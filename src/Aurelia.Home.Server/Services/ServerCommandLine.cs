@@ -4,22 +4,58 @@ namespace Aurelia.Home.Server.Services;
 
 public sealed record ServerCommandLine(
     string Command,
+    string? LibraryAction,
     string? Username,
     string DeviceName,
-    bool PasswordFromStandardInput)
+    bool PasswordFromStandardInput,
+    IReadOnlyDictionary<string, string> Options,
+    IReadOnlySet<string> Flags)
 {
     public static ServerCommandLine Parse(string[] args)
     {
-        var command = args.FirstOrDefault(argument =>
+        var commandIndex = Array.FindIndex(args, argument =>
             argument.Equals("run", StringComparison.OrdinalIgnoreCase)
-            || argument.Equals("setup-owner", StringComparison.OrdinalIgnoreCase)) ?? "run";
+            || argument.Equals("setup-owner", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("library", StringComparison.OrdinalIgnoreCase));
+        var command = commandIndex >= 0 ? args[commandIndex].ToLowerInvariant() : "run";
+        var action = command == "library" && commandIndex + 1 < args.Length
+            && !args[commandIndex + 1].StartsWith("--", StringComparison.Ordinal)
+                ? args[commandIndex + 1].ToLowerInvariant()
+                : null;
+        var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < args.Length; index += 1)
+        {
+            if (!args[index].StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (index + 1 < args.Length
+                && !args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                options[args[index]] = args[index + 1];
+                index += 1;
+            }
+            else
+            {
+                flags.Add(args[index]);
+            }
+        }
 
         return new ServerCommandLine(
-            command.ToLowerInvariant(),
-            OptionValue(args, "--username"),
-            OptionValue(args, "--device-name") ?? Environment.MachineName,
-            args.Contains("--password-stdin", StringComparer.OrdinalIgnoreCase));
+            command,
+            action,
+            options.GetValueOrDefault("--username"),
+            options.GetValueOrDefault("--device-name") ?? Environment.MachineName,
+            flags.Contains("--password-stdin"),
+            options,
+            flags);
     }
+
+    public string? Option(string name) => Options.GetValueOrDefault(name);
+
+    public bool HasFlag(string name) => Flags.Contains(name);
 
     public string ReadPassword()
     {
@@ -56,16 +92,4 @@ public sealed record ServerCommandLine(
         }
     }
 
-    private static string? OptionValue(string[] args, string option)
-    {
-        for (var index = 0; index < args.Length - 1; index += 1)
-        {
-            if (args[index].Equals(option, StringComparison.OrdinalIgnoreCase))
-            {
-                return args[index + 1];
-            }
-        }
-
-        return null;
-    }
 }

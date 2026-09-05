@@ -1,4 +1,5 @@
 using Aurelia.Home.Server.Data;
+using Aurelia.Home.Contracts;
 using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Home.Server.Services;
@@ -30,6 +31,16 @@ public static class DatabaseInitializer
         await database.Database.ExecuteSqlRawAsync(
             "PRAGMA foreign_keys=ON;",
             cancellationToken);
+
+        var interruptedAt = DateTimeOffset.UtcNow;
+        await database.LibraryScans
+            .Where(scan => scan.State == LibraryScanState.Queued
+                || scan.State == LibraryScanState.Running)
+            .ExecuteUpdateAsync(updates => updates
+                .SetProperty(scan => scan.State, LibraryScanState.Interrupted)
+                .SetProperty(scan => scan.CompletedAt, interruptedAt)
+                .SetProperty(scan => scan.Error, "The server stopped before the scan completed."),
+                cancellationToken);
 
         PrivateFilePermissions.ProtectFile(runtime.DatabasePath);
         PrivateFilePermissions.ProtectFile($"{runtime.DatabasePath}-wal");

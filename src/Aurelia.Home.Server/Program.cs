@@ -14,6 +14,12 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 var commandLine = ServerCommandLine.Parse(args);
+if (commandLine.Command == "library")
+{
+    Environment.ExitCode = await LibraryCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 var runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 
@@ -43,6 +49,11 @@ builder.Services.AddDbContext<AureliaHomeDbContext>(options =>
     options.UseSqlite(connectionString));
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<LibraryService>();
+builder.Services.AddScoped<CatalogService>();
+builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
+builder.Services.AddSingleton<LibraryScanScheduler>();
+builder.Services.AddHostedService<LibraryScanWorker>();
 builder.Services.AddScoped<IPasswordHasher<ServerUser>, PasswordHasher<ServerUser>>();
 builder.Services.Configure<PasswordHasherOptions>(options =>
 {

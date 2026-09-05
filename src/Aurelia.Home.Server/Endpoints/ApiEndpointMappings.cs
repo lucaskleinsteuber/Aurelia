@@ -39,6 +39,22 @@ public static class ApiEndpointMappings
         users.MapPost(string.Empty, CreateUserAsync);
         users.MapPut("/{userId:guid}/role", ChangeUserRoleAsync);
         users.MapDelete("/{userId:guid}", DeleteUserAsync);
+
+        var libraries = api.MapGroup("/libraries").RequireAuthorization("Administrator");
+        libraries.MapGet(string.Empty, ListLibrariesAsync);
+        libraries.MapPost(string.Empty, CreateLibraryAsync);
+        libraries.MapDelete("/{libraryId:guid}", RemoveLibraryAsync);
+        libraries.MapPost("/{libraryId:guid}/scans", StartLibraryScanAsync);
+        libraries.MapPost("/scans", StartAllLibraryScansAsync);
+
+        var scans = api.MapGroup("/scans").RequireAuthorization("Administrator");
+        scans.MapGet("/{scanId:guid}", GetLibraryScanAsync);
+
+        var catalog = api.MapGroup("/catalog").RequireAuthorization();
+        catalog.MapGet("/movies", ListMoviesAsync);
+        catalog.MapGet("/movies/{movieId:guid}", GetMovieAsync);
+        catalog.MapGet("/series", ListSeriesAsync);
+        catalog.MapGet("/series/{seriesId:guid}", GetSeriesAsync);
     }
 
     private static async Task<IResult> HealthAsync(
@@ -210,6 +226,98 @@ public static class ApiEndpointMappings
             cancellationToken));
     }
 
+    private static Task<IResult> ListLibrariesAsync(
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => libraries.ListAsync(cancellationToken));
+    }
+
+    private static async Task<IResult> CreateLibraryAsync(
+        CreateLibraryRequest request,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResultAsync(async () =>
+        {
+            var library = await libraries.CreateAsync(request, cancellationToken);
+            return Results.Created($"/api/v1/libraries/{library.Id}", library);
+        });
+    }
+
+    private static Task<IResult> RemoveLibraryAsync(
+        Guid libraryId,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteNoContentAsync(() => libraries.RemoveAsync(libraryId, cancellationToken));
+    }
+
+    private static async Task<IResult> StartLibraryScanAsync(
+        Guid libraryId,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResultAsync(async () =>
+        {
+            var scan = await libraries.StartScanAsync(libraryId, cancellationToken);
+            return Results.Accepted($"/api/v1/scans/{scan.Id}", scan);
+        });
+    }
+
+    private static async Task<IResult> StartAllLibraryScansAsync(
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResultAsync(async () =>
+        {
+            var scans = await libraries.StartAllScansAsync(cancellationToken);
+            return Results.Accepted("/api/v1/scans", scans);
+        });
+    }
+
+    private static Task<IResult> GetLibraryScanAsync(
+        Guid scanId,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => libraries.GetScanAsync(scanId, cancellationToken));
+    }
+
+    private static Task<IResult> ListMoviesAsync(
+        int? offset,
+        int? limit,
+        CatalogService catalog,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => catalog.ListMoviesAsync(offset ?? 0, limit ?? 100, cancellationToken));
+    }
+
+    private static Task<IResult> GetMovieAsync(
+        Guid movieId,
+        CatalogService catalog,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => catalog.GetMovieAsync(movieId, cancellationToken));
+    }
+
+    private static Task<IResult> ListSeriesAsync(
+        int? offset,
+        int? limit,
+        CatalogService catalog,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => catalog.ListSeriesAsync(offset ?? 0, limit ?? 100, cancellationToken));
+    }
+
+    private static Task<IResult> GetSeriesAsync(
+        Guid seriesId,
+        CatalogService catalog,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => catalog.GetSeriesAsync(seriesId, cancellationToken));
+    }
+
     private static bool IsLoopback(HttpContext context, IWebHostEnvironment environment)
     {
         if (environment.IsEnvironment("Testing"))
@@ -231,6 +339,10 @@ public static class ApiEndpointMappings
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
+        catch (LibraryException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
     }
 
     private static async Task<IResult> ExecuteNoContentAsync(Func<Task> action)
@@ -241,6 +353,22 @@ public static class ApiEndpointMappings
             return Results.NoContent();
         }
         catch (AccountException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+        catch (LibraryException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+    }
+
+    private static async Task<IResult> ExecuteResultAsync(Func<Task<IResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (LibraryException exception)
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
