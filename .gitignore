@@ -1,0 +1,24 @@
+.DS_Store
+.idea/
+.vscode/
+*.user
+*.suo
+
+bin/
+obj/
+artifacts/
+TestResults/
+
+*.db
+*.db-shm
+*.db-wal
+*.log
+.env
+
+# Personal media never belongs in this repository.
+*.avi
+*.m4v
+*.mkv
+*.mov
+*.mp4
+*.webm

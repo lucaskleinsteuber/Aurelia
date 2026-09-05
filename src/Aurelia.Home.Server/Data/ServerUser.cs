@@ -1,0 +1,22 @@
+using Aurelia.Home.Contracts;
+
+namespace Aurelia.Home.Server.Data;
+
+public sealed class ServerUser
+{
+    public Guid Id { get; set; }
+
+    public required string Username { get; set; }
+
+    public required string NormalizedUsername { get; set; }
+
+    public required string PasswordHash { get; set; }
+
+    public UserRole Role { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public List<DeviceSession> Sessions { get; set; } = [];
+
+    public List<PairingCode> PairingCodes { get; set; } = [];
+}
