@@ -166,7 +166,7 @@ public sealed class MediaLibraryScannerTests
             ]);
 
         Assert.Equal("library", command.Command);
-        Assert.Equal("add", command.LibraryAction);
+        Assert.Equal("add", command.Action);
         Assert.Equal("tv", command.Option("--kind"));
         Assert.Equal("/Volumes/Media Drive/TV Shows", command.Option("--path"));
         Assert.Equal("lucas", command.Username);

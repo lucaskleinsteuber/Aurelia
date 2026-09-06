@@ -1,10 +1,11 @@
 # Aurelia Home
 
 Aurelia Home is a native, self-hosted media system. The server now maintains a
-read-only movie and TV library and provides authenticated HTTP Range streaming;
-the native desktop client and player come later.
-Build 3 has no browser interface. Native apps remain the primary clients; an
-optional web client may be added later for devices without a native app.
+read-only movie and TV library, provides authenticated HTTP Range streaming,
+and connects securely to the first native macOS library client.
+Build 4 has no browser interface and the native client is not a web wrapper.
+An optional responsive web client may be added later for devices without a
+native app.
 
 ## Non-negotiable data rules
 
@@ -27,8 +28,23 @@ optional web client may be added later for devices without a native app.
 - Authenticated paged movie and series catalog APIs
 - Short-lived, revocable playback URLs bound to one media file and device session
 - Seekable HTTP Range streaming of original media without buffering whole files
+- Opt-in HTTPS access on the local network with a persistent server identity
+- Bonjour discovery with a manual-address fallback
 - Versioned JSON API under `/api/v1`
 - Single-instance protection, serialized background scans, and graceful shutdown
+
+## Current Mac client
+
+- Native SwiftUI application for macOS 26 and newer
+- Universal Apple Silicon and Intel executable
+- Bonjour server discovery and manual server addresses
+- Human-verified certificate pinning during one-time pairing
+- Device token and server identity stored in the macOS Keychain
+- Movie, TV show, season, episode, extra, and availability views
+- No WebView and no local catalog or media cache
+
+Playback controls are intentionally deferred to the next milestone even though
+the server streaming API already exists.
 
 ## Development
 
@@ -42,6 +58,16 @@ dotnet tool restore
 dotnet restore AureliaHome.slnx
 dotnet test AureliaHome.slnx
 dotnet run --project src/Aurelia.Home.Server -- run
+```
+
+Build and test the Mac client with the checked-in Xcode project. The build-number
+check keeps the server and app bundle versions synchronized:
+
+```sh
+scripts/verify-build-number.sh
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  xcodebuild -project clients/macos/AureliaHome.xcodeproj \
+  -scheme AureliaHome -destination 'platform=macOS' test
 ```
 
 Generated builds, package caches, test results, and development logs are kept
@@ -59,9 +85,28 @@ dotnet run --project src/Aurelia.Home.Server -- setup-owner \
 ```
 
 The command prompts for the password without echoing it and prints the initial
-device token once. Build 3 enforces a loopback-only listen address. LAN discovery,
-remote binding, and HTTPS trust are intentionally deferred until a native client
-can verify the server identity during pairing.
+device token once. The default server remains restricted to loopback. After the
+owner exists, opt in to encrypted local-network access explicitly:
+
+```sh
+dotnet run --project src/Aurelia.Home.Server -- run --lan
+```
+
+This keeps the local CLI on `http://127.0.0.1:43110` and adds HTTPS on LAN port
+`43111`. The server creates its long-lived TLS identity inside its private data
+directory and prints a short verification fingerprint. Password login and owner
+setup are rejected over the network; other devices use pairing.
+
+While the server is running, create a one-time code for the Mac app:
+
+```sh
+dotnet run --project src/Aurelia.Home.Server -- pairing create --username lucas
+dotnet run --project src/Aurelia.Home.Server -- server identity
+```
+
+Compare the fingerprint shown by the app with the local CLI output before
+entering the pairing code. If the server identity changes later, the app blocks
+the connection until the server is deliberately forgotten and paired again.
 
 While the server is running, an owner or administrator can manage libraries
 through the local CLI. The password is prompted without echo and the temporary

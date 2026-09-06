@@ -4,7 +4,7 @@ namespace Aurelia.Home.Server.Services;
 
 public sealed record ServerCommandLine(
     string Command,
-    string? LibraryAction,
+    string? Action,
     string? Username,
     string DeviceName,
     bool PasswordFromStandardInput,
@@ -16,9 +16,12 @@ public sealed record ServerCommandLine(
         var commandIndex = Array.FindIndex(args, argument =>
             argument.Equals("run", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("setup-owner", StringComparison.OrdinalIgnoreCase)
-            || argument.Equals("library", StringComparison.OrdinalIgnoreCase));
+            || argument.Equals("library", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("pairing", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("server", StringComparison.OrdinalIgnoreCase));
         var command = commandIndex >= 0 ? args[commandIndex].ToLowerInvariant() : "run";
-        var action = command == "library" && commandIndex + 1 < args.Length
+        var action = command is "library" or "pairing" or "server"
+            && commandIndex + 1 < args.Length
             && !args[commandIndex + 1].StartsWith("--", StringComparison.Ordinal)
                 ? args[commandIndex + 1].ToLowerInvariant()
                 : null;

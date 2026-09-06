@@ -16,7 +16,11 @@ public sealed record ServerInfoResponse(
     Guid ServerId,
     string Name,
     string Version,
-    bool IsSetup);
+    bool IsSetup,
+    bool LanAccessEnabled,
+    int? LanHttpsPort,
+    string? PublicKeyFingerprint,
+    string? DisplayFingerprint);
 
 public sealed record SetupOwnerRequest(
     string Username,

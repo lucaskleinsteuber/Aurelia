@@ -14,13 +14,13 @@ public static class LibraryCommandClient
         ServerCommandLine commandLine,
         CancellationToken cancellationToken)
     {
-        if (commandLine.LibraryAction is null
-            || commandLine.LibraryAction is "help" or "--help"
+        if (commandLine.Action is null
+            || commandLine.Action is "help" or "--help"
             || commandLine.HasFlag("--help"))
         {
             PrintUsage();
             return commandLine.HasFlag("--help")
-                || commandLine.LibraryAction is "help" or "--help"
+                || commandLine.Action is "help" or "--help"
                     ? 0
                     : 2;
         }
@@ -60,14 +60,14 @@ public static class LibraryCommandClient
 
             try
             {
-                return commandLine.LibraryAction switch
+                return commandLine.Action switch
                 {
                     "add" => await AddAsync(client, commandLine, cancellationToken),
                     "list" => await ListAsync(client, cancellationToken),
                     "scan" => await ScanAsync(client, commandLine, cancellationToken),
                     "remove" => await RemoveAsync(client, commandLine, cancellationToken),
                     _ => throw new InvalidOperationException(
-                        $"Unknown library action '{commandLine.LibraryAction}'."),
+                        $"Unknown library action '{commandLine.Action}'."),
                 };
             }
             finally

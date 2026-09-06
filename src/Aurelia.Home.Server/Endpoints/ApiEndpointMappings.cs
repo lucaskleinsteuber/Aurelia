@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
 using Aurelia.Home.Contracts;
@@ -97,6 +96,7 @@ public static class ApiEndpointMappings
     private static async Task<IResult> ServerInfoAsync(
         AureliaHomeDbContext database,
         ServerRuntimeOptions runtime,
+        ServerTlsIdentity tlsIdentity,
         CancellationToken cancellationToken)
     {
         var identity = await database.ServerIdentities
@@ -108,7 +108,11 @@ public static class ApiEndpointMappings
             identity.ServerId,
             runtime.ServerName,
             version,
-            isSetup));
+            isSetup,
+            runtime.LanAccessEnabled,
+            runtime.LanAccessEnabled ? runtime.LanHttpsPort : null,
+            runtime.LanAccessEnabled ? tlsIdentity.PublicKeyFingerprint : null,
+            runtime.LanAccessEnabled ? tlsIdentity.DisplayFingerprint : null));
     }
 
     private static async Task<IResult> SetupOwnerAsync(
@@ -131,10 +135,20 @@ public static class ApiEndpointMappings
     }
 
     private static Task<IResult> LoginAsync(
+        HttpContext context,
+        IWebHostEnvironment environment,
         LoginRequest request,
         AccountService accounts,
         CancellationToken cancellationToken)
     {
+        if (!IsLoopback(context, environment))
+        {
+            return Task.FromResult(Problem(
+                "local_login_required",
+                "Password login is only available from the server computer. Use pairing on other devices.",
+                StatusCodes.Status403Forbidden));
+        }
+
         return ExecuteAsync(() => accounts.LoginAsync(request, cancellationToken));
     }
 
@@ -391,13 +405,9 @@ public static class ApiEndpointMappings
 
     private static bool IsLoopback(HttpContext context, IWebHostEnvironment environment)
     {
-        if (environment.IsEnvironment("Testing"))
-        {
-            return true;
-        }
-
-        var address = context.Connection.RemoteIpAddress;
-        return address is not null && IPAddress.IsLoopback(address);
+        return LocalRequestPolicy.IsAllowed(
+            context.Connection.RemoteIpAddress,
+            environment.IsEnvironment("Testing"));
     }
 
     private static async Task<IResult> ExecuteAsync<T>(Func<Task<T>> action)

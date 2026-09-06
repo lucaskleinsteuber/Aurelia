@@ -20,13 +20,34 @@ if (commandLine.Command == "library")
     return;
 }
 
+if (commandLine.Command == "pairing")
+{
+    Environment.ExitCode = await PairingCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
+if (commandLine.Command == "server")
+{
+    Environment.ExitCode = await ServerIdentityCommandClient.RunAsync(
+        commandLine,
+        CancellationToken.None);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 var runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 
 PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
+using var tlsIdentity = ServerTlsIdentity.LoadOrCreate(runtime);
 var dataProtectionDirectory = Path.Combine(runtime.DataDirectory, "DataProtectionKeys");
 PrivateFilePermissions.CreatePrivateDirectory(dataProtectionDirectory);
 builder.WebHost.UseUrls(runtime.ListenUrl);
+if (tlsIdentity.Certificate is not null)
+{
+    builder.WebHost.ConfigureKestrel(options =>
+        options.ConfigureHttpsDefaults(https =>
+            https.ServerCertificate = tlsIdentity.Certificate));
+}
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Routing", LogLevel.Warning);
 if (commandLine.Command == "setup-owner")
@@ -44,6 +65,7 @@ var connectionString = new SqliteConnectionStringBuilder
 }.ToString();
 
 builder.Services.AddSingleton(runtime);
+builder.Services.AddSingleton(tlsIdentity);
 builder.Services.AddDataProtection()
     .SetApplicationName("Aurelia.Home.Server")
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionDirectory));
@@ -57,6 +79,7 @@ builder.Services.AddScoped<PlaybackService>();
 builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
 builder.Services.AddSingleton<LibraryScanScheduler>();
 builder.Services.AddHostedService<LibraryScanWorker>();
+builder.Services.AddHostedService<BonjourAdvertisementService>();
 builder.Services.AddScoped<IPasswordHasher<ServerUser>, PasswordHasher<ServerUser>>();
 builder.Services.Configure<PasswordHasherOptions>(options =>
 {
@@ -119,6 +142,19 @@ try
 
     await DatabaseInitializer.InitializeAsync(app.Services, CancellationToken.None);
 
+    if (runtime.LanAccessEnabled)
+    {
+        await using var readinessScope = app.Services.CreateAsyncScope();
+        var database = readinessScope.ServiceProvider.GetRequiredService<AureliaHomeDbContext>();
+        if (!await database.Users.AnyAsync())
+        {
+            Console.Error.WriteLine(
+                "LAN access requires an owner. Run setup-owner locally before starting with --lan.");
+            Environment.ExitCode = 2;
+            return;
+        }
+    }
+
     if (commandLine.Command == "setup-owner")
     {
         if (string.IsNullOrWhiteSpace(commandLine.Username))
@@ -156,6 +192,12 @@ try
         }
 
         return;
+    }
+
+    if (runtime.LanAccessEnabled)
+    {
+        Console.WriteLine($"Aurelia Home HTTPS is available on LAN port {runtime.LanHttpsPort}.");
+        Console.WriteLine($"Verification fingerprint: {tlsIdentity.DisplayFingerprint}");
     }
 
     await app.RunAsync();

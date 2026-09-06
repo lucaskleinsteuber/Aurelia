@@ -6,8 +6,14 @@ public sealed record ServerRuntimeOptions(
     string DataDirectory,
     string DatabasePath,
     string ListenUrl,
-    string ServerName)
+    string ServerName,
+    bool LanAccessEnabled,
+    int LanHttpsPort,
+    string CertificatePath,
+    string PrivateKeyPath)
 {
+    public const int DefaultLanHttpsPort = 43111;
+
     public static ServerRuntimeOptions Resolve(IConfiguration configuration, string[]? arguments = null)
     {
         var configuredDataDirectory = FirstNonEmpty(
@@ -18,22 +24,37 @@ public sealed record ServerRuntimeOptions(
 
         var dataDirectory = Path.GetFullPath(
             configuredDataDirectory ?? DefaultDataDirectory());
-        var listenUrl = ValidateListenUrl(FirstNonEmpty(
+        var localListenUrl = ValidateLocalListenUrl(FirstNonEmpty(
             OptionValue(arguments, "--urls"),
             configuration["urls"],
             configuration["AureliaHome:ListenUrl"],
             Environment.GetEnvironmentVariable("AURELIA_HOME_URLS"))
             ?? "http://127.0.0.1:43110");
+        var lanAccessEnabled = HasFlag(arguments, "--lan")
+            || ParseBoolean(configuration["AureliaHome:LanAccessEnabled"])
+            || ParseBoolean(Environment.GetEnvironmentVariable("AURELIA_HOME_LAN_ENABLED"));
+        var lanHttpsPort = ParsePort(FirstNonEmpty(
+            OptionValue(arguments, "--lan-port"),
+            configuration["AureliaHome:LanHttpsPort"],
+            Environment.GetEnvironmentVariable("AURELIA_HOME_LAN_PORT")));
         var serverName = FirstNonEmpty(
             configuration["AureliaHome:ServerName"],
             Environment.GetEnvironmentVariable("AURELIA_HOME_SERVER_NAME"))
             ?? "Aurelia Home";
 
+        var listenUrl = lanAccessEnabled
+            ? $"{localListenUrl};https://*:{lanHttpsPort}"
+            : localListenUrl;
+
         return new ServerRuntimeOptions(
             dataDirectory,
             Path.Combine(dataDirectory, "aurelia-home.db"),
             listenUrl,
-            serverName);
+            serverName,
+            lanAccessEnabled,
+            lanHttpsPort,
+            Path.Combine(dataDirectory, "server-certificate.pem"),
+            Path.Combine(dataDirectory, "server-private-key.pem"));
     }
 
     private static string? FirstNonEmpty(params string?[] values)
@@ -59,7 +80,34 @@ public sealed record ServerRuntimeOptions(
         return null;
     }
 
-    private static string ValidateListenUrl(string value)
+    private static bool HasFlag(string[]? arguments, string flag)
+    {
+        return arguments?.Any(argument => argument.Equals(
+            flag,
+            StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
+    private static bool ParseBoolean(string? value)
+    {
+        return bool.TryParse(value, out var parsed) && parsed;
+    }
+
+    private static int ParsePort(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return DefaultLanHttpsPort;
+        }
+
+        if (!int.TryParse(value, out var port) || port is < 1 or > 65535)
+        {
+            throw new ArgumentException("The LAN HTTPS port must be between 1 and 65535.");
+        }
+
+        return port;
+    }
+
+    private static string ValidateLocalListenUrl(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
             || uri.Scheme is not ("http" or "https")
@@ -70,7 +118,7 @@ public sealed record ServerRuntimeOptions(
             || !string.IsNullOrEmpty(uri.Fragment))
         {
             throw new ArgumentException(
-                "Build 3 only accepts a single loopback HTTP or HTTPS listen URL.",
+                "The local listen URL must be a single loopback HTTP or HTTPS URL.",
                 nameof(value));
         }
 
