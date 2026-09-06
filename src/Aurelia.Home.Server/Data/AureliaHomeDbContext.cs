@@ -22,6 +22,8 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
 
     public DbSet<LibraryScanIssue> LibraryScanIssues => Set<LibraryScanIssue>();
 
+    public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var dateTimeOffsetConverter = new ValueConverter<DateTimeOffset, long>(
@@ -164,6 +166,31 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
                 .WithMany(scan => scan.Issues)
                 .HasForeignKey(issue => issue.LibraryScanId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlaybackTicket>(entity =>
+        {
+            entity.HasKey(ticket => ticket.Id);
+            entity.Property(ticket => ticket.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(ticket => ticket.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(ticket => ticket.ExpiresAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(ticket => ticket.RevokedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(ticket => ticket.TokenHash).IsUnique();
+            entity.HasIndex(ticket => new { ticket.UserId, ticket.ExpiresAt });
+            entity.HasIndex(ticket => new { ticket.DeviceSessionId, ticket.ExpiresAt });
+            entity.HasOne(ticket => ticket.MediaItem)
+                .WithMany(item => item.PlaybackTickets)
+                .HasForeignKey(ticket => ticket.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(ticket => ticket.DeviceSession)
+                .WithMany(session => session.PlaybackTickets)
+                .HasForeignKey(ticket => ticket.DeviceSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(ticket => ticket.User)
+                .WithMany(user => user.PlaybackTickets)
+                .HasForeignKey(ticket => ticket.UserId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
     }
 }

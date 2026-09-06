@@ -19,4 +19,6 @@ public sealed class DeviceSession
     public DateTimeOffset ExpiresAt { get; set; }
 
     public DateTimeOffset? RevokedAt { get; set; }
+
+    public List<PlaybackTicket> PlaybackTickets { get; set; } = [];
 }

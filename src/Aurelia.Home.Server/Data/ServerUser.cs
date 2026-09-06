@@ -19,4 +19,6 @@ public sealed class ServerUser
     public List<DeviceSession> Sessions { get; set; } = [];
 
     public List<PairingCode> PairingCodes { get; set; } = [];
+
+    public List<PlaybackTicket> PlaybackTickets { get; set; } = [];
 }

@@ -198,3 +198,11 @@ public sealed record SupplementSummary(
     string Category,
     int? SeasonNumber,
     MediaAvailability Availability);
+
+public sealed record PlaybackSourceResponse(
+    Guid Id,
+    Guid MediaId,
+    string StreamPath,
+    string ContentType,
+    long ContentLength,
+    DateTimeOffset ExpiresAt);

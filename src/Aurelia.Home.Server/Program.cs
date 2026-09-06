@@ -27,6 +27,8 @@ PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
 var dataProtectionDirectory = Path.Combine(runtime.DataDirectory, "DataProtectionKeys");
 PrivateFilePermissions.CreatePrivateDirectory(dataProtectionDirectory);
 builder.WebHost.UseUrls(runtime.ListenUrl);
+builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.AspNetCore.Routing", LogLevel.Warning);
 if (commandLine.Command == "setup-owner")
 {
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
@@ -51,6 +53,7 @@ builder.Services.AddSingleton<TokenService>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<LibraryService>();
 builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<PlaybackService>();
 builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
 builder.Services.AddSingleton<LibraryScanScheduler>();
 builder.Services.AddHostedService<LibraryScanWorker>();

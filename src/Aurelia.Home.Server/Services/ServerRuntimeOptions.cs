@@ -18,12 +18,12 @@ public sealed record ServerRuntimeOptions(
 
         var dataDirectory = Path.GetFullPath(
             configuredDataDirectory ?? DefaultDataDirectory());
-        var listenUrl = FirstNonEmpty(
+        var listenUrl = ValidateListenUrl(FirstNonEmpty(
             OptionValue(arguments, "--urls"),
             configuration["urls"],
             configuration["AureliaHome:ListenUrl"],
             Environment.GetEnvironmentVariable("AURELIA_HOME_URLS"))
-            ?? "http://127.0.0.1:43110";
+            ?? "http://127.0.0.1:43110");
         var serverName = FirstNonEmpty(
             configuration["AureliaHome:ServerName"],
             Environment.GetEnvironmentVariable("AURELIA_HOME_SERVER_NAME"))
@@ -57,6 +57,24 @@ public sealed record ServerRuntimeOptions(
         }
 
         return null;
+    }
+
+    private static string ValidateListenUrl(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https")
+            || !uri.IsLoopback
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || uri.AbsolutePath != "/"
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            throw new ArgumentException(
+                "Build 3 only accepts a single loopback HTTP or HTTPS listen URL.",
+                nameof(value));
+        }
+
+        return value;
     }
 
     private static string DefaultDataDirectory()

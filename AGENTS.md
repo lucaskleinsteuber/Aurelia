@@ -5,9 +5,11 @@ These rules apply to every task in this repository.
 ## Scope and product direction
 
 - Never modify `/Users/lucas/Documents/Aurelia` while working on Aurelia Home.
-- Aurelia Home is a real self-hosted server plus native clients. Do not add a
-  browser UI, web app, or menu-bar shortcut whose main purpose is opening
-  localhost.
+- Aurelia Home is a real self-hosted server with native apps as its primary
+  clients. Never replace that architecture with a browser-only UI or a menu-bar
+  shortcut whose main purpose is opening localhost. A responsive optional web
+  client for devices without a native app may be added in a dedicated later
+  milestone.
 - Keep all user-facing product text in English until localization is a planned
   task.
 - Preserve the clean Aurelia visual direction when the native client is added,

@@ -1,10 +1,12 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Reflection;
 using Aurelia.Home.Contracts;
 using Aurelia.Home.Server.Authentication;
 using Aurelia.Home.Server.Data;
 using Aurelia.Home.Server.Services;
 using Microsoft.EntityFrameworkCore;
+using EntityTagHeaderValue = Microsoft.Net.Http.Headers.EntityTagHeaderValue;
 
 namespace Aurelia.Home.Server.Endpoints;
 
@@ -55,6 +57,15 @@ public static class ApiEndpointMappings
         catalog.MapGet("/movies/{movieId:guid}", GetMovieAsync);
         catalog.MapGet("/series", ListSeriesAsync);
         catalog.MapGet("/series/{seriesId:guid}", GetSeriesAsync);
+
+        var media = api.MapGroup("/media").RequireAuthorization();
+        media.MapPost("/{mediaId:guid}/playback", CreatePlaybackAsync);
+
+        var playback = api.MapGroup("/playback").RequireAuthorization();
+        playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
+
+        api.MapMethods("/streams/{ticket}", [HttpMethods.Get, HttpMethods.Head], StreamAsync)
+            .WithDisplayName("Stream media");
     }
 
     private static async Task<IResult> HealthAsync(
@@ -318,6 +329,66 @@ public static class ApiEndpointMappings
         return ExecuteAsync(() => catalog.GetSeriesAsync(seriesId, cancellationToken));
     }
 
+    private static Task<IResult> CreatePlaybackAsync(
+        HttpContext context,
+        Guid mediaId,
+        PlaybackService playback,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => playback.CreateAsync(
+            context.User.RequireUserId(),
+            context.User.RequireSessionId(),
+            mediaId,
+            cancellationToken));
+    }
+
+    private static Task<IResult> RevokePlaybackAsync(
+        HttpContext context,
+        Guid playbackId,
+        PlaybackService playback,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteNoContentAsync(() => playback.RevokeAsync(
+            context.User.RequireUserId(),
+            playbackId,
+            cancellationToken));
+    }
+
+    private static async Task<IResult> StreamAsync(
+        HttpContext context,
+        string ticket,
+        PlaybackService playback,
+        CancellationToken cancellationToken)
+    {
+        var source = await playback.OpenStreamAsync(ticket, cancellationToken);
+        if (source is null)
+        {
+            return Results.NotFound();
+        }
+
+        context.Response.Headers.CacheControl = "private, no-store";
+        context.Response.Headers.XContentTypeOptions = "nosniff";
+        if (context.Request.Headers.Range.Count > 0
+            && (!RangeHeaderValue.TryParse(context.Request.Headers.Range.ToString(), out var range)
+                || !string.Equals(range.Unit, "bytes", StringComparison.OrdinalIgnoreCase)
+                || range.Ranges.Count != 1))
+        {
+            source.Stream.Dispose();
+            context.Response.Headers.ContentRange = $"bytes */{source.ContentLength}";
+            return Results.StatusCode(StatusCodes.Status416RangeNotSatisfiable);
+        }
+
+        var entityTag = new EntityTagHeaderValue(
+            $"\"{source.ContentLength:x}-{source.LastModified.ToUnixTimeMilliseconds():x}\"");
+        return Results.File(
+            source.Stream,
+            contentType: source.ContentType,
+            fileDownloadName: null,
+            lastModified: source.LastModified,
+            entityTag: entityTag,
+            enableRangeProcessing: true);
+    }
+
     private static bool IsLoopback(HttpContext context, IWebHostEnvironment environment)
     {
         if (environment.IsEnvironment("Testing"))
@@ -343,6 +414,10 @@ public static class ApiEndpointMappings
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
+        catch (PlaybackException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
     }
 
     private static async Task<IResult> ExecuteNoContentAsync(Func<Task> action)
@@ -360,6 +435,10 @@ public static class ApiEndpointMappings
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
+        catch (PlaybackException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
     }
 
     private static async Task<IResult> ExecuteResultAsync(Func<Task<IResult>> action)
@@ -369,6 +448,10 @@ public static class ApiEndpointMappings
             return await action();
         }
         catch (LibraryException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+        catch (PlaybackException exception)
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }

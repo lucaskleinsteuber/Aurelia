@@ -10,6 +10,11 @@ public sealed class TokenService
         return Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
     }
 
+    public string CreatePlaybackToken()
+    {
+        return Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+    }
+
     public string CreatePairingCode()
     {
         return RandomNumberGenerator.GetInt32(0, 100_000_000)

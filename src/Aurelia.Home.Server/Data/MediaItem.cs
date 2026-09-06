@@ -47,4 +47,6 @@ public sealed class MediaItem
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    public List<PlaybackTicket> PlaybackTickets { get; set; } = [];
 }

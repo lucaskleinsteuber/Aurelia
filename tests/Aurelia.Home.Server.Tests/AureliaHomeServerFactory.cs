@@ -9,14 +9,17 @@ public sealed class AureliaHomeServerFactory : WebApplicationFactory<Program>
 {
     private readonly bool ownsDataDirectory;
     private readonly Action<IServiceCollection>? configureServices;
+    private readonly Action<ILoggingBuilder>? configureLogging;
 
     public AureliaHomeServerFactory(
         string? dataDirectory = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        Action<ILoggingBuilder>? configureLogging = null)
     {
         DataDirectory = dataDirectory ?? TestPaths.CreateDataDirectory();
         ownsDataDirectory = dataDirectory is null;
         this.configureServices = configureServices;
+        this.configureLogging = configureLogging;
     }
 
     public string DataDirectory { get; }
@@ -26,7 +29,11 @@ public sealed class AureliaHomeServerFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Testing");
         builder.UseSetting("AureliaHome:DataDirectory", DataDirectory);
         builder.UseSetting("AureliaHome:ListenUrl", "http://127.0.0.1:0");
-        builder.ConfigureLogging(logging => logging.SetMinimumLevel(LogLevel.Warning));
+        builder.ConfigureLogging(logging =>
+        {
+            logging.SetMinimumLevel(LogLevel.Warning);
+            configureLogging?.Invoke(logging);
+        });
         if (configureServices is not null)
         {
             builder.ConfigureServices(configureServices);

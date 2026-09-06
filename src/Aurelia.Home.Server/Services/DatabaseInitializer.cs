@@ -32,6 +32,9 @@ public static class DatabaseInitializer
             "PRAGMA foreign_keys=ON;",
             cancellationToken);
 
+        var playback = scope.ServiceProvider.GetRequiredService<PlaybackService>();
+        await playback.PruneExpiredAsync(DateTimeOffset.UtcNow, cancellationToken);
+
         var interruptedAt = DateTimeOffset.UtcNow;
         await database.LibraryScans
             .Where(scan => scan.State == LibraryScanState.Queued
