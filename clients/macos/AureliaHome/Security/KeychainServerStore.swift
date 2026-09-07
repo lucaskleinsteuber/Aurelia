@@ -1,7 +1,13 @@
 import Foundation
 import Security
 
-struct KeychainServerStore: Sendable {
+protocol ServerProfileStore: Sendable {
+  func load() throws -> StoredServerProfile?
+  func save(_ profile: StoredServerProfile) throws
+  func delete() throws
+}
+
+struct KeychainServerStore: ServerProfileStore {
   enum StoreError: LocalizedError {
     case unexpectedStatus(OSStatus)
 
@@ -13,9 +19,11 @@ struct KeychainServerStore: Sendable {
     }
   }
 
+  static let productionService = "com.lucas.aureliahome.connection.v2"
+
   let service: String
 
-  init(service: String = "com.lucas.aureliahome.server") {
+  init(service: String = productionService) {
     self.service = service
   }
 
@@ -72,6 +80,28 @@ struct KeychainServerStore: Sendable {
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: "active-server",
+      kSecAttrSynchronizable as String: false,
     ]
+  }
+}
+
+final class InMemoryServerProfileStore: ServerProfileStore, @unchecked Sendable {
+  private let lock = NSLock()
+  private var profile: StoredServerProfile?
+
+  init(profile: StoredServerProfile? = nil) {
+    self.profile = profile
+  }
+
+  func load() throws -> StoredServerProfile? {
+    lock.withLock { profile }
+  }
+
+  func save(_ profile: StoredServerProfile) throws {
+    lock.withLock { self.profile = profile }
+  }
+
+  func delete() throws {
+    lock.withLock { profile = nil }
   }
 }

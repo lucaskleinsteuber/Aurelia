@@ -3,7 +3,7 @@
 Aurelia Home is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
 and connects securely to a native macOS library and playback client.
-Build 5 has no browser interface and the native client is not a web wrapper.
+Build 6 has no browser interface and the native client is not a web wrapper.
 An optional responsive web client may be added later for devices without a
 native app.
 
@@ -66,16 +66,18 @@ dotnet run --project src/Aurelia.Home.Server -- run
 Build and test the Mac client with the checked-in Xcode project. The build-number
 
 ```sh
-scripts/prepare-vlckit.sh
 scripts/verify-build-number.sh
-DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  xcodebuild -project clients/macos/AureliaHome.xcodeproj \
-  -scheme AureliaHome -destination 'platform=macOS' test
+scripts/test-macos.sh
 ```
 
 Generated builds, package caches, test results, and development logs are kept
 outside the repository in the adjacent `Aurelia Home Other` directory. Test
 source remains in the repository so every checkout can reproduce verification.
+The Mac test script launches all runnable test products from the private
+`~/Library/Caches/AureliaHome/TestRuns` directory, so test execution cannot
+accidentally ask for access to the protected Documents folder merely because the
+repository lives there. It removes the temporary test host after copying the log
+and result bundle to `Aurelia Home Other`.
 
 The development server listens on `http://127.0.0.1:43110` by default. Override
 the location of its small data directory with `AURELIA_HOME_DATA_DIR` or
@@ -143,6 +145,13 @@ HTTPS connection, and streams responses incrementally. Neither the device token
 nor the server playback ticket is exposed to VLCKit or written to logs. The
 VLCKit download is pinned and verified by `scripts/prepare-vlckit.sh`; license
 information is recorded in `THIRD_PARTY_NOTICES.md` and bundled with the app.
+
+The Mac client stores its paired-server profile in a new app-owned macOS
+Keychain namespace. Build 6 also uses a stable Apple Development signature so
+future local builds retain the same Keychain identity. It deliberately leaves
+incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
+requires pairing once again. UI tests use an in-memory profile store and never
+read or write the production Keychain service.
 
 The product language is English for the first release. Additional localizations
 will be introduced deliberately in a later milestone.

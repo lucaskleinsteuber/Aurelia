@@ -12,11 +12,11 @@ final class AppModel: ObservableObject {
   @Published private(set) var isWorking = false
   @Published var errorMessage: String?
 
-  private let store: KeychainServerStore
+  private let store: any ServerProfileStore
   private var hasStarted = false
 
-  init(store: KeychainServerStore = KeychainServerStore()) {
-    self.store = store
+  init(store: (any ServerProfileStore)? = nil) {
+    self.store = store ?? Self.defaultStore
   }
 
   func start() async {
@@ -209,7 +209,7 @@ final class AppModel: ObservableObject {
     inspectedServer = nil
     playback = nil
     errorMessage = nil
-    if Self.uiTestMode == nil {
+    if !Self.isTestProcess {
       try? store.delete()
       if let current {
         try? await APIClient(profile: current).logout()
@@ -233,6 +233,24 @@ final class AppModel: ObservableObject {
       ProcessInfo.processInfo.environment["AURELIA_HOME_UI_TEST_MODE"]
     #else
       nil
+    #endif
+  }
+
+  private static var defaultStore: any ServerProfileStore {
+    #if DEBUG
+      if isTestProcess {
+        return InMemoryServerProfileStore()
+      }
+    #endif
+    return KeychainServerStore()
+  }
+
+  private static var isTestProcess: Bool {
+    #if DEBUG
+      uiTestMode != nil
+        || ProcessInfo.processInfo.environment["AURELIA_HOME_RUNNING_TESTS"] == "1"
+    #else
+      false
     #endif
   }
 }

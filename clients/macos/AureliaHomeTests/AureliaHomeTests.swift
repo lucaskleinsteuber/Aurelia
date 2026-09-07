@@ -21,7 +21,7 @@ struct AureliaHomeTests {
   }
 
   @Test
-  func serverInformationDecodesBuildFiveIdentity() throws {
+  func serverInformationDecodesBuildSixIdentity() throws {
     let json = Data(
       """
       {
@@ -151,8 +151,27 @@ struct AureliaHomeTests {
   }
 
   @Test
-  func serverProfileRoundTripsThroughKeychain() throws {
-    let service = "com.lucas.aureliahome.tests.\(UUID().uuidString)"
+  func serverProfileRoundTripsThroughInMemoryStore() throws {
+    let store = InMemoryServerProfileStore()
+    let profile = StoredServerProfile(
+      serverId: UUID(),
+      name: "Test Server",
+      baseURL: URL(string: "https://test.local:43111")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      token: "temporary-unit-test-token",
+      sessionId: UUID(),
+      expiresAt: "2099-01-01T00:00:00Z")
+
+    #expect(try store.load() == nil)
+    try store.save(profile)
+    #expect(try store.load() == profile)
+    try store.delete()
+    #expect(try store.load() == nil)
+  }
+
+  @Test
+  func serverProfileRoundTripsThroughAppOwnedKeychain() throws {
+    let service = "com.lucas.aureliahome.connection.tests.\(UUID().uuidString)"
     let store = KeychainServerStore(service: service)
     let profile = StoredServerProfile(
       serverId: UUID(),

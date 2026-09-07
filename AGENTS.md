@@ -52,6 +52,18 @@ These rules apply to every task in this repository.
   later media milestone explicitly needs it.
 - Keep generated server data small. Do not perform a full-library scan or create
   large caches without an explicit task and a bounded representative test first.
+- macOS privacy-protected folders must never become runtime locations. Build
+  output may remain under `Aurelia Home Other`, but XCTest hosts and UI-test
+  runners must be staged under a unique
+  `~/Library/Caches/AureliaHome/TestRuns/<run-id>` directory. Pre-install smoke
+  candidates must use a unique `/private/tmp/AureliaHome/<run-id>` directory.
+  Copy only logs, result bundles, and reports back to `Aurelia Home Other`, then
+  remove the temporary runtime directory. Launch installed candidates only from
+  `/Applications`.
+- Tests must use in-memory credentials or credentials created by the same signed
+  test host. Never seed the production Keychain with the `security` command-line
+  tool, and never trigger privacy access merely to discover files elsewhere in
+  the user's home directory.
 
 ## Build and verification
 

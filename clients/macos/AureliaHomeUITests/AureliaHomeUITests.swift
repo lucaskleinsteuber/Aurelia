@@ -13,6 +13,7 @@ final class AureliaHomeUITests: XCTestCase {
     XCTAssertTrue(app.textFields["manual-server-address"].exists)
     XCTAssertTrue(app.buttons["connect-manually"].exists)
     XCTAssertFalse(app.webViews.firstMatch.exists)
+    assertNoUnexpectedDialog(in: app)
   }
 
   @MainActor
@@ -40,6 +41,7 @@ final class AureliaHomeUITests: XCTestCase {
     app.buttons["episode-1-1"].click()
     XCTAssertTrue(app.descendants(matching: .any)["native-player"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.webViews.firstMatch.exists)
+    assertNoUnexpectedDialog(in: app)
   }
 
   @MainActor
@@ -128,5 +130,13 @@ final class AureliaHomeUITests: XCTestCase {
   private func assertNativePlayer(in app: XCUIApplication) {
     XCTAssertTrue(app.descendants(matching: .any)["native-player"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.webViews.firstMatch.exists)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
+  private func assertNoUnexpectedDialog(in app: XCUIApplication) {
+    XCTAssertFalse(app.alerts.firstMatch.exists)
+    XCTAssertFalse(app.dialogs.firstMatch.exists)
+    XCTAssertFalse(app.sheets.firstMatch.exists)
   }
 }
