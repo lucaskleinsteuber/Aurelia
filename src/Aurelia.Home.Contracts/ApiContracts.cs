@@ -209,4 +209,18 @@ public sealed record PlaybackSourceResponse(
     string StreamPath,
     string ContentType,
     long ContentLength,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    PlaybackProgressResponse Progress);
+
+public sealed record UpdatePlaybackProgressRequest(
+    long PositionMilliseconds,
+    long DurationMilliseconds,
+    bool IsFinished);
+
+public sealed record PlaybackProgressResponse(
+    Guid MediaId,
+    long PositionMilliseconds,
+    long DurationMilliseconds,
+    bool IsCompleted,
+    DateTimeOffset? LastPlayedAt,
+    DateTimeOffset? UpdatedAt);

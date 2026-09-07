@@ -6,6 +6,12 @@
 	objectVersion = 71;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		D50000000000000000000001 /* VLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; };
+		D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000011 /* VLCKit-COPYING.txt */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		B4000000000000000000000F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -23,6 +29,20 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		D50000000000000000000020 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		A40000000000000000000001 /* Aurelia Home.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Aurelia Home.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40000000000000000000001 /* AureliaHomeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AureliaHomeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -30,6 +50,8 @@
 		C40000000000000000000001 /* AureliaHome-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "AureliaHome-Info.plist"; sourceTree = "<group>"; };
 		C40000000000000000000002 /* AureliaHome.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AureliaHome.entitlements; sourceTree = "<group>"; };
 		C40000000000000000000003 /* BuildNumber.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildNumber.xcconfig; sourceTree = "<group>"; };
+		D50000000000000000000010 /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = VLCKit.xcframework; sourceTree = "<group>"; };
+		D50000000000000000000011 /* VLCKit-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "VLCKit-COPYING.txt"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -39,7 +61,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A40000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A40000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (D50000000000000000000001 /* VLCKit.xcframework in Frameworks */, ); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000006 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000009 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
@@ -52,6 +74,7 @@
 				B40000000000000000000003 /* AureliaHomeTests */,
 				B40000000000000000000004 /* AureliaHomeUITests */,
 				C40000000000000000000004 /* Configuration */,
+				D50000000000000000000012 /* Dependencies */,
 				A40000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -76,6 +99,15 @@
 			path = Configuration;
 			sourceTree = "<group>";
 		};
+		D50000000000000000000012 /* Dependencies */ = {
+			isa = PBXGroup;
+			children = (
+				D50000000000000000000010 /* VLCKit.xcframework */,
+				D50000000000000000000011 /* VLCKit-COPYING.txt */,
+			);
+			path = Dependencies;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -85,6 +117,7 @@
 			buildPhases = (
 				A40000000000000000000008 /* Sources */,
 				A40000000000000000000003 /* Frameworks */,
+				D50000000000000000000020 /* Embed Frameworks */,
 				A40000000000000000000009 /* Resources */,
 			);
 			buildRules = ();
@@ -165,7 +198,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A40000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A40000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		B4000000000000000000000A /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
@@ -186,6 +219,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
@@ -201,6 +235,8 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				LM_FILTER_WARNINGS = YES;
+				LM_FORCE_LINK_GENERATION = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -214,6 +250,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
@@ -228,6 +265,8 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				LM_FILTER_WARNINGS = YES;
+				LM_FORCE_LINK_GENERATION = YES;
 				ONLY_ACTIVE_ARCH = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;

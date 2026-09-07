@@ -21,7 +21,14 @@ struct RootView: View {
       } else {
         LibraryShellView()
       }
+
+      if let profile = model.profile, let playback = model.playback {
+        PlayerView(profile: profile, presentation: playback)
+          .transition(.opacity)
+          .zIndex(10)
+      }
     }
+    .animation(.easeInOut(duration: 0.2), value: model.playback)
     .preferredColorScheme(.dark)
     .frame(minWidth: 760, minHeight: 560)
   }

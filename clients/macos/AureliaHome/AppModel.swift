@@ -7,6 +7,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var inspectedServer: InspectedServer?
   @Published private(set) var movies: [MovieSummary] = []
   @Published private(set) var series: [SeriesSummary] = []
+  @Published private(set) var playback: PlaybackPresentation?
   @Published private(set) var isStarting = true
   @Published private(set) var isWorking = false
   @Published var errorMessage: String?
@@ -138,7 +139,7 @@ final class AppModel: ObservableObject {
       if Self.uiTestMode == "library" {
         return MovieDetailResponse(
           id: id,
-          title: "El Camino",
+          title: "El Camino - A Breaking Bad Movie",
           year: 2019,
           availability: .available,
           supplements: [
@@ -191,12 +192,22 @@ final class AppModel: ObservableObject {
     return try await APIClient(profile: profile).series(id: id)
   }
 
+  func startPlayback(mediaId: UUID, title: String, subtitle: String? = nil) {
+    guard profile != nil else { return }
+    playback = PlaybackPresentation(mediaId: mediaId, title: title, subtitle: subtitle)
+  }
+
+  func closePlayback() {
+    playback = nil
+  }
+
   func disconnect() async {
     let current = profile
     profile = nil
     movies = []
     series = []
     inspectedServer = nil
+    playback = nil
     errorMessage = nil
     if Self.uiTestMode == nil {
       try? store.delete()

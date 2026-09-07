@@ -2,8 +2,8 @@
 
 Aurelia Home is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to the first native macOS library client.
-Build 4 has no browser interface and the native client is not a web wrapper.
+and connects securely to a native macOS library and playback client.
+Build 5 has no browser interface and the native client is not a web wrapper.
 An optional responsive web client may be added later for devices without a
 native app.
 
@@ -28,6 +28,7 @@ native app.
 - Authenticated paged movie and series catalog APIs
 - Short-lived, revocable playback URLs bound to one media file and device session
 - Seekable HTTP Range streaming of original media without buffering whole files
+- Per-user, cross-device watch progress with resume and completed-state handling
 - Opt-in HTTPS access on the local network with a persistent server identity
 - Bonjour discovery with a manual-address fallback
 - Versioned JSON API under `/api/v1`
@@ -41,10 +42,12 @@ native app.
 - Human-verified certificate pinning during one-time pairing
 - Device token and server identity stored in the macOS Keychain
 - Movie, TV show, season, episode, extra, and availability views
+- Direct Play for movies, episodes, extras, and trailers through VLCKit 3.7.3
+- A certificate-pinned, loopback-only streaming relay with no media cache
+- Play/pause, five-second seeking, scrubbing, volume, mute, native fullscreen,
+  and descriptive audio/subtitle track selection
+- Automatic resume and regular server-side watch-progress updates
 - No WebView and no local catalog or media cache
-
-Playback controls are intentionally deferred to the next milestone even though
-the server streaming API already exists.
 
 ## Development
 
@@ -61,9 +64,9 @@ dotnet run --project src/Aurelia.Home.Server -- run
 ```
 
 Build and test the Mac client with the checked-in Xcode project. The build-number
-check keeps the server and app bundle versions synchronized:
 
 ```sh
+scripts/prepare-vlckit.sh
 scripts/verify-build-number.sh
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
   xcodebuild -project clients/macos/AureliaHome.xcodeproj \
@@ -133,6 +136,13 @@ An authenticated client requests a twelve-hour, single-file playback URL with
 and `HEAD`, including byte ranges for seeking. It contains a dedicated playback
 ticket rather than the long-lived device token. Online metadata, artwork,
 transcoding, and automatic file watchers are not part of the current build.
+
+The Mac app gives VLCKit a random loopback URL. Its internal relay validates
+that URL, forwards only GET/HEAD and byte-range requests over the already pinned
+HTTPS connection, and streams responses incrementally. Neither the device token
+nor the server playback ticket is exposed to VLCKit or written to logs. The
+VLCKit download is pinned and verified by `scripts/prepare-vlckit.sh`; license
+information is recorded in `THIRD_PARTY_NOTICES.md` and bundled with the app.
 
 The product language is English for the first release. Additional localizations
 will be introduced deliberately in a later milestone.

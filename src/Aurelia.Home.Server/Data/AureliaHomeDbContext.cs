@@ -24,6 +24,8 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
 
     public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
 
+    public DbSet<PlaybackProgress> PlaybackProgress => Set<PlaybackProgress>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var dateTimeOffsetConverter = new ValueConverter<DateTimeOffset, long>(
@@ -191,6 +193,25 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
                 .WithMany(user => user.PlaybackTickets)
                 .HasForeignKey(ticket => ticket.UserId)
                 .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<PlaybackProgress>(entity =>
+        {
+            entity.HasKey(progress => progress.Id);
+            entity.Property(progress => progress.LastPlayedAt)
+                .HasConversion(dateTimeOffsetConverter);
+            entity.Property(progress => progress.UpdatedAt)
+                .HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(progress => new { progress.UserId, progress.MediaItemId })
+                .IsUnique();
+            entity.HasOne(progress => progress.MediaItem)
+                .WithMany(item => item.PlaybackProgress)
+                .HasForeignKey(progress => progress.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(progress => progress.User)
+                .WithMany(user => user.PlaybackProgress)
+                .HasForeignKey(progress => progress.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

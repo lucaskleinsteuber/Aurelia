@@ -119,6 +119,56 @@ struct APIClient: Sendable {
     try await get("/api/v1/catalog/series/\(id.uuidString.lowercased())")
   }
 
+  func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/playback",
+      method: "POST")
+    return try Self.decode(PlaybackSourceResponse.self, from: data)
+  }
+
+  func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
+    try await get("/api/v1/media/\(mediaId.uuidString.lowercased())/progress")
+  }
+
+  func updatePlaybackProgress(
+    mediaId: UUID,
+    positionMilliseconds: Int64,
+    durationMilliseconds: Int64,
+    isFinished: Bool
+  ) async throws -> PlaybackProgressResponse {
+    let body = try JSONEncoder().encode(
+      UpdatePlaybackProgressRequest(
+        positionMilliseconds: positionMilliseconds,
+        durationMilliseconds: durationMilliseconds,
+        isFinished: isFinished))
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/progress",
+      method: "PUT",
+      body: body)
+    return try Self.decode(PlaybackProgressResponse.self, from: data)
+  }
+
+  func revokePlayback(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/playback/\(id.uuidString.lowercased())",
+      method: "DELETE")
+  }
+
+  func streamURL(path: String) throws -> URL {
+    guard path.hasPrefix("/api/v1/streams/"),
+      !path.contains("?"),
+      !path.contains("#"),
+      let components = URLComponents(string: path),
+      components.scheme == nil,
+      components.host == nil,
+      let url = URL(string: path, relativeTo: profile.baseURL)?.absoluteURL,
+      url.host?.caseInsensitiveCompare(profile.baseURL.host ?? "") == .orderedSame
+    else {
+      throw APIClientError.invalidResponse
+    }
+    return url
+  }
+
   func logout() async throws {
     _ = try await perform(path: "/api/v1/auth/logout", method: "POST")
   }
@@ -140,13 +190,13 @@ struct APIClient: Sendable {
     return try Self.decode(Value.self, from: data)
   }
 
-  private func perform(path: String, method: String) async throws -> Data {
+  private func perform(path: String, method: String, body: Data? = nil) async throws -> Data {
     let (data, _, _) = try await Self.request(
       baseURL: profile.baseURL,
       path: path,
       method: method,
       token: profile.token,
-      body: nil,
+      body: body,
       trustMode: .pinned(profile.publicKeyFingerprint))
     return data
   }

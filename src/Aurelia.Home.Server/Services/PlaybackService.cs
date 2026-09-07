@@ -12,7 +12,8 @@ public sealed record PlaybackStreamSource(
 
 public sealed class PlaybackService(
     AureliaHomeDbContext database,
-    TokenService tokenService)
+    TokenService tokenService,
+    PlaybackProgressService progressService)
 {
     private static readonly TimeSpan TicketLifetime = TimeSpan.FromHours(12);
     private const int CleanupBatchSize = 100;
@@ -90,7 +91,11 @@ public sealed class PlaybackService(
             $"/api/v1/streams/{rawToken}",
             file.ContentType,
             file.Length,
-            expiresAt);
+            expiresAt,
+            await progressService.GetSnapshotAsync(
+                userId,
+                media.Id,
+                cancellationToken));
     }
 
     public async Task RevokeAsync(

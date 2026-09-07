@@ -46,6 +46,9 @@ public sealed class PlaybackStreamingTests
             Assert.StartsWith("/api/v1/streams/", playback.StreamPath, StringComparison.Ordinal);
             Assert.DoesNotContain(root, playback.StreamPath, StringComparison.Ordinal);
             Assert.DoesNotContain(Path.GetFileName(path), playback.StreamPath, StringComparison.Ordinal);
+            Assert.Equal(mediaId, playback.Progress.MediaId);
+            Assert.Equal(0, playback.Progress.PositionMilliseconds);
+            Assert.False(playback.Progress.IsCompleted);
 
             var rawTicket = Path.GetFileName(playback.StreamPath);
             using (var scope = factory.Services.CreateScope())

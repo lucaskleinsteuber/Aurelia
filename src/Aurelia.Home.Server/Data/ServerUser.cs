@@ -21,4 +21,6 @@ public sealed class ServerUser
     public List<PairingCode> PairingCodes { get; set; } = [];
 
     public List<PlaybackTicket> PlaybackTickets { get; set; } = [];
+
+    public List<PlaybackProgress> PlaybackProgress { get; set; } = [];
 }

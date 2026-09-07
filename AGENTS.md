@@ -17,6 +17,20 @@ These rules apply to every task in this repository.
 - The server must never copy, convert, remux, transcode, or cache video files.
   Media stays at its original path.
 
+## Native client design contract
+
+- Keep one consistent Apple TV and macOS 26 visual language throughout the app.
+- Content extends beneath a transparent sidebar; never add a gray or black title
+  strip above the content.
+- A later Home build will rotate one movie or series recommendation every hour.
+- Rebuild editing flows as one consistent native design instead of preserving
+  the old Aurelia editor menus.
+- Keep the player aligned with Lucas's supplied Aurelia references: restrained
+  controls over the video, automatic control hiding, and content-first layout.
+- In native fullscreen, do not draw custom traffic-light buttons. Let macOS show
+  its real window controls only when the pointer reaches the top screen edge.
+- The full Home and library visual rebuild remains a dedicated later milestone.
+
 ## Repository hygiene
 
 - Keep only source code, migrations, versioned tests, configuration, and the

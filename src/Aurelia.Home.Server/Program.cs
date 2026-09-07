@@ -76,6 +76,7 @@ builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<LibraryService>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<PlaybackService>();
+builder.Services.AddScoped<PlaybackProgressService>();
 builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
 builder.Services.AddSingleton<LibraryScanScheduler>();
 builder.Services.AddHostedService<LibraryScanWorker>();

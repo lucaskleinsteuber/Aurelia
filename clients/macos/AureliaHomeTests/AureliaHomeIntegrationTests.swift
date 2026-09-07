@@ -35,11 +35,35 @@ final class AureliaHomeIntegrationTests: XCTestCase {
     let profile = try await APIClient.pair(
       inspected: inspected,
       code: pairingCode,
-      deviceName: "Build 4 Integration Test")
+      deviceName: "Build 5 Integration Test")
     let client = APIClient(profile: profile)
-    async let movies = client.movies()
-    async let series = client.series()
-    _ = try await (movies, series)
+    async let moviesRequest = client.movies()
+    async let seriesRequest = client.series()
+    let (movies, _) = try await (moviesRequest, seriesRequest)
+    if let movie = movies.first(where: { $0.availability == .available }) {
+      let playback = try await client.createPlayback(mediaId: movie.id)
+      XCTAssertEqual(playback.mediaId, movie.id)
+      let relay = try LoopbackStreamRelay(
+        sourceURL: client.streamURL(path: playback.streamPath),
+        publicKeyFingerprint: profile.publicKeyFingerprint)
+      let localURL = try await relay.start()
+      var rangeRequest = URLRequest(url: localURL)
+      rangeRequest.setValue("bytes=0-7", forHTTPHeaderField: "Range")
+      let (bytes, response) = try await URLSession.shared.data(for: rangeRequest)
+      XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 206)
+      XCTAssertEqual(bytes.count, 8)
+      relay.stop()
+
+      let stored = try await client.updatePlaybackProgress(
+        mediaId: movie.id,
+        positionMilliseconds: 20_000,
+        durationMilliseconds: 120_000,
+        isFinished: false)
+      XCTAssertEqual(stored.positionMilliseconds, 20_000)
+      let loadedProgress = try await client.playbackProgress(mediaId: movie.id)
+      XCTAssertEqual(loadedProgress, stored)
+      try await client.revokePlayback(id: playback.id)
+    }
     try await client.logout()
   }
 }

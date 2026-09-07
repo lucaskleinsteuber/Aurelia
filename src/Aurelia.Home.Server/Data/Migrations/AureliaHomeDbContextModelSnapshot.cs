@@ -313,6 +313,43 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.ToTable("PairingCodes");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.PlaybackProgress", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DurationMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsCompleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("LastPlayedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PositionMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId")
+                        .IsUnique();
+
+                    b.ToTable("PlaybackProgress");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.PlaybackTicket", b =>
                 {
                     b.Property<Guid>("Id")
@@ -474,6 +511,25 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.PlaybackProgress", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.MediaItem", "MediaItem")
+                        .WithMany("PlaybackProgress")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Home.Server.Data.ServerUser", "User")
+                        .WithMany("PlaybackProgress")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.PlaybackTicket", b =>
                 {
                     b.HasOne("Aurelia.Home.Server.Data.DeviceSession", "DeviceSession")
@@ -522,12 +578,16 @@ namespace Aurelia.Home.Server.Data.Migrations
                 {
                     b.Navigation("Children");
 
+                    b.Navigation("PlaybackProgress");
+
                     b.Navigation("PlaybackTickets");
                 });
 
             modelBuilder.Entity("Aurelia.Home.Server.Data.ServerUser", b =>
                 {
                     b.Navigation("PairingCodes");
+
+                    b.Navigation("PlaybackProgress");
 
                     b.Navigation("PlaybackTickets");
 

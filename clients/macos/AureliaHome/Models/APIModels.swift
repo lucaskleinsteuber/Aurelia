@@ -111,6 +111,39 @@ struct SupplementSummary: Codable, Identifiable, Equatable, Sendable {
   let availability: MediaAvailability
 }
 
+struct PlaybackProgressResponse: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let positionMilliseconds: Int64
+  let durationMilliseconds: Int64
+  let isCompleted: Bool
+  let lastPlayedAt: String?
+  let updatedAt: String?
+}
+
+struct UpdatePlaybackProgressRequest: Encodable, Equatable, Sendable {
+  let positionMilliseconds: Int64
+  let durationMilliseconds: Int64
+  let isFinished: Bool
+}
+
+struct PlaybackSourceResponse: Codable, Equatable, Sendable {
+  let id: UUID
+  let mediaId: UUID
+  let streamPath: String
+  let contentType: String
+  let contentLength: Int64
+  let expiresAt: String
+  let progress: PlaybackProgressResponse
+}
+
+struct PlaybackPresentation: Identifiable, Equatable, Sendable {
+  let mediaId: UUID
+  let title: String
+  let subtitle: String?
+
+  var id: UUID { mediaId }
+}
+
 struct StoredServerProfile: Codable, Equatable, Sendable {
   let serverId: UUID
   let name: String

@@ -3,6 +3,7 @@
 .vscode/
 xcuserdata/
 *.xcuserstate
+clients/macos/Dependencies/
 *.user
 *.suo
 

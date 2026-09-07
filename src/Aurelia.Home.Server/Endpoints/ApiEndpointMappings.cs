@@ -59,6 +59,8 @@ public static class ApiEndpointMappings
 
         var media = api.MapGroup("/media").RequireAuthorization();
         media.MapPost("/{mediaId:guid}/playback", CreatePlaybackAsync);
+        media.MapGet("/{mediaId:guid}/progress", GetPlaybackProgressAsync);
+        media.MapPut("/{mediaId:guid}/progress", UpdatePlaybackProgressAsync);
 
         var playback = api.MapGroup("/playback").RequireAuthorization();
         playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
@@ -365,6 +367,32 @@ public static class ApiEndpointMappings
         return ExecuteNoContentAsync(() => playback.RevokeAsync(
             context.User.RequireUserId(),
             playbackId,
+            cancellationToken));
+    }
+
+    private static Task<IResult> GetPlaybackProgressAsync(
+        HttpContext context,
+        Guid mediaId,
+        PlaybackProgressService progress,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => progress.GetAsync(
+            context.User.RequireUserId(),
+            mediaId,
+            cancellationToken));
+    }
+
+    private static Task<IResult> UpdatePlaybackProgressAsync(
+        HttpContext context,
+        Guid mediaId,
+        UpdatePlaybackProgressRequest request,
+        PlaybackProgressService progress,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => progress.UpdateAsync(
+            context.User.RequireUserId(),
+            mediaId,
+            request,
             cancellationToken));
     }
 

@@ -14,6 +14,47 @@ namespace Aurelia.Home.Server.Tests;
 public sealed class MigrationUpgradeTests
 {
     [Fact]
+    public async Task BuildFourDatabaseUpgradesWithPlaybackProgressTable()
+    {
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(dataDirectory);
+        var databasePath = Path.Combine(dataDirectory, "aurelia-home.db");
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<AureliaHomeDbContext>()
+                .UseSqlite($"Data Source={databasePath}")
+                .Options;
+            await using (var database = new AureliaHomeDbContext(options))
+            {
+                var migrator = database.Database.GetService<IMigrator>();
+                await migrator.MigrateAsync("20260905235120_Build3PlaybackStreaming");
+            }
+
+            using var factory = new AureliaHomeServerFactory(dataDirectory);
+            using var client = factory.CreateClient();
+            using var response = await client.GetAsync("/api/v1/health");
+            response.EnsureSuccessStatusCode();
+
+            await using var connection = new SqliteConnection(
+                $"Data Source={databasePath};Mode=ReadOnly");
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
+            Assert.Equal(4L, await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
+            Assert.Equal(1L, await command.ExecuteScalarAsync());
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+            {
+                Directory.Delete(dataDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BuildOneDatabaseUpgradesWithoutLosingItsIdentity()
     {
         var dataDirectory = TestPaths.CreateDataDirectory();
@@ -52,10 +93,12 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(3L, await command.ExecuteScalarAsync());
+            Assert.Equal(4L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaItems';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackTickets';";
+            Assert.Equal(1L, await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
         }
         finally
@@ -134,6 +177,7 @@ public sealed class MigrationUpgradeTests
                 Assert.Equal(mediaId, media.Id);
                 Assert.Equal(libraryId, media.LibraryRootId);
                 Assert.Empty(await database.PlaybackTickets.ToListAsync());
+                Assert.Empty(await database.PlaybackProgress.ToListAsync());
             }
         }
         finally
