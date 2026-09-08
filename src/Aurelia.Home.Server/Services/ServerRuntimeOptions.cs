@@ -10,7 +10,8 @@ public sealed record ServerRuntimeOptions(
     bool LanAccessEnabled,
     int LanHttpsPort,
     string CertificatePath,
-    string PrivateKeyPath)
+    string PrivateKeyPath,
+    int? HostParentProcessId)
 {
     public const int DefaultLanHttpsPort = 43111;
 
@@ -24,23 +25,27 @@ public sealed record ServerRuntimeOptions(
 
         var dataDirectory = Path.GetFullPath(
             configuredDataDirectory ?? DefaultDataDirectory());
+        var persisted = ServerHostSettings.Load(dataDirectory);
         var localListenUrl = ValidateLocalListenUrl(FirstNonEmpty(
             OptionValue(arguments, "--urls"),
             configuration["urls"],
             configuration["AureliaHome:ListenUrl"],
             Environment.GetEnvironmentVariable("AURELIA_HOME_URLS"))
             ?? "http://127.0.0.1:43110");
-        var lanAccessEnabled = HasFlag(arguments, "--lan")
-            || ParseBoolean(configuration["AureliaHome:LanAccessEnabled"])
-            || ParseBoolean(Environment.GetEnvironmentVariable("AURELIA_HOME_LAN_ENABLED"));
+        var lanAccessEnabled = ResolveLanAccess(configuration, arguments, persisted);
         var lanHttpsPort = ParsePort(FirstNonEmpty(
             OptionValue(arguments, "--lan-port"),
             configuration["AureliaHome:LanHttpsPort"],
-            Environment.GetEnvironmentVariable("AURELIA_HOME_LAN_PORT")));
+            Environment.GetEnvironmentVariable("AURELIA_HOME_LAN_PORT"),
+            persisted?.LanHttpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         var serverName = FirstNonEmpty(
             configuration["AureliaHome:ServerName"],
-            Environment.GetEnvironmentVariable("AURELIA_HOME_SERVER_NAME"))
+            Environment.GetEnvironmentVariable("AURELIA_HOME_SERVER_NAME"),
+            persisted?.ServerName)
             ?? "Aurelia Home";
+        var hostParentProcessId = ParseProcessId(FirstNonEmpty(
+            OptionValue(arguments, "--host-parent-pid"),
+            Environment.GetEnvironmentVariable("AURELIA_HOME_HOST_PARENT_PID")));
 
         var listenUrl = lanAccessEnabled
             ? $"{localListenUrl};https://*:{lanHttpsPort}"
@@ -54,7 +59,8 @@ public sealed record ServerRuntimeOptions(
             lanAccessEnabled,
             lanHttpsPort,
             Path.Combine(dataDirectory, "server-certificate.pem"),
-            Path.Combine(dataDirectory, "server-private-key.pem"));
+            Path.Combine(dataDirectory, "server-private-key.pem"),
+            hostParentProcessId);
     }
 
     private static string? FirstNonEmpty(params string?[] values)
@@ -87,9 +93,29 @@ public sealed record ServerRuntimeOptions(
             StringComparison.OrdinalIgnoreCase)) == true;
     }
 
-    private static bool ParseBoolean(string? value)
+    private static bool ResolveLanAccess(
+        IConfiguration configuration,
+        string[]? arguments,
+        ServerHostSettings? persisted)
     {
-        return bool.TryParse(value, out var parsed) && parsed;
+        if (HasFlag(arguments, "--lan"))
+        {
+            return true;
+        }
+
+        foreach (var value in new[]
+        {
+            configuration["AureliaHome:LanAccessEnabled"],
+            Environment.GetEnvironmentVariable("AURELIA_HOME_LAN_ENABLED"),
+        })
+        {
+            if (bool.TryParse(value, out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return persisted?.LanAccessEnabled == true;
     }
 
     private static int ParsePort(string? value)
@@ -99,12 +125,27 @@ public sealed record ServerRuntimeOptions(
             return DefaultLanHttpsPort;
         }
 
-        if (!int.TryParse(value, out var port) || port is < 1 or > 65535)
+        if (!int.TryParse(value, out var port) || port is < 1024 or > 65535)
         {
-            throw new ArgumentException("The LAN HTTPS port must be between 1 and 65535.");
+            throw new ArgumentException("The LAN HTTPS port must be between 1024 and 65535.");
         }
 
         return port;
+    }
+
+    private static int? ParseProcessId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!int.TryParse(value, out var processId) || processId <= 1)
+        {
+            throw new ArgumentException("The native host parent process ID is invalid.");
+        }
+
+        return processId;
     }
 
     private static string ValidateLocalListenUrl(string value)
@@ -151,5 +192,39 @@ public sealed record ServerRuntimeOptions(
                 ".local",
                 "share",
                 "aurelia-home");
+    }
+}
+
+public sealed record ServerHostSettings(
+    int Version,
+    string ServerName,
+    bool LanAccessEnabled,
+    int LanHttpsPort)
+{
+    public const string FileName = "server-settings.json";
+    private static readonly System.Text.Json.JsonSerializerOptions JsonOptions =
+        new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    public static ServerHostSettings? Load(string dataDirectory)
+    {
+        var path = Path.Combine(dataDirectory, FileName);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var settings = System.Text.Json.JsonSerializer.Deserialize<ServerHostSettings>(
+            File.ReadAllText(path),
+            JsonOptions);
+        if (settings is null
+            || settings.Version != 1
+            || string.IsNullOrWhiteSpace(settings.ServerName)
+            || settings.ServerName.Length > 128
+            || settings.LanHttpsPort is < 1024 or > 65535)
+        {
+            throw new InvalidDataException("The server host settings file is invalid.");
+        }
+
+        return settings;
     }
 }

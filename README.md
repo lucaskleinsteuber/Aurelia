@@ -2,8 +2,9 @@
 
 Aurelia Home is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to a native macOS library and playback client.
-Build 6 has no browser interface and the native client is not a web wrapper.
+and connects securely to a native macOS library and playback client. Build 7
+can host the complete server on this Mac or remain a client of another server.
+It has no browser interface and the native client is not a web wrapper.
 An optional responsive web client may be added later for devices without a
 native app.
 
@@ -33,11 +34,17 @@ native app.
 - Bonjour discovery with a manual-address fallback
 - Versioned JSON API under `/api/v1`
 - Single-instance protection, serialized background scans, and graceful shutdown
+- One-use, loopback-only bootstrap authorization for native owner setup
+- Parent-process monitoring for an app-owned server process
 
 ## Current Mac client
 
 - Native SwiftUI application for macOS 26 and newer
 - Universal Apple Silicon and Intel executable
+- In-app choice between hosting on this Mac and connecting to another server
+- Separately signed, windowless host helper with both self-contained server architectures
+- Automatic server start while the host app runs, bounded private logs, and crash recovery
+- Native owner setup, local login, library management, scan status, pairing, and sessions
 - Bonjour server discovery and manual server addresses
 - Human-verified certificate pinning during one-time pairing
 - Device token and server identity stored in the macOS Keychain
@@ -68,6 +75,8 @@ Build and test the Mac client with the checked-in Xcode project. The build-numbe
 ```sh
 scripts/verify-build-number.sh
 scripts/test-macos.sh
+scripts/build-macos-release.sh
+scripts/test-native-host.sh
 ```
 
 Generated builds, package caches, test results, and development logs are kept
@@ -152,6 +161,21 @@ future local builds retain the same Keychain identity. It deliberately leaves
 incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
+
+For normal Build 7 use, launch Aurelia Home and choose **Host on This Mac**.
+The native assistant creates the owner, enables LAN HTTPS, and lets the owner
+select only the media folders they explicitly want to add. Closing the last
+window leaves the app and its server running; clicking the Dock icon restores
+the window. Choosing **Aurelia Home > Quit Aurelia Home** stops both cleanly.
+Existing Build 6 connections remain in client mode after upgrading.
+
+The sandboxed app starts its separately signed host helper through Launch
+Services. A versioned launch description is bound to the exact running app PID
+and executable path, while the random 256-bit control secret crosses only a
+permission-restricted FIFO and is removed immediately after use. The secret is
+never placed in process arguments, environment variables, configuration files,
+or logs. The helper has no Keychain access and stops its server if the owning app
+disappears.
 
 The product language is English for the first release. Additional localizations
 will be introduced deliberately in a later milestone.

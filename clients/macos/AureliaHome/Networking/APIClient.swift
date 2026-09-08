@@ -96,11 +96,114 @@ struct APIClient: Sendable {
       publicKeyFingerprint: inspected.publicKeyFingerprint,
       token: authentication.token,
       sessionId: authentication.sessionId,
-      expiresAt: authentication.expiresAt)
+      expiresAt: authentication.expiresAt,
+      user: authentication.user)
+  }
+
+  static func setupOwner(
+    username: String,
+    password: String,
+    deviceName: String,
+    bootstrapToken: String
+  ) async throws -> AuthenticationResponse {
+    let body = try JSONEncoder().encode(
+      SetupOwnerRequest(username: username, password: password, deviceName: deviceName))
+    let (data, _, _) = try await request(
+      baseURL: URL(string: "http://127.0.0.1:43110")!,
+      path: "/api/v1/setup/owner",
+      method: "POST",
+      token: nil,
+      body: body,
+      trustMode: .inspect,
+      additionalHeaders: ["X-Aurelia-Bootstrap-Token": bootstrapToken])
+    return try decode(AuthenticationResponse.self, from: data)
+  }
+
+  static func loginLocally(
+    username: String,
+    password: String,
+    deviceName: String
+  ) async throws -> AuthenticationResponse {
+    let body = try JSONEncoder().encode(
+      LoginRequest(username: username, password: password, deviceName: deviceName))
+    let (data, _, _) = try await request(
+      baseURL: URL(string: "http://127.0.0.1:43110")!,
+      path: "/api/v1/auth/login",
+      method: "POST",
+      token: nil,
+      body: body,
+      trustMode: .inspect)
+    return try decode(AuthenticationResponse.self, from: data)
+  }
+
+  static func profile(
+    authentication: AuthenticationResponse,
+    inspected: InspectedServer
+  ) -> StoredServerProfile {
+    StoredServerProfile(
+      serverId: inspected.info.serverId,
+      name: inspected.info.name,
+      baseURL: inspected.baseURL,
+      publicKeyFingerprint: inspected.publicKeyFingerprint,
+      token: authentication.token,
+      sessionId: authentication.sessionId,
+      expiresAt: authentication.expiresAt,
+      user: authentication.user)
   }
 
   func serverInfo() async throws -> ServerInfoResponse {
     try await get("/api/v1/server/info")
+  }
+
+  func currentUser() async throws -> UserSummary {
+    try await get("/api/v1/auth/me")
+  }
+
+  func libraries() async throws -> [LibrarySummary] {
+    try await get("/api/v1/libraries")
+  }
+
+  func createLibrary(name: String, path: String, kind: LibraryKind) async throws
+    -> LibrarySummary
+  {
+    let body = try JSONEncoder().encode(CreateLibraryRequest(name: name, path: path, kind: kind))
+    let data = try await perform(path: "/api/v1/libraries", method: "POST", body: body)
+    return try Self.decode(LibrarySummary.self, from: data)
+  }
+
+  func removeLibrary(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/libraries/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func startLibraryScan(id: UUID) async throws -> LibraryScanSummary {
+    let data = try await perform(
+      path: "/api/v1/libraries/\(id.uuidString.lowercased())/scans",
+      method: "POST")
+    return try Self.decode(LibraryScanSummary.self, from: data)
+  }
+
+  func startAllLibraryScans() async throws -> [LibraryScanSummary] {
+    let data = try await perform(path: "/api/v1/libraries/scans", method: "POST")
+    return try Self.decode([LibraryScanSummary].self, from: data)
+  }
+
+  func scan(id: UUID) async throws -> LibraryScanSummary {
+    try await get("/api/v1/scans/\(id.uuidString.lowercased())")
+  }
+
+  func createPairingCode() async throws -> PairingCodeResponse {
+    let data = try await perform(path: "/api/v1/auth/pairings", method: "POST")
+    return try Self.decode(PairingCodeResponse.self, from: data)
+  }
+
+  func sessions() async throws -> [DeviceSessionSummary] {
+    try await get("/api/v1/auth/sessions")
+  }
+
+  func revokeSession(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/auth/sessions/\(id.uuidString.lowercased())",
+      method: "DELETE")
   }
 
   func movies() async throws -> [MovieSummary] {
@@ -207,7 +310,8 @@ struct APIClient: Sendable {
     method: String,
     token: String?,
     body: Data?,
-    trustMode: TLSTrustDelegate.Mode
+    trustMode: TLSTrustDelegate.Mode,
+    additionalHeaders: [String: String] = [:]
   ) async throws -> (Data, HTTPURLResponse, TLSTrustDelegate) {
     guard let host = baseURL.host,
       let url = URL(string: path, relativeTo: baseURL)?.absoluteURL
@@ -227,6 +331,9 @@ struct APIClient: Sendable {
     request.httpMethod = method
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue("application/json", forHTTPHeaderField: "Accept")
+    for (name, value) in additionalHeaders {
+      request.setValue(value, forHTTPHeaderField: name)
+    }
     if let token {
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }

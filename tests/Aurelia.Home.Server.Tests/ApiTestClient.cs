@@ -8,6 +8,7 @@ namespace Aurelia.Home.Server.Tests;
 
 internal static class ApiTestClient
 {
+    public const string BootstrapToken = "test-only-bootstrap-token-with-256-bits-0001";
     public static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     public static async Task<AuthenticationResponse> SetupOwnerAsync(
@@ -16,10 +17,12 @@ internal static class ApiTestClient
         string password = "correct horse battery staple",
         string deviceName = "Test Mac")
     {
-        using var response = await client.PostAsJsonAsync(
-            "/api/v1/setup/owner",
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/setup/owner");
+        request.Headers.Add("X-Aurelia-Bootstrap-Token", BootstrapToken);
+        request.Content = JsonContent.Create(
             new SetupOwnerRequest(username, password, deviceName),
-            JsonOptions);
+            options: JsonOptions);
+        using var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();
         return await ReadAsync<AuthenticationResponse>(response);
     }

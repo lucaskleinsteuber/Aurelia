@@ -23,6 +23,8 @@ public static class ApiEndpointMappings
         var authentication = api.MapGroup("/auth");
         authentication.MapPost("/login", LoginAsync)
             .RequireRateLimiting("authentication");
+        authentication.MapGet("/me", CurrentUserAsync)
+            .RequireAuthorization();
         authentication.MapPost("/pair", RedeemPairingCodeAsync)
             .RequireRateLimiting("authentication");
         authentication.MapPost("/logout", LogoutAsync)
@@ -122,6 +124,7 @@ public static class ApiEndpointMappings
         IWebHostEnvironment environment,
         SetupOwnerRequest request,
         AccountService accounts,
+        BootstrapSetupAuthorizer bootstrap,
         CancellationToken cancellationToken)
     {
         if (!IsLoopback(context, environment))
@@ -132,8 +135,32 @@ public static class ApiEndpointMappings
                 StatusCodes.Status403Forbidden);
         }
 
-        return await ExecuteAsync(
+        if (!bootstrap.IsAuthorized(context.Request.Headers[BootstrapSetupAuthorizer.HeaderName]))
+        {
+            return Problem(
+                "bootstrap_required",
+                "Native setup authorization is required.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var result = await ExecuteAsync(
             () => accounts.SetupOwnerAsync(request, cancellationToken));
+        if (result is IStatusCodeHttpResult { StatusCode: >= 200 and < 300 })
+        {
+            bootstrap.Consume();
+        }
+
+        return result;
+    }
+
+    private static Task<IResult> CurrentUserAsync(
+        HttpContext context,
+        AccountService accounts,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => accounts.GetUserAsync(
+            context.User.RequireUserId(),
+            cancellationToken));
     }
 
     private static Task<IResult> LoginAsync(

@@ -91,7 +91,7 @@ public sealed class ServerFoundationTests
             "/api/v1/setup/owner",
             new SetupOwnerRequest("other", "another secure password", "Other Mac"),
             ApiTestClient.JsonOptions);
-        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, duplicate.StatusCode);
 
         using var login = await client.PostAsJsonAsync(
             "/api/v1/auth/login",
@@ -99,6 +99,16 @@ public sealed class ServerFoundationTests
             ApiTestClient.JsonOptions);
         login.EnsureSuccessStatusCode();
         var secondSession = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
+
+        using var meRequest = ApiTestClient.Authorized(
+            HttpMethod.Get,
+            "/api/v1/auth/me",
+            secondSession.Token);
+        using var meResponse = await client.SendAsync(meRequest);
+        meResponse.EnsureSuccessStatusCode();
+        var currentUser = await ApiTestClient.ReadAsync<UserSummary>(meResponse);
+        Assert.Equal(owner.User.Id, currentUser.Id);
+        Assert.Equal(UserRole.Owner, currentUser.Role);
 
         using var listRequest = ApiTestClient.Authorized(
             HttpMethod.Get,

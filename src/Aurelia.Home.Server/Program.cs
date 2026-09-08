@@ -66,6 +66,7 @@ var connectionString = new SqliteConnectionStringBuilder
 
 builder.Services.AddSingleton(runtime);
 builder.Services.AddSingleton(tlsIdentity);
+builder.Services.AddSingleton<BootstrapSetupAuthorizer>();
 builder.Services.AddDataProtection()
     .SetApplicationName("Aurelia.Home.Server")
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionDirectory));
@@ -81,6 +82,7 @@ builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
 builder.Services.AddSingleton<LibraryScanScheduler>();
 builder.Services.AddHostedService<LibraryScanWorker>();
 builder.Services.AddHostedService<BonjourAdvertisementService>();
+builder.Services.AddHostedService<ParentProcessMonitor>();
 builder.Services.AddScoped<IPasswordHasher<ServerUser>, PasswordHasher<ServerUser>>();
 builder.Services.Configure<PasswordHasherOptions>(options =>
 {

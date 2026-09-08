@@ -16,6 +16,12 @@ struct RootView: View {
             .foregroundStyle(.secondary)
         }
         .accessibilityIdentifier("startup-progress")
+      } else if model.operatingMode == nil {
+        OperatingModeView()
+      } else if model.operatingMode == .host && model.profile == nil {
+        NativeHostSetupView()
+      } else if model.needsInitialLibrarySetup {
+        InitialLibrarySetupView()
       } else if model.profile == nil {
         ConnectionView()
       } else {

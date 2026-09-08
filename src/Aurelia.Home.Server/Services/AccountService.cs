@@ -89,6 +89,11 @@ public sealed class AccountService(
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<UserSummary> GetUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return ToSummary(await RequireUserAsync(userId, cancellationToken));
+    }
+
     public async Task<UserSummary> CreateUserAsync(
         Guid actorId,
         CreateUserRequest request,

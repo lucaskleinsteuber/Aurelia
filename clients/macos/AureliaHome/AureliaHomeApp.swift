@@ -19,19 +19,19 @@ struct AureliaHomeApp: App {
     Settings {
       AppSettingsView()
         .environmentObject(model)
-        .frame(width: 480, height: 280)
     }
   }
 }
 
 @MainActor
 final class AureliaHomeAppDelegate: NSObject, NSApplicationDelegate {
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApplication.shared.activate()
+  }
+
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard PlaybackShutdownCoordinator.shared.hasActivePlayback else {
-      return .terminateNow
-    }
     Task {
-      await PlaybackShutdownCoordinator.shared.shutdown()
+      await AppModel.active?.shutdown()
       sender.reply(toApplicationShouldTerminate: true)
     }
     return .terminateLater

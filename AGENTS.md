@@ -112,8 +112,10 @@ These rules apply to every task in this repository.
   requests one.
 - After every completed change, inspect the diff, check for secrets, credentials,
   local paths that should not be portable, generated files, databases, and media.
-- Commit each completed change with a clear English message and push it to
-  `origin/main` immediately. Do not batch unrelated completed changes.
+- Name each completed build commit exactly after its product version. For
+  example, Build 7 is `1.0.7`, Build 8 is `1.0.8`, and subsequent builds follow
+  the same pattern. Push it to `origin/main` immediately. Do not batch unrelated
+  completed changes.
 - Never force-push, rewrite published history, or commit credentials, tokens,
   personal media, generated builds, runtime data, or the external build summary.
 - A local commit is not completion: verify that the exact commit exists on

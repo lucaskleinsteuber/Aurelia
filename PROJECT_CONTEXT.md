@@ -56,6 +56,17 @@ The complete path is:
 - Build 6 moves Mac tests outside privacy-protected folders, adopts a fresh
   app-owned Keychain namespace with stable signing, and makes this handoff
   durable.
+- Build 7 embeds both self-contained macOS server architectures, adds a
+  separately signed native host helper, and provides owner setup, local login,
+  libraries, scans, pairing, and session management inside the Mac app.
+
+The Build 7 host handoff keeps the primary app sandboxed. Launch Services opens
+the separately signed, windowless helper; a non-secret launch description is
+validated against the exact live Aurelia Home PID and executable, and its
+random 256-bit control secret is transferred only through a short-lived FIFO.
+The description and FIFO are deleted after consumption. Secrets never enter
+arguments, persisted settings, or logs, and the helper shuts down when its
+owning app disappears.
 
 The system is functional but not visually finished. Treat a passing build as
 engineering evidence, not as proof that every UI route, network, codec, or
@@ -112,19 +123,15 @@ back after execution. Pre-install smoke candidates use
 8. Verify the candidate before backing up and replacing the installed app.
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
-10. Commit directly to `main`, push immediately, verify the remote hash, and
+10. Commit directly to `main` using the exact product version as the commit
+    message (`1.0.7` for Build 7), push immediately, verify the remote hash, and
     write exactly one English external summary for the completed build.
 
 ## Planned direction
 
-The next sensible milestone is Build 7: make the server behave like a real home
-appliance on macOS. It should install and manage a separate background server
-process with clear start, stop, status, health, and diagnostic behavior while
-keeping the native app a client and configuration surface. The design must leave
-room for an equivalent Linux service later.
-
-After that, establish optional metadata and artwork without weakening manual
-metadata precedence, then perform the dedicated Home/library/detail visual
-rebuild. Automatic scans, the optional web client, broader administration,
-Linux and Windows native clients, and advanced playback features should follow
-as deliberate milestones rather than being mixed into infrastructure work.
+The next sensible milestone is Build 8: establish optional metadata and artwork
+without weakening manual metadata precedence or changing media files. After
+that, perform the dedicated Home/library/detail visual rebuild. Automatic scans,
+the optional web client, broader administration, Linux and Windows native
+clients, and advanced playback features should follow as deliberate milestones
+rather than being mixed into infrastructure work.

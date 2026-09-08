@@ -16,6 +16,18 @@ struct RedeemPairingCodeRequest: Encodable, Sendable {
   let deviceName: String
 }
 
+struct SetupOwnerRequest: Encodable, Sendable {
+  let username: String
+  let password: String
+  let deviceName: String
+}
+
+struct LoginRequest: Encodable, Sendable {
+  let username: String
+  let password: String
+  let deviceName: String
+}
+
 struct AuthenticationResponse: Decodable, Sendable {
   let user: UserSummary
   let sessionId: UUID
@@ -23,11 +35,98 @@ struct AuthenticationResponse: Decodable, Sendable {
   let expiresAt: String
 }
 
-struct UserSummary: Decodable, Sendable {
+enum UserRole: String, Codable, Sendable {
+  case owner
+  case admin
+  case user
+
+  var canManageLibraries: Bool { self == .owner || self == .admin }
+}
+
+struct UserSummary: Codable, Equatable, Sendable {
   let id: UUID
   let username: String
-  let role: String
+  let role: UserRole
   let createdAt: String
+}
+
+enum LibraryKind: String, Codable, CaseIterable, Sendable {
+  case movies
+  case tvShows
+
+  var title: String { self == .movies ? "Movies" : "TV Shows" }
+}
+
+enum LibraryAvailability: String, Codable, Sendable {
+  case unknown
+  case available
+  case unavailable
+  case error
+}
+
+enum LibraryScanState: String, Codable, Sendable {
+  case queued
+  case running
+  case completed
+  case failed
+  case interrupted
+}
+
+struct CreateLibraryRequest: Encodable, Sendable {
+  let name: String
+  let path: String
+  let kind: LibraryKind
+}
+
+struct LibrarySummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let name: String
+  let path: String
+  let kind: LibraryKind
+  let availability: LibraryAvailability
+  let createdAt: String
+  let lastScanStartedAt: String?
+  let lastScanCompletedAt: String?
+  let lastError: String?
+}
+
+struct LibraryScanIssueSummary: Codable, Equatable, Sendable {
+  let code: String
+  let message: String
+  let path: String?
+}
+
+struct LibraryScanSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let libraryId: UUID
+  let state: LibraryScanState
+  let createdAt: String
+  let startedAt: String?
+  let completedAt: String?
+  let filesDiscovered: Int
+  let filesProcessed: Int
+  let addedFiles: Int
+  let updatedFiles: Int
+  let missingFiles: Int
+  let skippedFiles: Int
+  let error: String?
+  let issues: [LibraryScanIssueSummary]
+}
+
+struct PairingCodeResponse: Codable, Equatable, Sendable {
+  let code: String
+  let expiresAt: String
+}
+
+struct DeviceSessionSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let userId: UUID
+  let deviceName: String
+  let createdAt: String
+  let lastSeenAt: String
+  let expiresAt: String
+  let revokedAt: String?
+  let isCurrent: Bool
 }
 
 struct APIProblem: Decodable, Error, Sendable {
@@ -152,6 +251,27 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
   let token: String
   let sessionId: UUID
   let expiresAt: String
+  let user: UserSummary?
+
+  init(
+    serverId: UUID,
+    name: String,
+    baseURL: URL,
+    publicKeyFingerprint: String,
+    token: String,
+    sessionId: UUID,
+    expiresAt: String,
+    user: UserSummary? = nil
+  ) {
+    self.serverId = serverId
+    self.name = name
+    self.baseURL = baseURL
+    self.publicKeyFingerprint = publicKeyFingerprint
+    self.token = token
+    self.sessionId = sessionId
+    self.expiresAt = expiresAt
+    self.user = user
+  }
 }
 
 struct InspectedServer: Equatable, Sendable {

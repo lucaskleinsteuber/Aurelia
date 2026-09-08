@@ -29,6 +29,7 @@ public sealed class AureliaHomeServerFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Testing");
         builder.UseSetting("AureliaHome:DataDirectory", DataDirectory);
         builder.UseSetting("AureliaHome:ListenUrl", "http://127.0.0.1:0");
+        builder.UseSetting("AureliaHome:BootstrapToken", ApiTestClient.BootstrapToken);
         builder.ConfigureLogging(logging =>
         {
             logging.SetMinimumLevel(LogLevel.Warning);

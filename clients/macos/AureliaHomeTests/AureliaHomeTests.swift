@@ -170,6 +170,152 @@ struct AureliaHomeTests {
   }
 
   @Test
+  func buildSixProfileDecodesWithoutRoleAndCanBeUpgraded() throws {
+    let json = Data(
+      """
+      {
+        "serverId":"00000000-0000-0000-0000-000000000004",
+        "name":"Existing Server",
+        "baseURL":"https://server.local:43111",
+        "publicKeyFingerprint":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "token":"legacy-token",
+        "sessionId":"00000000-0000-0000-0000-000000000005",
+        "expiresAt":"2099-01-01T00:00:00Z"
+      }
+      """.utf8)
+    let profile = try JSONDecoder().decode(StoredServerProfile.self, from: json)
+    #expect(profile.user == nil)
+
+    let ownerJSON = Data(
+      """
+      {
+        "id":"00000000-0000-0000-0000-000000000006",
+        "username":"lucas",
+        "role":"owner",
+        "createdAt":"2099-01-01T00:00:00Z"
+      }
+      """.utf8)
+    let owner = try JSONDecoder().decode(UserSummary.self, from: ownerJSON)
+    #expect(owner.role.canManageLibraries)
+  }
+
+  @Test
+  func nativeHostSettingsUseVersionedPortableJSON() throws {
+    let settings = NativeHostSettings(
+      version: 1,
+      serverName: "Aurelia Home on Test Mac",
+      lanAccessEnabled: true,
+      lanHttpsPort: 44_111)
+    let encoded = try JSONEncoder().encode(settings)
+    #expect(try JSONDecoder().decode(NativeHostSettings.self, from: encoded) == settings)
+  }
+
+  @Test
+  func nativeHostLaunchHandoffIsPIDBoundAndKeepsItsSecretInAFIFO() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+      .appendingPathComponent("AureliaHomeHostLaunch-\(UUID().uuidString)", isDirectory: true)
+    try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    let processID: Int32 = 12_345
+    let secret = String(repeating: "S", count: 43)
+    let rendezvous = root.appendingPathComponent("rendezvous.json")
+    let handoff = try HostLaunchHandoff(
+      secret: secret,
+      directory: root,
+      rendezvous: rendezvous,
+      serverName: "Test Server",
+      lanPort: 43_111,
+      environment: [
+        "AURELIA_HOME_DATA_DIR": root.appendingPathComponent("Data").path,
+        "AURELIA_HOME_LOG_DIR": root.appendingPathComponent("Logs").path,
+      ],
+      processID: processID)
+
+    let configurationData = try Data(contentsOf: handoff.configurationURL)
+    #expect(!String(decoding: configurationData, as: UTF8.self).contains(secret))
+    let description = try JSONDecoder().decode(HostLaunchDescription.self, from: configurationData)
+    #expect(description.parentProcessID == processID)
+    #expect(
+      try HostLaunchSecurity.validate(
+        description,
+        expectedParentProcessID: processID,
+        bootstrapDirectory: root)
+        == ValidatedHostLaunchPaths(
+          rendezvousURL: rendezvous.standardizedFileURL,
+          pipeURL: handoff.secretPipeURL.standardizedFileURL))
+    #expect(throws: HostLaunchSecurityError.invalidDescription) {
+      try HostLaunchSecurity.validate(
+        description,
+        expectedParentProcessID: processID + 1,
+        bootstrapDirectory: root)
+    }
+
+    let mode = try #require(
+      fileManager.attributesOfItem(atPath: handoff.configurationURL.path)[.posixPermissions]
+        as? NSNumber)
+    #expect(mode.intValue & 0o777 == 0o600)
+    var metadata = stat()
+    #expect(lstat(handoff.secretPipeURL.path, &metadata) == 0)
+    #expect(metadata.st_mode & S_IFMT == S_IFIFO)
+    #expect(try HostLaunchSecurity.readSecretPipe(at: handoff.secretPipeURL.path) == secret)
+    #expect(!fileManager.fileExists(atPath: handoff.secretPipeURL.path))
+
+    handoff.remove()
+    #expect(!fileManager.fileExists(atPath: handoff.configurationURL.path))
+  }
+
+  @Test
+  func nativeHostLaunchValidationRejectsWrongApplicationsPathsAndNonFIFOs() throws {
+    let expectedExecutable = URL(fileURLWithPath: "/Applications/Aurelia Home.app/Contents/MacOS/AureliaHome")
+    #expect(
+      HostLaunchSecurity.acceptsApplication(
+        processIdentifier: 42,
+        executableURL: expectedExecutable,
+        isTerminated: false,
+        expectedExecutableURL: expectedExecutable))
+    #expect(
+      !HostLaunchSecurity.acceptsApplication(
+        processIdentifier: 42,
+        executableURL: URL(fileURLWithPath: "/private/tmp/AureliaHome"),
+        isTerminated: false,
+        expectedExecutableURL: expectedExecutable))
+    #expect(
+      !HostLaunchSecurity.acceptsApplication(
+        processIdentifier: 42,
+        executableURL: expectedExecutable,
+        isTerminated: true,
+        expectedExecutableURL: expectedExecutable))
+
+    let root = FileManager.default.temporaryDirectory
+      .appendingPathComponent("AureliaHomeHostValidation-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let invalid = HostLaunchDescription(
+      version: 1,
+      parentProcessID: 42,
+      rendezvousPath: root.appendingPathComponent("rendezvous.json").path,
+      secretPipePath: root.deletingLastPathComponent().appendingPathComponent("stolen.pipe").path,
+      dataDirectory: nil,
+      logDirectory: nil,
+      serverName: "Test",
+      lanPort: 43_111)
+    #expect(throws: HostLaunchSecurityError.invalidDescription) {
+      try HostLaunchSecurity.validate(
+        invalid,
+        expectedParentProcessID: 42,
+        bootstrapDirectory: root)
+    }
+
+    let fakePipe = root.appendingPathComponent("not-a-fifo.pipe")
+    try Data("not secret transport".utf8).write(to: fakePipe)
+    #expect(throws: HostLaunchSecurityError.invalidSecretPipe) {
+      try HostLaunchSecurity.readSecretPipe(at: fakePipe.path)
+    }
+  }
+
+  @Test
   func serverProfileRoundTripsThroughAppOwnedKeychain() throws {
     let service = "com.lucas.aureliahome.connection.tests.\(UUID().uuidString)"
     let store = KeychainServerStore(service: service)
