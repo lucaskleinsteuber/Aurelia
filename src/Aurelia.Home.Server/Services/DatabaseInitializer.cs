@@ -45,6 +45,18 @@ public static class DatabaseInitializer
                 .SetProperty(scan => scan.Error, "The server stopped before the scan completed."),
                 cancellationToken);
 
+        await database.MetadataJobs
+            .Where(job => job.State == MetadataJobState.Queued
+                || job.State == MetadataJobState.Running)
+            .ExecuteUpdateAsync(updates => updates
+                .SetProperty(job => job.State, MetadataJobState.Interrupted)
+                .SetProperty(job => job.CompletedAt, interruptedAt)
+                .SetProperty(job => job.Error, "The server stopped before metadata enrichment completed."),
+                cancellationToken);
+
+        var artwork = scope.ServiceProvider.GetRequiredService<ArtworkStore>();
+        await artwork.PruneOrphansAsync(database, cancellationToken);
+
         PrivateFilePermissions.ProtectFile(runtime.DatabasePath);
         PrivateFilePermissions.ProtectFile($"{runtime.DatabasePath}-wal");
         PrivateFilePermissions.ProtectFile($"{runtime.DatabasePath}-shm");

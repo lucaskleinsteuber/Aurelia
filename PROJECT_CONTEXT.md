@@ -62,6 +62,9 @@ The complete path is:
   libraries, scans, pairing, and session management inside the Mac app.
 - Build 8 replaces separate movie and TV setup with automatic storage locations,
   persistent review decisions, targeted rescans, and a shorter first-run flow.
+- Build 9 adds optional English TMDB metadata and bounded authenticated artwork,
+  cautious match review, manual precedence, collections, favorites, search, and
+  the server-side data required by the future Home and detail experience.
 
 The Build 7 host handoff keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; a non-secret launch description is
@@ -127,14 +130,15 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message (`1.0.8` for Build 8), push immediately, verify the remote hash, and
+    message (`1.0.9` for Build 9), push immediately, verify the remote hash, and
     write exactly one English external summary for the completed build.
 
 ## Planned direction
 
-The next sensible milestone is Build 9: add optional TMDB metadata and artwork
-without weakening manual metadata precedence or changing media files, together
-with the dedicated Home, library, and detail visual rebuild. Automatic file
+The next milestone is Build 10: use the Build 9 presentation APIs for the
+dedicated Apple-TV-style Home, library, detail, metadata review, and editing
+redesign. The supplied Aurelia screenshots remain the visual reference, while
+the existing server/native-client boundary stays unchanged. Automatic file
 watchers, the optional web client, broader administration, Linux and Windows
 native clients, and advanced playback features should follow as deliberate
-milestones rather than being mixed into infrastructure work.
+milestones rather than being mixed into that visual work.

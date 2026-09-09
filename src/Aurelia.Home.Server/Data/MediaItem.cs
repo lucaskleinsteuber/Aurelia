@@ -51,4 +51,12 @@ public sealed class MediaItem
     public List<PlaybackTicket> PlaybackTickets { get; set; } = [];
 
     public List<PlaybackProgress> PlaybackProgress { get; set; } = [];
+
+    public MediaMetadata? Metadata { get; set; }
+
+    public List<MetadataReview> MetadataReviews { get; set; } = [];
+
+    public List<UserFavorite> Favorites { get; set; } = [];
+
+    public List<MediaCollectionMember> CollectionMemberships { get; set; } = [];
 }

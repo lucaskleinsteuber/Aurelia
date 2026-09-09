@@ -17,10 +17,11 @@ public sealed record ServerCommandLine(
             argument.Equals("run", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("setup-owner", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("library", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("metadata", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("pairing", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("server", StringComparison.OrdinalIgnoreCase));
         var command = commandIndex >= 0 ? args[commandIndex].ToLowerInvariant() : "run";
-        var action = command is "library" or "pairing" or "server"
+        var action = command is "library" or "metadata" or "pairing" or "server"
             && commandIndex + 1 < args.Length
             && !args[commandIndex + 1].StartsWith("--", StringComparison.Ordinal)
                 ? args[commandIndex + 1].ToLowerInvariant()
@@ -61,13 +62,16 @@ public sealed record ServerCommandLine(
     public bool HasFlag(string name) => Flags.Contains(name);
 
     public string ReadPassword()
+        => ReadSecret("Password: ");
+
+    public string ReadSecret(string prompt)
     {
         if (PasswordFromStandardInput || Console.IsInputRedirected)
         {
             return Console.ReadLine() ?? string.Empty;
         }
 
-        Console.Error.Write("Password: ");
+        Console.Error.Write(prompt);
         var password = new StringBuilder();
         while (true)
         {

@@ -16,6 +16,8 @@ final class AppModel: ObservableObject {
   @Published private(set) var libraryDiscoveries: [LibraryDiscoverySummary] = []
   @Published private(set) var pairingCode: PairingCodeResponse?
   @Published private(set) var sessions: [DeviceSessionSummary] = []
+  @Published private(set) var metadataProvider: MetadataProviderStatus?
+  @Published private(set) var metadataJob: MetadataJobSummary?
   @Published private(set) var needsInitialLibrarySetup = false
   @Published private(set) var isStarting = true
   @Published private(set) var isWorking = false
@@ -90,6 +92,21 @@ final class AppModel: ObservableObject {
         profile = Self.previewOwnerProfile
         hostSnapshot = Self.previewHostSnapshot
         needsInitialLibrarySetup = true
+        isStarting = false
+        return
+      }
+      if Self.uiTestMode == "metadata-settings" {
+        operatingMode = .host
+        profile = Self.previewOwnerProfile
+        hostSnapshot = Self.previewHostSnapshot
+        metadataProvider = MetadataProviderStatus(
+          enabled: true,
+          hasToken: true,
+          language: "en-US",
+          artworkBytes: 42,
+          artworkLimitBytes: 1_073_741_824,
+          provider: "TMDB",
+          attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB.")
         isStarting = false
         return
       }
@@ -233,6 +250,7 @@ final class AppModel: ObservableObject {
       libraries = try await loadedLibraries
       sessions = try await loadedSessions
       libraryDiscoveries = try await loadDiscoveries(client: client, libraries: libraries)
+      metadataProvider = try await client.metadataProviderStatus()
     } catch { errorMessage = error.localizedDescription }
   }
 
@@ -328,6 +346,41 @@ final class AppModel: ObservableObject {
     do {
       try await APIClient(profile: profile).revokeSession(id: id)
       sessions = try await APIClient(profile: profile).sessions()
+    } catch { errorMessage = error.localizedDescription }
+  }
+
+  func configureMetadata(token: String) async {
+    guard let profile else { return }
+    do {
+      metadataProvider = try await APIClient(profile: profile).configureMetadata(
+        token: token, enabled: true)
+    } catch { errorMessage = error.localizedDescription }
+  }
+
+  func disableMetadata() async {
+    guard let profile else { return }
+    do { metadataProvider = try await APIClient(profile: profile).removeMetadataToken() }
+    catch { errorMessage = error.localizedDescription }
+  }
+
+  func enrichLibrary() async {
+    guard let profile else { return }
+    do {
+      metadataJob = try await APIClient(profile: profile).startMetadataJob()
+      guard let jobID = metadataJob?.id else { return }
+      while metadataJob?.state == .queued || metadataJob?.state == .running {
+        try await Task.sleep(for: .seconds(1))
+        metadataJob = try await APIClient(profile: profile).metadataJob(id: jobID)
+      }
+      metadataProvider = try await APIClient(profile: profile).metadataProviderStatus()
+    } catch { errorMessage = error.localizedDescription }
+  }
+
+  func pruneArtwork() async {
+    guard let profile else { return }
+    do {
+      try await APIClient(profile: profile).pruneArtwork()
+      metadataProvider = try await APIClient(profile: profile).metadataProviderStatus()
     } catch { errorMessage = error.localizedDescription }
   }
 
@@ -643,7 +696,7 @@ final class AppModel: ObservableObject {
       serverInfo: ServerInfoResponse(
         serverId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
         name: "Aurelia Home on Test Mac",
-        version: "1.0.8",
+        version: "1.0.9",
         isSetup: true,
         lanAccessEnabled: true,
         lanHttpsPort: 43_111,

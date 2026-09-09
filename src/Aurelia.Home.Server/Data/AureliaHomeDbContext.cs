@@ -28,6 +28,15 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
 
     public DbSet<PlaybackProgress> PlaybackProgress => Set<PlaybackProgress>();
 
+    public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
+    public DbSet<MediaCredit> MediaCredits => Set<MediaCredit>();
+    public DbSet<ArtworkAsset> ArtworkAssets => Set<ArtworkAsset>();
+    public DbSet<MetadataReview> MetadataReviews => Set<MetadataReview>();
+    public DbSet<MetadataJob> MetadataJobs => Set<MetadataJob>();
+    public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
+    public DbSet<MediaCollectionRecord> MediaCollections => Set<MediaCollectionRecord>();
+    public DbSet<MediaCollectionMember> MediaCollectionMembers => Set<MediaCollectionMember>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var dateTimeOffsetConverter = new ValueConverter<DateTimeOffset, long>(
@@ -238,6 +247,122 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
                 .WithMany(user => user.PlaybackProgress)
                 .HasForeignKey(progress => progress.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaMetadata>(entity =>
+        {
+            entity.HasKey(metadata => metadata.MediaItemId);
+            entity.Property(metadata => metadata.Provider).HasMaxLength(32);
+            entity.Property(metadata => metadata.ProviderMediaId).HasMaxLength(64);
+            entity.Property(metadata => metadata.ProviderMediaType).HasMaxLength(16);
+            entity.Property(metadata => metadata.ProviderTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ProviderOriginalTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ProviderOverview).HasMaxLength(8192);
+            entity.Property(metadata => metadata.ProviderReleaseDate).HasMaxLength(32);
+            entity.Property(metadata => metadata.ProviderContentRating).HasMaxLength(32);
+            entity.Property(metadata => metadata.ProviderGenresJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ProviderStudiosJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ProviderCountriesJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ManualTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ManualOriginalTitle).HasMaxLength(512);
+            entity.Property(metadata => metadata.ManualOverview).HasMaxLength(8192);
+            entity.Property(metadata => metadata.ManualReleaseDate).HasMaxLength(32);
+            entity.Property(metadata => metadata.ManualContentRating).HasMaxLength(32);
+            entity.Property(metadata => metadata.ManualGenresJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ManualStudiosJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ManualCountriesJson).HasMaxLength(4096);
+            entity.Property(metadata => metadata.ReviewState).HasConversion<string>().HasMaxLength(16);
+            entity.Property(metadata => metadata.ProviderUpdatedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(metadata => metadata.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(metadata => new { metadata.Provider, metadata.ProviderMediaId });
+            entity.HasOne(metadata => metadata.MediaItem).WithOne(item => item.Metadata)
+                .HasForeignKey<MediaMetadata>(metadata => metadata.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaCredit>(entity =>
+        {
+            entity.HasKey(credit => credit.Id);
+            entity.Property(credit => credit.ProviderPersonId).HasMaxLength(64);
+            entity.Property(credit => credit.Name).HasMaxLength(256).IsRequired();
+            entity.Property(credit => credit.Department).HasMaxLength(64).IsRequired();
+            entity.Property(credit => credit.Job).HasMaxLength(128);
+            entity.Property(credit => credit.Character).HasMaxLength(512);
+            entity.Property(credit => credit.ProfilePath).HasMaxLength(512);
+            entity.HasIndex(credit => new { credit.MediaItemId, credit.SortOrder });
+            entity.HasOne(credit => credit.Metadata).WithMany(metadata => metadata.Credits)
+                .HasForeignKey(credit => credit.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ArtworkAsset>(entity =>
+        {
+            entity.HasKey(asset => asset.Id);
+            entity.Property(asset => asset.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(asset => asset.ProviderPath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.RelativeFilePath).HasMaxLength(512).IsRequired();
+            entity.Property(asset => asset.ContentType).HasMaxLength(64).IsRequired();
+            entity.Property(asset => asset.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(asset => new { asset.MediaItemId, asset.Kind, asset.ProviderPath }).IsUnique();
+            entity.HasIndex(asset => asset.RelativeFilePath).IsUnique();
+            entity.HasOne(asset => asset.Metadata).WithMany(metadata => metadata.Artwork)
+                .HasForeignKey(asset => asset.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MetadataReview>(entity =>
+        {
+            entity.HasKey(review => review.Id);
+            entity.Property(review => review.Reason).HasMaxLength(256).IsRequired();
+            entity.Property(review => review.CandidatesJson).HasMaxLength(32768).IsRequired();
+            entity.Property(review => review.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(review => review.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(review => review.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(review => review.MediaItemId).IsUnique();
+            entity.HasOne(review => review.MediaItem).WithMany(item => item.MetadataReviews)
+                .HasForeignKey(review => review.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MetadataJob>(entity =>
+        {
+            entity.HasKey(job => job.Id);
+            entity.Property(job => job.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(job => job.Error).HasMaxLength(1024);
+            entity.Property(job => job.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(job => job.StartedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.CompletedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(job => new { job.State, job.CreatedAt });
+        });
+
+        modelBuilder.Entity<UserFavorite>(entity =>
+        {
+            entity.HasKey(favorite => favorite.Id);
+            entity.Property(favorite => favorite.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(favorite => new { favorite.UserId, favorite.MediaItemId }).IsUnique();
+            entity.HasOne(favorite => favorite.User).WithMany(user => user.Favorites)
+                .HasForeignKey(favorite => favorite.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(favorite => favorite.MediaItem).WithMany(item => item.Favorites)
+                .HasForeignKey(favorite => favorite.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaCollectionRecord>(entity =>
+        {
+            entity.HasKey(collection => collection.Id);
+            entity.Property(collection => collection.Name).HasMaxLength(512).IsRequired();
+            entity.Property(collection => collection.Provider).HasMaxLength(32);
+            entity.Property(collection => collection.ProviderCollectionId).HasMaxLength(64);
+            entity.Property(collection => collection.SourceKey).HasMaxLength(4096);
+            entity.Property(collection => collection.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(collection => collection.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(collection => new { collection.Provider, collection.ProviderCollectionId });
+            entity.HasIndex(collection => collection.SourceKey);
+        });
+
+        modelBuilder.Entity<MediaCollectionMember>(entity =>
+        {
+            entity.HasKey(member => new { member.CollectionId, member.MediaItemId });
+            entity.HasOne(member => member.Collection).WithMany(collection => collection.Members)
+                .HasForeignKey(member => member.CollectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(member => member.MediaItem).WithMany(item => item.CollectionMemberships)
+                .HasForeignKey(member => member.MediaItemId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

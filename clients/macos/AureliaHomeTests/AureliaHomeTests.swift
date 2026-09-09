@@ -5,6 +5,34 @@ import Testing
 
 struct AureliaHomeTests {
   @Test
+  func metadataProviderAndJobResponsesDecodeWithoutSecrets() throws {
+    let provider = try JSONDecoder().decode(
+      MetadataProviderStatus.self,
+      from: Data(
+        """
+        {"enabled":true,"hasToken":true,"language":"en-US","artworkBytes":42,
+        "artworkLimitBytes":1073741824,"provider":"TMDB","attribution":"Required attribution"}
+        """.utf8))
+    #expect(provider.enabled)
+    #expect(provider.hasToken)
+    #expect(provider.language == "en-US")
+    #expect(provider.artworkBytes == 42)
+
+    let job = try JSONDecoder().decode(
+      MetadataJobSummary.self,
+      from: Data(
+        """
+        {"id":"00000000-0000-0000-0000-000000000009","libraryId":null,"mediaId":null,
+        "state":"running","itemsTotal":10,"itemsProcessed":4,"itemsMatched":3,
+        "itemsNeedingReview":1,"itemsFailed":0,"error":null,
+        "createdAt":"2026-09-09T12:00:00Z","startedAt":"2026-09-09T12:00:01Z","completedAt":null}
+        """.utf8))
+    #expect(job.state == .running)
+    #expect(job.itemsProcessed == 4)
+    #expect(job.itemsNeedingReview == 1)
+  }
+
+  @Test
   func serverAddressDefaultsToSecureLanPort() throws {
     let url = try APIClient.normalizedServerURL("192.168.1.20")
     #expect(url.absoluteString == "https://192.168.1.20:43111")

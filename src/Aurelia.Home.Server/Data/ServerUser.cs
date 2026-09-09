@@ -23,4 +23,6 @@ public sealed class ServerUser
     public List<PlaybackTicket> PlaybackTickets { get; set; } = [];
 
     public List<PlaybackProgress> PlaybackProgress { get; set; } = [];
+
+    public List<UserFavorite> Favorites { get; set; } = [];
 }

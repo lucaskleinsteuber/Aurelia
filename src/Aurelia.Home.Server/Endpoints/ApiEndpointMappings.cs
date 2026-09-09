@@ -65,17 +65,48 @@ public static class ApiEndpointMappings
         catalog.MapGet("/movies/{movieId:guid}", GetMovieAsync);
         catalog.MapGet("/series", ListSeriesAsync);
         catalog.MapGet("/series/{seriesId:guid}", GetSeriesAsync);
+        catalog.MapGet("/search", SearchCatalogAsync);
+        catalog.MapGet("/collections", ListCollectionsAsync);
+
+        var collections = api.MapGroup("/collections").RequireAuthorization("Administrator");
+        collections.MapPost(string.Empty, CreateCollectionAsync);
+        collections.MapPut("/{collectionId:guid}", UpdateCollectionAsync);
+        collections.MapDelete("/{collectionId:guid}", DeleteCollectionAsync);
+
+        api.MapGet("/home", GetHomeAsync).RequireAuthorization();
+
+        var metadata = api.MapGroup("/metadata").RequireAuthorization("Administrator");
+        metadata.MapGet("/provider", GetMetadataProviderAsync);
+        metadata.MapPut("/provider", UpdateMetadataProviderAsync);
+        metadata.MapDelete("/provider/token", RemoveMetadataProviderTokenAsync);
+        metadata.MapPost("/jobs", StartMetadataJobAsync);
+        metadata.MapGet("/jobs/{jobId:guid}", GetMetadataJobAsync);
+        metadata.MapGet("/reviews", ListMetadataReviewsAsync);
+        metadata.MapPost("/artwork/prune", PruneArtworkAsync);
 
         var media = api.MapGroup("/media").RequireAuthorization();
         media.MapPost("/{mediaId:guid}/playback", CreatePlaybackAsync);
         media.MapGet("/{mediaId:guid}/progress", GetPlaybackProgressAsync);
         media.MapPut("/{mediaId:guid}/progress", UpdatePlaybackProgressAsync);
+        media.MapGet("/{mediaId:guid}/metadata", GetMediaMetadataAsync);
+        media.MapPut("/{mediaId:guid}/metadata", UpdateMediaMetadataAsync)
+            .RequireAuthorization("Administrator");
+        media.MapDelete("/{mediaId:guid}/metadata/match", ClearMetadataMatchAsync)
+            .RequireAuthorization("Administrator");
+        media.MapGet("/{mediaId:guid}/metadata/search", SearchMetadataAsync)
+            .RequireAuthorization("Administrator");
+        media.MapPut("/{mediaId:guid}/metadata/match", SelectMetadataMatchAsync)
+            .RequireAuthorization("Administrator");
+        media.MapPut("/{mediaId:guid}/favorite", SetFavoriteAsync);
 
         var playback = api.MapGroup("/playback").RequireAuthorization();
         playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
 
         api.MapMethods("/streams/{ticket}", [HttpMethods.Get, HttpMethods.Head], StreamAsync)
             .WithDisplayName("Stream media");
+        api.MapMethods("/artwork/{artworkId:guid}", [HttpMethods.Get, HttpMethods.Head], ArtworkAsync)
+            .RequireAuthorization()
+            .WithDisplayName("Artwork");
     }
 
     private static async Task<IResult> HealthAsync(
@@ -419,6 +450,83 @@ public static class ApiEndpointMappings
         return ExecuteAsync(() => catalog.GetSeriesAsync(seriesId, cancellationToken));
     }
 
+    private static Task<IResult> SearchCatalogAsync(HttpContext context, string? query, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.SearchAsync(context.User.RequireUserId(), query ?? string.Empty, offset ?? 0, limit ?? 100, cancellationToken));
+
+    private static Task<IResult> ListCollectionsAsync(HttpContext context, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.CollectionsAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 100, cancellationToken));
+
+    private static Task<IResult> GetHomeAsync(HttpContext context, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.HomeAsync(context.User.RequireUserId(), cancellationToken));
+
+    private static Task<IResult> CreateCollectionAsync(HttpContext context, SaveCollectionRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.CreateCollectionAsync(context.User.RequireUserId(), request, cancellationToken));
+
+    private static Task<IResult> UpdateCollectionAsync(HttpContext context, Guid collectionId, SaveCollectionRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.UpdateCollectionAsync(context.User.RequireUserId(), collectionId, request, cancellationToken));
+
+    private static Task<IResult> DeleteCollectionAsync(Guid collectionId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => presentation.DeleteCollectionAsync(collectionId, cancellationToken));
+
+    private static Task<IResult> GetMetadataProviderAsync(MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.GetStatusAsync(cancellationToken));
+
+    private static Task<IResult> UpdateMetadataProviderAsync(UpdateMetadataProviderRequest request, MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.ConfigureAsync(request, cancellationToken));
+
+    private static Task<IResult> RemoveMetadataProviderTokenAsync(MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.RemoveTokenAsync(cancellationToken));
+
+    private static async Task<IResult> StartMetadataJobAsync(Guid? libraryId, Guid? mediaId, MetadataService metadata, CancellationToken cancellationToken) =>
+        await ExecuteResultAsync(async () =>
+        {
+            var job = await metadata.StartAsync(libraryId, mediaId, cancellationToken);
+            return Results.Accepted($"/api/v1/metadata/jobs/{job.Id}", job);
+        });
+
+    private static Task<IResult> GetMetadataJobAsync(Guid jobId, MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.GetJobAsync(jobId, cancellationToken));
+
+    private static Task<IResult> ListMetadataReviewsAsync(MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.ReviewsAsync(cancellationToken));
+
+    private static async Task<IResult> PruneArtworkAsync(ArtworkStore artwork, AureliaHomeDbContext database, CancellationToken cancellationToken) =>
+        Results.Ok(new { Removed = await artwork.PruneOrphansAsync(database, cancellationToken) });
+
+    private static async Task<IResult> GetMediaMetadataAsync(Guid mediaId, AureliaHomeDbContext database, CancellationToken cancellationToken)
+    {
+        var item = await database.MediaItems.AsNoTracking()
+            .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Credits)
+            .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
+            .SingleOrDefaultAsync(media => media.Id == mediaId, cancellationToken);
+        return item is null ? Problem("media_not_found", "The media item was not found.", StatusCodes.Status404NotFound) : Results.Ok(MetadataPresentation.ToSummary(item));
+    }
+
+    private static Task<IResult> UpdateMediaMetadataAsync(Guid mediaId, UpdateMediaMetadataRequest request, MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.UpdateAsync(mediaId, request, cancellationToken));
+
+    private static Task<IResult> ClearMetadataMatchAsync(Guid mediaId, MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.ClearMatchAsync(mediaId, cancellationToken));
+
+    private static Task<IResult> SearchMetadataAsync(Guid mediaId, string? query, MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.SearchAsync(mediaId, query, cancellationToken));
+
+    private static Task<IResult> SelectMetadataMatchAsync(Guid mediaId, SelectMetadataMatchRequest request, MetadataService metadata, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.SelectAsync(mediaId, request, cancellationToken));
+
+    private static Task<IResult> SetFavoriteAsync(HttpContext context, Guid mediaId, SetFavoriteRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.SetFavoriteAsync(context.User.RequireUserId(), mediaId, request.IsFavorite, cancellationToken));
+
+    private static async Task<IResult> ArtworkAsync(HttpContext context, Guid artworkId, ArtworkStore artwork, AureliaHomeDbContext database, CancellationToken cancellationToken)
+    {
+        var source = await artwork.OpenAsync(artworkId, database, cancellationToken);
+        if (source is null) return Results.NotFound();
+        context.Response.Headers.CacheControl = "private, max-age=86400";
+        context.Response.Headers.XContentTypeOptions = "nosniff";
+        return Results.File(source.Stream, source.ContentType, lastModified: source.LastModified,
+            entityTag: new EntityTagHeaderValue($"\"{artworkId:N}-{source.ContentLength:x}\""));
+    }
+
     private static Task<IResult> CreatePlaybackAsync(
         HttpContext context,
         Guid mediaId,
@@ -530,6 +638,10 @@ public static class ApiEndpointMappings
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
+        catch (MetadataException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
     }
 
     private static async Task<IResult> ExecuteNoContentAsync(Func<Task> action)
@@ -551,6 +663,10 @@ public static class ApiEndpointMappings
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
+        catch (MetadataException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
     }
 
     private static async Task<IResult> ExecuteResultAsync(Func<Task<IResult>> action)
@@ -564,6 +680,10 @@ public static class ApiEndpointMappings
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
         catch (PlaybackException exception)
+        {
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
+        catch (MetadataException exception)
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }

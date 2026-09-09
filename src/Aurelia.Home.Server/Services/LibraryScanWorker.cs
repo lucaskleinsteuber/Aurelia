@@ -6,6 +6,8 @@ namespace Aurelia.Home.Server.Services;
 
 public sealed partial class LibraryScanWorker(
     LibraryScanScheduler queue,
+    MetadataJobScheduler metadataQueue,
+    MetadataProviderSettingsStore metadataSettings,
     IServiceScopeFactory scopeFactory,
     IMediaLibraryScanner scanner,
     ILogger<LibraryScanWorker> logger) : BackgroundService
@@ -139,7 +141,95 @@ public sealed partial class LibraryScanWorker(
             scanRoot,
             request.TargetRelativePath,
             cancellationToken);
+        await RebuildLocalCollectionsAsync(database, library, cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
+        if (metadataSettings.Load().Enabled
+            && !await database.MetadataJobs.AnyAsync(
+                job => job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running,
+                cancellationToken))
+        {
+            var metadataJob = new MetadataJob
+            {
+                Id = Guid.NewGuid(),
+                LibraryRootId = library.Id,
+                State = MetadataJobState.Queued,
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+            database.MetadataJobs.Add(metadataJob);
+            await database.SaveChangesAsync(cancellationToken);
+            metadataQueue.Enqueue(metadataJob.Id);
+        }
+    }
+
+    private static async Task RebuildLocalCollectionsAsync(
+        AureliaHomeDbContext database,
+        LibraryRoot library,
+        CancellationToken cancellationToken)
+    {
+        var root = MediaPath.Normalize(library.Path);
+        var items = await database.MediaItems
+            .Where(item => item.LibraryRootId == library.Id
+                && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series))
+            .ToListAsync(cancellationToken);
+        var groups = items.Select(item => new
+        {
+            Item = item,
+            Container = CollectionContainer(item, root),
+        })
+            .Where(value => value.Container is not null)
+            .GroupBy(value => value.Container!, StringComparer.Ordinal)
+            .Where(group => group.Count() >= 2)
+            .ToDictionary(group => group.Key, group => group.Select(value => value.Item).ToList(), StringComparer.Ordinal);
+
+        var existing = (await database.MediaCollections.Include(collection => collection.Members)
+            .Where(collection => collection.Provider == "local" && collection.SourceKey != null)
+            .ToListAsync(cancellationToken))
+            .Where(collection => MediaPath.IsSameOrDescendant(collection.SourceKey!, root))
+            .ToList();
+        foreach (var collection in existing.Where(collection => !groups.ContainsKey(collection.SourceKey!)))
+            database.MediaCollections.Remove(collection);
+
+        foreach (var (sourceKey, members) in groups)
+        {
+            var collection = existing.SingleOrDefault(value => value.SourceKey == sourceKey);
+            if (collection is null)
+            {
+                collection = new MediaCollectionRecord
+                {
+                    Id = Guid.NewGuid(),
+                    Provider = "local",
+                    SourceKey = sourceKey,
+                    Name = Path.GetFileName(sourceKey),
+                    CreatedAt = DateTimeOffset.UtcNow,
+                };
+                database.MediaCollections.Add(collection);
+            }
+            collection.UpdatedAt = DateTimeOffset.UtcNow;
+            var desired = members.Select(item => item.Id).ToHashSet();
+            foreach (var old in collection.Members.Where(member => !desired.Contains(member.MediaItemId)).ToList())
+                database.MediaCollectionMembers.Remove(old);
+            var order = 0;
+            foreach (var item in members.OrderBy(item => item.OverrideTitle ?? item.DetectedTitle))
+            {
+                var member = collection.Members.SingleOrDefault(value => value.MediaItemId == item.Id);
+                if (member is null)
+                {
+                    member = new MediaCollectionMember { CollectionId = collection.Id, MediaItemId = item.Id };
+                    collection.Members.Add(member);
+                }
+                member.SortOrder = order++;
+            }
+        }
+        await database.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string? CollectionContainer(MediaItem item, string libraryRoot)
+    {
+        var source = MediaPath.Normalize(item.SourcePath);
+        var anchor = Path.GetDirectoryName(source);
+        if (string.IsNullOrWhiteSpace(anchor) || anchor == libraryRoot
+            || !MediaPath.IsSameOrDescendant(anchor, libraryRoot)) return null;
+        return anchor;
     }
 
     private static async Task ReconcileAsync(

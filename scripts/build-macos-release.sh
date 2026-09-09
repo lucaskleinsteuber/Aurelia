@@ -6,9 +6,9 @@ other_root=${AURELIA_HOME_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
 developer_dir=${DEVELOPER_DIR:-/Applications/Xcode-beta.app/Contents/Developer}
 dotnet_bin=${DOTNET_BIN:-"$HOME/.dotnet/dotnet"}
 build_parent="$other_root/Build"
-final_root="$build_parent/Build 8"
+final_root="$build_parent/Build 9"
 mkdir -p "$build_parent"
-stage_root=$(mktemp -d "$build_parent/.build8.XXXXXX")
+stage_root=$(mktemp -d "$build_parent/.build9.XXXXXX")
 derived_data="$stage_root/DerivedData"
 publish_root="$stage_root/Server"
 candidate="$stage_root/Aurelia Home.app"
@@ -70,7 +70,7 @@ codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
 codesign --verify --deep --strict --verbose=2 "$candidate"
 
 if [[ -e "$final_root" ]]; then
-  if [[ "$final_root" != "$other_root/Build/Build 8" ]]; then
+  if [[ "$final_root" != "$other_root/Build/Build 9" ]]; then
     echo "Refusing to replace an unexpected build directory." >&2
     exit 1
   fi
@@ -80,4 +80,4 @@ mkdir -p "$final_root"
 /usr/bin/ditto "$candidate" "$final_root/Aurelia Home.app"
 /usr/bin/ditto "$publish_root" "$final_root/Server"
 
-echo "Build 8 release is available at $final_root"
+echo "Build 9 release is available at $final_root"

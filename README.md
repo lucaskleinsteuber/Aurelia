@@ -2,11 +2,13 @@
 
 Aurelia Home is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to a native macOS library and playback client. Build 8
+and connects securely to a native macOS library and playback client. Build 9
 can host the complete server on this Mac or remain a client of another server.
 People choose whole storage locations instead of separating movie and TV
 folders themselves; Aurelia Home classifies clear structures locally and asks
-only about ambiguous folders.
+only about ambiguous folders. Owners can optionally add their own TMDB token
+for English metadata and bounded artwork storage; local names and manual edits
+remain authoritative.
 It has no browser interface and the native client is not a web wrapper.
 An optional responsive web client may be added later for devices without a
 native app.
@@ -39,6 +41,9 @@ native app.
 - Single-instance protection, serialized background scans, and graceful shutdown
 - One-use, loopback-only bootstrap authorization for native owner setup
 - Parent-process monitoring for an app-owned server process
+- Optional TMDB metadata with cautious matching and an explicit review queue
+- Authenticated artwork, cast and crew, collections, favorites, catalog search,
+  and per-user Home data with an hourly stable recommendation
 
 ## Current Mac client
 
@@ -59,6 +64,8 @@ native app.
   and descriptive audio/subtitle track selection
 - Automatic resume and regular server-side watch-progress updates
 - No WebView and no local catalog or media cache
+- A compact Advanced control for enabling metadata, starting enrichment, and
+  pruning unused artwork; the full presentation redesign is reserved for Build 10
 
 ## Development
 
@@ -150,10 +157,27 @@ packages, and symbolic links are ignored.
 An authenticated client requests a twelve-hour, single-file playback URL with
 `POST /api/v1/media/{mediaId}/playback`. The returned relative URL accepts `GET`
 and `HEAD`, including byte ranges for seeking. It contains a dedicated playback
-ticket rather than the long-lived device token. Online metadata, artwork,
-transcoding, and automatic file watchers are not part of the current build.
+ticket rather than the long-lived device token. Transcoding and automatic file
+watchers are not part of the current build.
 Automatic classification stays local and uses only the same filesystem facts
 as the scanner.
+
+Online metadata is optional and disabled until an owner supplies a TMDB API
+Read Access Token under Advanced settings or through the CLI. The token is kept
+in a private server file and never returned by the API or written to logs.
+Metadata matching is deliberately conservative; uncertain titles remain local
+and appear in a review queue instead of being guessed. Artwork is authenticated,
+stored under opaque names, and limited to 1 GiB by default. This product uses
+the TMDB API but is not endorsed or certified by TMDB.
+
+```sh
+dotnet run --project src/Aurelia.Home.Server -- metadata configure --username lucas
+dotnet run --project src/Aurelia.Home.Server -- metadata refresh --username lucas
+dotnet run --project src/Aurelia.Home.Server -- metadata reviews --username lucas
+```
+
+Both the password and TMDB token are prompted without echo. Neither is accepted
+as a command-line argument.
 
 The Mac app gives VLCKit a random loopback URL. Its internal relay validates
 that URL, forwards only GET/HEAD and byte-range requests over the already pinned
@@ -169,7 +193,7 @@ incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
 
-For normal Build 8 use, launch Aurelia Home and choose **Set Up This Mac**.
+For normal Build 9 use, launch Aurelia Home and choose **Set Up This Mac**.
 The native assistant creates the owner, enables LAN HTTPS, and lets the owner
 select one or more drives or folders. Technical server and port settings remain
 under Advanced. Clear movie and TV structures are classified automatically;

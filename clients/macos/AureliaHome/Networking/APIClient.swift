@@ -245,6 +245,35 @@ struct APIClient: Sendable {
       method: "DELETE")
   }
 
+  func metadataProviderStatus() async throws -> MetadataProviderStatus {
+    try await get("/api/v1/metadata/provider")
+  }
+
+  func configureMetadata(token: String?, enabled: Bool) async throws -> MetadataProviderStatus {
+    let body = try JSONEncoder().encode(
+      UpdateMetadataProviderRequest(enabled: enabled, language: "en-US", token: token))
+    let data = try await perform(path: "/api/v1/metadata/provider", method: "PUT", body: body)
+    return try Self.decode(MetadataProviderStatus.self, from: data)
+  }
+
+  func removeMetadataToken() async throws -> MetadataProviderStatus {
+    let data = try await perform(path: "/api/v1/metadata/provider/token", method: "DELETE")
+    return try Self.decode(MetadataProviderStatus.self, from: data)
+  }
+
+  func startMetadataJob() async throws -> MetadataJobSummary {
+    let data = try await perform(path: "/api/v1/metadata/jobs", method: "POST")
+    return try Self.decode(MetadataJobSummary.self, from: data)
+  }
+
+  func metadataJob(id: UUID) async throws -> MetadataJobSummary {
+    try await get("/api/v1/metadata/jobs/\(id.uuidString.lowercased())")
+  }
+
+  func pruneArtwork() async throws {
+    _ = try await perform(path: "/api/v1/metadata/artwork/prune", method: "POST")
+  }
+
   func movies() async throws -> [MovieSummary] {
     try await allPages(path: "/api/v1/catalog/movies")
   }

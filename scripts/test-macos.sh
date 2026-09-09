@@ -60,17 +60,21 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
   -derivedDataPath "$derived_data" \
   -resultBundlePath "$temporary_unit_result" \
   -enableCodeCoverage NO \
+  -parallel-testing-enabled NO \
   -only-testing:AureliaHomeTests \
   test-without-building 2>&1 | tee -a "$temporary_log"
 
 stop_test_hosts
 
-DEVELOPER_DIR="$developer_dir" xcodebuild \
-  -project "$repository_root/clients/macos/AureliaHome.xcodeproj" \
-  -scheme AureliaHome \
-  -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath "$derived_data" \
-  -resultBundlePath "$temporary_ui_result" \
-  -enableCodeCoverage NO \
-  -only-testing:AureliaHomeUITests \
-  test-without-building 2>&1 | tee -a "$temporary_log"
+if [[ "${AURELIA_HOME_SKIP_UI_TESTS:-0}" != "1" ]]; then
+  DEVELOPER_DIR="$developer_dir" xcodebuild \
+    -project "$repository_root/clients/macos/AureliaHome.xcodeproj" \
+    -scheme AureliaHome \
+    -destination 'platform=macOS,arch=arm64' \
+    -derivedDataPath "$derived_data" \
+    -resultBundlePath "$temporary_ui_result" \
+    -enableCodeCoverage NO \
+    -parallel-testing-enabled NO \
+    -only-testing:AureliaHomeUITests \
+    test-without-building 2>&1 | tee -a "$temporary_log"
+fi

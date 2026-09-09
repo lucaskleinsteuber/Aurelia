@@ -249,3 +249,164 @@ public sealed record PlaybackProgressResponse(
     bool IsCompleted,
     DateTimeOffset? LastPlayedAt,
     DateTimeOffset? UpdatedAt);
+
+public enum MetadataJobState
+{
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Interrupted,
+}
+
+public enum MetadataReviewState
+{
+    NeedsReview,
+    Matched,
+    Ignored,
+}
+
+public enum ArtworkKind
+{
+    Poster,
+    Backdrop,
+    Still,
+    Profile,
+}
+
+public sealed record MetadataProviderStatus(
+    bool Enabled,
+    bool HasToken,
+    string Language,
+    long ArtworkBytes,
+    long ArtworkLimitBytes,
+    string Provider,
+    string Attribution);
+
+public sealed record UpdateMetadataProviderRequest(
+    bool Enabled,
+    string Language,
+    string? Token);
+
+public sealed record MetadataCandidateSummary(
+    string Provider,
+    string ProviderMediaId,
+    string MediaType,
+    string Title,
+    string? OriginalTitle,
+    int? Year,
+    string? Overview,
+    string? PosterPath,
+    double Confidence);
+
+public sealed record SelectMetadataMatchRequest(
+    string ProviderMediaId,
+    string MediaType);
+
+public sealed record UpdateMediaMetadataRequest(
+    string? Title = null,
+    string? OriginalTitle = null,
+    string? Overview = null,
+    string? ReleaseDate = null,
+    int? RuntimeMinutes = null,
+    double? Rating = null,
+    string? ContentRating = null,
+    IReadOnlyList<string>? Genres = null,
+    IReadOnlyList<string>? Studios = null,
+    IReadOnlyList<string>? Countries = null,
+    IReadOnlyList<string>? ClearFields = null);
+
+public sealed record ArtworkSummary(
+    Guid Id,
+    ArtworkKind Kind,
+    string Path,
+    string ContentType,
+    long ContentLength);
+
+public sealed record CreditSummary(
+    string Name,
+    string Department,
+    string? Job,
+    string? Character,
+    int Order,
+    ArtworkSummary? Profile);
+
+public sealed record MediaMetadataSummary(
+    Guid MediaId,
+    string Title,
+    string? OriginalTitle,
+    string? Overview,
+    string? ReleaseDate,
+    int? Year,
+    int? RuntimeMinutes,
+    double? Rating,
+    string? ContentRating,
+    IReadOnlyList<string> Genres,
+    IReadOnlyList<string> Studios,
+    IReadOnlyList<string> Countries,
+    IReadOnlyList<CreditSummary> Credits,
+    ArtworkSummary? Poster,
+    ArtworkSummary? Backdrop,
+    ArtworkSummary? Still,
+    string? Provider,
+    string? ProviderMediaId,
+    MetadataReviewState ReviewState);
+
+public sealed record MetadataReviewSummary(
+    Guid Id,
+    Guid MediaId,
+    string Title,
+    string Reason,
+    MetadataReviewState State,
+    IReadOnlyList<MetadataCandidateSummary> Candidates,
+    DateTimeOffset UpdatedAt);
+
+public sealed record MetadataJobSummary(
+    Guid Id,
+    Guid? LibraryId,
+    Guid? MediaId,
+    MetadataJobState State,
+    int ItemsTotal,
+    int ItemsProcessed,
+    int ItemsMatched,
+    int ItemsNeedingReview,
+    int ItemsFailed,
+    string? Error,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt);
+
+public sealed record SetFavoriteRequest(bool IsFavorite);
+
+public sealed record CatalogItemSummary(
+    Guid Id,
+    MediaKind Kind,
+    string Title,
+    string? OriginalTitle,
+    int? Year,
+    string? Overview,
+    IReadOnlyList<string> Genres,
+    ArtworkSummary? Poster,
+    ArtworkSummary? Backdrop,
+    MediaAvailability Availability,
+    bool IsFavorite,
+    PlaybackProgressResponse? Progress,
+    DateTimeOffset AddedAt);
+
+public sealed record CollectionSummary(
+    Guid Id,
+    string Name,
+    ArtworkSummary? Poster,
+    IReadOnlyList<CatalogItemSummary> Items);
+
+public sealed record SaveCollectionRequest(
+    string Name,
+    IReadOnlyList<Guid> MediaIds);
+
+public sealed record HomeResponse(
+    CatalogItemSummary? Recommendation,
+    IReadOnlyList<CatalogItemSummary> ContinueWatching,
+    IReadOnlyList<CatalogItemSummary> RecentlyAdded,
+    IReadOnlyList<CatalogItemSummary> Favorites,
+    IReadOnlyList<CollectionSummary> Collections,
+    DateTimeOffset RecommendationChangesAt);

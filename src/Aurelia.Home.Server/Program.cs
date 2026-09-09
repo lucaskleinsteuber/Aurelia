@@ -20,6 +20,12 @@ if (commandLine.Command == "library")
     return;
 }
 
+if (commandLine.Command == "metadata")
+{
+    Environment.ExitCode = await MetadataCommandClient.RunAsync(commandLine, CancellationToken.None);
+    return;
+}
+
 if (commandLine.Command == "pairing")
 {
     Environment.ExitCode = await PairingCommandClient.RunAsync(commandLine, CancellationToken.None);
@@ -78,9 +84,20 @@ builder.Services.AddScoped<LibraryService>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<PlaybackService>();
 builder.Services.AddScoped<PlaybackProgressService>();
+builder.Services.AddScoped<MetadataService>();
+builder.Services.AddScoped<PresentationService>();
+builder.Services.AddSingleton<MetadataProviderSettingsStore>();
+builder.Services.AddSingleton<ArtworkStore>();
+builder.Services.AddSingleton<MetadataJobScheduler>();
+builder.Services.AddHttpClient<ITmdbClient, TmdbClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("AureliaHome/1.0");
+});
 builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
 builder.Services.AddSingleton<LibraryScanScheduler>();
 builder.Services.AddHostedService<LibraryScanWorker>();
+builder.Services.AddHostedService<MetadataJobWorker>();
 builder.Services.AddHostedService<BonjourAdvertisementService>();
 builder.Services.AddHostedService<ParentProcessMonitor>();
 builder.Services.AddScoped<IPasswordHasher<ServerUser>, PasswordHasher<ServerUser>>();

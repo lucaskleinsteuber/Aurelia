@@ -17,6 +17,52 @@ namespace Aurelia.Home.Server.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.ArtworkAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ContentLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderPath")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativeFilePath")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RelativeFilePath")
+                        .IsUnique();
+
+                    b.HasIndex("MediaItemId", "Kind", "ProviderPath")
+                        .IsUnique();
+
+                    b.ToTable("ArtworkAssets");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.DeviceSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -246,6 +292,110 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.ToTable("LibraryScanIssues");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaCollectionMember", b =>
+                {
+                    b.Property<Guid>("CollectionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("CollectionId", "MediaItemId");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.ToTable("MediaCollectionMembers");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaCollectionRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsManual")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderCollectionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceKey")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceKey");
+
+                    b.HasIndex("Provider", "ProviderCollectionId");
+
+                    b.ToTable("MediaCollections");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaCredit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Character")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Department")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Job")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProfilePath")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderPersonId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId", "SortOrder");
+
+                    b.ToTable("MediaCredits");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.MediaItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -330,6 +480,213 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.HasIndex("LibraryRootId", "Kind", "ParentId", "SeasonNumber", "EpisodeNumber");
 
                     b.ToTable("MediaItems");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaMetadata", b =>
+                {
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManualContentRating")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManualCountriesJson")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManualGenresJson")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManualOriginalTitle")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManualOverview")
+                        .HasMaxLength(8192)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("ManualRating")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("ManualReleaseDate")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ManualRuntimeMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ManualStudiosJson")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManualTitle")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("MatchConfidence")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderContentRating")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderCountriesJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderGenresJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderMediaId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderMediaType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderOriginalTitle")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderOverview")
+                        .HasMaxLength(8192)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("ProviderRating")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("ProviderReleaseDate")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ProviderRuntimeMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ProviderStudiosJson")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderTitle")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ProviderUpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ReviewState")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MediaItemId");
+
+                    b.HasIndex("Provider", "ProviderMediaId");
+
+                    b.ToTable("MediaMetadata");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MetadataJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("CompletedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ItemsFailed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ItemsMatched")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ItemsNeedingReview")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ItemsProcessed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ItemsTotal")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("StartedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("State", "CreatedAt");
+
+                    b.ToTable("MetadataJobs");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MetadataReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CandidatesJson")
+                        .IsRequired()
+                        .HasMaxLength(32768)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId")
+                        .IsUnique();
+
+                    b.ToTable("MetadataReviews");
                 });
 
             modelBuilder.Entity("Aurelia.Home.Server.Data.PairingCode", b =>
@@ -503,6 +860,42 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.UserFavorite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId")
+                        .IsUnique();
+
+                    b.ToTable("UserFavorites");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.ArtworkAsset", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.MediaMetadata", "Metadata")
+                        .WithMany("Artwork")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Metadata");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.DeviceSession", b =>
                 {
                     b.HasOne("Aurelia.Home.Server.Data.ServerUser", "User")
@@ -547,6 +940,36 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.Navigation("LibraryScan");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaCollectionMember", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.MediaCollectionRecord", "Collection")
+                        .WithMany("Members")
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Home.Server.Data.MediaItem", "MediaItem")
+                        .WithMany("CollectionMemberships")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Collection");
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaCredit", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.MediaMetadata", "Metadata")
+                        .WithMany("Credits")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Metadata");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.MediaItem", b =>
                 {
                     b.HasOne("Aurelia.Home.Server.Data.LibraryRoot", "LibraryRoot")
@@ -563,6 +986,28 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.Navigation("LibraryRoot");
 
                     b.Navigation("Parent");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaMetadata", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.MediaItem", "MediaItem")
+                        .WithOne("Metadata")
+                        .HasForeignKey("Aurelia.Home.Server.Data.MediaMetadata", "MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MetadataReview", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.MediaItem", "MediaItem")
+                        .WithMany("MetadataReviews")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
                 });
 
             modelBuilder.Entity("Aurelia.Home.Server.Data.PairingCode", b =>
@@ -622,6 +1067,25 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.UserFavorite", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.MediaItem", "MediaItem")
+                        .WithMany("Favorites")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Home.Server.Data.ServerUser", "User")
+                        .WithMany("Favorites")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.DeviceSession", b =>
                 {
                     b.Navigation("PlaybackTickets");
@@ -641,17 +1105,39 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.Navigation("Issues");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaCollectionRecord", b =>
+                {
+                    b.Navigation("Members");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.MediaItem", b =>
                 {
                     b.Navigation("Children");
+
+                    b.Navigation("CollectionMemberships");
+
+                    b.Navigation("Favorites");
+
+                    b.Navigation("Metadata");
+
+                    b.Navigation("MetadataReviews");
 
                     b.Navigation("PlaybackProgress");
 
                     b.Navigation("PlaybackTickets");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.MediaMetadata", b =>
+                {
+                    b.Navigation("Artwork");
+
+                    b.Navigation("Credits");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.ServerUser", b =>
                 {
+                    b.Navigation("Favorites");
+
                     b.Navigation("PairingCodes");
 
                     b.Navigation("PlaybackProgress");

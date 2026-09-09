@@ -268,6 +268,42 @@ struct PlaybackSourceResponse: Codable, Equatable, Sendable {
   let progress: PlaybackProgressResponse
 }
 
+struct MetadataProviderStatus: Codable, Equatable, Sendable {
+  let enabled: Bool
+  let hasToken: Bool
+  let language: String
+  let artworkBytes: Int64
+  let artworkLimitBytes: Int64
+  let provider: String
+  let attribution: String
+}
+
+struct UpdateMetadataProviderRequest: Encodable, Sendable {
+  let enabled: Bool
+  let language: String
+  let token: String?
+}
+
+enum MetadataJobState: String, Codable, Sendable {
+  case queued, running, completed, failed, interrupted
+}
+
+struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let libraryId: UUID?
+  let mediaId: UUID?
+  let state: MetadataJobState
+  let itemsTotal: Int
+  let itemsProcessed: Int
+  let itemsMatched: Int
+  let itemsNeedingReview: Int
+  let itemsFailed: Int
+  let error: String?
+  let createdAt: String
+  let startedAt: String?
+  let completedAt: String?
+}
+
 struct PlaybackPresentation: Identifiable, Equatable, Sendable {
   let mediaId: UUID
   let title: String

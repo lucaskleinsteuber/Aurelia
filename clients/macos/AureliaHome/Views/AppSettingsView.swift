@@ -8,6 +8,7 @@ struct AppSettingsView: View {
   @State private var pendingLocations: [StorageLocationDraft] = []
   @State private var showingCombineConfirmation = false
   @State private var isLoadingAdministration = false
+  @State private var tmdbToken = ""
 
   var body: some View {
     ScrollView {
@@ -265,6 +266,41 @@ struct AppSettingsView: View {
         LabeledContent("Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
         if let user = profile.user {
           LabeledContent("Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
+        }
+        if profile.user?.role.canManageLibraries == true {
+          Divider()
+          Text("Movie & TV Information").font(.headline)
+          Text("Add your own TMDB API Read Access Token to download English metadata and artwork. File paths are never sent.")
+            .font(.caption).foregroundStyle(.secondary)
+          if model.metadataProvider?.hasToken == true {
+            LabeledContent("TMDB", value: model.metadataProvider?.enabled == true ? "Enabled" : "Disabled")
+            if let status = model.metadataProvider {
+              LabeledContent("Artwork", value: ByteCountFormatter.string(fromByteCount: status.artworkBytes, countStyle: .file))
+              Text(status.attribution).font(.caption2).foregroundStyle(.secondary)
+            }
+            HStack {
+              Button("Enrich Library") { Task { await model.enrichLibrary() } }
+                .accessibilityIdentifier("metadata-enrich")
+              Button("Remove Unused Artwork") { Task { await model.pruneArtwork() } }
+              Button("Remove TMDB Token", role: .destructive) { Task { await model.disableMetadata() } }
+                .accessibilityIdentifier("metadata-remove-token")
+            }
+            if let job = model.metadataJob {
+              ProgressView(value: Double(job.itemsProcessed), total: Double(max(job.itemsTotal, 1))) {
+                Text("Metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
+              }
+            }
+          } else {
+            SecureField("TMDB API Read Access Token", text: $tmdbToken)
+              .textFieldStyle(.roundedBorder)
+              .accessibilityIdentifier("tmdb-token")
+            Button("Enable TMDB") {
+              let token = tmdbToken
+              tmdbToken = ""
+              Task { await model.configureMetadata(token: token) }
+            }
+            .disabled(tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          }
         }
         if model.operatingMode == .host {
           LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)

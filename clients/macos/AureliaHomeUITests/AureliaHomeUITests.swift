@@ -81,6 +81,26 @@ final class AureliaHomeUITests: XCTestCase {
   }
 
   @MainActor
+  func testAdvancedSettingsExposeOptionalMetadataWithoutASecret() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_HOME_UI_TEST_MODE"] = "metadata-settings"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+
+    app.typeKey(",", modifierFlags: .command)
+    XCTAssertTrue(app.buttons["Advanced"].waitForExistence(timeout: 8))
+    app.buttons["Advanced"].click()
+    XCTAssertTrue(app.staticTexts["Movie & TV Information"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.buttons["metadata-enrich"].exists)
+    XCTAssertTrue(app.buttons["metadata-remove-token"].exists)
+    XCTAssertFalse(app.secureTextFields["tmdb-token"].exists)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
   func testClosingWindowAndReopeningThroughLaunchServicesRestoresIt() throws {
     continueAfterFailure = false
     let app = XCUIApplication()
