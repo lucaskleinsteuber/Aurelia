@@ -59,8 +59,9 @@ public sealed partial class LibraryScanWorker(
         library.LastError = null;
         await database.SaveChangesAsync(cancellationToken);
 
-        EnsureReadableRoot(library.Path);
-        var existingEpisodes = await database.MediaItems
+        var scanRoot = ResolveScanRoot(library.Path, request.TargetRelativePath);
+        EnsureReadableRoot(scanRoot);
+        var allExistingEpisodes = await database.MediaItems
             .AsNoTracking()
             .Where(item => item.LibraryRootId == library.Id
                 && item.Kind == MediaKind.Episode
@@ -73,15 +74,44 @@ public sealed partial class LibraryScanWorker(
                 item.EpisodeNumber!.Value,
                 item.SourcePath))
             .ToListAsync(cancellationToken);
+        var existingEpisodes = allExistingEpisodes.Where(item =>
+            MediaPath.IsSameOrDescendant(
+                MediaPath.Normalize(item.FilePath),
+                MediaPath.Normalize(scanRoot))).ToList();
+        var storedDecisions = await database.LibraryDiscoveries
+            .AsNoTracking()
+            .Where(discovery => discovery.LibraryRootId == library.Id
+                && discovery.Decision != null)
+            .Select(discovery => new
+            {
+                discovery.RelativePath,
+                Decision = discovery.Decision!.Value,
+            })
+            .ToListAsync(cancellationToken);
+        var classificationDecisions = storedDecisions.Select(decision =>
+            new
+            {
+                FullPath = Path.GetFullPath(Path.Combine(library.Path, decision.RelativePath)),
+                decision.Decision,
+            })
+            .Where(decision => MediaPath.IsSameOrDescendant(
+                MediaPath.Normalize(decision.FullPath),
+                MediaPath.Normalize(scanRoot)))
+            .Select(decision => new ExistingClassificationDecision(
+                Path.GetRelativePath(scanRoot, decision.FullPath) is "." ? string.Empty :
+                    Path.GetRelativePath(scanRoot, decision.FullPath),
+                decision.Decision))
+            .ToList();
 
         var discoveredCount = 0;
         var discoveryTask = Task.Run(
             () => scanner.Scan(
-                library.Path,
+                scanRoot,
                 library.Kind,
                 existingEpisodes,
                 count => Volatile.Write(ref discoveredCount, count),
-                cancellationToken),
+                cancellationToken,
+                classificationDecisions),
             cancellationToken);
         var lastReportedCount = -1;
         while (!discoveryTask.IsCompleted)
@@ -96,7 +126,19 @@ public sealed partial class LibraryScanWorker(
         }
 
         var discovery = await discoveryTask;
-        await ReconcileAsync(database, library, scan, discovery, cancellationToken);
+        if (request.TargetRelativePath is not null)
+        {
+            discovery = PrefixClassifications(discovery, request.TargetRelativePath);
+        }
+
+        await ReconcileAsync(
+            database,
+            library,
+            scan,
+            discovery,
+            scanRoot,
+            request.TargetRelativePath,
+            cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
     }
 
@@ -105,6 +147,8 @@ public sealed partial class LibraryScanWorker(
         LibraryRoot library,
         LibraryScan scan,
         MediaScanDiscovery discovery,
+        string scanRoot,
+        string? targetRelativePath,
         CancellationToken cancellationToken)
     {
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
@@ -119,6 +163,15 @@ public sealed partial class LibraryScanWorker(
         var parentsByPath = new Dictionary<string, MediaItem>(StringComparer.Ordinal);
         var addedFiles = 0;
         var updatedFiles = 0;
+
+        await ReconcileDiscoveriesAsync(
+            database,
+            library,
+            scan.Id,
+            discovery.Classifications ?? [],
+            targetRelativePath,
+            now,
+            cancellationToken);
 
         foreach (var candidate in discovery.Items.Where(item =>
                      item.Kind is MediaKind.Movie or MediaKind.Series))
@@ -179,7 +232,10 @@ public sealed partial class LibraryScanWorker(
 
         var missingFiles = 0;
         foreach (var item in allItems.Where(item => item.Kind != MediaKind.Series
-                     && !seenIds.Contains(item.Id)))
+                     && !seenIds.Contains(item.Id)
+                     && MediaPath.IsSameOrDescendant(
+                         item.NormalizedSourcePath,
+                         MediaPath.Normalize(scanRoot))))
         {
             if (item.Availability == MediaAvailability.Available)
             {
@@ -234,6 +290,115 @@ public sealed partial class LibraryScanWorker(
         }
 
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task ReconcileDiscoveriesAsync(
+        AureliaHomeDbContext database,
+        LibraryRoot library,
+        Guid scanId,
+        IReadOnlyList<DiscoveredClassification> classifications,
+        string? targetRelativePath,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (library.Kind != LibraryKind.Automatic)
+        {
+            return;
+        }
+
+        var stored = await database.LibraryDiscoveries
+            .Where(discovery => discovery.LibraryRootId == library.Id)
+            .ToListAsync(cancellationToken);
+        var byPath = stored.ToDictionary(
+            discovery => discovery.NormalizedRelativePath,
+            StringComparer.Ordinal);
+        var seen = new HashSet<Guid>();
+        foreach (var classification in classifications)
+        {
+            var normalized = NormalizeRelativePath(classification.RelativePath);
+            if (!byPath.TryGetValue(normalized, out var entry))
+            {
+                entry = new LibraryDiscovery
+                {
+                    Id = Guid.NewGuid(),
+                    LibraryRoot = library,
+                    LibraryRootId = library.Id,
+                    NormalizedRelativePath = normalized,
+                    CreatedAt = now,
+                };
+                database.LibraryDiscoveries.Add(entry);
+                byPath[normalized] = entry;
+            }
+
+            entry.RelativePath = classification.RelativePath;
+            entry.DetectedTitle = classification.DetectedTitle;
+            entry.SuggestedKind = classification.SuggestedKind;
+            entry.Reason = classification.Reason;
+            entry.LastSeenScanId = scanId;
+            entry.UpdatedAt = now;
+            seen.Add(entry.Id);
+        }
+
+        var normalizedTarget = targetRelativePath is null
+            ? null
+            : NormalizeRelativePath(targetRelativePath);
+        database.LibraryDiscoveries.RemoveRange(stored.Where(discovery =>
+            discovery.Decision == null
+            && !seen.Contains(discovery.Id)
+            && (normalizedTarget is null
+                || IsSameOrDescendantRelative(
+                    discovery.NormalizedRelativePath,
+                    normalizedTarget))));
+    }
+
+    private static string ResolveScanRoot(string libraryPath, string? targetRelativePath)
+    {
+        if (targetRelativePath is null)
+        {
+            return libraryPath;
+        }
+
+        var candidate = Path.GetFullPath(Path.Combine(libraryPath, targetRelativePath));
+        if (!MediaPath.IsSameOrDescendant(
+                MediaPath.Normalize(candidate),
+                MediaPath.Normalize(libraryPath)))
+        {
+            throw new LibraryException(
+                "invalid_scan_target",
+                "The selected folder is outside the storage location.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return candidate;
+    }
+
+    private static MediaScanDiscovery PrefixClassifications(
+        MediaScanDiscovery discovery,
+        string targetRelativePath)
+    {
+        return discovery with
+        {
+            Classifications = (discovery.Classifications ?? []).Select(item => item with
+            {
+                RelativePath = string.IsNullOrEmpty(item.RelativePath)
+                    ? targetRelativePath
+                    : Path.Combine(targetRelativePath, item.RelativePath),
+            }).ToList(),
+        };
+    }
+
+    private static bool IsSameOrDescendantRelative(string candidate, string parent)
+    {
+        return candidate == parent
+            || candidate.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeRelativePath(string path)
+    {
+        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+            .Trim(Path.DirectorySeparatorChar)
+            .Normalize(System.Text.NormalizationForm.FormKC)
+            .ToUpperInvariant();
     }
 
     private static MediaItem Upsert(

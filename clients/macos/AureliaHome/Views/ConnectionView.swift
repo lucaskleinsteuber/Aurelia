@@ -6,6 +6,7 @@ struct ConnectionView: View {
   @State private var manualAddress = ""
   @State private var fingerprintMatches = false
   @State private var pairingCode = ""
+  @State private var showsAdvancedConnection = false
 
   var body: some View {
     ScrollView {
@@ -89,20 +90,39 @@ struct ConnectionView: View {
 
       Divider()
 
-      Text("Manual Address")
-        .font(.headline)
-      HStack(spacing: 10) {
-        TextField("192.168.1.20 or aurelia-home.local", text: $manualAddress)
-          .textFieldStyle(.roundedBorder)
-          .onSubmit { connectManually() }
-          .accessibilityIdentifier("manual-server-address")
-        Button("Connect") { connectManually() }
-          .buttonStyle(.borderedProminent)
-          .disabled(
-            manualAddress.trimmingCharacters(in: .whitespaces).isEmpty
-              || model.isWorking
-          )
-          .accessibilityIdentifier("connect-manually")
+      Button {
+        showsAdvancedConnection.toggle()
+      } label: {
+        HStack {
+          Text("Advanced")
+          Spacer()
+          Image(systemName: "chevron.right")
+            .rotationEffect(.degrees(showsAdvancedConnection ? 90 : 0))
+            .foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("connection-advanced")
+
+      if showsAdvancedConnection {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Manual Address").font(.subheadline.weight(.semibold))
+          HStack(spacing: 10) {
+            TextField("192.168.1.20 or aurelia-home.local", text: $manualAddress)
+              .textFieldStyle(.roundedBorder)
+              .onSubmit { connectManually() }
+              .accessibilityIdentifier("manual-server-address")
+            Button("Connect") { connectManually() }
+              .buttonStyle(.borderedProminent)
+              .disabled(
+                manualAddress.trimmingCharacters(in: .whitespaces).isEmpty
+                  || model.isWorking
+              )
+              .accessibilityIdentifier("connect-manually")
+          }
+        }
+        .padding(.top, 8)
       }
     }
     .padding(22)
@@ -134,27 +154,26 @@ struct ConnectionView: View {
           .foregroundStyle(.secondary)
       }
 
-      VStack(alignment: .leading, spacing: 8) {
-        Text("Verification Fingerprint")
-          .font(.subheadline.weight(.semibold))
-        Text(inspected.displayFingerprint)
-          .font(.system(.title3, design: .monospaced, weight: .semibold))
-          .textSelection(.enabled)
-          .accessibilityIdentifier("server-fingerprint")
-        Text(
-          "Compare this with the fingerprint printed by the server. This protects you from connecting to an imitation server."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      }
-
-      Toggle("The fingerprints match", isOn: $fingerprintMatches)
-        .accessibilityIdentifier("fingerprint-matches")
-
       TextField("8-digit pairing code", text: $pairingCode)
         .textFieldStyle(.roundedBorder)
-        .disabled(!fingerprintMatches)
         .accessibilityIdentifier("pairing-code")
+
+      DisclosureGroup("Advanced Security Check") {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Verification Fingerprint")
+            .font(.subheadline.weight(.semibold))
+          Text(inspected.displayFingerprint)
+            .font(.system(.title3, design: .monospaced, weight: .semibold))
+            .textSelection(.enabled)
+            .accessibilityIdentifier("server-fingerprint")
+          Text("Compare this with the fingerprint shown by the server owner.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Toggle("The fingerprints match", isOn: $fingerprintMatches)
+            .accessibilityIdentifier("fingerprint-matches")
+        }
+        .padding(.top, 8)
+      }
 
       Button {
         Task { _ = await model.pair(code: pairingCode) }

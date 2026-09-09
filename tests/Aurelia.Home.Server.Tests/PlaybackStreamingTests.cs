@@ -386,13 +386,24 @@ public sealed class PlaybackStreamingTests
     public void NonLoopbackListenUrlIsRejected()
     {
         var configuration = new ConfigurationBuilder().Build();
-        Assert.Throws<ArgumentException>(() => ServerRuntimeOptions.Resolve(
-            configuration,
-            ["--urls", "http://0.0.0.0:43110"]));
-        var loopback = ServerRuntimeOptions.Resolve(
-            configuration,
-            ["--urls", "http://127.0.0.1:43110"]);
-        Assert.Equal("http://127.0.0.1:43110", loopback.ListenUrl);
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        try
+        {
+            Assert.Throws<ArgumentException>(() => ServerRuntimeOptions.Resolve(
+                configuration,
+                ["--data-dir", dataDirectory, "--urls", "http://0.0.0.0:43110"]));
+            var loopback = ServerRuntimeOptions.Resolve(
+                configuration,
+                ["--data-dir", dataDirectory, "--urls", "http://127.0.0.1:43110"]);
+            Assert.Equal("http://127.0.0.1:43110", loopback.ListenUrl);
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+            {
+                Directory.Delete(dataDirectory, recursive: true);
+            }
+        }
     }
 
     [Theory]

@@ -1,81 +1,56 @@
 import AppKit
 import SwiftUI
 
-struct LibraryDraft: Identifiable, Equatable, Sendable {
+struct StorageLocationDraft: Identifiable, Equatable, Sendable {
   let id = UUID()
-  var name: String
-  var path: String
-  var kind: LibraryKind
+  let path: String
+
+  var name: String {
+    URL(fileURLWithPath: path, isDirectory: true).lastPathComponent
+  }
 }
 
 struct OperatingModeView: View {
   @EnvironmentObject private var model: AppModel
 
   var body: some View {
-    VStack(spacing: 28) {
+    VStack(spacing: 24) {
       Spacer()
       Image(systemName: "house.and.flag.fill")
         .font(.system(size: 58, weight: .medium))
         .symbolRenderingMode(.hierarchical)
       VStack(spacing: 8) {
         Text("Welcome to Aurelia Home").font(.system(size: 34, weight: .bold))
-        Text("Host your own media server on this Mac, or connect to one you already have.")
-          .foregroundStyle(.secondary)
-          .multilineTextAlignment(.center)
+        Text("Your own media server, made simple.").foregroundStyle(.secondary)
       }
-      HStack(spacing: 18) {
-        modeCard(
-          title: "Host on This Mac",
-          description: "This Mac runs the server while Aurelia Home is open.",
-          symbol: "macstudio.fill",
-          identifier: "choose-host") {
-            Task { await model.selectHostMode() }
-          }
-        modeCard(
-          title: "Connect to Existing Server",
-          description: "Find an Aurelia Home server on your local network.",
-          symbol: "network",
-          identifier: "choose-client") {
-            model.selectClientMode()
-          }
+      Button {
+        Task { await model.selectHostMode() }
+      } label: {
+        Label("Set Up This Mac", systemImage: "macstudio.fill")
+          .font(.title3.bold())
+          .frame(maxWidth: 360)
+          .padding(.vertical, 8)
       }
-      .frame(maxWidth: 760)
+      .buttonStyle(.borderedProminent)
+      .controlSize(.large)
+      .accessibilityIdentifier("choose-host")
+
+      Button("Connect to Another Server") { model.selectClientMode() }
+        .buttonStyle(.link)
+        .accessibilityIdentifier("choose-client")
       Spacer()
     }
     .padding(40)
-  }
-
-  private func modeCard(
-    title: String,
-    description: String,
-    symbol: String,
-    identifier: String,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      VStack(alignment: .leading, spacing: 16) {
-        Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(.tint)
-        Text(title).font(.title2.bold())
-        Text(description).foregroundStyle(.secondary).multilineTextAlignment(.leading)
-        Spacer()
-        Label("Continue", systemImage: "arrow.right").font(.headline)
-      }
-      .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
-      .padding(24)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
-      .contentShape(RoundedRectangle(cornerRadius: 22))
-    }
-    .buttonStyle(.plain)
-    .accessibilityIdentifier(identifier)
   }
 }
 
 struct NativeHostSetupView: View {
   @EnvironmentObject private var model: AppModel
   @State private var serverName = "Aurelia Home on \(Host.current().localizedName ?? "This Mac")"
-  @State private var username = ""
+  @State private var username = NSUserName().count >= 3 ? NSUserName() : "owner"
   @State private var password = ""
-  @State private var confirmation = ""
+  @State private var showsPassword = false
+  @State private var showsAdvancedSetup = false
   @State private var lanPort = 43_111
 
   var body: some View {
@@ -112,7 +87,7 @@ struct NativeHostSetupView: View {
       }
       Spacer()
     }
-    .frame(maxWidth: 560)
+    .frame(maxWidth: 520)
     .frame(maxWidth: .infinity)
     .padding(36)
   }
@@ -120,63 +95,94 @@ struct NativeHostSetupView: View {
   private var ownerSetup: some View {
     VStack(spacing: 18) {
       VStack(spacing: 6) {
-        Text("Create Your Aurelia Home Server").font(.title.bold())
-        Text("Your media stays on this Mac. Nothing is uploaded or converted.")
+        Text("Set Up This Mac").font(.title.bold())
+        Text("Choose a password. Aurelia Home takes care of the server details.")
           .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
       }
-      Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
-        GridRow {
-          Text("Server Name")
-          TextField("Server name", text: $serverName)
-            .accessibilityIdentifier("host-server-name")
+      HStack {
+        Group {
+          if showsPassword {
+            TextField("At least 12 characters", text: $password)
+          } else {
+            SecureField("At least 12 characters", text: $password)
+          }
         }
-        GridRow {
-          Text("Owner Username")
-          TextField("Username", text: $username)
-            .accessibilityIdentifier("host-owner-name")
+        .textFieldStyle(.roundedBorder)
+        .accessibilityIdentifier("host-owner-password")
+        Button { showsPassword.toggle() } label: {
+          Image(systemName: showsPassword ? "eye.slash" : "eye")
         }
-        GridRow {
-          Text("Password")
-          SecureField("At least 12 characters", text: $password)
-            .accessibilityIdentifier("host-owner-password")
-        }
-        GridRow {
-          Text("Confirm Password")
-          SecureField("Repeat password", text: $confirmation)
-            .accessibilityIdentifier("host-owner-confirmation")
-        }
-        GridRow {
-          Text("HTTPS Port")
-          TextField("43111", value: $lanPort, format: .number).frame(maxWidth: 130)
-        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(showsPassword ? "Hide Password" : "Show Password")
       }
-      .textFieldStyle(.roundedBorder)
-      Button("Create Server") {
+      if !password.isEmpty && password.count < 12 {
+        Text("Use at least 12 characters.")
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      Button {
+        showsAdvancedSetup.toggle()
+      } label: {
+        HStack {
+          Text("Advanced")
+          Spacer()
+          Image(systemName: "chevron.right")
+            .rotationEffect(.degrees(showsAdvancedSetup ? 90 : 0))
+            .foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("host-advanced")
+
+      if showsAdvancedSetup {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+          GridRow {
+            Text("Server Name")
+            TextField("Server name", text: $serverName)
+              .accessibilityIdentifier("host-server-name")
+          }
+          GridRow {
+            Text("Owner Name")
+            TextField("Owner", text: $username)
+              .accessibilityIdentifier("host-owner-name")
+          }
+          GridRow {
+            Text("HTTPS Port")
+            TextField("43111", value: $lanPort, format: .number)
+          }
+        }
+        .textFieldStyle(.roundedBorder)
+        .padding(.top, 10)
+      }
+      Button("Continue") {
         Task {
           _ = await model.setupLocalOwner(
             serverName: serverName,
             username: username,
             password: password,
-            confirmation: confirmation,
+            confirmation: password,
             lanPort: lanPort)
         }
       }
       .buttonStyle(.borderedProminent)
+      .controlSize(.large)
       .disabled(
         serverName.trimmingCharacters(in: .whitespaces).isEmpty
           || username.trimmingCharacters(in: .whitespaces).count < 3
-          || password.count < 12 || model.isWorking
-      )
+          || password.count < 12 || model.isWorking)
       .accessibilityIdentifier("create-local-server")
     }
   }
 
   private var localLogin: some View {
     VStack(spacing: 18) {
-      Text("Sign In to This Server").font(.title.bold())
-      Text("An existing Aurelia Home library was found and will not be overwritten.")
+      Text("Welcome Back").font(.title.bold())
+      Text("Sign in to the Aurelia Home server already stored on this Mac.")
         .foregroundStyle(.secondary).multilineTextAlignment(.center)
-      TextField("Username", text: $username).textFieldStyle(.roundedBorder)
+      TextField("Owner name", text: $username).textFieldStyle(.roundedBorder)
       SecureField("Password", text: $password).textFieldStyle(.roundedBorder)
       Button("Sign In") {
         Task { _ = await model.loginToLocalServer(username: username, password: password) }
@@ -198,115 +204,88 @@ struct NativeHostSetupView: View {
 
 struct InitialLibrarySetupView: View {
   @EnvironmentObject private var model: AppModel
-  @State private var drafts: [LibraryDraft] = []
-  @State private var showingAddLibrary = false
+  @State private var locations: [StorageLocationDraft] = []
 
   var body: some View {
     VStack(spacing: 22) {
       Spacer()
       Image(systemName: "externaldrive.fill.badge.plus")
         .font(.system(size: 48)).symbolRenderingMode(.hierarchical)
-      Text("Add Your Media Libraries").font(.title.bold())
-      Text("Choose only the folders you want Aurelia Home Server to scan.")
+      Text("Choose Storage Locations").font(.title.bold())
+      Text("Select a drive or folder. Aurelia Home will recognize movies and TV shows for you.")
         .foregroundStyle(.secondary)
-      VStack(spacing: 8) {
-        ForEach(drafts) { draft in
-          HStack {
-            Image(systemName: draft.kind == .movies ? "film" : "tv")
-            VStack(alignment: .leading) {
-              Text(draft.name).font(.headline)
-              Text(draft.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Spacer()
-            Button(role: .destructive) { drafts.removeAll { $0.id == draft.id } } label: {
-              Image(systemName: "minus.circle.fill")
-            }.buttonStyle(.plain)
-          }
-          .padding(12)
-          .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        }
-      }
-      .frame(maxWidth: 620)
-      Button("Add Media Folder") { showingAddLibrary = true }
+        .multilineTextAlignment(.center)
+      StorageLocationList(locations: $locations).frame(maxWidth: 620)
+      Button("Choose Storage Locations…") { chooseStorageLocations(into: &locations) }
         .accessibilityIdentifier("initial-add-media-folder")
       HStack {
         Button("Skip for Now") { model.completeInitialLibrarySetup() }
           .accessibilityIdentifier("skip-library-setup")
-        Button("Create Libraries and Start Scan") {
-          Task { _ = await model.createLibraries(drafts) }
+        Button("Start Scanning") {
+          Task { _ = await model.createStorageLocations(locations) }
         }
         .buttonStyle(.borderedProminent)
-        .disabled(drafts.isEmpty || model.isWorking)
+        .disabled(locations.isEmpty || model.isWorking)
+        .accessibilityIdentifier("start-storage-scan")
       }
+      if !model.activeScans.isEmpty { ProgressView("Scanning in the background…") }
       if let error = model.errorMessage {
         Text(error).foregroundStyle(.orange).multilineTextAlignment(.center)
       }
       Spacer()
     }
     .padding(36)
-    .sheet(isPresented: $showingAddLibrary) {
-      AddLibraryView { draft in drafts.append(draft) }
+  }
+}
+
+struct StorageLocationList: View {
+  @Binding var locations: [StorageLocationDraft]
+
+  var body: some View {
+    VStack(spacing: 8) {
+      ForEach(locations) { location in
+        HStack {
+          Image(systemName: "externaldrive.fill")
+          VStack(alignment: .leading, spacing: 2) {
+            Text(location.name).font(.headline)
+            Text(location.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          }
+          Spacer()
+          Button(role: .destructive) {
+            locations.removeAll { $0.id == location.id }
+          } label: {
+            Image(systemName: "minus.circle.fill")
+          }
+          .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+      }
     }
   }
 }
 
-struct AddLibraryView: View {
-  @Environment(\.dismiss) private var dismiss
-  @State private var name = ""
-  @State private var path = ""
-  @State private var kind: LibraryKind = .movies
-  let onAdd: (LibraryDraft) -> Void
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      Text("Add Media Folder").font(.title2.bold())
-      Picker("Library Type", selection: $kind) {
-        ForEach(LibraryKind.allCases, id: \.self) { Text($0.title).tag($0) }
+@MainActor
+func chooseStorageLocations(into locations: inout [StorageLocationDraft]) {
+  #if DEBUG
+    let environment = ProcessInfo.processInfo.environment
+    let injected = environment["AURELIA_HOME_UI_TEST_FOLDERS"]
+      ?? environment["AURELIA_HOME_UI_TEST_FOLDER"]
+    if let injected {
+      let paths = injected.split(separator: "\n").map(String.init).filter { $0.hasPrefix("/") }
+      for path in paths where !locations.contains(where: { $0.path == path }) {
+        locations.append(StorageLocationDraft(path: path))
       }
-      TextField("Library name", text: $name).textFieldStyle(.roundedBorder)
-        .accessibilityIdentifier("library-name")
-      HStack {
-        TextField("Folder", text: $path).textFieldStyle(.roundedBorder).disabled(true)
-          .accessibilityIdentifier("library-path")
-        Button("Choose…") { chooseFolder() }
-          .accessibilityIdentifier("choose-media-folder")
-      }
-      Text("Aurelia Home reads media in place and never copies or converts it.")
-        .font(.caption).foregroundStyle(.secondary)
-      HStack {
-        Spacer()
-        Button("Cancel") { dismiss() }
-        Button("Add") {
-          onAdd(LibraryDraft(name: name, path: path, kind: kind))
-          dismiss()
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || path.isEmpty)
-        .accessibilityIdentifier("confirm-add-library")
-      }
+      return
     }
-    .padding(24)
-    .frame(width: 540)
-  }
-
-  private func chooseFolder() {
-    #if DEBUG
-      if let injectedPath = ProcessInfo.processInfo.environment["AURELIA_HOME_UI_TEST_FOLDER"],
-        injectedPath.hasPrefix("/")
-      {
-        let url = URL(fileURLWithPath: injectedPath, isDirectory: true)
-        path = url.path
-        if name.isEmpty { name = url.lastPathComponent }
-        return
-      }
-    #endif
-    let panel = NSOpenPanel()
-    panel.canChooseDirectories = true
-    panel.canChooseFiles = false
-    panel.allowsMultipleSelection = false
-    panel.prompt = "Choose Media Folder"
-    guard panel.runModal() == .OK, let url = panel.url else { return }
-    path = url.path
-    if name.isEmpty { name = url.lastPathComponent }
+  #endif
+  let panel = NSOpenPanel()
+  panel.canChooseDirectories = true
+  panel.canChooseFiles = false
+  panel.allowsMultipleSelection = true
+  panel.prompt = "Choose Storage Locations"
+  guard panel.runModal() == .OK else { return }
+  for url in panel.urls where !locations.contains(where: { $0.path == url.path }) {
+    locations.append(StorageLocationDraft(path: url.path))
   }
 }

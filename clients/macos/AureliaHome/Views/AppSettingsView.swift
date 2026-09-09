@@ -3,19 +3,23 @@ import SwiftUI
 
 struct AppSettingsView: View {
   @EnvironmentObject private var model: AppModel
-  @State private var showingAddLibrary = false
   @State private var libraryToRemove: LibrarySummary?
   @State private var showingSwitchConfirmation = false
+  @State private var pendingLocations: [StorageLocationDraft] = []
+  @State private var showingCombineConfirmation = false
+  @State private var isLoadingAdministration = false
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
-        Text("Server").font(.title.bold())
-        if model.operatingMode == .host { hostStatus }
+        Text("Aurelia Home Settings").font(.title.bold())
         if let profile = model.profile {
-          connection(profile)
-          if profile.user?.role.canManageLibraries == true { libraryManagement }
-          deviceManagement
+          if profile.user?.role.canManageLibraries == true { storage }
+          devices
+          advanced(profile)
+          if let error = model.errorMessage {
+            Text(error).foregroundStyle(.orange)
+          }
         } else if model.operatingMode != .host {
           ContentUnavailableView(
             "No Server Connected",
@@ -26,92 +30,72 @@ struct AppSettingsView: View {
       .padding(24)
     }
     .frame(width: 680, height: 680)
-    .task { await model.reloadAdministration() }
-    .sheet(isPresented: $showingAddLibrary) {
-      AddLibraryView { draft in
-        Task { _ = await model.addLibrary(name: draft.name, path: draft.path, kind: draft.kind) }
-      }
+    .task {
+      isLoadingAdministration = true
+      await model.reloadAdministration()
+      isLoadingAdministration = false
     }
     .confirmationDialog(
-      "Remove \(libraryToRemove?.name ?? "Library")?",
+      "Remove \(libraryToRemove?.name ?? "Storage Location")?",
       isPresented: Binding(
         get: { libraryToRemove != nil },
         set: { if !$0 { libraryToRemove = nil } }),
       titleVisibility: .visible
     ) {
       if let library = libraryToRemove {
-        Button("Remove Database Entries", role: .destructive) {
+        Button("Remove from Aurelia Home", role: .destructive) {
           Task { await model.removeLibrary(id: library.id) }
           libraryToRemove = nil
         }
       }
     } message: {
-      Text("Media files are never deleted or changed.")
+      Text("Only Aurelia Home database entries are removed. Your media files are never deleted or changed.")
     }
     .confirmationDialog(
       "Stop hosting on this Mac?",
       isPresented: $showingSwitchConfirmation,
       titleVisibility: .visible
     ) {
-      Button("Stop Server and Switch to Client", role: .destructive) {
+      Button("Stop Server and Switch", role: .destructive) {
         Task { await model.switchToClientMode() }
       }
     } message: {
       Text("Server data and media files remain untouched.")
     }
-  }
-
-  private var hostStatus: some View {
-    GroupBox("This Mac") {
-      VStack(alignment: .leading, spacing: 12) {
-        LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
-        if let info = model.hostSnapshot.serverInfo {
-          LabeledContent("LAN Port", value: String(info.lanHttpsPort ?? 43_111))
-          if let fingerprint = info.publicKeyFingerprint {
-            LabeledContent("Fingerprint", value: FingerprintFormatter.display(fingerprint))
-          }
-        }
-        if let message = model.hostSnapshot.message {
-          Text(message).font(.caption).foregroundStyle(.orange)
-        }
-        HStack {
-          Button("Restart Server") { Task { await model.restartNativeHost() } }
-          Button("Switch to Client…", role: .destructive) { showingSwitchConfirmation = true }
-        }
+    .confirmationDialog(
+      "Combine Existing Libraries?",
+      isPresented: $showingCombineConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Combine Existing Libraries") {
+        let locations = pendingLocations
+        pendingLocations = []
+        Task { _ = await model.addStorageLocations(locations, combineExisting: true) }
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(8)
+      Button("Cancel", role: .cancel) { pendingLocations = [] }
+    } message: {
+      Text("Movies, IDs, custom titles, and watch progress stay intact. No media files are moved or changed.")
     }
   }
 
-  private func connection(_ profile: StoredServerProfile) -> some View {
-    GroupBox("Connection") {
-      VStack(alignment: .leading, spacing: 10) {
-        LabeledContent("Name", value: profile.name)
-        LabeledContent("Address", value: profile.baseURL.absoluteString)
-        LabeledContent("Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
-        if let user = profile.user {
-          LabeledContent("Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
-        }
-        if model.operatingMode != .host {
-          Divider()
-          Button("Disconnect This Mac", role: .destructive) {
-            Task { await model.disconnect() }
-          }
-          .accessibilityIdentifier("disconnect-server")
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(8)
-    }
-  }
+  private var storage: some View {
+    GroupBox("Storage") {
+      VStack(alignment: .leading, spacing: 14) {
+        Text("Aurelia Home recognizes movies and TV shows automatically in each location.")
+          .font(.callout).foregroundStyle(.secondary)
 
-  private var libraryManagement: some View {
-    GroupBox("Libraries") {
-      VStack(spacing: 10) {
+        if model.libraries.isEmpty {
+          if isLoadingAdministration {
+            ProgressView("Loading storage…")
+          } else {
+            Text("No storage locations yet.")
+              .foregroundStyle(.secondary)
+          }
+        }
+
         ForEach(model.libraries) { library in
           HStack {
-            Image(systemName: library.kind == .movies ? "film" : "tv")
+            Image(systemName: "externaldrive.fill")
             VStack(alignment: .leading, spacing: 2) {
               Text(library.name).font(.headline)
               Text(library.path).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -126,17 +110,115 @@ struct AppSettingsView: View {
           }
           if library.id != model.libraries.last?.id { Divider() }
         }
+
         if !model.activeScans.isEmpty {
-          ProgressView("Scanning \(model.activeScans.count) library item(s)…")
+          ProgressView("Scanning in the background…")
         }
-        Button("Add Media Folder…") { showingAddLibrary = true }
-          .frame(maxWidth: .infinity, alignment: .leading)
+
+        let unresolved = model.libraryDiscoveries.filter {
+          $0.suggestedKind == nil && $0.decision == nil
+        }
+        if !unresolved.isEmpty {
+          Divider()
+          Text("Needs Your Help").font(.headline)
+          Text("Aurelia Home did not guess these folders.")
+            .font(.caption).foregroundStyle(.secondary)
+          ForEach(unresolved) { discovery in
+            DiscoveryDecisionCard(discovery: discovery)
+          }
+        }
+
+        let recognized = model.libraryDiscoveries.filter {
+          $0.suggestedKind != nil && $0.decision != .ignore
+        }
+        if !recognized.isEmpty {
+          DisclosureGroup("Review Recognized Folders") {
+            VStack(spacing: 8) {
+              ForEach(recognized) { discovery in
+                HStack {
+                  Image(systemName: effectiveKind(discovery) == .movies ? "film" : "tv")
+                  Text(discovery.detectedTitle).lineLimit(1)
+                  Spacer()
+                  Menu("Change") {
+                    classificationButton("Movie", .movie, discovery)
+                    classificationButton("TV Show", .tvShows, discovery)
+                    classificationButton("Ignore", .ignore, discovery)
+                  }
+                }
+              }
+            }
+            .padding(.top, 8)
+          }
+        }
+
+
+        let ignored = model.libraryDiscoveries.filter { $0.decision == .ignore }
+        if !ignored.isEmpty {
+          DisclosureGroup("Ignored Folders") {
+            VStack(spacing: 8) {
+              ForEach(ignored) { discovery in
+                HStack {
+                  Image(systemName: "eye.slash")
+                  Text(discovery.detectedTitle).lineLimit(1)
+                  Spacer()
+                  Button("Review Again") {
+                    Task { await model.reviewIgnoredDiscovery(discovery) }
+                  }
+                }
+              }
+            }
+            .padding(.top, 8)
+          }
+        }
+
+        Button("Add Storage Locations…") {
+          var locations: [StorageLocationDraft] = []
+          chooseStorageLocations(into: &locations)
+          if !locations.isEmpty {
+            if containsExistingLibraries(locations) {
+              pendingLocations = locations
+              showingCombineConfirmation = true
+            } else {
+              Task { _ = await model.addStorageLocations(locations) }
+            }
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("add-storage-locations")
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
     }
   }
 
-  private var deviceManagement: some View {
+  private func containsExistingLibraries(_ locations: [StorageLocationDraft]) -> Bool {
+    locations.contains { location in
+      let root = URL(fileURLWithPath: location.path, isDirectory: true).standardizedFileURL.path
+      return model.libraries.contains { library in
+        let path = URL(fileURLWithPath: library.path, isDirectory: true).standardizedFileURL.path
+        return path == root || path.hasPrefix(root + "/")
+      }
+    }
+  }
+
+  private func effectiveKind(_ discovery: LibraryDiscoverySummary) -> LibraryKind? {
+    switch discovery.decision {
+    case .movie: .movies
+    case .tvShows: .tvShows
+    case .ignore: nil
+    case nil: discovery.suggestedKind
+    }
+  }
+
+  private func classificationButton(
+    _ title: String,
+    _ decision: ClassificationDecision,
+    _ discovery: LibraryDiscoverySummary
+  ) -> some View {
+    Button(title) { Task { await model.classifyDiscovery(discovery, as: decision) } }
+  }
+
+  private var devices: some View {
     GroupBox("Devices") {
       VStack(alignment: .leading, spacing: 12) {
         if let code = model.pairingCode {
@@ -172,6 +254,66 @@ struct AppSettingsView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
+    }
+  }
+
+  private func advanced(_ profile: StoredServerProfile) -> some View {
+    DisclosureGroup("Advanced") {
+      VStack(alignment: .leading, spacing: 10) {
+        LabeledContent("Server", value: profile.name)
+        LabeledContent("Address", value: profile.baseURL.absoluteString)
+        LabeledContent("Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
+        if let user = profile.user {
+          LabeledContent("Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
+        }
+        if model.operatingMode == .host {
+          LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
+          Button("Restart Server") { Task { await model.restartNativeHost() } }
+          Button("Switch to Another Server…", role: .destructive) {
+            showingSwitchConfirmation = true
+          }
+        } else {
+          Button("Disconnect This Mac", role: .destructive) {
+            Task { await model.disconnect() }
+          }
+          .accessibilityIdentifier("disconnect-server")
+        }
+      }
+      .padding(.top, 10)
+    }
+  }
+}
+
+private struct DiscoveryDecisionCard: View {
+  @EnvironmentObject private var model: AppModel
+  let discovery: LibraryDiscoverySummary
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text(discovery.detectedTitle).font(.headline)
+      if !discovery.relativePath.isEmpty {
+        Text(discovery.relativePath).font(.caption).foregroundStyle(.secondary)
+      }
+      HStack {
+        decisionButton("Movie", .movie, "film")
+        decisionButton("TV Show", .tvShows, "tv")
+        decisionButton("Ignore", .ignore, "eye.slash")
+      }
+    }
+    .padding(12)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    .accessibilityIdentifier("discovery-\(discovery.id.uuidString.lowercased())")
+  }
+
+  private func decisionButton(
+    _ title: String,
+    _ decision: ClassificationDecision,
+    _ symbol: String
+  ) -> some View {
+    Button {
+      Task { await model.classifyDiscovery(discovery, as: decision) }
+    } label: {
+      Label(title, systemImage: symbol)
     }
   }
 }

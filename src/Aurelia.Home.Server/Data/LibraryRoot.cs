@@ -27,4 +27,6 @@ public sealed class LibraryRoot
     public List<MediaItem> MediaItems { get; } = [];
 
     public List<LibraryScan> Scans { get; } = [];
+
+    public List<LibraryDiscovery> Discoveries { get; } = [];
 }

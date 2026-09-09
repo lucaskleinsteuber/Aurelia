@@ -150,6 +150,230 @@ public sealed class MediaLibraryScannerTests
     }
 
     [Fact]
+    public void AutomaticScannerSeparatesShowsMoviesContainersAndAmbiguousFolders()
+    {
+        var root = CreateDirectory("Mixed Drive");
+        try
+        {
+            Touch(root, "Breaking Bad/Season 1/Breaking Bad S01E01 Pilot.mkv");
+            Touch(root, "Breaking Bad/Season 1/Breaking Bad S01E02 Cat's in the Bag.mkv");
+            Touch(root, "El Camino/El Camino - A Breaking Bad Movie.mkv");
+            Touch(root, "El Camino/Extras/Making El Camino.mkv");
+            Touch(root, "Minions & Despicable Me/Minions/Minions.mkv");
+            Touch(root, "Minions & Despicable Me/Despicable Me/Despicable Me.mkv");
+            Touch(root, "Tiktok/clip-one.mkv");
+            Touch(root, "Tiktok/clip-two.mp4");
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Automatic,
+                [],
+                null,
+                CancellationToken.None);
+
+            var series = Assert.Single(result.Items, item => item.Kind == MediaKind.Series);
+            Assert.Equal("Breaking Bad", series.DetectedTitle);
+            Assert.Equal(2, result.Items.Count(item => item.Kind == MediaKind.Episode));
+            Assert.Equal(3, result.Items.Count(item => item.Kind == MediaKind.Movie));
+            Assert.Single(result.Items, item => item.Kind == MediaKind.Extra);
+            Assert.DoesNotContain(result.Items, item => item.SourcePath.Contains("Tiktok"));
+
+            var review = Assert.Single(result.Classifications!, item => item.RelativePath == "Tiktok");
+            Assert.True(review.NeedsReview);
+            Assert.Null(review.SuggestedKind);
+            Assert.Equal("multiple_unmatched_videos", review.Reason);
+            Assert.Contains(result.Issues, issue => issue.Code == "classification_required");
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void AutomaticScannerKeepsLooseRootVideosSeparateFromNestedTitles()
+    {
+        var root = CreateDirectory("Mixed Root With Loose Video");
+        try
+        {
+            Touch(root, "Loose Clip.mkv");
+            Touch(root, "Movies/El Camino/El Camino.mkv");
+            Touch(root, "TV/Breaking Bad/Season 1/Breaking Bad S01E01.mkv");
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Automatic,
+                [],
+                null,
+                CancellationToken.None);
+
+            Assert.Contains(result.Items, item =>
+                item.Kind == MediaKind.Movie
+                && item.DetectedTitle == "Loose Clip"
+                && item.SourcePath == Path.Combine(root, "Loose Clip.mkv"));
+            Assert.Contains(result.Items, item =>
+                item.Kind == MediaKind.Movie
+                && item.DetectedTitle == "El Camino");
+            Assert.Contains(result.Items, item =>
+                item.Kind == MediaKind.Series
+                && item.DetectedTitle == "Breaking Bad");
+            Assert.DoesNotContain(result.Items, item =>
+                item.ParentSourcePath == root
+                && item.SourcePath.Contains("Breaking Bad", StringComparison.Ordinal));
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void AutomaticScannerDoesNotTreatAMixedRootAsOneSeries()
+    {
+        var root = CreateDirectory("Mixed Root With Loose Episode");
+        try
+        {
+            Touch(root, "Breaking Bad S01E01.mkv");
+            Touch(root, "Movies/El Camino/El Camino.mkv");
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Automatic,
+                [],
+                null,
+                CancellationToken.None);
+
+            Assert.DoesNotContain(result.Items, item =>
+                item.Kind == MediaKind.Series && item.SourcePath == root);
+            Assert.Contains(result.Items, item =>
+                item.Kind == MediaKind.Movie && item.DetectedTitle == "El Camino");
+            var review = Assert.Single(result.Classifications!, item => item.RelativePath == "");
+            Assert.True(review.NeedsReview);
+            Assert.Equal("mixed_root_episode_files", review.Reason);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void AutomaticScannerHonorsStoredClassificationDecisions()
+    {
+        var root = CreateDirectory("Decisions");
+        try
+        {
+            Touch(root, "Home Videos/Part 1.mkv");
+            Touch(root, "Home Videos/Part 2.mkv");
+            Touch(root, "Ignored/One.mkv");
+            Touch(root, "Ignored/Two.mkv");
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Automatic,
+                [],
+                null,
+                CancellationToken.None,
+                [
+                    new ExistingClassificationDecision("Home Videos", ClassificationDecision.Movie),
+                    new ExistingClassificationDecision("Ignored", ClassificationDecision.Ignore),
+                ]);
+
+            Assert.Equal(2, result.Items.Count(item => item.Kind == MediaKind.Movie));
+            Assert.DoesNotContain(result.Items, item => item.SourcePath.Contains("Ignored"));
+            Assert.DoesNotContain(result.Issues, issue => issue.Code == "classification_required");
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void AutomaticStorageWithOneNestedShowUsesTheShowFolderAsItsIdentity()
+    {
+        var root = CreateDirectory("Single Show Storage");
+        try
+        {
+            Touch(root, "Breaking Bad/Season 1/Breaking Bad S01E01 Pilot.mkv");
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Automatic,
+                [],
+                null,
+                CancellationToken.None);
+
+            var series = Assert.Single(result.Items, item => item.Kind == MediaKind.Series);
+            Assert.Equal("Breaking Bad", series.DetectedTitle);
+            Assert.EndsWith("Breaking Bad", series.SourcePath, StringComparison.Ordinal);
+            Assert.Single(
+                result.Classifications!,
+                item => item.RelativePath == "Breaking Bad"
+                    && item.SuggestedKind == LibraryKind.TvShows);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void ExplicitMixedStorageAcceptanceRemainsMetadataOnly()
+    {
+        var root = Environment.GetEnvironmentVariable("AURELIA_HOME_REAL_STORAGE_TEST");
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return;
+        }
+
+        var result = scanner.Scan(
+            root,
+            LibraryKind.Automatic,
+            [],
+            null,
+            CancellationToken.None);
+        var classifications = result.Classifications!;
+
+        foreach (var folder in new[]
+                 {
+                     "Breaking Bad",
+                     "Top Gear",
+                     "Better Call Saul",
+                     "Mr Robot",
+                     "The Grand Tour",
+                     "Clarksons Farm",
+                 })
+        {
+            Assert.True(classifications.Any(item =>
+                item.SuggestedKind == LibraryKind.TvShows
+                && item.RelativePath.Trim().Equals(folder, StringComparison.OrdinalIgnoreCase)),
+                $"Expected TV show folder was not recognized: {folder}");
+        }
+
+        Assert.Contains(classifications, item =>
+            item.SuggestedKind == LibraryKind.Movies
+            && item.DetectedTitle.Contains("El Camino", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(classifications, item =>
+            item.SuggestedKind == LibraryKind.Movies
+            && item.DetectedTitle.Contains("Truman Show", StringComparison.OrdinalIgnoreCase));
+        Assert.True(classifications.Count(item =>
+            item.SuggestedKind == LibraryKind.Movies
+            && (item.RelativePath.Contains("Minions & Despicable Me", StringComparison.OrdinalIgnoreCase)
+                || item.RelativePath.Contains("Monsters Inc", StringComparison.OrdinalIgnoreCase))) >= 4);
+        if (Directory.EnumerateDirectories(root).Any(path =>
+                Path.GetFileName(path).Contains("Tiktok", StringComparison.OrdinalIgnoreCase)))
+        {
+            Assert.Contains(classifications, item =>
+                item.RelativePath.Contains("Tiktok", StringComparison.OrdinalIgnoreCase)
+                && item.SuggestedKind == null
+                && item.NeedsReview);
+        }
+        Assert.DoesNotContain(result.Items, item =>
+            Path.GetFileName(item.SourcePath).StartsWith("._", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void LibraryCommandParserKeepsPathsAndFlagsSeparate()
     {
         var command = ServerCommandLine.Parse(

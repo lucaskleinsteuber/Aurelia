@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
   @Published private(set) var libraries: [LibrarySummary] = []
   @Published private(set) var activeScans: [LibraryScanSummary] = []
+  @Published private(set) var libraryDiscoveries: [LibraryDiscoverySummary] = []
   @Published private(set) var pairingCode: PairingCodeResponse?
   @Published private(set) var sessions: [DeviceSessionSummary] = []
   @Published private(set) var needsInitialLibrarySetup = false
@@ -201,17 +202,17 @@ final class AppModel: ObservableObject {
     needsInitialLibrarySetup = false
   }
 
-  func createLibraries(_ drafts: [LibraryDraft]) async -> Bool {
+  func createStorageLocations(_ locations: [StorageLocationDraft]) async -> Bool {
     guard let profile else { return false }
     isWorking = true
     errorMessage = nil
     defer { isWorking = false }
     do {
       let client = APIClient(profile: profile)
-      for draft in drafts {
-        _ = try await client.createLibrary(name: draft.name, path: draft.path, kind: draft.kind)
+      for location in locations {
+        _ = try await client.createLibrary(path: location.path)
       }
-      activeScans = drafts.isEmpty ? [] : try await client.startAllLibraryScans()
+      activeScans = locations.isEmpty ? [] : try await client.startAllLibraryScans()
       libraries = try await client.libraries()
       needsInitialLibrarySetup = false
       startScanPolling()
@@ -231,21 +232,72 @@ final class AppModel: ObservableObject {
       async let loadedSessions = client.sessions()
       libraries = try await loadedLibraries
       sessions = try await loadedSessions
+      libraryDiscoveries = try await loadDiscoveries(client: client, libraries: libraries)
     } catch { errorMessage = error.localizedDescription }
   }
 
-  func addLibrary(name: String, path: String, kind: LibraryKind) async -> Bool {
+  func addStorageLocations(
+    _ locations: [StorageLocationDraft],
+    combineExisting: Bool = false
+  ) async -> Bool {
     guard let profile else { return false }
+    isWorking = true
+    defer { isWorking = false }
     do {
       let client = APIClient(profile: profile)
-      let created = try await client.createLibrary(name: name, path: path, kind: kind)
-      libraries.append(created)
+      var created: [LibrarySummary] = []
+      for location in locations {
+        created.append(try await client.createLibrary(
+          path: location.path,
+          combineExisting: combineExisting))
+      }
+      libraries.append(contentsOf: created)
       libraries.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+      for library in created {
+        activeScans.append(try await client.startLibraryScan(id: library.id))
+      }
+      startScanPolling()
       return true
     } catch {
       errorMessage = error.localizedDescription
       return false
     }
+  }
+
+  func classifyDiscovery(_ discovery: LibraryDiscoverySummary, as decision: ClassificationDecision)
+    async
+  {
+    guard let profile else { return }
+    do {
+      let scan = try await APIClient(profile: profile).updateClassification(
+        libraryId: discovery.libraryId,
+        discoveryId: discovery.id,
+        decision: decision)
+      activeScans.append(scan)
+      libraryDiscoveries.removeAll { $0.id == discovery.id }
+      startScanPolling()
+    } catch { errorMessage = error.localizedDescription }
+  }
+
+  func reviewIgnoredDiscovery(_ discovery: LibraryDiscoverySummary) async {
+    guard let profile else { return }
+    do {
+      let scan = try await APIClient(profile: profile).resetClassification(
+        libraryId: discovery.libraryId,
+        discoveryId: discovery.id)
+      activeScans.append(scan)
+      if let index = libraryDiscoveries.firstIndex(where: { $0.id == discovery.id }) {
+        libraryDiscoveries[index] = LibraryDiscoverySummary(
+          id: discovery.id,
+          libraryId: discovery.libraryId,
+          relativePath: discovery.relativePath,
+          detectedTitle: discovery.detectedTitle,
+          suggestedKind: discovery.suggestedKind,
+          reason: discovery.reason,
+          decision: nil)
+      }
+      startScanPolling()
+    } catch { errorMessage = error.localizedDescription }
   }
 
   func removeLibrary(id: UUID) async {
@@ -547,6 +599,19 @@ final class AppModel: ObservableObject {
     }
   }
 
+  private func loadDiscoveries(
+    client: APIClient,
+    libraries: [LibrarySummary]
+  ) async throws -> [LibraryDiscoverySummary] {
+    var discoveries: [LibraryDiscoverySummary] = []
+    for library in libraries where library.kind == .automatic {
+      discoveries.append(contentsOf: try await client.libraryDiscoveries(id: library.id))
+    }
+    return discoveries.sorted {
+      $0.detectedTitle.localizedCaseInsensitiveCompare($1.detectedTitle) == .orderedAscending
+    }
+  }
+
   #if DEBUG
     private static let previewProfile = StoredServerProfile(
       serverId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
@@ -578,7 +643,7 @@ final class AppModel: ObservableObject {
       serverInfo: ServerInfoResponse(
         serverId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
         name: "Aurelia Home on Test Mac",
-        version: "1.0.7",
+        version: "1.0.8",
         isSetup: true,
         lanAccessEnabled: true,
         lanHttpsPort: 43_111,

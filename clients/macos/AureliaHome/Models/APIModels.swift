@@ -53,8 +53,15 @@ struct UserSummary: Codable, Equatable, Sendable {
 enum LibraryKind: String, Codable, CaseIterable, Sendable {
   case movies
   case tvShows
+  case automatic
 
-  var title: String { self == .movies ? "Movies" : "TV Shows" }
+  var title: String {
+    switch self {
+    case .movies: "Movies"
+    case .tvShows: "TV Shows"
+    case .automatic: "Automatic"
+    }
+  }
 }
 
 enum LibraryAvailability: String, Codable, Sendable {
@@ -73,9 +80,35 @@ enum LibraryScanState: String, Codable, Sendable {
 }
 
 struct CreateLibraryRequest: Encodable, Sendable {
-  let name: String
+  let name: String?
   let path: String
   let kind: LibraryKind
+  let combineExisting: Bool
+}
+
+enum ClassificationDecision: String, Codable, Sendable {
+  case movie
+  case tvShows
+  case ignore
+}
+
+struct LibraryDiscoverySummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let libraryId: UUID
+  let relativePath: String
+  let detectedTitle: String
+  let suggestedKind: LibraryKind?
+  let reason: String
+  let decision: ClassificationDecision?
+}
+
+struct ClassificationDecisionUpdate: Encodable, Sendable {
+  let discoveryId: UUID
+  let decision: ClassificationDecision
+}
+
+struct UpdateClassificationDecisionsRequest: Encodable, Sendable {
+  let decisions: [ClassificationDecisionUpdate]
 }
 
 struct LibrarySummary: Codable, Identifiable, Equatable, Sendable {

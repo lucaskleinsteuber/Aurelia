@@ -23,24 +23,50 @@ public sealed class LibraryService(
         CreateLibraryRequest request,
         CancellationToken cancellationToken)
     {
-        var name = ValidateName(request.Name);
         if (!Enum.IsDefined(request.Kind))
         {
             throw BadRequest("invalid_library_kind", "The library kind is not valid.");
         }
 
         var path = ValidateDirectory(request.Path);
+        var derivedName = new DirectoryInfo(path).Name;
+        var name = ValidateName(string.IsNullOrWhiteSpace(request.Name) ? derivedName : request.Name);
         var normalizedPath = MediaPath.Normalize(path);
-        var existingPaths = await database.LibraryRoots
-            .AsNoTracking()
-            .Select(library => library.NormalizedPath)
+        var existingLibraries = await database.LibraryRoots
             .ToListAsync(cancellationToken);
-        if (existingPaths.Any(existing => MediaPath.Overlaps(existing, normalizedPath)))
+        var overlaps = existingLibraries
+            .Where(existing => MediaPath.Overlaps(existing.NormalizedPath, normalizedPath))
+            .ToList();
+        if (overlaps.Count > 0 && !request.CombineExisting)
         {
             throw new LibraryException(
                 "overlapping_library_path",
-                "The folder overlaps an existing library.",
+                request.Kind == LibraryKind.Automatic
+                    ? "This storage location contains an existing library. Choose Combine Existing Libraries to keep its media and progress."
+                    : "The folder overlaps an existing library.",
                 StatusCodes.Status409Conflict);
+        }
+
+        if (overlaps.Count > 0)
+        {
+            if (request.Kind != LibraryKind.Automatic
+                || overlaps.Any(existing => existing.Kind == LibraryKind.Automatic)
+                || overlaps.Any(existing => !MediaPath.IsSameOrDescendant(
+                    existing.NormalizedPath,
+                    normalizedPath)))
+            {
+                throw new LibraryException(
+                    "libraries_cannot_be_combined",
+                    "Only existing movie and TV libraries inside a new automatic storage location can be combined.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            return await CombineAsync(
+                overlaps,
+                name,
+                path,
+                normalizedPath,
+                cancellationToken);
         }
 
         var library = new LibraryRoot
@@ -56,6 +82,202 @@ public sealed class LibraryService(
         database.LibraryRoots.Add(library);
         await database.SaveChangesAsync(cancellationToken);
         return ToSummary(library);
+    }
+
+    private async Task<LibrarySummary> CombineAsync(
+        IReadOnlyList<LibraryRoot> existingLibraries,
+        string name,
+        string path,
+        string normalizedPath,
+        CancellationToken cancellationToken)
+    {
+        var existingIds = existingLibraries.Select(library => library.Id).ToList();
+        var activeScan = await database.LibraryScans.AnyAsync(
+            scan => existingIds.Contains(scan.LibraryRootId)
+                && (scan.State == LibraryScanState.Queued
+                    || scan.State == LibraryScanState.Running),
+            cancellationToken);
+        if (activeScan)
+        {
+            throw new LibraryException(
+                "library_scan_active",
+                "Existing libraries cannot be combined while a scan is active.",
+                StatusCodes.Status409Conflict);
+        }
+
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var combined = new LibraryRoot
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            Path = path,
+            NormalizedPath = normalizedPath,
+            Kind = LibraryKind.Automatic,
+            Availability = existingLibraries.All(library =>
+                library.Availability == LibraryAvailability.Available)
+                ? LibraryAvailability.Available
+                : LibraryAvailability.Unknown,
+            CreatedAt = existingLibraries.Min(library => library.CreatedAt),
+            LastScanStartedAt = existingLibraries.Max(library => library.LastScanStartedAt),
+            LastScanCompletedAt = existingLibraries.Max(library => library.LastScanCompletedAt),
+        };
+        database.LibraryRoots.Add(combined);
+        await database.SaveChangesAsync(cancellationToken);
+
+        foreach (var existing in existingLibraries)
+        {
+            var relativePath = Path.GetRelativePath(path, existing.Path);
+            if (relativePath == ".")
+            {
+                relativePath = string.Empty;
+            }
+
+            database.LibraryDiscoveries.Add(new LibraryDiscovery
+            {
+                Id = Guid.NewGuid(),
+                LibraryRootId = combined.Id,
+                LibraryRoot = combined,
+                RelativePath = relativePath,
+                NormalizedRelativePath = NormalizeRelativePath(relativePath),
+                DetectedTitle = existing.Name,
+                SuggestedKind = existing.Kind,
+                Reason = "combined_existing_library",
+                Decision = existing.Kind switch
+                {
+                    LibraryKind.Movies => ClassificationDecision.Movie,
+                    LibraryKind.TvShows => ClassificationDecision.TvShows,
+                    _ => throw new InvalidOperationException(
+                        "Only fixed movie and TV libraries can be combined."),
+                },
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+
+        await database.MediaItems
+            .Where(item => existingIds.Contains(item.LibraryRootId))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(item => item.LibraryRootId, combined.Id),
+                cancellationToken);
+        await database.LibraryScans
+            .Where(scan => existingIds.Contains(scan.LibraryRootId))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(scan => scan.LibraryRootId, combined.Id),
+                cancellationToken);
+        database.LibraryRoots.RemoveRange(existingLibraries);
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return ToSummary(combined);
+    }
+
+    public async Task<IReadOnlyList<LibraryDiscoverySummary>> ListDiscoveriesAsync(
+        Guid libraryId,
+        CancellationToken cancellationToken)
+    {
+        var library = await RequireLibraryAsync(libraryId, cancellationToken);
+        if (library.Kind != LibraryKind.Automatic)
+        {
+            throw BadRequest(
+                "automatic_library_required",
+                "Discovery review is only available for automatic storage locations.");
+        }
+
+        return await database.LibraryDiscoveries
+            .AsNoTracking()
+            .Where(discovery => discovery.LibraryRootId == libraryId)
+            .OrderBy(discovery => discovery.RelativePath)
+            .ThenBy(discovery => discovery.Id)
+            .Select(discovery => new LibraryDiscoverySummary(
+                discovery.Id,
+                discovery.LibraryRootId,
+                discovery.RelativePath,
+                discovery.DetectedTitle,
+                discovery.SuggestedKind,
+                discovery.Reason,
+                discovery.Decision))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<LibraryScanSummary> UpdateClassificationDecisionsAsync(
+        Guid libraryId,
+        UpdateClassificationDecisionsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var library = await RequireLibraryAsync(libraryId, cancellationToken);
+        if (library.Kind != LibraryKind.Automatic)
+        {
+            throw BadRequest(
+                "automatic_library_required",
+                "Classification decisions are only available for automatic storage locations.");
+        }
+
+        if (request.Decisions is null || request.Decisions.Count == 0)
+        {
+            throw BadRequest("decisions_required", "Choose at least one folder classification.");
+        }
+
+        if (request.Decisions.Select(update => update.DiscoveryId).Distinct().Count()
+            != request.Decisions.Count)
+        {
+            throw BadRequest("duplicate_decision", "Each discovered folder can be changed once per request.");
+        }
+
+        if (request.Decisions.Any(update => !Enum.IsDefined(update.Decision)))
+        {
+            throw BadRequest("invalid_decision", "A classification decision is not valid.");
+        }
+
+        var ids = request.Decisions.Select(update => update.DiscoveryId).ToList();
+        var discoveries = await database.LibraryDiscoveries
+            .Where(discovery => discovery.LibraryRootId == libraryId && ids.Contains(discovery.Id))
+            .ToListAsync(cancellationToken);
+        if (discoveries.Count != ids.Count)
+        {
+            throw new LibraryException(
+                "discovery_not_found",
+                "A discovered folder no longer exists.",
+                StatusCodes.Status404NotFound);
+        }
+
+        var updates = request.Decisions.ToDictionary(update => update.DiscoveryId);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var discovery in discoveries)
+        {
+            discovery.Decision = updates[discovery.Id].Decision;
+            discovery.UpdatedAt = now;
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
+        var target = discoveries.Count == 1 ? discoveries[0].RelativePath : null;
+        return await StartScanAsync(libraryId, target, cancellationToken);
+    }
+
+    public async Task<LibraryScanSummary> ResetClassificationDecisionAsync(
+        Guid libraryId,
+        Guid discoveryId,
+        CancellationToken cancellationToken)
+    {
+        var library = await RequireLibraryAsync(libraryId, cancellationToken);
+        if (library.Kind != LibraryKind.Automatic)
+        {
+            throw BadRequest(
+                "automatic_library_required",
+                "Classification decisions are only available for automatic storage locations.");
+        }
+
+        var discovery = await database.LibraryDiscoveries.SingleOrDefaultAsync(
+            candidate => candidate.LibraryRootId == libraryId && candidate.Id == discoveryId,
+            cancellationToken)
+            ?? throw new LibraryException(
+                "discovery_not_found",
+                "The discovered folder no longer exists.",
+                StatusCodes.Status404NotFound);
+
+        discovery.Decision = null;
+        discovery.UpdatedAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(cancellationToken);
+        return await StartScanAsync(libraryId, discovery.RelativePath, cancellationToken);
     }
 
     public async Task RemoveAsync(Guid libraryId, CancellationToken cancellationToken)
@@ -88,6 +310,14 @@ public sealed class LibraryService(
         Guid libraryId,
         CancellationToken cancellationToken)
     {
+        return await StartScanAsync(libraryId, null, cancellationToken);
+    }
+
+    private async Task<LibraryScanSummary> StartScanAsync(
+        Guid libraryId,
+        string? targetRelativePath,
+        CancellationToken cancellationToken)
+    {
         _ = await RequireLibraryAsync(libraryId, cancellationToken);
         if (!scanQueue.TryReserve(libraryId))
         {
@@ -115,7 +345,7 @@ public sealed class LibraryService(
             };
             database.LibraryScans.Add(scan);
             await database.SaveChangesAsync(cancellationToken);
-            scanQueue.Enqueue(scan.Id, libraryId);
+            scanQueue.Enqueue(scan.Id, libraryId, targetRelativePath);
             return ToSummary(scan, []);
         }
         catch
@@ -198,6 +428,14 @@ public sealed class LibraryService(
         }
 
         return name;
+    }
+
+    private static string NormalizeRelativePath(string path)
+    {
+        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+            .Trim(Path.DirectorySeparatorChar)
+            .Normalize(NormalizationForm.FormKC)
+            .ToUpperInvariant();
     }
 
     private static string ValidateDirectory(string? value)

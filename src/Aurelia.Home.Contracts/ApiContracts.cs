@@ -79,6 +79,14 @@ public enum LibraryKind
 {
     Movies,
     TvShows,
+    Automatic,
+}
+
+public enum ClassificationDecision
+{
+    Movie,
+    TvShows,
+    Ignore,
 }
 
 public enum LibraryAvailability
@@ -114,9 +122,26 @@ public enum LibraryScanState
 }
 
 public sealed record CreateLibraryRequest(
-    string Name,
+    string? Name,
     string Path,
-    LibraryKind Kind);
+    LibraryKind Kind,
+    bool CombineExisting = false);
+
+public sealed record LibraryDiscoverySummary(
+    Guid Id,
+    Guid LibraryId,
+    string RelativePath,
+    string DetectedTitle,
+    LibraryKind? SuggestedKind,
+    string Reason,
+    ClassificationDecision? Decision);
+
+public sealed record ClassificationDecisionUpdate(
+    Guid DiscoveryId,
+    ClassificationDecision Decision);
+
+public sealed record UpdateClassificationDecisionsRequest(
+    IReadOnlyList<ClassificationDecisionUpdate> Decisions);
 
 public sealed record LibrarySummary(
     Guid Id,

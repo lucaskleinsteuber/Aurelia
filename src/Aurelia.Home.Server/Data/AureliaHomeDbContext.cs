@@ -22,6 +22,8 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
 
     public DbSet<LibraryScanIssue> LibraryScanIssues => Set<LibraryScanIssue>();
 
+    public DbSet<LibraryDiscovery> LibraryDiscoveries => Set<LibraryDiscovery>();
+
     public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
 
     public DbSet<PlaybackProgress> PlaybackProgress => Set<PlaybackProgress>();
@@ -167,6 +169,30 @@ public sealed class AureliaHomeDbContext(DbContextOptions<AureliaHomeDbContext> 
             entity.HasOne(issue => issue.LibraryScan)
                 .WithMany(scan => scan.Issues)
                 .HasForeignKey(issue => issue.LibraryScanId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryDiscovery>(entity =>
+        {
+            entity.HasKey(discovery => discovery.Id);
+            entity.Property(discovery => discovery.RelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(discovery => discovery.NormalizedRelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(discovery => discovery.DetectedTitle).HasMaxLength(512).IsRequired();
+            entity.Property(discovery => discovery.SuggestedKind)
+                .HasConversion<string>().HasMaxLength(16);
+            entity.Property(discovery => discovery.Reason).HasMaxLength(128).IsRequired();
+            entity.Property(discovery => discovery.Decision)
+                .HasConversion<string>().HasMaxLength(16);
+            entity.Property(discovery => discovery.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(discovery => discovery.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(discovery => new
+            {
+                discovery.LibraryRootId,
+                discovery.NormalizedRelativePath,
+            }).IsUnique();
+            entity.HasOne(discovery => discovery.LibraryRoot)
+                .WithMany(library => library.Discoveries)
+                .HasForeignKey(discovery => discovery.LibraryRootId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

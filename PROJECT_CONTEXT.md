@@ -20,8 +20,9 @@ their own suitable UI technology without changing how the media system works.
 
 ## Responsibility and playback flow
 
-The server is the source of truth. It scans explicitly registered movie and TV
-folders, stores only catalog and account data in SQLite, authenticates devices,
+The server is the source of truth. It scans only explicitly selected storage
+locations, classifies clear movie and TV structures locally, stores only catalog
+and account data in SQLite, authenticates devices,
 issues short-lived playback tickets, streams requested byte ranges over HTTPS,
 and stores progress per user. It never copies, opens for analysis, hashes,
 converts, remuxes, transcodes, or caches a complete video file.
@@ -59,6 +60,8 @@ The complete path is:
 - Build 7 embeds both self-contained macOS server architectures, adds a
   separately signed native host helper, and provides owner setup, local login,
   libraries, scans, pairing, and session management inside the Mac app.
+- Build 8 replaces separate movie and TV setup with automatic storage locations,
+  persistent review decisions, targeted rescans, and a shorter first-run flow.
 
 The Build 7 host handoff keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; a non-secret launch description is
@@ -124,14 +127,14 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message (`1.0.7` for Build 7), push immediately, verify the remote hash, and
+    message (`1.0.8` for Build 8), push immediately, verify the remote hash, and
     write exactly one English external summary for the completed build.
 
 ## Planned direction
 
-The next sensible milestone is Build 8: establish optional metadata and artwork
-without weakening manual metadata precedence or changing media files. After
-that, perform the dedicated Home/library/detail visual rebuild. Automatic scans,
-the optional web client, broader administration, Linux and Windows native
-clients, and advanced playback features should follow as deliberate milestones
-rather than being mixed into infrastructure work.
+The next sensible milestone is Build 9: add optional TMDB metadata and artwork
+without weakening manual metadata precedence or changing media files, together
+with the dedicated Home, library, and detail visual rebuild. Automatic file
+watchers, the optional web client, broader administration, Linux and Windows
+native clients, and advanced playback features should follow as deliberate
+milestones rather than being mixed into infrastructure work.

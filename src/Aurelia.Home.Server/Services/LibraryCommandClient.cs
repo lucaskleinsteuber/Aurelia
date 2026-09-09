@@ -100,7 +100,9 @@ public static class LibraryCommandClient
         {
             "movies" => LibraryKind.Movies,
             "tv" => LibraryKind.TvShows,
-            _ => throw new InvalidOperationException("--kind must be either movies or tv."),
+            "automatic" or "auto" => LibraryKind.Automatic,
+            _ => throw new InvalidOperationException(
+                "--kind must be automatic, movies, or tv."),
         };
         var name = commandLine.Option("--name")
             ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
@@ -263,7 +265,7 @@ public static class LibraryCommandClient
     private static void PrintUsage()
     {
         Console.WriteLine("Aurelia Home library commands:");
-        Console.WriteLine("  library add --kind movies|tv --path PATH [--name NAME] [--username USER]");
+        Console.WriteLine("  library add --kind automatic|movies|tv --path PATH [--name NAME] [--username USER]");
         Console.WriteLine("  library list [--username USER]");
         Console.WriteLine("  library scan --id ID|--all [--username USER]");
         Console.WriteLine("  library remove --id ID --yes [--username USER]");

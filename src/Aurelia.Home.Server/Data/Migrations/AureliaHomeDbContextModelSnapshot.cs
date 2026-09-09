@@ -58,6 +58,60 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.ToTable("DeviceSessions");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.LibraryDiscovery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Decision")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DetectedTitle")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LastSeenScanId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedRelativePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SuggestedKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LibraryRootId", "NormalizedRelativePath")
+                        .IsUnique();
+
+                    b.ToTable("LibraryDiscoveries");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.LibraryRoot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -460,6 +514,17 @@ namespace Aurelia.Home.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Aurelia.Home.Server.Data.LibraryDiscovery", b =>
+                {
+                    b.HasOne("Aurelia.Home.Server.Data.LibraryRoot", "LibraryRoot")
+                        .WithMany("Discoveries")
+                        .HasForeignKey("LibraryRootId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LibraryRoot");
+                });
+
             modelBuilder.Entity("Aurelia.Home.Server.Data.LibraryScan", b =>
                 {
                     b.HasOne("Aurelia.Home.Server.Data.LibraryRoot", "LibraryRoot")
@@ -564,6 +629,8 @@ namespace Aurelia.Home.Server.Data.Migrations
 
             modelBuilder.Entity("Aurelia.Home.Server.Data.LibraryRoot", b =>
                 {
+                    b.Navigation("Discoveries");
+
                     b.Navigation("MediaItems");
 
                     b.Navigation("Scans");

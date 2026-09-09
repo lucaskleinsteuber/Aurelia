@@ -48,6 +48,13 @@ public static class ApiEndpointMappings
         libraries.MapPost(string.Empty, CreateLibraryAsync);
         libraries.MapDelete("/{libraryId:guid}", RemoveLibraryAsync);
         libraries.MapPost("/{libraryId:guid}/scans", StartLibraryScanAsync);
+        libraries.MapGet("/{libraryId:guid}/discoveries", ListLibraryDiscoveriesAsync);
+        libraries.MapPut(
+            "/{libraryId:guid}/classification-decisions",
+            UpdateClassificationDecisionsAsync);
+        libraries.MapDelete(
+            "/{libraryId:guid}/classification-decisions/{discoveryId:guid}",
+            ResetClassificationDecisionAsync);
         libraries.MapPost("/scans", StartAllLibraryScansAsync);
 
         var scans = api.MapGroup("/scans").RequireAuthorization("Administrator");
@@ -305,6 +312,46 @@ public static class ApiEndpointMappings
         CancellationToken cancellationToken)
     {
         return ExecuteNoContentAsync(() => libraries.RemoveAsync(libraryId, cancellationToken));
+    }
+
+    private static Task<IResult> ListLibraryDiscoveriesAsync(
+        Guid libraryId,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => libraries.ListDiscoveriesAsync(libraryId, cancellationToken));
+    }
+
+    private static async Task<IResult> UpdateClassificationDecisionsAsync(
+        Guid libraryId,
+        UpdateClassificationDecisionsRequest request,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResultAsync(async () =>
+        {
+            var scan = await libraries.UpdateClassificationDecisionsAsync(
+                libraryId,
+                request,
+                cancellationToken);
+            return Results.Accepted($"/api/v1/scans/{scan.Id}", scan);
+        });
+    }
+
+    private static async Task<IResult> ResetClassificationDecisionAsync(
+        Guid libraryId,
+        Guid discoveryId,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResultAsync(async () =>
+        {
+            var scan = await libraries.ResetClassificationDecisionAsync(
+                libraryId,
+                discoveryId,
+                cancellationToken);
+            return Results.Accepted($"/api/v1/scans/{scan.Id}", scan);
+        });
     }
 
     private static async Task<IResult> StartLibraryScanAsync(

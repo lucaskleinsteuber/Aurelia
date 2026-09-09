@@ -3,7 +3,7 @@ set -euo pipefail
 
 repository_root=${0:A:h:h}
 other_root=${AURELIA_HOME_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
-candidate=${1:-"$other_root/Build/Build 7/Aurelia Home.app"}
+candidate=${1:-"$other_root/Build/Build 8/Aurelia Home.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 runtime_root="/private/tmp/AureliaHome/$run_id"
 result_root="$other_root/Test Results"
@@ -93,7 +93,7 @@ wait_for_state() {
   return 1
 }
 
-[[ -d "$candidate" ]] || fail "The Build 7 app candidate does not exist."
+[[ -d "$candidate" ]] || fail "The Build 8 app candidate does not exist."
 [[ -x "$application" ]] || fail "The native Aurelia Home app is missing."
 [[ -x "$helper" ]] || fail "The native server host helper is missing."
 [[ -x "$server" ]] || fail "The embedded arm64 server is missing."
@@ -102,7 +102,7 @@ if lsof -nP -iTCP:43110 -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root"
-print -r -- "Aurelia Home Build 7 native host smoke test" >"$report"
+print -r -- "Aurelia Home Build 8 native host smoke test" >"$report"
 print -r -- "Run: $run_id" >>"$report"
 
 lan_port="$(ruby -rsocket -e 'server = TCPServer.new("127.0.0.1", 0); puts server.addr[1]; server.close')"
@@ -207,8 +207,8 @@ curl --silent --show-error --fail-with-body --insecure \
 fixture="$runtime_root/Fixture Movies"
 mkdir -p "$fixture"
 dd if=/dev/zero of="$fixture/Host Smoke Movie 2026.mkv" bs=1024 count=1 status=none
-library_body="$(jq -cn --arg name 'Host Smoke Movies' --arg path "$fixture" \
-  '{name:$name,path:$path,kind:"movies"}')"
+library_body="$(jq -cn --arg path "$fixture" \
+  '{path:$path,kind:"automatic"}')"
 curl --silent --show-error --fail-with-body --insecure \
   --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
   --data "$library_body" "$https_base/api/v1/libraries" >"$runtime_root/library.json"

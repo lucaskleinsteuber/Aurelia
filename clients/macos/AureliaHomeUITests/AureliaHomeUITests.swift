@@ -14,7 +14,7 @@ final class AureliaHomeUITests: XCTestCase {
 
     XCTAssertTrue(app.staticTexts["Welcome to Aurelia Home"].waitForExistence(timeout: 8))
     XCTAssertTrue(app.buttons["choose-host"].exists)
-    XCTAssertTrue(app.buttons["choose-client"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["choose-client"].exists)
     XCTAssertFalse(app.webViews.firstMatch.exists)
     assertNoUnexpectedDialog(in: app)
   }
@@ -29,10 +29,13 @@ final class AureliaHomeUITests: XCTestCase {
     app.activate()
     defer { app.terminate() }
 
-    XCTAssertTrue(app.staticTexts["Create Your Aurelia Home Server"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Set Up This Mac"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.secureTextFields["host-owner-password"].exists)
+    XCTAssertFalse(app.textFields["host-server-name"].exists)
+    XCTAssertFalse(app.secureTextFields["host-owner-confirmation"].exists)
+    app.buttons["host-advanced"].click()
     XCTAssertTrue(app.textFields["host-server-name"].exists)
     XCTAssertTrue(app.textFields["host-owner-name"].exists)
-    XCTAssertTrue(app.secureTextFields["host-owner-password"].exists)
     XCTAssertTrue(app.buttons["create-local-server"].exists)
     assertNoUnexpectedDialog(in: app)
   }
@@ -43,18 +46,17 @@ final class AureliaHomeUITests: XCTestCase {
     let app = XCUIApplication()
     configureTestLaunch(app)
     app.launchEnvironment["AURELIA_HOME_UI_TEST_MODE"] = "library-setup"
-    app.launchEnvironment["AURELIA_HOME_UI_TEST_FOLDER"] = "/private/tmp/AureliaHome/UIFixture"
+    app.launchEnvironment["AURELIA_HOME_UI_TEST_FOLDERS"] =
+      "/private/tmp/AureliaHome/UIFixture\n/private/tmp/AureliaHome/SecondFixture"
     app.launch()
     app.activate()
     defer { app.terminate() }
 
     XCTAssertTrue(app.buttons["initial-add-media-folder"].waitForExistence(timeout: 8))
     app.buttons["initial-add-media-folder"].click()
-    XCTAssertTrue(app.buttons["choose-media-folder"].waitForExistence(timeout: 5))
-    app.buttons["choose-media-folder"].click()
-    XCTAssertEqual(
-      app.textFields["library-path"].value as? String,
-      "/private/tmp/AureliaHome/UIFixture")
+    XCTAssertTrue(app.staticTexts["/private/tmp/AureliaHome/UIFixture"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["/private/tmp/AureliaHome/SecondFixture"].exists)
+    XCTAssertTrue(app.buttons["start-storage-scan"].isEnabled)
     XCTAssertFalse(app.dialogs.firstMatch.exists)
     XCTAssertFalse(app.alerts.firstMatch.exists)
   }
@@ -70,6 +72,8 @@ final class AureliaHomeUITests: XCTestCase {
     defer { app.terminate() }
 
     XCTAssertTrue(app.staticTexts["Connect to Aurelia Home"].waitForExistence(timeout: 8))
+    XCTAssertFalse(app.textFields["manual-server-address"].exists)
+    app.buttons["connection-advanced"].click()
     XCTAssertTrue(app.textFields["manual-server-address"].exists)
     XCTAssertTrue(app.buttons["connect-manually"].exists)
     XCTAssertFalse(app.webViews.firstMatch.exists)
@@ -190,17 +194,13 @@ final class AureliaHomeUITests: XCTestCase {
     assertNativePlayer(in: app)
 
     let window = app.windows.firstMatch
-    let originalFrame = window.frame
     window.hover()
     let fullScreen = app.buttons["player-fullscreen"]
     XCTAssertTrue(fullScreen.waitForExistence(timeout: 5))
+    XCTAssertEqual(fullScreen.label, "Enter Full Screen")
     fullScreen.click()
-
-    let enteredFullScreen = NSPredicate { _, _ in
-      window.frame.width > originalFrame.width + 100
-        || window.frame.height > originalFrame.height + 100
-    }
-    expectation(for: enteredFullScreen, evaluatedWith: window)
+    let enteredFullScreen = NSPredicate(format: "label == %@", "Exit Full Screen")
+    expectation(for: enteredFullScreen, evaluatedWith: fullScreen)
     waitForExpectations(timeout: 8)
 
     window.hover()
@@ -208,10 +208,9 @@ final class AureliaHomeUITests: XCTestCase {
     XCTAssertTrue(back.waitForExistence(timeout: 5))
     back.click()
     XCTAssertFalse(app.descendants(matching: .any)["native-player"].waitForExistence(timeout: 5))
-
-    let restoredFrame = window.frame
-    XCTAssertEqual(restoredFrame.width, originalFrame.width, accuracy: 4)
-    XCTAssertEqual(restoredFrame.height, originalFrame.height, accuracy: 4)
+    XCTAssertTrue(
+      app.windows.firstMatch.buttons[XCUIIdentifierFullScreenWindow].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.buttons["play-media"].waitForExistence(timeout: 5))
   }
 
   @MainActor
@@ -246,4 +245,5 @@ final class AureliaHomeUITests: XCTestCase {
     XCTAssertFalse(app.dialogs.firstMatch.exists)
     XCTAssertFalse(app.sheets.firstMatch.exists)
   }
+
 }

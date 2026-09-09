@@ -211,6 +211,38 @@ struct AureliaHomeTests {
   }
 
   @Test
+  func automaticStorageContractsEncodeKindAndReviewDecision() throws {
+    let libraryID = UUID(uuidString: "30000000-0000-0000-0000-000000000001")!
+    let discoveryID = UUID(uuidString: "30000000-0000-0000-0000-000000000002")!
+    let request = CreateLibraryRequest(
+      name: nil,
+      path: "/Volumes/Media",
+      kind: .automatic,
+      combineExisting: false)
+    let requestObject = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+    #expect(requestObject["kind"] as? String == "automatic")
+    #expect(requestObject["name"] == nil)
+
+    let discovery = try JSONDecoder().decode(
+      LibraryDiscoverySummary.self,
+      from: Data(
+        """
+        {
+          "id":"\(discoveryID)",
+          "libraryId":"\(libraryID)",
+          "relativePath":"Home Videos",
+          "detectedTitle":"Home Videos",
+          "suggestedKind":null,
+          "reason":"multiple_unmatched_videos",
+          "decision":"ignore"
+        }
+        """.utf8))
+    #expect(discovery.decision == .ignore)
+    #expect(discovery.relativePath == "Home Videos")
+  }
+
+  @Test
   func nativeHostLaunchHandoffIsPIDBoundAndKeepsItsSecretInAFIFO() throws {
     let fileManager = FileManager.default
     let root = fileManager.temporaryDirectory

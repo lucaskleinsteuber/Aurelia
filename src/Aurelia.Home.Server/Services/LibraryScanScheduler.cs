@@ -2,7 +2,7 @@ using System.Threading.Channels;
 
 namespace Aurelia.Home.Server.Services;
 
-public sealed record QueuedLibraryScan(Guid ScanId, Guid LibraryId);
+public sealed record QueuedLibraryScan(Guid ScanId, Guid LibraryId, string? TargetRelativePath);
 
 public sealed class LibraryScanScheduler
 {
@@ -23,9 +23,12 @@ public sealed class LibraryScanScheduler
         }
     }
 
-    public void Enqueue(Guid scanId, Guid libraryId)
+    public void Enqueue(Guid scanId, Guid libraryId, string? targetRelativePath = null)
     {
-        if (!channel.Writer.TryWrite(new QueuedLibraryScan(scanId, libraryId)))
+        if (!channel.Writer.TryWrite(new QueuedLibraryScan(
+                scanId,
+                libraryId,
+                targetRelativePath)))
         {
             Release(libraryId);
             throw new InvalidOperationException("The library scan queue is unavailable.");

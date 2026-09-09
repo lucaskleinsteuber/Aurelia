@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Aurelia.Home.Contracts;
 using Aurelia.Home.Server.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
@@ -182,6 +183,220 @@ public sealed class MediaLibraryApiTests
         finally
         {
             DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public async Task AutomaticStoragePersistsReviewDecisionsAndKeepsPathsPrivate()
+    {
+        var root = CreateDirectory("Mixed Storage");
+        Touch(root, "Show/Season 1/Show S01E01 Pilot.mkv");
+        Touch(root, "Movie/Movie.mkv");
+        Touch(root, "Tiktok/clip-one.mkv");
+        Touch(root, "Tiktok/clip-two.mp4");
+        try
+        {
+            using var factory = new AureliaHomeServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+
+            using var createRequest = ApiTestClient.Authorized(
+                HttpMethod.Post,
+                "/api/v1/libraries",
+                owner.Token,
+                new CreateLibraryRequest(null, root, LibraryKind.Automatic));
+            using var createResponse = await client.SendAsync(createRequest);
+            Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+            var library = await ApiTestClient.ReadAsync<LibrarySummary>(createResponse);
+            Assert.Equal("Mixed Storage", library.Name);
+            Assert.Equal(LibraryKind.Automatic, library.Kind);
+
+            var firstScan = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+            Assert.Equal(LibraryScanState.Completed, firstScan.State);
+
+            using var discoveriesRequest = ApiTestClient.Authorized(
+                HttpMethod.Get,
+                $"/api/v1/libraries/{library.Id}/discoveries",
+                owner.Token);
+            using var discoveriesResponse = await client.SendAsync(discoveriesRequest);
+            discoveriesResponse.EnsureSuccessStatusCode();
+            var discoveryJson = await discoveriesResponse.Content.ReadAsStringAsync();
+            Assert.DoesNotContain(root, discoveryJson, StringComparison.Ordinal);
+            var discoveries = await ApiTestClient.ReadAsync<List<LibraryDiscoverySummary>>(
+                discoveriesResponse);
+            var tiktok = Assert.Single(discoveries, item => item.RelativePath == "Tiktok");
+            Assert.Null(tiktok.SuggestedKind);
+            Assert.Null(tiktok.Decision);
+
+            using var decideRequest = ApiTestClient.Authorized(
+                HttpMethod.Put,
+                $"/api/v1/libraries/{library.Id}/classification-decisions",
+                owner.Token,
+                new UpdateClassificationDecisionsRequest(
+                    [new ClassificationDecisionUpdate(tiktok.Id, ClassificationDecision.Ignore)]));
+            using var decideResponse = await client.SendAsync(decideRequest);
+            Assert.Equal(HttpStatusCode.Accepted, decideResponse.StatusCode);
+            var rescan = await ApiTestClient.ReadAsync<LibraryScanSummary>(decideResponse);
+            var completed = await WaitForScanAsync(client, owner.Token, rescan.Id);
+            Assert.Equal(LibraryScanState.Completed, completed.State);
+            Assert.Equal(2, completed.FilesDiscovered);
+
+            using var afterRequest = ApiTestClient.Authorized(
+                HttpMethod.Get,
+                $"/api/v1/libraries/{library.Id}/discoveries",
+                owner.Token);
+            using var afterResponse = await client.SendAsync(afterRequest);
+            afterResponse.EnsureSuccessStatusCode();
+            var after = await ApiTestClient.ReadAsync<List<LibraryDiscoverySummary>>(afterResponse);
+            Assert.Equal(
+                ClassificationDecision.Ignore,
+                Assert.Single(after, item => item.Id == tiktok.Id).Decision);
+
+            using var resetRequest = ApiTestClient.Authorized(
+                HttpMethod.Delete,
+                $"/api/v1/libraries/{library.Id}/classification-decisions/{tiktok.Id}",
+                owner.Token);
+            using var resetResponse = await client.SendAsync(resetRequest);
+            Assert.Equal(HttpStatusCode.Accepted, resetResponse.StatusCode);
+            var resetScan = await ApiTestClient.ReadAsync<LibraryScanSummary>(resetResponse);
+            var resetCompleted = await WaitForScanAsync(client, owner.Token, resetScan.Id);
+            Assert.Equal(LibraryScanState.Completed, resetCompleted.State);
+            Assert.Equal(2, resetCompleted.FilesDiscovered);
+
+            using var resetDiscoveriesRequest = ApiTestClient.Authorized(
+                HttpMethod.Get,
+                $"/api/v1/libraries/{library.Id}/discoveries",
+                owner.Token);
+            using var resetDiscoveriesResponse = await client.SendAsync(resetDiscoveriesRequest);
+            resetDiscoveriesResponse.EnsureSuccessStatusCode();
+            var resetDiscoveries = await ApiTestClient.ReadAsync<List<LibraryDiscoverySummary>>(
+                resetDiscoveriesResponse);
+            Assert.Null(Assert.Single(
+                resetDiscoveries,
+                item => item.Id == tiktok.Id).Decision);
+
+            var viewer = await CreateUserAsync(client, owner.Token);
+            var viewerLogin = await LoginAsync(client, viewer.Username, "a secure viewer password");
+            using var forbiddenRequest = ApiTestClient.Authorized(
+                HttpMethod.Get,
+                $"/api/v1/libraries/{library.Id}/discoveries",
+                viewerLogin.Token);
+            using var forbiddenResponse = await client.SendAsync(forbiddenRequest);
+            Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public async Task AutomaticStorageCanAtomicallyCombineExistingLibraries()
+    {
+        var storage = CreateDirectory("Combined Storage");
+        var movieRoot = Path.Combine(storage, "Movies");
+        Directory.CreateDirectory(movieRoot);
+        Touch(movieRoot, "Existing Movie.mkv");
+        try
+        {
+            using var factory = new AureliaHomeServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var oldLibrary = await CreateLibraryAsync(
+                client,
+                owner.Token,
+                movieRoot,
+                LibraryKind.Movies);
+            _ = await StartAndWaitForScanAsync(client, owner.Token, oldLibrary.Id);
+
+            Guid mediaId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaHomeDbContext>();
+                var media = await database.MediaItems.SingleAsync(item => item.Kind == MediaKind.Movie);
+                var user = await database.Users.SingleAsync(item => item.Id == owner.User.Id);
+                mediaId = media.Id;
+                media.OverrideTitle = "My Existing Title";
+                database.PlaybackProgress.Add(new PlaybackProgress
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = owner.User.Id,
+                    User = user,
+                    MediaItemId = media.Id,
+                    MediaItem = media,
+                    PositionMilliseconds = 12_345,
+                    DurationMilliseconds = 90_000,
+                    LastPlayedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                });
+                await database.SaveChangesAsync();
+            }
+
+            using var combineRequest = ApiTestClient.Authorized(
+                HttpMethod.Post,
+                "/api/v1/libraries",
+                owner.Token,
+                new CreateLibraryRequest(null, storage, LibraryKind.Automatic, CombineExisting: true));
+            using var combineResponse = await client.SendAsync(combineRequest);
+            Assert.Equal(HttpStatusCode.Created, combineResponse.StatusCode);
+            var combined = await ApiTestClient.ReadAsync<LibrarySummary>(combineResponse);
+            Assert.Equal(LibraryKind.Automatic, combined.Kind);
+
+            using var verificationScope = factory.Services.CreateScope();
+            var verificationDatabase = verificationScope.ServiceProvider
+                .GetRequiredService<AureliaHomeDbContext>();
+            var library = Assert.Single(await verificationDatabase.LibraryRoots.ToListAsync());
+            Assert.Equal(combined.Id, library.Id);
+            var mediaAfter = Assert.Single(await verificationDatabase.MediaItems.ToListAsync());
+            Assert.Equal(mediaId, mediaAfter.Id);
+            Assert.Equal(combined.Id, mediaAfter.LibraryRootId);
+            Assert.Equal("My Existing Title", mediaAfter.OverrideTitle);
+            var progress = Assert.Single(await verificationDatabase.PlaybackProgress.ToListAsync());
+            Assert.Equal(mediaId, progress.MediaItemId);
+            Assert.Equal(12_345, progress.PositionMilliseconds);
+            var decision = Assert.Single(await verificationDatabase.LibraryDiscoveries.ToListAsync());
+            Assert.Equal("Movies", decision.RelativePath);
+            Assert.Equal(ClassificationDecision.Movie, decision.Decision);
+        }
+        finally
+        {
+            DeleteFixture(storage);
+        }
+    }
+
+    [Fact]
+    public async Task ExistingAutomaticStorageCannotBeCombinedAgain()
+    {
+        var storage = CreateDirectory("Existing Automatic Storage");
+        try
+        {
+            using var factory = new AureliaHomeServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            _ = await CreateLibraryAsync(
+                client,
+                owner.Token,
+                storage,
+                LibraryKind.Automatic);
+
+            using var duplicateRequest = ApiTestClient.Authorized(
+                HttpMethod.Post,
+                "/api/v1/libraries",
+                owner.Token,
+                new CreateLibraryRequest(
+                    null,
+                    storage,
+                    LibraryKind.Automatic,
+                    CombineExisting: true));
+            using var duplicateResponse = await client.SendAsync(duplicateRequest);
+
+            Assert.Equal(HttpStatusCode.Conflict, duplicateResponse.StatusCode);
+            var problem = await ApiTestClient.ReadAsync<ApiProblem>(duplicateResponse);
+            Assert.Equal("libraries_cannot_be_combined", problem.Code);
+        }
+        finally
+        {
+            DeleteFixture(storage);
         }
     }
 
@@ -449,7 +664,8 @@ public sealed class MediaLibraryApiTests
             LibraryKind kind,
             IReadOnlyList<Aurelia.Home.Server.Services.ExistingEpisodeBinding> existingEpisodes,
             Action<int>? progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IReadOnlyList<Aurelia.Home.Server.Services.ExistingClassificationDecision>? classificationDecisions = null)
         {
             Started.Set();
             Release.Wait(cancellationToken);

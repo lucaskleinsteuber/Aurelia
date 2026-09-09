@@ -2,8 +2,11 @@
 
 Aurelia Home is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to a native macOS library and playback client. Build 7
+and connects securely to a native macOS library and playback client. Build 8
 can host the complete server on this Mac or remain a client of another server.
+People choose whole storage locations instead of separating movie and TV
+folders themselves; Aurelia Home classifies clear structures locally and asks
+only about ambiguous folders.
 It has no browser interface and the native client is not a web wrapper.
 An optional responsive web client may be added later for devices without a
 native app.
@@ -23,7 +26,7 @@ native app.
 - One-time local owner setup
 - Owner, administrator, and user roles
 - Password login, revocable device sessions, and one-time pairing codes
-- Explicit movie and TV library roots with safe manual scans
+- Automatic storage locations with safe manual scans and persistent review decisions
 - Local filename parsing for movies, seasons, episodes, extras, and trailers
 - Stable catalog IDs, missing-file state, and offline-drive protection
 - Authenticated paged movie and series catalog APIs
@@ -44,7 +47,8 @@ native app.
 - In-app choice between hosting on this Mac and connecting to another server
 - Separately signed, windowless host helper with both self-contained server architectures
 - Automatic server start while the host app runs, bounded private logs, and crash recovery
-- Native owner setup, local login, library management, scan status, pairing, and sessions
+- Simple local setup with one password, storage selection, background scan status,
+  pairing, and sessions
 - Bonjour server discovery and manual server addresses
 - Human-verified certificate pinning during one-time pairing
 - Device token and server identity stored in the macOS Keychain
@@ -71,6 +75,7 @@ dotnet run --project src/Aurelia.Home.Server -- run
 ```
 
 Build and test the Mac client with the checked-in Xcode project. The build-number
+check keeps the server and app bundle on the same release number:
 
 ```sh
 scripts/verify-build-number.sh
@@ -128,15 +133,15 @@ CLI session is revoked afterward:
 
 ```sh
 dotnet run --project src/Aurelia.Home.Server -- library add \
-  --kind tv --path "/Media/TV Shows" --name "TV Shows" --username lucas
+  --kind automatic --path "/Volumes/Media" --username lucas
 
 dotnet run --project src/Aurelia.Home.Server -- library list --username lucas
 dotnet run --project src/Aurelia.Home.Server -- library scan --all --username lucas
 ```
 
-Use `--kind movies` for a movie library. Removing a library requires its ID and
-the explicit `--yes` flag; it removes database records only and never touches
-media files.
+Advanced users may still use `--kind movies` or `--kind tv` for a fixed library.
+Removing a library requires its ID and the explicit `--yes` flag; it removes
+database records only and never touches media files.
 
 Scans recognize MKV, MP4, MOV, M4V, AVI, and WebM. They read directory entries,
 file sizes, and modification times only. Hidden files, AppleDouble files,
@@ -147,6 +152,8 @@ An authenticated client requests a twelve-hour, single-file playback URL with
 and `HEAD`, including byte ranges for seeking. It contains a dedicated playback
 ticket rather than the long-lived device token. Online metadata, artwork,
 transcoding, and automatic file watchers are not part of the current build.
+Automatic classification stays local and uses only the same filesystem facts
+as the scanner.
 
 The Mac app gives VLCKit a random loopback URL. Its internal relay validates
 that URL, forwards only GET/HEAD and byte-range requests over the already pinned
@@ -162,12 +169,15 @@ incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
 
-For normal Build 7 use, launch Aurelia Home and choose **Host on This Mac**.
+For normal Build 8 use, launch Aurelia Home and choose **Set Up This Mac**.
 The native assistant creates the owner, enables LAN HTTPS, and lets the owner
-select only the media folders they explicitly want to add. Closing the last
+select one or more drives or folders. Technical server and port settings remain
+under Advanced. Clear movie and TV structures are classified automatically;
+uncertain folders can be marked Movie, TV Show, or Ignore and reviewed again
+later. Closing the last
 window leaves the app and its server running; clicking the Dock icon restores
 the window. Choosing **Aurelia Home > Quit Aurelia Home** stops both cleanly.
-Existing Build 6 connections remain in client mode after upgrading.
+Existing client connections remain in client mode after upgrading.
 
 The sandboxed app starts its separately signed host helper through Launch
 Services. A versioned launch description is bound to the exact running app PID

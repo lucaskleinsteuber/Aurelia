@@ -163,12 +163,51 @@ struct APIClient: Sendable {
     try await get("/api/v1/libraries")
   }
 
-  func createLibrary(name: String, path: String, kind: LibraryKind) async throws
+  func createLibrary(
+    name: String? = nil,
+    path: String,
+    kind: LibraryKind = .automatic,
+    combineExisting: Bool = false
+  ) async throws
     -> LibrarySummary
   {
-    let body = try JSONEncoder().encode(CreateLibraryRequest(name: name, path: path, kind: kind))
+    let body = try JSONEncoder().encode(
+      CreateLibraryRequest(
+        name: name,
+        path: path,
+        kind: kind,
+        combineExisting: combineExisting))
     let data = try await perform(path: "/api/v1/libraries", method: "POST", body: body)
     return try Self.decode(LibrarySummary.self, from: data)
+  }
+
+  func libraryDiscoveries(id: UUID) async throws -> [LibraryDiscoverySummary] {
+    try await get("/api/v1/libraries/\(id.uuidString.lowercased())/discoveries")
+  }
+
+  func updateClassification(
+    libraryId: UUID,
+    discoveryId: UUID,
+    decision: ClassificationDecision
+  ) async throws -> LibraryScanSummary {
+    let body = try JSONEncoder().encode(
+      UpdateClassificationDecisionsRequest(
+        decisions: [ClassificationDecisionUpdate(discoveryId: discoveryId, decision: decision)]))
+    let data = try await perform(
+      path: "/api/v1/libraries/\(libraryId.uuidString.lowercased())/classification-decisions",
+      method: "PUT",
+      body: body)
+    return try Self.decode(LibraryScanSummary.self, from: data)
+  }
+
+  func resetClassification(libraryId: UUID, discoveryId: UUID) async throws
+    -> LibraryScanSummary
+  {
+    let data = try await perform(
+      path:
+        "/api/v1/libraries/\(libraryId.uuidString.lowercased())/classification-decisions/\(discoveryId.uuidString.lowercased())",
+      method: "DELETE")
+    return try Self.decode(LibraryScanSummary.self, from: data)
   }
 
   func removeLibrary(id: UUID) async throws {

@@ -9,6 +9,7 @@ struct PlayerView: View {
   @State private var scrubPosition: Double = 0
   @State private var hideTask: Task<Void, Never>?
   @State private var windowPresentation = PlayerWindowPresentation()
+  @State private var isNativeFullScreen = false
 
   init(profile: StoredServerProfile, presentation: PlaybackPresentation) {
     _controller = StateObject(
@@ -49,6 +50,20 @@ struct PlayerView: View {
       PlaybackShutdownCoordinator.shared.unregister(controller)
       windowPresentation.restore()
       Task { await controller.shutdown() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) {
+      notification in
+      guard let window = notification.object as? NSWindow,
+        window === windowPresentation.window
+      else { return }
+      isNativeFullScreen = true
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) {
+      notification in
+      guard let window = notification.object as? NSWindow,
+        window === windowPresentation.window
+      else { return }
+      isNativeFullScreen = false
     }
   }
 
@@ -154,7 +169,10 @@ struct PlayerView: View {
 
             Spacer()
 
-            controlButton("Toggle Full Screen", systemImage: "arrow.up.left.and.arrow.down.right") {
+            controlButton(
+              isNativeFullScreen ? "Exit Full Screen" : "Enter Full Screen",
+              systemImage: "arrow.up.left.and.arrow.down.right"
+            ) {
               windowPresentation.window?.toggleFullScreen(nil)
             }
             .accessibilityIdentifier("player-fullscreen")
