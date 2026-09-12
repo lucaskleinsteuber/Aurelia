@@ -65,6 +65,8 @@ public static class ApiEndpointMappings
         catalog.MapGet("/movies/{movieId:guid}", GetMovieAsync);
         catalog.MapGet("/series", ListSeriesAsync);
         catalog.MapGet("/series/{seriesId:guid}", GetSeriesAsync);
+        catalog.MapGet("/items", ListCatalogItemsAsync);
+        catalog.MapGet("/items/{mediaId:guid}", GetCatalogDetailAsync);
         catalog.MapGet("/search", SearchCatalogAsync);
         catalog.MapGet("/collections", ListCollectionsAsync);
 
@@ -453,6 +455,12 @@ public static class ApiEndpointMappings
     private static Task<IResult> SearchCatalogAsync(HttpContext context, string? query, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.SearchAsync(context.User.RequireUserId(), query ?? string.Empty, offset ?? 0, limit ?? 100, cancellationToken));
 
+    private static Task<IResult> ListCatalogItemsAsync(HttpContext context, string? kind, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.CatalogAsync(context.User.RequireUserId(), ParseCatalogKind(kind), offset ?? 0, limit ?? 100, cancellationToken));
+
+    private static Task<IResult> GetCatalogDetailAsync(HttpContext context, Guid mediaId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.DetailAsync(context.User.RequireUserId(), mediaId, cancellationToken));
+
     private static Task<IResult> ListCollectionsAsync(HttpContext context, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.CollectionsAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 100, cancellationToken));
 
@@ -516,6 +524,16 @@ public static class ApiEndpointMappings
 
     private static Task<IResult> SetFavoriteAsync(HttpContext context, Guid mediaId, SetFavoriteRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.SetFavoriteAsync(context.User.RequireUserId(), mediaId, request.IsFavorite, cancellationToken));
+
+    private static MediaKind? ParseCatalogKind(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (Enum.TryParse<MediaKind>(value, ignoreCase: true, out var kind)) return kind;
+        throw new MetadataException(
+            "invalid_catalog_kind",
+            "Catalog kind must be movie or series.",
+            StatusCodes.Status400BadRequest);
+    }
 
     private static async Task<IResult> ArtworkAsync(HttpContext context, Guid artworkId, ArtworkStore artwork, AureliaHomeDbContext database, CancellationToken cancellationToken)
     {

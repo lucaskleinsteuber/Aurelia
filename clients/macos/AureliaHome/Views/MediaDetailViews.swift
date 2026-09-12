@@ -1,260 +1,430 @@
 import SwiftUI
 
-struct MovieDetailView: View {
+struct MediaDetailView: View {
   @EnvironmentObject private var model: AppModel
-  let movieId: UUID
+  let mediaId: UUID
   let onBack: () -> Void
-  @State private var detail: MovieDetailResponse?
+  @State private var detail: CatalogDetailPresentation?
   @State private var errorMessage: String?
+  @State private var selectedSeason: Int?
+  @State private var showingMetadataEditor = false
+  @State private var showingMatchEditor = false
 
   var body: some View {
-    detailPage {
+    ScrollView {
       if let detail {
-        VStack(alignment: .leading, spacing: AureliaHomeDesign.sectionSpacing) {
-          detailHeader(
-            title: detail.title,
-            subtitle: detail.year.map(String.init),
-            availability: detail.availability,
-            symbol: "film")
-          Button {
-            model.startPlayback(mediaId: detail.id, title: detail.title)
-          } label: {
-            Label("Play", systemImage: "play.fill")
-              .font(.headline)
-              .padding(.horizontal, 8)
+        LazyVStack(alignment: .leading, spacing: 34) {
+          DetailHero(
+            detail: detail,
+            onBack: onBack,
+            onPlay: { playPrimary(detail) },
+            onFavorite: {
+              Task {
+                if await model.setFavorite(
+                  mediaId: detail.item.id, isFavorite: !detail.item.isFavorite)
+                {
+                  await load()
+                }
+              }
+            },
+            onEdit: model.profile?.user?.role.canManageLibraries == true
+              ? { showingMetadataEditor = true } : nil,
+            onMatch: model.profile?.user?.role.canManageLibraries == true
+              ? { showingMatchEditor = true } : nil)
+
+          if !detail.seasons.isEmpty {
+            seasons(detail)
           }
-          .buttonStyle(.borderedProminent)
-          .controlSize(.large)
-          .disabled(detail.availability != .available)
-          .accessibilityIdentifier("play-media")
-          supplementSection(detail.supplements) { supplement in
-            model.startPlayback(
-              mediaId: supplement.id,
-              title: supplement.title,
-              subtitle: detail.title)
-          }
+          supplementSection(detail.supplements, parentTitle: detail.item.title)
+          credits(detail.metadata.credits)
+          about(detail)
         }
+        .padding(.bottom, 48)
       } else if let errorMessage {
         ContentUnavailableView(
-          "Movie Unavailable",
+          "Media Unavailable",
           systemImage: "exclamationmark.triangle",
-          description: Text(errorMessage))
+          description: Text(errorMessage)
+        )
+        .frame(maxWidth: .infinity, minHeight: 420)
+        .padding(AureliaHomeDesign.pagePadding)
       } else {
-        ProgressView("Loading movie…")
-          .frame(maxWidth: .infinity, minHeight: 360)
+        VStack(alignment: .leading, spacing: 20) {
+          RoundedRectangle(cornerRadius: AureliaHomeDesign.heroRadius)
+            .fill(.white.opacity(0.055)).frame(height: 500)
+          ProgressView("Loading details…")
+        }
+        .padding(.bottom, 40)
       }
     }
-    .task(id: movieId) {
-      do {
-        detail = try await model.movieDetail(id: movieId)
-      } catch {
-        errorMessage = error.localizedDescription
+    .scrollIndicators(.visible)
+    .accessibilityIdentifier("media-detail-scroll")
+    .task(id: mediaId) { await load() }
+    .sheet(isPresented: $showingMetadataEditor) {
+      if let detail {
+        MetadataEditorSheet(metadata: detail.metadata) { await load() }
+          .environmentObject(model)
+      }
+    }
+    .sheet(isPresented: $showingMatchEditor) {
+      if let detail {
+        MetadataMatchSheet(metadata: detail.metadata) { await load() }
+          .environmentObject(model)
       }
     }
   }
 
-  private func detailPage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-    ScrollView {
-      content()
-        .padding(AureliaHomeDesign.pagePadding)
-        .frame(maxWidth: 920, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
+  private func load() async {
+    do {
+      detail = try await model.catalogDetail(id: mediaId)
+      selectedSeason = selectedSeason ?? detail?.seasons.first?.number
+      errorMessage = nil
+    } catch {
+      if detail == nil { errorMessage = error.localizedDescription }
     }
-    .background(AureliaHomeBackdrop())
-    .toolbar {
-      ToolbarItem(placement: .navigation) {
-        Button(action: onBack) {
-          Label("Back", systemImage: "chevron.left")
+  }
+
+  private func playPrimary(_ detail: CatalogDetailPresentation) {
+    if detail.item.kind == .movie {
+      model.startPlayback(mediaId: detail.item.id, title: detail.item.title)
+    } else if let episode = detail.seasons.first?.episodes.first {
+      play(episode, seriesTitle: detail.item.title)
+    }
+  }
+
+  private func play(_ episode: EpisodePresentation, seriesTitle: String) {
+    model.startPlayback(
+      mediaId: episode.item.id,
+      title: episode.item.title,
+      subtitle:
+        "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))"
+    )
+  }
+
+  private func seasons(_ detail: CatalogDetailPresentation) -> some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack {
+        Picker(
+          "Season",
+          selection: Binding(
+            get: { selectedSeason ?? detail.seasons.first?.number ?? 0 },
+            set: { selectedSeason = $0 })
+        ) {
+          ForEach(detail.seasons) { season in Text("Season \(season.number)").tag(season.number) }
+        }
+        .pickerStyle(.menu)
+        .font(AureliaHomeDesign.sectionTitle)
+        .accessibilityIdentifier("season-\(selectedSeason ?? detail.seasons.first?.number ?? 0)")
+        Spacer()
+        if let season = activeSeason(detail) {
+          Text("\(season.episodes.count) episodes").font(.callout).foregroundStyle(.secondary)
+        }
+      }
+      .padding(.horizontal, AureliaHomeDesign.pagePadding)
+
+      if let season = activeSeason(detail) {
+        ScrollView(.horizontal, showsIndicators: false) {
+          LazyHStack(alignment: .top, spacing: 20) {
+            ForEach(season.episodes) { episode in
+              Button {
+                play(episode, seriesTitle: detail.item.title)
+              } label: {
+                EpisodeCard(episode: episode)
+              }
+              .buttonStyle(.plain)
+              .disabled(episode.item.availability != .available)
+              .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
+            }
+          }
+          .padding(.horizontal, AureliaHomeDesign.pagePadding)
+          .padding(.vertical, 4)
+        }
+        supplementSection(
+          season.supplements,
+          parentTitle: "\(detail.item.title) · Season \(season.number)")
+      }
+    }
+  }
+
+  private func activeSeason(_ detail: CatalogDetailPresentation) -> SeasonPresentation? {
+    detail.seasons.first { $0.number == selectedSeason } ?? detail.seasons.first
+  }
+
+  @ViewBuilder
+  private func supplementSection(
+    _ supplements: [SupplementPresentation],
+    parentTitle: String
+  ) -> some View {
+    if !supplements.isEmpty {
+      VStack(alignment: .leading, spacing: 14) {
+        Text("Trailers & Extras").font(AureliaHomeDesign.sectionTitle)
+          .padding(.horizontal, AureliaHomeDesign.pagePadding)
+        ScrollView(.horizontal, showsIndicators: false) {
+          LazyHStack(spacing: 20) {
+            ForEach(supplements) { supplement in
+              Button {
+                model.startPlayback(
+                  mediaId: supplement.item.id,
+                  title: supplement.item.title,
+                  subtitle: parentTitle)
+              } label: {
+                ZStack {
+                  LandscapeMediaCard(
+                    item: supplement.item, width: 360, eyebrow: supplement.category)
+                  Image(systemName: "play.fill")
+                    .font(.title2)
+                    .frame(width: 50, height: 50)
+                    .background(.ultraThinMaterial, in: Circle())
+                }
+              }
+              .buttonStyle(.plain)
+              .disabled(supplement.item.availability != .available)
+              .accessibilityIdentifier("supplement-\(supplement.id.uuidString)")
+            }
+          }
+          .padding(.horizontal, AureliaHomeDesign.pagePadding)
+          .padding(.vertical, 4)
         }
       }
     }
+  }
+
+  @ViewBuilder
+  private func credits(_ values: [CreditSummary]) -> some View {
+    if !values.isEmpty {
+      VStack(alignment: .leading, spacing: 16) {
+        Text("Cast & Crew").font(AureliaHomeDesign.sectionTitle)
+          .padding(.horizontal, AureliaHomeDesign.pagePadding)
+        ScrollView(.horizontal, showsIndicators: false) {
+          LazyHStack(alignment: .top, spacing: 30) {
+            ForEach(values.sorted { $0.order < $1.order }) { credit in
+              VStack(spacing: 8) {
+                AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
+                  .frame(width: 112, height: 112)
+                  .clipShape(Circle())
+                  .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 1) }
+                Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
+                Text(credit.job ?? credit.department).font(.caption).foregroundStyle(.secondary)
+                if let character = credit.character {
+                  Text(character).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                }
+              }
+              .frame(width: 132)
+            }
+          }
+          .padding(.horizontal, AureliaHomeDesign.pagePadding)
+          .padding(.vertical, 4)
+        }
+      }
+      .accessibilityIdentifier("cast-and-crew")
+    }
+  }
+
+  private func about(_ detail: CatalogDetailPresentation) -> some View {
+    VStack(alignment: .leading, spacing: 22) {
+      if let overview = detail.metadata.overview, !overview.isEmpty {
+        VStack(alignment: .leading, spacing: 9) {
+          Text("About \(detail.metadata.title)").font(AureliaHomeDesign.sectionTitle)
+          Text(overview).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      Text("Information").font(AureliaHomeDesign.sectionTitle)
+      Grid(alignment: .leading, horizontalSpacing: 54, verticalSpacing: 20) {
+        GridRow {
+          InfoValue(
+            title: "Released",
+            value: detail.metadata.releaseDate ?? detail.metadata.year.map(String.init))
+          InfoValue(title: "Runtime", value: detail.metadata.runtimeMinutes.map { "\($0) min" })
+          InfoValue(title: "Content Rating", value: detail.metadata.contentRating)
+        }
+        GridRow {
+          InfoValue(title: "Studio", value: detail.metadata.studios.first)
+          InfoValue(title: "Country", value: detail.metadata.countries.joined(separator: ", "))
+          InfoValue(title: "Genres", value: detail.metadata.genres.joined(separator: ", "))
+        }
+        if !detail.seasons.isEmpty {
+          GridRow {
+            InfoValue(title: "Seasons", value: String(detail.seasons.count))
+            InfoValue(
+              title: "Episodes",
+              value: String(detail.seasons.reduce(0) { $0 + $1.episodes.count }))
+            InfoValue(title: "Original Title", value: detail.metadata.originalTitle)
+          }
+        }
+      }
+    }
+    .padding(.horizontal, AureliaHomeDesign.pagePadding)
+    .frame(maxWidth: 1040, alignment: .leading)
+    .accessibilityIdentifier("media-information")
   }
 }
 
-struct SeriesDetailView: View {
-  @EnvironmentObject private var model: AppModel
-  let seriesId: UUID
+private struct DetailHero: View {
+  let detail: CatalogDetailPresentation
   let onBack: () -> Void
-  @State private var detail: SeriesDetailResponse?
-  @State private var errorMessage: String?
+  let onPlay: () -> Void
+  let onFavorite: () -> Void
+  let onEdit: (() -> Void)?
+  let onMatch: (() -> Void)?
 
   var body: some View {
-    ScrollView {
-      Group {
-        if let detail {
-          VStack(alignment: .leading, spacing: AureliaHomeDesign.sectionSpacing) {
-            detailHeader(
-              title: detail.title,
-              subtitle: "\(detail.seasons.count) seasons",
-              availability: detail.availability,
-              symbol: "tv")
-            supplementSection(detail.supplements) { supplement in
-              model.startPlayback(
-                mediaId: supplement.id,
-                title: supplement.title,
-                subtitle: detail.title)
-            }
-            ForEach(detail.seasons) { season in
-              seasonSection(season, seriesTitle: detail.title)
-            }
+    ZStack(alignment: .bottomLeading) {
+      AuthenticatedArtwork(
+        artwork: detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop,
+        symbol: detail.item.kind == .movie ? "film.fill" : "tv.fill",
+        extendsBlurredEdges: true)
+      LinearGradient(
+        colors: [.black.opacity(0.84), .black.opacity(0.18), .clear],
+        startPoint: .leading,
+        endPoint: .trailing)
+      LinearGradient(
+        colors: [.clear, AureliaHomeDesign.canvas.opacity(0.12), AureliaHomeDesign.canvas],
+        startPoint: .top,
+        endPoint: .bottom)
+
+      VStack(alignment: .leading, spacing: 12) {
+        Text(metadataLine).font(.caption.weight(.bold)).tracking(1).foregroundStyle(
+          .white.opacity(0.74))
+        Text(detail.metadata.title).font(AureliaHomeDesign.heroTitle).lineLimit(2)
+        if let original = detail.metadata.originalTitle, original != detail.metadata.title {
+          Text(original).font(.title3).foregroundStyle(.white.opacity(0.7))
+        }
+        if !detail.metadata.genres.isEmpty {
+          Text(detail.metadata.genres.prefix(3).joined(separator: "  ·  "))
+            .font(.callout.weight(.semibold)).foregroundStyle(.white.opacity(0.78))
+        }
+        if let overview = detail.metadata.overview {
+          Text(overview)
+            .lineLimit(3)
+            .multilineTextAlignment(.leading)
+            .foregroundStyle(.white.opacity(0.82))
+            .frame(maxWidth: 620, alignment: .leading)
+        }
+        HStack(spacing: 10) {
+          Button(action: onPlay) {
+            Label(detail.item.progressFraction == nil ? "Play" : "Resume", systemImage: "play.fill")
+              .font(.headline).padding(.horizontal, 5)
           }
-        } else if let errorMessage {
-          ContentUnavailableView(
-            "TV Show Unavailable",
-            systemImage: "exclamationmark.triangle",
-            description: Text(errorMessage))
-        } else {
-          ProgressView("Loading TV show…")
-            .frame(maxWidth: .infinity, minHeight: 360)
+          .buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black).controlSize(.large)
+          .disabled(
+            detail.item.availability != .available
+              || (detail.item.kind == .series && detail.seasons.isEmpty)
+          )
+          .accessibilityIdentifier("play-media")
+          Button(action: onFavorite) {
+            Label(
+              detail.item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+              systemImage: detail.item.isFavorite ? "star.fill" : "star")
+          }
+          .buttonStyle(.bordered).controlSize(.large)
+          AvailabilityBadge(availability: detail.item.availability)
         }
       }
       .padding(AureliaHomeDesign.pagePadding)
-      .frame(maxWidth: 920, alignment: .leading)
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    .background(AureliaHomeBackdrop())
-    .toolbar {
-      ToolbarItem(placement: .navigation) {
-        Button(action: onBack) {
-          Label("Back", systemImage: "chevron.left")
+      .padding(.bottom, 16)
+
+      VStack {
+        HStack {
+          Button(action: onBack) {
+            Image(systemName: "chevron.left").font(.headline).frame(width: 44, height: 44)
+              .background(.ultraThinMaterial, in: Circle())
+          }
+          .buttonStyle(.plain).accessibilityLabel("Back")
+          Spacer()
+          if onEdit != nil || onMatch != nil {
+            Menu {
+              if let onEdit { Button("Edit Metadata", action: onEdit) }
+              if let onMatch { Button("Find Metadata Match", action: onMatch) }
+            } label: {
+              Image(systemName: "ellipsis").font(.headline).frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+            }
+            .menuStyle(.borderlessButton)
+            .accessibilityLabel("More Actions")
+            .accessibilityIdentifier("media-actions")
+          }
         }
+        .padding(AureliaHomeDesign.pagePadding)
+        Spacer()
       }
     }
-    .task(id: seriesId) {
-      do {
-        detail = try await model.seriesDetail(id: seriesId)
-      } catch {
-        errorMessage = error.localizedDescription
-      }
-    }
+    .frame(height: 500)
+    .clipShape(
+      UnevenRoundedRectangle(
+        bottomLeadingRadius: AureliaHomeDesign.heroRadius,
+        bottomTrailingRadius: AureliaHomeDesign.heroRadius)
+    )
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("media-hero")
   }
 
-  private func seasonSection(_ season: SeasonSummary, seriesTitle: String) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Season \(season.number)")
-        .font(AureliaHomeDesign.sectionTitle)
-        .accessibilityIdentifier("season-\(season.number)")
-      VStack(spacing: 0) {
-        ForEach(Array(season.episodes.enumerated()), id: \.element.id) { index, episode in
-          Button {
-            model.startPlayback(
-              mediaId: episode.id,
-              title: episode.title,
-              subtitle: "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))")
-          } label: {
-            HStack(spacing: 14) {
-              Text("\(episode.episodeNumber)")
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .trailing)
-              Text(episode.title)
-                .frame(maxWidth: .infinity, alignment: .leading)
-              if episode.availability == .available {
-                Image(systemName: "play.fill")
-                  .foregroundStyle(.secondary)
-              }
-              AvailabilityBadge(availability: episode.availability)
-            }
-            .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          .disabled(episode.availability != .available)
-          .padding(.vertical, 12)
-          .accessibilityIdentifier(
-            "episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
-          if index < season.episodes.count - 1 {
-            Divider()
-          }
-        }
-      }
-      .padding(.horizontal, 16)
-      .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 16))
-      supplementSection(season.supplements) { supplement in
-        model.startPlayback(
-          mediaId: supplement.id,
-          title: supplement.title,
-          subtitle: "\(seriesTitle) · Season \(season.number)")
-      }
-    }
+  private var metadataLine: String {
+    var values = [detail.item.kind == .movie ? "MOVIE" : "TV SHOW"]
+    if let year = detail.metadata.year { values.append(String(year)) }
+    if let runtime = detail.metadata.runtimeMinutes { values.append("\(runtime) MIN") }
+    if let rating = detail.metadata.contentRating { values.append(rating.uppercased()) }
+    return values.joined(separator: "  ·  ")
   }
 }
 
-@ViewBuilder
-@MainActor
-private func detailHeader(
-  title: String,
-  subtitle: String?,
-  availability: MediaAvailability,
-  symbol: String
-) -> some View {
-  HStack(alignment: .top, spacing: 24) {
-    ZStack {
-      RoundedRectangle(cornerRadius: 20)
-        .fill(.white.opacity(0.08))
-      Image(systemName: symbol)
-        .font(.system(size: 46, weight: .light))
-        .foregroundStyle(.white.opacity(0.72))
-    }
-    .frame(width: 150, height: 225)
-
-    VStack(alignment: .leading, spacing: 10) {
-      Text(title)
-        .font(.system(size: 38, weight: .bold))
-        .fixedSize(horizontal: false, vertical: true)
-        .textSelection(.enabled)
-      if let subtitle {
-        Text(subtitle)
-          .font(.title3)
-          .foregroundStyle(.secondary)
-      }
-      AvailabilityBadge(availability: availability)
-    }
-    .fixedSize(horizontal: false, vertical: true)
-    .frame(minHeight: 225, alignment: .top)
-    .layoutPriority(1)
-  }
-}
-
-@ViewBuilder
-@MainActor
-private func supplementSection(
-  _ supplements: [SupplementSummary],
-  onPlay: @escaping (SupplementSummary) -> Void
-) -> some View {
-  if !supplements.isEmpty {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Extras")
-        .font(AureliaHomeDesign.sectionTitle)
-      ForEach(supplements) { supplement in
-        Button {
-          onPlay(supplement)
-        } label: {
-          HStack(spacing: 12) {
-            Image(systemName: supplement.kind == .trailer ? "play.rectangle" : "sparkles.tv")
-              .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-              Text(supplement.title)
-              if !supplement.category.isEmpty {
-                Text(supplement.category)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
-            }
+private struct EpisodeCard: View {
+  let episode: EpisodePresentation
+  var body: some View {
+    ZStack(alignment: .bottomLeading) {
+      AuthenticatedArtwork(
+        artwork: episode.item.backdrop ?? episode.item.poster,
+        symbol: "play.rectangle")
+      LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
+      VStack(alignment: .leading, spacing: 5) {
+        Text("EPISODE \(episode.episodeNumber)").font(.caption2.weight(.bold)).tracking(1.2)
+        Text(episode.item.title).font(.headline).lineLimit(1)
+        if let overview = episode.item.overview {
+          Text(overview).font(.caption).foregroundStyle(.white.opacity(0.72)).lineLimit(2)
+        }
+        HStack {
+          Text(episode.item.year.map(String.init) ?? "Episode").font(.caption)
+          Spacer()
+          AvailabilityBadge(availability: episode.item.availability)
+        }
+      }.padding(16)
+      if let progress = episode.item.progressFraction {
+        GeometryReader { geometry in
+          VStack {
             Spacer()
-            if supplement.availability == .available {
-              Image(systemName: "play.fill")
-                .foregroundStyle(.secondary)
-            }
-            AvailabilityBadge(availability: supplement.availability)
+            Capsule().fill(.white).frame(width: geometry.size.width * progress, height: 4)
           }
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(supplement.availability != .available)
-        .accessibilityIdentifier("supplement-\(supplement.id.uuidString)")
-        .padding(14)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
+        }.padding(.horizontal, 10).padding(.bottom, 7)
       }
     }
+    .frame(width: 420, height: 236)
+    .clipShape(RoundedRectangle(cornerRadius: AureliaHomeDesign.cardRadius))
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaHomeDesign.cardRadius).stroke(.white.opacity(0.1))
+    }
   }
+}
+
+private struct InfoValue: View {
+  let title: String
+  let value: String?
+  var body: some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text(title).font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+      Text(value?.isEmpty == false ? value! : "—").foregroundStyle(.secondary).lineLimit(2)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+// Compatibility entry points retained for older navigation tests.
+struct MovieDetailView: View {
+  let movieId: UUID
+  let onBack: () -> Void
+  var body: some View { MediaDetailView(mediaId: movieId, onBack: onBack) }
+}
+
+struct SeriesDetailView: View {
+  let seriesId: UUID
+  let onBack: () -> Void
+  var body: some View { MediaDetailView(mediaId: seriesId, onBack: onBack) }
 }

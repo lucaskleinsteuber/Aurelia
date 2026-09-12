@@ -2,7 +2,7 @@
 
 Aurelia Home is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to a native macOS library and playback client. Build 9
+and connects securely to a native macOS library and playback client. Build 10
 can host the complete server on this Mac or remain a client of another server.
 People choose whole storage locations instead of separating movie and TV
 folders themselves; Aurelia Home classifies clear structures locally and asks
@@ -44,11 +44,25 @@ native app.
 - Optional TMDB metadata with cautious matching and an explicit review queue
 - Authenticated artwork, cast and crew, collections, favorites, catalog search,
   and per-user Home data with an hourly stable recommendation
+- Compact presentation endpoints for paged movie/series cards and bundled
+  details, with episode search context and no source paths in responses
 
 ## Current Mac client
 
 - Native SwiftUI application for macOS 26 and newer
 - Universal Apple Silicon and Intel executable
+- A unified dark Apple TV/macOS 26 presentation across Home, Library, details,
+  setup, settings, editors, and playback
+- A transparent 236-point sidebar with content extending beneath it and no
+  artificial title strip
+- Hourly stable Home recommendations, Continue Watching, genre rows,
+  favorites, collections, and Recently Added
+- Artwork-rich movie, TV show, collection, season, episode, supplement,
+  cast/crew, About, and information views with resilient placeholders
+- Structured title, original-title, genre, person, series, season, and episode
+  search; episode results open Direct Play immediately
+- One consistent native sheet family for metadata, provider matching, review,
+  and collection editing, restricted to owners and administrators
 - In-app choice between hosting on this Mac and connecting to another server
 - Separately signed, windowless host helper with both self-contained server architectures
 - Automatic server start while the host app runs, bounded private logs, and crash recovery
@@ -64,8 +78,8 @@ native app.
   and descriptive audio/subtitle track selection
 - Automatic resume and regular server-side watch-progress updates
 - No WebView and no local catalog or media cache
-- A compact Advanced control for enabling metadata, starting enrichment, and
-  pruning unused artwork; the full presentation redesign is reserved for Build 10
+- Memory-bounded authenticated artwork loading through the certificate-pinned
+  API session, with request coalescing, cancellation, and no persistent client cache
 
 ## Development
 
@@ -193,7 +207,7 @@ incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
 
-For normal Build 9 use, launch Aurelia Home and choose **Set Up This Mac**.
+For normal Build 10 use, launch Aurelia Home and choose **Set Up This Mac**.
 The native assistant creates the owner, enables LAN HTTPS, and lets the owner
 select one or more drives or folders. Technical server and port settings remain
 under Advanced. Clear movie and TV structures are classified automatically;

@@ -19,7 +19,7 @@ struct ConnectionView: View {
 
         VStack(spacing: 9) {
           Text("Connect to Aurelia Home")
-            .font(.system(size: 32, weight: .bold))
+            .font(AureliaHomeDesign.pageTitle)
           Text("Find your server, verify it once, and keep your library private.")
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
@@ -46,6 +46,7 @@ struct ConnectionView: View {
     }
     .onAppear { browser.start() }
     .onDisappear { browser.stop() }
+    .background(AureliaHomeBackdrop())
   }
 
   private var discoveryCard: some View {
@@ -126,7 +127,11 @@ struct ConnectionView: View {
       }
     }
     .padding(22)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AureliaHomeDesign.cardRadius))
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaHomeDesign.cardRadius)
+        .stroke(.white.opacity(0.08), lineWidth: 1)
+    }
   }
 
   private func verificationCard(_ inspected: InspectedServer) -> some View {
@@ -194,7 +199,7 @@ struct ConnectionView: View {
       .accessibilityIdentifier("pair-this-mac")
     }
     .padding(22)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AureliaHomeDesign.cardRadius))
   }
 
   private func connectManually() {

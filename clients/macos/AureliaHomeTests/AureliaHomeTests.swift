@@ -116,7 +116,8 @@ struct AureliaHomeTests {
   func relayParserAcceptsOnlyTheSecretLoopbackPlaybackShape() throws {
     let secret = "test-secret"
     let request = Data(
-      "GET /stream/\(secret) HTTP/1.1\r\nHost: 127.0.0.1:54321\r\nRange: bytes=10-20\r\nIf-Range: test-etag\r\n\r\n".utf8)
+      "GET /stream/\(secret) HTTP/1.1\r\nHost: 127.0.0.1:54321\r\nRange: bytes=10-20\r\nIf-Range: test-etag\r\n\r\n"
+        .utf8)
     #expect(
       try LoopbackStreamRelay.parseRequest(request, secret: secret)
         == RelayRequest(method: "GET", range: "bytes=10-20", ifRange: "test-etag"))
@@ -328,7 +329,8 @@ struct AureliaHomeTests {
 
   @Test
   func nativeHostLaunchValidationRejectsWrongApplicationsPathsAndNonFIFOs() throws {
-    let expectedExecutable = URL(fileURLWithPath: "/Applications/Aurelia Home.app/Contents/MacOS/AureliaHome")
+    let expectedExecutable = URL(
+      fileURLWithPath: "/Applications/Aurelia Home.app/Contents/MacOS/AureliaHome")
     #expect(
       HostLaunchSecurity.acceptsApplication(
         processIdentifier: 42,
@@ -361,7 +363,7 @@ struct AureliaHomeTests {
       logDirectory: nil,
       serverName: "Test",
       lanPort: 43_111)
-    #expect(throws: HostLaunchSecurityError.invalidDescription) {
+    #expect(throws: HostLaunchSecurityError.invalidPathLocation) {
       try HostLaunchSecurity.validate(
         invalid,
         expectedParentProcessID: 42,
@@ -394,4 +396,162 @@ struct AureliaHomeTests {
     try store.delete()
     #expect(try store.load() == nil)
   }
+
+  @Test
+  func buildTenPresentationDetailDecodesEpisodesSupplementsCreditsAndProgress() throws {
+    let mediaID = "10000000-0000-0000-0000-000000000001"
+    let episodeID = "10000000-0000-0000-0000-000000000002"
+    let extraID = "10000000-0000-0000-0000-000000000003"
+    let json = Data(
+      """
+      {
+        "item":{
+          "id":"\(mediaID)","kind":"series","title":"Example Show","originalTitle":null,
+          "year":2026,"overview":"A precise test.","genres":["Drama","Crime"],
+          "poster":null,"backdrop":null,"availability":"available","isFavorite":true,
+          "progress":null,"addedAt":"2026-09-12T08:00:00Z"
+        },
+        "metadata":{
+          "mediaId":"\(mediaID)","title":"Example Show","originalTitle":null,
+          "overview":"A precise test.","releaseDate":"2026-09-12","year":2026,
+          "runtimeMinutes":null,"rating":8.4,"contentRating":"TV-MA",
+          "genres":["Drama","Crime"],"studios":["Aurelia"],"countries":["DE"],
+          "credits":[{"name":"Actor","department":"Acting","job":null,"character":"Lead","order":0,"profile":null}],
+          "poster":null,"backdrop":null,"still":null,"provider":"tmdb",
+          "providerMediaId":"42","reviewState":"matched"
+        },
+        "seasons":[{
+          "number":1,
+          "episodes":[{
+            "item":{"id":"\(episodeID)","kind":"episode","title":"Pilot","originalTitle":null,
+              "year":2026,"overview":"Episode overview","genres":[],"poster":null,"backdrop":null,
+              "availability":"available","isFavorite":false,
+              "progress":{"mediaId":"\(episodeID)","positionMilliseconds":30000,
+                "durationMilliseconds":60000,"isCompleted":false,"lastPlayedAt":null,"updatedAt":null},
+              "addedAt":"2026-09-12T08:00:00Z"},
+            "seasonNumber":1,"episodeNumber":1
+          }],
+          "supplements":[]
+        }],
+        "supplements":[{
+          "item":{"id":"\(extraID)","kind":"extra","title":"Behind the Scenes","originalTitle":null,
+            "year":2026,"overview":null,"genres":[],"poster":null,"backdrop":null,
+            "availability":"missing","isFavorite":false,"progress":null,
+            "addedAt":"2026-09-12T08:00:00Z"},
+          "category":"Extras","seasonNumber":null
+        }]
+      }
+      """.utf8)
+    let detail = try JSONDecoder().decode(CatalogDetailPresentation.self, from: json)
+    #expect(detail.seasons.first?.episodes.first?.item.progressFraction == 0.5)
+    #expect(detail.supplements.first?.item.availability == .missing)
+    #expect(detail.metadata.credits.first?.character == "Lead")
+  }
+
+  @Test
+  func homeGenreRowsAreStableLimitedAndNeverEmpty() {
+    let first = presentationItem(
+      id: "10000000-0000-0000-0000-000000000011",
+      title: "First",
+      genres: ["Drama", "Crime", "Drama"])
+    let second = presentationItem(
+      id: "10000000-0000-0000-0000-000000000012",
+      title: "Second",
+      genres: ["Fantasy", "Comedy", " "])
+    let rows = HomePresentationLogic.genreRows(from: [first, second])
+    #expect(rows.map(\.title) == ["Comedy", "Crime", "Drama"])
+    #expect(rows.allSatisfy { !$0.items.isEmpty })
+    #expect(rows.last?.items.count == 1)
+    #expect(HomePresentationLogic.genreRows(from: [], limit: 3).isEmpty)
+  }
+
+  @Test
+  func homeRefreshPolicyUsesTheExactServerBoundary() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    let boundary = ISO8601DateFormatter().string(from: now.addingTimeInterval(1_800))
+    #expect(HomeRefreshPolicy.delay(until: boundary, now: now) == 1_800)
+    #expect(HomeRefreshPolicy.delay(until: "invalid", now: now) == nil)
+  }
+
+  @Test
+  func queryEncodingCannotInjectAdditionalParameters() throws {
+    #expect(
+      try APIClient.query(name: "query", value: "crime & drama? +")
+        == "query=crime%20%26%20drama%3F%20%2B")
+  }
+
+  @Test @MainActor
+  func artworkLoaderCoalescesRequestsCachesInMemoryAndScopesServers() async throws {
+    let counter = ArtworkFetchCounter()
+    let loader = ArtworkLoader(memoryLimit: 1_024, itemLimit: 4) { _, _ in
+      await counter.increment()
+      try await Task.sleep(for: .milliseconds(40))
+      return Data([1, 2, 3])
+    }
+    let artwork = ArtworkSummary(
+      id: UUID(uuidString: "10000000-0000-0000-0000-000000000099")!,
+      kind: .poster,
+      path: "/api/v1/artwork/10000000-0000-0000-0000-000000000099",
+      contentType: "image/jpeg",
+      contentLength: 3)
+    let firstProfile = artworkProfile(serverID: "20000000-0000-0000-0000-000000000001")
+    let secondProfile = artworkProfile(serverID: "20000000-0000-0000-0000-000000000002")
+
+    async let first = loader.data(for: artwork, profile: firstProfile)
+    async let second = loader.data(for: artwork, profile: firstProfile)
+    let values = try await (first, second)
+    #expect(values.0 == Data([1, 2, 3]))
+    #expect(values.1 == Data([1, 2, 3]))
+    #expect(await counter.value == 1)
+
+    _ = try await loader.data(for: artwork, profile: firstProfile)
+    #expect(await counter.value == 1)
+    _ = try await loader.data(for: artwork, profile: secondProfile)
+    #expect(await counter.value == 2)
+  }
+
+  @Test @MainActor
+  func artworkLoaderRejectsForeignAndDecoratedPathsBeforeFetching() async {
+    let counter = ArtworkFetchCounter()
+    let loader = ArtworkLoader { _, _ in
+      await counter.increment()
+      return Data()
+    }
+    let profile = artworkProfile(serverID: "20000000-0000-0000-0000-000000000001")
+    for path in [
+      "https://attacker.invalid/api/v1/artwork/10000000-0000-0000-0000-000000000099",
+      "/api/v1/artwork/10000000-0000-0000-0000-000000000099?token=leak",
+      "/api/v1/artwork/not-a-uuid",
+    ] {
+      let artwork = ArtworkSummary(
+        id: UUID(), kind: .poster, path: path, contentType: "image/jpeg", contentLength: 1)
+      await #expect(throws: APIClientError.invalidResponse) {
+        try await loader.data(for: artwork, profile: profile)
+      }
+    }
+    #expect(await counter.value == 0)
+  }
+
+  private func presentationItem(id: String, title: String, genres: [String])
+    -> CatalogItemSummary
+  {
+    CatalogItemSummary(
+      id: UUID(uuidString: id)!, kind: .movie, title: title, originalTitle: nil,
+      year: 2026, overview: nil, genres: genres, poster: nil, backdrop: nil,
+      availability: .available, isFavorite: false, progress: nil,
+      addedAt: "2026-09-12T08:00:00Z")
+  }
+
+  private func artworkProfile(serverID: String) -> StoredServerProfile {
+    StoredServerProfile(
+      serverId: UUID(uuidString: serverID)!, name: "Test",
+      baseURL: URL(string: "https://server.local:43111")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-token",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z")
+  }
+}
+
+private actor ArtworkFetchCounter {
+  private(set) var value = 0
+  func increment() { value += 1 }
 }

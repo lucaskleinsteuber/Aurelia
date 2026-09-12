@@ -290,6 +290,126 @@ struct APIClient: Sendable {
     try await get("/api/v1/catalog/series/\(id.uuidString.lowercased())")
   }
 
+  func catalogItems(kind: MediaKind? = nil) async throws -> [CatalogItemSummary] {
+    let query = kind.map { "kind=\($0.rawValue)" }
+    return try await allPages(path: "/api/v1/catalog/items", query: query)
+  }
+
+  func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
+    try await get("/api/v1/catalog/items/\(id.uuidString.lowercased())")
+  }
+
+  func home() async throws -> HomeResponse {
+    try await get("/api/v1/home")
+  }
+
+  func searchCatalog(_ query: String) async throws -> [CatalogItemSummary] {
+    return try await allPages(
+      path: "/api/v1/catalog/search",
+      query: try Self.query(name: "query", value: query))
+  }
+
+  func collections() async throws -> [CollectionSummary] {
+    try await get("/api/v1/catalog/collections?offset=0&limit=200")
+  }
+
+  func createCollection(name: String, mediaIds: [UUID]) async throws -> CollectionSummary {
+    let body = try JSONEncoder().encode(SaveCollectionRequest(name: name, mediaIds: mediaIds))
+    let data = try await perform(path: "/api/v1/collections", method: "POST", body: body)
+    return try Self.decode(CollectionSummary.self, from: data)
+  }
+
+  func updateCollection(id: UUID, name: String, mediaIds: [UUID]) async throws
+    -> CollectionSummary
+  {
+    let body = try JSONEncoder().encode(SaveCollectionRequest(name: name, mediaIds: mediaIds))
+    let data = try await perform(
+      path: "/api/v1/collections/\(id.uuidString.lowercased())", method: "PUT", body: body)
+    return try Self.decode(CollectionSummary.self, from: data)
+  }
+
+  func deleteCollection(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/collections/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func setFavorite(mediaId: UUID, isFavorite: Bool) async throws -> Bool {
+    let body = try JSONEncoder().encode(SetFavoriteRequest(isFavorite: isFavorite))
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/favorite",
+      method: "PUT",
+      body: body)
+    return try Self.decode(Bool.self, from: data)
+  }
+
+  func mediaMetadata(id: UUID) async throws -> MediaMetadataSummary {
+    try await get("/api/v1/media/\(id.uuidString.lowercased())/metadata")
+  }
+
+  func updateMediaMetadata(id: UUID, request: UpdateMediaMetadataRequest) async throws
+    -> MediaMetadataSummary
+  {
+    let body = try JSONEncoder().encode(request)
+    let data = try await perform(
+      path: "/api/v1/media/\(id.uuidString.lowercased())/metadata", method: "PUT", body: body)
+    return try Self.decode(MediaMetadataSummary.self, from: data)
+  }
+
+  func metadataCandidates(mediaId: UUID, query: String) async throws
+    -> [MetadataCandidateSummary]
+  {
+    return try await get(
+      "/api/v1/media/\(mediaId.uuidString.lowercased())/metadata/search?\(try Self.query(name: "query", value: query))"
+    )
+  }
+
+  func selectMetadataMatch(
+    mediaId: UUID,
+    providerMediaId: String,
+    mediaType: String
+  ) async throws -> MediaMetadataSummary {
+    let body = try JSONEncoder().encode(
+      SelectMetadataMatchRequest(providerMediaId: providerMediaId, mediaType: mediaType))
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/metadata/match",
+      method: "PUT",
+      body: body)
+    return try Self.decode(MediaMetadataSummary.self, from: data)
+  }
+
+  func clearMetadataMatch(mediaId: UUID) async throws -> MediaMetadataSummary {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/metadata/match",
+      method: "DELETE")
+    return try Self.decode(MediaMetadataSummary.self, from: data)
+  }
+
+  func metadataReviews() async throws -> [MetadataReviewSummary] {
+    try await get("/api/v1/metadata/reviews")
+  }
+
+  func artworkData(path: String) async throws -> Data {
+    guard Self.isValidArtworkPath(path) else { throw APIClientError.invalidResponse }
+    return try await perform(path: path, method: "GET")
+  }
+
+  static func isValidArtworkPath(_ path: String) -> Bool {
+    guard path.hasPrefix("/api/v1/artwork/"), !path.contains("?"), !path.contains("#") else {
+      return false
+    }
+    let identifier = String(path.dropFirst("/api/v1/artwork/".count))
+    return UUID(uuidString: identifier) != nil
+  }
+
+  static func query(name: String, value: String) throws -> String {
+    var allowed = CharacterSet.alphanumerics
+    allowed.insert(charactersIn: "-._~")
+    guard let encodedName = name.addingPercentEncoding(withAllowedCharacters: allowed),
+      let encodedValue = value.addingPercentEncoding(withAllowedCharacters: allowed)
+    else { throw APIClientError.invalidAddress }
+    return "\(encodedName)=\(encodedValue)"
+  }
+
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
     let data = try await perform(
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/playback",
@@ -344,11 +464,15 @@ struct APIClient: Sendable {
     _ = try await perform(path: "/api/v1/auth/logout", method: "POST")
   }
 
-  private func allPages<Item: Decodable & Sendable>(path: String) async throws -> [Item] {
+  private func allPages<Item: Decodable & Sendable>(
+    path: String,
+    query: String? = nil
+  ) async throws -> [Item] {
     var collected: [Item] = []
     while true {
+      let prefix = query.map { "\($0)&" } ?? ""
       let page: PagedResponse<Item> = try await get(
-        "\(path)?offset=\(collected.count)&limit=100")
+        "\(path)?\(prefix)offset=\(collected.count)&limit=100")
       collected.append(contentsOf: page.items)
       if collected.count >= page.total || page.items.isEmpty {
         return collected

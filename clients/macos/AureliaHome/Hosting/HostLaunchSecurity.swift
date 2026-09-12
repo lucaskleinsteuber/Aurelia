@@ -23,6 +23,7 @@ struct ValidatedHostLaunchPaths: Equatable {
 
 enum HostLaunchSecurityError: Error, Equatable {
   case invalidDescription
+  case invalidPathLocation
   case invalidSecretPipe
 }
 
@@ -52,15 +53,15 @@ enum HostLaunchSecurity {
       !description.serverName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else { throw HostLaunchSecurityError.invalidDescription }
 
-    let expectedDirectory = bootstrapDirectory.standardizedFileURL
+    let expectedDirectory = bootstrapDirectory.standardizedFileURL.resolvingSymlinksInPath()
     let rendezvousURL = URL(fileURLWithPath: description.rendezvousPath).standardizedFileURL
     let pipeURL = URL(fileURLWithPath: description.secretPipePath).standardizedFileURL
     guard description.rendezvousPath.hasPrefix("/"),
       description.secretPipePath.hasPrefix("/"),
       description.secretPipePath.hasSuffix(".pipe"),
-      rendezvousURL.deletingLastPathComponent() == expectedDirectory,
-      pipeURL.deletingLastPathComponent() == expectedDirectory
-    else { throw HostLaunchSecurityError.invalidDescription }
+      rendezvousURL.deletingLastPathComponent().resolvingSymlinksInPath() == expectedDirectory,
+      pipeURL.deletingLastPathComponent().resolvingSymlinksInPath() == expectedDirectory
+    else { throw HostLaunchSecurityError.invalidPathLocation }
 
     return ValidatedHostLaunchPaths(rendezvousURL: rendezvousURL, pipeURL: pipeURL)
   }

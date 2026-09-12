@@ -7,26 +7,29 @@ struct RootView: View {
     ZStack {
       AureliaHomeBackdrop()
 
-      if model.isStarting {
-        VStack(spacing: 16) {
-          ProgressView()
-            .controlSize(.large)
-          Text("Opening Aurelia Home")
-            .font(.headline)
-            .foregroundStyle(.secondary)
+      Group {
+        if model.isStarting {
+          VStack(spacing: 16) {
+            ProgressView()
+              .controlSize(.large)
+            Text("Opening Aurelia Home")
+              .font(.headline)
+              .foregroundStyle(.secondary)
+          }
+          .accessibilityIdentifier("startup-progress")
+        } else if model.operatingMode == nil {
+          OperatingModeView()
+        } else if model.operatingMode == .host && model.profile == nil {
+          NativeHostSetupView()
+        } else if model.needsInitialLibrarySetup {
+          InitialLibrarySetupView()
+        } else if model.profile == nil {
+          ConnectionView()
+        } else {
+          LibraryShellView()
         }
-        .accessibilityIdentifier("startup-progress")
-      } else if model.operatingMode == nil {
-        OperatingModeView()
-      } else if model.operatingMode == .host && model.profile == nil {
-        NativeHostSetupView()
-      } else if model.needsInitialLibrarySetup {
-        InitialLibrarySetupView()
-      } else if model.profile == nil {
-        ConnectionView()
-      } else {
-        LibraryShellView()
       }
+      .accessibilityHidden(model.playback != nil)
 
       if let profile = model.profile, let playback = model.playback {
         PlayerView(profile: profile, presentation: playback)

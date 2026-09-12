@@ -391,7 +391,31 @@ public sealed record CatalogItemSummary(
     MediaAvailability Availability,
     bool IsFavorite,
     PlaybackProgressResponse? Progress,
-    DateTimeOffset AddedAt);
+    DateTimeOffset AddedAt,
+    string? ParentTitle = null,
+    int? SeasonNumber = null,
+    int? EpisodeNumber = null);
+
+public sealed record EpisodePresentation(
+    CatalogItemSummary Item,
+    int SeasonNumber,
+    int EpisodeNumber);
+
+public sealed record SupplementPresentation(
+    CatalogItemSummary Item,
+    string Category,
+    int? SeasonNumber);
+
+public sealed record SeasonPresentation(
+    int Number,
+    IReadOnlyList<EpisodePresentation> Episodes,
+    IReadOnlyList<SupplementPresentation> Supplements);
+
+public sealed record CatalogDetailPresentation(
+    CatalogItemSummary Item,
+    MediaMetadataSummary Metadata,
+    IReadOnlyList<SeasonPresentation> Seasons,
+    IReadOnlyList<SupplementPresentation> Supplements);
 
 public sealed record CollectionSummary(
     Guid Id,

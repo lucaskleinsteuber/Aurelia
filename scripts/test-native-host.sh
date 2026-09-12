@@ -3,15 +3,16 @@ set -euo pipefail
 
 repository_root=${0:A:h:h}
 other_root=${AURELIA_HOME_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
-candidate=${1:-"$other_root/Build/Build 9/Aurelia Home.app"}
+build_number=$(sed -n 's:.*<AureliaHomeBuildNumber>\([0-9][0-9]*\)</AureliaHomeBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
+source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia Home.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 runtime_root="/private/tmp/AureliaHome/$run_id"
+candidate="$runtime_root/Aurelia Home.app"
 result_root="$other_root/Test Results"
 log_root="$other_root/Logs"
 report="$result_root/AureliaHome-NativeHost-$run_id.txt"
 copied_log="$log_root/AureliaHome-NativeHost-$run_id.log"
 helper="$candidate/Contents/Helpers/Aurelia Home Server Host.app/Contents/MacOS/AureliaHomeServerHost"
-helper_app="$candidate/Contents/Helpers/Aurelia Home Server Host.app"
 application="$candidate/Contents/MacOS/AureliaHome"
 server="$candidate/Contents/Resources/Server/osx-arm64/Aurelia.Home.Server"
 data_root="$runtime_root/Data"
@@ -20,7 +21,7 @@ secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
 owner_password='native-host-smoke-password-123!'
 helper_pid=''
 application_pid=''
-bootstrap_root="$HOME/Library/Containers/com.lucas.aureliahome/Data/Library/Caches/AureliaHome/Host"
+bootstrap_root="$runtime_root/Host"
 rendezvous="$bootstrap_root/rendezvous-$run_id.json"
 configuration=''
 secret_pipe=''
@@ -93,7 +94,10 @@ wait_for_state() {
   return 1
 }
 
-[[ -d "$candidate" ]] || fail "The Build 9 app candidate does not exist."
+mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root"
+mkdir -m 700 "$bootstrap_root"
+[[ -d "$source_candidate" ]] || fail "The Build $build_number app candidate does not exist."
+/usr/bin/ditto "$source_candidate" "$candidate"
 [[ -x "$application" ]] || fail "The native Aurelia Home app is missing."
 [[ -x "$helper" ]] || fail "The native server host helper is missing."
 [[ -x "$server" ]] || fail "The embedded arm64 server is missing."
@@ -101,8 +105,7 @@ if lsof -nP -iTCP:43110 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Loopback port 43110 is already occupied; no existing process was stopped."
 fi
 
-mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root"
-print -r -- "Aurelia Home Build 9 native host smoke test" >"$report"
+print -r -- "Aurelia Home Build $build_number native host smoke test" >"$report"
 print -r -- "Run: $run_id" >>"$report"
 
 lan_port="$(ruby -rsocket -e 'server = TCPServer.new("127.0.0.1", 0); puts server.addr[1]; server.close')"
@@ -133,14 +136,11 @@ jq -cn \
 chmod 600 "$configuration"
 exec 9<>"$secret_pipe"
 print -rn -- "$secret" >&9
-open -na "$helper_app"
-for _ in {1..50}; do
-  helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
-  [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null && break
-  sleep 0.1
-done
+AURELIA_HOME_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
+  "$helper" >"$runtime_root/helper-output.log" 2>&1 &
+helper_pid=$!
 [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null \
-  || fail "The server host helper did not start through Launch Services."
+  || fail "The server host helper did not start."
 
 wait_for_file "$rendezvous" || fail "The helper did not create its rendezvous file."
 exec 9>&-
@@ -231,6 +231,23 @@ done
 [[ "$(jq -r '.state // empty' "$runtime_root/scan.json")" == completed ]] \
   || fail "The bounded test scan timed out."
 
+curl --silent --show-error --fail-with-body --insecure \
+  --header "Authorization: Bearer $token" \
+  "$https_base/api/v1/catalog/items?kind=movie&offset=0&limit=10" \
+  >"$runtime_root/catalog.json"
+media_id="$(jq -r '.items[0].id // empty' "$runtime_root/catalog.json")"
+[[ -n "$media_id" ]] || fail "The bounded test movie did not appear in the presentation catalog."
+curl --silent --show-error --fail-with-body --insecure --request POST \
+  --header "Authorization: Bearer $token" \
+  "$https_base/api/v1/media/$media_id/playback" >"$runtime_root/playback.json"
+stream_path="$(jq -r '.streamPath // empty' "$runtime_root/playback.json")"
+[[ "$stream_path" == /api/v1/streams/* ]] || fail "Direct Play did not return a relative ticket URL."
+range_status="$(curl --silent --insecure --output "$runtime_root/range.bin" \
+  --write-out '%{http_code}' --header 'Range: bytes=0-63' "$https_base$stream_path")"
+[[ "$range_status" == 206 ]] || fail "Direct Play did not honor the bounded byte range."
+[[ "$(stat -f '%z' "$runtime_root/range.bin")" == 64 ]] \
+  || fail "Direct Play returned an unexpected byte count."
+
 curl --silent --show-error --fail-with-body --insecure --request POST \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/auth/pairings" >"$runtime_root/pairing.json"
@@ -287,14 +304,11 @@ jq -cn \
 chmod 600 "$configuration"
 exec 9<>"$secret_pipe"
 print -rn -- "$secret" >&9
-open -na "$helper_app"
-for _ in {1..50}; do
-  helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
-  [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null && break
-  sleep 0.1
-done
+AURELIA_HOME_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
+  "$helper" >"$runtime_root/helper-output.log" 2>&1 &
+helper_pid=$!
 [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null \
-  || fail "The parent-abort server host helper did not start through Launch Services."
+  || fail "The parent-abort server host helper did not start."
 wait_for_file "$rendezvous" || fail "The parent-abort helper did not start."
 exec 9>&-
 kill "$application_pid"
@@ -317,6 +331,7 @@ fi
   print -r -- "PASS: one-time owner bootstrap and LAN HTTPS restart"
   print -r -- "PASS: live TLS public-key fingerprint matched server identity"
   print -r -- "PASS: /auth/me, library creation, bounded scan, pairing, and sessions"
+  print -r -- "PASS: authenticated Direct Play returned the requested 64-byte original-file range"
   print -r -- "PASS: graceful helper/server shutdown"
   print -r -- "PASS: helper stopped when its PID-bound parent app disappeared"
   print -r -- "PASS: SQLite quick_check and integrity_check; foreign keys clean"

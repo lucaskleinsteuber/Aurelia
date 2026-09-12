@@ -13,8 +13,8 @@ struct AureliaHomeApp: App {
           await model.start()
         }
     }
-    .defaultSize(width: 1_120, height: 720)
-    .windowToolbarStyle(.unifiedCompact)
+    .defaultSize(width: 1_470, height: 956)
+    .windowStyle(.hiddenTitleBar)
 
     Settings {
       AppSettingsView()

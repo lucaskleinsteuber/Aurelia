@@ -31,7 +31,8 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
     } catch {
       let category = (error as? HostError)?.diagnosticCategory ?? "runtime-initialization"
       Self.logger.error("Server host startup failed: \(category, privacy: .public)")
-      FileHandle.standardError.write(Data("Aurelia Home Server Host could not start.\n".utf8))
+      FileHandle.standardError.write(
+        Data("Aurelia Home Server Host could not start (\(category)).\n".utf8))
       finishTermination()
     }
   }
@@ -108,7 +109,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var process: Process?
   private var logSink: BoundedLogSink?
   private var parentTimer: DispatchSourceTimer?
-  private var status = HostStatus(state: .starting, message: nil, bootstrapToken: nil, serverInfo: nil)
+  private var status = HostStatus(
+    state: .starting, message: nil, bootstrapToken: nil, serverInfo: nil)
   private var pendingRestartLAN: Bool?
   private var shuttingDown = false
   private var restartDates: [Date] = []
@@ -143,8 +145,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
     let parameters = NWParameters.tcp
     parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
     let listener: NWListener
-    do { listener = try NWListener(using: parameters) }
-    catch { throw HostError.controlListener }
+    do { listener = try NWListener(using: parameters) } catch { throw HostError.controlListener }
     self.listener = listener
     listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
     listener.stateUpdateHandler = { [weak self] state in self?.listenerChanged(state) }
@@ -166,34 +167,40 @@ private final class ServerHostRuntime: @unchecked Sendable {
       .deletingLastPathComponent()
     let expectedExecutable = mainContents.appendingPathComponent("MacOS/AureliaHome")
       .standardizedFileURL
-    let bootstrapDirectory = FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent(
-        "Library/Containers/com.lucas.aureliahome/Data/Library/Caches/AureliaHome/Host",
-        isDirectory: true)
+    let bootstrapDirectory = try bootstrapDirectory(environment: environment)
     var foundTrustedParent = false
     for application in NSRunningApplication.runningApplications(
       withBundleIdentifier: "com.lucas.aureliahome")
     {
-      guard HostLaunchSecurity.acceptsApplication(
-        processIdentifier: application.processIdentifier,
-        executableURL: application.executableURL,
-        isTerminated: application.isTerminated,
-        expectedExecutableURL: expectedExecutable)
+      guard
+        HostLaunchSecurity.acceptsApplication(
+          processIdentifier: application.processIdentifier,
+          executableURL: application.executableURL,
+          isTerminated: application.isTerminated,
+          expectedExecutableURL: expectedExecutable)
       else { continue }
       foundTrustedParent = true
       let configurationURL = bootstrapDirectory.appendingPathComponent(
         "launch-\(application.processIdentifier).json")
       guard let data = try? Data(contentsOf: configurationURL) else { continue }
-      guard let description = try? JSONDecoder().decode(HostLaunchDescription.self, from: data),
-        let validated = try? HostLaunchSecurity.validate(
+      guard let description = try? JSONDecoder().decode(HostLaunchDescription.self, from: data)
+      else { throw HostError.invalidLaunchDescription }
+      let validated: ValidatedHostLaunchPaths
+      do {
+        validated = try HostLaunchSecurity.validate(
           description,
           expectedParentProcessID: application.processIdentifier,
           bootstrapDirectory: bootstrapDirectory)
-      else { throw HostError.invalidLaunchConfiguration }
+      } catch HostLaunchSecurityError.invalidPathLocation {
+        throw HostError.invalidLaunchPathLocation
+      } catch {
+        throw HostError.invalidLaunchDescription
+      }
       defer { try? FileManager.default.removeItem(at: configurationURL) }
       let secret: String
-      do { secret = try HostLaunchSecurity.readSecretPipe(at: validated.pipeURL.path) }
-      catch { throw HostError.missingControlSecret }
+      do { secret = try HostLaunchSecurity.readSecretPipe(at: validated.pipeURL.path) } catch {
+        throw HostError.missingControlSecret
+      }
       return ResolvedHostLaunch(
         secret: secret,
         parentProcessID: description.parentProcessID,
@@ -206,6 +213,27 @@ private final class ServerHostRuntime: @unchecked Sendable {
         lanPort: description.lanPort)
     }
     throw foundTrustedParent ? HostError.missingLaunchConfiguration : HostError.missingTrustedParent
+  }
+
+  private static func bootstrapDirectory(environment: [String: String]) throws -> URL {
+    guard let override = environment["AURELIA_HOME_HOST_BOOTSTRAP_DIR"] else {
+      return FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(
+          "Library/Containers/com.lucas.aureliahome/Data/Library/Caches/AureliaHome/Host",
+          isDirectory: true)
+    }
+
+    let directory = URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
+    let resolvedDirectory = directory.resolvingSymlinksInPath()
+    let smokeRoot = URL(fileURLWithPath: "/private/tmp/AureliaHome", isDirectory: true)
+      .standardizedFileURL.resolvingSymlinksInPath()
+    var isDirectory: ObjCBool = false
+    guard resolvedDirectory.path.hasPrefix(smokeRoot.path + "/"),
+      resolvedDirectory.lastPathComponent == "Host",
+      FileManager.default.fileExists(atPath: resolvedDirectory.path, isDirectory: &isDirectory),
+      isDirectory.boolValue
+    else { throw HostError.invalidBootstrapDirectory }
+    return directory
   }
 
   private static var defaultDataDirectory: URL {
@@ -437,8 +465,14 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private func respond(_ connection: NWConnection, status: Int, body: Data) {
-    let reason = status == 200 ? "OK" : status == 204 ? "No Content" : status == 202 ? "Accepted" : status == 404 ? "Not Found" : "Bad Request"
-    var response = Data("HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
+    let reason =
+      status == 200
+      ? "OK"
+      : status == 204
+        ? "No Content" : status == 202 ? "Accepted" : status == 404 ? "Not Found" : "Bad Request"
+    var response = Data(
+      "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+        .utf8)
     response.append(body)
     connection.send(
       content: response,
@@ -479,13 +513,15 @@ private final class ServerHostRuntime: @unchecked Sendable {
       lanHttpsPort: settings.lanHttpsPort)
     let data = try JSONEncoder().encode(canonical)
     try data.write(to: settingsURL, options: [.atomic])
-    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: settingsURL.path)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: settingsURL.path)
   }
 
   private func writeRendezvous(port: UInt16) throws {
     let data = try JSONSerialization.data(withJSONObject: ["port": Int(port)])
     try data.write(to: rendezvousURL, options: [.atomic])
-    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: rendezvousURL.path)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: rendezvousURL.path)
   }
 
   private func serverExecutableURL() throws -> URL {
@@ -500,7 +536,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
     let mainContents = Bundle.main.bundleURL
       .deletingLastPathComponent()
       .deletingLastPathComponent()
-    let url = mainContents
+    let url =
+      mainContents
       .appendingPathComponent("Resources/Server/\(runtime)/Aurelia.Home.Server")
     let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
     guard values.isRegularFile == true, values.isSymbolicLink != true,
@@ -635,15 +672,17 @@ private struct HostRequest {
     guard parts.count == 3, parts[2] == "HTTP/1.1" else { return nil }
     let pathParts = parts[1].split(separator: "/")
     guard pathParts.count == 2 else { return nil }
-    let contentLength = lines.dropFirst().compactMap { line -> Int? in
-      let pieces = line.split(separator: ":", maxSplits: 1)
-      guard pieces.count == 2, pieces[0].lowercased() == "content-length" else { return nil }
-      return Int(pieces[1].trimmingCharacters(in: .whitespaces))
-    }.first ?? 0
+    let contentLength =
+      lines.dropFirst().compactMap { line -> Int? in
+        let pieces = line.split(separator: ":", maxSplits: 1)
+        guard pieces.count == 2, pieces[0].lowercased() == "content-length" else { return nil }
+        return Int(pieces[1].trimmingCharacters(in: .whitespaces))
+      }.first ?? 0
     guard contentLength >= 0, contentLength <= 32_768 else { return nil }
     let bodyStart = headerRange.upperBound
     let available = data.count - bodyStart
-    let body = available >= contentLength
+    let body =
+      available >= contentLength
       ? Data(data[bodyStart..<(bodyStart + contentLength)])
       : Data()
     return HostRequest(
@@ -659,7 +698,9 @@ private enum HostError: Error {
   case missingControlSecret
   case missingTrustedParent
   case missingLaunchConfiguration
-  case invalidLaunchConfiguration
+  case invalidBootstrapDirectory
+  case invalidLaunchDescription
+  case invalidLaunchPathLocation
   case invalidSettings
   case settingsStorage
   case controlListener
@@ -672,7 +713,9 @@ private enum HostError: Error {
     case .missingControlSecret: "missing-control-secret"
     case .missingTrustedParent: "missing-trusted-parent"
     case .missingLaunchConfiguration: "missing-launch-configuration"
-    case .invalidLaunchConfiguration: "invalid-launch-configuration"
+    case .invalidBootstrapDirectory: "invalid-bootstrap-directory"
+    case .invalidLaunchDescription: "invalid-launch-description"
+    case .invalidLaunchPathLocation: "invalid-launch-path-location"
     case .invalidSettings: "invalid-settings"
     case .settingsStorage: "settings-storage"
     case .controlListener: "control-listener"

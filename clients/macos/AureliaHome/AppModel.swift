@@ -9,6 +9,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var inspectedServer: InspectedServer?
   @Published private(set) var movies: [MovieSummary] = []
   @Published private(set) var series: [SeriesSummary] = []
+  @Published private(set) var catalogItems: [CatalogItemSummary] = []
+  @Published private(set) var home: HomeResponse?
+  @Published private(set) var collections: [CollectionSummary] = []
   @Published private(set) var playback: PlaybackPresentation?
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
   @Published private(set) var libraries: [LibrarySummary] = []
@@ -23,10 +26,13 @@ final class AppModel: ObservableObject {
   @Published private(set) var isWorking = false
   @Published var errorMessage: String?
 
+  let artworkLoader = ArtworkLoader()
+
   private let store: any ServerProfileStore
   private let serverHost: NativeServerHost
   private var hasStarted = false
   private var hostPollTask: Task<Void, Never>?
+  private var homeRefreshTask: Task<Void, Never>?
   private var isTerminationProtectionActive = false
   private static let operatingModeKey = "AureliaHomeOperatingMode"
 
@@ -46,9 +52,10 @@ final class AppModel: ObservableObject {
     hasStarted = true
 
     #if DEBUG
-      if Self.uiTestMode == "library" {
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
         operatingMode = .client
-        profile = Self.previewProfile
+        profile =
+          Self.uiTestMode == "library-admin" ? Self.previewOwnerProfile : Self.previewProfile
         movies = [
           MovieSummary(
             id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
@@ -64,6 +71,9 @@ final class AppModel: ObservableObject {
             seasonCount: 5,
             episodeCount: 62)
         ]
+        catalogItems = Self.previewCatalog
+        home = Self.previewHome
+        collections = Self.previewHome.collections
         isStarting = false
         return
       }
@@ -211,8 +221,7 @@ final class AppModel: ObservableObject {
 
   func restartNativeHost() async {
     errorMessage = nil
-    do { try await serverHost.restart() }
-    catch { errorMessage = error.localizedDescription }
+    do { try await serverHost.restart() } catch { errorMessage = error.localizedDescription }
   }
 
   func completeInitialLibrarySetup() {
@@ -265,9 +274,10 @@ final class AppModel: ObservableObject {
       let client = APIClient(profile: profile)
       var created: [LibrarySummary] = []
       for location in locations {
-        created.append(try await client.createLibrary(
-          path: location.path,
-          combineExisting: combineExisting))
+        created.append(
+          try await client.createLibrary(
+            path: location.path,
+            combineExisting: combineExisting))
       }
       libraries.append(contentsOf: created)
       libraries.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -337,8 +347,9 @@ final class AppModel: ObservableObject {
 
   func generatePairingCode() async {
     guard let profile else { return }
-    do { pairingCode = try await APIClient(profile: profile).createPairingCode() }
-    catch { errorMessage = error.localizedDescription }
+    do { pairingCode = try await APIClient(profile: profile).createPairingCode() } catch {
+      errorMessage = error.localizedDescription
+    }
   }
 
   func revokeSession(id: UUID) async {
@@ -359,8 +370,9 @@ final class AppModel: ObservableObject {
 
   func disableMetadata() async {
     guard let profile else { return }
-    do { metadataProvider = try await APIClient(profile: profile).removeMetadataToken() }
-    catch { errorMessage = error.localizedDescription }
+    do { metadataProvider = try await APIClient(profile: profile).removeMetadataToken() } catch {
+      errorMessage = error.localizedDescription
+    }
   }
 
   func enrichLibrary() async {
@@ -387,6 +399,7 @@ final class AppModel: ObservableObject {
   func shutdown() async {
     await PlaybackShutdownCoordinator.shared.shutdown()
     hostPollTask?.cancel()
+    homeRefreshTask?.cancel()
     if operatingMode == .host { await serverHost.stop() }
     endTerminationProtection()
   }
@@ -465,8 +478,123 @@ final class AppModel: ObservableObject {
     }
     async let loadedMovies = client.movies()
     async let loadedSeries = client.series()
+    async let loadedCatalog = client.catalogItems()
+    async let loadedHome = client.home()
+    async let loadedCollections = client.collections()
     movies = try await loadedMovies
     series = try await loadedSeries
+    catalogItems = try await loadedCatalog
+    home = try await loadedHome
+    collections = try await loadedCollections
+    scheduleHomeRefresh()
+  }
+
+  func refreshHome() async {
+    guard let profile else { return }
+    do {
+      home = try await APIClient(profile: profile).home()
+      scheduleHomeRefresh()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  func searchCatalog(_ query: String) async throws -> [CatalogItemSummary] {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return catalogItems }
+    #if DEBUG
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
+        return (catalogItems + [Self.previewSearchEpisode]).filter { item in
+          ([item.title, item.originalTitle ?? "", item.overview ?? ""] + item.genres)
+            .joined(separator: " ")
+            .localizedCaseInsensitiveContains(trimmed)
+        }
+      }
+    #endif
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await APIClient(profile: profile).searchCatalog(trimmed)
+  }
+
+  func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
+    #if DEBUG
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin",
+        let item = Self.previewCatalog.first(where: { $0.id == id })
+      {
+        return Self.previewDetail(for: item)
+      }
+    #endif
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await APIClient(profile: profile).catalogDetail(id: id)
+  }
+
+  func setFavorite(mediaId: UUID, isFavorite: Bool) async -> Bool {
+    guard let profile else { return false }
+    do {
+      _ = try await APIClient(profile: profile).setFavorite(
+        mediaId: mediaId, isFavorite: isFavorite)
+      try await refresh()
+      return true
+    } catch {
+      errorMessage = error.localizedDescription
+      return false
+    }
+  }
+
+  func saveMetadata(id: UUID, request: UpdateMediaMetadataRequest) async throws
+    -> MediaMetadataSummary
+  {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let result = try await APIClient(profile: profile).updateMediaMetadata(id: id, request: request)
+    try await refresh()
+    return result
+  }
+
+  func metadataCandidates(mediaId: UUID, query: String) async throws
+    -> [MetadataCandidateSummary]
+  {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await APIClient(profile: profile).metadataCandidates(mediaId: mediaId, query: query)
+  }
+
+  func selectMetadataMatch(
+    mediaId: UUID,
+    providerMediaId: String,
+    mediaType: String
+  ) async throws -> MediaMetadataSummary {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let result = try await APIClient(profile: profile).selectMetadataMatch(
+      mediaId: mediaId, providerMediaId: providerMediaId, mediaType: mediaType)
+    try await refresh()
+    return result
+  }
+
+  func clearMetadataMatch(mediaId: UUID) async throws -> MediaMetadataSummary {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let result = try await APIClient(profile: profile).clearMetadataMatch(mediaId: mediaId)
+    try await refresh()
+    return result
+  }
+
+  func metadataReviews() async throws -> [MetadataReviewSummary] {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await APIClient(profile: profile).metadataReviews()
+  }
+
+  func saveCollection(id: UUID?, name: String, mediaIds: [UUID]) async throws {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let client = APIClient(profile: profile)
+    if let id {
+      _ = try await client.updateCollection(id: id, name: name, mediaIds: mediaIds)
+    } else {
+      _ = try await client.createCollection(name: name, mediaIds: mediaIds)
+    }
+    try await refresh()
+  }
+
+  func deleteCollection(id: UUID) async throws {
+    guard let profile else { throw APIClientError.invalidResponse }
+    try await APIClient(profile: profile).deleteCollection(id: id)
+    try await refresh()
   }
 
   func refreshFromUI() async {
@@ -550,6 +678,12 @@ final class AppModel: ObservableObject {
     profile = nil
     movies = []
     series = []
+    catalogItems = []
+    home = nil
+    collections = []
+    homeRefreshTask?.cancel()
+    homeRefreshTask = nil
+    artworkLoader.removeAll()
     inspectedServer = nil
     playback = nil
     errorMessage = nil
@@ -581,6 +715,18 @@ final class AppModel: ObservableObject {
         message: error.localizedDescription,
         bootstrapToken: nil,
         serverInfo: nil)
+    }
+  }
+
+  private func scheduleHomeRefresh() {
+    homeRefreshTask?.cancel()
+    guard let value = home?.recommendationChangesAt,
+      let delay = HomeRefreshPolicy.delay(until: value)
+    else { return }
+    homeRefreshTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      guard !Task.isCancelled, let self else { return }
+      await self.refreshHome()
     }
   }
 
@@ -666,6 +812,176 @@ final class AppModel: ObservableObject {
   }
 
   #if DEBUG
+    private static let previewMovieID = UUID(
+      uuidString: "10000000-0000-0000-0000-000000000001")!
+    private static let previewSeriesID = UUID(
+      uuidString: "20000000-0000-0000-0000-000000000001")!
+    private static let previewEpisodeID = UUID(
+      uuidString: "20000000-0000-0000-0000-000000000010")!
+    private static let previewMissingID = UUID(
+      uuidString: "10000000-0000-0000-0000-000000000099")!
+
+    private static let previewCatalog: [CatalogItemSummary] = [
+      CatalogItemSummary(
+        id: previewMovieID,
+        kind: .movie,
+        title: "El Camino: A Breaking Bad Movie",
+        originalTitle: nil,
+        year: 2019,
+        overview: "Jesse Pinkman must come to terms with his past in order to forge a future.",
+        genres: ["Crime", "Drama"],
+        poster: nil,
+        backdrop: nil,
+        availability: .available,
+        isFavorite: true,
+        progress: PlaybackProgressResponse(
+          mediaId: previewMovieID,
+          positionMilliseconds: 2_100_000,
+          durationMilliseconds: 7_320_000,
+          isCompleted: false,
+          lastPlayedAt: "2026-09-10T08:00:00Z",
+          updatedAt: "2026-09-10T08:00:00Z"),
+        addedAt: "2026-09-09T08:00:00Z"),
+      CatalogItemSummary(
+        id: previewSeriesID,
+        kind: .series,
+        title: "Breaking Bad",
+        originalTitle: nil,
+        year: 2008,
+        overview:
+          "A chemistry teacher transforms himself into a ruthless player in the local drug trade.",
+        genres: ["Drama", "Crime"],
+        poster: nil,
+        backdrop: nil,
+        availability: .available,
+        isFavorite: false,
+        progress: nil,
+        addedAt: "2026-09-08T08:00:00Z"),
+      CatalogItemSummary(
+        id: previewMissingID,
+        kind: .movie,
+        title: "Missing Feature",
+        originalTitle: nil,
+        year: 2024,
+        overview: "This title remains in the library while its source is offline.",
+        genres: ["Drama"],
+        poster: nil,
+        backdrop: nil,
+        availability: .missing,
+        isFavorite: false,
+        progress: nil,
+        addedAt: "2026-09-07T08:00:00Z"),
+    ]
+
+    private static let previewSearchEpisode = CatalogItemSummary(
+      id: previewEpisodeID,
+      kind: .episode,
+      title: "Pilot",
+      originalTitle: nil,
+      year: 2008,
+      overview: "Walter White makes a desperate choice after receiving life-changing news.",
+      genres: ["Drama", "Crime"],
+      poster: nil,
+      backdrop: nil,
+      availability: .available,
+      isFavorite: false,
+      progress: nil,
+      addedAt: "2026-09-08T08:00:00Z",
+      parentTitle: "Breaking Bad",
+      seasonNumber: 1,
+      episodeNumber: 1)
+
+    private static let previewHome = HomeResponse(
+      recommendation: previewCatalog[1],
+      continueWatching: [previewCatalog[0]],
+      recentlyAdded: previewCatalog,
+      favorites: [previewCatalog[0]],
+      collections: [
+        CollectionSummary(
+          id: UUID(uuidString: "30000000-0000-0000-0000-000000000001")!,
+          name: "Breaking Bad Universe",
+          poster: nil,
+          items: previewCatalog)
+      ],
+      recommendationChangesAt: "2099-01-01T00:00:00Z")
+
+    private static func previewDetail(for item: CatalogItemSummary)
+      -> CatalogDetailPresentation
+    {
+      let metadata = MediaMetadataSummary(
+        mediaId: item.id,
+        title: item.title,
+        originalTitle: item.originalTitle,
+        overview: item.overview,
+        releaseDate: item.year.map { "\($0)-01-01" },
+        year: item.year,
+        runtimeMinutes: item.kind == .movie ? 122 : nil,
+        rating: 8.9,
+        contentRating: "TV-MA",
+        genres: item.genres,
+        studios: ["Sony Pictures Television"],
+        countries: ["United States"],
+        credits: [
+          CreditSummary(
+            name: "Bryan Cranston",
+            department: "Acting",
+            job: nil,
+            character: "Walter White",
+            order: 0,
+            profile: nil),
+          CreditSummary(
+            name: "Aaron Paul",
+            department: "Acting",
+            job: nil,
+            character: "Jesse Pinkman",
+            order: 1,
+            profile: nil),
+        ],
+        poster: item.poster,
+        backdrop: item.backdrop,
+        still: nil,
+        provider: "TMDB",
+        providerMediaId: "preview",
+        reviewState: .matched)
+      let episodeItem = previewSearchEpisode
+      let supplementID = UUID(
+        uuidString: item.kind == .movie
+          ? "10000000-0000-0000-0000-000000000010"
+          : "20000000-0000-0000-0000-000000000020")!
+      let supplementItem = CatalogItemSummary(
+        id: supplementID,
+        kind: item.kind == .movie ? .trailer : .extra,
+        title: item.kind == .movie ? "Official Trailer" : "Inside Breaking Bad",
+        originalTitle: nil,
+        year: item.year,
+        overview: nil,
+        genres: [],
+        poster: nil,
+        backdrop: nil,
+        availability: .available,
+        isFavorite: false,
+        progress: nil,
+        addedAt: "2026-09-08T08:00:00Z")
+      return CatalogDetailPresentation(
+        item: item,
+        metadata: metadata,
+        seasons: item.kind == .series
+          ? [
+            SeasonPresentation(
+              number: 1,
+              episodes: [
+                EpisodePresentation(item: episodeItem, seasonNumber: 1, episodeNumber: 1)
+              ],
+              supplements: [])
+          ] : [],
+        supplements: [
+          SupplementPresentation(
+            item: supplementItem,
+            category: item.kind == .movie ? "Trailer" : "Extras",
+            seasonNumber: nil)
+        ])
+    }
+
     private static let previewProfile = StoredServerProfile(
       serverId: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
       name: "Aurelia Home",

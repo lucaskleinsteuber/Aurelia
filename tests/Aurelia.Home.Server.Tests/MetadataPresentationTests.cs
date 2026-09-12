@@ -47,6 +47,8 @@ public sealed class MetadataPresentationTests
             using var artworkResponse = await client.SendAsync(artworkRequest);
             Assert.Equal(HttpStatusCode.OK, artworkResponse.StatusCode);
             Assert.Equal("image/jpeg", artworkResponse.Content.Headers.ContentType?.MediaType);
+            using var unauthenticatedArtwork = await client.GetAsync(metadata.Poster.Path);
+            Assert.Equal(HttpStatusCode.Unauthorized, unauthenticatedArtwork.StatusCode);
 
             _ = await SendAsync<bool>(client, owner.Token, HttpMethod.Put, $"/api/v1/media/{movie.Id}/favorite", new SetFavoriteRequest(true));
             var home = await SendAsync<HomeResponse>(client, owner.Token, HttpMethod.Get, "/api/v1/home");
@@ -54,6 +56,8 @@ public sealed class MetadataPresentationTests
             Assert.Equal(movie.Id, home.Recommendation?.Id);
             var search = await SendAsync<PagedResponse<CatalogItemSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/catalog/search?query=breaking");
             Assert.Equal(movie.Id, Assert.Single(search.Items).Id);
+            var personSearch = await SendAsync<PagedResponse<CatalogItemSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/catalog/search?query=Aaron%20Paul");
+            Assert.Equal(movie.Id, Assert.Single(personSearch.Items).Id);
 
             var secretPath = Path.Combine(factory.DataDirectory, "Secrets", "tmdb-token");
             Assert.Equal("test-token-value-with-more-than-thirty-two-characters", await File.ReadAllTextAsync(secretPath));

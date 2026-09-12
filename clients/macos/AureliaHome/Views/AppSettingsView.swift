@@ -9,11 +9,13 @@ struct AppSettingsView: View {
   @State private var showingCombineConfirmation = false
   @State private var isLoadingAdministration = false
   @State private var tmdbToken = ""
+  @State private var showingReviewQueue = false
+  @State private var showsAdvanced = false
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
-        Text("Aurelia Home Settings").font(.title.bold())
+        Text("Aurelia Home Settings").font(AureliaHomeDesign.pageTitle)
         if let profile = model.profile {
           if profile.user?.role.canManageLibraries == true { storage }
           devices
@@ -31,6 +33,7 @@ struct AppSettingsView: View {
       .padding(24)
     }
     .frame(width: 680, height: 680)
+    .background(AureliaHomeBackdrop())
     .task {
       isLoadingAdministration = true
       await model.reloadAdministration()
@@ -50,7 +53,9 @@ struct AppSettingsView: View {
         }
       }
     } message: {
-      Text("Only Aurelia Home database entries are removed. Your media files are never deleted or changed.")
+      Text(
+        "Only Aurelia Home database entries are removed. Your media files are never deleted or changed."
+      )
     }
     .confirmationDialog(
       "Stop hosting on this Mac?",
@@ -75,7 +80,12 @@ struct AppSettingsView: View {
       }
       Button("Cancel", role: .cancel) { pendingLocations = [] }
     } message: {
-      Text("Movies, IDs, custom titles, and watch progress stay intact. No media files are moved or changed.")
+      Text(
+        "Movies, IDs, custom titles, and watch progress stay intact. No media files are moved or changed."
+      )
+    }
+    .sheet(isPresented: $showingReviewQueue) {
+      MetadataReviewQueueSheet().environmentObject(model)
     }
   }
 
@@ -105,7 +115,9 @@ struct AppSettingsView: View {
             Text(library.availability.rawValue.capitalized)
               .font(.caption).foregroundStyle(.secondary)
             Button("Scan") { Task { await model.scanLibrary(id: library.id) } }
-            Button(role: .destructive) { libraryToRemove = library } label: {
+            Button(role: .destructive) {
+              libraryToRemove = library
+            } label: {
               Image(systemName: "trash")
             }
           }
@@ -151,7 +163,6 @@ struct AppSettingsView: View {
             .padding(.top, 8)
           }
         }
-
 
         let ignored = model.libraryDiscoveries.filter { $0.decision == .ignore }
         if !ignored.isEmpty {
@@ -259,63 +270,95 @@ struct AppSettingsView: View {
   }
 
   private func advanced(_ profile: StoredServerProfile) -> some View {
-    DisclosureGroup("Advanced") {
+    CinemaMaterialCard {
       VStack(alignment: .leading, spacing: 10) {
-        LabeledContent("Server", value: profile.name)
-        LabeledContent("Address", value: profile.baseURL.absoluteString)
-        LabeledContent("Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
-        if let user = profile.user {
-          LabeledContent("Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
+        Button {
+          showsAdvanced.toggle()
+        } label: {
+          HStack {
+            Label("Advanced", systemImage: "gearshape.2")
+              .font(.headline)
+            Spacer()
+            Image(systemName: "chevron.right")
+              .foregroundStyle(.secondary)
+              .rotationEffect(.degrees(showsAdvanced ? 90 : 0))
+          }
+          .contentShape(Rectangle())
         }
-        if profile.user?.role.canManageLibraries == true {
+        .buttonStyle(.plain)
+        .frame(minHeight: 44)
+        .accessibilityIdentifier("settings-advanced")
+
+        if showsAdvanced {
           Divider()
-          Text("Movie & TV Information").font(.headline)
-          Text("Add your own TMDB API Read Access Token to download English metadata and artwork. File paths are never sent.")
+          LabeledContent("Server", value: profile.name)
+          LabeledContent("Address", value: profile.baseURL.absoluteString)
+          LabeledContent(
+            "Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
+          if let user = profile.user {
+            LabeledContent(
+              "Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
+          }
+          if profile.user?.role.canManageLibraries == true {
+            Divider()
+            Text("Movie & TV Information").font(.headline)
+            Text(
+              "Add your own TMDB API Read Access Token to download English metadata and artwork. File paths are never sent."
+            )
             .font(.caption).foregroundStyle(.secondary)
-          if model.metadataProvider?.hasToken == true {
-            LabeledContent("TMDB", value: model.metadataProvider?.enabled == true ? "Enabled" : "Disabled")
-            if let status = model.metadataProvider {
-              LabeledContent("Artwork", value: ByteCountFormatter.string(fromByteCount: status.artworkBytes, countStyle: .file))
-              Text(status.attribution).font(.caption2).foregroundStyle(.secondary)
-            }
-            HStack {
-              Button("Enrich Library") { Task { await model.enrichLibrary() } }
-                .accessibilityIdentifier("metadata-enrich")
-              Button("Remove Unused Artwork") { Task { await model.pruneArtwork() } }
-              Button("Remove TMDB Token", role: .destructive) { Task { await model.disableMetadata() } }
-                .accessibilityIdentifier("metadata-remove-token")
-            }
-            if let job = model.metadataJob {
-              ProgressView(value: Double(job.itemsProcessed), total: Double(max(job.itemsTotal, 1))) {
-                Text("Metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
+            if model.metadataProvider?.hasToken == true {
+              LabeledContent(
+                "TMDB", value: model.metadataProvider?.enabled == true ? "Enabled" : "Disabled")
+              if let status = model.metadataProvider {
+                LabeledContent(
+                  "Artwork",
+                  value: ByteCountFormatter.string(
+                    fromByteCount: status.artworkBytes, countStyle: .file))
+                Text(status.attribution).font(.caption2).foregroundStyle(.secondary)
               }
+              HStack {
+                Button("Enrich Library") { Task { await model.enrichLibrary() } }
+                  .accessibilityIdentifier("metadata-enrich")
+                Button("Review Queue") { showingReviewQueue = true }
+                Button("Remove Unused Artwork") { Task { await model.pruneArtwork() } }
+                Button("Remove TMDB Token", role: .destructive) {
+                  Task { await model.disableMetadata() }
+                }
+                .accessibilityIdentifier("metadata-remove-token")
+              }
+              if let job = model.metadataJob {
+                ProgressView(
+                  value: Double(job.itemsProcessed), total: Double(max(job.itemsTotal, 1))
+                ) {
+                  Text("Metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
+                }
+              }
+            } else {
+              SecureField("TMDB API Read Access Token", text: $tmdbToken)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("tmdb-token")
+              Button("Enable TMDB") {
+                let token = tmdbToken
+                tmdbToken = ""
+                Task { await model.configureMetadata(token: token) }
+              }
+              .disabled(tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+          }
+          if model.operatingMode == .host {
+            LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
+            Button("Restart Server") { Task { await model.restartNativeHost() } }
+            Button("Switch to Another Server…", role: .destructive) {
+              showingSwitchConfirmation = true
             }
           } else {
-            SecureField("TMDB API Read Access Token", text: $tmdbToken)
-              .textFieldStyle(.roundedBorder)
-              .accessibilityIdentifier("tmdb-token")
-            Button("Enable TMDB") {
-              let token = tmdbToken
-              tmdbToken = ""
-              Task { await model.configureMetadata(token: token) }
+            Button("Disconnect This Mac", role: .destructive) {
+              Task { await model.disconnect() }
             }
-            .disabled(tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityIdentifier("disconnect-server")
           }
-        }
-        if model.operatingMode == .host {
-          LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
-          Button("Restart Server") { Task { await model.restartNativeHost() } }
-          Button("Switch to Another Server…", role: .destructive) {
-            showingSwitchConfirmation = true
-          }
-        } else {
-          Button("Disconnect This Mac", role: .destructive) {
-            Task { await model.disconnect() }
-          }
-          .accessibilityIdentifier("disconnect-server")
         }
       }
-      .padding(.top, 10)
     }
   }
 }

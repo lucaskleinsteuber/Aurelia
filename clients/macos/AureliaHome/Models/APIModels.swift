@@ -187,6 +187,212 @@ enum MediaKind: String, Codable, Sendable {
   case trailer
 }
 
+enum ArtworkKind: String, Codable, Sendable {
+  case poster
+  case backdrop
+  case still
+  case profile
+}
+
+enum MetadataReviewState: String, Codable, Sendable {
+  case needsReview
+  case matched
+  case ignored
+}
+
+struct ArtworkSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let kind: ArtworkKind
+  let path: String
+  let contentType: String
+  let contentLength: Int64
+}
+
+struct CreditSummary: Codable, Identifiable, Equatable, Sendable {
+  let name: String
+  let department: String
+  let job: String?
+  let character: String?
+  let order: Int
+  let profile: ArtworkSummary?
+
+  var id: String { "\(order):\(department):\(name):\(character ?? "")" }
+}
+
+struct MediaMetadataSummary: Codable, Identifiable, Equatable, Sendable {
+  let mediaId: UUID
+  let title: String
+  let originalTitle: String?
+  let overview: String?
+  let releaseDate: String?
+  let year: Int?
+  let runtimeMinutes: Int?
+  let rating: Double?
+  let contentRating: String?
+  let genres: [String]
+  let studios: [String]
+  let countries: [String]
+  let credits: [CreditSummary]
+  let poster: ArtworkSummary?
+  let backdrop: ArtworkSummary?
+  let still: ArtworkSummary?
+  let provider: String?
+  let providerMediaId: String?
+  let reviewState: MetadataReviewState
+
+  var id: UUID { mediaId }
+}
+
+struct CatalogItemSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let kind: MediaKind
+  let title: String
+  let originalTitle: String?
+  let year: Int?
+  let overview: String?
+  let genres: [String]
+  let poster: ArtworkSummary?
+  let backdrop: ArtworkSummary?
+  let availability: MediaAvailability
+  let isFavorite: Bool
+  let progress: PlaybackProgressResponse?
+  let addedAt: String
+  let parentTitle: String?
+  let seasonNumber: Int?
+  let episodeNumber: Int?
+
+  init(
+    id: UUID, kind: MediaKind, title: String, originalTitle: String?, year: Int?,
+    overview: String?, genres: [String], poster: ArtworkSummary?, backdrop: ArtworkSummary?,
+    availability: MediaAvailability, isFavorite: Bool, progress: PlaybackProgressResponse?,
+    addedAt: String, parentTitle: String? = nil, seasonNumber: Int? = nil,
+    episodeNumber: Int? = nil
+  ) {
+    self.id = id
+    self.kind = kind
+    self.title = title
+    self.originalTitle = originalTitle
+    self.year = year
+    self.overview = overview
+    self.genres = genres
+    self.poster = poster
+    self.backdrop = backdrop
+    self.availability = availability
+    self.isFavorite = isFavorite
+    self.progress = progress
+    self.addedAt = addedAt
+    self.parentTitle = parentTitle
+    self.seasonNumber = seasonNumber
+    self.episodeNumber = episodeNumber
+  }
+
+  var isPlayable: Bool { availability == .available && kind != .series }
+  var progressFraction: Double? {
+    guard let progress, progress.durationMilliseconds > 0, !progress.isCompleted else { return nil }
+    return min(
+      max(Double(progress.positionMilliseconds) / Double(progress.durationMilliseconds), 0), 1)
+  }
+}
+
+struct EpisodePresentation: Codable, Identifiable, Equatable, Sendable {
+  let item: CatalogItemSummary
+  let seasonNumber: Int
+  let episodeNumber: Int
+
+  var id: UUID { item.id }
+}
+
+struct SupplementPresentation: Codable, Identifiable, Equatable, Sendable {
+  let item: CatalogItemSummary
+  let category: String
+  let seasonNumber: Int?
+
+  var id: UUID { item.id }
+}
+
+struct SeasonPresentation: Codable, Identifiable, Equatable, Sendable {
+  let number: Int
+  let episodes: [EpisodePresentation]
+  let supplements: [SupplementPresentation]
+
+  var id: Int { number }
+}
+
+struct CatalogDetailPresentation: Codable, Equatable, Sendable {
+  let item: CatalogItemSummary
+  let metadata: MediaMetadataSummary
+  let seasons: [SeasonPresentation]
+  let supplements: [SupplementPresentation]
+}
+
+struct CollectionSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let name: String
+  let poster: ArtworkSummary?
+  let items: [CatalogItemSummary]
+}
+
+struct HomeResponse: Codable, Equatable, Sendable {
+  let recommendation: CatalogItemSummary?
+  let continueWatching: [CatalogItemSummary]
+  let recentlyAdded: [CatalogItemSummary]
+  let favorites: [CatalogItemSummary]
+  let collections: [CollectionSummary]
+  let recommendationChangesAt: String
+}
+
+struct MetadataCandidateSummary: Codable, Identifiable, Equatable, Sendable {
+  let provider: String
+  let providerMediaId: String
+  let mediaType: String
+  let title: String
+  let originalTitle: String?
+  let year: Int?
+  let overview: String?
+  let posterPath: String?
+  let confidence: Double
+
+  var id: String { "\(provider):\(mediaType):\(providerMediaId)" }
+}
+
+struct MetadataReviewSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let mediaId: UUID
+  let title: String
+  let reason: String
+  let state: MetadataReviewState
+  let candidates: [MetadataCandidateSummary]
+  let updatedAt: String
+}
+
+struct SaveCollectionRequest: Encodable, Sendable {
+  let name: String
+  let mediaIds: [UUID]
+}
+
+struct SetFavoriteRequest: Encodable, Sendable {
+  let isFavorite: Bool
+}
+
+struct SelectMetadataMatchRequest: Encodable, Sendable {
+  let providerMediaId: String
+  let mediaType: String
+}
+
+struct UpdateMediaMetadataRequest: Encodable, Sendable {
+  let title: String?
+  let originalTitle: String?
+  let overview: String?
+  let releaseDate: String?
+  let runtimeMinutes: Int?
+  let rating: Double?
+  let contentRating: String?
+  let genres: [String]?
+  let studios: [String]?
+  let countries: [String]?
+  let clearFields: [String]?
+}
+
 struct MovieSummary: Codable, Identifiable, Equatable, Sendable {
   let id: UUID
   let title: String

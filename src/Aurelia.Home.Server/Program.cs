@@ -79,6 +79,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddDbContext<AureliaHomeDbContext>(options =>
     options.UseSqlite(connectionString));
 builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<LibraryService>();
 builder.Services.AddScoped<CatalogService>();

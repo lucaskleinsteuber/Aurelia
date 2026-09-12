@@ -10,6 +10,11 @@ struct PlayerView: View {
   @State private var hideTask: Task<Void, Never>?
   @State private var windowPresentation = PlayerWindowPresentation()
   @State private var isNativeFullScreen = false
+  @State private var isAdjustingVolume = false
+  @State private var showingAudioTracks = false
+  @State private var showingSubtitleTracks = false
+  @State private var cursorHidden = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   init(profile: StoredServerProfile, presentation: PlaybackPresentation) {
     _controller = StateObject(
@@ -21,7 +26,7 @@ struct PlayerView: View {
       Color.black
         .ignoresSafeArea()
 
-      PlayerVideoSurface(controller: controller, onInteraction: revealControls)
+      PlayerVideoSurface(controller: controller, onInteraction: { revealControls() })
         .ignoresSafeArea()
 
       if controlsVisible || controller.isPreparing || controller.errorMessage != nil {
@@ -32,12 +37,14 @@ struct PlayerView: View {
       Color.clear
         .frame(width: 1, height: 1)
         .accessibilityElement()
-        .accessibilityLabel("Native Player")
+        .accessibilityLabel("Native Player · \(controller.presentation.title)")
         .accessibilityIdentifier("native-player")
     }
-    .background(PlayerWindowAccessor { window in
-      windowPresentation.apply(to: window)
-    })
+    .background(
+      PlayerWindowAccessor { window in
+        windowPresentation.apply(to: window)
+      }
+    )
     .preferredColorScheme(.dark)
     .task {
       PlaybackShutdownCoordinator.shared.register(controller)
@@ -46,7 +53,7 @@ struct PlayerView: View {
     }
     .onDisappear {
       hideTask?.cancel()
-      NSCursor.unhide()
+      showCursor()
       PlaybackShutdownCoordinator.shared.unregister(controller)
       windowPresentation.restore()
       Task { await controller.shutdown() }
@@ -65,6 +72,16 @@ struct PlayerView: View {
       else { return }
       isNativeFullScreen = false
     }
+    .onChange(of: controller.isPreparing) {
+      if controller.isPreparing {
+        revealControls(scheduleHide: false)
+      } else {
+        revealControls()
+      }
+    }
+    .onChange(of: controller.errorMessage) {
+      revealControls(scheduleHide: controller.errorMessage == nil)
+    }
   }
 
   private var controls: some View {
@@ -72,8 +89,9 @@ struct PlayerView: View {
       LinearGradient(
         colors: [.black.opacity(0.7), .clear, .black.opacity(0.82)],
         startPoint: .top,
-        endPoint: .bottom)
-        .ignoresSafeArea()
+        endPoint: .bottom
+      )
+      .ignoresSafeArea()
 
       VStack {
         HStack {
@@ -88,8 +106,8 @@ struct PlayerView: View {
 
         Spacer()
 
-        HStack(spacing: 18) {
-          controlButton("Back 5 Seconds", systemImage: "gobackward.5") {
+        HStack(spacing: 14) {
+          centerControlButton("Back 5 Seconds", systemImage: "gobackward.5") {
             controller.skip(seconds: -5)
           }
           Button {
@@ -105,7 +123,7 @@ struct PlayerView: View {
           .buttonStyle(.plain)
           .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
           .accessibilityIdentifier("player-play-pause")
-          controlButton("Forward 5 Seconds", systemImage: "goforward.5") {
+          centerControlButton("Forward 5 Seconds", systemImage: "goforward.5") {
             controller.skip(seconds: 5)
           }
         }
@@ -114,72 +132,9 @@ struct PlayerView: View {
 
         Spacer()
 
-        VStack(alignment: .leading, spacing: 12) {
-          VStack(alignment: .leading, spacing: 2) {
-            Text(controller.presentation.subtitle ?? "NOW PLAYING")
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.secondary)
-            Text(controller.presentation.title)
-              .font(.title3.weight(.semibold))
-              .accessibilityIdentifier("player-title")
-          }
-
-          HStack(spacing: 10) {
-            Text(formatTime(displayedPosition))
-              .monospacedDigit()
-            Slider(
-              value: Binding(
-                get: { displayedPosition },
-                set: { scrubPosition = $0 }),
-              in: 0...max(Double(controller.durationMilliseconds), 1),
-              onEditingChanged: { editing in
-                isScrubbing = editing
-                if editing {
-                  scrubPosition = Double(controller.currentTimeMilliseconds)
-                  revealControls()
-                } else {
-                  controller.seek(to: Int64(scrubPosition.rounded()))
-                  revealControls()
-                }
-              })
-              .accessibilityLabel("Playback Position")
-              .accessibilityIdentifier("player-timeline")
-            Text("−\(formatTime(max(0, Double(controller.durationMilliseconds) - displayedPosition)))")
-              .monospacedDigit()
-          }
-          .font(.caption)
-
-          HStack {
-            Button {
-              controller.toggleMute()
-              revealControls()
-            } label: {
-              Image(systemName: controller.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(controller.isMuted ? "Unmute" : "Mute")
-
-            Slider(
-              value: Binding(
-                get: { controller.volume },
-                set: { controller.setVolume($0) }),
-              in: 0...1)
-              .frame(width: 130)
-              .accessibilityLabel("Volume")
-
-            Spacer()
-
-            controlButton(
-              isNativeFullScreen ? "Exit Full Screen" : "Enter Full Screen",
-              systemImage: "arrow.up.left.and.arrow.down.right"
-            ) {
-              windowPresentation.window?.toggleFullScreen(nil)
-            }
-            .accessibilityIdentifier("player-fullscreen")
-          }
-        }
-        .padding(.horizontal, 30)
-        .padding(.bottom, 24)
+        bottomControls
+          .padding(.horizontal, 30)
+          .padding(.bottom, 24)
       }
 
       if controller.isPreparing, controller.errorMessage == nil {
@@ -215,56 +170,182 @@ struct PlayerView: View {
 
   private var trackMenus: some View {
     HStack(spacing: 8) {
-      Menu {
-        if controller.audioTracks.isEmpty {
-          Text("No audio tracks available")
-        } else {
-          ForEach(controller.audioTracks) { track in
-            Button {
-              controller.selectAudioTrack(track.id)
-            } label: {
-              if controller.selectedAudioTrackID == track.id {
-                Label(track.title, systemImage: "checkmark")
-              } else {
-                Text(track.title)
-              }
-            }
-          }
-        }
+      Button {
+        showingAudioTracks.toggle()
+        revealControls(scheduleHide: false)
       } label: {
-        Label("Audio", systemImage: "waveform")
+        Image(systemName: "waveform").frame(width: 30, height: 30)
       }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Audio")
       .accessibilityIdentifier("player-audio-menu")
-
-      Menu {
-        Button {
-          controller.selectSubtitleTrack(nil)
-        } label: {
-          if controller.selectedSubtitleTrackID == nil {
-            Label("Off", systemImage: "checkmark")
-          } else {
-            Text("Off")
-          }
+      .popover(isPresented: $showingAudioTracks, arrowEdge: .top) {
+        trackPicker(
+          title: "Audio",
+          emptyMessage: "No audio tracks available",
+          tracks: controller.audioTracks,
+          selectedID: controller.selectedAudioTrackID
+        ) { id in
+          controller.selectAudioTrack(id)
+          showingAudioTracks = false
         }
-        Divider()
-        ForEach(controller.subtitleTracks) { track in
-          Button {
-            controller.selectSubtitleTrack(track.id)
-          } label: {
-            if controller.selectedSubtitleTrackID == track.id {
-              Label(track.title, systemImage: "checkmark")
-            } else {
-              Text(track.title)
+      }
+
+      Button {
+        showingSubtitleTracks.toggle()
+        revealControls(scheduleHide: false)
+      } label: {
+        Image(systemName: "captions.bubble").frame(width: 30, height: 30)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Subtitles")
+      .accessibilityIdentifier("player-subtitle-menu")
+      .popover(isPresented: $showingSubtitleTracks, arrowEdge: .top) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Subtitles").font(.headline).padding(.bottom, 6)
+          trackChoice("Off", selected: controller.selectedSubtitleTrackID == nil) {
+            controller.selectSubtitleTrack(nil)
+            showingSubtitleTracks = false
+          }
+          if !controller.subtitleTracks.isEmpty { Divider() }
+          ForEach(controller.subtitleTracks) { track in
+            trackChoice(track.title, selected: controller.selectedSubtitleTrackID == track.id) {
+              controller.selectSubtitleTrack(track.id)
+              showingSubtitleTracks = false
             }
           }
         }
-      } label: {
-        Label("Subtitles", systemImage: "captions.bubble")
+        .padding(12)
+        .frame(minWidth: 230, alignment: .leading)
       }
-      .accessibilityIdentifier("player-subtitle-menu")
     }
     .padding(10)
     .background(.ultraThinMaterial, in: Capsule())
+    .onChange(of: showingAudioTracks) { if !showingAudioTracks { revealControls() } }
+    .onChange(of: showingSubtitleTracks) { if !showingSubtitleTracks { revealControls() } }
+  }
+
+  private var bottomControls: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(alignment: .bottom, spacing: 24) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(controller.presentation.subtitle ?? "NOW PLAYING")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.66))
+          Text(controller.presentation.title)
+            .font(.title3.weight(.semibold))
+            .accessibilityLabel(controller.presentation.title)
+            .accessibilityIdentifier("player-title")
+        }
+        Spacer(minLength: 30)
+        HStack(spacing: 12) {
+          Button {
+            controller.toggleMute()
+            revealControls()
+          } label: {
+            Image(systemName: controller.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+              .frame(width: 32, height: 32)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(controller.isMuted ? "Unmute" : "Mute")
+
+          Slider(
+            value: Binding(
+              get: { controller.volume },
+              set: { controller.setVolume($0) }),
+            in: 0...1,
+            onEditingChanged: { editing in
+              isAdjustingVolume = editing
+              revealControls(scheduleHide: !editing)
+            }
+          )
+          .frame(width: 120)
+          .accessibilityLabel("Volume")
+
+          Button {
+            guard let window = windowPresentation.window else { return }
+            isNativeFullScreen.toggle()
+            window.toggleFullScreen(nil)
+            revealControls()
+          } label: {
+            Image(
+              systemName: isNativeFullScreen
+                ? "arrow.down.right.and.arrow.up.left"
+                : "arrow.up.left.and.arrow.down.right"
+            )
+            .frame(width: 32, height: 32)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(isNativeFullScreen ? "Exit Full Screen" : "Enter Full Screen")
+          .accessibilityIdentifier("player-fullscreen")
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+      }
+
+      HStack(spacing: 10) {
+        Text(formatTime(displayedPosition)).monospacedDigit()
+        Slider(
+          value: Binding(
+            get: { displayedPosition },
+            set: { scrubPosition = $0 }),
+          in: 0...max(Double(controller.durationMilliseconds), 1),
+          onEditingChanged: { editing in
+            isScrubbing = editing
+            if editing {
+              scrubPosition = Double(controller.currentTimeMilliseconds)
+              revealControls(scheduleHide: false)
+            } else {
+              controller.seek(to: Int64(scrubPosition.rounded()))
+              revealControls()
+            }
+          }
+        )
+        .accessibilityLabel("Playback Position")
+        .accessibilityIdentifier("player-timeline")
+        Text(formatTime(Double(controller.durationMilliseconds))).monospacedDigit()
+      }
+      .font(.caption)
+    }
+  }
+
+  private func trackPicker(
+    title: String,
+    emptyMessage: String,
+    tracks: [PlaybackTrack],
+    selectedID: Int32?,
+    selection: @escaping (Int32) -> Void
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title).font(.headline).padding(.bottom, 6)
+      if tracks.isEmpty {
+        Text(emptyMessage).foregroundStyle(.secondary).padding(.vertical, 6)
+      } else {
+        ForEach(tracks) { track in
+          trackChoice(track.title, selected: selectedID == track.id) { selection(track.id) }
+        }
+      }
+    }
+    .padding(12)
+    .frame(minWidth: 230, alignment: .leading)
+  }
+
+  private func trackChoice(
+    _ title: String,
+    selected: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      HStack {
+        Text(title).lineLimit(1)
+        Spacer()
+        if selected { Image(systemName: "checkmark") }
+      }
+      .contentShape(Rectangle())
+      .frame(minHeight: 32)
+    }
+    .buttonStyle(.plain)
   }
 
   private var displayedPosition: Double {
@@ -286,22 +367,56 @@ struct PlayerView: View {
     .accessibilityLabel(title)
   }
 
-  private func revealControls() {
-    NSCursor.unhide()
-    withAnimation(.easeOut(duration: 0.15)) { controlsVisible = true }
+  private func centerControlButton(
+    _ title: String,
+    systemImage: String,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button {
+      action()
+      revealControls()
+    } label: {
+      Image(systemName: systemImage)
+        .font(.system(size: 18, weight: .semibold))
+        .frame(width: 44, height: 44)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(title)
+  }
+
+  private func revealControls(scheduleHide: Bool = true) {
+    showCursor()
+    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { controlsVisible = true }
     hideTask?.cancel()
-    guard controller.errorMessage == nil else { return }
+    guard scheduleHide, canAutoHide else { return }
     hideTask = Task {
       try? await Task.sleep(for: .seconds(2))
-      guard !Task.isCancelled, !isScrubbing else { return }
-      withAnimation(.easeInOut(duration: 0.25)) { controlsVisible = false }
-      NSCursor.hide()
+      guard !Task.isCancelled, canAutoHide else { return }
+      withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { controlsVisible = false }
+      hideCursor()
     }
+  }
+
+  private var canAutoHide: Bool {
+    !controller.isPreparing && controller.errorMessage == nil && !isScrubbing
+      && !isAdjustingVolume && !showingAudioTracks && !showingSubtitleTracks
+  }
+
+  private func hideCursor() {
+    guard !cursorHidden else { return }
+    NSCursor.hide()
+    cursorHidden = true
+  }
+
+  private func showCursor() {
+    guard cursorHidden else { return }
+    NSCursor.unhide()
+    cursorHidden = false
   }
 
   private func closePlayer() {
     hideTask?.cancel()
-    NSCursor.unhide()
+    showCursor()
     Task {
       await controller.shutdown()
       model.closePlayback()

@@ -65,6 +65,10 @@ The complete path is:
 - Build 9 adds optional English TMDB metadata and bounded authenticated artwork,
   cautious match review, manual precedence, collections, favorites, search, and
   the server-side data required by the future Home and detail experience.
+- Build 10 completes the native visual system: an hourly Home recommendation,
+  shared catalog cards, bundled movie/series details, structured search,
+  unified editors, authenticated in-memory artwork loading, and a restrained
+  content-first player across the macOS client.
 
 The Build 7 host handoff keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; a non-secret launch description is
@@ -74,9 +78,9 @@ The description and FIFO are deleted after consumption. Secrets never enter
 arguments, persisted settings, or logs, and the helper shuts down when its
 owning app disappears.
 
-The system is functional but not visually finished. Treat a passing build as
-engineering evidence, not as proof that every UI route, network, codec, or
-physical device has been exercised.
+Treat a passing build as engineering evidence, not as proof that every network,
+codec, physical device, accessibility configuration, or complete media library
+has been exercised.
 
 ## Product and design direction
 
@@ -87,11 +91,11 @@ visible beneath it, no gray or black title strip above content, restrained
 player controls that disappear automatically, and native macOS fullscreen
 behavior. Never draw fake traffic-light buttons in fullscreen.
 
-A later Home screen will rotate one movie or series recommendation every hour.
-Library, detail, metadata, and editing screens must eventually be rebuilt as one
-coherent system; do not preserve inconsistent old Aurelia editor menus merely
-because code exists for them. During infrastructure milestones, avoid unrelated
-visual redesigns.
+Home rotates one movie or series recommendation on the server-reported hourly
+boundary. Library, details, metadata, editing, setup, settings, and playback use
+one coherent native system; do not reintroduce inconsistent old Aurelia editor
+menus merely because code exists for them. Future infrastructure milestones
+should avoid unrelated visual redesigns.
 
 ## Workspace map and safety boundary
 
@@ -130,15 +134,13 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message (`1.0.9` for Build 9), push immediately, verify the remote hash, and
+    message (`1.0.10` for Build 10), push immediately, verify the remote hash, and
     write exactly one English external summary for the completed build.
 
 ## Planned direction
 
-The next milestone is Build 10: use the Build 9 presentation APIs for the
-dedicated Apple-TV-style Home, library, detail, metadata review, and editing
-redesign. The supplied Aurelia screenshots remain the visual reference, while
-the existing server/native-client boundary stays unchanged. Automatic file
-watchers, the optional web client, broader administration, Linux and Windows
-native clients, and advanced playback features should follow as deliberate
-milestones rather than being mixed into that visual work.
+Build 10 deliberately does not introduce chapters, playback speed, sleep timer,
+PiP, timeline thumbnails, automatic file watchers, an optional web client,
+broader administration, or Linux and Windows native clients. Those should
+follow as deliberate milestones without weakening the existing server/native-
+client boundary or the established visual system.

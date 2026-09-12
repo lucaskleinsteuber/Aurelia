@@ -6,8 +6,62 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Home.Server.Services;
 
-public sealed class PresentationService(AureliaHomeDbContext database)
+public sealed class PresentationService(AureliaHomeDbContext database, TimeProvider timeProvider)
 {
+    public async Task<PagedResponse<CatalogItemSummary>> CatalogAsync(
+        Guid userId,
+        MediaKind? kind,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        ValidatePage(offset, limit);
+        if (kind is not null and not MediaKind.Movie and not MediaKind.Series)
+            throw new MetadataException(
+                "invalid_catalog_kind",
+                "Catalog kind must be movie or series.",
+                StatusCodes.Status400BadRequest);
+
+        var query = BaseItems(userId).Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
+        if (kind is not null) query = query.Where(item => item.Kind == kind);
+        var total = await query.CountAsync(cancellationToken);
+        var items = await query.OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id)
+            .Skip(offset).Take(limit).ToListAsync(cancellationToken);
+        return new PagedResponse<CatalogItemSummary>(
+            items.Select(item => ToCatalog(item, userId)).ToList(), offset, limit, total);
+    }
+
+    public async Task<CatalogDetailPresentation> DetailAsync(
+        Guid userId,
+        Guid mediaId,
+        CancellationToken cancellationToken)
+    {
+        var item = await BaseItems(userId)
+            .SingleOrDefaultAsync(candidate => candidate.Id == mediaId
+                && (candidate.Kind == MediaKind.Movie || candidate.Kind == MediaKind.Series), cancellationToken)
+            ?? throw new MetadataException("media_not_found", "The movie or series was not found.", StatusCodes.Status404NotFound);
+        var children = await BaseItems(userId).Where(candidate => candidate.ParentId == mediaId)
+            .OrderBy(candidate => candidate.SeasonNumber).ThenBy(candidate => candidate.EpisodeNumber)
+            .ThenBy(candidate => candidate.DetectedTitle).ThenBy(candidate => candidate.Id)
+            .ToListAsync(cancellationToken);
+
+        var seasons = children.Where(child => child.SeasonNumber.HasValue)
+            .GroupBy(child => child.SeasonNumber!.Value).OrderBy(group => group.Key)
+            .Select(group => new SeasonPresentation(
+                group.Key,
+                group.Where(child => child.Kind == MediaKind.Episode).Select(child => new EpisodePresentation(
+                    ToCatalog(child, userId), child.SeasonNumber!.Value, child.EpisodeNumber ?? 0)).ToList(),
+                group.Where(child => child.Kind is MediaKind.Extra or MediaKind.Trailer).Select(child =>
+                    new SupplementPresentation(ToCatalog(child, userId), child.Category, child.SeasonNumber)).ToList()))
+            .ToList();
+        var supplements = children.Where(child => !child.SeasonNumber.HasValue
+                && (child.Kind is MediaKind.Extra or MediaKind.Trailer))
+            .Select(child => new SupplementPresentation(ToCatalog(child, userId), child.Category, child.SeasonNumber))
+            .ToList();
+        return new CatalogDetailPresentation(
+            ToCatalog(item, userId), MetadataPresentation.ToSummary(item), seasons, supplements);
+    }
+
     public async Task<PagedResponse<CatalogItemSummary>> SearchAsync(Guid userId, string query, int offset, int limit, CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
@@ -32,7 +86,8 @@ public sealed class PresentationService(AureliaHomeDbContext database)
             .OrderByDescending(item => item.PlaybackProgress.Single(progress => progress.UserId == userId).LastPlayedAt).Take(20).Select(item => ToCatalog(item, userId)).ToList();
         var recent = topLevel.OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id).Take(30).Select(item => ToCatalog(item, userId)).ToList();
         var favorites = topLevel.Where(item => item.Favorites.Any(value => value.UserId == userId)).OrderBy(item => EffectiveTitle(item)).Take(30).Select(item => ToCatalog(item, userId)).ToList();
-        var hour = new DateTimeOffset(DateTimeOffset.UtcNow.Year, DateTimeOffset.UtcNow.Month, DateTimeOffset.UtcNow.Day, DateTimeOffset.UtcNow.Hour, 0, 0, TimeSpan.Zero);
+        var now = timeProvider.GetUtcNow();
+        var hour = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero);
         var preferred = topLevel.Where(item => !item.PlaybackProgress.Any(progress => progress.UserId == userId && progress.IsCompleted)).ToList();
         if (preferred.Count == 0) preferred = topLevel;
         var recommendation = preferred.Count == 0 ? null : ToCatalog(preferred[StableIndex(userId, hour, preferred.Count)], userId);
@@ -141,6 +196,7 @@ public sealed class PresentationService(AureliaHomeDbContext database)
     private IQueryable<MediaItem> BaseItems(Guid userId) => database.MediaItems.AsNoTracking()
         .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
         .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Credits)
+        .Include(item => item.Parent)!.ThenInclude(parent => parent!.Metadata)
         .Include(item => item.Favorites.Where(value => value.UserId == userId))
         .Include(item => item.PlaybackProgress.Where(value => value.UserId == userId));
 
@@ -153,7 +209,10 @@ public sealed class PresentationService(AureliaHomeDbContext database)
             metadata.Genres, metadata.Poster, metadata.Backdrop ?? metadata.Still, item.Availability,
             item.Favorites.Any(value => value.UserId == userId),
             progress is null ? null : new PlaybackProgressResponse(item.Id, progress.PositionMilliseconds, progress.DurationMilliseconds, progress.IsCompleted, progress.LastPlayedAt, progress.UpdatedAt),
-            item.CreatedAt);
+            item.CreatedAt,
+            item.Parent is null ? null : EffectiveTitle(item.Parent),
+            item.SeasonNumber,
+            item.EpisodeNumber);
     }
 
     private static string SearchText(MediaItem item)
@@ -165,6 +224,9 @@ public sealed class PresentationService(AureliaHomeDbContext database)
             metadata?.ManualOriginalTitle, metadata?.ProviderOriginalTitle, metadata?.ManualGenresJson,
             metadata?.ProviderGenresJson,
             metadata is null ? null : string.Join(' ', metadata.Credits.Select(credit => credit.Name)),
+            item.Parent is null ? null : EffectiveTitle(item.Parent),
+            item.SeasonNumber is null ? null : $"Season {item.SeasonNumber}",
+            item.EpisodeNumber is null ? null : $"Episode {item.EpisodeNumber}",
         }.Where(value => !string.IsNullOrWhiteSpace(value)));
     }
 
