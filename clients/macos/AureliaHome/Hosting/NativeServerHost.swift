@@ -43,6 +43,7 @@ enum NativeServerHostError: LocalizedError, Equatable {
   case rendezvousTimedOut
   case invalidResponse
   case rejected
+  case alreadyStarting
 
   var errorDescription: String? {
     switch self {
@@ -51,25 +52,37 @@ enum NativeServerHostError: LocalizedError, Equatable {
     case .rendezvousTimedOut: "Aurelia Home Server Host did not become ready."
     case .invalidResponse: "Aurelia Home Server Host returned an invalid response."
     case .rejected: "Aurelia Home Server Host rejected the request."
+    case .alreadyStarting: "Aurelia Home Server Host is already starting."
     }
   }
 }
 
-final class NativeServerHost: @unchecked Sendable {
-  private let lock = NSLock()
+@MainActor
+final class NativeServerHost {
   private var controlURL: URL?
   private var runningApplication: NSRunningApplication?
   private var rendezvousURL: URL?
+  private var isStarting = false
 
   func start(serverName: String, lanPort: Int = 43_111) async throws -> NativeHostSnapshot {
-    if let existing = lock.withLock({ controlURL }) {
-      return try await status(at: existing)
+    if let controlURL {
+      do {
+        let snapshot = try await status(at: controlURL)
+        if snapshot.state != .failed && snapshot.state != .stopped { return snapshot }
+        await discardCurrentHelper(requestShutdown: true)
+      } catch {
+        await discardCurrentHelper(requestShutdown: false)
+      }
     }
+    guard !isStarting else { throw NativeServerHostError.alreadyStarting }
+    isStarting = true
+    defer { isStarting = false }
 
     let secret = try Self.randomSecret()
-    let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("AureliaHome/Host", isDirectory: true)
-    try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+    let cache: URL
+    do { cache = try HostBootstrapLocation.directory() } catch {
+      throw NativeServerHostError.couldNotLaunch
+    }
     let rendezvous = cache.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
     let helperURL = try helperApplicationURL()
     let launchHandoff = try HostLaunchHandoff(
@@ -93,37 +106,53 @@ final class NativeServerHost: @unchecked Sendable {
     } catch {
       throw NativeServerHostError.couldNotLaunch
     }
-    lock.withLock {
-      runningApplication = application
-      rendezvousURL = rendezvous
-    }
+    runningApplication = application
+    rendezvousURL = rendezvous
 
-    for _ in 0..<100 {
-      if let data = try? Data(contentsOf: rendezvous),
-        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let port = object["port"] as? Int,
-        port > 0, port <= 65_535,
-        let url = URL(string: "http://127.0.0.1:\(port)/\(secret)")
-      {
-        try? FileManager.default.removeItem(at: rendezvous)
-        lock.withLock { controlURL = url }
-        for _ in 0..<60 {
-          if let snapshot = try? await status(at: url) { return snapshot }
-          try await Task.sleep(for: .milliseconds(100))
+    do {
+      for _ in 0..<100 {
+        try Task.checkCancellation()
+        guard !application.isTerminated else { throw NativeServerHostError.couldNotLaunch }
+        if (try? HostLaunchSecurity.validateConfigurationFile(
+          at: rendezvous.path,
+          bootstrapDirectory: cache)) != nil,
+          let data = try? Data(contentsOf: rendezvous),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let port = object["port"] as? Int,
+          port > 0, port <= 65_535,
+          let url = URL(string: "http://127.0.0.1:\(port)/\(secret)")
+        {
+          try? FileManager.default.removeItem(at: rendezvous)
+          controlURL = url
+          for _ in 0..<60 {
+            try Task.checkCancellation()
+            guard !application.isTerminated else { throw NativeServerHostError.couldNotLaunch }
+            if let snapshot = try? await status(at: url) { return snapshot }
+            try await Task.sleep(for: .milliseconds(100))
+          }
+          throw NativeServerHostError.rendezvousTimedOut
         }
-        throw NativeServerHostError.rendezvousTimedOut
+        try await Task.sleep(for: .milliseconds(100))
       }
-      try await Task.sleep(for: .milliseconds(100))
+      throw NativeServerHostError.rendezvousTimedOut
+    } catch {
+      application.forceTerminate()
+      clearLaunchState()
+      try? FileManager.default.removeItem(at: rendezvous)
+      if error is CancellationError { throw error }
+      throw error
     }
-    application.terminate()
-    throw NativeServerHostError.rendezvousTimedOut
   }
 
   func status() async throws -> NativeHostSnapshot {
-    guard let url = lock.withLock({ controlURL }) else {
+    if runningApplication?.isTerminated == true {
+      clearLaunchState()
+      throw NativeServerHostError.couldNotLaunch
+    }
+    guard let controlURL else {
       return .stopped
     }
-    return try await status(at: url)
+    return try await status(at: controlURL)
   }
 
   func configure(name: String, lanPort: Int) async throws {
@@ -141,32 +170,34 @@ final class NativeServerHost: @unchecked Sendable {
   }
 
   func stop() async {
+    if controlURL == nil {
+      runningApplication?.forceTerminate()
+      clearLaunchState()
+      return
+    }
     _ = try? await request(action: "shutdown", method: "POST")
     for _ in 0..<100 {
-      if lock.withLock({ runningApplication?.isTerminated ?? true }) { break }
+      if runningApplication?.isTerminated ?? true { break }
       try? await Task.sleep(for: .milliseconds(100))
     }
-    let cleanup = lock.withLock { () -> URL? in
-      let result = rendezvousURL
-      controlURL = nil
-      runningApplication = nil
-      rendezvousURL = nil
-      return result
-    }
+    if runningApplication?.isTerminated == false { runningApplication?.forceTerminate() }
+    let cleanup = rendezvousURL
+    clearLaunchState()
     if let cleanup { try? FileManager.default.removeItem(at: cleanup) }
   }
 
   private func status(at url: URL) async throws -> NativeHostSnapshot {
     let data = try await request(baseURL: url, action: "status", method: "GET")
-    do { return try JSONDecoder().decode(NativeHostSnapshot.self, from: data) }
-    catch { throw NativeServerHostError.invalidResponse }
+    do { return try JSONDecoder().decode(NativeHostSnapshot.self, from: data) } catch {
+      throw NativeServerHostError.invalidResponse
+    }
   }
 
   private func request(action: String, method: String, body: Data? = nil) async throws -> Data {
-    guard let url = lock.withLock({ controlURL }) else {
+    guard let controlURL else {
       throw NativeServerHostError.invalidResponse
     }
-    return try await request(baseURL: url, action: action, method: method, body: body)
+    return try await request(baseURL: controlURL, action: action, method: method, body: body)
   }
 
   private func request(baseURL: URL, action: String, method: String, body: Data? = nil) async throws
@@ -199,6 +230,27 @@ final class NativeServerHost: @unchecked Sendable {
       throw NativeServerHostError.helperMissing
     }
     return url
+  }
+
+  private func clearLaunchState() {
+    controlURL = nil
+    runningApplication = nil
+    rendezvousURL = nil
+  }
+
+  private func discardCurrentHelper(requestShutdown: Bool) async {
+    let application = runningApplication
+    if requestShutdown {
+      _ = try? await request(action: "shutdown", method: "POST")
+    }
+    for _ in 0..<20 {
+      if application?.isTerminated ?? true { break }
+      try? await Task.sleep(for: .milliseconds(100))
+    }
+    if application?.isTerminated == false { application?.forceTerminate() }
+    let cleanup = rendezvousURL
+    clearLaunchState()
+    if let cleanup { try? FileManager.default.removeItem(at: cleanup) }
   }
 
   private static func randomSecret() throws -> String {

@@ -2,8 +2,9 @@
 
 Aurelia Home is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to a native macOS library and playback client. Build 10
-can host the complete server on this Mac or remain a client of another server.
+and connects securely to a native macOS library and playback client. Build 11
+starts this Mac as a host by default while preserving an explicitly selected
+remote-client mode.
 People choose whole storage locations instead of separating movie and TV
 folders themselves; Aurelia Home classifies clear structures locally and asks
 only about ambiguous folders. Owners can optionally add their own TMDB token
@@ -63,9 +64,9 @@ native app.
   search; episode results open Direct Play immediately
 - One consistent native sheet family for metadata, provider matching, review,
   and collection editing, restricted to owners and administrators
-- In-app choice between hosting on this Mac and connecting to another server
+- Reliable host-first startup with an explicit, remembered remote-client mode
 - Separately signed, windowless host helper with both self-contained server architectures
-- Automatic server start while the host app runs, bounded private logs, and crash recovery
+- App-Group-secured server bootstrap, bounded private logs, retry, and crash recovery
 - Simple local setup with one password, storage selection, background scan status,
   pairing, and sessions
 - Bonjour server discovery and manual server addresses
@@ -83,12 +84,11 @@ native app.
 
 ## Development
 
-The repository uses the SDK pinned in `global.json`. On this development Mac it
-is installed in `~/.dotnet`; add that directory to `PATH` in a new shell if the
-`dotnet` command is not found.
+The repository uses the SDK pinned in `global.json`. Generated SDK and package
+caches live outside the repository in `Aurelia Home Other/Package Cache`.
 
 ```sh
-export PATH="$HOME/.dotnet:$PATH"
+export PATH="../Aurelia Home Other/Package Cache/dotnet:$PATH"
 dotnet tool restore
 dotnet restore AureliaHome.slnx
 dotnet test AureliaHome.slnx
@@ -103,6 +103,7 @@ scripts/verify-build-number.sh
 scripts/test-macos.sh
 scripts/build-macos-release.sh
 scripts/test-native-host.sh
+scripts/test-release-app-autostart.sh
 ```
 
 Generated builds, package caches, test results, and development logs are kept
@@ -207,18 +208,21 @@ incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
 
-For normal Build 10 use, launch Aurelia Home and choose **Set Up This Mac**.
-The native assistant creates the owner, enables LAN HTTPS, and lets the owner
+For normal Build 11 use, launch Aurelia Home. It starts the local server and,
+on a new installation, opens **Set Up This Mac** automatically. The native
+assistant creates the owner, enables LAN HTTPS, and lets the owner
 select one or more drives or folders. Technical server and port settings remain
 under Advanced. Clear movie and TV structures are classified automatically;
 uncertain folders can be marked Movie, TV Show, or Ignore and reviewed again
 later. Closing the last
 window leaves the app and its server running; clicking the Dock icon restores
 the window. Choosing **Aurelia Home > Quit Aurelia Home** stops both cleanly.
-Existing client connections remain in client mode after upgrading.
+Existing remote profiles remain in client mode after upgrading. A deliberate
+host or remote-client choice is versioned and remembered.
 
 The sandboxed app starts its separately signed host helper through Launch
-Services. A versioned launch description is bound to the exact running app PID
+Services and exchanges only transient bootstrap files in their shared macOS App
+Group. A versioned launch description is bound to the exact running app PID
 and executable path, while the random 256-bit control secret crosses only a
 permission-restricted FIFO and is removed immediately after use. The secret is
 never placed in process arguments, environment variables, configuration files,

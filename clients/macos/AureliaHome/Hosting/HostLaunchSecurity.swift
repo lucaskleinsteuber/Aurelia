@@ -21,6 +21,26 @@ struct ValidatedHostLaunchPaths: Equatable {
   let pipeURL: URL
 }
 
+enum HostBootstrapLocation {
+  static let appGroupIdentifier = "B5N7JVK37J.com.lucas.aureliahome.host"
+
+  static func directory(fileManager: FileManager = .default) throws -> URL {
+    guard
+      let container = fileManager.containerURL(
+        forSecurityApplicationGroupIdentifier: appGroupIdentifier)
+    else {
+      throw HostLaunchSecurityError.invalidPathLocation
+    }
+
+    let directory = container.appendingPathComponent(
+      "Library/Caches/AureliaHome/Host", isDirectory: true)
+    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    try fileManager.setAttributes(
+      [.posixPermissions: 0o700], ofItemAtPath: directory.path)
+    return directory.standardizedFileURL
+  }
+}
+
 enum HostLaunchSecurityError: Error, Equatable {
   case invalidDescription
   case invalidPathLocation
@@ -28,6 +48,33 @@ enum HostLaunchSecurityError: Error, Equatable {
 }
 
 enum HostLaunchSecurity {
+  static func validateBootstrapDirectory(at url: URL, owner: uid_t = getuid()) throws {
+    var metadata = stat()
+    let path = url.standardizedFileURL.path
+    guard path.hasPrefix("/"), lstat(path, &metadata) == 0,
+      metadata.st_mode & S_IFMT == S_IFDIR,
+      metadata.st_uid == owner,
+      metadata.st_mode & 0o777 == 0o700
+    else { throw HostLaunchSecurityError.invalidPathLocation }
+  }
+
+  static func validateConfigurationFile(
+    at path: String,
+    bootstrapDirectory: URL,
+    owner: uid_t = getuid()
+  ) throws {
+    var metadata = stat()
+    let configurationURL = URL(fileURLWithPath: path).standardizedFileURL
+    let expectedDirectory = bootstrapDirectory.standardizedFileURL.resolvingSymlinksInPath()
+    guard path.hasPrefix("/"), path.hasSuffix(".json"),
+      configurationURL.deletingLastPathComponent().resolvingSymlinksInPath() == expectedDirectory,
+      lstat(path, &metadata) == 0,
+      metadata.st_mode & S_IFMT == S_IFREG,
+      metadata.st_uid == owner,
+      metadata.st_mode & 0o777 == 0o600
+    else { throw HostLaunchSecurityError.invalidDescription }
+  }
+
   static func acceptsApplication(
     processIdentifier: Int32,
     executableURL: URL?,
@@ -66,12 +113,16 @@ enum HostLaunchSecurity {
     return ValidatedHostLaunchPaths(rendezvousURL: rendezvousURL, pipeURL: pipeURL)
   }
 
-  static func readSecretPipe(at path: String) throws -> String {
+  static func readSecretPipe(at path: String, owner: uid_t = getuid()) throws -> String {
     guard path.hasPrefix("/"), path.hasSuffix(".pipe"), path.utf8.count <= 1_024 else {
       throw HostLaunchSecurityError.invalidSecretPipe
     }
     var metadata = stat()
-    guard lstat(path, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFIFO else {
+    guard lstat(path, &metadata) == 0,
+      metadata.st_mode & S_IFMT == S_IFIFO,
+      metadata.st_uid == owner,
+      metadata.st_mode & 0o777 == 0o600
+    else {
       throw HostLaunchSecurityError.invalidSecretPipe
     }
     let descriptor = path.withCString { aureliaOpenPipe($0, O_RDONLY | O_NONBLOCK) }

@@ -3,6 +3,39 @@ import XCTest
 
 final class AureliaHomeUITests: XCTestCase {
   @MainActor
+  func testDefaultHostLaunchShowsServerStartingState() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_HOME_UI_TEST_MODE"] = "host-starting"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+
+    XCTAssertTrue(app.staticTexts["Starting Your Server"].waitForExistence(timeout: 8))
+    XCTAssertFalse(app.buttons["switch-to-client"].exists)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
+  func testFailedHostLaunchCanRetryFromACompleteNewAttempt() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_HOME_UI_TEST_MODE"] = "host-failed"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+
+    let retry = app.buttons["retry-server-start"]
+    XCTAssertTrue(retry.waitForExistence(timeout: 8))
+    XCTAssertTrue(app.descendants(matching: .any)["switch-to-client"].exists)
+    retry.click()
+    XCTAssertTrue(app.staticTexts["Set Up This Mac"].waitForExistence(timeout: 5))
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
   func testFirstRunOffersHostAndClientModes() throws {
     continueAfterFailure = false
     let app = XCUIApplication()

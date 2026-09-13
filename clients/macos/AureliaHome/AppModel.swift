@@ -35,6 +35,7 @@ final class AppModel: ObservableObject {
   private var homeRefreshTask: Task<Void, Never>?
   private var isTerminationProtectionActive = false
   private static let operatingModeKey = "AureliaHomeOperatingMode"
+  private static let operatingModeSelectionVersionKey = "AureliaHomeOperatingModeSelectionVersion"
 
   init(
     store: (any ServerProfileStore)? = nil,
@@ -97,6 +98,16 @@ final class AppModel: ObservableObject {
         isStarting = false
         return
       }
+      if Self.uiTestMode == "host-starting" || Self.uiTestMode == "host-failed" {
+        operatingMode = .host
+        hostSnapshot = NativeHostSnapshot(
+          state: Self.uiTestMode == "host-starting" ? .starting : .failed,
+          message: Self.uiTestMode == "host-failed" ? "The test server could not start." : nil,
+          bootstrapToken: nil,
+          serverInfo: nil)
+        isStarting = false
+        return
+      }
       if Self.uiTestMode == "library-setup" {
         operatingMode = .host
         profile = Self.previewOwnerProfile
@@ -124,10 +135,12 @@ final class AppModel: ObservableObject {
 
     do {
       profile = try store.load()
-      if profile != nil, operatingMode == nil {
-        operatingMode = .client
-        UserDefaults.standard.set(OperatingMode.client.rawValue, forKey: Self.operatingModeKey)
-      }
+      operatingMode = OperatingModePolicy.resolve(
+        storedMode: operatingMode,
+        storedSelectionVersion: UserDefaults.standard.integer(
+          forKey: Self.operatingModeSelectionVersionKey),
+        profile: profile)
+      persistOperatingMode(explicit: false)
       if operatingMode == .host {
         await startNativeHost()
       } else if profile != nil {
@@ -141,13 +154,16 @@ final class AppModel: ObservableObject {
 
   func selectClientMode() {
     operatingMode = .client
-    UserDefaults.standard.set(OperatingMode.client.rawValue, forKey: Self.operatingModeKey)
+    persistOperatingMode(explicit: true)
     errorMessage = nil
   }
 
   func selectHostMode() async {
+    if let profile, !OperatingModePolicy.isLocal(profile.baseURL) {
+      await disconnect()
+    }
     operatingMode = .host
-    UserDefaults.standard.set(OperatingMode.host.rawValue, forKey: Self.operatingModeKey)
+    persistOperatingMode(explicit: true)
     await startNativeHost()
   }
 
@@ -159,7 +175,7 @@ final class AppModel: ObservableObject {
     endTerminationProtection()
     hostSnapshot = .stopped
     operatingMode = .client
-    UserDefaults.standard.set(OperatingMode.client.rawValue, forKey: Self.operatingModeKey)
+    persistOperatingMode(explicit: true)
     await disconnect()
   }
 
@@ -221,6 +237,26 @@ final class AppModel: ObservableObject {
 
   func restartNativeHost() async {
     errorMessage = nil
+    #if DEBUG
+      if Self.uiTestMode == "host-failed" {
+        hostSnapshot = NativeHostSnapshot(
+          state: .starting,
+          message: nil,
+          bootstrapToken: nil,
+          serverInfo: nil)
+        await Task.yield()
+        hostSnapshot = NativeHostSnapshot(
+          state: .setupRequired,
+          message: nil,
+          bootstrapToken: "ui-test-retry-bootstrap-token",
+          serverInfo: nil)
+        return
+      }
+    #endif
+    if hostSnapshot.state == .failed || hostSnapshot.state == .stopped {
+      await startNativeHost()
+      return
+    }
     do { try await serverHost.restart() } catch { errorMessage = error.localizedDescription }
   }
 
@@ -707,7 +743,7 @@ final class AppModel: ObservableObject {
       beginTerminationProtection()
       startHostPolling()
       if profile != nil, hostSnapshot.state == .running {
-        try await refresh()
+        do { try await refresh() } catch { errorMessage = error.localizedDescription }
       }
     } catch {
       hostSnapshot = NativeHostSnapshot(
@@ -736,10 +772,28 @@ final class AppModel: ObservableObject {
       while !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(750))
         guard let self else { return }
-        if let snapshot = try? await self.serverHost.status() {
+        do {
+          let snapshot = try await self.serverHost.status()
           self.hostSnapshot = snapshot
+        } catch {
+          self.hostSnapshot = NativeHostSnapshot(
+            state: .failed,
+            message: error.localizedDescription,
+            bootstrapToken: nil,
+            serverInfo: nil)
+          return
         }
       }
+    }
+  }
+
+  private func persistOperatingMode(explicit: Bool) {
+    guard let operatingMode else { return }
+    UserDefaults.standard.set(operatingMode.rawValue, forKey: Self.operatingModeKey)
+    if explicit {
+      UserDefaults.standard.set(
+        OperatingModePolicy.selectionVersion,
+        forKey: Self.operatingModeSelectionVersionKey)
     }
   }
 

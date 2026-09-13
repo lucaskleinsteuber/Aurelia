@@ -69,6 +69,7 @@
 		B40000000000000000000002 /* AureliaHomeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AureliaHomeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C40000000000000000000001 /* AureliaHome-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "AureliaHome-Info.plist"; sourceTree = "<group>"; };
 		C40000000000000000000002 /* AureliaHome.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AureliaHome.entitlements; sourceTree = "<group>"; };
+		C40000000000000000000005 /* AureliaHomeServerHost.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AureliaHomeServerHost.entitlements; sourceTree = "<group>"; };
 		C40000000000000000000003 /* BuildNumber.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildNumber.xcconfig; sourceTree = "<group>"; };
 		D50000000000000000000010 /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = VLCKit.xcframework; sourceTree = "<group>"; };
 		D50000000000000000000011 /* VLCKit-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "VLCKit-COPYING.txt"; sourceTree = "<group>"; };
@@ -123,6 +124,7 @@
 				C40000000000000000000001 /* AureliaHome-Info.plist */,
 				E70000000000000000000005 /* AureliaHomeServerHost-Info.plist */,
 				C40000000000000000000002 /* AureliaHome.entitlements */,
+				C40000000000000000000005 /* AureliaHomeServerHost.entitlements */,
 				C40000000000000000000003 /* BuildNumber.xcconfig */,
 			);
 			path = Configuration;
@@ -443,6 +445,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/AureliaHomeServerHost.entitlements;
 				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -464,6 +467,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/AureliaHomeServerHost.entitlements;
 				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;

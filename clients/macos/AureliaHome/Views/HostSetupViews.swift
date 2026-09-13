@@ -63,8 +63,11 @@ struct NativeHostSetupView: View {
       switch model.hostSnapshot.state {
       case .starting, .restarting:
         ProgressView().controlSize(.large)
-        Text(model.hostSnapshot.state == .starting ? "Starting Your Server" : "Restarting Your Server")
-          .font(.title.bold())
+        Text(
+          model.hostSnapshot.state == .starting
+            ? "Starting Your Server" : "Restarting Your Server"
+        )
+        .font(.title.bold())
       case .setupRequired:
         ownerSetup
       case .running:
@@ -73,8 +76,9 @@ struct NativeHostSetupView: View {
         Text("Server Host Needs Attention").font(.title.bold())
         Text(model.hostSnapshot.message ?? "The server could not start.")
           .foregroundStyle(.secondary).multilineTextAlignment(.center)
-        Button("Restart Server") { Task { await model.restartNativeHost() } }
+        Button("Try Again") { Task { await model.restartNativeHost() } }
           .buttonStyle(.borderedProminent)
+          .accessibilityIdentifier("retry-server-start")
       case .stopping, .stopped:
         Text("Server Stopped").font(.title.bold())
         Button("Start Server") { Task { await model.selectHostMode() } }
@@ -84,6 +88,13 @@ struct NativeHostSetupView: View {
         Label(error, systemImage: "exclamationmark.triangle.fill")
           .foregroundStyle(.orange).multilineTextAlignment(.center)
           .accessibilityIdentifier("host-setup-error")
+      }
+      if model.hostSnapshot.state != .starting && model.hostSnapshot.state != .restarting {
+        Button("Connect to Another Server") {
+          Task { await model.switchToClientMode() }
+        }
+        .buttonStyle(.link)
+        .accessibilityIdentifier("switch-to-client")
       }
       Spacer()
     }
@@ -110,7 +121,9 @@ struct NativeHostSetupView: View {
         }
         .textFieldStyle(.roundedBorder)
         .accessibilityIdentifier("host-owner-password")
-        Button { showsPassword.toggle() } label: {
+        Button {
+          showsPassword.toggle()
+        } label: {
           Image(systemName: showsPassword ? "eye.slash" : "eye")
         }
         .buttonStyle(.borderless)
@@ -172,7 +185,8 @@ struct NativeHostSetupView: View {
       .disabled(
         serverName.trimmingCharacters(in: .whitespaces).isEmpty
           || username.trimmingCharacters(in: .whitespaces).count < 3
-          || password.count < 12 || model.isWorking)
+          || password.count < 12 || model.isWorking
+      )
       .accessibilityIdentifier("create-local-server")
     }
   }
@@ -269,7 +283,8 @@ struct StorageLocationList: View {
 func chooseStorageLocations(into locations: inout [StorageLocationDraft]) {
   #if DEBUG
     let environment = ProcessInfo.processInfo.environment
-    let injected = environment["AURELIA_HOME_UI_TEST_FOLDERS"]
+    let injected =
+      environment["AURELIA_HOME_UI_TEST_FOLDERS"]
       ?? environment["AURELIA_HOME_UI_TEST_FOLDER"]
     if let injected {
       let paths = injected.split(separator: "\n").map(String.init).filter { $0.hasPrefix("/") }

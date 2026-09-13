@@ -69,11 +69,15 @@ The complete path is:
   shared catalog cards, bundled movie/series details, structured search,
   unified editors, authenticated in-memory artwork loading, and a restrained
   content-first player across the macOS client.
+- Build 11 makes the Mac a reliable host by default, moves the transient helper
+  bootstrap into a shared App Group, adds retry-safe host lifecycle handling,
+  and remembers only deliberate remote-client choices.
 
-The Build 7 host handoff keeps the primary app sandboxed. Launch Services opens
-the separately signed, windowless helper; a non-secret launch description is
-validated against the exact live Aurelia Home PID and executable, and its
-random 256-bit control secret is transferred only through a short-lived FIFO.
+The Build 11 host handoff keeps the primary app sandboxed. Launch Services opens
+the separately signed, windowless helper; both processes resolve a shared App
+Group container, and a non-secret launch description is validated against the
+exact live Aurelia Home PID and executable. Its random 256-bit control secret is
+transferred only through a short-lived FIFO.
 The description and FIFO are deleted after consumption. Secrets never enter
 arguments, persisted settings, or logs, and the helper shuts down when its
 owning app disappears.
@@ -134,12 +138,13 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message (`1.0.10` for Build 10), push immediately, verify the remote hash, and
-    write exactly one English external summary for the completed build.
+    message matching the build (`1.0.11` for Build 11), push immediately, verify
+    the remote hash, and write exactly one English external summary for the
+    completed build.
 
 ## Planned direction
 
-Build 10 deliberately does not introduce chapters, playback speed, sleep timer,
+Build 11 deliberately does not introduce chapters, playback speed, sleep timer,
 PiP, timeline thumbnails, automatic file watchers, an optional web client,
 broader administration, or Linux and Windows native clients. Those should
 follow as deliberate milestones without weakening the existing server/native-

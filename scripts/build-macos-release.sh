@@ -4,7 +4,7 @@ set -euo pipefail
 repository_root=${0:A:h:h}
 other_root=${AURELIA_HOME_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
 developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
-dotnet_bin=${DOTNET_BIN:-"$HOME/.dotnet/dotnet"}
+dotnet_bin=${DOTNET_BIN:-"$other_root/Package Cache/dotnet/dotnet"}
 build_parent="$other_root/Build"
 build_number=$(sed -n 's:.*<AureliaHomeBuildNumber>\([0-9][0-9]*\)</AureliaHomeBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
 if [[ -z "$build_number" ]]; then
@@ -69,6 +69,7 @@ done < <(find "$candidate/Contents/Resources/Server" -type f -print0)
 codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
   "$candidate/Contents/Frameworks/VLCKit.framework"
 codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
+  --entitlements "$repository_root/clients/macos/Configuration/AureliaHomeServerHost.entitlements" \
   "$candidate/Contents/Helpers/Aurelia Home Server Host.app"
 codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
   --preserve-metadata=entitlements "$candidate"

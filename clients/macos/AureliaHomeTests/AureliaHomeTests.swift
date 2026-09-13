@@ -38,6 +38,42 @@ struct AureliaHomeTests {
     #expect(url.absoluteString == "https://192.168.1.20:43111")
   }
 
+  @Test(
+    arguments: [
+      (nil, 0, nil, OperatingMode.host),
+      (OperatingMode.client, 0, nil, OperatingMode.host),
+      (OperatingMode.host, 0, "https://media-mac.local:43111", OperatingMode.client),
+      (OperatingMode.client, 0, "https://127.0.0.1:43111", OperatingMode.host),
+      (OperatingMode.client, 0, "https://localhost:43111", OperatingMode.host),
+      (OperatingMode.client, 0, "https://[::1]:43111", OperatingMode.host),
+      (OperatingMode.host, 0, "https://192.168.1.20:43111", OperatingMode.client),
+      (OperatingMode.host, 1, "https://192.168.1.20:43111", OperatingMode.host),
+      (OperatingMode.client, 1, "https://127.0.0.1:43111", OperatingMode.client),
+    ] as [(OperatingMode?, Int, String?, OperatingMode)]
+  )
+  func operatingModeMigrationIsExplicitAndDistinguishesLoopbackFromRemote(
+    storedMode: OperatingMode?,
+    selectionVersion: Int,
+    address: String?,
+    expected: OperatingMode
+  ) throws {
+    let profile = try address.map { address in
+      StoredServerProfile(
+        serverId: UUID(),
+        name: "Test",
+        baseURL: try #require(URL(string: address)),
+        publicKeyFingerprint: String(repeating: "A", count: 64),
+        token: "test-token",
+        sessionId: UUID(),
+        expiresAt: "2099-01-01T00:00:00Z")
+    }
+    #expect(
+      OperatingModePolicy.resolve(
+        storedMode: storedMode,
+        storedSelectionVersion: selectionVersion,
+        profile: profile) == expected)
+  }
+
   @Test
   func insecureAndPathBasedAddressesAreRejected() {
     #expect(throws: APIClientError.insecureAddress) {
@@ -374,6 +410,75 @@ struct AureliaHomeTests {
     try Data("not secret transport".utf8).write(to: fakePipe)
     #expect(throws: HostLaunchSecurityError.invalidSecretPipe) {
       try HostLaunchSecurity.readSecretPipe(at: fakePipe.path)
+    }
+
+    let publicPipe = root.appendingPathComponent("public.pipe")
+    #expect(mkfifo(publicPipe.path, S_IRUSR | S_IWUSR) == 0)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o644], ofItemAtPath: publicPipe.path)
+    #expect(throws: HostLaunchSecurityError.invalidSecretPipe) {
+      try HostLaunchSecurity.readSecretPipe(at: publicPipe.path)
+    }
+    unlink(publicPipe.path)
+  }
+
+  @Test
+  func nativeHostLaunchFilesRequirePrivateOwnershipTypesAndGroupLocation() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+      .appendingPathComponent("AureliaHomeHostFiles-\(UUID().uuidString)", isDirectory: true)
+    let outside = fileManager.temporaryDirectory
+      .appendingPathComponent("AureliaHomeOutside-\(UUID().uuidString)", isDirectory: true)
+    try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+    try fileManager.createDirectory(at: outside, withIntermediateDirectories: true)
+    try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+    defer {
+      try? fileManager.removeItem(at: root)
+      try? fileManager.removeItem(at: outside)
+    }
+
+    try HostLaunchSecurity.validateBootstrapDirectory(at: root)
+    #expect(throws: HostLaunchSecurityError.invalidPathLocation) {
+      try HostLaunchSecurity.validateBootstrapDirectory(at: root, owner: getuid() + 1)
+    }
+
+    let configuration = root.appendingPathComponent("launch-42.json")
+    try Data("{}".utf8).write(to: configuration)
+    try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configuration.path)
+    try HostLaunchSecurity.validateConfigurationFile(
+      at: configuration.path,
+      bootstrapDirectory: root)
+    #expect(throws: HostLaunchSecurityError.invalidDescription) {
+      try HostLaunchSecurity.validateConfigurationFile(
+        at: configuration.path,
+        bootstrapDirectory: root,
+        owner: getuid() + 1)
+    }
+
+    try fileManager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: configuration.path)
+    #expect(throws: HostLaunchSecurityError.invalidDescription) {
+      try HostLaunchSecurity.validateConfigurationFile(
+        at: configuration.path,
+        bootstrapDirectory: root)
+    }
+    try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configuration.path)
+
+    let outsideConfiguration = outside.appendingPathComponent("launch-42.json")
+    try Data("{}".utf8).write(to: outsideConfiguration)
+    try fileManager.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: outsideConfiguration.path)
+    #expect(throws: HostLaunchSecurityError.invalidDescription) {
+      try HostLaunchSecurity.validateConfigurationFile(
+        at: outsideConfiguration.path,
+        bootstrapDirectory: root)
+    }
+
+    let symlink = root.appendingPathComponent("launch-symlink.json")
+    try fileManager.createSymbolicLink(at: symlink, withDestinationURL: configuration)
+    #expect(throws: HostLaunchSecurityError.invalidDescription) {
+      try HostLaunchSecurity.validateConfigurationFile(
+        at: symlink.path,
+        bootstrapDirectory: root)
     }
   }
 

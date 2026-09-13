@@ -27,6 +27,19 @@ struct AureliaHomeApp: App {
 final class AureliaHomeAppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApplication.shared.activate()
+    Task {
+      await AppModel.active?.start()
+    }
+  }
+
+  func applicationShouldHandleReopen(
+    _ sender: NSApplication,
+    hasVisibleWindows flag: Bool
+  ) -> Bool {
+    guard !flag else { return true }
+    sender.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+    sender.activate()
+    return true
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

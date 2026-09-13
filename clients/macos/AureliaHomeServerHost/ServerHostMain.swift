@@ -114,6 +114,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var pendingRestartLAN: Bool?
   private var shuttingDown = false
   private var restartDates: [Date] = []
+  private var readinessGeneration: UInt64 = 0
 
   init(
     environment: [String: String],
@@ -168,6 +169,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
     let expectedExecutable = mainContents.appendingPathComponent("MacOS/AureliaHome")
       .standardizedFileURL
     let bootstrapDirectory = try bootstrapDirectory(environment: environment)
+    do { try HostLaunchSecurity.validateBootstrapDirectory(at: bootstrapDirectory) } catch {
+      throw HostError.invalidBootstrapDirectory
+    }
     var foundTrustedParent = false
     for application in NSRunningApplication.runningApplications(
       withBundleIdentifier: "com.lucas.aureliahome")
@@ -182,7 +186,17 @@ private final class ServerHostRuntime: @unchecked Sendable {
       foundTrustedParent = true
       let configurationURL = bootstrapDirectory.appendingPathComponent(
         "launch-\(application.processIdentifier).json")
-      guard let data = try? Data(contentsOf: configurationURL) else { continue }
+      guard FileManager.default.fileExists(atPath: configurationURL.path) else { continue }
+      do {
+        try HostLaunchSecurity.validateConfigurationFile(
+          at: configurationURL.path,
+          bootstrapDirectory: bootstrapDirectory)
+      } catch {
+        throw HostError.invalidLaunchDescription
+      }
+      guard let data = try? Data(contentsOf: configurationURL) else {
+        throw HostError.invalidLaunchDescription
+      }
       guard let description = try? JSONDecoder().decode(HostLaunchDescription.self, from: data)
       else { throw HostError.invalidLaunchDescription }
       let validated: ValidatedHostLaunchPaths
@@ -217,10 +231,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private static func bootstrapDirectory(environment: [String: String]) throws -> URL {
     guard let override = environment["AURELIA_HOME_HOST_BOOTSTRAP_DIR"] else {
-      return FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(
-          "Library/Containers/com.lucas.aureliahome/Data/Library/Caches/AureliaHome/Host",
-          isDirectory: true)
+      do { return try HostBootstrapLocation.directory() } catch {
+        throw HostError.invalidBootstrapDirectory
+      }
     }
 
     let directory = URL(fileURLWithPath: override, isDirectory: true).standardizedFileURL
@@ -269,6 +282,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private func startServer(lan: Bool) {
     guard !shuttingDown else { return }
+    readinessGeneration &+= 1
+    let generation = readinessGeneration
     do {
       let executable = try serverExecutableURL()
       let settings = try loadSettings()
@@ -301,18 +316,19 @@ private final class ServerHostRuntime: @unchecked Sendable {
       }
       process = child
       try child.run()
-      waitForServer(lan: lan, bootstrapToken: bootstrapToken)
+      waitForServer(lan: lan, bootstrapToken: bootstrapToken, generation: generation)
     } catch {
       updateStatus(.failed, message: "The bundled Aurelia Home Server could not be started.")
     }
   }
 
-  private func waitForServer(lan: Bool, bootstrapToken: String?) {
+  private func waitForServer(lan: Bool, bootstrapToken: String?, generation: UInt64) {
     Task { [weak self] in
       for _ in 0..<75 {
         guard let self, !self.shuttingDown else { return }
         if let info = try? await Self.readServerInfo() {
           self.queue.async {
+            guard self.readinessGeneration == generation else { return }
             guard self.process?.isRunning == true else { return }
             if !lan && info.isSetup {
               self.restart(lan: true)
@@ -330,6 +346,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
       }
       guard let runtime = self else { return }
       runtime.queue.async {
+        guard runtime.readinessGeneration == generation else { return }
         runtime.updateStatus(.failed, message: "Aurelia Home Server did not become ready.")
       }
     }
@@ -337,6 +354,11 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private func restart(lan: Bool) {
     guard !shuttingDown else { return }
+    if pendingRestartLAN != nil {
+      pendingRestartLAN = lan
+      return
+    }
+    readinessGeneration &+= 1
     pendingRestartLAN = lan
     updateStatus(.restarting)
     if let process, process.isRunning {
@@ -378,6 +400,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private func beginShutdown() {
     guard !shuttingDown else { return }
     shuttingDown = true
+    readinessGeneration &+= 1
     updateStatus(.stopping)
     parentTimer?.cancel()
     parentTimer = nil

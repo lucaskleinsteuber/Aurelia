@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <AureliaHomeBuildNumber>10</AureliaHomeBuildNumber>
+    <AureliaHomeBuildNumber>11</AureliaHomeBuildNumber>
     <Version>0.1.0</Version>
     <FileVersion>0.1.0.$(AureliaHomeBuildNumber)</FileVersion>
     <InformationalVersion>0.1.0+build.$(AureliaHomeBuildNumber)</InformationalVersion>
