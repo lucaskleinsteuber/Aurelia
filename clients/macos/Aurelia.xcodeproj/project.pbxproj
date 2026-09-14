@@ -1,0 +1,502 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 71;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D50000000000000000000001 /* VLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; };
+		D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000011 /* VLCKit-COPYING.txt */; };
+		E70000000000000000000001 /* Aurelia Server Host.app in Embed Server Host */ = {isa = PBXBuildFile; fileRef = E70000000000000000000002 /* Aurelia Server Host.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		E7000000000000000000000A /* HostLaunchSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7000000000000000000000B /* HostLaunchSecurity.swift */; };
+		E7000000000000000000000C /* ServerDataMigrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7000000000000000000000D /* ServerDataMigrator.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B4000000000000000000000F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A4000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A40000000000000000000006;
+			remoteInfo = Aurelia;
+		};
+		B40000000000000000000010 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A4000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A40000000000000000000006;
+			remoteInfo = Aurelia;
+		};
+		E70000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A4000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E70000000000000000000010;
+			remoteInfo = AureliaServerHost;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		D50000000000000000000020 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E70000000000000000000004 /* Embed Server Host */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				E70000000000000000000001 /* Aurelia Server Host.app in Embed Server Host */,
+			);
+			name = "Embed Server Host";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		A40000000000000000000001 /* Aurelia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Aurelia.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40000000000000000000001 /* AureliaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AureliaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40000000000000000000002 /* AureliaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AureliaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C40000000000000000000001 /* Aurelia-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Aurelia-Info.plist"; sourceTree = "<group>"; };
+		C40000000000000000000002 /* Aurelia.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Aurelia.entitlements; sourceTree = "<group>"; };
+		C40000000000000000000005 /* AureliaServerHost.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AureliaServerHost.entitlements; sourceTree = "<group>"; };
+		C40000000000000000000003 /* BuildNumber.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildNumber.xcconfig; sourceTree = "<group>"; };
+		D50000000000000000000010 /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = VLCKit.xcframework; sourceTree = "<group>"; };
+		D50000000000000000000011 /* VLCKit-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "VLCKit-COPYING.txt"; sourceTree = "<group>"; };
+		E70000000000000000000002 /* Aurelia Server Host.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Aurelia Server Host.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E70000000000000000000005 /* AureliaServerHost-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "AureliaServerHost-Info.plist"; sourceTree = "<group>"; };
+		E7000000000000000000000B /* HostLaunchSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aurelia/Hosting/HostLaunchSecurity.swift; sourceTree = "<group>"; };
+		E7000000000000000000000D /* ServerDataMigrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aurelia/Hosting/ServerDataMigrator.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A40000000000000000000002 /* Aurelia */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Aurelia; sourceTree = "<group>"; };
+		B40000000000000000000003 /* AureliaTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = AureliaTests; sourceTree = "<group>"; };
+		B40000000000000000000004 /* AureliaUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = AureliaUITests; sourceTree = "<group>"; };
+		E70000000000000000000006 /* AureliaServerHost */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = AureliaServerHost; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A40000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (D50000000000000000000001 /* VLCKit.xcframework in Frameworks */, ); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000006 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000009 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		E70000000000000000000007 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000004 = {
+			isa = PBXGroup;
+			children = (
+				E7000000000000000000000B /* HostLaunchSecurity.swift */,
+				E7000000000000000000000D /* ServerDataMigrator.swift */,
+				A40000000000000000000002 /* Aurelia */,
+				E70000000000000000000006 /* AureliaServerHost */,
+				B40000000000000000000003 /* AureliaTests */,
+				B40000000000000000000004 /* AureliaUITests */,
+				C40000000000000000000004 /* Configuration */,
+				D50000000000000000000012 /* Dependencies */,
+				A40000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000001 /* Aurelia.app */,
+				E70000000000000000000002 /* Aurelia Server Host.app */,
+				B40000000000000000000001 /* AureliaTests.xctest */,
+				B40000000000000000000002 /* AureliaUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C40000000000000000000004 /* Configuration */ = {
+			isa = PBXGroup;
+			children = (
+				C40000000000000000000001 /* Aurelia-Info.plist */,
+				E70000000000000000000005 /* AureliaServerHost-Info.plist */,
+				C40000000000000000000002 /* Aurelia.entitlements */,
+				C40000000000000000000005 /* AureliaServerHost.entitlements */,
+				C40000000000000000000003 /* BuildNumber.xcconfig */,
+			);
+			path = Configuration;
+			sourceTree = "<group>";
+		};
+		D50000000000000000000012 /* Dependencies */ = {
+			isa = PBXGroup;
+			children = (
+				D50000000000000000000010 /* VLCKit.xcframework */,
+				D50000000000000000000011 /* VLCKit-COPYING.txt */,
+			);
+			path = Dependencies;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A40000000000000000000006 /* Aurelia */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A40000000000000000000007 /* Build configuration list for PBXNativeTarget "Aurelia" */;
+			buildPhases = (
+				A40000000000000000000008 /* Sources */,
+				A40000000000000000000003 /* Frameworks */,
+				D50000000000000000000020 /* Embed Frameworks */,
+				E70000000000000000000004 /* Embed Server Host */,
+				A40000000000000000000009 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (E70000000000000000000011 /* PBXTargetDependency */);
+			fileSystemSynchronizedGroups = (A40000000000000000000002 /* Aurelia */);
+			name = Aurelia;
+			packageProductDependencies = ();
+			productName = "Aurelia";
+			productReference = A40000000000000000000001 /* Aurelia.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B4000000000000000000000B /* AureliaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B40000000000000000000011 /* Build configuration list for PBXNativeTarget "AureliaTests" */;
+			buildPhases = (
+				B40000000000000000000005 /* Sources */,
+				B40000000000000000000006 /* Frameworks */,
+				B40000000000000000000007 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (B4000000000000000000000D /* PBXTargetDependency */);
+			fileSystemSynchronizedGroups = (B40000000000000000000003 /* AureliaTests */);
+			name = AureliaTests;
+			packageProductDependencies = ();
+			productName = AureliaTests;
+			productReference = B40000000000000000000001 /* AureliaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B4000000000000000000000C /* AureliaUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B40000000000000000000012 /* Build configuration list for PBXNativeTarget "AureliaUITests" */;
+			buildPhases = (
+				B40000000000000000000008 /* Sources */,
+				B40000000000000000000009 /* Frameworks */,
+				B4000000000000000000000A /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (B4000000000000000000000E /* PBXTargetDependency */);
+			fileSystemSynchronizedGroups = (B40000000000000000000004 /* AureliaUITests */);
+			name = AureliaUITests;
+			packageProductDependencies = ();
+			productName = AureliaUITests;
+			productReference = B40000000000000000000002 /* AureliaUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		E70000000000000000000010 /* AureliaServerHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E70000000000000000000012 /* Build configuration list for PBXNativeTarget "AureliaServerHost" */;
+			buildPhases = (
+				E70000000000000000000008 /* Sources */,
+				E70000000000000000000007 /* Frameworks */,
+				E70000000000000000000009 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (E70000000000000000000006 /* AureliaServerHost */);
+			name = AureliaServerHost;
+			packageProductDependencies = ();
+			productName = "Aurelia Server Host";
+			productReference = E70000000000000000000002 /* Aurelia Server Host.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A4000000000000000000000A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					A40000000000000000000006 = {CreatedOnToolsVersion = 27.0;};
+					B4000000000000000000000B = {CreatedOnToolsVersion = 27.0; TestTargetID = A40000000000000000000006;};
+					B4000000000000000000000C = {CreatedOnToolsVersion = 27.0; TestTargetID = A40000000000000000000006;};
+					E70000000000000000000010 = {CreatedOnToolsVersion = 27.0;};
+				};
+			};
+			buildConfigurationList = A4000000000000000000000B /* Build configuration list for PBXProject "Aurelia" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A40000000000000000000004;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = ();
+			productRefGroup = A40000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A40000000000000000000006 /* Aurelia */,
+				E70000000000000000000010 /* AureliaServerHost */,
+				B4000000000000000000000B /* AureliaTests */,
+				B4000000000000000000000C /* AureliaUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A40000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B4000000000000000000000A /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		E70000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A40000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		E70000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (E7000000000000000000000A /* HostLaunchSecurity.swift in Sources */, E7000000000000000000000C /* ServerDataMigrator.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B4000000000000000000000D /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A40000000000000000000006 /* Aurelia */; targetProxy = B4000000000000000000000F /* PBXContainerItemProxy */; };
+		B4000000000000000000000E /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A40000000000000000000006 /* Aurelia */; targetProxy = B40000000000000000000010 /* PBXContainerItemProxy */; };
+		E70000000000000000000011 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = E70000000000000000000010 /* AureliaServerHost */; targetProxy = E70000000000000000000003 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A4000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				LM_FILTER_WARNINGS = YES;
+				LM_FORCE_LINK_GENERATION = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A4000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				LM_FILTER_WARNINGS = YES;
+				LM_FORCE_LINK_GENERATION = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A4000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/Aurelia.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_PREVIEWS = YES;
+				EXECUTABLE_NAME = Aurelia;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/Aurelia-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media;
+				PRODUCT_MODULE_NAME = Aurelia;
+				PRODUCT_NAME = "Aurelia";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		A4000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/Aurelia.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = Aurelia;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/Aurelia-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media;
+				PRODUCT_MODULE_NAME = Aurelia;
+				PRODUCT_NAME = "Aurelia";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+		B40000000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aurelia.app/Contents/MacOS/Aurelia";
+			};
+			name = Debug;
+		};
+		B40000000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aurelia.app/Contents/MacOS/Aurelia";
+			};
+			name = Release;
+		};
+		B40000000000000000000015 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_TARGET_NAME = Aurelia;
+			};
+			name = Debug;
+		};
+		B40000000000000000000016 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks");
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_TARGET_NAME = Aurelia;
+			};
+			name = Release;
+		};
+		E70000000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/AureliaServerHost.entitlements;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = B5N7JVK37J;
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXECUTABLE_NAME = AureliaServerHost;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/AureliaServerHost-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.server-host;
+				PRODUCT_MODULE_NAME = AureliaServerHost;
+				PRODUCT_NAME = "Aurelia Server Host";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Debug;
+		};
+		E70000000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C40000000000000000000003 /* BuildNumber.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Configuration/AureliaServerHost.entitlements;
+				APP_INTENTS_METADATA_EXTRACTION_ENABLED = NO;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = AureliaServerHost;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Configuration/AureliaServerHost-Info.plist";
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.server-host;
+				PRODUCT_MODULE_NAME = AureliaServerHost;
+				PRODUCT_NAME = "Aurelia Server Host";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A40000000000000000000007 /* Build configuration list for PBXNativeTarget "Aurelia" */ = {isa = XCConfigurationList; buildConfigurations = (A4000000000000000000000E /* Debug */, A4000000000000000000000F /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A4000000000000000000000B /* Build configuration list for PBXProject "Aurelia" */ = {isa = XCConfigurationList; buildConfigurations = (A4000000000000000000000C /* Debug */, A4000000000000000000000D /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B40000000000000000000011 /* Build configuration list for PBXNativeTarget "AureliaTests" */ = {isa = XCConfigurationList; buildConfigurations = (B40000000000000000000013 /* Debug */, B40000000000000000000014 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B40000000000000000000012 /* Build configuration list for PBXNativeTarget "AureliaUITests" */ = {isa = XCConfigurationList; buildConfigurations = (B40000000000000000000015 /* Debug */, B40000000000000000000016 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		E70000000000000000000012 /* Build configuration list for PBXNativeTarget "AureliaServerHost" */ = {isa = XCConfigurationList; buildConfigurations = (E70000000000000000000013 /* Debug */, E70000000000000000000014 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A4000000000000000000000A /* Project object */;
+}

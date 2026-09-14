@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Aurelia.Home.Contracts/Aurelia.Home.Contracts.csproj" />
-    <Project Path="src/Aurelia.Home.Server/Aurelia.Home.Server.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Aurelia.Home.Server.Tests/Aurelia.Home.Server.Tests.csproj" />
-  </Folder>
-</Solution>

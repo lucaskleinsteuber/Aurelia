@@ -1,12 +1,12 @@
-# Aurelia Home
+# Aurelia
 
-Aurelia Home is a native, self-hosted media system. The server now maintains a
+Aurelia is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to a native macOS library and playback client. Build 11
-starts this Mac as a host by default while preserving an explicitly selected
-remote-client mode.
+and connects securely to a native macOS library and playback client. Aurelia
+1.0.12 starts this Mac as a host by default, preserves an explicitly selected
+remote-client mode, and makes storage import available throughout the app.
 People choose whole storage locations instead of separating movie and TV
-folders themselves; Aurelia Home classifies clear structures locally and asks
+folders themselves; Aurelia classifies clear structures locally and asks
 only about ambiguous folders. Owners can optionally add their own TMDB token
 for English metadata and bounded artwork storage; local names and manual edits
 remain authoritative.
@@ -69,6 +69,9 @@ native app.
 - App-Group-secured server bootstrap, bounded private logs, retry, and crash recovery
 - Simple local setup with one password, storage selection, background scan status,
   pairing, and sessions
+- A unified Add Media / Manage Media sheet for multiple folders and drives,
+  library type selection, persistent scan history, rescans, safe removal, and
+  classification review
 - Bonjour server discovery and manual server addresses
 - Human-verified certificate pinning during one-time pairing
 - Device token and server identity stored in the macOS Keychain
@@ -90,9 +93,9 @@ caches live outside the repository in `Aurelia Home Other/Package Cache`.
 ```sh
 export PATH="../Aurelia Home Other/Package Cache/dotnet:$PATH"
 dotnet tool restore
-dotnet restore AureliaHome.slnx
-dotnet test AureliaHome.slnx
-dotnet run --project src/Aurelia.Home.Server -- run
+dotnet restore Aurelia.slnx
+dotnet test Aurelia.slnx
+dotnet run --project src/Aurelia.Server -- run
 ```
 
 Build and test the Mac client with the checked-in Xcode project. The build-number
@@ -110,18 +113,18 @@ Generated builds, package caches, test results, and development logs are kept
 outside the repository in the adjacent `Aurelia Home Other` directory. Test
 source remains in the repository so every checkout can reproduce verification.
 The Mac test script launches all runnable test products from the private
-`~/Library/Caches/AureliaHome/TestRuns` directory, so test execution cannot
+`~/Library/Caches/Aurelia/TestRuns` directory, so test execution cannot
 accidentally ask for access to the protected Documents folder merely because the
 repository lives there. It removes the temporary test host after copying the log
 and result bundle to `Aurelia Home Other`.
 
 The development server listens on `http://127.0.0.1:43110` by default. Override
-the location of its small data directory with `AURELIA_HOME_DATA_DIR` or
+the location of its small data directory with `AURELIA_DATA_DIR` or
 `--data-dir`. Create the first owner without exposing the password in the
 process list:
 
 ```sh
-dotnet run --project src/Aurelia.Home.Server -- setup-owner \
+dotnet run --project src/Aurelia.Server -- setup-owner \
   --username lucas --device-name "Server Mac"
 ```
 
@@ -130,7 +133,7 @@ device token once. The default server remains restricted to loopback. After the
 owner exists, opt in to encrypted local-network access explicitly:
 
 ```sh
-dotnet run --project src/Aurelia.Home.Server -- run --lan
+dotnet run --project src/Aurelia.Server -- run --lan
 ```
 
 This keeps the local CLI on `http://127.0.0.1:43110` and adds HTTPS on LAN port
@@ -141,8 +144,8 @@ setup are rejected over the network; other devices use pairing.
 While the server is running, create a one-time code for the Mac app:
 
 ```sh
-dotnet run --project src/Aurelia.Home.Server -- pairing create --username lucas
-dotnet run --project src/Aurelia.Home.Server -- server identity
+dotnet run --project src/Aurelia.Server -- pairing create --username lucas
+dotnet run --project src/Aurelia.Server -- server identity
 ```
 
 Compare the fingerprint shown by the app with the local CLI output before
@@ -154,11 +157,11 @@ through the local CLI. The password is prompted without echo and the temporary
 CLI session is revoked afterward:
 
 ```sh
-dotnet run --project src/Aurelia.Home.Server -- library add \
+dotnet run --project src/Aurelia.Server -- library add \
   --kind automatic --path "/Volumes/Media" --username lucas
 
-dotnet run --project src/Aurelia.Home.Server -- library list --username lucas
-dotnet run --project src/Aurelia.Home.Server -- library scan --all --username lucas
+dotnet run --project src/Aurelia.Server -- library list --username lucas
+dotnet run --project src/Aurelia.Server -- library scan --all --username lucas
 ```
 
 Advanced users may still use `--kind movies` or `--kind tv` for a fixed library.
@@ -186,9 +189,9 @@ stored under opaque names, and limited to 1 GiB by default. This product uses
 the TMDB API but is not endorsed or certified by TMDB.
 
 ```sh
-dotnet run --project src/Aurelia.Home.Server -- metadata configure --username lucas
-dotnet run --project src/Aurelia.Home.Server -- metadata refresh --username lucas
-dotnet run --project src/Aurelia.Home.Server -- metadata reviews --username lucas
+dotnet run --project src/Aurelia.Server -- metadata configure --username lucas
+dotnet run --project src/Aurelia.Server -- metadata refresh --username lucas
+dotnet run --project src/Aurelia.Server -- metadata reviews --username lucas
 ```
 
 Both the password and TMDB token are prompted without echo. Neither is accepted
@@ -208,7 +211,7 @@ incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
 
-For normal Build 11 use, launch Aurelia Home. It starts the local server and,
+For normal Aurelia 1.0.12 use, launch Aurelia. It starts the local server and,
 on a new installation, opens **Set Up This Mac** automatically. The native
 assistant creates the owner, enables LAN HTTPS, and lets the owner
 select one or more drives or folders. Technical server and port settings remain
@@ -216,7 +219,7 @@ under Advanced. Clear movie and TV structures are classified automatically;
 uncertain folders can be marked Movie, TV Show, or Ignore and reviewed again
 later. Closing the last
 window leaves the app and its server running; clicking the Dock icon restores
-the window. Choosing **Aurelia Home > Quit Aurelia Home** stops both cleanly.
+the window. Choosing **Aurelia > Quit Aurelia** stops both cleanly.
 Existing remote profiles remain in client mode after upgrading. A deliberate
 host or remote-client choice is versioned and remembered.
 

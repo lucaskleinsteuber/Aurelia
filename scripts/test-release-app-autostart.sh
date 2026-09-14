@@ -2,19 +2,19 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_HOME_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
-build_number=$(sed -n 's:.*<AureliaHomeBuildNumber>\([0-9][0-9]*\)</AureliaHomeBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
-source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia Home.app"}
+other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
+build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
+source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-runtime_root="/private/tmp/AureliaHome/$run_id"
-candidate="$runtime_root/Aurelia Home.app"
+runtime_root="/private/tmp/Aurelia/$run_id"
+candidate="$runtime_root/Aurelia.app"
 data_root="$runtime_root/Data"
 host_log_root="$runtime_root/Logs"
 result_root="$other_root/Test Results"
 log_root="$other_root/Logs"
-report="$result_root/AureliaHome-ReleaseAppAutostart-$run_id.txt"
-application="$candidate/Contents/MacOS/AureliaHome"
-helper="$candidate/Contents/Helpers/Aurelia Home Server Host.app/Contents/MacOS/AureliaHomeServerHost"
+report="$result_root/Aurelia-ReleaseAppAutostart-$run_id.txt"
+application="$candidate/Contents/MacOS/Aurelia"
+helper="$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
 application_pid=''
 helper_pid=''
 
@@ -28,9 +28,9 @@ cleanup() {
     kill "$helper_pid" 2>/dev/null || true
   fi
   if [[ "$exit_code" -ne 0 && -f "$host_log_root/server.log" ]]; then
-    cp "$host_log_root/server.log" "$log_root/AureliaHome-ReleaseAppAutostart-$run_id.log"
+    cp "$host_log_root/server.log" "$log_root/Aurelia-ReleaseAppAutostart-$run_id.log"
   fi
-  if [[ "$runtime_root" == /private/tmp/AureliaHome/* ]]; then
+  if [[ "$runtime_root" == /private/tmp/Aurelia/* ]]; then
     find "$runtime_root" -depth -delete 2>/dev/null || true
   fi
   return "$exit_code"
@@ -47,23 +47,23 @@ mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root
 /usr/bin/ditto "$source_candidate" "$candidate"
 [[ -x "$application" && -x "$helper" ]] || fail "The staged release app is incomplete."
 
-if pgrep -x AureliaHome >/dev/null 2>&1 || pgrep -x AureliaHomeServerHost >/dev/null 2>&1; then
-  fail "Aurelia Home is already running; no existing process was stopped."
+if pgrep -x Aurelia >/dev/null 2>&1 || pgrep -x AureliaServerHost >/dev/null 2>&1; then
+  fail "Aurelia is already running; no existing process was stopped."
 fi
 if lsof -nP -iTCP:43110 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Loopback port 43110 is already occupied; no existing process was stopped."
 fi
 
-print -r -- "Aurelia Home Build $build_number release app autostart smoke test" >"$report"
+print -r -- "Aurelia Build $build_number release app autostart smoke test" >"$report"
 print -r -- "Run: $run_id" >>"$report"
 
 /usr/bin/open -n -g \
-  --env "AURELIA_HOME_DATA_DIR=$data_root" \
-  --env "AURELIA_HOME_LOG_DIR=$host_log_root" \
+  --env "AURELIA_DATA_DIR=$data_root" \
+  --env "AURELIA_LOG_DIR=$host_log_root" \
   "$candidate" --args \
   -ApplePersistenceIgnoreState YES \
-  -AureliaHomeOperatingMode host \
-  -AureliaHomeOperatingModeSelectionVersion 1
+  -AureliaOperatingMode host \
+  -AureliaOperatingModeSelectionVersion 1
 
 for _ in {1..100}; do
   application_pid="$(pgrep -f "^$application( |$)" | tail -1 || true)"
@@ -90,7 +90,7 @@ done
 [[ "$(jq -r 'if has("isSetup") then .isSetup else empty end' "$runtime_root/server-info.json" 2>/dev/null)" == false ]] \
   || fail "The fresh loopback server did not become ready for owner setup."
 
-/usr/bin/osascript -e 'tell application id "com.lucas.aureliahome" to quit' >/dev/null
+/usr/bin/osascript -e 'tell application id "com.lucas.aurelia.media" to quit' >/dev/null
 for _ in {1..150}; do
   if ! kill -0 "$application_pid" 2>/dev/null && ! kill -0 "$helper_pid" 2>/dev/null; then
     break

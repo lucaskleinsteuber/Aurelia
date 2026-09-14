@@ -1,6 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <AssemblyName>Aurelia.Home.Contracts</AssemblyName>
-    <RootNamespace>Aurelia.Home.Contracts</RootNamespace>
-  </PropertyGroup>
-</Project>

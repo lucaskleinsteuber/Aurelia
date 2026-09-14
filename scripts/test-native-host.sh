@@ -2,19 +2,19 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_HOME_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
-build_number=$(sed -n 's:.*<AureliaHomeBuildNumber>\([0-9][0-9]*\)</AureliaHomeBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
-source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia Home.app"}
+other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
+build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
+source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-runtime_root="/private/tmp/AureliaHome/$run_id"
-candidate="$runtime_root/Aurelia Home.app"
+runtime_root="/private/tmp/Aurelia/$run_id"
+candidate="$runtime_root/Aurelia.app"
 result_root="$other_root/Test Results"
 log_root="$other_root/Logs"
-report="$result_root/AureliaHome-NativeHost-$run_id.txt"
-copied_log="$log_root/AureliaHome-NativeHost-$run_id.log"
-helper="$candidate/Contents/Helpers/Aurelia Home Server Host.app/Contents/MacOS/AureliaHomeServerHost"
-application="$candidate/Contents/MacOS/AureliaHome"
-server="$candidate/Contents/Resources/Server/osx-arm64/Aurelia.Home.Server"
+report="$result_root/Aurelia-NativeHost-$run_id.txt"
+copied_log="$log_root/Aurelia-NativeHost-$run_id.log"
+helper="$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
+application="$candidate/Contents/MacOS/Aurelia"
+server="$candidate/Contents/Resources/Server/osx-arm64/Aurelia.Server"
 data_root="$runtime_root/Data"
 host_log_root="$runtime_root/Logs"
 secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
@@ -31,7 +31,7 @@ cleanup() {
   set +e
   if [[ "$exit_code" -ne 0 ]]; then
     if [[ -f "$runtime_root/helper-output.log" ]]; then
-      cp "$runtime_root/helper-output.log" "$log_root/AureliaHome-NativeHost-$run_id-helper.log"
+      cp "$runtime_root/helper-output.log" "$log_root/Aurelia-NativeHost-$run_id-helper.log"
     fi
     if [[ -f "$host_log_root/server.log" ]]; then
       cp "$host_log_root/server.log" "$copied_log"
@@ -53,7 +53,7 @@ cleanup() {
   [[ -n "$configuration" ]] && rm -f "$configuration"
   [[ -n "$secret_pipe" ]] && rm -f "$secret_pipe"
   [[ -n "$rendezvous" ]] && rm -f "$rendezvous"
-  if [[ "$runtime_root" == /private/tmp/AureliaHome/* ]]; then
+  if [[ "$runtime_root" == /private/tmp/Aurelia/* ]]; then
     find "$runtime_root" -depth -delete 2>/dev/null || true
   fi
   return "$exit_code"
@@ -62,7 +62,7 @@ trap cleanup EXIT
 
 fail() {
   if [[ -f "$runtime_root/helper-output.log" ]]; then
-    cp "$runtime_root/helper-output.log" "$log_root/AureliaHome-NativeHost-$run_id-helper.log"
+    cp "$runtime_root/helper-output.log" "$log_root/Aurelia-NativeHost-$run_id-helper.log"
   fi
   if [[ -f "$host_log_root/server.log" ]]; then
     cp "$host_log_root/server.log" "$copied_log"
@@ -98,25 +98,25 @@ mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root
 mkdir -m 700 "$bootstrap_root"
 [[ -d "$source_candidate" ]] || fail "The Build $build_number app candidate does not exist."
 /usr/bin/ditto "$source_candidate" "$candidate"
-[[ -x "$application" ]] || fail "The native Aurelia Home app is missing."
+[[ -x "$application" ]] || fail "The native Aurelia app is missing."
 [[ -x "$helper" ]] || fail "The native server host helper is missing."
 [[ -x "$server" ]] || fail "The embedded arm64 server is missing."
 if lsof -nP -iTCP:43110 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Loopback port 43110 is already occupied; no existing process was stopped."
 fi
 
-print -r -- "Aurelia Home Build $build_number native host smoke test" >"$report"
+print -r -- "Aurelia Build $build_number native host smoke test" >"$report"
 print -r -- "Run: $run_id" >>"$report"
 
 lan_port="$(ruby -rsocket -e 'server = TCPServer.new("127.0.0.1", 0); puts server.addr[1]; server.close')"
-open -na "$candidate" --args -AureliaHomeOperatingMode client
+open -na "$candidate" --args -AureliaOperatingMode client
 for _ in {1..50}; do
   application_pid="$(pgrep -f "^$application( |$)" | tail -1 || true)"
   [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null && break
   sleep 0.1
 done
 [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null \
-  || fail "The parent Aurelia Home app did not start through Launch Services."
+  || fail "The parent Aurelia app did not start through Launch Services."
 
 mkdir -p "$bootstrap_root"
 configuration="$bootstrap_root/launch-$application_pid.json"
@@ -129,14 +129,14 @@ jq -cn \
   --arg secretPipePath "$secret_pipe" \
   --arg dataDirectory "$data_root" \
   --arg logDirectory "$host_log_root" \
-  --arg serverName 'Aurelia Home Host Smoke' \
+  --arg serverName 'Aurelia Host Smoke' \
   --argjson lanPort "$lan_port" \
   '{version:1,parentProcessID:$parentProcessID,rendezvousPath:$rendezvousPath,secretPipePath:$secretPipePath,dataDirectory:$dataDirectory,logDirectory:$logDirectory,serverName:$serverName,lanPort:$lanPort}' \
   >"$configuration"
 chmod 600 "$configuration"
 exec 9<>"$secret_pipe"
 print -rn -- "$secret" >&9
-AURELIA_HOME_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
+AURELIA_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
   "$helper" >"$runtime_root/helper-output.log" 2>&1 &
 helper_pid=$!
 [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null \
@@ -171,7 +171,7 @@ curl --silent --show-error --fail-with-body \
 token="$(jq -r '.token // empty' "$runtime_root/authentication.json")"
 [[ ${#token} -ge 43 ]] || fail "Owner setup did not return a device token."
 configure_body="$(jq -cn \
-  --arg serverName 'Aurelia Home Host Smoke' \
+  --arg serverName 'Aurelia Host Smoke' \
   --argjson lanHttpsPort "$lan_port" \
   '{version:1,serverName:$serverName,lanAccessEnabled:true,lanHttpsPort:$lanHttpsPort}')"
 curl --silent --show-error --fail-with-body \
@@ -269,9 +269,9 @@ kill -0 "$helper_pid" 2>/dev/null && fail "The helper did not stop after a grace
 wait "$helper_pid" 2>/dev/null || true
 helper_pid=''
 
-quick_check="$(sqlite3 "$data_root/aurelia-home.db" 'PRAGMA quick_check;')"
-integrity_check="$(sqlite3 "$data_root/aurelia-home.db" 'PRAGMA integrity_check;')"
-foreign_keys="$(sqlite3 "$data_root/aurelia-home.db" 'PRAGMA foreign_key_check;')"
+quick_check="$(sqlite3 "$data_root/aurelia.db" 'PRAGMA quick_check;')"
+integrity_check="$(sqlite3 "$data_root/aurelia.db" 'PRAGMA integrity_check;')"
+foreign_keys="$(sqlite3 "$data_root/aurelia.db" 'PRAGMA foreign_key_check;')"
 [[ "$quick_check" == ok && "$integrity_check" == ok && -z "$foreign_keys" ]] \
   || fail "SQLite integrity verification failed."
 
@@ -297,14 +297,14 @@ jq -cn \
   --arg secretPipePath "$secret_pipe" \
   --arg dataDirectory "$data_root" \
   --arg logDirectory "$host_log_root" \
-  --arg serverName 'Aurelia Home Host Smoke' \
+  --arg serverName 'Aurelia Host Smoke' \
   --argjson lanPort "$lan_port" \
   '{version:1,parentProcessID:$parentProcessID,rendezvousPath:$rendezvousPath,secretPipePath:$secretPipePath,dataDirectory:$dataDirectory,logDirectory:$logDirectory,serverName:$serverName,lanPort:$lanPort}' \
   >"$configuration"
 chmod 600 "$configuration"
 exec 9<>"$secret_pipe"
 print -rn -- "$secret" >&9
-AURELIA_HOME_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
+AURELIA_HOST_BOOTSTRAP_DIR="$bootstrap_root" \
   "$helper" >"$runtime_root/helper-output.log" 2>&1 &
 helper_pid=$!
 [[ -n "$helper_pid" ]] && kill -0 "$helper_pid" 2>/dev/null \

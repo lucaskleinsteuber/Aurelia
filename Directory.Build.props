@@ -6,17 +6,17 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <AureliaHomeBuildNumber>11</AureliaHomeBuildNumber>
-    <Version>0.1.0</Version>
-    <FileVersion>0.1.0.$(AureliaHomeBuildNumber)</FileVersion>
-    <InformationalVersion>0.1.0+build.$(AureliaHomeBuildNumber)</InformationalVersion>
-    <AureliaHomeOtherRoot Condition="'$(AURELIA_HOME_OTHER_ROOT)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../Aurelia Home Other'))</AureliaHomeOtherRoot>
-    <AureliaHomeOtherRoot Condition="'$(AURELIA_HOME_OTHER_ROOT)' != ''">$(AURELIA_HOME_OTHER_ROOT)</AureliaHomeOtherRoot>
-    <AureliaHomeBuildRoot Condition="'$(AURELIA_HOME_BUILD_ROOT)' == ''">$([System.IO.Path]::Combine('$(AureliaHomeOtherRoot)', 'Build'))</AureliaHomeBuildRoot>
-    <RestorePackagesPath Condition="'$(NUGET_PACKAGES)' == ''">$([System.IO.Path]::Combine('$(AureliaHomeOtherRoot)', 'Package Cache', 'NuGet'))</RestorePackagesPath>
-    <BaseOutputPath>$([System.IO.Path]::Combine('$(AureliaHomeBuildRoot)', 'bin', '$(MSBuildProjectName)'))/</BaseOutputPath>
-    <BaseIntermediateOutputPath>$([System.IO.Path]::Combine('$(AureliaHomeBuildRoot)', 'obj', '$(MSBuildProjectName)'))/</BaseIntermediateOutputPath>
+    <AureliaBuildNumber>12</AureliaBuildNumber>
+    <Version>1.0.12</Version>
+    <FileVersion>1.0.12.$(AureliaBuildNumber)</FileVersion>
+    <InformationalVersion>1.0.12+build.$(AureliaBuildNumber)</InformationalVersion>
+    <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../Aurelia Home Other'))</AureliaOtherRoot>
+    <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' != ''">$(AURELIA_OTHER_ROOT)</AureliaOtherRoot>
+    <AureliaBuildRoot Condition="'$(AURELIA_BUILD_ROOT)' == ''">$([System.IO.Path]::Combine('$(AureliaOtherRoot)', 'Build'))</AureliaBuildRoot>
+    <RestorePackagesPath Condition="'$(NUGET_PACKAGES)' == ''">$([System.IO.Path]::Combine('$(AureliaOtherRoot)', 'Package Cache', 'NuGet'))</RestorePackagesPath>
+    <BaseOutputPath>$([System.IO.Path]::Combine('$(AureliaBuildRoot)', 'bin', '$(MSBuildProjectName)'))/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$([System.IO.Path]::Combine('$(AureliaBuildRoot)', 'obj', '$(MSBuildProjectName)'))/</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
-    <VSTestResultsDirectory>$([System.IO.Path]::Combine('$(AureliaHomeOtherRoot)', 'Test Results'))</VSTestResultsDirectory>
+    <VSTestResultsDirectory>$([System.IO.Path]::Combine('$(AureliaOtherRoot)', 'Test Results'))</VSTestResultsDirectory>
   </PropertyGroup>
 </Project>
