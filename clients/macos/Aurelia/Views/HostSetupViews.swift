@@ -22,33 +22,87 @@ struct OperatingModeView: View {
   @EnvironmentObject private var model: AppModel
 
   var body: some View {
-    VStack(spacing: 24) {
+    VStack(spacing: 26) {
       Spacer()
-      Image(systemName: "house.and.flag.fill")
+      Image(systemName: "play.rectangle.on.rectangle.fill")
         .font(.system(size: 58, weight: .medium))
         .symbolRenderingMode(.hierarchical)
       VStack(spacing: 8) {
         Text("Welcome to Aurelia").font(.system(size: 34, weight: .bold))
-        Text("Your own media server, made simple.").foregroundStyle(.secondary)
+        Text("Choose where your private media server should run.")
+          .foregroundStyle(.secondary)
       }
-      Button {
-        Task { await model.selectHostMode() }
-      } label: {
-        Label("Set Up This Mac", systemImage: "macstudio.fill")
-          .font(.title3.bold())
-          .frame(maxWidth: 360)
-          .padding(.vertical, 8)
-      }
-      .buttonStyle(.borderedProminent)
-      .controlSize(.large)
-      .accessibilityIdentifier("choose-host")
 
-      Button("Connect to Another Server") { model.selectClientMode() }
-        .buttonStyle(.link)
+      VStack(spacing: 14) {
+        Button {
+          Task { await model.selectHostMode() }
+        } label: {
+          setupChoice(
+            title: "Set Up This Mac",
+            detail: "Recommended · Aurelia starts and stops the server for you.",
+            symbol: "macstudio.fill",
+            primary: true)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("choose-host")
+
+        Button {
+          model.selectClientMode()
+        } label: {
+          setupChoice(
+            title: "Connect to an Existing Server",
+            detail: "For a server you run separately on another Mac or computer.",
+            symbol: "network",
+            primary: false)
+        }
+        .buttonStyle(.plain)
         .accessibilityIdentifier("choose-client")
+      }
+      .frame(maxWidth: 560)
       Spacer()
     }
     .padding(40)
+    .background(AureliaBackdrop())
+  }
+
+  private func setupChoice(
+    title: String,
+    detail: String,
+    symbol: String,
+    primary: Bool
+  ) -> some View {
+    HStack(spacing: 16) {
+      Image(systemName: symbol)
+        .font(.system(size: 23, weight: .semibold))
+        .symbolRenderingMode(.hierarchical)
+        .frame(width: 44, height: 44)
+        .background(
+          primary ? Color.white.opacity(0.94) : AureliaDesign.raisedSurface,
+          in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .foregroundStyle(primary ? Color.black : Color.primary)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title).font(.headline)
+        Text(detail)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.leading)
+      }
+      Spacer(minLength: 12)
+      Image(systemName: "chevron.right")
+        .font(.callout.weight(.semibold))
+        .foregroundStyle(.tertiary)
+    }
+    .padding(18)
+    .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
+    .background(
+      primary ? AureliaDesign.raisedSurface : AureliaDesign.surface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+    )
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+        .stroke(primary ? Color.white.opacity(0.18) : AureliaDesign.hairline, lineWidth: 1)
+    }
   }
 }
 
@@ -85,12 +139,12 @@ struct NativeHostSetupView: View {
         Text(model.hostSnapshot.message ?? "The server could not start.")
           .foregroundStyle(.secondary).multilineTextAlignment(.center)
         Button("Try Again") { Task { await model.restartNativeHost() } }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
           .accessibilityIdentifier("retry-server-start")
       case .stopping, .stopped:
         Text("Server Stopped").font(.title.bold())
         Button("Start Server") { Task { await model.selectHostMode() } }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
       }
       if let error = model.errorMessage {
         Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -109,6 +163,7 @@ struct NativeHostSetupView: View {
     .frame(maxWidth: 520)
     .frame(maxWidth: .infinity)
     .padding(36)
+    .background(AureliaBackdrop())
   }
 
   private var ownerSetup: some View {
@@ -188,7 +243,7 @@ struct NativeHostSetupView: View {
             lanPort: lanPort)
         }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(AureliaPrimaryActionButtonStyle())
       .controlSize(.large)
       .disabled(
         serverName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -209,7 +264,7 @@ struct NativeHostSetupView: View {
       Button("Sign In") {
         Task { _ = await model.loginToLocalServer(username: username, password: password) }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(AureliaPrimaryActionButtonStyle())
       .disabled(username.isEmpty || password.isEmpty || model.isWorking)
       .accessibilityIdentifier("local-server-sign-in")
     }
@@ -246,7 +301,7 @@ struct InitialLibrarySetupView: View {
         Button("Start Scanning") {
           Task { _ = await model.createStorageLocations(locations) }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
         .disabled(locations.isEmpty || model.isWorking)
         .accessibilityIdentifier("start-storage-scan")
       }
@@ -257,6 +312,7 @@ struct InitialLibrarySetupView: View {
       Spacer()
     }
     .padding(36)
+    .background(AureliaBackdrop())
   }
 }
 
@@ -280,8 +336,15 @@ struct StorageLocationList: View {
           }
           .buttonStyle(.plain)
         }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(14)
+        .background(
+          AureliaDesign.surface,
+          in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+        )
+        .overlay {
+          RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+            .stroke(AureliaDesign.hairline, lineWidth: 1)
+        }
       }
     }
   }

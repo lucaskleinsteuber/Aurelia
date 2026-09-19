@@ -13,7 +13,7 @@ struct MediaDetailView: View {
   var body: some View {
     ScrollView {
       if let detail {
-        LazyVStack(alignment: .leading, spacing: 34) {
+        LazyVStack(alignment: .leading, spacing: 38) {
           DetailHero(
             detail: detail,
             onBack: onBack,
@@ -49,12 +49,21 @@ struct MediaDetailView: View {
         .frame(maxWidth: .infinity, minHeight: 420)
         .padding(AureliaDesign.pagePadding)
       } else {
-        VStack(alignment: .leading, spacing: 20) {
-          RoundedRectangle(cornerRadius: AureliaDesign.heroRadius)
-            .fill(.white.opacity(0.055)).frame(height: 500)
+        ZStack {
+          MediaArtworkPlaceholder(symbol: "film")
+          LinearGradient(
+            colors: [.clear, AureliaDesign.canvas],
+            startPoint: .top,
+            endPoint: .bottom)
           ProgressView("Loading details…")
+            .controlSize(.large)
         }
-        .padding(.bottom, 40)
+        .frame(height: 500)
+        .clipShape(
+          UnevenRoundedRectangle(
+            bottomLeadingRadius: AureliaDesign.heroRadius,
+            bottomTrailingRadius: AureliaDesign.heroRadius)
+        )
       }
     }
     .scrollIndicators(.visible)
@@ -103,7 +112,7 @@ struct MediaDetailView: View {
 
   private func seasons(_ detail: CatalogDetailPresentation) -> some View {
     VStack(alignment: .leading, spacing: 16) {
-      HStack {
+      HStack(alignment: .center) {
         Picker(
           "Season",
           selection: Binding(
@@ -117,7 +126,9 @@ struct MediaDetailView: View {
         .accessibilityIdentifier("season-\(selectedSeason ?? detail.seasons.first?.number ?? 0)")
         Spacer()
         if let season = activeSeason(detail) {
-          Text("\(season.episodes.count) episodes").font(.callout).foregroundStyle(.secondary)
+          Text("\(season.episodes.count) episodes")
+            .font(.callout)
+            .foregroundStyle(.secondary)
         }
       }
       .padding(.horizontal, AureliaDesign.pagePadding)
@@ -139,6 +150,7 @@ struct MediaDetailView: View {
           .padding(.horizontal, AureliaDesign.pagePadding)
           .padding(.vertical, 4)
         }
+        .scrollClipDisabled()
         supplementSection(
           season.supplements,
           parentTitle: "\(detail.item.title) · Season \(season.number)")
@@ -185,6 +197,7 @@ struct MediaDetailView: View {
           .padding(.horizontal, AureliaDesign.pagePadding)
           .padding(.vertical, 4)
         }
+        .scrollClipDisabled()
       }
     }
   }
@@ -215,6 +228,7 @@ struct MediaDetailView: View {
           .padding(.horizontal, AureliaDesign.pagePadding)
           .padding(.vertical, 4)
         }
+        .scrollClipDisabled()
       }
       .accessibilityIdentifier("cast-and-crew")
     }
@@ -229,27 +243,25 @@ struct MediaDetailView: View {
         }
       }
       Text("Information").font(AureliaDesign.sectionTitle)
-      Grid(alignment: .leading, horizontalSpacing: 54, verticalSpacing: 20) {
-        GridRow {
-          InfoValue(
-            title: "Released",
-            value: detail.metadata.releaseDate ?? detail.metadata.year.map(String.init))
-          InfoValue(title: "Runtime", value: detail.metadata.runtimeMinutes.map { "\($0) min" })
-          InfoValue(title: "Content Rating", value: detail.metadata.contentRating)
-        }
-        GridRow {
-          InfoValue(title: "Studio", value: detail.metadata.studios.first)
-          InfoValue(title: "Country", value: detail.metadata.countries.joined(separator: ", "))
-          InfoValue(title: "Genres", value: detail.metadata.genres.joined(separator: ", "))
-        }
+      LazyVGrid(
+        columns: [GridItem(.adaptive(minimum: 210, maximum: 320), spacing: 46)],
+        alignment: .leading,
+        spacing: 22
+      ) {
+        InfoValue(
+          title: "Released",
+          value: detail.metadata.releaseDate ?? detail.metadata.year.map(String.init))
+        InfoValue(title: "Runtime", value: detail.metadata.runtimeMinutes.map { "\($0) min" })
+        InfoValue(title: "Content Rating", value: detail.metadata.contentRating)
+        InfoValue(title: "Studio", value: detail.metadata.studios.first)
+        InfoValue(title: "Country", value: detail.metadata.countries.joined(separator: ", "))
+        InfoValue(title: "Genres", value: detail.metadata.genres.joined(separator: ", "))
         if !detail.seasons.isEmpty {
-          GridRow {
-            InfoValue(title: "Seasons", value: String(detail.seasons.count))
-            InfoValue(
-              title: "Episodes",
-              value: String(detail.seasons.reduce(0) { $0 + $1.episodes.count }))
-            InfoValue(title: "Original Title", value: detail.metadata.originalTitle)
-          }
+          InfoValue(title: "Seasons", value: String(detail.seasons.count))
+          InfoValue(
+            title: "Episodes",
+            value: String(detail.seasons.reduce(0) { $0 + $1.episodes.count }))
+          InfoValue(title: "Original Title", value: detail.metadata.originalTitle)
         }
       }
     }
@@ -272,20 +284,32 @@ private struct DetailHero: View {
       AuthenticatedArtwork(
         artwork: detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop,
         symbol: detail.item.kind == .movie ? "film.fill" : "tv.fill",
-        extendsBlurredEdges: true)
+        extendsBlurredEdges: true,
+        placeholderSymbolSize: 64)
       LinearGradient(
-        colors: [.black.opacity(0.84), .black.opacity(0.18), .clear],
+        stops: [
+          .init(color: .black.opacity(0.9), location: 0),
+          .init(color: .black.opacity(0.52), location: 0.36),
+          .init(color: .clear, location: 0.74),
+        ],
         startPoint: .leading,
         endPoint: .trailing)
       LinearGradient(
-        colors: [.clear, AureliaDesign.canvas.opacity(0.12), AureliaDesign.canvas],
+        stops: [
+          .init(color: .clear, location: 0.5),
+          .init(color: AureliaDesign.canvas.opacity(0.26), location: 0.76),
+          .init(color: AureliaDesign.canvas, location: 1),
+        ],
         startPoint: .top,
         endPoint: .bottom)
 
       VStack(alignment: .leading, spacing: 12) {
         Text(metadataLine).font(.caption.weight(.bold)).tracking(1).foregroundStyle(
           .white.opacity(0.74))
-        Text(detail.metadata.title).font(AureliaDesign.heroTitle).lineLimit(2)
+        Text(detail.metadata.title)
+          .font(AureliaDesign.heroTitle)
+          .tracking(-0.6)
+          .lineLimit(2)
         if let original = detail.metadata.originalTitle, original != detail.metadata.title {
           Text(original).font(.title3).foregroundStyle(.white.opacity(0.7))
         }
@@ -297,7 +321,8 @@ private struct DetailHero: View {
           Text(overview)
             .lineLimit(3)
             .multilineTextAlignment(.leading)
-            .foregroundStyle(.white.opacity(0.82))
+            .foregroundStyle(.white.opacity(0.78))
+            .lineSpacing(2)
             .frame(maxWidth: 620, alignment: .leading)
         }
         HStack(spacing: 10) {
@@ -305,7 +330,7 @@ private struct DetailHero: View {
             Label(detail.item.progressFraction == nil ? "Play" : "Resume", systemImage: "play.fill")
               .font(.headline).padding(.horizontal, 5)
           }
-          .buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black).controlSize(.large)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
           .disabled(
             detail.item.availability != .available
               || (detail.item.kind == .series && detail.seasons.isEmpty)
@@ -328,6 +353,7 @@ private struct DetailHero: View {
           Button(action: onBack) {
             Image(systemName: "chevron.left").font(.headline).frame(width: 44, height: 44)
               .background(.ultraThinMaterial, in: Circle())
+              .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
           }
           .buttonStyle(.plain).accessibilityLabel("Back")
           Spacer()
@@ -338,6 +364,7 @@ private struct DetailHero: View {
             } label: {
               Image(systemName: "ellipsis").font(.headline).frame(width: 44, height: 44)
                 .background(.ultraThinMaterial, in: Circle())
+                .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
             }
             .menuStyle(.borderlessButton)
             .accessibilityLabel("More Actions")
@@ -348,7 +375,7 @@ private struct DetailHero: View {
         Spacer()
       }
     }
-    .frame(height: 500)
+    .frame(height: 540)
     .clipShape(
       UnevenRoundedRectangle(
         bottomLeadingRadius: AureliaDesign.heroRadius,
@@ -369,6 +396,9 @@ private struct DetailHero: View {
 
 private struct EpisodeCard: View {
   let episode: EpisodePresentation
+  @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
     ZStack(alignment: .bottomLeading) {
       AuthenticatedArtwork(
@@ -399,8 +429,13 @@ private struct EpisodeCard: View {
     .frame(width: 420, height: 236)
     .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
     .overlay {
-      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius).stroke(.white.opacity(0.1))
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
+        .stroke(hovering ? .white.opacity(0.25) : AureliaDesign.hairline)
     }
+    .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
+    .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
+    .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
+    .onHover { hovering = $0 }
   }
 }
 

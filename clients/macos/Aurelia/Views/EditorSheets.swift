@@ -72,7 +72,7 @@ struct MetadataEditorSheet: View {
         Spacer()
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
         Button("Save") { Task { await save() } }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
           .keyboardShortcut(.defaultAction)
           .disabled(!isValid || isSaving)
       }
@@ -169,7 +169,7 @@ struct MetadataMatchSheet: View {
           TextField("Search title", text: $query).textFieldStyle(.roundedBorder)
             .onSubmit { Task { await search() } }
           Button("Search") { Task { await search() } }
-            .buttonStyle(.borderedProminent).disabled(
+            .buttonStyle(AureliaPrimaryActionButtonStyle()).disabled(
               query.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         if candidates.isEmpty {
@@ -198,7 +198,7 @@ struct MetadataMatchSheet: View {
               }
               Spacer()
               Button("Use Match") { Task { await select(candidate) } }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AureliaPrimaryActionButtonStyle())
             }
             .padding(.vertical, 6)
           }
@@ -312,7 +312,8 @@ struct CollectionEditorSheet: View {
         Spacer()
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
         Button("Save") { Task { await save() } }
-          .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!isValid)
+          .buttonStyle(AureliaPrimaryActionButtonStyle()).keyboardShortcut(.defaultAction)
+          .disabled(!isValid)
       }.padding(16)
     }
     .frame(width: 720, height: 640)

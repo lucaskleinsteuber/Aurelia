@@ -151,6 +151,7 @@ final class AureliaUITests: XCTestCase {
 
     XCTAssertTrue(app.staticTexts["Connect to Aurelia"].waitForExistence(timeout: 8))
     XCTAssertFalse(app.textFields["manual-server-address"].exists)
+    XCTAssertTrue(app.buttons["connection-set-up-this-mac"].exists)
     app.buttons["connection-advanced"].click()
     XCTAssertTrue(app.textFields["manual-server-address"].exists)
     XCTAssertTrue(app.buttons["connect-manually"].exists)

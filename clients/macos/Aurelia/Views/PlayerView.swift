@@ -129,6 +129,7 @@ struct PlayerView: View {
         }
         .padding(12)
         .background(.ultraThinMaterial, in: Capsule())
+        .overlay { Capsule().stroke(.white.opacity(0.12), lineWidth: 1) }
 
         Spacer()
 
@@ -158,7 +159,7 @@ struct PlayerView: View {
             Button("Try Again") {
               Task { await controller.retry() }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AureliaPrimaryActionButtonStyle())
           }
         }
         .padding(26)
@@ -221,6 +222,7 @@ struct PlayerView: View {
     }
     .padding(10)
     .background(.ultraThinMaterial, in: Capsule())
+    .overlay { Capsule().stroke(.white.opacity(0.12), lineWidth: 1) }
     .onChange(of: showingAudioTracks) { if !showingAudioTracks { revealControls() } }
     .onChange(of: showingSubtitleTracks) { if !showingSubtitleTracks { revealControls() } }
   }
@@ -282,6 +284,7 @@ struct PlayerView: View {
         .padding(.horizontal, 13)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
+        .overlay { Capsule().stroke(.white.opacity(0.12), lineWidth: 1) }
       }
 
       HStack(spacing: 10) {
@@ -360,7 +363,7 @@ struct PlayerView: View {
     Button(action: action) {
       Image(systemName: systemImage)
         .font(.system(size: 18, weight: .semibold))
-        .frame(width: 42, height: 42)
+        .frame(width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
         .background(.ultraThinMaterial, in: Circle())
     }
     .buttonStyle(.plain)

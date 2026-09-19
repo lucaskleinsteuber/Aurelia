@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
   @EnvironmentObject private var model: AppModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     ZStack {
@@ -9,12 +10,20 @@ struct RootView: View {
 
       Group {
         if model.isStarting {
-          VStack(spacing: 16) {
+          VStack(spacing: 22) {
+            Image(systemName: "play.rectangle.on.rectangle.fill")
+              .font(.system(size: 46, weight: .medium))
+              .symbolRenderingMode(.hierarchical)
+              .foregroundStyle(.white.opacity(0.86))
+            VStack(spacing: 8) {
+              Text("Opening Aurelia")
+                .font(.title2.weight(.semibold))
+              Text("Preparing your private library…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
             ProgressView()
-              .controlSize(.large)
-            Text("Opening Aurelia")
-              .font(.headline)
-              .foregroundStyle(.secondary)
+              .controlSize(.small)
           }
           .accessibilityIdentifier("startup-progress")
         } else if model.operatingMode == nil {
@@ -37,7 +46,8 @@ struct RootView: View {
           .zIndex(10)
       }
     }
-    .animation(.easeInOut(duration: 0.2), value: model.playback)
+    .background(AureliaWindowChrome())
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.playback)
     .preferredColorScheme(.dark)
     .frame(minWidth: 760, minHeight: 560)
     .sheet(isPresented: $model.isMediaManagerPresented) {

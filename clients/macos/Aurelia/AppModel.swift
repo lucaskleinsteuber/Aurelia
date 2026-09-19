@@ -621,6 +621,14 @@ final class AppModel: ObservableObject {
   }
 
   func refreshHome() async {
+    #if DEBUG
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
+        home = Self.previewHome
+        scheduleHomeRefresh()
+        return
+      }
+      if Self.uiTestMode != nil { return }
+    #endif
     guard let profile else { return }
     do {
       home = try await APIClient(profile: profile).home()
@@ -1003,9 +1011,10 @@ final class AppModel: ObservableObject {
     let client = APIClient(profile: profile)
     if let refreshedLibraries = try? await client.libraries() {
       libraries = refreshedLibraries
-      libraryDiscoveries = (try? await loadDiscoveries(
-        client: client,
-        libraries: refreshedLibraries)) ?? libraryDiscoveries
+      libraryDiscoveries =
+        (try? await loadDiscoveries(
+          client: client,
+          libraries: refreshedLibraries)) ?? libraryDiscoveries
     }
   }
 

@@ -7,12 +7,15 @@ enum OperatingModePolicy {
     storedMode: OperatingMode?,
     storedSelectionVersion: Int,
     profile: StoredServerProfile?
-  ) -> OperatingMode {
+  ) -> OperatingMode? {
     if storedSelectionVersion >= selectionVersion, let storedMode {
       return storedMode
     }
     if let profile, !isLocal(profile.baseURL) {
       return .client
+    }
+    if profile == nil, storedMode == nil {
+      return nil
     }
     return .host
   }

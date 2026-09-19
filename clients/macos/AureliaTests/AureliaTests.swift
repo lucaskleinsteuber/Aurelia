@@ -40,7 +40,7 @@ struct AureliaTests {
 
   @Test(
     arguments: [
-      (nil, 0, nil, OperatingMode.host),
+      (nil, 0, nil, nil),
       (OperatingMode.client, 0, nil, OperatingMode.host),
       (OperatingMode.host, 0, "https://media-mac.local:43111", OperatingMode.client),
       (OperatingMode.client, 0, "https://127.0.0.1:43111", OperatingMode.host),
@@ -49,13 +49,13 @@ struct AureliaTests {
       (OperatingMode.host, 0, "https://192.168.1.20:43111", OperatingMode.client),
       (OperatingMode.host, 1, "https://192.168.1.20:43111", OperatingMode.host),
       (OperatingMode.client, 1, "https://127.0.0.1:43111", OperatingMode.client),
-    ] as [(OperatingMode?, Int, String?, OperatingMode)]
+    ] as [(OperatingMode?, Int, String?, OperatingMode?)]
   )
   func operatingModeMigrationIsExplicitAndDistinguishesLoopbackFromRemote(
     storedMode: OperatingMode?,
     selectionVersion: Int,
     address: String?,
-    expected: OperatingMode
+    expected: OperatingMode?
   ) throws {
     let profile = try address.map { address in
       StoredServerProfile(
@@ -356,9 +356,11 @@ struct AureliaTests {
     try ServerDataMigrator.migrateIfNeeded(from: legacy, to: destination)
 
     #expect(FileManager.default.fileExists(atPath: legacyDatabase.path))
-    #expect(FileManager.default.fileExists(atPath: destination.appendingPathComponent("aurelia.db").path))
     #expect(
-      try String(contentsOf: destination.appendingPathComponent("server-settings.json"), encoding: .utf8)
+      FileManager.default.fileExists(atPath: destination.appendingPathComponent("aurelia.db").path))
+    #expect(
+      try String(
+        contentsOf: destination.appendingPathComponent("server-settings.json"), encoding: .utf8)
         == "settings")
     try ServerDataMigrator.migrateIfNeeded(from: legacy, to: destination)
   }
@@ -366,7 +368,8 @@ struct AureliaTests {
   @Test
   func build11ServerDataMigrationRejectsASymlinkDatabase() throws {
     let root = FileManager.default.temporaryDirectory
-      .appendingPathComponent("AureliaMigrationSymlinkTests-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent(
+        "AureliaMigrationSymlinkTests-\(UUID().uuidString)", isDirectory: true)
     let legacy = root.appendingPathComponent("Aurelia Home Server", isDirectory: true)
     let destination = root.appendingPathComponent("Aurelia Server", isDirectory: true)
     let externalDatabase = root.appendingPathComponent("external.db")

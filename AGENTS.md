@@ -85,7 +85,7 @@ These rules apply to every task in this repository.
   unportable paths, generated data, databases, binaries, media, caches, and test
   results.
 - Commit a completed build with exactly its product version as the message
-  (for example `1.0.13`), push to `origin/main`, and verify the remote hash.
+  (for example `1.0.14`), push to `origin/main`, and verify the remote hash.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
 - After verification, create exactly one concise English Markdown summary in

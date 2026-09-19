@@ -3,46 +3,256 @@ import SwiftUI
 
 enum AureliaDesign {
   static let pagePadding: CGFloat = 32
-  static let sectionSpacing: CGFloat = 28
+  static let sectionSpacing: CGFloat = 30
+  static let rowSpacing: CGFloat = 20
   static let cardRadius: CGFloat = 18
   static let compactRadius: CGFloat = 12
   static let heroRadius: CGFloat = 24
   static let sidebarWidth: CGFloat = 236
-  static let pageTitle = Font.system(size: 34, weight: .bold)
-  static let heroTitle = Font.system(size: 44, weight: .bold)
-  static let sectionTitle = Font.system(size: 20, weight: .semibold)
-  static let canvas = Color(red: 0.045, green: 0.055, blue: 0.071)
+  static let minimumControlSize: CGFloat = 44
+
+  static let pageTitle = Font.system(size: 34, weight: .bold, design: .default)
+  static let heroTitle = Font.system(size: 44, weight: .bold, design: .default)
+  static let sectionTitle = Font.system(size: 20, weight: .semibold, design: .default)
+
+  static let canvas = Color(red: 0.032, green: 0.039, blue: 0.051)
+  static let canvasTop = Color(red: 0.055, green: 0.067, blue: 0.084)
+  static let surface = Color(red: 0.079, green: 0.091, blue: 0.109)
+  static let raisedSurface = Color(red: 0.105, green: 0.118, blue: 0.138)
+  static let hairline = Color.white.opacity(0.085)
+  static let subduedText = Color.white.opacity(0.62)
+
+  static let responsiveSpring = Animation.spring(response: 0.3, dampingFraction: 1)
 }
 
 struct AureliaBackdrop: View {
   var body: some View {
     LinearGradient(
-      colors: [
-        Color(red: 0.08, green: 0.098, blue: 0.122),
-        AureliaDesign.canvas,
-        Color(red: 0.025, green: 0.031, blue: 0.041),
-      ],
-      startPoint: .topLeading,
-      endPoint: .bottomTrailing
+      colors: [AureliaDesign.canvasTop, AureliaDesign.canvas, AureliaDesign.canvas],
+      startPoint: .top,
+      endPoint: .bottom
     )
     .ignoresSafeArea()
   }
 }
 
+struct AureliaWindowChrome: NSViewRepresentable {
+  func makeNSView(context: Context) -> WindowChromeView { WindowChromeView() }
+  func updateNSView(_ nsView: WindowChromeView, context: Context) { nsView.apply() }
+
+  final class WindowChromeView: NSView {
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      apply()
+    }
+
+    func apply() {
+      guard let window else { return }
+      window.styleMask.insert(.fullSizeContentView)
+      window.titleVisibility = .hidden
+      window.titlebarAppearsTransparent = true
+      window.titlebarSeparatorStyle = .none
+      window.toolbar?.isVisible = false
+      window.isMovableByWindowBackground = true
+    }
+  }
+}
+
+struct AureliaSurface<Content: View>: View {
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  let material: Bool
+  let radius: CGFloat
+  let padding: CGFloat
+  let content: Content
+
+  init(
+    material: Bool = false,
+    radius: CGFloat = AureliaDesign.cardRadius,
+    padding: CGFloat = 20,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.material = material
+    self.radius = radius
+    self.padding = padding
+    self.content = content()
+  }
+
+  var body: some View {
+    content
+      .padding(padding)
+      .background {
+        if material && !reduceTransparency {
+          Rectangle().fill(.regularMaterial)
+        } else {
+          Rectangle().fill(AureliaDesign.surface.opacity(material ? 0.98 : 1))
+        }
+      }
+      .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+          .stroke(AureliaDesign.hairline, lineWidth: 1)
+      }
+  }
+}
+
+// Kept as a compatibility entry point for existing settings and setup views.
 struct CinemaMaterialCard<Content: View>: View {
   let content: Content
 
   init(@ViewBuilder content: () -> Content) { self.content = content() }
 
   var body: some View {
-    content
-      .padding(20)
-      .background(.thinMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
-      .overlay {
-        RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
-          .stroke(.white.opacity(0.085), lineWidth: 1)
+    AureliaSurface(material: false) { content }
+  }
+}
+
+struct AureliaSectionHeading: View {
+  let title: String
+  var count: Int?
+  var trailing: AnyView?
+
+  init(title: String, count: Int? = nil) {
+    self.title = title
+    self.count = count
+    trailing = nil
+  }
+
+  init<Trailing: View>(title: String, count: Int? = nil, @ViewBuilder trailing: () -> Trailing) {
+    self.title = title
+    self.count = count
+    self.trailing = AnyView(trailing())
+  }
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(title)
+        .font(AureliaDesign.sectionTitle)
+      if let count {
+        Text(String(count))
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
       }
-      .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+      Spacer(minLength: 12)
+      trailing
+    }
+  }
+}
+
+struct AureliaSettingsSection<Content: View>: View {
+  let title: String
+  let symbol: String?
+  let description: String?
+  let content: Content
+
+  init(
+    _ title: String,
+    symbol: String? = nil,
+    description: String? = nil,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.title = title
+    self.symbol = symbol
+    self.description = description
+    self.content = content()
+  }
+
+  var body: some View {
+    AureliaSurface {
+      VStack(alignment: .leading, spacing: 16) {
+        HStack(spacing: 10) {
+          if let symbol {
+            Image(systemName: symbol)
+              .font(.system(size: 16, weight: .semibold))
+              .foregroundStyle(.secondary)
+              .frame(width: 22)
+          }
+          Text(title)
+            .font(AureliaDesign.sectionTitle)
+        }
+        if let description {
+          Text(description)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        content
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+}
+
+struct AureliaSearchField: View {
+  let prompt: String
+  @Binding var text: String
+
+  var body: some View {
+    HStack(spacing: 9) {
+      Image(systemName: "magnifyingglass")
+        .foregroundStyle(.secondary)
+      TextField(prompt, text: $text)
+        .textFieldStyle(.plain)
+      if !text.isEmpty {
+        Button {
+          text = ""
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.tertiary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Clear Search")
+      }
+    }
+    .padding(.horizontal, 12)
+    .frame(height: 38)
+    .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
+    .overlay {
+      RoundedRectangle(cornerRadius: 10)
+        .stroke(AureliaDesign.hairline, lineWidth: 1)
+    }
+  }
+}
+
+struct AureliaIconControl: View {
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  let symbol: String
+  let label: String
+  var selected = false
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 15, weight: .semibold))
+        .frame(width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
+        .background {
+          if reduceTransparency {
+            Circle().fill(AureliaDesign.raisedSurface)
+          } else {
+            Circle().fill(.ultraThinMaterial)
+          }
+        }
+        .overlay {
+          Circle().stroke(selected ? .white.opacity(0.24) : AureliaDesign.hairline, lineWidth: 1)
+        }
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(label)
+  }
+}
+
+struct AureliaPrimaryActionButtonStyle: ButtonStyle {
+  @Environment(\.isEnabled) private var isEnabled
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .foregroundStyle(.black.opacity(isEnabled ? 0.94 : 0.42))
+      .padding(.horizontal, 18)
+      .frame(minHeight: AureliaDesign.minimumControlSize)
+      .background(.white.opacity(isEnabled ? 0.96 : 0.38), in: Capsule())
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
   }
 }
 
@@ -52,11 +262,12 @@ struct AuthenticatedArtwork: View {
   let symbol: String
   var contentMode: ContentMode = .fill
   var extendsBlurredEdges = false
+  var placeholderSymbolSize: CGFloat = 36
   @State private var image: NSImage?
 
   var body: some View {
     ZStack {
-      MediaArtworkPlaceholder(symbol: symbol)
+      MediaArtworkPlaceholder(symbol: symbol, symbolSize: placeholderSymbolSize)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Artwork placeholder")
         .accessibilityIdentifier("artwork-placeholder")
@@ -65,8 +276,8 @@ struct AuthenticatedArtwork: View {
           Image(nsImage: image)
             .resizable()
             .aspectRatio(contentMode: .fill)
-            .scaleEffect(1.08)
-            .blur(radius: 28, opaque: true)
+            .scaleEffect(1.1)
+            .blur(radius: 30, opaque: true)
           Image(nsImage: image)
             .resizable()
             .aspectRatio(contentMode: .fit)
@@ -86,7 +297,7 @@ struct AuthenticatedArtwork: View {
       guard let artwork, let profile = model.profile else { return }
       do {
         let data = try await model.artworkLoader.data(for: artwork, profile: profile)
-        guard !Task.isCancelled else { return }
+        try Task.checkCancellation()
         image = NSImage(data: data)
       } catch is CancellationError {
         return
@@ -103,20 +314,21 @@ struct AuthenticatedArtwork: View {
 
 struct MediaArtworkPlaceholder: View {
   let symbol: String
+  var symbolSize: CGFloat = 36
 
   var body: some View {
     ZStack {
       LinearGradient(
         colors: [
-          Color(red: 0.16, green: 0.19, blue: 0.23),
-          Color(red: 0.065, green: 0.078, blue: 0.098),
+          Color(red: 0.13, green: 0.15, blue: 0.18),
+          Color(red: 0.055, green: 0.064, blue: 0.079),
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing)
       Image(systemName: symbol)
-        .font(.system(size: 38, weight: .light))
+        .font(.system(size: symbolSize, weight: .light))
         .symbolRenderingMode(.hierarchical)
-        .foregroundStyle(.white.opacity(0.64))
+        .foregroundStyle(.white.opacity(0.54))
     }
   }
 }
@@ -129,28 +341,54 @@ struct MediaPosterCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
-      AuthenticatedArtwork(artwork: item.poster, symbol: item.kind == .movie ? "film" : "tv")
-        .frame(width: width, height: width * 1.5)
-        .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
-        .overlay(alignment: .topTrailing) {
+      ZStack(alignment: .bottom) {
+        AuthenticatedArtwork(artwork: item.poster, symbol: item.kind == .movie ? "film" : "tv")
+        if let progress = item.progressFraction {
+          GeometryReader { geometry in
+            VStack {
+              Spacer()
+              Capsule()
+                .fill(.black.opacity(0.42))
+                .frame(height: 4)
+                .overlay(alignment: .leading) {
+                  Capsule()
+                    .fill(.white)
+                    .frame(width: geometry.size.width * progress, height: 4)
+                }
+                .padding(8)
+            }
+          }
+        }
+      }
+      .frame(width: width, height: width * 1.5)
+      .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
+      .overlay(alignment: .topTrailing) {
+        VStack(spacing: 7) {
+          if item.isFavorite {
+            Image(systemName: "star.fill")
+              .foregroundStyle(.white)
+              .accessibilityLabel("Favorite")
+          }
           if item.availability == .missing {
             Image(systemName: "exclamationmark.triangle.fill")
-              .font(.caption.weight(.bold))
               .foregroundStyle(.orange)
-              .padding(8)
-              .background(.ultraThinMaterial, in: Circle())
-              .padding(8)
               .accessibilityLabel("Media missing")
           }
         }
-        .overlay {
-          RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
-            .stroke(.white.opacity(0.09), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        .font(.caption.weight(.bold))
+        .padding(9)
+        .background(.black.opacity(0.44), in: RoundedRectangle(cornerRadius: 10))
+        .padding(9)
+      }
+      .overlay {
+        RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+          .stroke(hovering ? .white.opacity(0.25) : AureliaDesign.hairline, lineWidth: 1)
+      }
+      .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
 
       Text(item.title)
         .font(.headline)
+        .foregroundStyle(.primary)
         .lineLimit(1)
         .frame(width: width, alignment: .leading)
       Text(secondaryLine)
@@ -161,7 +399,7 @@ struct MediaPosterCard: View {
     }
     .contentShape(Rectangle())
     .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
-    .animation(.easeOut(duration: 0.14), value: hovering)
+    .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
     .onHover { hovering = $0 }
   }
 
@@ -185,20 +423,23 @@ struct LandscapeMediaCard: View {
         artwork: item.backdrop ?? item.poster,
         symbol: item.kind == .movie ? "film" : item.kind == .episode ? "play.rectangle" : "tv")
       LinearGradient(
-        colors: [.clear, .black.opacity(0.25), .black.opacity(0.88)],
+        colors: [.clear, .black.opacity(0.2), .black.opacity(0.9)],
         startPoint: .top,
         endPoint: .bottom)
       VStack(alignment: .leading, spacing: 3) {
         if let eyebrow {
           Text(eyebrow.uppercased())
             .font(.caption2.weight(.bold))
-            .tracking(1.2)
-            .foregroundStyle(.white.opacity(0.72))
+            .tracking(1)
+            .foregroundStyle(.white.opacity(0.7))
         }
-        Text(item.title).font(.headline).lineLimit(1)
+        Text(item.title)
+          .font(.headline)
+          .foregroundStyle(.white)
+          .lineLimit(1)
         Text(item.year.map(String.init) ?? (item.kind == .movie ? "Movie" : "TV Show"))
           .font(.caption)
-          .foregroundStyle(.white.opacity(0.7))
+          .foregroundStyle(.white.opacity(0.68))
       }
       .padding(16)
       if item.availability == .missing {
@@ -223,14 +464,14 @@ struct LandscapeMediaCard: View {
       }
     }
     .frame(width: width, height: width * 0.5625)
-    .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+    .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
-        .stroke(.white.opacity(0.1), lineWidth: 1)
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+        .stroke(hovering ? .white.opacity(0.25) : AureliaDesign.hairline, lineWidth: 1)
     }
-    .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+    .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
     .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
-    .animation(.easeOut(duration: 0.14), value: hovering)
+    .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
     .onHover { hovering = $0 }
   }
 }
@@ -245,7 +486,8 @@ struct AvailabilityBadge: View {
         .foregroundStyle(.orange)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(.orange.opacity(0.12), in: Capsule())
+        .background(.black.opacity(0.56), in: Capsule())
+        .overlay { Capsule().stroke(.orange.opacity(0.28), lineWidth: 1) }
     }
   }
 }
@@ -256,18 +498,21 @@ struct ErrorBanner: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-      Text(message).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.orange)
+      Text(message)
+        .font(.callout)
+        .frame(maxWidth: .infinity, alignment: .leading)
       if let retry { Button("Try Again", action: retry) }
     }
     .padding(14)
-    .background(
-      .regularMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
-    )
+    .frame(maxWidth: 760)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius))
     .overlay {
       RoundedRectangle(cornerRadius: AureliaDesign.compactRadius)
-        .stroke(.white.opacity(0.08), lineWidth: 1)
+        .stroke(AureliaDesign.hairline, lineWidth: 1)
     }
+    .shadow(color: .black.opacity(0.25), radius: 14, y: 7)
     .padding(.horizontal, AureliaDesign.pagePadding)
     .padding(.bottom, 18)
   }

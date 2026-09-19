@@ -92,6 +92,32 @@ struct ConnectionView: View {
       Divider()
 
       Button {
+        Task { await model.selectHostMode() }
+      } label: {
+        HStack(spacing: 12) {
+          Image(systemName: "macstudio.fill")
+            .font(.title3)
+            .frame(width: 28)
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Set Up a Server on This Mac")
+              .font(.headline)
+            Text("Aurelia will start it automatically whenever the app opens.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          Image(systemName: "chevron.right")
+            .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .frame(minHeight: AureliaDesign.minimumControlSize)
+      .accessibilityIdentifier("connection-set-up-this-mac")
+
+      Divider()
+
+      Button {
         showsAdvancedConnection.toggle()
       } label: {
         HStack {
@@ -115,7 +141,7 @@ struct ConnectionView: View {
               .onSubmit { connectManually() }
               .accessibilityIdentifier("manual-server-address")
             Button("Connect") { connectManually() }
-              .buttonStyle(.borderedProminent)
+              .buttonStyle(AureliaPrimaryActionButtonStyle())
               .disabled(
                 manualAddress.trimmingCharacters(in: .whitespaces).isEmpty
                   || model.isWorking
@@ -191,7 +217,7 @@ struct ConnectionView: View {
             .frame(maxWidth: .infinity)
         }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(AureliaPrimaryActionButtonStyle())
       .disabled(
         !fingerprintMatches || pairingCode.filter(\.isNumber).count != 8
           || model.isWorking

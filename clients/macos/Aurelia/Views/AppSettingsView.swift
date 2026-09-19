@@ -94,11 +94,12 @@ struct AppSettingsView: View {
   }
 
   private var storage: some View {
-    GroupBox("Storage") {
+    AureliaSettingsSection(
+      "Storage",
+      symbol: "externaldrive.fill",
+      description: "Aurelia recognizes movies and TV shows automatically in each location."
+    ) {
       VStack(alignment: .leading, spacing: 14) {
-        Text("Aurelia recognizes movies and TV shows automatically in each location.")
-          .font(.callout).foregroundStyle(.secondary)
-
         if model.libraries.isEmpty {
           if isLoadingAdministration {
             ProgressView("Loading storage…")
@@ -138,8 +139,10 @@ struct AppSettingsView: View {
         if !unresolved.isEmpty {
           Divider()
           Text("Needs Your Help").font(.headline)
-          Text("Aurelia did not guess these folders. Choose TV Show · Force Import for episode files without S01E01 names; their natural filename order becomes Season 1.")
-            .font(.caption).foregroundStyle(.secondary)
+          Text(
+            "Aurelia did not guess these folders. Choose TV Show · Force Import for episode files without S01E01 names; their natural filename order becomes Season 1."
+          )
+          .font(.caption).foregroundStyle(.secondary)
           ForEach(unresolved) { discovery in
             DiscoveryDecisionCard(discovery: discovery)
           }
@@ -188,11 +191,10 @@ struct AppSettingsView: View {
         }
 
         Button("Manage Media…") { showingMediaManager = true }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier("add-storage-locations")
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .accessibilityIdentifier("add-storage-locations")
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(8)
     }
   }
 
@@ -224,7 +226,11 @@ struct AppSettingsView: View {
   }
 
   private var devices: some View {
-    GroupBox("Devices") {
+    AureliaSettingsSection(
+      "Devices",
+      symbol: "laptopcomputer.and.iphone",
+      description: "Pair trusted devices and revoke sessions you no longer use."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
         if let code = model.pairingCode {
           HStack {
@@ -240,7 +246,7 @@ struct AppSettingsView: View {
           }
         }
         Button("Pair Another Device") { Task { await model.generatePairingCode() } }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
         ForEach(model.sessions) { session in
           HStack {
             VStack(alignment: .leading) {
@@ -258,7 +264,6 @@ struct AppSettingsView: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(8)
     }
   }
 
@@ -372,8 +377,15 @@ struct DiscoveryDecisionCard: View {
         decisionButton("Ignore", .ignore, "eye.slash")
       }
     }
-    .padding(12)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    .padding(14)
+    .background(
+      AureliaDesign.raisedSurface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+    )
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+        .stroke(AureliaDesign.hairline, lineWidth: 1)
+    }
     .accessibilityIdentifier("discovery-\(discovery.id.uuidString.lowercased())")
   }
 

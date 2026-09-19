@@ -79,6 +79,10 @@ The complete path is:
   monitoring, conservative filesystem-identity reconciliation, offline-storage
   recovery, server-side indexed search/filtering, revision ETags, and an
   authenticated change cursor for efficient native-client refreshes.
+- Aurelia 1.0.14 completes the native visual redesign across first run, Home,
+  Library, details, media management, settings, editors, and playback. It also
+  makes first launch an explicit host-or-remote choice while remembered local
+  hosts start automatically and return directly to Home on later launches.
 
 The Build 11 host handoff retained by Aurelia 1.0.12 keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; both processes resolve a shared App
@@ -147,14 +151,13 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message matching the build (`1.0.13` for Build 13), push immediately, verify
+    message matching the build (`1.0.14` for Build 14), push immediately, verify
     the remote hash, and write exactly one English external summary for the
     completed build.
 
 ## Planned direction
 
-Aurelia 1.0.13 deliberately does not introduce chapters, playback speed, sleep
+Aurelia 1.0.14 deliberately does not introduce chapters, playback speed, sleep
 timer, PiP, timeline thumbnails, downloads, transcoding, an optional web client,
-or Linux and Windows native clients. The next planned product milestone is the
-full native visual redesign, built on the stable monitoring, filtering, search,
-health, job, and sync APIs introduced here.
+or Linux and Windows native clients. Those remain separate future milestones;
+the current native client and reliable library engine are the release baseline.

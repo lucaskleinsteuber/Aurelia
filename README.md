@@ -3,7 +3,7 @@
 Aurelia is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
 and connects securely to a native macOS library and playback client. Aurelia
-1.0.13 starts this Mac as a host by default, preserves an explicitly selected
+1.0.14 starts this Mac as a host by default, preserves an explicitly selected
 remote-client mode, and makes storage import available throughout the app.
 People choose whole storage locations instead of separating movie and TV
 folders themselves; Aurelia classifies clear structures locally and asks
@@ -221,11 +221,13 @@ incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
 
-For normal Aurelia 1.0.13 use, launch Aurelia. It starts the local server and,
-on a new installation, opens **Set Up This Mac** automatically. The native
-assistant creates the owner, enables LAN HTTPS, and lets the owner
-select one or more drives or folders. Technical server and port settings remain
-under Advanced. Clear movie and TV structures are classified automatically;
+For normal Aurelia use, launch Aurelia. A new installation first asks whether
+this Mac should host the server or connect to an independently managed server.
+Choosing **Set Up This Mac** opens the native assistant for server name, owner,
+password, LAN HTTPS, and storage locations. Aurelia remembers that choice,
+starts the local server on later launches, and opens the library directly.
+Choosing an existing server keeps its startup under the server owner's control.
+Technical server and port settings remain under Advanced. Clear movie and TV structures are classified automatically;
 uncertain folders can be marked Movie, TV Show, or Ignore and reviewed again
 later. Closing the last
 window leaves the app and its server running; clicking the Dock icon restores

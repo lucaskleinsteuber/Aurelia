@@ -21,7 +21,7 @@ struct MediaManagerView: View {
           scanActivity
           classifications
         }
-        .padding(24)
+        .padding(AureliaDesign.pagePadding)
       }
       Divider()
       HStack {
@@ -32,9 +32,10 @@ struct MediaManagerView: View {
         Button("Done") { dismiss() }
           .keyboardShortcut(.defaultAction)
       }
-      .padding(16)
+      .padding(.horizontal, AureliaDesign.pagePadding)
+      .padding(.vertical, 16)
     }
-    .frame(width: 760, height: 680)
+    .frame(width: 800, height: 720)
     .background(AureliaBackdrop())
     .task { await model.reloadAdministration() }
   }
@@ -42,16 +43,17 @@ struct MediaManagerView: View {
   private var header: some View {
     HStack(spacing: 14) {
       Image(systemName: "externaldrive.fill.badge.plus")
-        .font(.system(size: 28, weight: .semibold))
+        .font(.system(size: 30, weight: .semibold))
         .symbolRenderingMode(.hierarchical)
       VStack(alignment: .leading, spacing: 3) {
-        Text("Manage Media").font(.title2.bold())
+        Text("Manage Media").font(AureliaDesign.pageTitle)
         Text("Add storage locations, follow scans, and review detected folders.")
           .font(.callout).foregroundStyle(.secondary)
       }
       Spacer()
     }
-    .padding(20)
+    .padding(.horizontal, AureliaDesign.pagePadding)
+    .padding(.vertical, 22)
   }
 
   private var remoteNotice: some View {
@@ -64,13 +66,17 @@ struct MediaManagerView: View {
     } icon: {
       Image(systemName: "macstudio")
     }
-    .padding(16)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    .modifier(AureliaSectionSurfaceModifier())
   }
 
   private var addLocations: some View {
-    GroupBox("Add Media") {
+    AureliaSettingsSection(
+      "Add Media",
+      symbol: "plus.rectangle.on.folder",
+      description:
+        "Choose one or more folders or drives. Aurelia reads their directory structure and leaves every media file untouched."
+    ) {
       VStack(alignment: .leading, spacing: 14) {
         ForEach($drafts) { $draft in
           VStack(alignment: .leading, spacing: 10) {
@@ -97,12 +103,20 @@ struct MediaManagerView: View {
               .frame(width: 210)
             }
           }
-          .padding(12)
-          .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+          .padding(14)
+          .background(
+            AureliaDesign.raisedSurface,
+            in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+          )
+          .overlay {
+            RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+              .stroke(AureliaDesign.hairline, lineWidth: 1)
+          }
         }
 
         HStack {
           Button("Choose Folders or Drives…") { chooseStorageLocations(into: &drafts) }
+            .frame(minHeight: AureliaDesign.minimumControlSize)
             .accessibilityIdentifier("media-manager-choose-locations")
           Toggle("Combine compatible overlapping libraries", isOn: $combineExisting)
             .toggleStyle(.checkbox)
@@ -116,17 +130,21 @@ struct MediaManagerView: View {
               }
             }
           }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
           .disabled(drafts.isEmpty || model.isWorking)
           .accessibilityIdentifier("media-manager-add-and-scan")
         }
       }
-      .padding(8)
     }
   }
 
   private var configuredLibraries: some View {
-    GroupBox("Storage Locations") {
+    AureliaSettingsSection(
+      "Storage Locations",
+      symbol: "externaldrive.fill",
+      description:
+        "Automatic monitoring keeps reachable locations current. Offline media remains in your library."
+    ) {
       VStack(spacing: 0) {
         if model.libraries.isEmpty {
           Text("No storage locations yet.")
@@ -148,7 +166,7 @@ struct MediaManagerView: View {
   private var scanActivity: some View {
     let scans = model.activeScans + model.recentScans
     if !scans.isEmpty {
-      GroupBox("Scan Activity") {
+      AureliaSettingsSection("Scan Activity", symbol: "arrow.triangle.2.circlepath") {
         VStack(spacing: 0) {
           ForEach(scans.prefix(20)) { scan in
             ScanStatusRow(scan: scan, library: model.libraries.first { $0.id == scan.libraryId })
@@ -162,17 +180,27 @@ struct MediaManagerView: View {
   @ViewBuilder
   private var classifications: some View {
     if !model.libraryDiscoveries.isEmpty {
-      GroupBox("Folder Classification") {
+      AureliaSettingsSection(
+        "Folder Classification",
+        symbol: "rectangle.3.group.bubble"
+      ) {
         VStack(alignment: .leading, spacing: 10) {
-          Text("Choose how ambiguous folders should be imported, or ignore them. TV Show · Force Import accepts unnumbered videos in natural filename order as Season 1 episodes.")
-            .font(.caption).foregroundStyle(.secondary)
+          Text(
+            "Choose how ambiguous folders should be imported, or ignore them. TV Show · Force Import accepts unnumbered videos in natural filename order as Season 1 episodes."
+          )
+          .font(.caption).foregroundStyle(.secondary)
           ForEach(model.libraryDiscoveries) { discovery in
             DiscoveryDecisionCard(discovery: discovery)
           }
         }
-        .padding(8)
       }
     }
+  }
+}
+
+private struct AureliaSectionSurfaceModifier: ViewModifier {
+  func body(content: Content) -> some View {
+    AureliaSurface { content }
   }
 }
 
@@ -206,18 +234,23 @@ private struct LibraryLocationRow: View {
               get: { library.isMonitoringEnabled },
               set: { enabled in
                 Task { await model.setMonitoring(libraryID: library.id, enabled: enabled) }
-              }))
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .accessibilityIdentifier("library-monitor-\(library.id.uuidString.lowercased())")
-            .help("Automatically detect changes in this storage location")
+              })
+          )
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .accessibilityIdentifier("library-monitor-\(library.id.uuidString.lowercased())")
+          .help("Automatically detect changes in this storage location")
         }
         Button("Rescan") { Task { await model.scanLibrary(id: library.id) } }
+          .frame(minHeight: AureliaDesign.minimumControlSize)
         Button(role: .destructive) {
           Task { await model.removeLibrary(id: library.id) }
         } label: {
           Image(systemName: "trash")
+            .frame(
+              width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("Remove \(library.name)")
       }
     }
@@ -259,7 +292,8 @@ private struct ScanStatusRow: View {
         }
       }
       if scan.state == .queued || scan.state == .running {
-        ProgressView(value: Double(scan.filesProcessed), total: Double(max(scan.filesDiscovered, 1)))
+        ProgressView(
+          value: Double(scan.filesProcessed), total: Double(max(scan.filesDiscovered, 1)))
       }
       if scan.state == .waitingForStorage {
         Text("Waiting for Storage")
@@ -301,8 +335,8 @@ private struct ScanStatusRow: View {
   }
 }
 
-private extension LibraryScanTrigger {
-  var title: String {
+extension LibraryScanTrigger {
+  fileprivate var title: String {
     switch self {
     case .manual: "Manual"
     case .fileChange: "Automatic Change"
