@@ -245,6 +245,91 @@ struct AureliaTests {
     #expect(scan.addedFiles == 4)
     #expect(scan.missingFiles == 1)
     #expect(scan.issues.first?.code == "unreadable")
+    #expect(scan.trigger == nil)
+    #expect(scan.attempt == nil)
+  }
+
+  @Test
+  func reliableLibraryStateDecodesAdditivelyForBuild13() throws {
+    let library = try JSONDecoder().decode(
+      LibrarySummary.self,
+      from: Data(
+        """
+        {"id":"00000000-0000-0000-0000-000000000010","name":"Archive",
+        "path":"/Volumes/Archive","kind":"movies","availability":"unavailable",
+        "createdAt":"2026-09-15T12:00:00Z","lastScanStartedAt":null,
+        "lastScanCompletedAt":null,"lastError":null,"monitoringEnabled":true,
+        "lastObservedAt":"2026-09-15T12:01:00Z","health":"waitingForStorage"}
+        """.utf8))
+    #expect(library.isMonitoringEnabled)
+    #expect(library.health == .waitingForStorage)
+
+    let scan = try JSONDecoder().decode(
+      LibraryScanSummary.self,
+      from: Data(
+        """
+        {"id":"00000000-0000-0000-0000-000000000011",
+        "libraryId":"00000000-0000-0000-0000-000000000010",
+        "state":"waitingForStorage","createdAt":"2026-09-15T12:00:00Z",
+        "startedAt":null,"completedAt":null,"filesDiscovered":0,"filesProcessed":0,
+        "addedFiles":0,"updatedFiles":0,"missingFiles":0,"skippedFiles":0,
+        "error":null,"issues":[],"trigger":"scheduled","attempt":2,
+        "targetRelativePath":null}
+        """.utf8))
+    #expect(scan.state == .waitingForStorage)
+    #expect(scan.trigger == .scheduled)
+    #expect(scan.attempt == 2)
+
+    let changes = try JSONDecoder().decode(
+      SyncChangesResponse.self,
+      from: Data(
+        """
+        {"cursor":42,"resetRequired":false,"changedAreas":["catalog","userState"],
+        "changedMediaIds":["00000000-0000-0000-0000-000000000012"]}
+        """.utf8))
+    #expect(changes.cursor == 42)
+    #expect(changes.changedAreas == [.catalog, .userState])
+    #expect(changes.changedMediaIds.count == 1)
+  }
+
+  @Test
+  func syncControllerStopsInBackgroundAndResumesFromItsServerCursor() async throws {
+    let profile = StoredServerProfile(
+      serverId: UUID(),
+      name: "Sync Test",
+      baseURL: URL(string: "https://sync-test.local:43111")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      token: "ephemeral-test-token",
+      sessionId: UUID(),
+      expiresAt: "2099-01-01T00:00:00Z")
+    let fetcher = SyncFetcherProbe()
+    let updates = SyncUpdateProbe()
+    let controller = LibrarySyncController { profile, cursor, _ in
+      try await fetcher.fetch(profile: profile, cursor: cursor)
+    }
+
+    await controller.start(profile: profile) { changes in
+      await updates.receive(changes)
+    }
+    try await Task.sleep(for: .milliseconds(100))
+    let initialUpdates = await updates.count
+    #expect(initialUpdates == 1)
+
+    await controller.setForeground(false, profile: profile) { changes in
+      await updates.receive(changes)
+    }
+    let callsBeforeBackgroundWait = await fetcher.cursors
+    try await Task.sleep(for: .milliseconds(50))
+    let callsAfterBackgroundWait = await fetcher.cursors
+    #expect(callsAfterBackgroundWait == callsBeforeBackgroundWait)
+
+    await controller.setForeground(true, profile: profile) { changes in
+      await updates.receive(changes)
+    }
+    try await Task.sleep(for: .milliseconds(100))
+    let resumedCursors = await fetcher.cursors
+    #expect(resumedCursors.contains(41))
+    await controller.stop()
   }
 
   @Test
@@ -736,6 +821,37 @@ struct AureliaTests {
       baseURL: URL(string: "https://server.local:43111")!,
       publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-token",
       sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z")
+  }
+}
+
+private actor SyncFetcherProbe {
+  private(set) var cursors: [Int64] = []
+
+  func fetch(profile: StoredServerProfile, cursor: Int64) async throws -> SyncChangesResponse {
+    _ = profile
+    cursors.append(cursor)
+    if cursors.count == 1 {
+      return SyncChangesResponse(
+        cursor: 41,
+        resetRequired: false,
+        changedAreas: [.catalog],
+        changedMediaIds: [])
+    }
+    try await Task.sleep(for: .seconds(60))
+    return SyncChangesResponse(
+      cursor: cursor,
+      resetRequired: false,
+      changedAreas: [],
+      changedMediaIds: [])
+  }
+}
+
+private actor SyncUpdateProbe {
+  private(set) var count = 0
+
+  func receive(_ changes: SyncChangesResponse) {
+    _ = changes
+    count += 1
   }
 }
 

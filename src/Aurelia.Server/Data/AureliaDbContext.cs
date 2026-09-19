@@ -1,3 +1,4 @@
+using Aurelia.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -36,6 +37,70 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
     public DbSet<MediaCollectionRecord> MediaCollections => Set<MediaCollectionRecord>();
     public DbSet<MediaCollectionMember> MediaCollectionMembers => Set<MediaCollectionMember>();
+    public DbSet<SyncChange> SyncChanges => Set<SyncChange>();
+
+    public override Task<int> SaveChangesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        AppendSyncChanges();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void AppendSyncChanges()
+    {
+        var changes = new HashSet<(SyncChangeArea Area, Guid? UserId, Guid? MediaId)>();
+        foreach (var entry in ChangeTracker.Entries().Where(entry =>
+                     (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                     && entry.Entity is not SyncChange))
+        {
+            switch (entry.Entity)
+            {
+                case LibraryRoot:
+                    changes.Add((SyncChangeArea.Libraries, null, null));
+                    changes.Add((SyncChangeArea.Catalog, null, null));
+                    break;
+                case LibraryScan or LibraryScanIssue or LibraryDiscovery:
+                    changes.Add((SyncChangeArea.Libraries, null, null));
+                    break;
+                case MediaItem item:
+                    changes.Add((SyncChangeArea.Catalog, null, item.Id));
+                    break;
+                case MediaMetadata metadata:
+                    changes.Add((SyncChangeArea.Metadata, null, metadata.MediaItemId));
+                    break;
+                case MediaCredit credit:
+                    changes.Add((SyncChangeArea.Metadata, null, credit.MediaItemId));
+                    break;
+                case ArtworkAsset artwork:
+                    changes.Add((SyncChangeArea.Metadata, null, artwork.MediaItemId));
+                    break;
+                case MediaCollectionRecord:
+                    changes.Add((SyncChangeArea.Collections, null, null));
+                    break;
+                case MediaCollectionMember member:
+                    changes.Add((SyncChangeArea.Collections, null, member.MediaItemId));
+                    break;
+                case UserFavorite favorite:
+                    changes.Add((SyncChangeArea.UserState, favorite.UserId, favorite.MediaItemId));
+                    break;
+                case PlaybackProgress progress:
+                    changes.Add((SyncChangeArea.UserState, progress.UserId, progress.MediaItemId));
+                    break;
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var change in changes)
+        {
+            SyncChanges.Add(new SyncChange
+            {
+                Area = change.Area,
+                UserId = change.UserId,
+                MediaItemId = change.MediaId,
+                CreatedAt = now,
+            });
+        }
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +173,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(library => library.NormalizedPath).HasMaxLength(4096).IsRequired();
             entity.Property(library => library.Kind).HasConversion<string>().HasMaxLength(16);
             entity.Property(library => library.Availability).HasConversion<string>().HasMaxLength(16);
+            entity.Property(library => library.LastObservedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
             entity.Property(library => library.CreatedAt).HasConversion(dateTimeOffsetConverter);
             entity.Property(library => library.LastScanStartedAt)
                 .HasConversion(nullableDateTimeOffsetConverter);
@@ -130,10 +197,14 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(item => item.Availability).HasConversion<string>().HasMaxLength(16);
             entity.Property(item => item.FileModifiedAt)
                 .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(item => item.FileSystemIdentity).HasMaxLength(128);
             entity.Property(item => item.CreatedAt).HasConversion(dateTimeOffsetConverter);
             entity.Property(item => item.UpdatedAt).HasConversion(dateTimeOffsetConverter);
             entity.HasIndex(item => new { item.LibraryRootId, item.NormalizedSourcePath })
                 .IsUnique();
+            entity.HasIndex(item => new { item.LibraryRootId, item.FileSystemIdentity });
+            entity.HasIndex(item => new { item.Kind, item.Availability, item.CreatedAt });
+            entity.HasIndex(item => new { item.LibraryRootId, item.Kind, item.Year });
             entity.HasIndex(item => new
             {
                 item.LibraryRootId,
@@ -156,10 +227,18 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         {
             entity.HasKey(scan => scan.Id);
             entity.Property(scan => scan.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(scan => scan.Trigger).HasConversion<string>().HasMaxLength(32);
+            entity.Property(scan => scan.TargetRelativePath).HasMaxLength(4096);
             entity.Property(scan => scan.CreatedAt).HasConversion(dateTimeOffsetConverter);
             entity.Property(scan => scan.StartedAt)
                 .HasConversion(nullableDateTimeOffsetConverter);
             entity.Property(scan => scan.CompletedAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.LeaseExpiresAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.HeartbeatAt)
+                .HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(scan => scan.CancelRequestedAt)
                 .HasConversion(nullableDateTimeOffsetConverter);
             entity.Property(scan => scan.Error).HasMaxLength(1024);
             entity.HasIndex(scan => new { scan.LibraryRootId, scan.CreatedAt });
@@ -325,10 +404,14 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         {
             entity.HasKey(job => job.Id);
             entity.Property(job => job.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(job => job.Mode).HasConversion<string>().HasMaxLength(16);
             entity.Property(job => job.Error).HasMaxLength(1024);
             entity.Property(job => job.CreatedAt).HasConversion(dateTimeOffsetConverter);
             entity.Property(job => job.StartedAt).HasConversion(nullableDateTimeOffsetConverter);
             entity.Property(job => job.CompletedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.LeaseExpiresAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.HeartbeatAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.CancelRequestedAt).HasConversion(nullableDateTimeOffsetConverter);
             entity.HasIndex(job => new { job.State, job.CreatedAt });
         });
 
@@ -363,6 +446,16 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 .HasForeignKey(member => member.CollectionId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(member => member.MediaItem).WithMany(item => item.CollectionMemberships)
                 .HasForeignKey(member => member.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SyncChange>(entity =>
+        {
+            entity.HasKey(change => change.Cursor);
+            entity.Property(change => change.Cursor).ValueGeneratedOnAdd();
+            entity.Property(change => change.Area).HasConversion<string>().HasMaxLength(16);
+            entity.Property(change => change.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(change => new { change.UserId, change.Cursor });
+            entity.HasIndex(change => change.CreatedAt);
         });
     }
 }

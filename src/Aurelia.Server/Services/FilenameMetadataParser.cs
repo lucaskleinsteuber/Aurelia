@@ -124,6 +124,57 @@ public static partial class FilenameMetadataParser
         return CleanTitleOrNull(value) ?? value.Trim();
     }
 
+    // File-system enumeration is ordinal, which puts episode 10 before episode 2.
+    // Keep the media order stable while comparing numeric runs as numbers.
+    public static int CompareNaturally(string left, string right)
+    {
+        var leftIndex = 0;
+        var rightIndex = 0;
+        while (leftIndex < left.Length && rightIndex < right.Length)
+        {
+            var leftIsDigit = char.IsDigit(left[leftIndex]);
+            var rightIsDigit = char.IsDigit(right[rightIndex]);
+            if (leftIsDigit && rightIsDigit)
+            {
+                var leftStart = leftIndex;
+                var rightStart = rightIndex;
+                while (leftIndex < left.Length && char.IsDigit(left[leftIndex])) leftIndex++;
+                while (rightIndex < right.Length && char.IsDigit(right[rightIndex])) rightIndex++;
+
+                var leftDigits = left[leftStart..leftIndex].TrimStart('0');
+                var rightDigits = right[rightStart..rightIndex].TrimStart('0');
+                if (leftDigits.Length != rightDigits.Length)
+                {
+                    return leftDigits.Length.CompareTo(rightDigits.Length);
+                }
+
+                var numericComparison = string.Compare(leftDigits, rightDigits, StringComparison.Ordinal);
+                if (numericComparison != 0)
+                {
+                    return numericComparison;
+                }
+
+                // Equal numeric values get a deterministic tie-breaker for names such as 02/2.
+                var runComparison = (leftIndex - leftStart).CompareTo(rightIndex - rightStart);
+                if (runComparison != 0)
+                {
+                    return runComparison;
+                }
+
+                continue;
+            }
+
+            var leftCharacter = char.ToUpperInvariant(left[leftIndex++]);
+            var rightCharacter = char.ToUpperInvariant(right[rightIndex++]);
+            if (leftCharacter != rightCharacter)
+            {
+                return leftCharacter.CompareTo(rightCharacter);
+            }
+        }
+
+        return (left.Length - leftIndex).CompareTo(right.Length - rightIndex);
+    }
+
     private static string? CleanTitleOrNull(string value)
     {
         var title = value.Replace('.', ' ').Replace('_', ' ');
@@ -152,7 +203,7 @@ public static partial class FilenameMetadataParser
     [GeneratedRegex(@"^(.+?)\s+\(?((?:19|20)\d{2})\)?$", RegexOptions.CultureInvariant)]
     private static partial Regex MovieYearExpression();
 
-    [GeneratedRegex(@"\bS(\d{1,2})[ ._-]*E(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SeasonEpisodeExpression();
 
     [GeneratedRegex(@"\b(\d{1,2})x(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

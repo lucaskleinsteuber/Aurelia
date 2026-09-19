@@ -32,27 +32,11 @@ public static class DatabaseInitializer
             "PRAGMA foreign_keys=ON;",
             cancellationToken);
 
+        var searchIndex = scope.ServiceProvider.GetRequiredService<MediaSearchIndexService>();
+        await searchIndex.RebuildAsync(cancellationToken);
+
         var playback = scope.ServiceProvider.GetRequiredService<PlaybackService>();
         await playback.PruneExpiredAsync(DateTimeOffset.UtcNow, cancellationToken);
-
-        var interruptedAt = DateTimeOffset.UtcNow;
-        await database.LibraryScans
-            .Where(scan => scan.State == LibraryScanState.Queued
-                || scan.State == LibraryScanState.Running)
-            .ExecuteUpdateAsync(updates => updates
-                .SetProperty(scan => scan.State, LibraryScanState.Interrupted)
-                .SetProperty(scan => scan.CompletedAt, interruptedAt)
-                .SetProperty(scan => scan.Error, "The server stopped before the scan completed."),
-                cancellationToken);
-
-        await database.MetadataJobs
-            .Where(job => job.State == MetadataJobState.Queued
-                || job.State == MetadataJobState.Running)
-            .ExecuteUpdateAsync(updates => updates
-                .SetProperty(job => job.State, MetadataJobState.Interrupted)
-                .SetProperty(job => job.CompletedAt, interruptedAt)
-                .SetProperty(job => job.Error, "The server stopped before metadata enrichment completed."),
-                cancellationToken);
 
         var artwork = scope.ServiceProvider.GetRequiredService<ArtworkStore>();
         await artwork.PruneOrphansAsync(database, cancellationToken);

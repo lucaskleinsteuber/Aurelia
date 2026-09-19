@@ -138,7 +138,7 @@ struct AppSettingsView: View {
         if !unresolved.isEmpty {
           Divider()
           Text("Needs Your Help").font(.headline)
-          Text("Aurelia did not guess these folders.")
+          Text("Aurelia did not guess these folders. Choose TV Show · Force Import for episode files without S01E01 names; their natural filename order becomes Season 1.")
             .font(.caption).foregroundStyle(.secondary)
           ForEach(unresolved) { discovery in
             DiscoveryDecisionCard(discovery: discovery)
@@ -158,7 +158,7 @@ struct AppSettingsView: View {
                   Spacer()
                   Menu("Change") {
                     classificationButton("Movie", .movie, discovery)
-                    classificationButton("TV Show", .tvShows, discovery)
+                    classificationButton("TV Show · Force Import", .tvShows, discovery)
                     classificationButton("Ignore", .ignore, discovery)
                   }
                 }
@@ -368,7 +368,7 @@ struct DiscoveryDecisionCard: View {
       }
       HStack {
         decisionButton("Movie", .movie, "film")
-        decisionButton("TV Show", .tvShows, "tv")
+        decisionButton("TV Show · Force Import", .tvShows, "tv")
         decisionButton("Ignore", .ignore, "eye.slash")
       }
     }

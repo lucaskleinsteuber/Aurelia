@@ -6,29 +6,38 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Services;
 
-public sealed class PresentationService(AureliaDbContext database, TimeProvider timeProvider)
+public sealed class PresentationService(
+    AureliaDbContext database,
+    TimeProvider timeProvider,
+    MediaSearchIndexService searchIndex)
 {
     public async Task<PagedResponse<CatalogItemSummary>> CatalogAsync(
         Guid userId,
         MediaKind? kind,
         int offset,
         int limit,
+        CancellationToken cancellationToken) =>
+        await CatalogAsync(userId, new CatalogQuery(Kind: kind, Offset: offset, Limit: limit), cancellationToken);
+
+    public async Task<PagedResponse<CatalogItemSummary>> CatalogAsync(
+        Guid userId,
+        CatalogQuery request,
         CancellationToken cancellationToken)
     {
-        ValidatePage(offset, limit);
-        if (kind is not null and not MediaKind.Movie and not MediaKind.Series)
+        ValidateQuery(request);
+        if (request.Kind is not null and not MediaKind.Movie and not MediaKind.Series)
             throw new MetadataException(
                 "invalid_catalog_kind",
                 "Catalog kind must be movie or series.",
                 StatusCodes.Status400BadRequest);
 
         var query = BaseItems(userId).Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
-        if (kind is not null) query = query.Where(item => item.Kind == kind);
+        query = ApplyFilters(query, userId, request);
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id)
-            .Skip(offset).Take(limit).ToListAsync(cancellationToken);
+        var items = await Order(query, userId, request.Sort, request.Direction)
+            .Skip(request.Offset).Take(request.Limit).ToListAsync(cancellationToken);
         return new PagedResponse<CatalogItemSummary>(
-            items.Select(item => ToCatalog(item, userId)).ToList(), offset, limit, total);
+            items.Select(item => ToCatalog(item, userId)).ToList(), request.Offset, request.Limit, total);
     }
 
     public async Task<CatalogDetailPresentation> DetailAsync(
@@ -62,40 +71,101 @@ public sealed class PresentationService(AureliaDbContext database, TimeProvider 
             ToCatalog(item, userId), MetadataPresentation.ToSummary(item), seasons, supplements);
     }
 
-    public async Task<PagedResponse<CatalogItemSummary>> SearchAsync(Guid userId, string query, int offset, int limit, CancellationToken cancellationToken)
+    public async Task<PagedResponse<CatalogItemSummary>> SearchAsync(Guid userId, string query, int offset, int limit, CancellationToken cancellationToken) =>
+        await SearchAsync(userId, query, new CatalogQuery(Offset: offset, Limit: limit), cancellationToken);
+
+    public async Task<PagedResponse<CatalogItemSummary>> SearchAsync(
+        Guid userId,
+        string query,
+        CatalogQuery request,
+        CancellationToken cancellationToken)
     {
-        ValidatePage(offset, limit);
+        ValidateQuery(request);
         var term = query.Trim();
         if (term.Length is < 1 or > 200)
             throw new MetadataException("invalid_search", "Search text must contain between 1 and 200 characters.", StatusCodes.Status400BadRequest);
-        var normalized = term.ToLowerInvariant();
-        var candidates = await BaseItems(userId)
+        if (request.Kind is null && request.LibraryId is null && request.Genre is null
+            && request.Availability is null && request.Favorite is null && request.WatchState is null
+            && request.YearFrom is null && request.YearTo is null
+            && request.Sort == CatalogSort.Title && request.Direction == SortDirection.Ascending)
+        {
+            var result = await searchIndex.SearchAsync(term, request.Offset, request.Limit, cancellationToken);
+            var indexedItems = await BaseItems(userId).Where(item => result.Ids.Contains(item.Id))
+                .ToListAsync(cancellationToken);
+            var byId = indexedItems.ToDictionary(item => item.Id);
+            return new PagedResponse<CatalogItemSummary>(
+                result.Ids.Where(byId.ContainsKey).Select(id => ToCatalog(byId[id], userId)).ToList(),
+                request.Offset,
+                request.Limit,
+                result.Total);
+        }
+
+        var pattern = $"%{EscapeLike(term)}%";
+        var prefix = $"{EscapeLike(term)}%";
+        var matches = BaseItems(userId)
             .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series || item.Kind == MediaKind.Episode)
-            .OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id).Take(5000).ToListAsync(cancellationToken);
-        var matches = candidates.Where(item => SearchText(item).Contains(normalized, StringComparison.OrdinalIgnoreCase)).ToList();
-        return new PagedResponse<CatalogItemSummary>(matches.Skip(offset).Take(limit).Select(item => ToCatalog(item, userId)).ToList(), offset, limit, matches.Count);
+            .Where(item => EF.Functions.Like(item.DetectedTitle, pattern, "\\")
+                || (item.OverrideTitle != null && EF.Functions.Like(item.OverrideTitle, pattern, "\\"))
+                || (item.Metadata != null && (
+                    (item.Metadata.ManualTitle != null && EF.Functions.Like(item.Metadata.ManualTitle, pattern, "\\"))
+                    || (item.Metadata.ProviderTitle != null && EF.Functions.Like(item.Metadata.ProviderTitle, pattern, "\\"))
+                    || (item.Metadata.ManualOriginalTitle != null && EF.Functions.Like(item.Metadata.ManualOriginalTitle, pattern, "\\"))
+                    || (item.Metadata.ProviderOriginalTitle != null && EF.Functions.Like(item.Metadata.ProviderOriginalTitle, pattern, "\\"))
+                    || EF.Functions.Like(item.Metadata.ProviderGenresJson, pattern, "\\")
+                    || (item.Metadata.ManualGenresJson != null && EF.Functions.Like(item.Metadata.ManualGenresJson, pattern, "\\"))
+                    || item.Metadata.Credits.Any(credit => EF.Functions.Like(credit.Name, pattern, "\\")
+                        || (credit.Character != null && EF.Functions.Like(credit.Character, pattern, "\\")))))
+                || (item.Parent != null && EF.Functions.Like(item.Parent.DetectedTitle, pattern, "\\")));
+        matches = ApplyFilters(matches, userId, request);
+        var total = await matches.CountAsync(cancellationToken);
+        var ordered = matches
+            .OrderByDescending(item => EF.Functions.Like(item.DetectedTitle, prefix, "\\")
+                || (item.OverrideTitle != null && EF.Functions.Like(item.OverrideTitle, prefix, "\\")))
+            .ThenBy(item => item.DetectedTitle)
+            .ThenBy(item => item.Id);
+        var items = await ordered.Skip(request.Offset).Take(request.Limit).ToListAsync(cancellationToken);
+        return new PagedResponse<CatalogItemSummary>(items.Select(item => ToCatalog(item, userId)).ToList(), request.Offset, request.Limit, total);
     }
 
     public async Task<HomeResponse> HomeAsync(Guid userId, CancellationToken cancellationToken)
     {
-        var items = await BaseItems(userId).Where(item => item.Availability == MediaAvailability.Available)
-            .OrderBy(item => item.DetectedTitle).ToListAsync(cancellationToken);
-        var topLevel = items.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series).ToList();
-        var playable = items.Where(item => item.Kind is MediaKind.Movie or MediaKind.Episode).ToList();
-        var continueWatching = playable.Where(item => item.PlaybackProgress.Any(progress => progress.UserId == userId && !progress.IsCompleted && progress.PositionMilliseconds > 10_000))
-            .OrderByDescending(item => item.PlaybackProgress.Single(progress => progress.UserId == userId).LastPlayedAt).Take(20).Select(item => ToCatalog(item, userId)).ToList();
-        var recent = topLevel.OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id).Take(30).Select(item => ToCatalog(item, userId)).ToList();
-        var favorites = topLevel.Where(item => item.Favorites.Any(value => value.UserId == userId)).OrderBy(item => EffectiveTitle(item)).Take(30).Select(item => ToCatalog(item, userId)).ToList();
+        var available = BaseItems(userId)
+            .Where(item => item.Availability == MediaAvailability.Available);
+        var topLevel = available.Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
+        var continueItems = await available
+            .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Episode)
+            .Where(item => item.PlaybackProgress.Any(progress => progress.UserId == userId
+                && !progress.IsCompleted && progress.PositionMilliseconds > 10_000))
+            .OrderByDescending(item => item.PlaybackProgress
+                .Where(progress => progress.UserId == userId)
+                .Select(progress => progress.LastPlayedAt)
+                .First())
+            .ThenBy(item => item.Id).Take(20).ToListAsync(cancellationToken);
+        var recentItems = await topLevel.OrderByDescending(item => item.CreatedAt)
+            .ThenBy(item => item.Id).Take(30).ToListAsync(cancellationToken);
+        var favoriteItems = await topLevel
+            .Where(item => item.Favorites.Any(value => value.UserId == userId))
+            .OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id)
+            .Take(30).ToListAsync(cancellationToken);
         var now = timeProvider.GetUtcNow();
         var hour = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero);
-        var preferred = topLevel.Where(item => !item.PlaybackProgress.Any(progress => progress.UserId == userId && progress.IsCompleted)).ToList();
-        if (preferred.Count == 0) preferred = topLevel;
-        var recommendation = preferred.Count == 0 ? null : ToCatalog(preferred[StableIndex(userId, hour, preferred.Count)], userId);
+        var preferred = topLevel.Where(item => !item.PlaybackProgress.Any(
+            progress => progress.UserId == userId && progress.IsCompleted));
+        var preferredCount = await preferred.CountAsync(cancellationToken);
+        var recommendationQuery = preferredCount == 0 ? topLevel : preferred;
+        var recommendationCount = preferredCount == 0
+            ? await topLevel.CountAsync(cancellationToken)
+            : preferredCount;
+        var recommendationItem = recommendationCount == 0
+            ? null
+            : await recommendationQuery.OrderBy(item => item.Id)
+                .Skip(StableIndex(userId, hour, recommendationCount)).Take(1)
+                .SingleAsync(cancellationToken);
         return new HomeResponse(
-            recommendation,
-            continueWatching,
-            recent,
-            favorites,
+            recommendationItem is null ? null : ToCatalog(recommendationItem, userId),
+            continueItems.Select(item => ToCatalog(item, userId)).ToList(),
+            recentItems.Select(item => ToCatalog(item, userId)).ToList(),
+            favoriteItems.Select(item => ToCatalog(item, userId)).ToList(),
             await CollectionsAsync(userId, 0, 30, cancellationToken),
             hour.AddHours(1));
     }
@@ -229,6 +299,96 @@ public sealed class PresentationService(AureliaDbContext database, TimeProvider 
             item.EpisodeNumber is null ? null : $"Episode {item.EpisodeNumber}",
         }.Where(value => !string.IsNullOrWhiteSpace(value)));
     }
+
+    private static IQueryable<MediaItem> ApplyFilters(
+        IQueryable<MediaItem> query,
+        Guid userId,
+        CatalogQuery request)
+    {
+        if (request.Kind.HasValue) query = query.Where(item => item.Kind == request.Kind.Value);
+        if (request.LibraryId.HasValue) query = query.Where(item => item.LibraryRootId == request.LibraryId.Value);
+        if (request.Availability.HasValue) query = query.Where(item => item.Availability == request.Availability.Value);
+        if (request.YearFrom.HasValue) query = query.Where(item => item.Year >= request.YearFrom.Value);
+        if (request.YearTo.HasValue) query = query.Where(item => item.Year <= request.YearTo.Value);
+        if (request.Favorite.HasValue)
+        {
+            query = request.Favorite.Value
+                ? query.Where(item => item.Favorites.Any(value => value.UserId == userId))
+                : query.Where(item => !item.Favorites.Any(value => value.UserId == userId));
+        }
+        if (!string.IsNullOrWhiteSpace(request.Genre))
+        {
+            var genre = $"%\"{EscapeLike(request.Genre.Trim())}\"%";
+            query = query.Where(item => item.Metadata != null
+                && ((item.Metadata.ManualGenresJson != null
+                        && EF.Functions.Like(item.Metadata.ManualGenresJson, genre, "\\"))
+                    || (item.Metadata.ManualGenresJson == null
+                        && EF.Functions.Like(item.Metadata.ProviderGenresJson, genre, "\\"))));
+        }
+        if (request.WatchState.HasValue)
+        {
+            query = request.WatchState.Value switch
+            {
+                CatalogWatchState.Unplayed => query.Where(item =>
+                    !item.PlaybackProgress.Any(progress => progress.UserId == userId
+                        && progress.PositionMilliseconds > 0)),
+                CatalogWatchState.InProgress => query.Where(item =>
+                    item.PlaybackProgress.Any(progress => progress.UserId == userId
+                        && progress.PositionMilliseconds > 0 && !progress.IsCompleted)),
+                CatalogWatchState.Completed => query.Where(item =>
+                    item.PlaybackProgress.Any(progress => progress.UserId == userId && progress.IsCompleted)),
+                _ => query,
+            };
+        }
+
+        return query;
+    }
+
+    private static IOrderedQueryable<MediaItem> Order(
+        IQueryable<MediaItem> query,
+        Guid userId,
+        CatalogSort sort,
+        SortDirection direction)
+    {
+        var descending = direction == SortDirection.Descending;
+        return sort switch
+        {
+            CatalogSort.DateAdded => descending
+                ? query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
+            CatalogSort.ReleaseYear => descending
+                ? query.OrderByDescending(item => item.Year).ThenBy(item => item.DetectedTitle).ThenBy(item => item.Id)
+                : query.OrderBy(item => item.Year).ThenBy(item => item.DetectedTitle).ThenBy(item => item.Id),
+            CatalogSort.LastPlayed => descending
+                ? query.OrderByDescending(item => item.PlaybackProgress
+                    .Where(progress => progress.UserId == userId)
+                    .Select(progress => (DateTimeOffset?)progress.LastPlayedAt)
+                    .FirstOrDefault()).ThenBy(item => item.Id)
+                : query.OrderBy(item => item.PlaybackProgress
+                    .Where(progress => progress.UserId == userId)
+                    .Select(progress => (DateTimeOffset?)progress.LastPlayedAt)
+                    .FirstOrDefault()).ThenBy(item => item.Id),
+            _ => descending
+                ? query.OrderByDescending(item => item.DetectedTitle).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id),
+        };
+    }
+
+    private static void ValidateQuery(CatalogQuery request)
+    {
+        ValidatePage(request.Offset, request.Limit);
+        if (request.YearFrom is < 1800 or > 3000 || request.YearTo is < 1800 or > 3000)
+            throw new MetadataException("invalid_year_range", "Years must be between 1800 and 3000.", StatusCodes.Status400BadRequest);
+        if (request.YearFrom.HasValue && request.YearTo.HasValue && request.YearFrom > request.YearTo)
+            throw new MetadataException("invalid_year_range", "yearFrom cannot be greater than yearTo.", StatusCodes.Status400BadRequest);
+        if (request.Genre is { Length: > 100 })
+            throw new MetadataException("invalid_genre", "Genre must contain 100 characters or fewer.", StatusCodes.Status400BadRequest);
+    }
+
+    private static string EscapeLike(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("%", "\\%", StringComparison.Ordinal)
+        .Replace("_", "\\_", StringComparison.Ordinal);
 
     private static string EffectiveTitle(MediaItem item) => item.Metadata?.ManualTitle ?? item.Metadata?.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle;
     private static int StableIndex(Guid userId, DateTimeOffset hour, int count)

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 
 namespace Aurelia.Server.Services;
@@ -6,14 +7,16 @@ public sealed record QueuedLibraryScan(Guid ScanId, Guid LibraryId, string? Targ
 
 public sealed class LibraryScanScheduler
 {
-    private readonly Channel<QueuedLibraryScan> channel = Channel.CreateUnbounded<QueuedLibraryScan>(
-        new UnboundedChannelOptions
+    private readonly Channel<bool> wake = Channel.CreateBounded<bool>(
+        new BoundedChannelOptions(1)
         {
             SingleReader = true,
             SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropWrite,
         });
     private readonly Lock gate = new();
     private readonly HashSet<Guid> reservedLibraries = [];
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> active = new();
 
     public bool TryReserve(Guid libraryId)
     {
@@ -23,21 +26,12 @@ public sealed class LibraryScanScheduler
         }
     }
 
-    public void Enqueue(Guid scanId, Guid libraryId, string? targetRelativePath = null)
+    public void ReserveExisting(Guid libraryId)
     {
-        if (!channel.Writer.TryWrite(new QueuedLibraryScan(
-                scanId,
-                libraryId,
-                targetRelativePath)))
+        lock (gate)
         {
-            Release(libraryId);
-            throw new InvalidOperationException("The library scan queue is unavailable.");
+            reservedLibraries.Add(libraryId);
         }
-    }
-
-    public IAsyncEnumerable<QueuedLibraryScan> ReadAllAsync(CancellationToken cancellationToken)
-    {
-        return channel.Reader.ReadAllAsync(cancellationToken);
     }
 
     public void Release(Guid libraryId)
@@ -46,5 +40,42 @@ public sealed class LibraryScanScheduler
         {
             reservedLibraries.Remove(libraryId);
         }
+    }
+
+    public void Pulse() => wake.Writer.TryWrite(true);
+
+    public async Task WaitAsync(CancellationToken cancellationToken)
+    {
+        _ = await wake.Reader.ReadAsync(cancellationToken);
+    }
+
+    public CancellationToken Register(Guid scanId, CancellationToken stoppingToken)
+    {
+        var source = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        if (!active.TryAdd(scanId, source))
+        {
+            source.Dispose();
+            throw new InvalidOperationException("The scan is already registered as active.");
+        }
+
+        return source.Token;
+    }
+
+    public void Unregister(Guid scanId)
+    {
+        if (active.TryRemove(scanId, out var source))
+        {
+            source.Dispose();
+        }
+    }
+
+    public void RequestCancellation(Guid scanId)
+    {
+        if (active.TryGetValue(scanId, out var source))
+        {
+            source.Cancel();
+        }
+
+        Pulse();
     }
 }

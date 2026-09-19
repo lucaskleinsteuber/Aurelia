@@ -14,6 +14,7 @@ public sealed class MediaLibraryScannerTests
     [InlineData("Season 4 Episode 7 - Problem Dog.mkv", null, 4, 7, "Problem Dog")]
     [InlineData("Episode 8 - Hermanos.mkv", 4, 4, 8, "Hermanos")]
     [InlineData("09 - Bug.mkv", 4, 4, 9, "Bug")]
+    [InlineData("ShowS02E03 - Compact Name.mkv", null, 2, 3, "Compact Name")]
     public void EpisodeParserRecognizesSupportedPatterns(
         string filename,
         int? expectedSeason,
@@ -117,6 +118,36 @@ public sealed class MediaLibraryScannerTests
             var issue = Assert.Single(result.Issues, issue => issue.Code == "duplicate_episode");
             Assert.Equal(duplicatePath, issue.Path);
             Assert.Equal(1, result.SkippedFiles);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void TvScannerForceImportsUnnumberedFilesInNaturalOrder()
+    {
+        var root = CreateDirectory("Unnumbered Show");
+        try
+        {
+            Touch(root, "Leon Part 10.mkv");
+            Touch(root, "Leon Part 2.mkv");
+            Touch(root, "Leon Part 1.mkv");
+
+            var result = scanner.Scan(root, LibraryKind.TvShows, [], null, CancellationToken.None);
+
+            var episodes = result.Items
+                .Where(item => item.Kind == MediaKind.Episode)
+                .OrderBy(item => item.EpisodeNumber)
+                .ToList();
+            Assert.Equal(3, episodes.Count);
+            Assert.EndsWith("Leon Part 1.mkv", episodes[0].SourcePath, StringComparison.Ordinal);
+            Assert.EndsWith("Leon Part 2.mkv", episodes[1].SourcePath, StringComparison.Ordinal);
+            Assert.EndsWith("Leon Part 10.mkv", episodes[2].SourcePath, StringComparison.Ordinal);
+            Assert.Equal([1, 2, 3], episodes.Select(item => item.EpisodeNumber).ToArray());
+            Assert.Equal(0, result.SkippedFiles);
+            Assert.Empty(result.Issues);
         }
         finally
         {
@@ -281,6 +312,40 @@ public sealed class MediaLibraryScannerTests
 
             Assert.Equal(2, result.Items.Count(item => item.Kind == MediaKind.Movie));
             Assert.DoesNotContain(result.Items, item => item.SourcePath.Contains("Ignored"));
+            Assert.DoesNotContain(result.Issues, issue => issue.Code == "classification_required");
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void AutomaticScannerForceImportsAnAmbiguousFolderAsSeasonOne()
+    {
+        var root = CreateDirectory("Force Import");
+        try
+        {
+            Touch(root, "Video 10.mkv");
+            Touch(root, "Video 2.mkv");
+            Touch(root, "Video 1.mkv");
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Automatic,
+                [],
+                null,
+                CancellationToken.None,
+                [new ExistingClassificationDecision("", ClassificationDecision.TvShows)]);
+
+            Assert.Single(result.Items, item => item.Kind == MediaKind.Series);
+            var episodes = result.Items
+                .Where(item => item.Kind == MediaKind.Episode)
+                .OrderBy(item => item.EpisodeNumber)
+                .ToList();
+            Assert.Equal(3, episodes.Count);
+            Assert.All(episodes, episode => Assert.Equal(1, episode.SeasonNumber));
+            Assert.Equal(0, result.SkippedFiles);
             Assert.DoesNotContain(result.Issues, issue => issue.Code == "classification_required");
         }
         finally

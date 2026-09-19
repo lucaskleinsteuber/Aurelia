@@ -40,6 +40,8 @@ public sealed class MediaItem
 
     public DateTimeOffset? FileModifiedAt { get; set; }
 
+    public string? FileSystemIdentity { get; set; }
+
     public MediaAvailability Availability { get; set; }
 
     public Guid? LastSeenScanId { get; set; }

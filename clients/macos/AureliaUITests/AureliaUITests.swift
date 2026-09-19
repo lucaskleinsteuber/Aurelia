@@ -110,6 +110,14 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(homeAction.waitForExistence(timeout: 8))
     homeAction.click()
     XCTAssertTrue(app.staticTexts["Manage Media"].waitForExistence(timeout: 5))
+    XCTAssertTrue(
+      app.descendants(matching: .any)[
+        "library-monitor-30000000-0000-0000-0000-000000000001"
+      ].exists)
+    XCTAssertTrue(app.staticTexts["Waiting for Storage"].exists)
+    XCTAssertTrue(app.staticTexts["Scheduled Check"].exists)
+    XCTAssertTrue(app.staticTexts["Attempt 2"].exists)
+    XCTAssertTrue(app.buttons["Cancel"].exists)
     let chooser = app.buttons["media-manager-choose-locations"]
     XCTAssertTrue(chooser.exists)
     chooser.click()

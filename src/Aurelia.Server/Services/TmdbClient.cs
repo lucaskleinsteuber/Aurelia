@@ -235,7 +235,16 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
                 return response;
             }
 
-            var retryAfter = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromMilliseconds(250 * (attempt + 1));
+            var retryAfter = response.Headers.RetryAfter switch
+            {
+                { Delta: { } delta } => delta,
+                { Date: { } date } => date - DateTimeOffset.UtcNow,
+                _ => TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt)),
+            };
+            if (retryAfter < TimeSpan.Zero)
+            {
+                retryAfter = TimeSpan.Zero;
+            }
             response.Dispose();
             await Task.Delay(retryAfter > TimeSpan.FromSeconds(10) ? TimeSpan.FromSeconds(10) : retryAfter, cancellationToken);
         }

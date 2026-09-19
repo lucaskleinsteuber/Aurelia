@@ -20,7 +20,8 @@ public sealed record DiscoveredMediaItem(
     string Category,
     string? Extension,
     long? FileSize,
-    DateTimeOffset? FileModifiedAt)
+    DateTimeOffset? FileModifiedAt,
+    string? FileSystemIdentity = null)
 {
     public bool IsFile => Kind != MediaKind.Series;
 }
@@ -58,9 +59,15 @@ public interface IMediaLibraryScanner
 
 public sealed class MediaLibraryScanner : IMediaLibraryScanner
 {
+    private static readonly IComparer<string> NaturalPathComparer =
+        Comparer<string>.Create(FilenameMetadataParser.CompareNaturally);
+
     private static readonly HashSet<string> SupportedExtensions = new(
         [".mkv", ".mp4", ".mov", ".m4v", ".avi", ".webm"],
         StringComparer.OrdinalIgnoreCase);
+
+    public static bool IsSupportedMediaPath(string path) =>
+        SupportedExtensions.Contains(Path.GetExtension(path));
 
     private static readonly HashSet<string> ExtrasFolderNames =
     [
@@ -370,7 +377,9 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             pendingSupplements.Add(new PendingSupplement(file, ownerDirectory, context));
         }
 
-        var items = new List<DiscoveredMediaItem>(movies);
+        var items = movies
+            .OrderBy(movie => movie.SourcePath, NaturalPathComparer)
+            .ToList();
         var skipped = 0;
         foreach (var supplement in pendingSupplements)
         {
@@ -417,6 +426,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
     {
         var seriesByPath = new Dictionary<string, DiscoveredMediaItem>(StringComparer.Ordinal);
         var episodes = new List<DiscoveredMediaItem>();
+        var implicitEpisodes = new List<PendingImplicitEpisode>();
         var supplements = new List<DiscoveredMediaItem>();
         var issues = new List<ScanDiscoveryIssue>(enumerationIssues);
         var skipped = 0;
@@ -466,11 +476,15 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             var identity = FilenameMetadataParser.Episode(file.Path, season);
             if (!identity.Season.HasValue || !identity.Episode.HasValue)
             {
-                skipped += 1;
-                issues.Add(new ScanDiscoveryIssue(
-                    "unmatched_episode",
-                    "No unambiguous season and episode number was found.",
-                    file.Path));
+                // A fixed TV library, or a folder explicitly classified as a TV show,
+                // is an explicit request to import these files as episodes. When the
+                // name contains no usable number, use the stable natural file order
+                // below instead of silently dropping the media.
+                implicitEpisodes.Add(new PendingImplicitEpisode(
+                    file,
+                    seriesPath,
+                    season ?? 1,
+                    identity.Title));
                 continue;
             }
 
@@ -491,6 +505,34 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 identity.Title,
                 seasonNumber: identity.Season,
                 episodeNumber: identity.Episode));
+        }
+
+        foreach (var group in implicitEpisodes.GroupBy(episode => new
+        {
+            Series = MediaPath.Normalize(episode.SeriesPath),
+            episode.SeasonNumber,
+        }))
+        {
+            var usedNumbers = episodes
+                .Where(episode => MediaPath.Normalize(episode.ParentSourcePath!) == group.Key.Series
+                    && episode.SeasonNumber == group.Key.SeasonNumber
+                    && episode.EpisodeNumber.HasValue)
+                .Select(episode => episode.EpisodeNumber!.Value)
+                .ToHashSet();
+            var nextEpisode = 1;
+            foreach (var pending in group.OrderBy(episode => episode.File.Path, NaturalPathComparer))
+            {
+                while (usedNumbers.Contains(nextEpisode)) nextEpisode++;
+                usedNumbers.Add(nextEpisode);
+                episodes.Add(ToItem(
+                    pending.File,
+                    MediaKind.Episode,
+                    pending.SeriesPath,
+                    pending.Title,
+                    seasonNumber: pending.SeasonNumber,
+                    episodeNumber: nextEpisode));
+                nextEpisode++;
+            }
         }
 
         var acceptedEpisodes = new List<DiscoveredMediaItem>();
@@ -533,9 +575,14 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         }
 
         var items = seriesByPath.Values
-            .OrderBy(series => series.SourcePath, StringComparer.Ordinal)
-            .Concat(acceptedEpisodes.OrderBy(episode => episode.SourcePath, StringComparer.Ordinal))
-            .Concat(supplements.OrderBy(supplement => supplement.SourcePath, StringComparer.Ordinal))
+            .OrderBy(series => series.SourcePath, NaturalPathComparer)
+            .Concat(acceptedEpisodes
+                .OrderBy(episode => episode.SeasonNumber)
+                .ThenBy(episode => episode.EpisodeNumber)
+                .ThenBy(episode => episode.SourcePath, NaturalPathComparer))
+            .Concat(supplements
+                .OrderBy(supplement => supplement.SeasonNumber)
+                .ThenBy(supplement => supplement.SourcePath, NaturalPathComparer))
             .ToList();
         return new MediaScanDiscovery(items, issues, files.Count, skipped);
     }
@@ -581,7 +628,8 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             category,
             Path.GetExtension(file.Path).ToLowerInvariant(),
             file.Size,
-            file.ModifiedAt);
+            file.ModifiedAt,
+            file.FileSystemIdentity);
     }
 
     private static EnumerationResult EnumerateVideoFiles(
@@ -656,7 +704,8 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                         Path.GetFullPath(file.FullName),
                         file.Length,
                         DateTimeOffset.FromUnixTimeMilliseconds(
-                            modifiedAt.ToUnixTimeMilliseconds())));
+                            modifiedAt.ToUnixTimeMilliseconds()),
+                        FileSystemIdentity.TryRead(file.FullName)));
                     progress?.Invoke(files.Count);
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -702,7 +751,11 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             || normalized.Contains("teaser", StringComparison.Ordinal);
     }
 
-    private sealed record ScannedFile(string Path, long Size, DateTimeOffset ModifiedAt);
+    private sealed record ScannedFile(
+        string Path,
+        long Size,
+        DateTimeOffset ModifiedAt,
+        string? FileSystemIdentity);
 
     private sealed record EnumerationResult(
         IReadOnlyList<ScannedFile> Files,
@@ -712,6 +765,12 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         ScannedFile File,
         string OwnerDirectory,
         FolderContext Context);
+
+    private sealed record PendingImplicitEpisode(
+        ScannedFile File,
+        string SeriesPath,
+        int SeasonNumber,
+        string Title);
 
     private sealed record AutomaticCandidate(
         string Path,

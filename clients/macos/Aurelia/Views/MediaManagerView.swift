@@ -164,7 +164,7 @@ struct MediaManagerView: View {
     if !model.libraryDiscoveries.isEmpty {
       GroupBox("Folder Classification") {
         VStack(alignment: .leading, spacing: 10) {
-          Text("Choose how ambiguous folders should be imported, or ignore them.")
+          Text("Choose how ambiguous folders should be imported, or ignore them. TV Show · Force Import accepts unnumbered videos in natural filename order as Season 1 episodes.")
             .font(.caption).foregroundStyle(.secondary)
           ForEach(model.libraryDiscoveries) { discovery in
             DiscoveryDecisionCard(discovery: discovery)
@@ -199,6 +199,19 @@ private struct LibraryLocationRow: View {
       Text(library.availability.rawValue.capitalized)
         .font(.caption).foregroundStyle(.secondary)
       if canEdit {
+        if library.monitoringEnabled != nil {
+          Toggle(
+            "Monitor",
+            isOn: Binding(
+              get: { library.isMonitoringEnabled },
+              set: { enabled in
+                Task { await model.setMonitoring(libraryID: library.id, enabled: enabled) }
+              }))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .accessibilityIdentifier("library-monitor-\(library.id.uuidString.lowercased())")
+            .help("Automatically detect changes in this storage location")
+        }
         Button("Rescan") { Task { await model.scanLibrary(id: library.id) } }
         Button(role: .destructive) {
           Task { await model.removeLibrary(id: library.id) }
@@ -218,6 +231,7 @@ private struct LibraryLocationRow: View {
 }
 
 private struct ScanStatusRow: View {
+  @EnvironmentObject private var model: AppModel
   let scan: LibraryScanSummary
   let library: LibrarySummary?
 
@@ -228,10 +242,29 @@ private struct ScanStatusRow: View {
           .foregroundStyle(color)
         Text(library?.name ?? "Storage Location").font(.headline)
         Spacer()
+        if let trigger = scan.trigger {
+          Text(trigger.title)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        if let attempt = scan.attempt, attempt > 0 {
+          Text("Attempt \(attempt)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
         Text(scan.state.rawValue.capitalized).font(.caption.weight(.semibold))
+        if scan.state == .queued || scan.state == .running || scan.state == .waitingForStorage {
+          Button("Cancel") { Task { await model.cancelScan(id: scan.id) } }
+            .controlSize(.small)
+        }
       }
       if scan.state == .queued || scan.state == .running {
         ProgressView(value: Double(scan.filesProcessed), total: Double(max(scan.filesDiscovered, 1)))
+      }
+      if scan.state == .waitingForStorage {
+        Text("Waiting for Storage")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.orange)
       }
       Text(
         "Found \(scan.filesDiscovered) · Added \(scan.addedFiles) · Updated \(scan.updatedFiles) · Missing \(scan.missingFiles) · Skipped \(scan.skippedFiles)"
@@ -250,16 +283,33 @@ private struct ScanStatusRow: View {
   private var symbol: String {
     switch scan.state {
     case .queued, .running: "arrow.triangle.2.circlepath"
+    case .waitingForStorage: "externaldrive.badge.exclamationmark"
     case .completed: "checkmark.circle.fill"
     case .failed, .interrupted: "exclamationmark.triangle.fill"
+    case .cancelled: "xmark.circle.fill"
     }
   }
 
   private var color: Color {
     switch scan.state {
     case .queued, .running: .accentColor
+    case .waitingForStorage: .orange
     case .completed: .green
     case .failed, .interrupted: .orange
+    case .cancelled: .secondary
+    }
+  }
+}
+
+private extension LibraryScanTrigger {
+  var title: String {
+    switch self {
+    case .manual: "Manual"
+    case .fileChange: "Automatic Change"
+    case .startup: "Startup Check"
+    case .scheduled: "Scheduled Check"
+    case .storageReconnected: "Storage Reconnected"
+    case .classificationChanged: "Classification Changed"
     }
   }
 }

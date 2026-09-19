@@ -32,10 +32,12 @@ final class AppModel: ObservableObject {
 
   private let store: any ServerProfileStore
   private let serverHost: NativeServerHost
+  private let syncController = LibrarySyncController()
   private var hasStarted = false
   private var hostPollTask: Task<Void, Never>?
   private var homeRefreshTask: Task<Void, Never>?
   private var scanPollTask: Task<Void, Never>?
+  private var syncRefreshTask: Task<Void, Never>?
   private var isTerminationProtectionActive = false
   private static let operatingModeKey = "AureliaOperatingMode"
   private static let operatingModeSelectionVersionKey = "AureliaOperatingModeSelectionVersion"
@@ -130,6 +132,42 @@ final class AppModel: ObservableObject {
         operatingMode = .host
         profile = Self.previewOwnerProfile
         hostSnapshot = Self.previewHostSnapshot
+        let libraryID = UUID(uuidString: "30000000-0000-0000-0000-000000000001")!
+        libraries = [
+          LibrarySummary(
+            id: libraryID,
+            name: "Archive Drive",
+            path: "/Volumes/Archive",
+            kind: .movies,
+            availability: .unavailable,
+            createdAt: "2026-09-15T12:00:00Z",
+            lastScanStartedAt: "2026-09-15T12:01:00Z",
+            lastScanCompletedAt: nil,
+            lastError: "The library directory is unavailable.",
+            monitoringEnabled: true,
+            lastObservedAt: "2026-09-15T12:01:00Z",
+            health: .waitingForStorage)
+        ]
+        activeScans = [
+          LibraryScanSummary(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+            libraryId: libraryID,
+            state: .waitingForStorage,
+            createdAt: "2026-09-15T12:01:00Z",
+            startedAt: nil,
+            completedAt: nil,
+            filesDiscovered: 0,
+            filesProcessed: 0,
+            addedFiles: 0,
+            updatedFiles: 0,
+            missingFiles: 0,
+            skippedFiles: 0,
+            error: "The library directory is unavailable.",
+            issues: [],
+            trigger: .scheduled,
+            attempt: 2,
+            targetRelativePath: nil)
+        ]
         isStarting = false
         return
       }
@@ -162,6 +200,7 @@ final class AppModel: ObservableObject {
         await startNativeHost()
       } else if profile != nil {
         try await refresh()
+        startSync()
       }
     } catch {
       errorMessage = error.localizedDescription
@@ -410,6 +449,29 @@ final class AppModel: ObservableObject {
     } catch { errorMessage = error.localizedDescription }
   }
 
+  func setMonitoring(libraryID: UUID, enabled: Bool) async {
+    guard let profile else { return }
+    do {
+      let updated = try await APIClient(profile: profile).updateLibraryMonitoring(
+        id: libraryID,
+        enabled: enabled)
+      if let index = libraries.firstIndex(where: { $0.id == libraryID }) {
+        libraries[index] = updated
+      }
+    } catch { errorMessage = error.localizedDescription }
+  }
+
+  func cancelScan(id: UUID) async {
+    guard let profile else { return }
+    do {
+      try await APIClient(profile: profile).cancelScan(id: id)
+      if let latest = try? await APIClient(profile: profile).scan(id: id) {
+        activeScans.removeAll { $0.id == id }
+        recentScans = Self.uniqueScans([latest] + recentScans)
+      }
+    } catch { errorMessage = error.localizedDescription }
+  }
+
   func generatePairingCode() async {
     guard let profile else { return }
     do { pairingCode = try await APIClient(profile: profile).createPairingCode() } catch {
@@ -466,6 +528,8 @@ final class AppModel: ObservableObject {
     hostPollTask?.cancel()
     homeRefreshTask?.cancel()
     scanPollTask?.cancel()
+    syncRefreshTask?.cancel()
+    await syncController.stop()
     if operatingMode == .host { await serverHost.stop() }
     endTerminationProtection()
   }
@@ -512,6 +576,7 @@ final class AppModel: ObservableObject {
       profile = paired
       self.inspectedServer = nil
       try await refresh()
+      startSync()
       return true
     } catch {
       errorMessage = error.localizedDescription
@@ -672,6 +737,12 @@ final class AppModel: ObservableObject {
     }
   }
 
+  func setApplicationActive(_ active: Bool) async {
+    await syncController.setForeground(active, profile: profile) { [weak self] changes in
+      await self?.handleSyncChanges(changes)
+    }
+  }
+
   func movieDetail(id: UUID) async throws -> MovieDetailResponse {
     #if DEBUG
       if Self.uiTestMode == "library" {
@@ -742,6 +813,9 @@ final class AppModel: ObservableObject {
   func disconnect() async {
     let current = profile
     profile = nil
+    await syncController.stop()
+    syncRefreshTask?.cancel()
+    syncRefreshTask = nil
     movies = []
     series = []
     catalogItems = []
@@ -860,6 +934,7 @@ final class AppModel: ObservableObject {
     profile = localProfile
     try await refresh()
     await reloadAdministration()
+    startSync()
   }
 
   private func startScanPolling() {
@@ -873,7 +948,9 @@ final class AppModel: ObservableObject {
         var completed: [LibraryScanSummary] = []
         for scan in self.activeScans {
           if let latest = try? await APIClient(profile: profile).scan(id: scan.id) {
-            if latest.state == .queued || latest.state == .running {
+            if latest.state == .queued || latest.state == .running
+              || latest.state == .waitingForStorage
+            {
               updated.append(latest)
             } else {
               completed.append(latest)
@@ -890,6 +967,35 @@ final class AppModel: ObservableObject {
       }
       self.scanPollTask = nil
     }
+  }
+
+  private func startSync() {
+    guard let profile else { return }
+    Task { [weak self, profile] in
+      guard let self else { return }
+      await self.syncController.start(profile: profile) { changes in
+        await self.handleSyncChanges(changes)
+      }
+    }
+  }
+
+  private func handleSyncChanges(_ changes: SyncChangesResponse) async {
+    guard changes.resetRequired || !changes.changedAreas.isEmpty else { return }
+    if changes.changedAreas.contains(.libraries), canManageMedia {
+      await reloadAdministrationAfterScan()
+    }
+    guard syncRefreshTask == nil else { return }
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      do {
+        try await self.refresh()
+      } catch {
+        self.errorMessage = error.localizedDescription
+      }
+      self.syncRefreshTask = nil
+    }
+    syncRefreshTask = task
+    await task.value
   }
 
   private func reloadAdministrationAfterScan() async {

@@ -16,6 +16,10 @@ public sealed class LibraryRoot
 
     public LibraryAvailability Availability { get; set; }
 
+    public bool MonitoringEnabled { get; set; } = true;
+
+    public DateTimeOffset? LastObservedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset? LastScanStartedAt { get; set; }

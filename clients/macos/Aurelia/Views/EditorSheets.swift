@@ -130,7 +130,9 @@ struct MetadataEditorSheet: View {
 struct MetadataMatchSheet: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.dismiss) private var dismiss
-  let metadata: MediaMetadataSummary
+  let mediaId: UUID
+  let mediaTitle: String
+  let providerMediaId: String?
   let onSaved: () async -> Void
   @State private var query: String
   @State private var candidates: [MetadataCandidateSummary] = []
@@ -138,14 +140,29 @@ struct MetadataMatchSheet: View {
   @State private var errorMessage: String?
 
   init(metadata: MediaMetadataSummary, onSaved: @escaping () async -> Void) {
-    self.metadata = metadata
+    self.mediaId = metadata.mediaId
+    self.mediaTitle = metadata.title
+    self.providerMediaId = metadata.providerMediaId
     self.onSaved = onSaved
     _query = State(initialValue: metadata.title)
   }
 
+  init(
+    mediaId: UUID,
+    title: String,
+    providerMediaId: String? = nil,
+    onSaved: @escaping () async -> Void
+  ) {
+    self.mediaId = mediaId
+    self.mediaTitle = title
+    self.providerMediaId = providerMediaId
+    self.onSaved = onSaved
+    _query = State(initialValue: title)
+  }
+
   var body: some View {
     VStack(spacing: 0) {
-      sheetHeader("Find Metadata Match", subtitle: metadata.title, symbol: "magnifyingglass")
+      sheetHeader("Find Metadata Match", subtitle: mediaTitle, symbol: "magnifyingglass")
       Divider()
       VStack(spacing: 16) {
         HStack {
@@ -192,7 +209,7 @@ struct MetadataMatchSheet: View {
       .padding(24)
       Divider()
       HStack {
-        if metadata.providerMediaId != nil {
+        if providerMediaId != nil {
           Button("Remove Match", role: .destructive) { Task { await removeMatch() } }
         }
         Spacer()
@@ -209,7 +226,7 @@ struct MetadataMatchSheet: View {
     isWorking = true
     defer { isWorking = false }
     do {
-      candidates = try await model.metadataCandidates(mediaId: metadata.mediaId, query: query)
+      candidates = try await model.metadataCandidates(mediaId: mediaId, query: query)
       errorMessage = nil
     } catch { errorMessage = error.localizedDescription }
   }
@@ -217,7 +234,7 @@ struct MetadataMatchSheet: View {
   private func select(_ candidate: MetadataCandidateSummary) async {
     do {
       _ = try await model.selectMetadataMatch(
-        mediaId: metadata.mediaId,
+        mediaId: mediaId,
         providerMediaId: candidate.providerMediaId,
         mediaType: candidate.mediaType)
       await onSaved()
@@ -227,7 +244,7 @@ struct MetadataMatchSheet: View {
 
   private func removeMatch() async {
     do {
-      _ = try await model.clearMetadataMatch(mediaId: metadata.mediaId)
+      _ = try await model.clearMetadataMatch(mediaId: mediaId)
       await onSaved()
       dismiss()
     } catch { errorMessage = error.localizedDescription }
@@ -347,6 +364,7 @@ struct MetadataReviewQueueSheet: View {
   @Environment(\.dismiss) private var dismiss
   @State private var reviews: [MetadataReviewSummary] = []
   @State private var errorMessage: String?
+  @State private var manualReview: MetadataReviewSummary?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -380,6 +398,8 @@ struct MetadataReviewQueueSheet: View {
                   .disabled(review.state != .needsReview)
               }
             }
+            Button("Search Manually…") { manualReview = review }
+              .disabled(review.state != .needsReview)
           }.padding(.vertical, 8)
         }
       }
@@ -393,6 +413,12 @@ struct MetadataReviewQueueSheet: View {
     .frame(width: 720, height: 640)
     .background(AureliaBackdrop())
     .task { await load() }
+    .sheet(item: $manualReview) { review in
+      MetadataMatchSheet(mediaId: review.mediaId, title: review.title) {
+        await load()
+      }
+      .environmentObject(model)
+    }
   }
 
   private func load() async {

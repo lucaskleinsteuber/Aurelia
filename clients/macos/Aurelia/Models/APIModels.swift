@@ -74,9 +74,19 @@ enum LibraryAvailability: String, Codable, Sendable {
 enum LibraryScanState: String, Codable, Sendable {
   case queued
   case running
+  case waitingForStorage
   case completed
   case failed
   case interrupted
+  case cancelled
+}
+
+enum LibraryHealthStatus: String, Codable, Sendable {
+  case unknown, healthy, waitingForStorage, permissionDenied, error
+}
+
+enum LibraryScanTrigger: String, Codable, Sendable {
+  case manual, fileChange, startup, scheduled, storageReconnected, classificationChanged
 }
 
 struct CreateLibraryRequest: Encodable, Sendable {
@@ -121,6 +131,11 @@ struct LibrarySummary: Codable, Identifiable, Equatable, Sendable {
   let lastScanStartedAt: String?
   let lastScanCompletedAt: String?
   let lastError: String?
+  var monitoringEnabled: Bool? = nil
+  var lastObservedAt: String? = nil
+  var health: LibraryHealthStatus? = nil
+
+  var isMonitoringEnabled: Bool { monitoringEnabled ?? false }
 }
 
 struct LibraryScanIssueSummary: Codable, Equatable, Sendable {
@@ -144,6 +159,9 @@ struct LibraryScanSummary: Codable, Identifiable, Equatable, Sendable {
   let skippedFiles: Int
   let error: String?
   let issues: [LibraryScanIssueSummary]
+  var trigger: LibraryScanTrigger? = nil
+  var attempt: Int? = nil
+  var targetRelativePath: String? = nil
 }
 
 struct PairingCodeResponse: Codable, Equatable, Sendable {
@@ -491,7 +509,11 @@ struct UpdateMetadataProviderRequest: Encodable, Sendable {
 }
 
 enum MetadataJobState: String, Codable, Sendable {
-  case queued, running, completed, failed, interrupted
+  case queued, running, completed, failed, interrupted, cancelled
+}
+
+enum MetadataJobMode: String, Codable, Sendable {
+  case incremental, fullRefresh, singleItem, retryFailed
 }
 
 struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
@@ -508,6 +530,19 @@ struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
   let createdAt: String
   let startedAt: String?
   let completedAt: String?
+  var mode: MetadataJobMode? = nil
+  var attempt: Int? = nil
+}
+
+enum SyncChangeArea: String, Codable, Sendable {
+  case catalog, libraries, metadata, collections, userState
+}
+
+struct SyncChangesResponse: Codable, Equatable, Sendable {
+  let cursor: Int64
+  let resetRequired: Bool
+  let changedAreas: [SyncChangeArea]
+  let changedMediaIds: [UUID]
 }
 
 struct PlaybackPresentation: Identifiable, Equatable, Sendable {

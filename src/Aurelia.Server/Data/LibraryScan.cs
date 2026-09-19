@@ -12,6 +12,18 @@ public sealed class LibraryScan
 
     public LibraryScanState State { get; set; }
 
+    public LibraryScanTrigger Trigger { get; set; } = LibraryScanTrigger.Manual;
+
+    public string? TargetRelativePath { get; set; }
+
+    public int Attempt { get; set; }
+
+    public DateTimeOffset? LeaseExpiresAt { get; set; }
+
+    public DateTimeOffset? HeartbeatAt { get; set; }
+
+    public DateTimeOffset? CancelRequestedAt { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset? StartedAt { get; set; }

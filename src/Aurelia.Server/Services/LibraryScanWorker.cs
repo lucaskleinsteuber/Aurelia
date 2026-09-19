@@ -14,32 +14,134 @@ public sealed partial class LibraryScanWorker(
 {
     private const int MaximumStoredIssues = 500;
     private const int RetainedScansPerLibrary = 25;
+    private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var request in queue.ReadAllAsync(stoppingToken))
+        await RecoverAsync(stoppingToken);
+        while (!stoppingToken.IsCancellationRequested)
         {
+            var request = await ClaimNextAsync(stoppingToken);
+            if (request is null)
+            {
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                wait.CancelAfter(TimeSpan.FromSeconds(1));
+                try
+                {
+                    await queue.WaitAsync(wait.Token);
+                }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // The database remains authoritative; periodically check it even if a wake was lost.
+                }
+
+                continue;
+            }
+
+            var scanToken = queue.Register(request.ScanId, stoppingToken);
             try
             {
-                await ProcessAsync(request, stoppingToken);
+                await ProcessAsync(request, scanToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                await MarkInterruptedAsync(request.ScanId);
+                await FinishCancellationAsync(request.ScanId, stoppingToken.IsCancellationRequested);
             }
             catch (LibraryException exception)
             {
-                await MarkFailedAsync(request.ScanId, request.LibraryId, exception);
+                if (exception.Code == "library_unavailable")
+                {
+                    await MarkWaitingForStorageAsync(request.ScanId, request.LibraryId, exception);
+                }
+                else
+                {
+                    await RetryOrFailAsync(request.ScanId, request.LibraryId, exception);
+                }
             }
             catch (Exception exception)
             {
                 LogScanFailed(logger, request.ScanId, exception);
-                await MarkFailedAsync(request.ScanId, request.LibraryId, exception);
+                await RetryOrFailAsync(request.ScanId, request.LibraryId, exception);
             }
             finally
             {
-                queue.Release(request.LibraryId);
+                queue.Unregister(request.ScanId);
+                await ReleaseIfTerminalAsync(request.ScanId, request.LibraryId);
             }
+        }
+    }
+
+    private async Task RecoverAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var running = await database.LibraryScans
+            .Where(scan => scan.State == LibraryScanState.Running)
+            .ToListAsync(cancellationToken);
+        foreach (var scan in running)
+        {
+            scan.State = scan.Attempt < 3
+                ? LibraryScanState.Queued
+                : LibraryScanState.Interrupted;
+            scan.CompletedAt = scan.Attempt < 3 ? null : now;
+            scan.Error = scan.Attempt < 3
+                ? "The interrupted scan will resume automatically."
+                : "The scan was interrupted too many times.";
+            scan.LeaseExpiresAt = null;
+            scan.HeartbeatAt = null;
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
+        var activeLibraries = await database.LibraryScans.AsNoTracking()
+            .Where(scan => scan.State == LibraryScanState.Queued
+                || scan.State == LibraryScanState.WaitingForStorage)
+            .Select(scan => scan.LibraryRootId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        foreach (var libraryId in activeLibraries)
+        {
+            queue.ReserveExisting(libraryId);
+        }
+
+        queue.Pulse();
+    }
+
+    private async Task<QueuedLibraryScan?> ClaimNextAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        while (true)
+        {
+            var scan = await database.LibraryScans
+                .Where(candidate => candidate.State == LibraryScanState.Queued)
+                .OrderBy(candidate => candidate.CreatedAt)
+                .ThenBy(candidate => candidate.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (scan is null)
+            {
+                return null;
+            }
+
+            if (scan.CancelRequestedAt.HasValue)
+            {
+                scan.State = LibraryScanState.Cancelled;
+                scan.CompletedAt = DateTimeOffset.UtcNow;
+                await database.SaveChangesAsync(cancellationToken);
+                queue.Release(scan.LibraryRootId);
+                continue;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            scan.State = LibraryScanState.Running;
+            scan.Attempt += 1;
+            scan.StartedAt ??= now;
+            scan.HeartbeatAt = now;
+            scan.LeaseExpiresAt = now.Add(LeaseDuration);
+            scan.Error = null;
+            await database.SaveChangesAsync(cancellationToken);
+            queue.ReserveExisting(scan.LibraryRootId);
+            return new QueuedLibraryScan(scan.Id, scan.LibraryRootId, scan.TargetRelativePath);
         }
     }
 
@@ -55,9 +157,8 @@ public sealed partial class LibraryScanWorker(
             cancellationToken);
 
         var startedAt = DateTimeOffset.UtcNow;
-        scan.State = LibraryScanState.Running;
-        scan.StartedAt = startedAt;
         library.LastScanStartedAt = startedAt;
+        library.LastObservedAt = startedAt;
         library.LastError = null;
         await database.SaveChangesAsync(cancellationToken);
 
@@ -142,6 +243,8 @@ public sealed partial class LibraryScanWorker(
             request.TargetRelativePath,
             cancellationToken);
         await RebuildLocalCollectionsAsync(database, library, cancellationToken);
+        await scope.ServiceProvider.GetRequiredService<MediaSearchIndexService>()
+            .RebuildAsync(cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
         if (metadataSettings.Load().Enabled
             && !await database.MetadataJobs.AnyAsync(
@@ -152,12 +255,13 @@ public sealed partial class LibraryScanWorker(
             {
                 Id = Guid.NewGuid(),
                 LibraryRootId = library.Id,
+                Mode = MetadataJobMode.Incremental,
                 State = MetadataJobState.Queued,
                 CreatedAt = DateTimeOffset.UtcNow,
             };
             database.MetadataJobs.Add(metadataJob);
             await database.SaveChangesAsync(cancellationToken);
-            metadataQueue.Enqueue(metadataJob.Id);
+            metadataQueue.Pulse();
         }
     }
 
@@ -249,8 +353,32 @@ public sealed partial class LibraryScanWorker(
         var itemsByPath = allItems.ToDictionary(
             item => item.NormalizedSourcePath,
             StringComparer.Ordinal);
+        var itemsByFileIdentity = allItems
+            .Where(item => item.FileSystemIdentity is not null)
+            .GroupBy(item => item.FileSystemIdentity!, StringComparer.Ordinal)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
         var seenIds = new HashSet<Guid>();
         var parentsByPath = new Dictionary<string, MediaItem>(StringComparer.Ordinal);
+        var seriesById = allItems.Where(item => item.Kind == MediaKind.Series)
+            .ToDictionary(item => item.Id);
+        var movedSeriesByPath = discovery.Items
+            .Where(item => item.ParentSourcePath is not null && item.FileSystemIdentity is not null)
+            .Select(item => new
+            {
+                Candidate = item,
+                Existing = itemsByFileIdentity.GetValueOrDefault(item.FileSystemIdentity!),
+            })
+            .Where(value => value.Existing?.ParentId is not null
+                && IsPlausibleIdentityMatch(value.Existing, value.Candidate))
+            .GroupBy(value => MediaPath.Normalize(value.Candidate.ParentSourcePath!), StringComparer.Ordinal)
+            .Select(group => new
+            {
+                Path = group.Key,
+                ParentIds = group.Select(value => value.Existing!.ParentId!.Value).Distinct().ToList(),
+            })
+            .Where(value => value.ParentIds.Count == 1 && seriesById.ContainsKey(value.ParentIds[0]))
+            .ToDictionary(value => value.Path, value => seriesById[value.ParentIds[0]], StringComparer.Ordinal);
         var addedFiles = 0;
         var updatedFiles = 0;
 
@@ -275,7 +403,11 @@ public sealed partial class LibraryScanWorker(
                 now,
                 allItems,
                 itemsByPath,
+                itemsByFileIdentity,
                 seenIds,
+                candidate.Kind == MediaKind.Series
+                    ? movedSeriesByPath.GetValueOrDefault(MediaPath.Normalize(candidate.SourcePath))
+                    : null,
                 out var wasAdded,
                 out var wasUpdated);
             parentsByPath[MediaPath.Normalize(candidate.SourcePath)] = item;
@@ -307,7 +439,9 @@ public sealed partial class LibraryScanWorker(
                 now,
                 allItems,
                 itemsByPath,
+                itemsByFileIdentity,
                 seenIds,
+                preferredItem: null,
                 out var wasAdded,
                 out var wasUpdated);
             if (wasAdded)
@@ -356,6 +490,8 @@ public sealed partial class LibraryScanWorker(
 
         scan.State = LibraryScanState.Completed;
         scan.CompletedAt = now;
+        scan.LeaseExpiresAt = null;
+        scan.HeartbeatAt = now;
         scan.FilesDiscovered = discovery.FilesDiscovered;
         scan.FilesProcessed = discovery.FilesDiscovered;
         scan.AddedFiles = addedFiles;
@@ -500,12 +636,32 @@ public sealed partial class LibraryScanWorker(
         DateTimeOffset now,
         List<MediaItem> allItems,
         Dictionary<string, MediaItem> itemsByPath,
+        Dictionary<string, MediaItem> itemsByFileIdentity,
         HashSet<Guid> seenIds,
+        MediaItem? preferredItem,
         out bool wasAdded,
         out bool wasUpdated)
     {
         var normalizedPath = MediaPath.Normalize(candidate.SourcePath);
         itemsByPath.TryGetValue(normalizedPath, out var item);
+        if (item is null && preferredItem is not null && !seenIds.Contains(preferredItem.Id))
+        {
+            item = preferredItem;
+            itemsByPath.Remove(item.NormalizedSourcePath);
+            itemsByPath[normalizedPath] = item;
+        }
+
+        if (item is null
+            && candidate.FileSystemIdentity is { } identity
+            && itemsByFileIdentity.TryGetValue(identity, out var identityMatch)
+            && !seenIds.Contains(identityMatch.Id)
+            && IsPlausibleIdentityMatch(identityMatch, candidate))
+        {
+            item = identityMatch;
+            itemsByPath.Remove(item.NormalizedSourcePath);
+            itemsByPath[normalizedPath] = item;
+        }
+
         if (item is null
             && candidate.Kind == MediaKind.Episode
             && parentId.HasValue)
@@ -551,6 +707,7 @@ public sealed partial class LibraryScanWorker(
             || item.Extension != candidate.Extension
             || item.FileSize != candidate.FileSize
             || item.FileModifiedAt != candidate.FileModifiedAt
+            || item.FileSystemIdentity != candidate.FileSystemIdentity
             || item.Availability != MediaAvailability.Available);
         item.ParentId = parentId;
         item.Kind = candidate.Kind;
@@ -564,11 +721,29 @@ public sealed partial class LibraryScanWorker(
         item.Extension = candidate.Extension;
         item.FileSize = candidate.FileSize;
         item.FileModifiedAt = candidate.FileModifiedAt;
+        item.FileSystemIdentity = candidate.FileSystemIdentity;
         item.Availability = MediaAvailability.Available;
         item.LastSeenScanId = scanId;
         item.UpdatedAt = now;
         seenIds.Add(item.Id);
         return item;
+    }
+
+    private static bool IsPlausibleIdentityMatch(
+        MediaItem existing,
+        DiscoveredMediaItem candidate)
+    {
+        if (existing.Kind != candidate.Kind || existing.FileSize != candidate.FileSize)
+        {
+            return false;
+        }
+
+        if (!existing.FileModifiedAt.HasValue || !candidate.FileModifiedAt.HasValue)
+        {
+            return existing.FileModifiedAt == candidate.FileModifiedAt;
+        }
+
+        return Math.Abs((existing.FileModifiedAt.Value - candidate.FileModifiedAt.Value).TotalSeconds) <= 1;
     }
 
     private async Task UpdateProgressAsync(
@@ -583,7 +758,9 @@ public sealed partial class LibraryScanWorker(
             .ExecuteUpdateAsync(
                 updates => updates
                     .SetProperty(scan => scan.FilesDiscovered, count)
-                    .SetProperty(scan => scan.FilesProcessed, count),
+                    .SetProperty(scan => scan.FilesProcessed, count)
+                    .SetProperty(scan => scan.HeartbeatAt, DateTimeOffset.UtcNow)
+                    .SetProperty(scan => scan.LeaseExpiresAt, DateTimeOffset.UtcNow.Add(LeaseDuration)),
                 cancellationToken);
     }
 
@@ -632,7 +809,7 @@ public sealed partial class LibraryScanWorker(
         }
     }
 
-    private async Task MarkFailedAsync(Guid scanId, Guid libraryId, Exception exception)
+    private async Task RetryOrFailAsync(Guid scanId, Guid libraryId, Exception exception)
     {
         try
         {
@@ -645,9 +822,16 @@ public sealed partial class LibraryScanWorker(
                 : "The library scan failed.";
             if (scan is not null)
             {
-                scan.State = LibraryScanState.Failed;
-                scan.CompletedAt = DateTimeOffset.UtcNow;
+                var retry = scan.Attempt < 3 && !scan.CancelRequestedAt.HasValue;
+                scan.State = retry ? LibraryScanState.Queued : LibraryScanState.Failed;
+                scan.CompletedAt = retry ? null : DateTimeOffset.UtcNow;
                 scan.Error = message;
+                scan.LeaseExpiresAt = null;
+                scan.HeartbeatAt = DateTimeOffset.UtcNow;
+                if (retry)
+                {
+                    queue.Pulse();
+                }
             }
 
             if (library is not null)
@@ -667,20 +851,93 @@ public sealed partial class LibraryScanWorker(
         }
     }
 
-    private async Task MarkInterruptedAsync(Guid scanId)
+    private async Task MarkWaitingForStorageAsync(
+        Guid scanId,
+        Guid libraryId,
+        Exception exception)
     {
         try
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            await database.LibraryScans
-                .Where(scan => scan.Id == scanId
-                    && (scan.State == LibraryScanState.Queued
-                        || scan.State == LibraryScanState.Running))
-                .ExecuteUpdateAsync(updates => updates
-                    .SetProperty(scan => scan.State, LibraryScanState.Interrupted)
-                    .SetProperty(scan => scan.CompletedAt, DateTimeOffset.UtcNow)
-                    .SetProperty(scan => scan.Error, "The server stopped before the scan completed."));
+            var scan = await database.LibraryScans.SingleOrDefaultAsync(value => value.Id == scanId);
+            var library = await database.LibraryRoots.SingleOrDefaultAsync(value => value.Id == libraryId);
+            if (scan is not null)
+            {
+                scan.State = LibraryScanState.WaitingForStorage;
+                scan.Error = exception.Message;
+                scan.LeaseExpiresAt = null;
+                scan.HeartbeatAt = DateTimeOffset.UtcNow;
+            }
+
+            if (library is not null)
+            {
+                library.Availability = LibraryAvailability.Unavailable;
+                library.LastError = exception.Message;
+                library.LastObservedAt = DateTimeOffset.UtcNow;
+            }
+
+            await database.SaveChangesAsync();
+        }
+        catch (Exception persistenceException)
+        {
+            LogInterruptedPersistenceFailed(logger, scanId, persistenceException);
+        }
+    }
+
+    private async Task FinishCancellationAsync(Guid scanId, bool serverStopping)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var scan = await database.LibraryScans.SingleOrDefaultAsync(value => value.Id == scanId);
+            if (scan is null)
+            {
+                return;
+            }
+
+            if (scan.State is LibraryScanState.Completed
+                or LibraryScanState.Failed
+                or LibraryScanState.Interrupted
+                or LibraryScanState.Cancelled)
+            {
+                return;
+            }
+
+            scan.State = serverStopping && !scan.CancelRequestedAt.HasValue
+                ? LibraryScanState.Queued
+                : LibraryScanState.Cancelled;
+            scan.CompletedAt = scan.State == LibraryScanState.Cancelled
+                ? DateTimeOffset.UtcNow
+                : null;
+            scan.Error = scan.State == LibraryScanState.Cancelled ? null : "The scan will resume after restart.";
+            scan.LeaseExpiresAt = null;
+            scan.HeartbeatAt = DateTimeOffset.UtcNow;
+            await database.SaveChangesAsync();
+        }
+        catch (Exception exception)
+        {
+            LogInterruptedPersistenceFailed(logger, scanId, exception);
+        }
+    }
+
+    private async Task ReleaseIfTerminalAsync(Guid scanId, Guid libraryId)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var state = await database.LibraryScans.AsNoTracking()
+                .Where(scan => scan.Id == scanId)
+                .Select(scan => (LibraryScanState?)scan.State)
+                .SingleOrDefaultAsync();
+            if (state is not (LibraryScanState.Queued
+                or LibraryScanState.Running
+                or LibraryScanState.WaitingForStorage))
+            {
+                queue.Release(libraryId);
+            }
         }
         catch (Exception exception)
         {

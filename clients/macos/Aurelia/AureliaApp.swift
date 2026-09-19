@@ -4,6 +4,7 @@ import SwiftUI
 struct AureliaApp: App {
   @NSApplicationDelegateAdaptor(AureliaAppDelegate.self) private var appDelegate
   @StateObject private var model = AppModel()
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some Scene {
     WindowGroup {
@@ -11,6 +12,9 @@ struct AureliaApp: App {
         .environmentObject(model)
         .task {
           await model.start()
+        }
+        .onChange(of: scenePhase) { _, phase in
+          Task { await model.setApplicationActive(phase == .active) }
         }
     }
     .defaultSize(width: 1_470, height: 956)

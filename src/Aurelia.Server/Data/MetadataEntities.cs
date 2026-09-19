@@ -82,6 +82,11 @@ public sealed class MetadataJob
     public Guid? LibraryRootId { get; set; }
     public Guid? MediaItemId { get; set; }
     public MetadataJobState State { get; set; }
+    public MetadataJobMode Mode { get; set; } = MetadataJobMode.FullRefresh;
+    public int Attempt { get; set; }
+    public DateTimeOffset? LeaseExpiresAt { get; set; }
+    public DateTimeOffset? HeartbeatAt { get; set; }
+    public DateTimeOffset? CancelRequestedAt { get; set; }
     public int ItemsTotal { get; set; }
     public int ItemsProcessed { get; set; }
     public int ItemsMatched { get; set; }

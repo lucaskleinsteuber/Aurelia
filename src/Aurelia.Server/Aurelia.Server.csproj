@@ -2,6 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Aurelia.Server</AssemblyName>
     <RootNamespace>Aurelia.Server</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Aurelia.Contracts/Aurelia.Contracts.csproj" />

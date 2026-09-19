@@ -47,6 +47,7 @@ public static class ApiEndpointMappings
         libraries.MapGet(string.Empty, ListLibrariesAsync);
         libraries.MapPost(string.Empty, CreateLibraryAsync);
         libraries.MapDelete("/{libraryId:guid}", RemoveLibraryAsync);
+        libraries.MapPut("/{libraryId:guid}/monitoring", UpdateLibraryMonitoringAsync);
         libraries.MapPost("/{libraryId:guid}/scans", StartLibraryScanAsync);
         libraries.MapGet("/{libraryId:guid}/scans", ListLibraryScansAsync);
         libraries.MapGet("/{libraryId:guid}/discoveries", ListLibraryDiscoveriesAsync);
@@ -61,6 +62,7 @@ public static class ApiEndpointMappings
 
         var scans = api.MapGroup("/scans").RequireAuthorization("Administrator");
         scans.MapGet("/{scanId:guid}", GetLibraryScanAsync);
+        scans.MapDelete("/{scanId:guid}", CancelLibraryScanAsync);
 
         var catalog = api.MapGroup("/catalog").RequireAuthorization();
         catalog.MapGet("/movies", ListMoviesAsync);
@@ -70,6 +72,8 @@ public static class ApiEndpointMappings
         catalog.MapGet("/items", ListCatalogItemsAsync);
         catalog.MapGet("/items/{mediaId:guid}", GetCatalogDetailAsync);
         catalog.MapGet("/search", SearchCatalogAsync);
+        catalog.MapPost("/search/rebuild", RebuildCatalogSearchAsync)
+            .RequireAuthorization("Administrator");
         catalog.MapGet("/collections", ListCollectionsAsync);
 
         var collections = api.MapGroup("/collections").RequireAuthorization("Administrator");
@@ -84,7 +88,9 @@ public static class ApiEndpointMappings
         metadata.MapPut("/provider", UpdateMetadataProviderAsync);
         metadata.MapDelete("/provider/token", RemoveMetadataProviderTokenAsync);
         metadata.MapPost("/jobs", StartMetadataJobAsync);
+        metadata.MapGet("/jobs", ListMetadataJobsAsync);
         metadata.MapGet("/jobs/{jobId:guid}", GetMetadataJobAsync);
+        metadata.MapDelete("/jobs/{jobId:guid}", CancelMetadataJobAsync);
         metadata.MapGet("/reviews", ListMetadataReviewsAsync);
         metadata.MapPost("/artwork/prune", PruneArtworkAsync);
 
@@ -111,6 +117,7 @@ public static class ApiEndpointMappings
         api.MapMethods("/artwork/{artworkId:guid}", [HttpMethods.Get, HttpMethods.Head], ArtworkAsync)
             .RequireAuthorization()
             .WithDisplayName("Artwork");
+        api.MapGet("/sync/changes", GetSyncChangesAsync).RequireAuthorization();
     }
 
     private static async Task<IResult> HealthAsync(
@@ -349,6 +356,13 @@ public static class ApiEndpointMappings
         return ExecuteNoContentAsync(() => libraries.RemoveAsync(libraryId, cancellationToken));
     }
 
+    private static Task<IResult> UpdateLibraryMonitoringAsync(
+        Guid libraryId,
+        UpdateLibraryMonitoringRequest request,
+        LibraryService libraries,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(() => libraries.SetMonitoringAsync(libraryId, request.Enabled, cancellationToken));
+
     private static Task<IResult> ListLibraryDiscoveriesAsync(
         Guid libraryId,
         LibraryService libraries,
@@ -445,6 +459,12 @@ public static class ApiEndpointMappings
         return ExecuteAsync(() => libraries.GetScanAsync(scanId, cancellationToken));
     }
 
+    private static Task<IResult> CancelLibraryScanAsync(
+        Guid scanId,
+        LibraryService libraries,
+        CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => libraries.CancelScanAsync(scanId, cancellationToken));
+
     private static Task<IResult> ListMoviesAsync(
         int? offset,
         int? limit,
@@ -479,20 +499,44 @@ public static class ApiEndpointMappings
         return ExecuteAsync(() => catalog.GetSeriesAsync(seriesId, cancellationToken));
     }
 
-    private static Task<IResult> SearchCatalogAsync(HttpContext context, string? query, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => presentation.SearchAsync(context.User.RequireUserId(), query ?? string.Empty, offset ?? 0, limit ?? 100, cancellationToken));
+    private static Task<IResult> SearchCatalogAsync(
+        HttpContext context, string? query, string? kind, Guid? libraryId, string? genre,
+        string? availability, bool? favorite, string? watchState, int? yearFrom, int? yearTo,
+        string? sort, string? direction, int? offset, int? limit,
+        PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => presentation.SearchAsync(
+            context.User.RequireUserId(), query ?? string.Empty,
+            ParseCatalogQuery(kind, libraryId, genre, availability, favorite, watchState,
+                yearFrom, yearTo, sort, direction, offset, limit),
+            cancellationToken));
 
-    private static Task<IResult> ListCatalogItemsAsync(HttpContext context, string? kind, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => presentation.CatalogAsync(context.User.RequireUserId(), ParseCatalogKind(kind), offset ?? 0, limit ?? 100, cancellationToken));
+    private static Task<IResult> ListCatalogItemsAsync(
+        HttpContext context, string? kind, Guid? libraryId, string? genre,
+        string? availability, bool? favorite, string? watchState, int? yearFrom, int? yearTo,
+        string? sort, string? direction, int? offset, int? limit,
+        PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => presentation.CatalogAsync(
+            context.User.RequireUserId(),
+            ParseCatalogQuery(kind, libraryId, genre, availability, favorite, watchState,
+                yearFrom, yearTo, sort, direction, offset, limit),
+            cancellationToken));
 
-    private static Task<IResult> GetCatalogDetailAsync(HttpContext context, Guid mediaId, PresentationService presentation, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => presentation.DetailAsync(context.User.RequireUserId(), mediaId, cancellationToken));
+    private static Task<IResult> GetCatalogDetailAsync(HttpContext context, Guid mediaId, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => presentation.DetailAsync(context.User.RequireUserId(), mediaId, cancellationToken));
+
+    private static async Task<IResult> RebuildCatalogSearchAsync(
+        MediaSearchIndexService searchIndex,
+        CancellationToken cancellationToken)
+    {
+        await searchIndex.RebuildAsync(cancellationToken);
+        return Results.NoContent();
+    }
 
     private static Task<IResult> ListCollectionsAsync(HttpContext context, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.CollectionsAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 100, cancellationToken));
 
-    private static Task<IResult> GetHomeAsync(HttpContext context, PresentationService presentation, CancellationToken cancellationToken) =>
-        ExecuteAsync(() => presentation.HomeAsync(context.User.RequireUserId(), cancellationToken));
+    private static Task<IResult> GetHomeAsync(HttpContext context, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => presentation.HomeAsync(context.User.RequireUserId(), cancellationToken));
 
     private static Task<IResult> CreateCollectionAsync(HttpContext context, SaveCollectionRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.CreateCollectionAsync(context.User.RequireUserId(), request, cancellationToken));
@@ -512,15 +556,48 @@ public static class ApiEndpointMappings
     private static Task<IResult> RemoveMetadataProviderTokenAsync(MetadataService metadata, CancellationToken cancellationToken) =>
         ExecuteAsync(() => metadata.RemoveTokenAsync(cancellationToken));
 
-    private static async Task<IResult> StartMetadataJobAsync(Guid? libraryId, Guid? mediaId, MetadataService metadata, CancellationToken cancellationToken) =>
+    private static async Task<IResult> StartMetadataJobAsync(HttpContext context, Guid? libraryId, Guid? mediaId, MetadataService metadata, CancellationToken cancellationToken) =>
         await ExecuteResultAsync(async () =>
         {
-            var job = await metadata.StartAsync(libraryId, mediaId, cancellationToken);
+            var hasBody = context.Request.ContentLength is > 0
+                || context.Request.Headers.TransferEncoding.Count > 0;
+            var job = hasBody
+                ? await metadata.StartAsync(
+                    await context.Request.ReadFromJsonAsync<StartMetadataJobRequest>(cancellationToken)
+                        ?? throw new MetadataException("invalid_metadata_job", "The metadata job request is invalid.", StatusCodes.Status400BadRequest),
+                    cancellationToken)
+                : await metadata.StartAsync(libraryId, mediaId, cancellationToken);
             return Results.Accepted($"/api/v1/metadata/jobs/{job.Id}", job);
         });
 
+    private static Task<IResult> ListMetadataJobsAsync(
+        bool? activeOnly,
+        int? limit,
+        MetadataService metadata,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(() => metadata.ListJobsAsync(activeOnly ?? false, limit ?? 25, cancellationToken));
+
     private static Task<IResult> GetMetadataJobAsync(Guid jobId, MetadataService metadata, CancellationToken cancellationToken) =>
         ExecuteAsync(() => metadata.GetJobAsync(jobId, cancellationToken));
+
+    private static Task<IResult> CancelMetadataJobAsync(
+        Guid jobId,
+        MetadataService metadata,
+        CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => metadata.CancelJobAsync(jobId, cancellationToken));
+
+    private static Task<IResult> GetSyncChangesAsync(
+        HttpContext context,
+        long? after,
+        int? waitSeconds,
+        SyncChangeService changes,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(() => changes.ChangesAsync(
+            context.User.RequireUserId(),
+            context.User.IsInRole(UserRole.Owner.ToString()) || context.User.IsInRole(UserRole.Admin.ToString()),
+            after ?? 0,
+            waitSeconds ?? 0,
+            cancellationToken));
 
     private static Task<IResult> ListMetadataReviewsAsync(MetadataService metadata, CancellationToken cancellationToken) =>
         ExecuteAsync(() => metadata.ReviewsAsync(cancellationToken));
@@ -560,6 +637,40 @@ public static class ApiEndpointMappings
             "invalid_catalog_kind",
             "Catalog kind must be movie or series.",
             StatusCodes.Status400BadRequest);
+    }
+
+    private static CatalogQuery ParseCatalogQuery(
+        string? kind,
+        Guid? libraryId,
+        string? genre,
+        string? availability,
+        bool? favorite,
+        string? watchState,
+        int? yearFrom,
+        int? yearTo,
+        string? sort,
+        string? direction,
+        int? offset,
+        int? limit) => new(
+            ParseCatalogKind(kind),
+            libraryId,
+            genre,
+            ParseOptionalEnum<MediaAvailability>(availability, "invalid_availability", "Availability is not valid."),
+            favorite,
+            ParseOptionalEnum<CatalogWatchState>(watchState, "invalid_watch_state", "Watch state is not valid."),
+            yearFrom,
+            yearTo,
+            ParseOptionalEnum<CatalogSort>(sort, "invalid_sort", "Sort is not valid.") ?? CatalogSort.Title,
+            ParseOptionalEnum<SortDirection>(direction, "invalid_direction", "Direction is not valid.") ?? SortDirection.Ascending,
+            offset ?? 0,
+            limit ?? 100);
+
+    private static T? ParseOptionalEnum<T>(string? value, string code, string message)
+        where T : struct, Enum
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (Enum.TryParse<T>(value, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)) return parsed;
+        throw new MetadataException(code, message, StatusCodes.Status400BadRequest);
     }
 
     private static async Task<IResult> ArtworkAsync(HttpContext context, Guid artworkId, ArtworkStore artwork, AureliaDbContext database, CancellationToken cancellationToken)
@@ -664,6 +775,29 @@ public static class ApiEndpointMappings
             context.Connection.RemoteIpAddress,
             environment.IsEnvironment("Testing"));
     }
+
+    private static Task<IResult> ExecuteRevisionedAsync<T>(
+        HttpContext context,
+        SyncChangeService changes,
+        Func<Task<T>> action) =>
+        ExecuteResultAsync(async () =>
+        {
+            var userId = context.User.RequireUserId();
+            var isAdministrator = context.User.IsInRole(UserRole.Owner.ToString())
+                || context.User.IsInRole(UserRole.Admin.ToString());
+            var cursor = await changes.CurrentCursorAsync(
+                userId,
+                isAdministrator,
+                context.RequestAborted);
+            var tag = $"\"revision-{cursor}\"";
+            context.Response.Headers.ETag = tag;
+            var matches = context.Request.Headers.IfNoneMatch.ToString()
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(value => value == "*" || string.Equals(value, tag, StringComparison.Ordinal));
+            return matches
+                ? Results.StatusCode(StatusCodes.Status304NotModified)
+                : Results.Ok(await action());
+        });
 
     private static async Task<IResult> ExecuteAsync<T>(Func<Task<T>> action)
     {

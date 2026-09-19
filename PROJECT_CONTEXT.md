@@ -75,6 +75,10 @@ The complete path is:
 - Aurelia 1.0.12 completes the product rename and adds a unified media manager,
   multiple typed storage locations, restorable scan status and history, and an
   automatic Build 11 data/profile migration that leaves rollback data intact.
+- Aurelia 1.0.13 adds persistent scan and metadata queues, automatic per-library
+  monitoring, conservative filesystem-identity reconciliation, offline-storage
+  recovery, server-side indexed search/filtering, revision ETags, and an
+  authenticated change cursor for efficient native-client refreshes.
 
 The Build 11 host handoff retained by Aurelia 1.0.12 keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; both processes resolve a shared App
@@ -143,14 +147,14 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message matching the build (`1.0.12` for Build 12), push immediately, verify
+    message matching the build (`1.0.13` for Build 13), push immediately, verify
     the remote hash, and write exactly one English external summary for the
     completed build.
 
 ## Planned direction
 
-Aurelia 1.0.12 deliberately does not introduce chapters, playback speed, sleep timer,
-PiP, timeline thumbnails, automatic file watchers, an optional web client,
-broader administration, or Linux and Windows native clients. Those should
-follow as deliberate milestones without weakening the existing server/native-
-client boundary or the established visual system.
+Aurelia 1.0.13 deliberately does not introduce chapters, playback speed, sleep
+timer, PiP, timeline thumbnails, downloads, transcoding, an optional web client,
+or Linux and Windows native clients. The next planned product milestone is the
+full native visual redesign, built on the stable monitoring, filtering, search,
+health, job, and sync APIs introduced here.

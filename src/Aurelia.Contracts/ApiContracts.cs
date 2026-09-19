@@ -97,6 +97,15 @@ public enum LibraryAvailability
     Error,
 }
 
+public enum LibraryHealthStatus
+{
+    Unknown,
+    Healthy,
+    WaitingForStorage,
+    PermissionDenied,
+    Error,
+}
+
 public enum MediaKind
 {
     Movie,
@@ -119,6 +128,18 @@ public enum LibraryScanState
     Completed,
     Failed,
     Interrupted,
+    WaitingForStorage,
+    Cancelled,
+}
+
+public enum LibraryScanTrigger
+{
+    Manual,
+    FileChange,
+    Startup,
+    Scheduled,
+    StorageReconnected,
+    ClassificationChanged,
 }
 
 public sealed record CreateLibraryRequest(
@@ -126,6 +147,8 @@ public sealed record CreateLibraryRequest(
     string Path,
     LibraryKind Kind,
     bool CombineExisting = false);
+
+public sealed record UpdateLibraryMonitoringRequest(bool Enabled);
 
 public sealed record LibraryDiscoverySummary(
     Guid Id,
@@ -152,7 +175,10 @@ public sealed record LibrarySummary(
     DateTimeOffset CreatedAt,
     DateTimeOffset? LastScanStartedAt,
     DateTimeOffset? LastScanCompletedAt,
-    string? LastError);
+    string? LastError,
+    bool MonitoringEnabled = true,
+    DateTimeOffset? LastObservedAt = null,
+    LibraryHealthStatus Health = LibraryHealthStatus.Unknown);
 
 public sealed record LibraryScanIssueSummary(
     string Code,
@@ -173,7 +199,10 @@ public sealed record LibraryScanSummary(
     int MissingFiles,
     int SkippedFiles,
     string? Error,
-    IReadOnlyList<LibraryScanIssueSummary> Issues);
+    IReadOnlyList<LibraryScanIssueSummary> Issues,
+    LibraryScanTrigger Trigger = LibraryScanTrigger.Manual,
+    int Attempt = 0,
+    string? TargetRelativePath = null);
 
 public sealed record PagedResponse<T>(
     IReadOnlyList<T> Items,
@@ -257,7 +286,21 @@ public enum MetadataJobState
     Completed,
     Failed,
     Interrupted,
+    Cancelled,
 }
+
+public enum MetadataJobMode
+{
+    Incremental,
+    FullRefresh,
+    SingleItem,
+    RetryFailed,
+}
+
+public sealed record StartMetadataJobRequest(
+    MetadataJobMode Mode = MetadataJobMode.FullRefresh,
+    Guid? LibraryId = null,
+    Guid? MediaId = null);
 
 public enum MetadataReviewState
 {
@@ -374,7 +417,59 @@ public sealed record MetadataJobSummary(
     string? Error,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt,
+    MetadataJobMode Mode = MetadataJobMode.FullRefresh,
+    int Attempt = 0);
+
+public enum CatalogWatchState
+{
+    Unplayed,
+    InProgress,
+    Completed,
+}
+
+public enum CatalogSort
+{
+    Title,
+    DateAdded,
+    ReleaseYear,
+    LastPlayed,
+}
+
+public enum SortDirection
+{
+    Ascending,
+    Descending,
+}
+
+public sealed record CatalogQuery(
+    MediaKind? Kind = null,
+    Guid? LibraryId = null,
+    string? Genre = null,
+    MediaAvailability? Availability = null,
+    bool? Favorite = null,
+    CatalogWatchState? WatchState = null,
+    int? YearFrom = null,
+    int? YearTo = null,
+    CatalogSort Sort = CatalogSort.Title,
+    SortDirection Direction = SortDirection.Ascending,
+    int Offset = 0,
+    int Limit = 100);
+
+public enum SyncChangeArea
+{
+    Catalog,
+    Libraries,
+    Metadata,
+    Collections,
+    UserState,
+}
+
+public sealed record SyncChangesResponse(
+    long Cursor,
+    bool ResetRequired,
+    IReadOnlyList<SyncChangeArea> ChangedAreas,
+    IReadOnlyList<Guid> ChangedMediaIds);
 
 public sealed record SetFavoriteRequest(bool IsFavorite);
 

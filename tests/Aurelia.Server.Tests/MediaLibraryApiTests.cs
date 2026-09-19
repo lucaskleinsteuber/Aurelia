@@ -93,11 +93,13 @@ public sealed class MediaLibraryApiTests
                     && episode.Availability == MediaAvailability.Missing);
 
             var offlinePath = root + "-offline";
+            Guid waitingScanId;
             Directory.Move(root, offlinePath);
             try
             {
                 var offlineScan = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
-                Assert.Equal(LibraryScanState.Failed, offlineScan.State);
+                Assert.Equal(LibraryScanState.WaitingForStorage, offlineScan.State);
+                waitingScanId = offlineScan.Id;
                 var libraries = await ListLibrariesAsync(client, owner.Token);
                 Assert.Equal(LibraryAvailability.Unavailable, Assert.Single(libraries).Availability);
                 var unchanged = await GetSeriesDetailAsync(client, userLogin.Token, seriesId);
@@ -109,6 +111,15 @@ public sealed class MediaLibraryApiTests
             finally
             {
                 Directory.Move(offlinePath, root);
+            }
+
+            using (var cancelWaiting = ApiTestClient.Authorized(
+                       HttpMethod.Delete,
+                       $"/api/v1/scans/{waitingScanId}",
+                       owner.Token))
+            using (var cancelResponse = await client.SendAsync(cancelWaiting))
+            {
+                Assert.Equal(HttpStatusCode.NoContent, cancelResponse.StatusCode);
             }
 
             using (var invalidPage = ApiTestClient.Authorized(
@@ -401,7 +412,7 @@ public sealed class MediaLibraryApiTests
     }
 
     [Fact]
-    public async Task QueuedAndRunningScansBecomeInterruptedAfterRestart()
+    public async Task RunningScansResumeAfterRestart()
     {
         var dataDirectory = TestPaths.CreateDataDirectory();
         var root = CreateDirectory("Restart Show");
@@ -442,7 +453,8 @@ public sealed class MediaLibraryApiTests
             using var response = await secondClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
             var scan = await ApiTestClient.ReadAsync<LibraryScanSummary>(response);
-            Assert.Equal(LibraryScanState.Interrupted, scan.State);
+            Assert.Equal(LibraryScanState.Completed, scan.State);
+            Assert.Equal(1, scan.Attempt);
             Assert.NotNull(scan.CompletedAt);
         }
         finally
@@ -581,6 +593,150 @@ public sealed class MediaLibraryApiTests
             blockingScanner.Release.Set();
             DeleteFixture(root);
         }
+    }
+
+    [Fact]
+    public async Task MonitoringMoveIdentitySearchAndSyncRemainConsistent()
+    {
+        var root = CreateDirectory("Reliable Movies");
+        var original = Touch(root, "Arrival (2016).mkv");
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.Movies);
+
+            using (var disable = ApiTestClient.Authorized(
+                       HttpMethod.Put,
+                       $"/api/v1/libraries/{library.Id}/monitoring",
+                       owner.Token,
+                       new UpdateLibraryMonitoringRequest(false)))
+            using (var response = await client.SendAsync(disable))
+            {
+                response.EnsureSuccessStatusCode();
+                var updated = await ApiTestClient.ReadAsync<LibrarySummary>(response);
+                Assert.False(updated.MonitoringEnabled);
+            }
+
+            var firstScan = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+            Assert.Equal(LibraryScanTrigger.Manual, firstScan.Trigger);
+            Assert.Equal(1, firstScan.Attempt);
+            var firstCatalog = await GetCatalogAsync(client, owner.Token);
+            var movie = Assert.Single(firstCatalog.Items);
+
+            using (var favorite = ApiTestClient.Authorized(
+                       HttpMethod.Put,
+                       $"/api/v1/media/{movie.Id}/favorite",
+                       owner.Token,
+                       new SetFavoriteRequest(true)))
+            using (var response = await client.SendAsync(favorite))
+                response.EnsureSuccessStatusCode();
+
+            var moved = Path.Combine(root, "Renamed", "Arrival Final.mkv");
+            Directory.CreateDirectory(Path.GetDirectoryName(moved)!);
+            File.Move(original, moved);
+            var secondScan = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+            Assert.Equal(0, secondScan.AddedFiles);
+            Assert.Equal(1, secondScan.UpdatedFiles);
+            var secondCatalog = await GetCatalogAsync(client, owner.Token);
+            var movedMovie = Assert.Single(secondCatalog.Items);
+            Assert.Equal(movie.Id, movedMovie.Id);
+            Assert.True(movedMovie.IsFavorite);
+
+            string entityTag;
+            using (var catalog = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       "/api/v1/catalog/items?offset=0&limit=100",
+                       owner.Token))
+            using (var response = await client.SendAsync(catalog))
+            {
+                response.EnsureSuccessStatusCode();
+                Assert.NotNull(response.Headers.ETag);
+                entityTag = response.Headers.ETag.ToString();
+            }
+
+            using (var unchanged = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       "/api/v1/catalog/items?offset=0&limit=100",
+                       owner.Token))
+            {
+                unchanged.Headers.TryAddWithoutValidation("If-None-Match", entityTag);
+                using var response = await client.SendAsync(unchanged);
+                Assert.Equal(HttpStatusCode.NotModified, response.StatusCode);
+                Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+            }
+
+            using (var search = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       "/api/v1/catalog/search?query=Arrival&offset=0&limit=10",
+                       owner.Token))
+            using (var response = await client.SendAsync(search))
+            {
+                response.EnsureSuccessStatusCode();
+                Assert.Equal(movie.Id, Assert.Single(
+                    (await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response)).Items).Id);
+            }
+
+            using (var filtered = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       $"/api/v1/catalog/items?kind=movie&libraryId={library.Id}&favorite=true&availability=available&sort=dateAdded&direction=descending",
+                       owner.Token))
+            using (var response = await client.SendAsync(filtered))
+            {
+                response.EnsureSuccessStatusCode();
+                Assert.Equal(movie.Id, Assert.Single(
+                    (await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response)).Items).Id);
+            }
+
+            using (var invalidFilter = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       "/api/v1/catalog/items?yearFrom=2020&yearTo=2010",
+                       owner.Token))
+            using (var response = await client.SendAsync(invalidFilter))
+            {
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                Assert.Equal("invalid_year_range", (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code);
+            }
+
+            using (var rebuild = ApiTestClient.Authorized(
+                       HttpMethod.Post,
+                       "/api/v1/catalog/search/rebuild",
+                       owner.Token))
+            using (var response = await client.SendAsync(rebuild))
+            {
+                Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            }
+
+            using (var sync = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       "/api/v1/sync/changes?after=0&waitSeconds=0",
+                       owner.Token))
+            using (var response = await client.SendAsync(sync))
+            {
+                response.EnsureSuccessStatusCode();
+                var changes = await ApiTestClient.ReadAsync<SyncChangesResponse>(response);
+                Assert.True(changes.Cursor > 0);
+                Assert.Contains(SyncChangeArea.Catalog, changes.ChangedAreas);
+            }
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    private static async Task<PagedResponse<CatalogItemSummary>> GetCatalogAsync(
+        HttpClient client,
+        string token)
+    {
+        using var request = ApiTestClient.Authorized(
+            HttpMethod.Get,
+            "/api/v1/catalog/items?offset=0&limit=100",
+            token);
+        using var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response);
     }
 
     private static async Task<LibrarySummary> CreateLibraryAsync(

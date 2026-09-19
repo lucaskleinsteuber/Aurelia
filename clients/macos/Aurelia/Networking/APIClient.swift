@@ -214,6 +214,15 @@ struct APIClient: Sendable {
     _ = try await perform(path: "/api/v1/libraries/\(id.uuidString.lowercased())", method: "DELETE")
   }
 
+  func updateLibraryMonitoring(id: UUID, enabled: Bool) async throws -> LibrarySummary {
+    let body = try JSONEncoder().encode(["enabled": enabled])
+    let data = try await perform(
+      path: "/api/v1/libraries/\(id.uuidString.lowercased())/monitoring",
+      method: "PUT",
+      body: body)
+    return try Self.decode(LibrarySummary.self, from: data)
+  }
+
   func startLibraryScan(id: UUID) async throws -> LibraryScanSummary {
     let data = try await perform(
       path: "/api/v1/libraries/\(id.uuidString.lowercased())/scans",
@@ -228,6 +237,10 @@ struct APIClient: Sendable {
 
   func scan(id: UUID) async throws -> LibraryScanSummary {
     try await get("/api/v1/scans/\(id.uuidString.lowercased())")
+  }
+
+  func cancelScan(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/scans/\(id.uuidString.lowercased())", method: "DELETE")
   }
 
   func activeLibraryScans() async throws -> [LibraryScanSummary] {
@@ -277,6 +290,27 @@ struct APIClient: Sendable {
 
   func metadataJob(id: UUID) async throws -> MetadataJobSummary {
     try await get("/api/v1/metadata/jobs/\(id.uuidString.lowercased())")
+  }
+
+  func metadataJobs(activeOnly: Bool = false, limit: Int = 25) async throws
+    -> [MetadataJobSummary]
+  {
+    try await get("/api/v1/metadata/jobs?activeOnly=\(activeOnly)&limit=\(limit)")
+  }
+
+  func cancelMetadataJob(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/metadata/jobs/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func syncChanges(after cursor: Int64, waitSeconds: Int) async throws
+    -> SyncChangesResponse
+  {
+    let data = try await perform(
+      path: "/api/v1/sync/changes?after=\(cursor)&waitSeconds=\(waitSeconds)",
+      method: "GET",
+      timeout: TimeInterval(max(waitSeconds + 5, 15)))
+    return try Self.decode(SyncChangesResponse.self, from: data)
   }
 
   func pruneArtwork() async throws {
@@ -494,14 +528,20 @@ struct APIClient: Sendable {
     return try Self.decode(Value.self, from: data)
   }
 
-  private func perform(path: String, method: String, body: Data? = nil) async throws -> Data {
+  private func perform(
+    path: String,
+    method: String,
+    body: Data? = nil,
+    timeout: TimeInterval = 15
+  ) async throws -> Data {
     let (data, _, _) = try await Self.request(
       baseURL: profile.baseURL,
       path: path,
       method: method,
       token: profile.token,
       body: body,
-      trustMode: .pinned(profile.publicKeyFingerprint))
+      trustMode: .pinned(profile.publicKeyFingerprint),
+      timeout: timeout)
     return data
   }
 
@@ -512,7 +552,8 @@ struct APIClient: Sendable {
     token: String?,
     body: Data?,
     trustMode: TLSTrustDelegate.Mode,
-    additionalHeaders: [String: String] = [:]
+    additionalHeaders: [String: String] = [:],
+    timeout: TimeInterval = 15
   ) async throws -> (Data, HTTPURLResponse, TLSTrustDelegate) {
     guard let host = baseURL.host,
       let url = URL(string: path, relativeTo: baseURL)?.absoluteURL
@@ -524,7 +565,7 @@ struct APIClient: Sendable {
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
     configuration.urlCache = nil
     configuration.httpCookieStorage = nil
-    configuration.timeoutIntervalForRequest = 15
+    configuration.timeoutIntervalForRequest = timeout
     let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
     defer { session.invalidateAndCancel() }
 

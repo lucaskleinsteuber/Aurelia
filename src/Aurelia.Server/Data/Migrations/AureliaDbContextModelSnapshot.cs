@@ -181,10 +181,16 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("LastObservedAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("LastScanCompletedAt")
                         .HasColumnType("INTEGER");
 
                     b.Property<long?>("LastScanStartedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MonitoringEnabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Name")
@@ -219,6 +225,12 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<int>("AddedFiles")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("Attempt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CancelRequestedAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("CompletedAt")
                         .HasColumnType("INTEGER");
 
@@ -233,6 +245,12 @@ namespace Aurelia.Server.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("FilesProcessed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("HeartbeatAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LeaseExpiresAt")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("LibraryRootId")
@@ -250,6 +268,15 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetRelativePath")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("UpdatedFiles")
@@ -433,6 +460,10 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long?>("FileSize")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("FileSystemIdentity")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -474,8 +505,14 @@ namespace Aurelia.Server.Data.Migrations
 
                     b.HasIndex("ParentId");
 
+                    b.HasIndex("LibraryRootId", "FileSystemIdentity");
+
                     b.HasIndex("LibraryRootId", "NormalizedSourcePath")
                         .IsUnique();
+
+                    b.HasIndex("Kind", "Availability", "CreatedAt");
+
+                    b.HasIndex("LibraryRootId", "Kind", "Year");
 
                     b.HasIndex("LibraryRootId", "Kind", "ParentId", "SeasonNumber", "EpisodeNumber");
 
@@ -605,6 +642,12 @@ namespace Aurelia.Server.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Attempt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CancelRequestedAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("CompletedAt")
                         .HasColumnType("INTEGER");
 
@@ -614,6 +657,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<string>("Error")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
+
+                    b.Property<long?>("HeartbeatAt")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("ItemsFailed")
                         .HasColumnType("INTEGER");
@@ -630,10 +676,18 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<int>("ItemsTotal")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long?>("LeaseExpiresAt")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid?>("LibraryRootId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<long?>("StartedAt")
@@ -858,6 +912,35 @@ namespace Aurelia.Server.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.SyncChange", b =>
+                {
+                    b.Property<long>("Cursor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Area")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Cursor");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("UserId", "Cursor");
+
+                    b.ToTable("SyncChanges");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.UserFavorite", b =>

@@ -95,7 +95,8 @@ public sealed class LibraryService(
         var activeScan = await database.LibraryScans.AnyAsync(
             scan => existingIds.Contains(scan.LibraryRootId)
                 && (scan.State == LibraryScanState.Queued
-                    || scan.State == LibraryScanState.Running),
+                    || scan.State == LibraryScanState.Running
+                    || scan.State == LibraryScanState.WaitingForStorage),
             cancellationToken);
         if (activeScan)
         {
@@ -250,7 +251,11 @@ public sealed class LibraryService(
 
         await database.SaveChangesAsync(cancellationToken);
         var target = discoveries.Count == 1 ? discoveries[0].RelativePath : null;
-        return await StartScanAsync(libraryId, target, cancellationToken);
+        return await StartScanAsync(
+            libraryId,
+            LibraryScanTrigger.ClassificationChanged,
+            target,
+            cancellationToken);
     }
 
     public async Task<LibraryScanSummary> ResetClassificationDecisionAsync(
@@ -277,7 +282,11 @@ public sealed class LibraryService(
         discovery.Decision = null;
         discovery.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
-        return await StartScanAsync(libraryId, discovery.RelativePath, cancellationToken);
+        return await StartScanAsync(
+            libraryId,
+            LibraryScanTrigger.ClassificationChanged,
+            discovery.RelativePath,
+            cancellationToken);
     }
 
     public async Task RemoveAsync(Guid libraryId, CancellationToken cancellationToken)
@@ -286,7 +295,8 @@ public sealed class LibraryService(
         var hasActiveScan = await database.LibraryScans.AnyAsync(
             scan => scan.LibraryRootId == libraryId
                 && (scan.State == LibraryScanState.Queued
-                    || scan.State == LibraryScanState.Running),
+                    || scan.State == LibraryScanState.Running
+                    || scan.State == LibraryScanState.WaitingForStorage),
             cancellationToken);
         if (hasActiveScan)
         {
@@ -310,11 +320,16 @@ public sealed class LibraryService(
         Guid libraryId,
         CancellationToken cancellationToken)
     {
-        return await StartScanAsync(libraryId, null, cancellationToken);
+        return await StartScanAsync(
+            libraryId,
+            LibraryScanTrigger.Manual,
+            null,
+            cancellationToken);
     }
 
-    private async Task<LibraryScanSummary> StartScanAsync(
+    public async Task<LibraryScanSummary> StartScanAsync(
         Guid libraryId,
+        LibraryScanTrigger trigger,
         string? targetRelativePath,
         CancellationToken cancellationToken)
     {
@@ -329,7 +344,8 @@ public sealed class LibraryService(
             var hasActiveScan = await database.LibraryScans.AnyAsync(
                 scan => scan.LibraryRootId == libraryId
                     && (scan.State == LibraryScanState.Queued
-                        || scan.State == LibraryScanState.Running),
+                        || scan.State == LibraryScanState.Running
+                        || scan.State == LibraryScanState.WaitingForStorage),
                 cancellationToken);
             if (hasActiveScan)
             {
@@ -341,11 +357,13 @@ public sealed class LibraryService(
                 Id = Guid.NewGuid(),
                 LibraryRootId = libraryId,
                 State = LibraryScanState.Queued,
+                Trigger = trigger,
+                TargetRelativePath = targetRelativePath,
                 CreatedAt = DateTimeOffset.UtcNow,
             };
             database.LibraryScans.Add(scan);
             await database.SaveChangesAsync(cancellationToken);
-            scanQueue.Enqueue(scan.Id, libraryId, targetRelativePath);
+            scanQueue.Pulse();
             return ToSummary(scan, []);
         }
         catch
@@ -353,6 +371,90 @@ public sealed class LibraryService(
             scanQueue.Release(libraryId);
             throw;
         }
+    }
+
+    public async Task<LibrarySummary> SetMonitoringAsync(
+        Guid libraryId,
+        bool enabled,
+        CancellationToken cancellationToken)
+    {
+        var library = await RequireLibraryAsync(libraryId, cancellationToken);
+        var wasEnabled = library.MonitoringEnabled;
+        library.MonitoringEnabled = enabled;
+        library.LastObservedAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(cancellationToken);
+        if (enabled && !wasEnabled)
+        {
+            try
+            {
+                _ = await StartScanAsync(
+                    libraryId,
+                    LibraryScanTrigger.Scheduled,
+                    targetRelativePath: null,
+                    cancellationToken);
+            }
+            catch (LibraryException exception) when (exception.Code == "library_scan_active")
+            {
+                // Existing work already reconciles this library.
+            }
+        }
+
+        return ToSummary(library);
+    }
+
+    public async Task CancelScanAsync(Guid scanId, CancellationToken cancellationToken)
+    {
+        var scan = await database.LibraryScans.SingleOrDefaultAsync(
+            candidate => candidate.Id == scanId,
+            cancellationToken)
+            ?? throw new LibraryException(
+                "scan_not_found",
+                "The library scan was not found.",
+                StatusCodes.Status404NotFound);
+        if (scan.State is LibraryScanState.Completed
+            or LibraryScanState.Failed
+            or LibraryScanState.Interrupted
+            or LibraryScanState.Cancelled)
+        {
+            return;
+        }
+
+        scan.CancelRequestedAt ??= DateTimeOffset.UtcNow;
+        if (scan.State is LibraryScanState.Queued or LibraryScanState.WaitingForStorage)
+        {
+            scan.State = LibraryScanState.Cancelled;
+            scan.CompletedAt = DateTimeOffset.UtcNow;
+            scan.Error = null;
+            scanQueue.Release(scan.LibraryRootId);
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
+        scanQueue.RequestCancellation(scanId);
+    }
+
+    public async Task<bool> ResumeWaitingForStorageAsync(
+        Guid libraryId,
+        CancellationToken cancellationToken)
+    {
+        var scan = await database.LibraryScans
+            .Where(candidate => candidate.LibraryRootId == libraryId
+                && candidate.State == LibraryScanState.WaitingForStorage
+                && !candidate.CancelRequestedAt.HasValue)
+            .OrderBy(candidate => candidate.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (scan is null)
+        {
+            return false;
+        }
+
+        scan.State = LibraryScanState.Queued;
+        scan.Error = null;
+        scan.LeaseExpiresAt = null;
+        scan.Trigger = LibraryScanTrigger.StorageReconnected;
+        await database.SaveChangesAsync(cancellationToken);
+        scanQueue.ReserveExisting(libraryId);
+        scanQueue.Pulse();
+        return true;
     }
 
     public async Task<IReadOnlyList<LibraryScanSummary>> StartAllScansAsync(
@@ -432,7 +534,8 @@ public sealed class LibraryService(
         if (activeOnly)
         {
             query = query.Where(scan => scan.State == LibraryScanState.Queued
-                || scan.State == LibraryScanState.Running);
+                || scan.State == LibraryScanState.Running
+                || scan.State == LibraryScanState.WaitingForStorage);
         }
 
         var scans = await query
@@ -520,7 +623,16 @@ public sealed class LibraryService(
             library.CreatedAt,
             library.LastScanStartedAt,
             library.LastScanCompletedAt,
-            library.LastError);
+            library.LastError,
+            library.MonitoringEnabled,
+            library.LastObservedAt,
+            library.Availability switch
+            {
+                LibraryAvailability.Available => LibraryHealthStatus.Healthy,
+                LibraryAvailability.Unavailable => LibraryHealthStatus.WaitingForStorage,
+                LibraryAvailability.Error => LibraryHealthStatus.Error,
+                _ => LibraryHealthStatus.Unknown,
+            });
     }
 
     private static LibraryScanSummary ToSummary(
@@ -544,7 +656,10 @@ public sealed class LibraryService(
             issues.Take(500).Select(issue => new LibraryScanIssueSummary(
                 issue.Code,
                 issue.Message,
-                issue.Path)).ToList());
+                issue.Path)).ToList(),
+            scan.Trigger,
+            scan.Attempt,
+            scan.TargetRelativePath);
     }
 
     private static LibraryException ScanAlreadyActive()

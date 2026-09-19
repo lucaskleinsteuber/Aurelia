@@ -3,7 +3,7 @@
 Aurelia is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
 and connects securely to a native macOS library and playback client. Aurelia
-1.0.12 starts this Mac as a host by default, preserves an explicitly selected
+1.0.13 starts this Mac as a host by default, preserves an explicitly selected
 remote-client mode, and makes storage import available throughout the app.
 People choose whole storage locations instead of separating movie and TV
 folders themselves; Aurelia classifies clear structures locally and asks
@@ -30,8 +30,12 @@ native app.
 - Owner, administrator, and user roles
 - Password login, revocable device sessions, and one-time pairing codes
 - Automatic storage locations with safe manual scans and persistent review decisions
+- Per-library automatic filesystem monitoring with debounce, stability checks,
+  startup/scheduled reconciliation, and offline-storage recovery
+- Persistent lease-based scan and metadata queues with retries and cancellation
 - Local filename parsing for movies, seasons, episodes, extras, and trailers
-- Stable catalog IDs, missing-file state, and offline-drive protection
+- Stable catalog IDs across unambiguous same-library moves, persistent
+  missing-file state, and offline-drive protection
 - Authenticated paged movie and series catalog APIs
 - Short-lived, revocable playback URLs bound to one media file and device session
 - Seekable HTTP Range streaming of original media without buffering whole files
@@ -47,6 +51,8 @@ native app.
   and per-user Home data with an hourly stable recommendation
 - Compact presentation endpoints for paged movie/series cards and bundled
   details, with episode search context and no source paths in responses
+- Server-side indexed search, combined catalog filters and sorting, revision
+  ETags, and a bounded authenticated change cursor
 
 ## Current Mac client
 
@@ -72,6 +78,10 @@ native app.
 - A unified Add Media / Manage Media sheet for multiple folders and drives,
   library type selection, persistent scan history, rescans, safe removal, and
   classification review
+- Per-library monitoring controls, health, automatic-change status, scan trigger,
+  retry attempt, offline waiting, and cancellation in the media manager
+- Foreground-only actor-isolated change polling with clean cancellation on
+  backgrounding or server-profile changes and fallback for 1.0.12 servers
 - Bonjour server discovery and manual server addresses
 - Human-verified certificate pinning during one-time pairing
 - Device token and server identity stored in the macOS Keychain
@@ -211,7 +221,7 @@ incompatible legacy ACL entries untouched; upgrading from Build 5 therefore
 requires pairing once again. UI tests use an in-memory profile store and never
 read or write the production Keychain service.
 
-For normal Aurelia 1.0.12 use, launch Aurelia. It starts the local server and,
+For normal Aurelia 1.0.13 use, launch Aurelia. It starts the local server and,
 on a new installation, opens **Set Up This Mac** automatically. The native
 assistant creates the owner, enables LAN HTTPS, and lets the owner
 select one or more drives or folders. Technical server and port settings remain

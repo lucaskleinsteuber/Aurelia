@@ -10,7 +10,8 @@ public sealed class MetadataService(
     MetadataProviderSettingsStore settings,
     ITmdbClient tmdb,
     MetadataJobScheduler scheduler,
-    ArtworkStore artworkStore)
+    ArtworkStore artworkStore,
+    MediaSearchIndexService searchIndex)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -44,12 +45,26 @@ public sealed class MetadataService(
     }
 
     public async Task<MetadataJobSummary> StartAsync(Guid? libraryId, Guid? mediaId, CancellationToken cancellationToken)
+        => await StartAsync(
+            new StartMetadataJobRequest(
+                mediaId.HasValue ? MetadataJobMode.SingleItem : MetadataJobMode.FullRefresh,
+                libraryId,
+                mediaId),
+            cancellationToken);
+
+    public async Task<MetadataJobSummary> StartAsync(
+        StartMetadataJobRequest request,
+        CancellationToken cancellationToken)
     {
         RequireEnabled();
+        var libraryId = request.LibraryId;
+        var mediaId = request.MediaId;
         if (libraryId.HasValue && !await database.LibraryRoots.AnyAsync(item => item.Id == libraryId, cancellationToken))
             throw NotFound("library_not_found", "The storage location was not found.");
         if (mediaId.HasValue && !await database.MediaItems.AnyAsync(item => item.Id == mediaId, cancellationToken))
             throw NotFound("media_not_found", "The media item was not found.");
+        if (request.Mode == MetadataJobMode.SingleItem && !mediaId.HasValue)
+            throw new MetadataException("metadata_item_required", "Single-item metadata refresh requires a media ID.", StatusCodes.Status400BadRequest);
         if (await database.MetadataJobs.AnyAsync(job => job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running, cancellationToken))
             throw new MetadataException("metadata_job_active", "A metadata job is already running.", StatusCodes.Status409Conflict);
 
@@ -58,18 +73,50 @@ public sealed class MetadataService(
             Id = Guid.NewGuid(),
             LibraryRootId = libraryId,
             MediaItemId = mediaId,
+            Mode = request.Mode,
             State = MetadataJobState.Queued,
             CreatedAt = DateTimeOffset.UtcNow,
         };
         database.MetadataJobs.Add(job);
         await database.SaveChangesAsync(cancellationToken);
-        scheduler.Enqueue(job.Id);
+        scheduler.Pulse();
         return ToSummary(job);
     }
 
     public async Task<MetadataJobSummary> GetJobAsync(Guid id, CancellationToken cancellationToken) =>
         ToSummary(await database.MetadataJobs.AsNoTracking().SingleOrDefaultAsync(job => job.Id == id, cancellationToken)
             ?? throw NotFound("metadata_job_not_found", "The metadata job was not found."));
+
+    public async Task<IReadOnlyList<MetadataJobSummary>> ListJobsAsync(
+        bool activeOnly,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        if (limit is < 1 or > 100)
+            throw new MetadataException("invalid_page", "Limit must be between 1 and 100.", StatusCodes.Status400BadRequest);
+        var query = database.MetadataJobs.AsNoTracking();
+        if (activeOnly)
+            query = query.Where(job => job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running);
+        return (await query.OrderByDescending(job => job.CreatedAt).Take(limit).ToListAsync(cancellationToken))
+            .Select(ToSummary).ToList();
+    }
+
+    public async Task CancelJobAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id, cancellationToken)
+            ?? throw NotFound("metadata_job_not_found", "The metadata job was not found.");
+        if (job.State is MetadataJobState.Completed or MetadataJobState.Failed
+            or MetadataJobState.Interrupted or MetadataJobState.Cancelled)
+            return;
+        job.CancelRequestedAt ??= DateTimeOffset.UtcNow;
+        if (job.State == MetadataJobState.Queued)
+        {
+            job.State = MetadataJobState.Cancelled;
+            job.CompletedAt = DateTimeOffset.UtcNow;
+        }
+        await database.SaveChangesAsync(cancellationToken);
+        scheduler.RequestCancellation(id);
+    }
 
     public async Task<IReadOnlyList<MetadataReviewSummary>> ReviewsAsync(CancellationToken cancellationToken)
     {
@@ -98,6 +145,11 @@ public sealed class MetadataService(
             throw new MetadataException("metadata_type_mismatch", "The selected result has the wrong media type.", StatusCodes.Status400BadRequest);
         var provider = await tmdb.GetAsync(configuration.Token!, configuration.Language, request.MediaType, request.ProviderMediaId, cancellationToken);
         await ApplyAsync(item, provider, 1, cancellationToken);
+        // Manual matching must enrich the whole series just like the automatic
+        // metadata job does. Previously only the series record was updated, so
+        // choosing a TV result from the review queue left its episodes unmatched.
+        await ApplyEpisodesAsync(item, provider, configuration, cancellationToken);
+        await searchIndex.RebuildAsync(cancellationToken);
         return MetadataPresentation.ToSummary(item);
     }
 
@@ -127,6 +179,7 @@ public sealed class MetadataService(
         foreach (var field in request.ClearFields ?? []) ClearField(metadata, field);
         metadata.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
+        await searchIndex.RebuildAsync(cancellationToken);
         return MetadataPresentation.ToSummary(item);
     }
 
@@ -145,6 +198,7 @@ public sealed class MetadataService(
             item.Metadata.UpdatedAt = DateTimeOffset.UtcNow;
             await database.SaveChangesAsync(cancellationToken);
         }
+        await searchIndex.RebuildAsync(cancellationToken);
         return MetadataPresentation.ToSummary(item);
     }
 
@@ -268,7 +322,7 @@ public sealed class MetadataService(
             .SingleOrDefaultAsync(item => item.Id == id && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series), cancellationToken)
             ?? throw NotFound("media_not_found", "A matchable movie or series was not found.");
 
-    internal static MetadataJobSummary ToSummary(MetadataJob job) => new(job.Id, job.LibraryRootId, job.MediaItemId, job.State, job.ItemsTotal, job.ItemsProcessed, job.ItemsMatched, job.ItemsNeedingReview, job.ItemsFailed, job.Error, job.CreatedAt, job.StartedAt, job.CompletedAt);
+    internal static MetadataJobSummary ToSummary(MetadataJob job) => new(job.Id, job.LibraryRootId, job.MediaItemId, job.State, job.ItemsTotal, job.ItemsProcessed, job.ItemsMatched, job.ItemsNeedingReview, job.ItemsFailed, job.Error, job.CreatedAt, job.StartedAt, job.CompletedAt, job.Mode, job.Attempt);
 
     private static MetadataReviewSummary ToReview(MetadataReview review) => new(
         review.Id, review.MediaItemId, review.MediaItem.OverrideTitle ?? review.MediaItem.DetectedTitle,

@@ -1,122 +1,95 @@
-# Aurelia Home Agent Rules
+# Aurelia Agent Rules
 
 These rules apply to every task in this repository.
 
 ## Scope and product direction
 
-- Never modify `/Users/lucas/Documents/Aurelia` while working on Aurelia Home.
-- Aurelia Home is a real self-hosted server with native apps as its primary
-  clients. Never replace that architecture with a browser-only UI or a menu-bar
-  shortcut whose main purpose is opening localhost. A responsive optional web
-  client for devices without a native app may be added in a dedicated later
-  milestone.
-- Keep all user-facing product text in English until localization is a planned
-  task.
-- Preserve the clean Aurelia visual direction when the native client is added,
-  but prioritize a working server and playback path before UI refinement.
-- The server must never copy, convert, remux, transcode, or cache video files.
-  Media stays at its original path.
+- Aurelia is a self-hosted media server with native clients. Do not replace it
+  with a browser-only product or a shortcut that merely opens localhost.
+- Keep all user-facing text in English until localization is an explicit task.
+- Preserve the native Apple TV/macOS design direction, but keep infrastructure
+  milestones focused and functional.
+- Never copy, convert, remux, transcode, hash, analyse, or cache video content.
+  Media remains at its original user-selected path; scans read only filesystem
+  metadata and directory structure.
+- Missing or offline media must retain identity, metadata, favorites, progress,
+  and collection membership unless an administrator explicitly removes it.
+- `/Users/lucaskleinsteuber/Documents/Aurelia Classic`, its app, database,
+  `Library.store`, and Application Support data are read-only references. Never
+  edit, migrate, launch for automation, or copy from them.
 
 ## Native client design contract
 
-- Keep one consistent Apple TV and macOS 26 visual language throughout the app.
-- Content extends beneath a transparent sidebar; never add a gray or black title
-  strip above the content.
-- A later Home build will rotate one movie or series recommendation every hour.
-- Rebuild editing flows as one consistent native design instead of preserving
-  the old Aurelia editor menus.
-- Keep the player aligned with Lucas's supplied Aurelia references: restrained
-  controls over the video, automatic control hiding, and content-first layout.
-- In native fullscreen, do not draw custom traffic-light buttons. Let macOS show
-  its real window controls only when the pointer reaches the top screen edge.
-- The full Home and library visual rebuild remains a dedicated later milestone.
+- Maintain one coherent Apple TV and macOS visual language.
+- Content extends beneath the transparent sidebar; never introduce a gray or
+  black strip above the content.
+- Use native macOS window controls and fullscreen behavior. Never draw fake
+  traffic-light buttons.
+- Editing, setup, settings, library management, details, and playback should use
+  the same design system. Do not revive the Classic app's inconsistent menus.
+- Keep player controls restrained, accessible, keyboard-operable, and hidden
+  after inactivity only when interaction state permits it.
 
-## Repository hygiene
+## Repository and workspace hygiene
 
-- Keep only source code, migrations, versioned tests, configuration, and the
-  minimum useful documentation in this repository.
-- Do not put compiled builds, test results, runtime logs, temporary files,
-  package caches, media, databases, or generated artwork in the repository.
-- Test source belongs in `tests/` and remains versioned so verification is
-  reproducible. Generated test data and results do not belong in the repository.
-- Use `/Users/lucas/Documents/Aurelia Home Other` for generated development
-  material. The standard locations are:
-  - `Build/` for compiler and publish output
-  - `Package Cache/` for restored packages
-  - `Test Runs/` and `Test Results/` for generated test data and reports
-  - `Logs/` for development logs
-  - `Aurelia Home - Build Backup/` for replaced installed app bundles
-  - `Aurelia Home Build summarys/` for the single English summary per build
-- Never copy the Breaking Bad or El Camino test media into the repository,
-  Application Support, a build, or a test folder. Read it in place only when a
-  later media milestone explicitly needs it.
-- Keep generated server data small. Do not perform a full-library scan or create
-  large caches without an explicit task and a bounded representative test first.
-- macOS privacy-protected folders must never become runtime locations. Build
-  output may remain under `Aurelia Home Other`, but XCTest hosts and UI-test
-  runners must be staged under a unique
-  `~/Library/Caches/AureliaHome/TestRuns/<run-id>` directory. Pre-install smoke
-  candidates must use a unique `/private/tmp/AureliaHome/<run-id>` directory.
-  Copy only logs, result bundles, and reports back to `Aurelia Home Other`, then
-  remove the temporary runtime directory. Launch installed candidates only from
-  `/Applications`.
-- Tests must use in-memory credentials or credentials created by the same signed
-  test host. Never seed the production Keychain with the `security` command-line
-  tool, and never trigger privacy access merely to discover files elsewhere in
-  the user's home directory.
+- Keep only source, migrations, versioned tests, configuration, and useful
+  documentation in the repository.
+- Never commit build products, result bundles, logs, caches, runtime data,
+  SQLite files, artwork, media, credentials, tokens, or signing material.
+- Generated output remains in the adjacent historical external workspace
+  `/Users/lucaskleinsteuber/Documents/Aurelia Home Other`; do not rename or move
+  that directory merely to change the product name. Its standard subdirectories
+  are `Build/`, `Package Cache/`, `Test Results/`, `Logs/`, and
+  `Aurelia Build summarys/`.
+- Runnable Mac test products must be staged under a unique
+  `~/Library/Caches/Aurelia/TestRuns/<run-id>` directory. Pre-install smoke
+  candidates use a unique `/private/tmp/Aurelia/<run-id>` directory. Launch the
+  installed release only from `/Applications`.
+- Tests use isolated synthetic media and credentials. Personal media may only
+  be read in place for an explicitly requested, bounded playback check; record
+  size and modification time before and after it.
 
 ## Build and verification
 
-- `AureliaHomeBuildNumber` in `Directory.Build.props` is the authoritative build
-  number. Increment it exactly once for each completed task that changes the
-  product. Never reuse or decrease a build number.
-- Build and test using the pinned SDK. At minimum run restore, a warning-free
-  build, all tests, formatting verification, and the relevant smoke test.
-- Treat warnings as errors. Do not install or publish a candidate that fails any
-  required check.
-- Verify both Apple Silicon and Intel macOS publish targets when the changed
-  deliverable supports both. Clearly record anything that could only be built,
-  not run, on the current hardware.
-- Do not claim that compilation, signing, or a successful API request proves an
-  untested UI, playback path, physical device, or complete media library.
+- `AureliaBuildNumber` in `Directory.Build.props` is authoritative. Increment it
+  exactly once, only after the pre-version verification is green; never reuse
+  or decrease a build number.
+- Use the pinned SDK and dependencies. At minimum run restore, format
+  verification, warning-free .NET and Swift builds, all relevant tests, and the
+  appropriate host/playback smoke tests.
+- Treat warnings as errors. Do not publish or install a failing candidate.
+- Verify arm64 and x86_64 server payloads and the universal macOS bundle. State
+  clearly when an architecture could only be built, not executed locally.
+- A successful build, signature check, or API call is evidence only for the
+  path actually exercised; never claim broader UI, codec, device, or library
+  coverage.
 
-## Installed macOS app and backups
+## Installation and version handling
 
-- Once a real native `Aurelia Home.app` target exists, every completed product
-  task must produce a fresh app bundle and replace `/Applications/Aurelia Home.app`
-  only after verification. Do not install a fake wrapper for a server-only build.
-- Before replacement, read the installed bundle's `CFBundleVersion`. Do not guess
-  its build number.
-- Stop the installed app and its owned server processes, then copy the complete
-  old bundle to `Aurelia Home - Build Backup/Aurelia Home Build <old-build>.app`.
-  Never merge bundles and never overwrite an existing backup silently.
-- Copy the complete verified candidate into `/Applications`, verify its version,
-  architecture, signature, and launch behavior there, and retain the backup for
-  rollback.
-- Never touch Aurelia's app bundle, data store, or rollback bundles during this
-  workflow.
+- Install the verified release as `/Applications/Aurelia.app`.
+- Before replacement, read the installed bundle's real `CFBundleVersion` and
+  `CFBundleShortVersionString`; never infer them from a filename.
+- Stop the installed app and its owned helper/server processes cleanly before
+  replacement. Preserve user data and libraries separately from the app bundle.
+- Do not leave old, previous, duplicate, renamed, or backup Aurelia app bundles
+  in `/Applications`. After an update, only the intended current
+  `/Applications/Aurelia.app` may remain.
+- Do not create local app-bundle backups in `/Applications` or elsewhere as part
+  of the release workflow. Git/GitHub history, tags, commits, and published
+  builds are the rollback mechanism.
 
-## Build summary
+## Build summary and Git discipline
 
-- After verification and installation, create exactly one concise English
-  Markdown file in `/Users/lucas/Documents/Aurelia Home Other/Aurelia Home Build summarys`.
-- Name it `Aurelia Home Build <build> - YYYY-MM-DD.md` and include: objective,
-  changed behavior, important files, verification results, installation and
-  backup status, known limitations or untested areas, and the final Git commit.
-- A server-only milestone must explicitly say that no app bundle was installed.
-  Do not invent an application backup when no prior app exists.
-
-## Git discipline
-
-- Work directly on `main`; do not create task branches unless Lucas explicitly
-  requests one.
-- After every completed change, inspect the diff, check for secrets, credentials,
-  local paths that should not be portable, generated files, databases, and media.
-- Name each completed build commit exactly after its product version. For
-  example, Build 7 is `1.0.7`, Build 8 is `1.0.8`, and subsequent builds follow
-  the same pattern. Push it to `origin/main` immediately. Do not batch unrelated
-  completed changes.
-- Never force-push, rewrite published history, or commit credentials, tokens,
-  personal media, generated builds, runtime data, or the external build summary.
-- A local commit is not completion: verify that the exact commit exists on
-  `origin/main` and record its hash in the build summary.
+- Work directly on `main` unless Lucas explicitly requests a branch.
+- Before committing, inspect the full diff and audit it for secrets, personal or
+  unportable paths, generated data, databases, binaries, media, caches, and test
+  results.
+- Commit a completed build with exactly its product version as the message
+  (for example `1.0.13`), push to `origin/main`, and verify the remote hash.
+- Never force-push, rewrite published history, or batch unrelated completed
+  product changes.
+- After verification, create exactly one concise English Markdown summary in
+  `/Users/lucaskleinsteuber/Documents/Aurelia Home Other/Aurelia Build summarys`.
+  Include objective, behavior, important files, verification, installation,
+  known limitations, and the verified final Git hash. Do not commit that
+  external summary.
