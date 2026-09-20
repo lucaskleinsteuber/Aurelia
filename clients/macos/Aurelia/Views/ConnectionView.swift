@@ -153,7 +153,10 @@ struct ConnectionView: View {
       }
     }
     .padding(22)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+    .background(
+      AureliaDesign.surface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+    )
     .overlay {
       RoundedRectangle(cornerRadius: AureliaDesign.cardRadius)
         .stroke(.white.opacity(0.08), lineWidth: 1)
@@ -225,7 +228,14 @@ struct ConnectionView: View {
       .accessibilityIdentifier("pair-this-mac")
     }
     .padding(22)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
+    .background(
+      AureliaDesign.surface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+    )
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+        .stroke(AureliaDesign.hairline, lineWidth: 1)
+    }
   }
 
   private func connectManually() {

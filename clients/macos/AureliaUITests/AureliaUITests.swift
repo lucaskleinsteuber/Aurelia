@@ -170,12 +170,12 @@ final class AureliaUITests: XCTestCase {
     defer { app.terminate() }
 
     app.typeKey(",", modifierFlags: .command)
-    let advanced = app.buttons["settings-advanced"]
-    XCTAssertTrue(advanced.waitForExistence(timeout: 8))
-    advanced.click()
+    let metadataTab = app.buttons["Metadata"]
+    XCTAssertTrue(metadataTab.waitForExistence(timeout: 8))
+    metadataTab.click()
     XCTAssertTrue(app.staticTexts["Movie & TV Information"].waitForExistence(timeout: 8))
-    XCTAssertTrue(app.buttons["metadata-enrich"].exists)
-    XCTAssertTrue(app.buttons["metadata-remove-token"].exists)
+    XCTAssertTrue(app.buttons["metadata-enrich"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.buttons["metadata-remove-token"].waitForExistence(timeout: 8))
     XCTAssertFalse(app.secureTextFields["tmdb-token"].exists)
     assertNoUnexpectedDialog(in: app)
   }
@@ -191,6 +191,9 @@ final class AureliaUITests: XCTestCase {
     defer { app.terminate() }
 
     app.typeKey(",", modifierFlags: .command)
+    let playbackTab = app.buttons["Playback"]
+    XCTAssertTrue(playbackTab.waitForExistence(timeout: 8))
+    playbackTab.click()
     XCTAssertTrue(app.staticTexts["Playback"].waitForExistence(timeout: 8))
     XCTAssertTrue(app.descendants(matching: .any)["playback-automatic-resume"].exists)
     XCTAssertTrue(app.descendants(matching: .any)["playback-auto-next"].exists)
@@ -283,7 +286,14 @@ final class AureliaUITests: XCTestCase {
     defer { app.terminate() }
 
     XCTAssertTrue(app.descendants(matching: .any)["home-page"].waitForExistence(timeout: 8))
-    XCTAssertTrue(app.descendants(matching: .any)["home-hero"].exists)
+    let hero = app.descendants(matching: .any)["home-hero"]
+    XCTAssertTrue(hero.exists)
+    let window = app.windows.firstMatch
+    XCTAssertTrue(window.exists)
+    XCTAssertLessThanOrEqual(
+      hero.frame.minY,
+      window.frame.minY + 2,
+      "The Home hero must reach the transparent titlebar; an empty top strip is a release blocker.")
     XCTAssertTrue(app.buttons["home-hero-action"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.staticTexts["Continue Watching"].exists)
     XCTAssertTrue(

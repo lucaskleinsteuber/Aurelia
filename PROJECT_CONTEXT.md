@@ -83,6 +83,11 @@ The complete path is:
   Library, details, media management, settings, editors, and playback. It also
   makes first launch an explicit host-or-remote choice while remembered local
   hosts start automatically and return directly to Home on later launches.
+- Aurelia 1.0.16 establishes Classic fidelity as the permanent visual baseline:
+  the measured `#202326` canvas, native material sidebar, artwork continuing
+  behind that sidebar, edge-to-sidebar media rails, native settings tabs and
+  restrained system menus across the complete client. `DESIGN.md` is the
+  authoritative guide for future UI work.
 
 The Build 11 host handoff retained by Aurelia 1.0.12 keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; both processes resolve a shared App
@@ -114,12 +119,12 @@ should avoid unrelated visual redesigns.
 
 ## Workspace map and safety boundary
 
-- Active repository: `/Users/lucaskleinsteuber/Documents/Aurelia`
 - Read-only Classic behavior and design reference:
   `/Users/lucaskleinsteuber/Documents/Aurelia Classic`
 - Generated builds, caches, tests, databases, and logs:
   `/Users/lucaskleinsteuber/Documents/Aurelia Home Other`
-- External summaries: `Aurelia Home Other/Aurelia Build summarys`
+- Record durable build summaries in
+  `/Users/lucaskleinsteuber/Documents/Aurelia/PROJECT_CONTEXT.md`.
 
 Never edit or migrate the Aurelia Classic repository, its `Library.store`, or
 its `Application Support/Aurelia` data. Do not copy its binaries or database

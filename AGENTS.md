@@ -67,6 +67,21 @@ These rules apply to every task in this repository.
 ## Installation and version handling
 
 - Install the verified release as `/Applications/Aurelia.app`.
+- While Aurelia is in Lucas's pre-release tester phase, every version installed
+  by an agent must be a clean test installation unless Lucas explicitly asks to
+  preserve the current setup. Before installing the verified app, run
+  `scripts/reset-installed-test-state.sh --confirm-clean-test-install` and
+  verify that the next launch shows the first-run setup. This is an installation
+  workflow rule, not behavior that may be added to the production app.
+- A clean test installation removes only Aurelia-owned accounts, sessions,
+  preferences, connection profiles, transient host state, logs, databases, and
+  the legacy Aurelia Home migration source that would otherwise restore an old
+  setup. It must never delete, edit, scan, or move user-selected media folders.
+  It must never touch Aurelia Classic, `Application Support/Aurelia`,
+  `Library.store`, or `com.lucas.aurelia` credentials and containers. Reset
+  sandbox preferences through macOS preferences services; preserve the
+  OS-managed sandbox and App Group container shells rather than bypassing macOS
+  container protections.
 - Before replacement, read the installed bundle's real `CFBundleVersion` and
   `CFBundleShortVersionString`; never infer them from a filename.
 - Stop the installed app and its owned helper/server processes cleanly before

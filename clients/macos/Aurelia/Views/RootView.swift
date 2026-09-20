@@ -47,6 +47,8 @@ struct RootView: View {
       }
     }
     .background(AureliaWindowChrome())
+    .aureliaFullWindowCanvas()
+    .aureliaRemoveEmptyWindowToolbar()
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.playback)
     .preferredColorScheme(.dark)
     .frame(minWidth: 760, minHeight: 560)

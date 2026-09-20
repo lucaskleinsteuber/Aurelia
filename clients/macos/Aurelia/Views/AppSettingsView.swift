@@ -2,8 +2,17 @@ import AppKit
 import SwiftUI
 
 struct AppSettingsView: View {
+  private enum SettingsPage: Hashable {
+    case general
+    case playback
+    case library
+    case metadata
+    case advanced
+  }
+
   @EnvironmentObject private var model: AppModel
   @ObservedObject private var playbackPreferences = PlaybackPreferencesStore.shared
+  @State private var selectedPage: SettingsPage = .general
   @State private var libraryToRemove: LibrarySummary?
   @State private var showingSwitchConfirmation = false
   @State private var pendingLocations: [StorageLocationDraft] = []
@@ -11,32 +20,63 @@ struct AppSettingsView: View {
   @State private var isLoadingAdministration = false
   @State private var tmdbToken = ""
   @State private var showingReviewQueue = false
-  @State private var showsAdvanced = false
   @State private var showingMediaManager = false
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 22) {
-        Text("Aurelia Settings").font(AureliaDesign.pageTitle)
-        playback
+    TabView(selection: $selectedPage) {
+      settingsPage {
         interface
-        if let profile = model.profile {
-          if profile.user?.role.canManageLibraries == true { storage }
-          devices
-          advanced(profile)
-          if let error = model.errorMessage {
-            Text(error).foregroundStyle(.orange)
-          }
-        } else if model.operatingMode != .host {
+        if model.profile != nil { devices }
+        disconnectedState
+      }
+      .tabItem { Label("General", systemImage: "gearshape") }
+      .tag(SettingsPage.general)
+
+      settingsPage { playback }
+        .tabItem { Label("Playback", systemImage: "play.rectangle") }
+        .tag(SettingsPage.playback)
+
+      settingsPage {
+        if model.profile?.user?.role.canManageLibraries == true {
+          storage
+        } else if model.profile != nil {
           ContentUnavailableView(
-            "No Server Connected",
-            systemImage: "network.slash",
-            description: Text("Connect from the main window."))
+            "Library Management Unavailable",
+            systemImage: "person.crop.circle.badge.xmark",
+            description: Text("An owner or administrator manages this server's storage."))
+        } else {
+          disconnectedState
         }
       }
-      .padding(24)
+      .tabItem { Label("Library", systemImage: "externaldrive") }
+      .tag(SettingsPage.library)
+
+      settingsPage {
+        if model.profile?.user?.role.canManageLibraries == true {
+          metadata
+        } else if model.profile != nil {
+          ContentUnavailableView(
+            "Metadata Settings Unavailable",
+            systemImage: "person.crop.circle.badge.xmark",
+            description: Text("An owner or administrator manages metadata for this server."))
+        } else {
+          disconnectedState
+        }
+      }
+      .tabItem { Label("Metadata", systemImage: "sparkles.rectangle.stack") }
+      .tag(SettingsPage.metadata)
+
+      settingsPage {
+        if let profile = model.profile {
+          advanced(profile)
+        } else {
+          disconnectedState
+        }
+      }
+      .tabItem { Label("Advanced", systemImage: "gearshape.2") }
+      .tag(SettingsPage.advanced)
     }
-    .frame(width: 680, height: 680)
+    .frame(width: 760, height: 640)
     .background(AureliaBackdrop())
     .task {
       isLoadingAdministration = true
@@ -93,6 +133,35 @@ struct AppSettingsView: View {
     }
     .sheet(isPresented: $showingMediaManager) {
       MediaManagerView().environmentObject(model)
+    }
+  }
+
+  private func settingsPage<Content: View>(
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 22) {
+        content()
+        if let error = model.errorMessage {
+          Text(error)
+            .foregroundStyle(.orange)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    .scrollContentBackground(.hidden)
+    .background(AureliaDesign.canvas)
+  }
+
+  @ViewBuilder
+  private var disconnectedState: some View {
+    if model.profile == nil && model.operatingMode != .host {
+      ContentUnavailableView(
+        "No Server Connected",
+        systemImage: "network.slash",
+        description: Text("Connect from the main window."))
     }
   }
 
@@ -384,96 +453,87 @@ struct AppSettingsView: View {
     }
   }
 
-  private func advanced(_ profile: StoredServerProfile) -> some View {
-    CinemaMaterialCard {
-      VStack(alignment: .leading, spacing: 10) {
-        Button {
-          showsAdvanced.toggle()
-        } label: {
-          HStack {
-            Label("Advanced", systemImage: "gearshape.2")
-              .font(.headline)
-            Spacer()
-            Image(systemName: "chevron.right")
-              .foregroundStyle(.secondary)
-              .rotationEffect(.degrees(showsAdvanced ? 90 : 0))
-          }
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .frame(minHeight: 44)
-        .accessibilityIdentifier("settings-advanced")
-
-        if showsAdvanced {
-          Divider()
-          LabeledContent("Server", value: profile.name)
-          LabeledContent("Address", value: profile.baseURL.absoluteString)
+  private var metadata: some View {
+    AureliaSettingsSection(
+      "Movie & TV Information",
+      symbol: "sparkles.rectangle.stack",
+      description:
+        "Use your own TMDB API Read Access Token to download English metadata and artwork. File paths are never sent."
+    ) {
+      VStack(alignment: .leading, spacing: 14) {
+        if model.metadataProvider?.hasToken == true {
           LabeledContent(
-            "Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
-          if let user = profile.user {
+            "TMDB", value: model.metadataProvider?.enabled == true ? "Enabled" : "Disabled")
+          if let status = model.metadataProvider {
             LabeledContent(
-              "Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
+              "Artwork",
+              value: ByteCountFormatter.string(
+                fromByteCount: status.artworkBytes, countStyle: .file))
+            Text(status.attribution).font(.caption2).foregroundStyle(.secondary)
           }
-          if profile.user?.role.canManageLibraries == true {
-            Divider()
-            Text("Movie & TV Information").font(.headline)
-            Text(
-              "Add your own TMDB API Read Access Token to download English metadata and artwork. File paths are never sent."
-            )
-            .font(.caption).foregroundStyle(.secondary)
-            if model.metadataProvider?.hasToken == true {
-              LabeledContent(
-                "TMDB", value: model.metadataProvider?.enabled == true ? "Enabled" : "Disabled")
-              if let status = model.metadataProvider {
-                LabeledContent(
-                  "Artwork",
-                  value: ByteCountFormatter.string(
-                    fromByteCount: status.artworkBytes, countStyle: .file))
-                Text(status.attribution).font(.caption2).foregroundStyle(.secondary)
-              }
-              HStack {
-                Button("Enrich Library") { Task { await model.enrichLibrary() } }
-                  .accessibilityIdentifier("metadata-enrich")
-                Button("Review Queue") { showingReviewQueue = true }
-                Button("Remove Unused Artwork") { Task { await model.pruneArtwork() } }
-                Button("Remove TMDB Token", role: .destructive) {
-                  Task { await model.disableMetadata() }
-                }
-                .accessibilityIdentifier("metadata-remove-token")
-              }
-              if let job = model.metadataJob {
-                ProgressView(
-                  value: Double(job.itemsProcessed), total: Double(max(job.itemsTotal, 1))
-                ) {
-                  Text("Metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
-                }
-              }
-            } else {
-              SecureField("TMDB API Read Access Token", text: $tmdbToken)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("tmdb-token")
-              Button("Enable TMDB") {
-                let token = tmdbToken
-                tmdbToken = ""
-                Task { await model.configureMetadata(token: token) }
-              }
-              .disabled(tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          HStack {
+            Button("Enrich Library") { Task { await model.enrichLibrary() } }
+              .accessibilityIdentifier("metadata-enrich")
+            Button("Review Queue") { showingReviewQueue = true }
+            Button("Remove Unused Artwork") { Task { await model.pruneArtwork() } }
+            Button("Remove TMDB Token", role: .destructive) {
+              Task { await model.disableMetadata() }
+            }
+            .accessibilityIdentifier("metadata-remove-token")
+          }
+          if let job = model.metadataJob {
+            ProgressView(
+              value: Double(job.itemsProcessed), total: Double(max(job.itemsTotal, 1))
+            ) {
+              Text("Metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
             }
           }
-          if model.operatingMode == .host {
-            LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
-            Button("Restart Server") { Task { await model.restartNativeHost() } }
-            Button("Switch to Another Server…", role: .destructive) {
-              showingSwitchConfirmation = true
-            }
-          } else {
-            Button("Disconnect This Mac", role: .destructive) {
-              Task { await model.disconnect() }
-            }
-            .accessibilityIdentifier("disconnect-server")
+        } else {
+          SecureField("TMDB API Read Access Token", text: $tmdbToken)
+            .textFieldStyle(.roundedBorder)
+            .accessibilityIdentifier("tmdb-token")
+          Button("Enable TMDB") {
+            let token = tmdbToken
+            tmdbToken = ""
+            Task { await model.configureMetadata(token: token) }
           }
+          .disabled(tmdbToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private func advanced(_ profile: StoredServerProfile) -> some View {
+    AureliaSettingsSection(
+      "Server",
+      symbol: "server.rack",
+      description: "Connection identity and server controls for this Mac."
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        LabeledContent("Server", value: profile.name)
+        LabeledContent("Address", value: profile.baseURL.absoluteString)
+        LabeledContent(
+          "Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
+        if let user = profile.user {
+          LabeledContent(
+            "Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
+        }
+        Divider()
+        if model.operatingMode == .host {
+          LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
+          Button("Restart Server") { Task { await model.restartNativeHost() } }
+          Button("Switch to Another Server…", role: .destructive) {
+            showingSwitchConfirmation = true
+          }
+        } else {
+          Button("Disconnect This Mac", role: .destructive) {
+            Task { await model.disconnect() }
+          }
+          .accessibilityIdentifier("disconnect-server")
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 }

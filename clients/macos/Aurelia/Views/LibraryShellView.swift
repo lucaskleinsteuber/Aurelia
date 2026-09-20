@@ -40,6 +40,7 @@ struct LibraryShellView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var destination: LibraryDestination = .home
   @State private var selection: MediaSelection?
+  @State private var heroOffset: CGFloat = 0
 
   var body: some View {
     ZStack {
@@ -48,17 +49,17 @@ struct LibraryShellView: View {
       NavigationSplitView {
         sidebar
           .navigationSplitViewColumnWidth(
-            min: 220,
+            min: 210,
             ideal: AureliaDesign.sidebarWidth,
-            max: 280)
+            max: 300)
       } detail: {
-        ZStack {
-          AureliaBackdrop()
-          content
-        }
+        content
+          .ignoresSafeArea(.container, edges: .top)
+          .background(AureliaDesign.canvas)
       }
       .navigationSplitViewStyle(.balanced)
-      .toolbar(.hidden)
+      .ignoresSafeArea(.container, edges: .top)
+      .aureliaRemoveEmptyWindowToolbar()
     }
     .overlay(alignment: .bottom) {
       if let error = model.errorMessage {
@@ -68,69 +69,86 @@ struct LibraryShellView: View {
     .onChange(of: scenePhase) {
       if scenePhase == .active { Task { await model.refreshHome() } }
     }
+    .onChange(of: destination) { heroOffset = 0 }
+    .onChange(of: selection) { heroOffset = 0 }
   }
 
   private var shellBackdrop: some View {
-    ZStack {
-      AuthenticatedArtwork(
-        artwork: model.home?.recommendation?.backdrop ?? model.home?.recommendation?.poster,
-        symbol: "play.rectangle.on.rectangle",
-        extendsBlurredEdges: true)
-      Color.black.opacity(0.5)
+    ZStack(alignment: .top) {
+      AureliaDesign.canvas
+      if let artwork = activeHeroArtwork {
+        ZStack {
+          AuthenticatedArtwork(
+            artwork: artwork,
+            symbol: activeHeroSymbol,
+            extendsBlurredEdges: true)
+          LinearGradient(
+            colors: [
+              AureliaDesign.canvas.opacity(0.84),
+              AureliaDesign.canvas.opacity(0.18),
+              .clear,
+            ],
+            startPoint: .leading,
+            endPoint: .trailing)
+          LinearGradient(
+            colors: [
+              .clear,
+              AureliaDesign.canvas.opacity(0.18),
+              AureliaDesign.canvas.opacity(0.92),
+            ],
+            startPoint: .top,
+            endPoint: .bottom)
+        }
+        .frame(height: 540)
+        .offset(y: min(heroOffset, 0))
+        .transition(.opacity)
+      }
     }
     .ignoresSafeArea()
+    .animation(.easeOut(duration: 0.18), value: activeHeroArtwork?.id)
+  }
+
+  private var activeHeroArtwork: ArtworkSummary? {
+    switch selection {
+    case .media(let id):
+      let item = model.catalogItems.first { $0.id == id }
+      return item?.backdrop ?? item?.poster
+    case .collection(let id):
+      let collection = model.collections.first { $0.id == id }
+      return collection?.items.first?.backdrop ?? collection?.poster
+    case nil:
+      guard destination == .home else { return nil }
+      return model.home?.recommendation?.backdrop ?? model.home?.recommendation?.poster
+    }
+  }
+
+  private var activeHeroSymbol: String {
+    switch selection {
+    case .media(let id):
+      return model.catalogItems.first { $0.id == id }?.kind == .movie ? "film.fill" : "tv.fill"
+    case .collection:
+      return "rectangle.stack.fill"
+    case nil:
+      return "play.rectangle.on.rectangle"
+    }
   }
 
   private var sidebar: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      VStack(spacing: 6) {
+    List(selection: $destination) {
+      Section {
         sidebarButton(.home)
       }
-
-      Text("LIBRARY")
-        .font(.caption2.weight(.semibold))
-        .tracking(0.7)
-        .foregroundStyle(.tertiary)
-        .padding(.leading, 12)
-        .padding(.top, 22)
-        .padding(.bottom, 7)
-
-      VStack(spacing: 6) {
-        ForEach([
-          LibraryDestination.library,
-          .recentlyAdded,
-          .tvShows,
-          .movies,
-        ]) { item in
-          sidebarButton(item)
-        }
-      }
-
-      Spacer(minLength: 20)
-
-      if let username = model.profile?.user?.username {
-        HStack(spacing: 10) {
-          Image(systemName: "person.crop.circle.fill")
-            .font(.title3)
-            .symbolRenderingMode(.hierarchical)
-          Text(username)
-            .font(.callout.weight(.medium))
-            .lineLimit(1)
-          Spacer()
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .accessibilityElement(children: .combine)
+      Section("Library") {
+        sidebarButton(.library)
+        sidebarButton(.recentlyAdded)
+        sidebarButton(.tvShows)
+        sidebarButton(.movies)
       }
     }
-    .padding(.horizontal, 12)
-    .padding(.top, 14)
-    .padding(.bottom, 10)
-    .background(.regularMaterial)
-    .overlay(alignment: .trailing) {
-      Rectangle().fill(AureliaDesign.hairline).frame(width: 1)
-    }
+    .listStyle(.sidebar)
+    .scrollContentBackground(.hidden)
+    .background { AureliaSidebarBackground() }
+    .accessibilityIdentifier("primary-sidebar")
   }
 
   private func sidebarButton(_ item: LibraryDestination) -> some View {
@@ -138,26 +156,12 @@ struct LibraryShellView: View {
       selection = nil
       destination = item
     } label: {
-      HStack(spacing: 11) {
-        Image(systemName: item.symbol)
-          .font(.system(size: 16, weight: .medium))
-          .symbolRenderingMode(.hierarchical)
-          .foregroundStyle(destination == item ? Color.accentColor : .secondary)
-          .frame(width: 22)
-        Text(item.title)
-          .font(.body.weight(destination == item ? .semibold : .regular))
-          .foregroundStyle(.primary)
-        Spacer()
-      }
-      .padding(.horizontal, 11)
-      .frame(minHeight: 42)
-      .background(
-        destination == item ? Color.white.opacity(0.105) : Color.clear,
-        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-      )
-      .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      Label(item.title, systemImage: item.symbol)
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .tag(item)
     .accessibilityIdentifier("sidebar-\(item.rawValue)")
   }
 
@@ -166,13 +170,17 @@ struct LibraryShellView: View {
     if let activeSelection = selection {
       switch activeSelection {
       case .media(let id):
-        MediaDetailView(mediaId: id) { selection = nil }
+        MediaDetailView(
+          mediaId: id,
+          onBack: { selection = nil },
+          onHeroOffsetChange: { heroOffset = $0 })
       case .collection(let id):
         if let collection = model.collections.first(where: { $0.id == id }) {
           CollectionDetailView(
             collection: collection,
             onBack: { selection = nil },
-            onSelect: { selection = .media($0) })
+            onSelect: { selection = .media($0) },
+            onHeroOffsetChange: { heroOffset = $0 })
         }
       }
     } else {
@@ -180,7 +188,8 @@ struct LibraryShellView: View {
       case .home:
         HomePage(
           onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) })
+          onSelectCollection: { selection = .collection($0) },
+          onHeroOffsetChange: { heroOffset = $0 })
       case .library:
         LibraryPage(
           onSelect: { selection = .media($0) },
@@ -216,6 +225,7 @@ private struct HomePage: View {
   @EnvironmentObject private var model: AppModel
   let onSelect: (UUID) -> Void
   let onSelectCollection: (UUID) -> Void
+  let onHeroOffsetChange: (CGFloat) -> Void
 
   var body: some View {
     if model.catalogItems.isEmpty, model.home?.recommendation == nil {
@@ -231,6 +241,7 @@ private struct HomePage: View {
         LazyVStack(alignment: .leading, spacing: 34) {
           if let recommendation = model.home?.recommendation {
             HomeHero(item: recommendation) { onSelect(recommendation.id) }
+              .aureliaTrackHeroOffset(onChange: onHeroOffsetChange)
           }
           landscapeRow(
             "Continue Watching",
@@ -245,6 +256,8 @@ private struct HomePage: View {
         }
         .padding(.bottom, 48)
       }
+      .coordinateSpace(name: "aurelia-content-scroll")
+      .defaultScrollAnchor(.top)
       .scrollIndicators(.visible)
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("home-page")
@@ -265,22 +278,17 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: title, count: items.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        ScrollView(.horizontal, showsIndicators: false) {
-          LazyHStack(spacing: AureliaDesign.rowSpacing) {
-            ForEach(items) { item in
-              Button {
-                onSelect(item.id)
-              } label: {
-                LandscapeMediaCard(item: item, eyebrow: eyebrow)
-              }
-              .buttonStyle(.plain)
-              .accessibilityIdentifier("continue-\(item.id.uuidString.lowercased())")
+        AureliaHorizontalRail {
+          ForEach(items) { item in
+            Button {
+              onSelect(item.id)
+            } label: {
+              LandscapeMediaCard(item: item, eyebrow: eyebrow)
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("continue-\(item.id.uuidString.lowercased())")
           }
-          .padding(.horizontal, AureliaDesign.pagePadding)
-          .padding(.vertical, 8)
         }
-        .scrollClipDisabled()
       }
     }
   }
@@ -291,22 +299,17 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: title, count: items.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        ScrollView(.horizontal, showsIndicators: false) {
-          LazyHStack(alignment: .top, spacing: AureliaDesign.rowSpacing) {
-            ForEach(items) { item in
-              Button {
-                onSelect(item.id)
-              } label: {
-                MediaPosterCard(item: item)
-              }
-              .buttonStyle(.plain)
-              .accessibilityIdentifier("media-\(item.id.uuidString)")
+        AureliaHorizontalRail {
+          ForEach(items) { item in
+            Button {
+              onSelect(item.id)
+            } label: {
+              MediaPosterCard(item: item)
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("media-\(item.id.uuidString)")
           }
-          .padding(.horizontal, AureliaDesign.pagePadding)
-          .padding(.vertical, 8)
         }
-        .scrollClipDisabled()
       }
     }
   }
@@ -317,21 +320,16 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: "Collections", count: collections.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        ScrollView(.horizontal, showsIndicators: false) {
-          LazyHStack(alignment: .top, spacing: AureliaDesign.rowSpacing) {
-            ForEach(collections) { collection in
-              Button {
-                onSelectCollection(collection.id)
-              } label: {
-                CollectionCard(collection: collection)
-              }
-              .buttonStyle(.plain)
+        AureliaHorizontalRail {
+          ForEach(collections) { collection in
+            Button {
+              onSelectCollection(collection.id)
+            } label: {
+              CollectionCard(collection: collection)
             }
+            .buttonStyle(.plain)
           }
-          .padding(.horizontal, AureliaDesign.pagePadding)
-          .padding(.vertical, 8)
         }
-        .scrollClipDisabled()
       }
     }
   }
@@ -451,20 +449,16 @@ private struct LibraryPage: View {
         if query.isEmpty, !model.collections.isEmpty {
           VStack(alignment: .leading, spacing: 14) {
             AureliaSectionHeading(title: "Collections", count: model.collections.count)
-            ScrollView(.horizontal, showsIndicators: false) {
-              LazyHStack(alignment: .top, spacing: AureliaDesign.rowSpacing) {
-                ForEach(model.collections) { collection in
-                  Button {
-                    onSelectCollection(collection.id)
-                  } label: {
-                    CollectionCard(collection: collection)
-                  }
-                  .buttonStyle(.plain)
+            AureliaHorizontalRail {
+              ForEach(model.collections) { collection in
+                Button {
+                  onSelectCollection(collection.id)
+                } label: {
+                  CollectionCard(collection: collection)
                 }
+                .buttonStyle(.plain)
               }
-              .padding(.vertical, 8)
             }
-            .scrollClipDisabled()
           }
         }
 
@@ -851,12 +845,14 @@ private struct CollectionDetailView: View {
   let collection: CollectionSummary
   let onBack: () -> Void
   let onSelect: (UUID) -> Void
+  let onHeroOffsetChange: (CGFloat) -> Void
   @State private var showingEditor = false
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 30) {
         collectionHero
+          .aureliaTrackHeroOffset(onChange: onHeroOffsetChange)
         VStack(alignment: .leading, spacing: 16) {
           AureliaSectionHeading(title: "Titles", count: collection.items.count)
           posterGrid(collection.items, onSelect: onSelect)
@@ -866,6 +862,7 @@ private struct CollectionDetailView: View {
       .padding(.bottom, 48)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .coordinateSpace(name: "aurelia-content-scroll")
     .sheet(isPresented: $showingEditor) {
       CollectionEditorSheet(collection: collection).environmentObject(model)
     }

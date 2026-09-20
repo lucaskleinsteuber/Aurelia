@@ -4,6 +4,7 @@ struct MediaDetailView: View {
   @EnvironmentObject private var model: AppModel
   let mediaId: UUID
   let onBack: () -> Void
+  var onHeroOffsetChange: (CGFloat) -> Void = { _ in }
   @State private var detail: CatalogDetailPresentation?
   @State private var errorMessage: String?
   @State private var selectedSeason: Int?
@@ -31,11 +32,12 @@ struct MediaDetailView: View {
               ? { showingMetadataEditor = true } : nil,
             onMatch: model.profile?.user?.role.canManageLibraries == true
               ? { showingMatchEditor = true } : nil)
+          .aureliaTrackHeroOffset(onChange: onHeroOffsetChange)
 
           if !detail.seasons.isEmpty {
             seasons(detail)
           }
-          supplementSection(detail.supplements, parentTitle: detail.item.title)
+          supplementSections(detail.supplements, parentTitle: detail.item.title)
           credits(detail.metadata.credits)
           about(detail)
         }
@@ -66,6 +68,8 @@ struct MediaDetailView: View {
         )
       }
     }
+    .coordinateSpace(name: "aurelia-content-scroll")
+    .defaultScrollAnchor(.top)
     .scrollIndicators(.visible)
     .accessibilityIdentifier("media-detail-scroll")
     .task(id: mediaId) { await load() }
@@ -164,27 +168,22 @@ struct MediaDetailView: View {
       .padding(.horizontal, AureliaDesign.pagePadding)
 
       if let season = activeSeason(detail) {
-        ScrollView(.horizontal, showsIndicators: false) {
-          LazyHStack(alignment: .top, spacing: 20) {
-            ForEach(season.episodes) { episode in
-              Button {
-                play(
-                  episode,
-                  seriesTitle: detail.item.title,
-                  allEpisodes: episodes(in: detail))
-              } label: {
-                EpisodeCard(episode: episode)
-              }
-              .buttonStyle(.plain)
-              .disabled(episode.item.availability != .available)
-              .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
+        AureliaHorizontalRail {
+          ForEach(season.episodes) { episode in
+            Button {
+              play(
+                episode,
+                seriesTitle: detail.item.title,
+                allEpisodes: episodes(in: detail))
+            } label: {
+              EpisodeCard(episode: episode)
             }
+            .buttonStyle(.plain)
+            .disabled(episode.item.availability != .available)
+            .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
           }
-          .padding(.horizontal, AureliaDesign.pagePadding)
-          .padding(.vertical, 4)
         }
-        .scrollClipDisabled()
-        supplementSection(
+        supplementSections(
           season.supplements,
           parentTitle: "\(detail.item.title) · Season \(season.number)")
       }
@@ -196,43 +195,53 @@ struct MediaDetailView: View {
   }
 
   @ViewBuilder
-  private func supplementSection(
+  private func supplementSections(
     _ supplements: [SupplementPresentation],
     parentTitle: String
   ) -> some View {
-    if !supplements.isEmpty {
+    ForEach(supplementGroups(supplements), id: \.title) { group in
       VStack(alignment: .leading, spacing: 14) {
-        Text("Trailers & Extras").font(AureliaDesign.sectionTitle)
+        Text(group.title).font(AureliaDesign.sectionTitle)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        ScrollView(.horizontal, showsIndicators: false) {
-          LazyHStack(spacing: 20) {
-            ForEach(supplements) { supplement in
-              Button {
-                model.startPlayback(
-                  mediaId: supplement.item.id,
-                  title: supplement.item.title,
-                  subtitle: parentTitle)
-              } label: {
-                ZStack {
-                  LandscapeMediaCard(
-                    item: supplement.item, width: 360, eyebrow: supplement.category)
-                  Image(systemName: "play.fill")
-                    .font(.title2)
-                    .frame(width: 50, height: 50)
-                    .background(.ultraThinMaterial, in: Circle())
-                }
+        AureliaHorizontalRail {
+          ForEach(group.items) { supplement in
+            Button {
+              model.startPlayback(
+                mediaId: supplement.item.id,
+                title: supplement.item.title,
+                subtitle: parentTitle)
+            } label: {
+              ZStack {
+                LandscapeMediaCard(
+                  item: supplement.item, width: 360, eyebrow: supplement.category)
+                Image(systemName: "play.fill")
+                  .font(.title2)
+                  .frame(width: 50, height: 50)
+                  .background(.ultraThinMaterial, in: Circle())
               }
-              .buttonStyle(.plain)
-              .disabled(supplement.item.availability != .available)
-              .accessibilityIdentifier("supplement-\(supplement.id.uuidString)")
             }
+            .buttonStyle(.plain)
+            .disabled(supplement.item.availability != .available)
+            .accessibilityIdentifier("supplement-\(supplement.id.uuidString)")
           }
-          .padding(.horizontal, AureliaDesign.pagePadding)
-          .padding(.vertical, 4)
         }
-        .scrollClipDisabled()
       }
     }
+  }
+
+  private func supplementGroups(
+    _ supplements: [SupplementPresentation]
+  ) -> [(title: String, items: [SupplementPresentation])] {
+    let trailers = supplements.filter {
+      $0.item.kind == .trailer || $0.category.localizedCaseInsensitiveContains("trailer")
+    }
+    let extras = supplements.filter { supplement in
+      !trailers.contains { $0.id == supplement.id }
+    }
+    return [
+      trailers.isEmpty ? nil : ("Trailers", trailers),
+      extras.isEmpty ? nil : ("Extras", extras),
+    ].compactMap { $0 }
   }
 
   @ViewBuilder
@@ -241,27 +250,22 @@ struct MediaDetailView: View {
       VStack(alignment: .leading, spacing: 16) {
         Text("Cast & Crew").font(AureliaDesign.sectionTitle)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        ScrollView(.horizontal, showsIndicators: false) {
-          LazyHStack(alignment: .top, spacing: 30) {
-            ForEach(values.sorted { $0.order < $1.order }) { credit in
-              VStack(spacing: 8) {
-                AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
-                  .frame(width: 112, height: 112)
-                  .clipShape(Circle())
-                  .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 1) }
-                Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
-                Text(credit.job ?? credit.department).font(.caption).foregroundStyle(.secondary)
-                if let character = credit.character {
-                  Text(character).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
-                }
+        AureliaHorizontalRail(spacing: 30) {
+          ForEach(values.sorted { $0.order < $1.order }) { credit in
+            VStack(spacing: 8) {
+              AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
+                .frame(width: 112, height: 112)
+                .clipShape(Circle())
+                .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 1) }
+              Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
+              Text(credit.job ?? credit.department).font(.caption).foregroundStyle(.secondary)
+              if let character = credit.character {
+                Text(character).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
               }
-              .frame(width: 132)
             }
+            .frame(width: 132)
           }
-          .padding(.horizontal, AureliaDesign.pagePadding)
-          .padding(.vertical, 4)
         }
-        .scrollClipDisabled()
       }
       .accessibilityIdentifier("cast-and-crew")
     }

@@ -5,6 +5,13 @@ import Testing
 
 struct AureliaTests {
   @Test
+  func classicCanvasUsesTheMeasuredReferenceColor() {
+    #expect(AureliaDesign.canvasRGB.red == 32)
+    #expect(AureliaDesign.canvasRGB.green == 35)
+    #expect(AureliaDesign.canvasRGB.blue == 38)
+  }
+
+  @Test
   func metadataProviderAndJobResponsesDecodeWithoutSecrets() throws {
     let provider = try JSONDecoder().decode(
       MetadataProviderStatus.self,

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 enum AureliaDesign {
+  static let canvasRGB = (red: UInt8(32), green: UInt8(35), blue: UInt8(38))
   static let pagePadding: CGFloat = 32
   static let sectionSpacing: CGFloat = 30
   static let rowSpacing: CGFloat = 20
@@ -15,14 +16,36 @@ enum AureliaDesign {
   static let heroTitle = Font.system(size: 44, weight: .bold, design: .default)
   static let sectionTitle = Font.system(size: 20, weight: .semibold, design: .default)
 
-  static let canvas = Color(red: 0.032, green: 0.039, blue: 0.051)
-  static let canvasTop = Color(red: 0.055, green: 0.067, blue: 0.084)
-  static let surface = Color(red: 0.079, green: 0.091, blue: 0.109)
-  static let raisedSurface = Color(red: 0.105, green: 0.118, blue: 0.138)
-  static let hairline = Color.white.opacity(0.085)
-  static let subduedText = Color.white.opacity(0.62)
+  // The neutral canvas is a measured reference value, not an approximate
+  // "cinema blue". Artwork is responsible for all strong color in Aurelia.
+  static let canvas = Color(
+    red: Double(canvasRGB.red) / 255,
+    green: Double(canvasRGB.green) / 255,
+    blue: Double(canvasRGB.blue) / 255)
+  static let canvasTop = Color(red: 27 / 255, green: 30 / 255, blue: 33 / 255)
+  static let surface = Color(red: 40 / 255, green: 44 / 255, blue: 47 / 255)
+  static let raisedSurface = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+  static let hairline = Color(nsColor: .separatorColor).opacity(0.72)
+  static let hover = Color(nsColor: .labelColor).opacity(0.08)
+  static let selection = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+  static let subduedText = Color(nsColor: .secondaryLabelColor)
 
   static let responsiveSpring = Animation.spring(response: 0.3, dampingFraction: 1)
+}
+
+struct AureliaSidebarBackground: View {
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+  var body: some View {
+    Group {
+      if reduceTransparency {
+        AureliaDesign.canvas.opacity(0.98)
+      } else {
+        Rectangle().fill(.ultraThinMaterial)
+      }
+    }
+    .ignoresSafeArea()
+  }
 }
 
 struct AureliaBackdrop: View {
@@ -33,6 +56,65 @@ struct AureliaBackdrop: View {
       endPoint: .bottom
     )
     .ignoresSafeArea()
+  }
+}
+
+struct AureliaHorizontalRail<Content: View>: View {
+  let spacing: CGFloat
+  let alignment: VerticalAlignment
+  let content: Content
+
+  init(
+    spacing: CGFloat = AureliaDesign.rowSpacing,
+    alignment: VerticalAlignment = .top,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.spacing = spacing
+    self.alignment = alignment
+    self.content = content()
+  }
+
+  var body: some View {
+    ScrollView(.horizontal, showsIndicators: false) {
+      LazyHStack(alignment: alignment, spacing: spacing) {
+        content
+      }
+      .scrollTargetLayout()
+      .padding(.vertical, 8)
+    }
+    .contentMargins(
+      .horizontal,
+      AureliaDesign.pagePadding,
+      for: .scrollContent
+    )
+    .padding(.horizontal, -AureliaDesign.pagePadding)
+    .scrollClipDisabled()
+    .scrollBounceBehavior(.basedOnSize)
+  }
+}
+
+private struct AureliaHeroOffsetPreferenceKey: PreferenceKey {
+  static let defaultValue: CGFloat = 0
+
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = nextValue()
+  }
+}
+
+extension View {
+  func aureliaTrackHeroOffset(
+    in coordinateSpace: String = "aurelia-content-scroll",
+    onChange: @escaping (CGFloat) -> Void
+  ) -> some View {
+    background {
+      GeometryReader { proxy in
+        Color.clear.preference(
+          key: AureliaHeroOffsetPreferenceKey.self,
+          value: proxy.frame(in: .named(coordinateSpace)).minY
+        )
+      }
+    }
+    .onPreferenceChange(AureliaHeroOffsetPreferenceKey.self, perform: onChange)
   }
 }
 
@@ -47,6 +129,12 @@ struct AureliaWindowChrome: NSViewRepresentable {
     }
 
     func apply() {
+      DispatchQueue.main.async { [weak self] in
+        self?.applyAttachedWindow()
+      }
+    }
+
+    private func applyAttachedWindow() {
       guard let window else { return }
       window.styleMask.insert(.fullSizeContentView)
       window.titleVisibility = .hidden
@@ -54,6 +142,34 @@ struct AureliaWindowChrome: NSViewRepresentable {
       window.titlebarSeparatorStyle = .none
       window.toolbar?.isVisible = false
       window.isMovableByWindowBackground = true
+      window.backgroundColor = NSColor(AureliaDesign.canvas)
+      window.standardWindowButton(.closeButton)?.isHidden = false
+      window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+      window.standardWindowButton(.zoomButton)?.isHidden = false
+      window.contentView?.needsLayout = true
+    }
+  }
+}
+
+extension View {
+  @ViewBuilder
+  func aureliaFullWindowCanvas() -> some View {
+    if #available(macOS 15.0, *) {
+      containerBackground(for: .window) { AureliaBackdrop() }
+    } else {
+      self
+    }
+  }
+
+  @ViewBuilder
+  func aureliaRemoveEmptyWindowToolbar() -> some View {
+    if #available(macOS 15.0, *) {
+      self
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .toolbar(removing: .sidebarToggle)
+        .toolbar(removing: .title)
+    } else {
+      self
     }
   }
 }
@@ -320,8 +436,8 @@ struct MediaArtworkPlaceholder: View {
     ZStack {
       LinearGradient(
         colors: [
-          Color(red: 0.13, green: 0.15, blue: 0.18),
-          Color(red: 0.055, green: 0.064, blue: 0.079),
+          AureliaDesign.surface,
+          AureliaDesign.canvasTop,
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing)
