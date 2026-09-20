@@ -181,6 +181,30 @@ final class AureliaUITests: XCTestCase {
   }
 
   @MainActor
+  func testPlaybackSettingsExposeDurablePlayerPreferences() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "metadata-settings"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+
+    app.typeKey(",", modifierFlags: .command)
+    XCTAssertTrue(app.staticTexts["Playback"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.descendants(matching: .any)["playback-automatic-resume"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["playback-auto-next"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["playback-prevent-sleep"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["playback-default-rate"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["playback-default-volume"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["playback-auto-hide-delay"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["playback-seek-interval"].exists)
+    XCTAssertTrue(app.buttons["playback-forget-tracks"].exists)
+    XCTAssertTrue(app.buttons["playback-restore-defaults"].exists)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
   func testClosingWindowAndReopeningThroughLaunchServicesRestoresIt() throws {
     continueAfterFailure = false
     let app = XCUIApplication()
@@ -350,6 +374,7 @@ final class AureliaUITests: XCTestCase {
     XCTAssertFalse(app.descendants(matching: .any)["media-actions"].exists)
     app.buttons["play-media"].click()
     assertNativePlayer(in: app)
+    assertClassicPlayerControls(in: app)
   }
 
   @MainActor
@@ -433,6 +458,24 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(app.descendants(matching: .any)["native-player"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.webViews.firstMatch.exists)
     assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
+  private func assertClassicPlayerControls(in app: XCUIApplication) {
+    app.windows.firstMatch.hover()
+    XCTAssertTrue(app.buttons["player-back"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["player-rate-menu"].exists)
+    XCTAssertTrue(app.buttons["player-audio-menu"].exists)
+    XCTAssertTrue(app.buttons["player-subtitle-menu"].exists)
+    XCTAssertTrue(app.buttons["player-sleep-menu"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["player-timeline"].exists)
+    XCTAssertTrue(app.buttons["player-picture-in-picture"].exists)
+    XCTAssertTrue(app.buttons["player-fullscreen"].exists)
+
+    app.buttons["player-rate-menu"].click()
+    XCTAssertTrue(app.staticTexts["Playback Rate"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["1.5x"].exists)
+    app.typeKey(.escape, modifierFlags: [])
   }
 
   @MainActor

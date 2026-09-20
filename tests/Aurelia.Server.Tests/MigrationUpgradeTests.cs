@@ -14,6 +14,68 @@ namespace Aurelia.Server.Tests;
 public sealed class MigrationUpgradeTests
 {
     [Fact]
+    public async Task OrphanedMigrationLockIsRecoveredWithoutChangingServerData()
+    {
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(dataDirectory);
+        var databasePath = Path.Combine(dataDirectory, "aurelia.db");
+        var serverId = Guid.NewGuid();
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<AureliaDbContext>()
+                .UseSqlite($"Data Source={databasePath}")
+                .Options;
+            await using (var database = new AureliaDbContext(options))
+            {
+                await database.Database.MigrateAsync();
+                database.ServerIdentities.Add(new ServerIdentity
+                {
+                    Id = 1,
+                    ServerId = serverId,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                });
+                await database.SaveChangesAsync();
+                await database.Database.ExecuteSqlRawAsync("""
+                    CREATE TABLE IF NOT EXISTS "__EFMigrationsLock" (
+                        "Id" INTEGER NOT NULL CONSTRAINT "PK___EFMigrationsLock" PRIMARY KEY,
+                        "Timestamp" TEXT NOT NULL
+                    );
+                    INSERT OR REPLACE INTO "__EFMigrationsLock" ("Id", "Timestamp")
+                    VALUES (1, 'interrupted-migration');
+                    """);
+            }
+
+            using var factory = new AureliaServerFactory(dataDirectory);
+            using var client = factory.CreateClient();
+            var info = await client.GetFromJsonAsync<ServerInfoResponse>(
+                "/api/v1/server/info",
+                ApiTestClient.JsonOptions);
+
+            Assert.NotNull(info);
+            Assert.Equal(serverId, info.ServerId);
+            await using var connection = new SqliteConnection(
+                $"Data Source={databasePath};Mode=ReadOnly");
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
+            Assert.Equal(7L, await command.ExecuteScalarAsync());
+            command.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsLock';";
+            Assert.Equal(1L, await command.ExecuteScalarAsync());
+            command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsLock;";
+            Assert.Equal(0L, await command.ExecuteScalarAsync());
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+            {
+                Directory.Delete(dataDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task BuildTwelveDatabaseUpgradesWithReliableLibrarySchema()
     {
         var dataDirectory = TestPaths.CreateDataDirectory();

@@ -6,10 +6,10 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <AureliaBuildNumber>14</AureliaBuildNumber>
-    <Version>1.0.14</Version>
-    <FileVersion>1.0.14.$(AureliaBuildNumber)</FileVersion>
-    <InformationalVersion>1.0.14+build.$(AureliaBuildNumber)</InformationalVersion>
+    <AureliaBuildNumber>15</AureliaBuildNumber>
+    <Version>1.0.15</Version>
+    <FileVersion>1.0.15.$(AureliaBuildNumber)</FileVersion>
+    <InformationalVersion>1.0.15+build.$(AureliaBuildNumber)</InformationalVersion>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../Aurelia Home Other'))</AureliaOtherRoot>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' != ''">$(AURELIA_OTHER_ROOT)</AureliaOtherRoot>
     <AureliaBuildRoot Condition="'$(AURELIA_BUILD_ROOT)' == ''">$([System.IO.Path]::Combine('$(AureliaOtherRoot)', 'Build'))</AureliaBuildRoot>

@@ -59,6 +59,20 @@ protocol PlaybackRelayProtocol: AnyObject {
 
 extension LoopbackStreamRelay: PlaybackRelayProtocol {}
 
+enum PlaybackSleepTimer: Equatable, Sendable {
+  case off
+  case endOfEpisode
+  case minutes(Int)
+
+  var title: String {
+    switch self {
+    case .off: "Off"
+    case .endOfEpisode: "End of episode"
+    case .minutes(let value): "\(value) minutes"
+    }
+  }
+}
+
 @MainActor
 final class PlaybackController: ObservableObject {
   @Published private(set) var isPreparing = true
@@ -69,14 +83,19 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var subtitleTracks: [PlaybackTrack] = []
   @Published private(set) var selectedAudioTrackID: Int32?
   @Published private(set) var selectedSubtitleTrackID: Int32?
+  @Published private(set) var playbackRate: Double
+  @Published private(set) var chapters: [PlaybackChapter] = []
+  @Published private(set) var currentChapterIndex: Int32?
+  @Published private(set) var sleepTimer: PlaybackSleepTimer = .off
   @Published var volume: Double = 1
   @Published var isMuted = false
   @Published var errorMessage: String?
 
-  let presentation: PlaybackPresentation
+  @Published private(set) var presentation: PlaybackPresentation
 
   private let client: any PlaybackClientProtocol
   private let engine: PlaybackEngine
+  private let preferences: PlaybackPreferences
   private let relayFactory: (URL, String) throws -> any PlaybackRelayProtocol
   private var relay: (any PlaybackRelayProtocol)?
   private var activePlayback: PlaybackSourceResponse?
@@ -88,15 +107,24 @@ final class PlaybackController: ObservableObject {
   private var appliedResumePosition = false
   private var resumePositionMilliseconds: Int64 = 0
   private var lastPeriodicSave = Date.distantPast
+  private var queuedItems: [PlaybackQueueItem]
+  private var sleepTask: Task<Void, Never>?
+  private var nextItemTask: Task<Void, Never>?
+  private var activityToken: NSObjectProtocol?
 
   init(
     profile: StoredServerProfile,
     presentation: PlaybackPresentation,
-    engine: PlaybackEngine = VLCPlaybackEngine()
+    engine: PlaybackEngine = VLCPlaybackEngine(),
+    preferences: PlaybackPreferences = PlaybackPreferencesStore.shared.preferences
   ) {
     self.client = APIPlaybackClient(profile: profile)
     self.presentation = presentation
     self.engine = engine
+    self.preferences = preferences.normalized
+    self.playbackRate = preferences.normalized.defaultPlaybackRate
+    self.volume = preferences.normalized.defaultVolume
+    self.queuedItems = presentation.queue
     self.relayFactory = { url, fingerprint in
       try LoopbackStreamRelay(sourceURL: url, publicKeyFingerprint: fingerprint)
     }
@@ -107,11 +135,16 @@ final class PlaybackController: ObservableObject {
     client: any PlaybackClientProtocol,
     presentation: PlaybackPresentation,
     engine: PlaybackEngine,
+    preferences: PlaybackPreferences = .defaultValue,
     relayFactory: @escaping (URL, String) throws -> any PlaybackRelayProtocol
   ) {
     self.client = client
     self.presentation = presentation
     self.engine = engine
+    self.preferences = preferences.normalized
+    self.playbackRate = preferences.normalized.defaultPlaybackRate
+    self.volume = preferences.normalized.defaultVolume
+    self.queuedItems = presentation.queue
     self.relayFactory = relayFactory
     connectEngineCallbacks()
   }
@@ -135,8 +168,13 @@ final class PlaybackController: ObservableObject {
 
     do {
       let source = try await client.createPlayback(mediaId: presentation.mediaId)
+      guard !stopped, !Task.isCancelled else {
+        try? await client.revokePlayback(id: source.id)
+        return
+      }
       try await begin(source)
     } catch {
+      guard !stopped, !Task.isCancelled else { return }
       isPreparing = false
       errorMessage = error.localizedDescription
     }
@@ -161,6 +199,12 @@ final class PlaybackController: ObservableObject {
 
   func skip(seconds: Int64) {
     seek(to: currentTimeMilliseconds + seconds * 1_000)
+  }
+
+  func setPlaybackRate(_ value: Double) {
+    guard PlaybackPreferences.supportedRates.contains(value) else { return }
+    playbackRate = value
+    engine.playbackRate = value
   }
 
   func seek(to milliseconds: Int64) {
@@ -192,11 +236,47 @@ final class PlaybackController: ObservableObject {
     engineUpdated()
   }
 
+  func selectChapter(_ chapter: PlaybackChapter) {
+    engine.selectChapter(index: chapter.index)
+    currentTimeMilliseconds = chapter.timeOffsetMilliseconds
+  }
+
+  func setSleepTimer(_ timer: PlaybackSleepTimer) {
+    sleepTask?.cancel()
+    sleepTask = nil
+    sleepTimer = timer
+    guard case .minutes(let minutes) = timer else { return }
+    if minutes <= 0 {
+      if engine.isPlaying { engine.pause() }
+      engineUpdated()
+      sleepTimer = .off
+      enqueueProgressSave(isFinished: false)
+      return
+    }
+    sleepTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: .seconds(minutes * 60))
+      } catch {
+        return
+      }
+      guard !Task.isCancelled, let self else { return }
+      if self.engine.isPlaying { self.engine.pause() }
+      self.engineUpdated()
+      self.sleepTimer = .off
+      self.enqueueProgressSave(isFinished: false)
+    }
+  }
+
   func shutdown(saveProgress: Bool = true) async {
     guard !stopped else { return }
     stopped = true
     renewalTask?.cancel()
     renewalTask = nil
+    sleepTask?.cancel()
+    sleepTask = nil
+    nextItemTask?.cancel()
+    nextItemTask = nil
+    endPlaybackActivity()
 
     if saveProgress {
       enqueueProgressSave(isFinished: false)
@@ -214,19 +294,28 @@ final class PlaybackController: ObservableObject {
   }
 
   private func begin(_ source: PlaybackSourceResponse) async throws {
+    guard !stopped, !Task.isCancelled else { throw CancellationError() }
     let sourceURL = try client.streamURL(path: source.streamPath)
     let relay = try relayFactory(sourceURL, client.profile.publicKeyFingerprint)
     let localURL = try await relay.start()
+    guard !stopped, !Task.isCancelled else {
+      relay.stop()
+      throw CancellationError()
+    }
     self.relay = relay
     activePlayback = source
     playbackIDs.insert(source.id)
-    resumePositionMilliseconds = source.progress.isCompleted
+    resumePositionMilliseconds =
+      source.progress.isCompleted
       ? 0
       : source.progress.positionMilliseconds
+    if !preferences.automaticResume { resumePositionMilliseconds = 0 }
     appliedResumePosition = resumePositionMilliseconds == 0
     engine.load(url: localURL)
     engine.volume = volume
     engine.isMuted = isMuted
+    engine.playbackRate = playbackRate
+    beginPlaybackActivityIfNeeded()
     scheduleRenewal(for: source)
     engine.play()
   }
@@ -241,6 +330,9 @@ final class PlaybackController: ObservableObject {
     subtitleTracks = engine.subtitleTracks
     selectedAudioTrackID = engine.selectedAudioTrackID
     selectedSubtitleTrackID = engine.selectedSubtitleTrackID
+    playbackRate = engine.playbackRate
+    chapters = engine.chapters
+    currentChapterIndex = engine.currentChapterIndex
     isPreparing = durationMilliseconds <= 0 && !isPlaying
 
     if !appliedResumePosition, durationMilliseconds > 0 {
@@ -256,14 +348,26 @@ final class PlaybackController: ObservableObject {
   }
 
   private func engineEnded() {
+    guard !stopped else { return }
     isPlaying = false
     currentTimeMilliseconds = durationMilliseconds
     enqueueProgressSave(isFinished: true)
+    guard sleepTimer != .endOfEpisode,
+      preferences.automaticallyPlayNextEpisode,
+      let next = queuedItems.first
+    else {
+      sleepTimer = .off
+      endPlaybackActivity()
+      return
+    }
+    queuedItems.removeFirst()
+    nextItemTask = Task { [weak self] in await self?.advance(to: next) }
   }
 
   private func engineFailed(_ message: String) {
     isPreparing = false
     isPlaying = false
+    endPlaybackActivity()
     errorMessage = message
   }
 
@@ -294,6 +398,60 @@ final class PlaybackController: ObservableObject {
     }
   }
 
+  private func advance(to item: PlaybackQueueItem) async {
+    defer { nextItemTask = nil }
+    await saveTask?.value
+    guard !stopped, !Task.isCancelled else { return }
+    renewalTask?.cancel()
+    renewalTask = nil
+    endPlaybackActivity()
+    engine.stop()
+    relay?.stop()
+    relay = nil
+    for id in playbackIDs {
+      try? await client.revokePlayback(id: id)
+      guard !stopped, !Task.isCancelled else { return }
+    }
+    playbackIDs.removeAll()
+    activePlayback = nil
+    presentation = PlaybackPresentation(
+      mediaId: item.mediaId,
+      title: item.title,
+      subtitle: item.subtitle,
+      queue: queuedItems)
+    isPreparing = true
+    currentTimeMilliseconds = 0
+    durationMilliseconds = 0
+    appliedResumePosition = false
+    errorMessage = nil
+    do {
+      let source = try await client.createPlayback(mediaId: item.mediaId)
+      guard !stopped, !Task.isCancelled else {
+        try? await client.revokePlayback(id: source.id)
+        return
+      }
+      try await begin(source)
+    } catch {
+      guard !stopped, !Task.isCancelled else { return }
+      isPreparing = false
+      errorMessage = "The next episode could not start. \(error.localizedDescription)"
+    }
+  }
+
+  private func beginPlaybackActivityIfNeeded() {
+    guard preferences.preventSleepDuringPlayback, activityToken == nil else { return }
+    activityToken =
+      ProcessInfo.processInfo.beginActivity(
+        options: [.userInitiated, .idleSystemSleepDisabled],
+        reason: "Aurelia is playing video") as NSObjectProtocol
+  }
+
+  private func endPlaybackActivity() {
+    guard let activityToken else { return }
+    ProcessInfo.processInfo.endActivity(activityToken)
+    self.activityToken = nil
+  }
+
   private func renewTicket() async {
     guard !stopped, let old = activePlayback else { return }
     do {
@@ -306,7 +464,8 @@ final class PlaybackController: ObservableObject {
       playbackIDs.remove(old.id)
       scheduleRenewal(for: renewed)
     } catch {
-      errorMessage = "The playback authorization could not be renewed. \(error.localizedDescription)"
+      errorMessage =
+        "The playback authorization could not be renewed. \(error.localizedDescription)"
     }
   }
 }
@@ -318,7 +477,8 @@ enum TicketRenewalPolicy {
   ) -> TimeInterval {
     let fractionalFormatter = ISO8601DateFormatter()
     fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let expiration = fractionalFormatter.date(from: expiresAt)
+    let expiration =
+      fractionalFormatter.date(from: expiresAt)
       ?? ISO8601DateFormatter().date(from: expiresAt)
       ?? now.addingTimeInterval(60)
     return max(1, expiration.timeIntervalSince(now) - 5 * 60)

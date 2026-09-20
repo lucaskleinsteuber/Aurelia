@@ -3,6 +3,7 @@ import SwiftUI
 
 struct AppSettingsView: View {
   @EnvironmentObject private var model: AppModel
+  @ObservedObject private var playbackPreferences = PlaybackPreferencesStore.shared
   @State private var libraryToRemove: LibrarySummary?
   @State private var showingSwitchConfirmation = false
   @State private var pendingLocations: [StorageLocationDraft] = []
@@ -17,6 +18,8 @@ struct AppSettingsView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
         Text("Aurelia Settings").font(AureliaDesign.pageTitle)
+        playback
+        interface
         if let profile = model.profile {
           if profile.user?.role.canManageLibraries == true { storage }
           devices
@@ -91,6 +94,120 @@ struct AppSettingsView: View {
     .sheet(isPresented: $showingMediaManager) {
       MediaManagerView().environmentObject(model)
     }
+  }
+
+  private var playback: some View {
+    AureliaSettingsSection(
+      "Playback",
+      symbol: "play.rectangle.fill",
+      description: "Choose how Aurelia starts, controls, and finishes playback on this Mac."
+    ) {
+      VStack(alignment: .leading, spacing: 14) {
+        Toggle(
+          "Automatic Resume",
+          isOn: $playbackPreferences.preferences.automaticResume
+        )
+        .accessibilityIdentifier("playback-automatic-resume")
+        Toggle(
+          "Automatically Play Next Episode",
+          isOn: $playbackPreferences.preferences.automaticallyPlayNextEpisode
+        )
+        .accessibilityIdentifier("playback-auto-next")
+        Toggle(
+          "Prevent Sleep During Playback",
+          isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
+        )
+        .accessibilityIdentifier("playback-prevent-sleep")
+        Divider()
+        LabeledContent("Default Playback Rate") {
+          Picker(
+            "Default Playback Rate",
+            selection: $playbackPreferences.preferences.defaultPlaybackRate
+          ) {
+            ForEach(PlaybackPreferences.supportedRates, id: \.self) { rate in
+              Text(playbackRateLabel(rate)).tag(rate)
+            }
+          }
+          .labelsHidden()
+          .frame(width: 120)
+          .accessibilityIdentifier("playback-default-rate")
+        }
+        LabeledContent("Default Volume") {
+          HStack(spacing: 10) {
+            Slider(value: $playbackPreferences.preferences.defaultVolume, in: 0...1)
+              .frame(width: 180)
+              .accessibilityLabel("Default Volume")
+              .accessibilityIdentifier("playback-default-volume")
+            Text("\(Int(playbackPreferences.preferences.defaultVolume * 100))%")
+              .monospacedDigit()
+              .frame(width: 42, alignment: .trailing)
+          }
+        }
+        LabeledContent("Controls Auto-Hide Delay") {
+          Picker(
+            "Controls Auto-Hide Delay",
+            selection: $playbackPreferences.preferences.controlsAutoHideDelay
+          ) {
+            ForEach([2.0, 3.0, 5.0, 8.0], id: \.self) { value in
+              Text("\(Int(value)) seconds").tag(value)
+            }
+          }
+          .labelsHidden()
+          .frame(width: 140)
+          .accessibilityIdentifier("playback-auto-hide-delay")
+        }
+        LabeledContent("Seek Interval") {
+          Stepper(
+            "\(playbackPreferences.preferences.seekInterval) seconds",
+            value: $playbackPreferences.preferences.seekInterval,
+            in: 5...60,
+            step: 5
+          )
+          .frame(width: 170, alignment: .trailing)
+          .accessibilityIdentifier("playback-seek-interval")
+        }
+        Divider()
+        HStack {
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Audio and Subtitles")
+            Text("Aurelia remembers the tracks you choose in the player.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          Button("Forget Track Choices") {
+            PlaybackTrackPreferenceStore.shared.audio = nil
+            PlaybackTrackPreferenceStore.shared.subtitle = nil
+          }
+          .accessibilityIdentifier("playback-forget-tracks")
+        }
+        Button("Restore Playback Defaults") { playbackPreferences.restoreDefaults() }
+          .accessibilityIdentifier("playback-restore-defaults")
+      }
+      .toggleStyle(.switch)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private var interface: some View {
+    AureliaSettingsSection(
+      "Interface",
+      symbol: "macwindow",
+      description: "Aurelia follows your Mac accessibility settings automatically."
+    ) {
+      VStack(spacing: 10) {
+        LabeledContent("Appearance", value: "Dark Cinema")
+        LabeledContent("Reduced Motion", value: "Follows System Settings")
+        LabeledContent("Reduced Transparency", value: "Follows System Settings")
+        LabeledContent("Increased Contrast", value: "Follows System Settings")
+      }
+    }
+  }
+
+  private func playbackRateLabel(_ rate: Double) -> String {
+    rate == rate.rounded()
+      ? "\(Int(rate))x"
+      : "\(String(format: "%g", locale: Locale(identifier: "en_US_POSIX"), rate))x"
   }
 
   private var storage: some View {

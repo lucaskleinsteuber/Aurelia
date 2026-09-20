@@ -12,6 +12,14 @@ public static class DatabaseInitializer
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
         var runtime = scope.ServiceProvider.GetRequiredService<ServerRuntimeOptions>();
 
+        // Program acquires ServerInstanceLock before initialization outside the isolated
+        // test environment. EF Core's SQLite migration mutex is a database table whose
+        // row can survive a force-quit, so no live migrator can own it at this point.
+        // Removing only that coordination table lets EF recreate it instead of waiting
+        // forever while leaving every Aurelia table and migration record untouched.
+        await database.Database.ExecuteSqlRawAsync(
+            "DROP TABLE IF EXISTS \"__EFMigrationsLock\";",
+            cancellationToken);
         await database.Database.MigrateAsync(cancellationToken);
 
         if (!await database.ServerIdentities.AnyAsync(cancellationToken))

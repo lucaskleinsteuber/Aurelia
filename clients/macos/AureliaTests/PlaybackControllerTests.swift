@@ -6,6 +6,28 @@ import XCTest
 
 @MainActor
 final class PlaybackControllerTests: XCTestCase {
+  func testPlaybackPreferencesPersistAndNormalize() throws {
+    let suite = "PlaybackControllerTests.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let store = PlaybackPreferencesStore(defaults: defaults)
+    store.preferences.seekInterval = 30
+    store.preferences.defaultVolume = 0.35
+    store.preferences.defaultPlaybackRate = 1.25
+    store.preferences.controlsAutoHideDelay = 5
+
+    let reloaded = PlaybackPreferencesStore(defaults: defaults)
+    XCTAssertEqual(reloaded.preferences.seekInterval, 30)
+    XCTAssertEqual(reloaded.preferences.defaultVolume, 0.35)
+    XCTAssertEqual(reloaded.preferences.defaultPlaybackRate, 1.25)
+    XCTAssertEqual(reloaded.preferences.controlsAutoHideDelay, 5)
+
+    reloaded.preferences.seekInterval = 500
+    let normalized = PlaybackPreferencesStore(defaults: defaults)
+    XCTAssertEqual(normalized.preferences.seekInterval, 60)
+  }
+
   func testResumePauseSeekTrackSelectionAndShutdownSave() async throws {
     let mediaID = UUID()
     let playbackID = UUID()
@@ -77,6 +99,129 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertTrue(client.updates.contains(where: { $0.finished }))
   }
 
+  func testPreferencesControlResumeRateVolumeAndChapters() async throws {
+    let source = Self.source(position: 30_000, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let preferences = PlaybackPreferences(
+      automaticResume: false,
+      defaultPlaybackRate: 1.5,
+      defaultVolume: 0.4,
+      controlsAutoHideDelay: 5,
+      seekInterval: 15,
+      preventSleepDuringPlayback: false,
+      automaticallyPlayNextEpisode: false)
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      preferences: preferences,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    XCTAssertEqual(controller.currentTimeMilliseconds, 0)
+    XCTAssertEqual(controller.playbackRate, 1.5)
+    XCTAssertEqual(controller.volume, 0.4)
+    XCTAssertEqual(controller.chapters.count, 2)
+
+    controller.selectChapter(engine.chapters[1])
+    controller.setPlaybackRate(0.75)
+    XCTAssertEqual(engine.currentChapterIndex, 1)
+    XCTAssertEqual(controller.currentTimeMilliseconds, 60_000)
+    XCTAssertEqual(engine.playbackRate, 0.75)
+    await controller.shutdown()
+  }
+
+  func testEndOfEpisodeAdvancesOnlyWhenEnabled() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let nextID = UUID()
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId,
+        title: "Episode 1",
+        subtitle: "Series · S01 E01",
+        queue: [
+          PlaybackQueueItem(
+            mediaId: nextID,
+            title: "Episode 2",
+            subtitle: "Series · S01 E02")
+        ]),
+      engine: engine,
+      preferences: preferences,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    engine.currentTimeMilliseconds = engine.durationMilliseconds
+    engine.isPlaying = false
+    engine.onEnded?()
+    for _ in 0..<5 { await Task.yield() }
+
+    XCTAssertEqual(controller.presentation.mediaId, nextID)
+    XCTAssertEqual(client.createdMediaIDs, [source.mediaId, nextID])
+    await controller.shutdown()
+  }
+
+  func testEndOfEpisodeSleepTimerStopsQueueAdvance() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId,
+        title: "Episode 1",
+        subtitle: nil,
+        queue: [PlaybackQueueItem(mediaId: UUID(), title: "Episode 2", subtitle: nil)]),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    controller.setSleepTimer(.endOfEpisode)
+    engine.onEnded?()
+    for _ in 0..<3 { await Task.yield() }
+
+    XCTAssertEqual(controller.presentation.mediaId, source.mediaId)
+    XCTAssertEqual(client.createdMediaIDs, [source.mediaId])
+    XCTAssertEqual(controller.sleepTimer, .off)
+    await controller.shutdown()
+  }
+
+  func testTimedSleepTimerPausesPlaybackAndResets() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId,
+        title: "Movie",
+        subtitle: nil),
+      engine: engine,
+      preferences: preferences,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    XCTAssertTrue(controller.isPlaying)
+    controller.setSleepTimer(.minutes(0))
+    for _ in 0..<5 { await Task.yield() }
+
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertEqual(controller.sleepTimer, .off)
+    await controller.shutdown()
+  }
+
   private static func source(
     position: Int64,
     completed: Bool
@@ -118,12 +263,30 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
   let source: PlaybackSourceResponse
   var updates: [Update] = []
   var revokedIDs: [UUID] = []
+  var createdMediaIDs: [UUID] = []
 
   init(source: PlaybackSourceResponse) {
     self.source = source
   }
 
-  func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse { source }
+  func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
+    createdMediaIDs.append(mediaId)
+    if mediaId == source.mediaId { return source }
+    return PlaybackSourceResponse(
+      id: UUID(),
+      mediaId: mediaId,
+      streamPath: source.streamPath,
+      contentType: source.contentType,
+      contentLength: source.contentLength,
+      expiresAt: source.expiresAt,
+      progress: PlaybackProgressResponse(
+        mediaId: mediaId,
+        positionMilliseconds: source.progress.positionMilliseconds,
+        durationMilliseconds: source.progress.durationMilliseconds,
+        isCompleted: source.progress.isCompleted,
+        lastPlayedAt: source.progress.lastPlayedAt,
+        updatedAt: source.progress.updatedAt))
+  }
 
   func updatePlaybackProgress(
     mediaId: UUID,
@@ -131,10 +294,11 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
     durationMilliseconds: Int64,
     isFinished: Bool
   ) async throws -> PlaybackProgressResponse {
-    updates.append(Update(
-      position: positionMilliseconds,
-      duration: durationMilliseconds,
-      finished: isFinished))
+    updates.append(
+      Update(
+        position: positionMilliseconds,
+        duration: durationMilliseconds,
+        finished: isFinished))
     return PlaybackProgressResponse(
       mediaId: mediaId,
       positionMilliseconds: positionMilliseconds,
@@ -173,8 +337,16 @@ private final class FakePlaybackEngine: PlaybackEngine {
   var durationMilliseconds: Int64 = 120_000
   var volume: Double = 1
   var isMuted = false
+  var playbackRate: Double = 1
   let audioTracks = [PlaybackTrack(id: 2, title: "Main - [English]")]
   let subtitleTracks = [PlaybackTrack(id: 7, title: "English SDH - [English]")]
+  let chapters = [
+    PlaybackChapter(
+      index: 0, title: "Chapter 1", timeOffsetMilliseconds: 0, durationMilliseconds: 60_000),
+    PlaybackChapter(
+      index: 1, title: "Chapter 2", timeOffsetMilliseconds: 60_000, durationMilliseconds: 60_000),
+  ]
+  var currentChapterIndex: Int32? = 0
   var selectedAudioTrackID: Int32?
   var selectedSubtitleTrackID: Int32?
   var loadedURL: URL?
@@ -201,6 +373,13 @@ private final class FakePlaybackEngine: PlaybackEngine {
   }
   func selectSubtitleTrack(id: Int32?) {
     selectedSubtitleTrackID = id
+    onUpdate?()
+  }
+  func selectChapter(index: Int32) {
+    currentChapterIndex = index
+    if let chapter = chapters.first(where: { $0.index == index }) {
+      currentTimeMilliseconds = chapter.timeOffsetMilliseconds
+    }
     onUpdate?()
   }
 }

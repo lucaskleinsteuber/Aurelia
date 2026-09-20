@@ -809,9 +809,18 @@ final class AppModel: ObservableObject {
     return try await APIClient(profile: profile).series(id: id)
   }
 
-  func startPlayback(mediaId: UUID, title: String, subtitle: String? = nil) {
+  func startPlayback(
+    mediaId: UUID,
+    title: String,
+    subtitle: String? = nil,
+    queue: [PlaybackQueueItem] = []
+  ) {
     guard profile != nil else { return }
-    playback = PlaybackPresentation(mediaId: mediaId, title: title, subtitle: subtitle)
+    playback = PlaybackPresentation(
+      mediaId: mediaId,
+      title: title,
+      subtitle: subtitle,
+      queue: queue)
   }
 
   func closePlayback() {

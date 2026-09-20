@@ -96,13 +96,43 @@ struct MediaDetailView: View {
   private func playPrimary(_ detail: CatalogDetailPresentation) {
     if detail.item.kind == .movie {
       model.startPlayback(mediaId: detail.item.id, title: detail.item.title)
-    } else if let episode = detail.seasons.first?.episodes.first {
-      play(episode, seriesTitle: detail.item.title)
+    } else {
+      let availableEpisodes = episodes(in: detail)
+      if let episode = availableEpisodes.first {
+        play(episode, seriesTitle: detail.item.title, allEpisodes: availableEpisodes)
+      }
     }
   }
 
-  private func play(_ episode: EpisodePresentation, seriesTitle: String) {
+  private func play(
+    _ episode: EpisodePresentation,
+    seriesTitle: String,
+    allEpisodes: [EpisodePresentation]
+  ) {
+    let queue = allEpisodes.drop(while: { $0.id != episode.id }).dropFirst().map {
+      queuedEpisode($0, seriesTitle: seriesTitle)
+    }
     model.startPlayback(
+      mediaId: episode.item.id,
+      title: episode.item.title,
+      subtitle:
+        "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))",
+      queue: queue
+    )
+  }
+
+  private func episodes(in detail: CatalogDetailPresentation) -> [EpisodePresentation] {
+    detail.seasons
+      .sorted { $0.number < $1.number }
+      .flatMap { $0.episodes.sorted { $0.episodeNumber < $1.episodeNumber } }
+      .filter { $0.item.availability == .available }
+  }
+
+  private func queuedEpisode(
+    _ episode: EpisodePresentation,
+    seriesTitle: String
+  ) -> PlaybackQueueItem {
+    PlaybackQueueItem(
       mediaId: episode.item.id,
       title: episode.item.title,
       subtitle:
@@ -138,7 +168,10 @@ struct MediaDetailView: View {
           LazyHStack(alignment: .top, spacing: 20) {
             ForEach(season.episodes) { episode in
               Button {
-                play(episode, seriesTitle: detail.item.title)
+                play(
+                  episode,
+                  seriesTitle: detail.item.title,
+                  allEpisodes: episodes(in: detail))
               } label: {
                 EpisodeCard(episode: episode)
               }

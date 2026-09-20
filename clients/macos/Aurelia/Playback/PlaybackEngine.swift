@@ -1,4 +1,5 @@
 @preconcurrency import AppKit
+import Combine
 @preconcurrency import Foundation
 @preconcurrency import VLCKit
 
@@ -29,6 +30,46 @@ struct PlaybackTrackPreference: Codable, Equatable, Sendable {
   let title: String
 }
 
+struct PlaybackChapter: Identifiable, Equatable, Sendable {
+  let index: Int32
+  let title: String
+  let timeOffsetMilliseconds: Int64
+  let durationMilliseconds: Int64
+
+  var id: Int32 { index }
+}
+
+struct PlaybackPreferences: Codable, Equatable, Sendable {
+  static let supportedRates: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
+  static let defaultValue = PlaybackPreferences(
+    automaticResume: true,
+    defaultPlaybackRate: 1,
+    defaultVolume: 1,
+    controlsAutoHideDelay: 2,
+    seekInterval: 10,
+    preventSleepDuringPlayback: true,
+    automaticallyPlayNextEpisode: true)
+
+  var automaticResume: Bool
+  var defaultPlaybackRate: Double
+  var defaultVolume: Double
+  var controlsAutoHideDelay: Double
+  var seekInterval: Int
+  var preventSleepDuringPlayback: Bool
+  var automaticallyPlayNextEpisode: Bool
+
+  var normalized: PlaybackPreferences {
+    var value = self
+    if !Self.supportedRates.contains(value.defaultPlaybackRate) {
+      value.defaultPlaybackRate = 1
+    }
+    value.defaultVolume = min(max(value.defaultVolume, 0), 1)
+    value.controlsAutoHideDelay = min(max(value.controlsAutoHideDelay, 1), 10)
+    value.seekInterval = min(max(value.seekInterval, 5), 60)
+    return value
+  }
+}
+
 @MainActor
 protocol PlaybackEngine: AnyObject {
   var onUpdate: (() -> Void)? { get set }
@@ -39,8 +80,11 @@ protocol PlaybackEngine: AnyObject {
   var durationMilliseconds: Int64 { get }
   var volume: Double { get set }
   var isMuted: Bool { get set }
+  var playbackRate: Double { get set }
   var audioTracks: [PlaybackTrack] { get }
   var subtitleTracks: [PlaybackTrack] { get }
+  var chapters: [PlaybackChapter] { get }
+  var currentChapterIndex: Int32? { get }
   var selectedAudioTrackID: Int32? { get }
   var selectedSubtitleTrackID: Int32? { get }
 
@@ -52,6 +96,7 @@ protocol PlaybackEngine: AnyObject {
   func seek(to milliseconds: Int64)
   func selectAudioTrack(id: Int32)
   func selectSubtitleTrack(id: Int32?)
+  func selectChapter(index: Int32)
 }
 
 @MainActor
@@ -112,6 +157,11 @@ final class VLCPlaybackEngine: PlaybackEngine {
     set { player.audio?.isMuted = newValue }
   }
 
+  var playbackRate: Double {
+    get { Double(player.rate) }
+    set { player.rate = Float(newValue) }
+  }
+
   var audioTracks: [PlaybackTrack] {
     tracks(names: player.audioTrackNames, indexes: player.audioTrackIndexes)
   }
@@ -127,6 +177,28 @@ final class VLCPlaybackEngine: PlaybackEngine {
 
   var selectedSubtitleTrackID: Int32? {
     let value = player.currentVideoSubTitleIndex
+    return value >= 0 ? value : nil
+  }
+
+  var chapters: [PlaybackChapter] {
+    let titleIndex = player.currentTitleIndex
+    guard titleIndex >= 0 else { return [] }
+    return player.chapterDescriptions(ofTitle: titleIndex).enumerated().compactMap { offset, raw in
+      guard let values = raw as? [AnyHashable: Any] else { return nil }
+      let time = chapterTime(values[VLCChapterDescriptionTimeOffset])
+      let duration = chapterTime(values[VLCChapterDescriptionDuration])
+      let suppliedTitle = values[VLCChapterDescriptionName] as? String
+      let title = suppliedTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return PlaybackChapter(
+        index: Int32(offset),
+        title: title.isEmpty ? "Chapter \(offset + 1)" : title,
+        timeOffsetMilliseconds: max(0, time),
+        durationMilliseconds: max(0, duration))
+    }
+  }
+
+  var currentChapterIndex: Int32? {
+    let value = player.currentChapterIndex
     return value >= 0 ? value : nil
   }
 
@@ -174,6 +246,11 @@ final class VLCPlaybackEngine: PlaybackEngine {
     PlaybackTrackPreferenceStore.shared.subtitle = id.flatMap { selected in
       subtitleTracks.first(where: { $0.id == selected })?.preference
     }
+    onUpdate?()
+  }
+
+  func selectChapter(index: Int32) {
+    player.currentChapterIndex = index
     onUpdate?()
   }
 
@@ -238,6 +315,45 @@ final class VLCPlaybackEngine: PlaybackEngine {
   private func displayTitle(_ value: String) -> String {
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? "Unknown track" : trimmed
+  }
+
+  private func chapterTime(_ value: Any?) -> Int64 {
+    if let value = value as? NSNumber { return value.int64Value }
+    if let value = value as? VLCTime { return value.value?.int64Value ?? 0 }
+    return 0
+  }
+}
+
+@MainActor
+final class PlaybackPreferencesStore: ObservableObject {
+  static let shared = PlaybackPreferencesStore()
+
+  @Published var preferences: PlaybackPreferences {
+    didSet {
+      let normalized = preferences.normalized
+      if normalized != preferences { preferences = normalized }
+      save(normalized)
+    }
+  }
+
+  private let defaults: UserDefaults
+  private let key = "playback.preferences.v1"
+
+  init(defaults: UserDefaults = .standard) {
+    self.defaults = defaults
+    preferences =
+      defaults.data(forKey: key)
+      .flatMap { try? JSONDecoder().decode(PlaybackPreferences.self, from: $0) }?
+      .normalized ?? .defaultValue
+  }
+
+  func restoreDefaults() {
+    preferences = .defaultValue
+  }
+
+  private func save(_ value: PlaybackPreferences) {
+    guard let data = try? JSONEncoder().encode(value) else { return }
+    defaults.set(data, forKey: key)
   }
 }
 

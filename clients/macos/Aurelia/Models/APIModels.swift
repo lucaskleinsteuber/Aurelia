@@ -545,10 +545,31 @@ struct SyncChangesResponse: Codable, Equatable, Sendable {
   let changedMediaIds: [UUID]
 }
 
+struct PlaybackQueueItem: Identifiable, Equatable, Sendable {
+  let mediaId: UUID
+  let title: String
+  let subtitle: String?
+
+  var id: UUID { mediaId }
+}
+
 struct PlaybackPresentation: Identifiable, Equatable, Sendable {
   let mediaId: UUID
   let title: String
   let subtitle: String?
+  let queue: [PlaybackQueueItem]
+
+  init(
+    mediaId: UUID,
+    title: String,
+    subtitle: String?,
+    queue: [PlaybackQueueItem] = []
+  ) {
+    self.mediaId = mediaId
+    self.title = title
+    self.subtitle = subtitle
+    self.queue = queue
+  }
 
   var id: UUID { mediaId }
 }
