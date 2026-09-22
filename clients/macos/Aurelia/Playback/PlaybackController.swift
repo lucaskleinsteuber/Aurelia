@@ -321,19 +321,19 @@ final class PlaybackController: ObservableObject {
   }
 
   private func engineUpdated() {
-    isPlaying = engine.isPlaying
-    currentTimeMilliseconds = engine.currentTimeMilliseconds
-    durationMilliseconds = engine.durationMilliseconds
-    volume = engine.volume
-    isMuted = engine.isMuted
-    audioTracks = engine.audioTracks
-    subtitleTracks = engine.subtitleTracks
-    selectedAudioTrackID = engine.selectedAudioTrackID
-    selectedSubtitleTrackID = engine.selectedSubtitleTrackID
-    playbackRate = engine.playbackRate
-    chapters = engine.chapters
-    currentChapterIndex = engine.currentChapterIndex
-    isPreparing = durationMilliseconds <= 0 && !isPlaying
+    assignIfChanged(&isPlaying, engine.isPlaying)
+    assignIfChanged(&currentTimeMilliseconds, engine.currentTimeMilliseconds)
+    assignIfChanged(&durationMilliseconds, engine.durationMilliseconds)
+    assignIfChanged(&volume, engine.volume)
+    assignIfChanged(&isMuted, engine.isMuted)
+    assignIfChanged(&audioTracks, engine.audioTracks)
+    assignIfChanged(&subtitleTracks, engine.subtitleTracks)
+    assignIfChanged(&selectedAudioTrackID, engine.selectedAudioTrackID)
+    assignIfChanged(&selectedSubtitleTrackID, engine.selectedSubtitleTrackID)
+    assignIfChanged(&playbackRate, engine.playbackRate)
+    assignIfChanged(&chapters, engine.chapters)
+    assignIfChanged(&currentChapterIndex, engine.currentChapterIndex)
+    assignIfChanged(&isPreparing, durationMilliseconds <= 0 && !isPlaying)
 
     if !appliedResumePosition, durationMilliseconds > 0 {
       appliedResumePosition = true
@@ -345,6 +345,11 @@ final class PlaybackController: ObservableObject {
       lastPeriodicSave = Date()
       enqueueProgressSave(isFinished: false)
     }
+  }
+
+  private func assignIfChanged<Value: Equatable>(_ value: inout Value, _ newValue: Value) {
+    guard value != newValue else { return }
+    value = newValue
   }
 
   private func engineEnded() {

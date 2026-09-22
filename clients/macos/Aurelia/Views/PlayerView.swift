@@ -13,11 +13,7 @@ struct PlayerView: View {
   @State private var isNativeFullScreen = false
   @State private var isPictureInPicture = false
   @State private var isAdjustingVolume = false
-  @State private var showingRate = false
-  @State private var showingAudioTracks = false
-  @State private var showingSubtitleTracks = false
-  @State private var showingSleepTimer = false
-  @State private var showingChapters = false
+  @State private var lastHideScheduleRefresh = 0.0
   @State private var cursorHidden = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -28,26 +24,36 @@ struct PlayerView: View {
   }
 
   var body: some View {
-    ZStack {
-      Color.black.ignoresSafeArea()
+    GeometryReader { geometry in
+      let viewport = geometry.size
 
-      PlayerVideoSurface(
-        controller: controller,
-        onInteraction: { revealControls() },
-        onKeyDown: handleKey
-      )
-      .ignoresSafeArea()
+      ZStack {
+        Color.black
+          .frame(width: viewport.width, height: viewport.height)
 
-      if controlsVisible || controller.isPreparing || controller.errorMessage != nil {
-        controls.transition(.opacity)
+        PlayerVideoSurface(
+          controller: controller,
+          onInteraction: { revealControls() },
+          onKeyDown: handleKey
+        )
+        .frame(width: viewport.width, height: viewport.height)
+
+        if controlsVisible || controller.isPreparing || controller.errorMessage != nil {
+          controls(in: viewport)
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
+        }
+
+        Color.clear
+          .frame(width: 1, height: 1)
+          .accessibilityElement()
+          .accessibilityLabel("Native Player · \(controller.presentation.title)")
+          .accessibilityIdentifier("native-player")
       }
-
-      Color.clear
-        .frame(width: 1, height: 1)
-        .accessibilityElement()
-        .accessibilityLabel("Native Player · \(controller.presentation.title)")
-        .accessibilityIdentifier("native-player")
+      .frame(width: viewport.width, height: viewport.height)
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .ignoresSafeArea()
     .background(PlayerWindowAccessor { window in windowPresentation.apply(to: window) })
     .preferredColorScheme(.dark)
     .task {
@@ -57,7 +63,6 @@ struct PlayerView: View {
     }
     .onDisappear {
       hideTask?.cancel()
-      closeMenus()
       showCursor()
       PlaybackShutdownCoordinator.shared.unregister(controller)
       windowPresentation.restore()
@@ -88,35 +93,46 @@ struct PlayerView: View {
     }
   }
 
-  private var controls: some View {
-    ZStack {
+  private func controls(in viewport: CGSize) -> some View {
+    let controlWidth = min(max(viewport.width - 64, 0), 1_180)
+    let topInset: CGFloat = isNativeFullScreen ? 16 : 42
+    let bottomInset: CGFloat = isNativeFullScreen ? 34 : 24
+
+    return ZStack {
       LinearGradient(
-        colors: [.black.opacity(0.72), .clear, .black.opacity(0.84)],
+        colors: [.black.opacity(0.42), .clear, .black.opacity(0.78)],
         startPoint: .top,
         endPoint: .bottom
       )
-      .ignoresSafeArea()
 
-      VStack {
-        HStack {
-          controlButton("Back", systemImage: "chevron.left") { closePlayer() }
-            .accessibilityIdentifier("player-back")
-          Spacer()
-          playerMenus
-        }
-        .padding(24)
+      HStack {
+        controlButton("Back", systemImage: "chevron.left") { closePlayer() }
+          .accessibilityIdentifier("player-back")
+        Spacer(minLength: 24)
+        playerMenus
+      }
+      .padding(.horizontal, 18)
+      .frame(width: viewport.width - 36, height: 52)
+      .position(x: viewport.width / 2, y: topInset + 26)
 
-        Spacer()
+      bottomControls
+        .frame(width: controlWidth, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .position(
+          x: viewport.width / 2,
+          y: viewport.height - bottomInset - 56)
 
-        HStack(spacing: 14) {
+      if !controller.isPreparing, controller.errorMessage == nil {
+        HStack(spacing: 4) {
           seekButton(forward: false)
           Button {
             controller.togglePlayback()
             revealControls()
           } label: {
             Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-              .font(.system(size: 29, weight: .semibold))
-              .frame(width: 58, height: 58)
+              .font(.system(size: 21, weight: .bold))
+              .offset(x: controller.isPlaying ? 0 : 1)
+              .frame(width: 50, height: 50)
               .background(.white, in: Circle())
               .foregroundStyle(.black)
           }
@@ -125,14 +141,9 @@ struct PlayerView: View {
           .accessibilityIdentifier("player-play-pause")
           seekButton(forward: true)
         }
-        .padding(12)
+        .padding(6)
         .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
-
-        Spacer()
-
-        bottomControls
-          .padding(.horizontal, 30)
-          .padding(.bottom, 24)
+        .position(x: viewport.width / 2, y: viewport.height / 2)
       }
 
       if controller.isPreparing, controller.errorMessage == nil {
@@ -141,110 +152,116 @@ struct PlayerView: View {
           .padding(20)
           .playerMaterial(
             reduceTransparency: reduceTransparency,
-            shape: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
+          )
+          .accessibilityIdentifier("player-preparing")
       }
 
       if let error = controller.errorMessage {
         playbackError(error)
       }
     }
+    .frame(width: viewport.width, height: viewport.height)
   }
 
   private var playerMenus: some View {
     HStack(spacing: 4) {
-      Button {
-        showingRate.toggle()
-        revealControls(scheduleHide: false)
+      Menu {
+        ForEach(PlaybackPreferences.supportedRates, id: \.self) { rate in
+          menuChoice(
+            rate == 1 ? "Standard" : rateLabel(rate),
+            selected: controller.playbackRate == rate
+          ) {
+            controller.setPlaybackRate(rate)
+          }
+        }
       } label: {
-        Text(rateLabel(controller.playbackRate))
-          .font(.callout.weight(.semibold))
-          .frame(
-            minWidth: AureliaDesign.minimumControlSize,
-            minHeight: AureliaDesign.minimumControlSize)
+        PlayerControlLabel(height: 42, minWidth: 50) {
+          Text(rateLabel(controller.playbackRate))
+            .font(.callout.weight(.bold).monospacedDigit())
+        }
       }
-      .buttonStyle(.plain)
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
       .accessibilityLabel("Playback Rate")
       .accessibilityValue(rateLabel(controller.playbackRate))
       .accessibilityIdentifier("player-rate-menu")
-      .popover(isPresented: $showingRate, arrowEdge: .top) { ratePicker }
 
-      playerMenuButton("Audio", systemImage: "waveform", isPresented: $showingAudioTracks)
-        .accessibilityIdentifier("player-audio-menu")
-        .popover(isPresented: $showingAudioTracks, arrowEdge: .top) {
-          trackPicker(
-            title: "Audio",
-            emptyMessage: "No audio tracks available",
-            tracks: controller.audioTracks,
-            selectedID: controller.selectedAudioTrackID
-          ) { id in
-            controller.selectAudioTrack(id)
-            showingAudioTracks = false
+      Menu {
+        if controller.audioTracks.isEmpty {
+          Button("No audio tracks available") {}
+            .disabled(true)
+        } else {
+          ForEach(controller.audioTracks) { track in
+            menuChoice(track.title, selected: controller.selectedAudioTrackID == track.id) {
+              controller.selectAudioTrack(track.id)
+            }
           }
         }
+      } label: {
+        PlayerControlLabel { Image(systemName: "waveform") }
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .accessibilityLabel("Audio")
+      .accessibilityIdentifier("player-audio-menu")
 
-      playerMenuButton(
-        "Subtitles", systemImage: "captions.bubble", isPresented: $showingSubtitleTracks
-      )
+      Menu {
+        menuChoice("Off", selected: controller.selectedSubtitleTrackID == nil) {
+          controller.selectSubtitleTrack(nil)
+        }
+        if controller.subtitleTracks.isEmpty {
+          Button("No subtitles available") {}
+            .disabled(true)
+        } else {
+          Divider()
+          ForEach(controller.subtitleTracks) { track in
+            menuChoice(track.title, selected: controller.selectedSubtitleTrackID == track.id) {
+              controller.selectSubtitleTrack(track.id)
+            }
+          }
+        }
+      } label: {
+        PlayerControlLabel {
+          Image(
+            systemName: controller.selectedSubtitleTrackID == nil
+              ? "captions.bubble" : "captions.bubble.fill")
+        }
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .accessibilityLabel("Subtitles")
       .accessibilityIdentifier("player-subtitle-menu")
-      .popover(isPresented: $showingSubtitleTracks, arrowEdge: .top) { subtitlePicker }
 
-      playerMenuButton("Sleep Timer", systemImage: "moon.zzz", isPresented: $showingSleepTimer)
-        .accessibilityIdentifier("player-sleep-menu")
-        .popover(isPresented: $showingSleepTimer, arrowEdge: .top) { sleepTimerPicker }
+      Menu {
+        menuChoice("Off", selected: controller.sleepTimer == .off) {
+          controller.setSleepTimer(.off)
+        }
+        Divider()
+        menuChoice("At end of episode", selected: controller.sleepTimer == .endOfEpisode) {
+          controller.setSleepTimer(.endOfEpisode)
+        }
+        ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
+          menuChoice("\(minutes) minutes", selected: controller.sleepTimer == .minutes(minutes)) {
+            controller.setSleepTimer(.minutes(minutes))
+          }
+        }
+      } label: {
+        PlayerControlLabel {
+          Image(systemName: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill")
+        }
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .accessibilityLabel("Sleep Timer")
+      .accessibilityIdentifier("player-sleep-menu")
     }
-    .padding(6)
+    .padding(7)
     .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
-    .onChange(of: showingRate) { if !showingRate { revealControls() } }
-    .onChange(of: showingAudioTracks) { if !showingAudioTracks { revealControls() } }
-    .onChange(of: showingSubtitleTracks) { if !showingSubtitleTracks { revealControls() } }
-    .onChange(of: showingSleepTimer) { if !showingSleepTimer { revealControls() } }
-  }
-
-  private var ratePicker: some View {
-    playerPicker(title: "Playback Rate") {
-      ForEach(PlaybackPreferences.supportedRates, id: \.self) { rate in
-        trackChoice(rateLabel(rate), selected: controller.playbackRate == rate) {
-          controller.setPlaybackRate(rate)
-          showingRate = false
-        }
-      }
-    }
-  }
-
-  private var subtitlePicker: some View {
-    playerPicker(title: "Subtitles") {
-      trackChoice("Off", selected: controller.selectedSubtitleTrackID == nil) {
-        controller.selectSubtitleTrack(nil)
-        showingSubtitleTracks = false
-      }
-      if !controller.subtitleTracks.isEmpty { Divider() }
-      ForEach(controller.subtitleTracks) { track in
-        trackChoice(track.title, selected: controller.selectedSubtitleTrackID == track.id) {
-          controller.selectSubtitleTrack(track.id)
-          showingSubtitleTracks = false
-        }
-      }
-    }
-  }
-
-  private var sleepTimerPicker: some View {
-    playerPicker(title: "Sleep Timer") {
-      sleepChoice(.off)
-      Divider()
-      sleepChoice(.endOfEpisode)
-      ForEach([15, 30, 45, 60, 90], id: \.self) { sleepChoice(.minutes($0)) }
-    }
-  }
-
-  private func sleepChoice(_ value: PlaybackSleepTimer) -> some View {
-    trackChoice(value.title, selected: controller.sleepTimer == value) {
-      controller.setSleepTimer(value)
-      showingSleepTimer = false
-    }
   }
 
   private var bottomControls: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 9) {
       HStack(alignment: .bottom, spacing: 24) {
         VStack(alignment: .leading, spacing: 2) {
           Text(controller.presentation.subtitle ?? "NOW PLAYING")
@@ -274,25 +291,35 @@ struct PlayerView: View {
       }
       .font(.caption)
     }
+    .frame(maxWidth: 1_180)
   }
 
   private var trailingControls: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 2) {
       if !controller.chapters.isEmpty {
-        playerMenuButton(
-          "Chapters", systemImage: "list.bullet.rectangle", isPresented: $showingChapters
-        )
+        Menu {
+          ForEach(controller.chapters) { chapter in
+            menuChoice(
+              "\(chapter.title)  \(formatTime(Double(chapter.timeOffsetMilliseconds)))",
+              selected: controller.currentChapterIndex == chapter.index
+            ) {
+              controller.selectChapter(chapter)
+            }
+          }
+        } label: {
+          PlayerControlLabel { Image(systemName: "list.bullet.rectangle") }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .accessibilityLabel("Chapters")
         .accessibilityIdentifier("player-chapter-menu")
-        .popover(isPresented: $showingChapters, arrowEdge: .bottom) { chapterPicker }
       }
       Button {
         controller.toggleMute()
         revealControls()
       } label: {
         Image(systemName: controller.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-          .frame(
-            width: AureliaDesign.minimumControlSize,
-            height: AureliaDesign.minimumControlSize)
+          .frame(width: 42, height: 42)
       }
       .buttonStyle(.plain)
       .accessibilityLabel(controller.isMuted ? "Unmute" : "Mute")
@@ -305,8 +332,8 @@ struct PlayerView: View {
           revealControls(scheduleHide: !editing)
         }
       )
-      .frame(width: 120)
-      .frame(minHeight: 44)
+      .frame(width: 96)
+      .frame(minHeight: 42)
       .accessibilityLabel("Volume")
       .accessibilityValue("\(Int(controller.volume * 100)) percent")
 
@@ -315,9 +342,7 @@ struct PlayerView: View {
           togglePictureInPicture()
         } label: {
           Image(systemName: isPictureInPicture ? "pip.exit" : "pip.enter")
-            .frame(
-              width: AureliaDesign.minimumControlSize,
-              height: AureliaDesign.minimumControlSize)
+            .frame(width: 42, height: 42)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
@@ -334,32 +359,14 @@ struct PlayerView: View {
             ? "arrow.down.right.and.arrow.up.left"
             : "arrow.up.left.and.arrow.down.right"
         )
-        .frame(
-          width: AureliaDesign.minimumControlSize,
-          height: AureliaDesign.minimumControlSize)
+        .frame(width: 42, height: 42)
       }
       .buttonStyle(.plain)
       .accessibilityLabel(isNativeFullScreen ? "Exit Full Screen" : "Enter Full Screen")
       .accessibilityIdentifier("player-fullscreen")
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 5)
+    .padding(7)
     .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
-    .onChange(of: showingChapters) { if !showingChapters { revealControls() } }
-  }
-
-  private var chapterPicker: some View {
-    playerPicker(title: "Chapters") {
-      ForEach(controller.chapters) { chapter in
-        trackChoice(
-          "\(chapter.title)  \(formatTime(Double(chapter.timeOffsetMilliseconds)))",
-          selected: controller.currentChapterIndex == chapter.index
-        ) {
-          controller.selectChapter(chapter)
-          showingChapters = false
-        }
-      }
-    }
   }
 
   private func playbackError(_ error: String) -> some View {
@@ -380,69 +387,21 @@ struct PlayerView: View {
       shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
   }
 
-  private func trackPicker(
-    title: String,
-    emptyMessage: String,
-    tracks: [PlaybackTrack],
-    selectedID: Int32?,
-    selection: @escaping (Int32) -> Void
-  ) -> some View {
-    playerPicker(title: title) {
-      if tracks.isEmpty {
-        Text(emptyMessage).foregroundStyle(.secondary).padding(.vertical, 6)
-      } else {
-        ForEach(tracks) { track in
-          trackChoice(track.title, selected: selectedID == track.id) { selection(track.id) }
-        }
-      }
-    }
-  }
-
-  private func playerPicker<Content: View>(
-    title: String,
-    @ViewBuilder content: () -> Content
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      Text(title).font(.headline).padding(.bottom, 6)
-      content()
-    }
-    .padding(12)
-    .frame(minWidth: 230, alignment: .leading)
-  }
-
-  private func trackChoice(
+  private func menuChoice(
     _ title: String,
     selected: Bool,
     action: @escaping () -> Void
   ) -> some View {
-    Button(action: action) {
-      HStack {
-        Text(title).lineLimit(1)
-        Spacer()
-        if selected { Image(systemName: "checkmark") }
-      }
-      .contentShape(Rectangle())
-      .frame(minHeight: AureliaDesign.minimumControlSize)
-    }
-    .buttonStyle(.plain)
-  }
-
-  private func playerMenuButton(
-    _ title: String,
-    systemImage: String,
-    isPresented: Binding<Bool>
-  ) -> some View {
     Button {
-      isPresented.wrappedValue.toggle()
-      revealControls(scheduleHide: false)
+      action()
+      revealControls()
     } label: {
-      Image(systemName: systemImage)
-        .frame(
-          width: AureliaDesign.minimumControlSize,
-          height: AureliaDesign.minimumControlSize)
+      if selected {
+        Label(title, systemImage: "checkmark")
+      } else {
+        Text(title)
+      }
     }
-    .buttonStyle(.plain)
-    .accessibilityLabel(title)
   }
 
   private func seekButton(forward: Bool) -> some View {
@@ -453,11 +412,11 @@ struct PlayerView: View {
     } label: {
       ZStack {
         Image(systemName: forward ? "goforward" : "gobackward")
-          .font(.system(size: 22, weight: .semibold))
+          .font(.system(size: 18, weight: .semibold))
         Text(String(interval))
           .font(.system(size: interval >= 10 ? 8 : 9, weight: .bold, design: .rounded))
       }
-      .frame(width: 44, height: 44)
+      .frame(width: 42, height: 42)
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
     .accessibilityLabel("\(forward ? "Forward" : "Back") \(interval) Seconds")
@@ -494,7 +453,7 @@ struct PlayerView: View {
   }
 
   private func handleKey(_ event: NSEvent) -> Bool {
-    revealControls(scheduleHide: false)
+    revealControls()
     switch event.keyCode {
     case 49:
       controller.togglePlayback()
@@ -507,9 +466,7 @@ struct PlayerView: View {
     case 46:
       controller.toggleMute()
     case 53:
-      if hasOpenMenu {
-        closeMenus()
-      } else if isPictureInPicture {
+      if isPictureInPicture {
         togglePictureInPicture()
       } else if isNativeFullScreen {
         toggleFullScreen()
@@ -521,19 +478,6 @@ struct PlayerView: View {
     }
     revealControls()
     return true
-  }
-
-  private var hasOpenMenu: Bool {
-    showingRate || showingAudioTracks || showingSubtitleTracks || showingSleepTimer
-      || showingChapters
-  }
-
-  private func closeMenus() {
-    showingRate = false
-    showingAudioTracks = false
-    showingSubtitleTracks = false
-    showingSleepTimer = false
-    showingChapters = false
   }
 
   private func toggleFullScreen() {
@@ -553,9 +497,15 @@ struct PlayerView: View {
 
   private func revealControls(scheduleHide: Bool = true) {
     showCursor()
-    withAnimation(reduceMotion ? nil : AureliaDesign.responsiveSpring) { controlsVisible = true }
-    hideTask?.cancel()
+    let controlsWereHidden = !controlsVisible
+    if controlsWereHidden {
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { controlsVisible = true }
+    }
     guard scheduleHide, canAutoHide else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    guard controlsWereHidden || now - lastHideScheduleRefresh >= 0.2 else { return }
+    lastHideScheduleRefresh = now
+    hideTask?.cancel()
     let delay = preferencesStore.preferences.controlsAutoHideDelay
     hideTask = Task {
       try? await Task.sleep(for: .seconds(delay))
@@ -567,7 +517,7 @@ struct PlayerView: View {
 
   private var canAutoHide: Bool {
     !controller.isPreparing && controller.errorMessage == nil && !isScrubbing
-      && !isAdjustingVolume && !hasOpenMenu
+      && !isAdjustingVolume
   }
 
   private func hideCursor() {
@@ -584,7 +534,6 @@ struct PlayerView: View {
 
   private func closePlayer() {
     hideTask?.cancel()
-    closeMenus()
     showCursor()
     Task {
       await controller.shutdown()
@@ -648,6 +597,36 @@ private struct PlayerPressButtonStyle: ButtonStyle {
   }
 }
 
+/// Stable hit target for a control inside one shared glass capsule. Hover only
+/// changes opacity, so the pointer can never move in and out because the
+/// control scaled underneath it.
+private struct PlayerControlLabel<Content: View>: View {
+  @State private var isHovering = false
+  let height: CGFloat
+  let minWidth: CGFloat
+  private let content: Content
+
+  init(
+    height: CGFloat = 42,
+    minWidth: CGFloat = 42,
+    @ViewBuilder content: () -> Content
+  ) {
+    self.height = height
+    self.minWidth = minWidth
+    self.content = content()
+  }
+
+  var body: some View {
+    content
+      .font(.system(size: 17, weight: .semibold))
+      .frame(minWidth: minWidth, minHeight: height)
+      .background(.white.opacity(isHovering ? 0.12 : 0), in: Capsule())
+      .contentShape(Capsule())
+      .onHover { isHovering = $0 }
+      .animation(.easeOut(duration: 0.12), value: isHovering)
+  }
+}
+
 extension View {
   fileprivate func playerMaterial<S: Shape>(reduceTransparency: Bool, shape: S) -> some View {
     background {
@@ -677,7 +656,6 @@ private struct PlayerVideoSurface: NSViewRepresentable {
   func updateNSView(_ nsView: PlayerTrackingView, context: Context) {
     nsView.onInteraction = onInteraction
     nsView.onKeyDown = onKeyDown
-    controller.attachVideoView(nsView)
   }
 }
 
@@ -739,6 +717,9 @@ private final class PlayerWindowPresentation {
   private var originalStyleMask: NSWindow.StyleMask?
   private var originalTitleVisibility: NSWindow.TitleVisibility?
   private var originalTitlebarAppearsTransparent: Bool?
+  private var originalTitlebarSeparatorStyle: NSTitlebarSeparatorStyle?
+  private var originalBackgroundColor: NSColor?
+  private var originalTitle: String?
   private var originalToolbarVisibility: Bool?
   private var originalFrame: NSRect?
   private var originalLevel: NSWindow.Level?
@@ -754,6 +735,9 @@ private final class PlayerWindowPresentation {
     originalStyleMask = window.styleMask
     originalTitleVisibility = window.titleVisibility
     originalTitlebarAppearsTransparent = window.titlebarAppearsTransparent
+    originalTitlebarSeparatorStyle = window.titlebarSeparatorStyle
+    originalBackgroundColor = window.backgroundColor
+    originalTitle = window.title
     originalToolbarVisibility = window.toolbar?.isVisible
     originalFrame = window.frame
     originalLevel = window.level
@@ -762,6 +746,9 @@ private final class PlayerWindowPresentation {
     window.styleMask.insert(.fullSizeContentView)
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
+    window.titlebarSeparatorStyle = .none
+    window.backgroundColor = .black
+    window.title = "\u{2060}"
     window.toolbar?.isVisible = false
   }
 
@@ -822,6 +809,11 @@ private final class PlayerWindowPresentation {
     if let originalTitlebarAppearsTransparent {
       window.titlebarAppearsTransparent = originalTitlebarAppearsTransparent
     }
+    if let originalTitlebarSeparatorStyle {
+      window.titlebarSeparatorStyle = originalTitlebarSeparatorStyle
+    }
+    if let originalBackgroundColor { window.backgroundColor = originalBackgroundColor }
+    if let originalTitle { window.title = originalTitle }
     if let originalToolbarVisibility { window.toolbar?.isVisible = originalToolbarVisibility }
     if let originalLevel { window.level = originalLevel }
     if let originalCollectionBehavior { window.collectionBehavior = originalCollectionBehavior }

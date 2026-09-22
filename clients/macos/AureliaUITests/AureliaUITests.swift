@@ -474,17 +474,42 @@ final class AureliaUITests: XCTestCase {
   private func assertClassicPlayerControls(in app: XCUIApplication) {
     app.windows.firstMatch.hover()
     XCTAssertTrue(app.buttons["player-back"].waitForExistence(timeout: 5))
-    XCTAssertTrue(app.buttons["player-rate-menu"].exists)
-    XCTAssertTrue(app.buttons["player-audio-menu"].exists)
-    XCTAssertTrue(app.buttons["player-subtitle-menu"].exists)
-    XCTAssertTrue(app.buttons["player-sleep-menu"].exists)
+    let rateMenu = app.descendants(matching: .any)["player-rate-menu"]
+    XCTAssertTrue(rateMenu.exists)
+    XCTAssertTrue(app.descendants(matching: .any)["player-audio-menu"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["player-subtitle-menu"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["player-sleep-menu"].exists)
     XCTAssertTrue(app.descendants(matching: .any)["player-timeline"].exists)
     XCTAssertTrue(app.buttons["player-picture-in-picture"].exists)
     XCTAssertTrue(app.buttons["player-fullscreen"].exists)
 
-    app.buttons["player-rate-menu"].click()
-    XCTAssertTrue(app.staticTexts["Playback Rate"].waitForExistence(timeout: 5))
-    XCTAssertTrue(app.buttons["1.5x"].exists)
+    let window = app.windows.firstMatch
+    let centerPlay = app.buttons["player-play-pause"]
+    let title = app.staticTexts["player-title"]
+    let timeline = app.descendants(matching: .any)["player-timeline"]
+    XCTAssertTrue(title.exists)
+
+    let centerY = window.frame.midY
+    XCTAssertLessThan(rateMenu.frame.midY, centerY)
+    XCTAssertGreaterThan(
+      title.frame.midY, centerY,
+      "Player title should be in the lower half. Title: \(title.frame), window: \(window.frame).")
+    XCTAssertGreaterThan(timeline.frame.midY, centerY)
+    XCTAssertGreaterThan(timeline.frame.minY, title.frame.maxY - 8)
+    XCTAssertGreaterThan(abs(timeline.frame.midY - centerY), window.frame.height * 0.25)
+
+    let preparing = app.descendants(matching: .any)["player-preparing"]
+    if preparing.exists {
+      XCTAssertFalse(centerPlay.exists, "The transport must not sit underneath the loading card.")
+      XCTAssertLessThan(abs(preparing.frame.midY - centerY), window.frame.height * 0.12)
+    } else {
+      XCTAssertTrue(centerPlay.exists)
+      XCTAssertLessThan(abs(centerPlay.frame.midY - centerY), window.frame.height * 0.12)
+    }
+
+    rateMenu.click()
+    XCTAssertTrue(app.menuItems["Standard"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.menuItems["1.5x"].exists)
     app.typeKey(.escape, modifierFlags: [])
   }
 
