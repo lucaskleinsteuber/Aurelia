@@ -136,6 +136,7 @@ final class AureliaUITests: XCTestCase {
     let app = launchLibrary()
     defer { app.terminate() }
     XCTAssertFalse(app.buttons["library-add-media"].exists)
+    XCTAssertFalse(app.buttons["library-review-metadata"].exists)
     XCTAssertFalse(app.menuItems["Add Media…"].isEnabled)
   }
 
@@ -359,6 +360,12 @@ final class AureliaUITests: XCTestCase {
     defer { app.terminate() }
 
     app.descendants(matching: .any)["sidebar-library"].click()
+    let reviewQueue = app.buttons["library-review-metadata"]
+    XCTAssertTrue(reviewQueue.waitForExistence(timeout: 5))
+    reviewQueue.click()
+    XCTAssertTrue(app.staticTexts["Review Queue"].waitForExistence(timeout: 5))
+    app.buttons["Done"].click()
+
     let movie = app.buttons["media-10000000-0000-0000-0000-000000000001"]
     XCTAssertTrue(movie.waitForExistence(timeout: 8))
     movie.click()

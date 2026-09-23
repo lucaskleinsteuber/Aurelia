@@ -440,6 +440,7 @@ private struct LibraryPage: View {
   @State private var filter: LibraryFilter = .all
   @State private var sort: LibrarySort = .title
   @State private var showingCollectionEditor = false
+  @State private var showingMetadataReviewQueue = false
 
   var body: some View {
     ScrollView {
@@ -570,6 +571,21 @@ private struct LibraryPage: View {
       .accessibilityLabel("Sort: \(sort.rawValue)")
 
       if model.canManageMedia {
+        Button {
+          showingMetadataReviewQueue = true
+        } label: {
+          Label("Review Matches", systemImage: "checklist")
+            .font(.callout.weight(.medium))
+            .lineLimit(1)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("library-review-metadata")
+        .help("Review uncertain metadata matches")
+        .sheet(isPresented: $showingMetadataReviewQueue) {
+          MetadataReviewQueueSheet()
+            .environmentObject(model)
+        }
+
         Button {
           model.showMediaManager()
         } label: {

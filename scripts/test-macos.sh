@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
+other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
 developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 runtime_parent="$HOME/Library/Caches/Aurelia/TestRuns"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"

@@ -91,7 +91,7 @@ public sealed class MetadataPresentationTests
             Assert.Equal(1, job.ItemsNeedingReview);
             var review = Assert.Single(await SendAsync<List<MetadataReviewSummary>>(
                 client, owner.Token, HttpMethod.Get, "/api/v1/metadata/reviews"));
-            Assert.Equal("Multiple or uncertain TMDB results need confirmation.", review.Reason);
+            Assert.Equal("Several similar TMDB matches need confirmation.", review.Reason);
 
             var edited = await SendAsync<MediaMetadataSummary>(client, owner.Token, HttpMethod.Put, $"/api/v1/media/{movie.Id}/metadata",
                 new UpdateMediaMetadataRequest(Title: "My Title", Overview: "My description", Genres: ["Drama"]));
@@ -152,7 +152,7 @@ public sealed class MetadataPresentationTests
                 HttpMethod.Get,
                 "/api/v1/metadata/reviews"));
             Assert.Empty(review.Candidates);
-            Assert.Equal("No confident TMDB result was found.", review.Reason);
+            Assert.Equal("TMDB returned no results for the detected title.", review.Reason);
         }
         finally { Directory.Delete(mediaRoot, recursive: true); }
     }

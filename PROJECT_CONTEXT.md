@@ -88,6 +88,13 @@ The complete path is:
   behind that sidebar, edge-to-sidebar media rails, native settings tabs and
   restrained system menus across the complete client. `DESIGN.md` is the
   authoritative guide for future UI work.
+- Aurelia 1.1.0 (Build 19) improves trailer-directory ownership and metadata
+  matching. Provider results are ranked by match confidence and the selected
+  best candidate is the one actually applied; safe filename variations include
+  a matching year, a single plural suffix, and `and`/`&`. A direct Review Matches
+  action makes unresolved metadata easier for administrators to find. The
+  current product is Aurelia; Aurelia Classic remains a separate, local-only
+  reference app.
 
 The Build 11 host handoff retained by Aurelia 1.0.12 keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; both processes resolve a shared App
@@ -122,7 +129,7 @@ should avoid unrelated visual redesigns.
 - Read-only Classic behavior and design reference:
   `/Users/lucaskleinsteuber/Documents/Aurelia Classic`
 - Generated builds, caches, tests, databases, and logs:
-  `/Users/lucaskleinsteuber/Documents/Aurelia Home Other`
+  `/Users/lucaskleinsteuber/Documents/Aurelia Other`
 - Record durable build summaries in
   `/Users/lucaskleinsteuber/Documents/Aurelia/PROJECT_CONTEXT.md`.
 
@@ -133,7 +140,7 @@ credentials, runtime databases, or large packages in this repository. Breaking
 Bad and El Camino test media are read in place only for explicitly bounded
 playback checks; record size and modification time before and after those checks.
 
-Because this repository and `Aurelia Home Other` live in Documents, runnable Mac
+Because this repository and `Aurelia Other` live in Documents, runnable Mac
 test products must be staged under
 `~/Library/Caches/Aurelia/TestRuns/<run-id>`. Only logs and results are copied
 back after execution. Pre-install smoke candidates use
@@ -156,13 +163,30 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message matching the build (`1.0.14` for Build 14), push immediately, verify
+    message matching the build (`1.1.0` for Build 19), push immediately, verify
     the remote hash, and write exactly one English external summary for the
     completed build.
 
-## Planned direction
+## Current non-goals
 
-Aurelia 1.0.14 deliberately does not introduce chapters, playback speed, sleep
-timer, PiP, timeline thumbnails, downloads, transcoding, an optional web client,
-or Linux and Windows native clients. Those remain separate future milestones;
-the current native client and reliable library engine are the release baseline.
+Aurelia does not currently introduce chapters, playback speed, sleep timer, PiP,
+timeline thumbnails, downloads, transcoding, an optional web client, or Linux
+and Windows native clients. Those remain separate future milestones; the current
+native client and reliable library engine are the release baseline.
+
+## Latest release and verification
+
+- Installed bundle: `/Applications/Aurelia.app`, version `1.1.0`, build `19`.
+- Each agent-installed version is a clean tester install. The reset removes
+  Aurelia's accounts, server database, preferences, connection profiles, and
+  logs, but never user-selected media or Aurelia Classic data.
+- Build 19 verification: 94/94 server tests passed; .NET format verification
+  passed; release server build completed with zero warnings; universal arm64 and
+  x86_64 app/helper and server payloads were packaged and signature-verified.
+  Launch Services smoke verified helper autostart, `/api/v1/server/info`, and
+  clean shutdown. The installed app reported version `1.1.0` and a fresh
+  `isSetup: false` response.
+- Swift sources and test targets compiled. XCTest execution did not reach test
+  cases because the local macOS test host exited before XCTest bootstrap with
+  `Failed to establish connection to the IDE`; do not describe UI tests as
+  passed until that runner issue is resolved and they are rerun.

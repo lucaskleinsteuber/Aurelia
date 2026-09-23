@@ -89,6 +89,49 @@ public sealed class MediaLibraryScannerTests
     }
 
     [Theory]
+    [InlineData(LibraryKind.Automatic)]
+    [InlineData(LibraryKind.Movies)]
+    public void MovieScannerRecognizesStandaloneTrailerFolderAndTrailingYear(LibraryKind kind)
+    {
+        var root = CreateDirectory("Movie With Trailer Folder");
+        try
+        {
+            var moviePath = Touch(root, "The Truman Show/The Truman Show .mkv");
+            Touch(root, "The Truman Show/Extras/Behind the Scenes.mkv");
+            var trailerPath = Touch(
+                root,
+                "The Truman Show/Trailer/The Truman Show Trailer (1998).mkv");
+
+            var result = scanner.Scan(root, kind, [], null, CancellationToken.None);
+
+            var movie = Assert.Single(result.Items, item => item.Kind == MediaKind.Movie);
+            Assert.Equal(moviePath, movie.SourcePath);
+            var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
+            Assert.Equal(trailerPath, trailer.SourcePath);
+            Assert.Equal(moviePath, trailer.ParentSourcePath);
+            Assert.Equal("The Truman Show", trailer.DetectedTitle);
+            Assert.Equal(1998, trailer.Year);
+            var extra = Assert.Single(result.Items, item => item.Kind == MediaKind.Extra);
+            Assert.Equal(moviePath, extra.ParentSourcePath);
+            Assert.Empty(result.ImportReviews!);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void MovieParserExtractsYearAfterExplicitTrailerSuffix()
+    {
+        var identity = FilenameMetadataParser.Movie("The Truman Show Trailer (1998).mkv");
+
+        Assert.True(FilenameMetadataParser.IsExplicitTrailerFile("The Truman Show Trailer (1998).mkv"));
+        Assert.Equal("The Truman Show", identity.Title);
+        Assert.Equal(1998, identity.Year);
+    }
+
+    [Theory]
     [InlineData(false, "No exact movie title match was found in this storage location.")]
     [InlineData(true, "More than one movie has this title in this storage location.")]
     public void MovieScannerRequiresReviewWhenATrailerMatchIsNotUnique(

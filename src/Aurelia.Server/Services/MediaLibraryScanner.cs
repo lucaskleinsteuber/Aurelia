@@ -93,6 +93,18 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         "specialfeatures",
     ];
 
+    private static readonly HashSet<string> TrailerFolderNames =
+    [
+        "trailer",
+        "trailers",
+        "teaser",
+        "teasers",
+        "officialtrailer",
+        "officialtrailers",
+        "officialteaser",
+        "officialteasers",
+    ];
+
     private static readonly HashSet<string> PackageExtensions = new(
         [".app", ".bundle", ".framework", ".plugin", ".pkg", ".xcodeproj"],
         StringComparer.OrdinalIgnoreCase);
@@ -247,7 +259,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         var immediateSeasonDirectories = immediateDirectories.Where(path =>
             FilenameMetadataParser.SeasonNumber(Path.GetFileName(path)).HasValue).ToList();
         var contentDirectories = immediateDirectories.Where(path =>
-            !IsExtrasFolder(Path.GetFileName(path))).ToList();
+            !IsSupplementFolder(Path.GetFileName(path))).ToList();
         var directEpisodeEvidence = directFiles.Any(file =>
         {
             var episode = FilenameMetadataParser.Episode(file.Path, null);
@@ -276,7 +288,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             .ToList();
         var directCandidateFiles = directFiles.Concat(
             immediateDirectories
-                .Where(path => IsExtrasFolder(Path.GetFileName(path)))
+                .Where(path => IsSupplementFolder(Path.GetFileName(path)))
                 .SelectMany(path => containedFiles.Where(file => MediaPath.IsSameOrDescendant(
                     MediaPath.Normalize(file.Path),
                     MediaPath.Normalize(path)))))
@@ -284,9 +296,10 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             .OrderBy(file => file.Path, StringComparer.Ordinal)
             .ToList();
 
-        var hasTrailerWithoutMovie = directMainFiles.Count == 0
-            && directCandidateFiles.Any(file => !IsSupplementPath(directoryPath, file.Path)
-                && FilenameMetadataParser.IsExplicitTrailerFile(file.Path));
+        var hasTrailerWithoutMovie = contentDirectories.Count == 0
+            && directMainFiles.Count == 0
+            && directCandidateFiles.Any(file =>
+                FolderContext.Create(directoryPath, file.Path).IsTrailer);
         if (directEpisodeEvidence)
         {
             candidates.Add(new AutomaticCandidate(
@@ -372,14 +385,14 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             .Where(path => path is not null)
             .Select(path => path!)
             .Distinct(StringComparer.Ordinal)
-            .Where(path => !IsExtrasFolder(Path.GetFileName(path)))
+            .Where(path => !IsSupplementFolder(Path.GetFileName(path)))
             .ToList();
         return immediateDirectories.Count > 0 && immediateDirectories.All(IsSeasonFolder);
     }
 
     private static bool IsSupplementPath(string rootPath, string filePath)
     {
-        return FolderContext.Create(rootPath, filePath).ExtrasIndex.HasValue;
+        return FolderContext.Create(rootPath, filePath).SupplementIndex.HasValue;
     }
 
     private static string DisplayTitle(string path)
@@ -411,7 +424,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         foreach (var file in files)
         {
             var context = FolderContext.Create(rootPath, file.Path);
-            if (context.ExtrasIndex is null)
+            if (context.SupplementIndex is null)
             {
                 var identity = FilenameMetadataParser.Movie(file.Path);
                 if (FilenameMetadataParser.IsExplicitTrailerFile(file.Path))
@@ -426,7 +439,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
 
             var ownerDirectory = CombineComponents(
                 rootPath,
-                context.DirectoryComponents.Take(context.ExtrasIndex.Value));
+                context.DirectoryComponents.Take(context.SupplementIndex.Value));
             pendingSupplements.Add(new PendingSupplement(file, ownerDirectory, context));
         }
 
@@ -534,13 +547,18 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             }
 
             var owner = possibleOwners[0];
+            var supplementIdentity = supplement.Context.IsTrailer
+                ? FilenameMetadataParser.Movie(supplement.File.Path)
+                : null;
             items.Add(ToItem(
                 supplement.File,
                 supplement.Context.IsTrailer ? MediaKind.Trailer : MediaKind.Extra,
                 owner.SourcePath,
-                FilenameMetadataParser.SupplementTitle(
-                    supplement.File.Path,
-                    owner.DetectedTitle),
+                supplementIdentity?.Title
+                    ?? FilenameMetadataParser.SupplementTitle(
+                        supplement.File.Path,
+                        owner.DetectedTitle),
+                supplementIdentity?.Year,
                 category: supplement.Context.Category));
         }
 
@@ -655,7 +673,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         foreach (var file in files)
         {
             var context = FolderContext.Create(rootPath, file.Path);
-            if (context.ExtrasIndex is null
+            if (context.SupplementIndex is null
                 && FilenameMetadataParser.IsExplicitTrailerFile(file.Path))
             {
                 var trailerIdentity = FilenameMetadataParser.Movie(file.Path);
@@ -740,7 +758,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 ? FilenameMetadataParser.SeasonNumber(
                     context.DirectoryComponents[context.SeasonIndex.Value])
                 : null;
-            if (context.ExtrasIndex.HasValue)
+            if (context.SupplementIndex.HasValue)
             {
                 var seriesTitle = seriesItem.DetectedTitle;
                 supplements.Add(ToItem(
@@ -873,7 +891,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         string filePath,
         FolderContext context)
     {
-        var boundary = new[] { context.SeasonIndex, context.ExtrasIndex }
+        var boundary = new[] { context.SeasonIndex, context.SupplementIndex }
             .Where(index => index.HasValue)
             .Select(index => index!.Value)
             .DefaultIfEmpty(-1)
@@ -1020,15 +1038,16 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         return components.Aggregate(Path.GetFullPath(rootPath), Path.Combine);
     }
 
-    private static bool IsExtrasFolder(string value)
+    private static bool IsSupplementFolder(string value)
     {
-        return ExtrasFolderNames.Contains(FilenameMetadataParser.NormalizeFolderToken(value));
+        var normalized = FilenameMetadataParser.NormalizeFolderToken(value);
+        return ExtrasFolderNames.Contains(normalized) || TrailerFolderNames.Contains(normalized);
     }
 
     private static bool IsTrailerToken(string value)
     {
         var normalized = FilenameMetadataParser.NormalizeFolderToken(value);
-        return normalized is "trailer" or "trailers" or "teaser" or "teasers"
+        return TrailerFolderNames.Contains(normalized)
             || FilenameMetadataParser.IsExplicitTrailerFile(value);
     }
 
@@ -1063,7 +1082,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
     private sealed record FolderContext(
         IReadOnlyList<string> DirectoryComponents,
         int? SeasonIndex,
-        int? ExtrasIndex,
+        int? SupplementIndex,
         bool IsTrailer,
         string Category)
     {
@@ -1075,18 +1094,19 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 : relativeDirectory.Split(Path.DirectorySeparatorChar).ToList();
             var seasonIndex = components.FindLastIndex(component =>
                 FilenameMetadataParser.SeasonNumber(component).HasValue);
-            var extrasIndex = components.FindIndex(IsExtrasFolder);
-            var category = extrasIndex < 0
+            var supplementIndex = components.FindIndex(IsSupplementFolder);
+            var trailerTokens = components.Append(Path.GetFileNameWithoutExtension(filePath)).ToList();
+            var isTrailer = trailerTokens.Any(IsTrailerToken);
+            var category = supplementIndex < 0 || isTrailer
                 ? string.Empty
                 : string.Join(
                     " / ",
-                    components.Skip(extrasIndex + 1).Where(component => !IsTrailerToken(component)));
-            var trailerTokens = components.Append(Path.GetFileNameWithoutExtension(filePath));
+                    components.Skip(supplementIndex + 1).Where(component => !IsTrailerToken(component)));
             return new FolderContext(
                 components,
                 seasonIndex < 0 ? null : seasonIndex,
-                extrasIndex < 0 ? null : extrasIndex,
-                trailerTokens.Any(IsTrailerToken),
+                supplementIndex < 0 ? null : supplementIndex,
+                isTrailer,
                 category);
         }
     }

@@ -14,8 +14,15 @@ public static partial class FilenameMetadataParser
     {
         var filename = Path.GetFileNameWithoutExtension(path);
         var trailerSuffix = TrailerSuffixExpression().Match(filename);
+        int? trailerYear = null;
         if (trailerSuffix.Success)
         {
+            if (int.TryParse(trailerSuffix.Groups["year"].Value, out var parsedTrailerYear)
+                && IsPlausibleYear(parsedTrailerYear))
+            {
+                trailerYear = parsedTrailerYear;
+            }
+
             filename = filename[..trailerSuffix.Index];
         }
 
@@ -27,14 +34,17 @@ public static partial class FilenameMetadataParser
         var match = MovieYearExpression().Match(title);
         if (!match.Success || !int.TryParse(match.Groups[2].Value, out var year))
         {
-            return new MovieIdentity(title, null);
+            return new MovieIdentity(title, trailerYear);
         }
 
         var plausibleYear = year >= 1888 && year <= DateTime.UtcNow.Year + 2;
         var titleWithoutYear = match.Groups[1].Value.Trim();
-        return plausibleYear && titleWithoutYear.Any(char.IsLetter)
-            ? new MovieIdentity(titleWithoutYear, year)
-            : new MovieIdentity(title, null);
+        if (plausibleYear && titleWithoutYear.Any(char.IsLetter))
+        {
+            return new MovieIdentity(titleWithoutYear, year);
+        }
+
+        return new MovieIdentity(title, trailerYear);
     }
 
     public static MovieIdentity Series(string directoryPath)
@@ -233,7 +243,9 @@ public static partial class FilenameMetadataParser
     [GeneratedRegex(@"^(.+?)\s+\(?((?:19|20)\d{2})\)?$", RegexOptions.CultureInvariant)]
     private static partial Regex MovieYearExpression();
 
-    [GeneratedRegex(@"^(?:official[\s._-]+)?(?:teaser|trailer)(?:[\s._-]*\d+)?$|(?:[\s._-]+)(?:official[\s._-]+)?(?:teaser|trailer)(?:[\s._-]*\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static bool IsPlausibleYear(int year) => year >= 1888 && year <= DateTime.UtcNow.Year + 2;
+
+    [GeneratedRegex(@"(?:^|[\s._-]+)(?:official[\s._-]+)?(?:teaser|trailer)(?:[\s._-]*\d+)?(?:[\s._-]+\(?(?<year>(?:19|20)\d{2})\)?)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TrailerSuffixExpression();
 
     [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

@@ -401,19 +401,159 @@ public static class MetadataMatcher
                 : score * 0.7;
         }
 
-        // Only an exact normalized title can be automatically applied. Similarity
-        // still gives reviewers a useful, deterministic ordering without letting a
-        // provider's result position act as evidence.
+        // Keep fuzzy matches below the automatic threshold. The narrowly permitted
+        // one-letter plural variation is checked separately with a matching year.
         return Math.Clamp(score, 0.1, 0.94);
     }
 
-    public static bool IsUnambiguous(IReadOnlyList<MetadataCandidateSummary> candidates) =>
-        candidates.Count > 0
-        && candidates[0].Confidence >= 0.95
-        && (candidates.Count == 1 || candidates[0].Confidence - candidates[1].Confidence >= 0.08);
+    public static MetadataCandidateSummary? SelectAutomaticMatch(
+        IReadOnlyList<MetadataCandidateSummary> candidates,
+        string requestedTitle,
+        int? requestedYear)
+    {
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
 
-    private static string Normalize(string value) =>
-        FilenameMetadataParser.NormalizeMatchTitle(value);
+        var ranked = candidates.OrderByDescending(candidate => candidate.Confidence).ToList();
+        var best = ranked[0];
+        var hasClearLead = ranked.Count == 1
+            || best.Confidence - ranked[1].Confidence >= 0.08;
+        if (!hasClearLead)
+        {
+            return null;
+        }
+
+        if (best.Confidence >= 0.95)
+        {
+            return best;
+        }
+
+        // A single trailing "s" is a common filename/provider variation. It is
+        // safe to accept only when the release year agrees and no candidate is
+        // close enough to make the choice ambiguous.
+        return requestedYear.HasValue
+            && best.Year == requestedYear
+            && best.Confidence >= 0.86
+            && new[] { best.Title, best.OriginalTitle ?? string.Empty }
+                .Any(candidate => IsSinglePluralVariant(requestedTitle, candidate))
+            ? best
+            : null;
+    }
+
+    public static bool IsUnambiguous(
+        IReadOnlyList<MetadataCandidateSummary> candidates,
+        string requestedTitle,
+        int? requestedYear) =>
+        SelectAutomaticMatch(candidates, requestedTitle, requestedYear) is not null;
+
+    public static string ReviewReason(
+        string requestedTitle,
+        int? requestedYear,
+        IReadOnlyList<MetadataCandidateSummary> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            return "TMDB returned no results for the detected title.";
+        }
+
+        var best = candidates.OrderByDescending(candidate => candidate.Confidence).First();
+        if (requestedYear.HasValue && best.Year.HasValue && requestedYear != best.Year)
+        {
+            return $"A possible title match was found, but TMDB lists it as {best.Year.Value} instead of {requestedYear.Value}.";
+        }
+
+        if (candidates.Count == 1)
+        {
+            var titleLooksClose = new[] { best.Title, best.OriginalTitle ?? string.Empty }
+                .Any(candidate => Normalize(candidate) == Normalize(requestedTitle)
+                    || IsSinglePluralVariant(requestedTitle, candidate));
+            return titleLooksClose
+                ? "One possible TMDB match was found, but it did not meet the safe automatic-selection rules."
+                : "TMDB returned one result, but it is not a close title match.";
+        }
+
+        var runnerUp = candidates
+            .OrderByDescending(candidate => candidate.Confidence)
+            .Skip(1)
+            .First();
+        return best.Confidence - runnerUp.Confidence < 0.08
+            ? "Several similar TMDB matches need confirmation."
+            : "The best TMDB match is below the safe automatic-selection threshold.";
+    }
+
+    private static bool IsSinglePluralVariant(string requested, string candidate)
+    {
+        var requestedWords = Words(requested);
+        var candidateWords = Words(candidate);
+        if (requestedWords.Length == 0 || requestedWords.Length != candidateWords.Length)
+        {
+            return false;
+        }
+
+        var differingWords = 0;
+        for (var index = 0; index < requestedWords.Length; index++)
+        {
+            var left = requestedWords[index];
+            var right = candidateWords[index];
+            if (left == right)
+            {
+                continue;
+            }
+
+            var pluralizesLeft = right.Length > 4
+                && right.EndsWith('s')
+                && right[..^1] == left;
+            var pluralizesRight = left.Length > 4
+                && left.EndsWith('s')
+                && left[..^1] == right;
+            if (!pluralizesLeft && !pluralizesRight)
+            {
+                return false;
+            }
+
+            differingWords++;
+        }
+
+        return differingWords == 1;
+    }
+
+    private static string[] Words(string value)
+    {
+        var words = new List<string>();
+        var current = new StringBuilder();
+        foreach (var character in value.Normalize(NormalizationForm.FormKD))
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (char.IsLetterOrDigit(character))
+            {
+                current.Append(char.ToLowerInvariant(character));
+                continue;
+            }
+
+            if (current.Length > 0)
+            {
+                words.Add(current.ToString());
+                current.Clear();
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            words.Add(current.ToString());
+        }
+
+        return words
+            .Where((word, index) => word != "and" || index == 0 || index == words.Count - 1)
+            .ToArray();
+    }
+
+    private static string Normalize(string value) => string.Concat(Words(value));
 
     private static double Similarity(string left, string right)
     {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
+other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
 developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 dotnet_bin=${DOTNET_BIN:-"$other_root/Package Cache/dotnet/dotnet"}
 provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-/Applications/Aurelia.app/Contents/embedded.provisionprofile}

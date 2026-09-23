@@ -2,8 +2,8 @@
 
 Aurelia is a native, self-hosted media system. The server now maintains a
 read-only movie and TV library, provides authenticated HTTP Range streaming,
-and connects securely to a native macOS library and playback client. Aurelia
-1.0.14 starts this Mac as a host by default, preserves an explicitly selected
+and connects securely to a native macOS library and playback client. The Mac
+starts as a host by default, preserves an explicitly selected
 remote-client mode, and makes storage import available throughout the app.
 People choose whole storage locations instead of separating movie and TV
 folders themselves; Aurelia classifies clear structures locally and asks
@@ -16,7 +16,8 @@ native app.
 
 ## Non-negotiable data rules
 
-- Existing Aurelia source code and `Library.store` are separate and untouched.
+- Aurelia Classic is a separate local-only app; its source, `Library.store`,
+  and application data are untouched.
 - Media files stay at their original locations.
 - The server never copies, converts, remuxes, transcodes, or caches video files.
 - Server data contains only configuration, accounts, sessions, metadata, and
@@ -48,7 +49,7 @@ native app.
 - Parent-process monitoring for an app-owned server process
 - Optional TMDB metadata with cautious matching and an explicit review queue
 - Authenticated artwork, cast and crew, collections, favorites, catalog search,
-  and per-user Home data with an hourly stable recommendation
+  and per-user Home recommendations with an hourly stable selection
 - Compact presentation endpoints for paged movie/series cards and bundled
   details, with episode search context and no source paths in responses
 - Server-side indexed search, combined catalog filters and sorting, revision
@@ -98,10 +99,10 @@ native app.
 ## Development
 
 The repository uses the SDK pinned in `global.json`. Generated SDK and package
-caches live outside the repository in `Aurelia Home Other/Package Cache`.
+caches live outside the repository in `Aurelia Other/Package Cache`.
 
 ```sh
-export PATH="../Aurelia Home Other/Package Cache/dotnet:$PATH"
+export PATH="../Aurelia Other/Package Cache/dotnet:$PATH"
 dotnet tool restore
 dotnet restore Aurelia.slnx
 dotnet test Aurelia.slnx
@@ -120,13 +121,13 @@ scripts/test-release-app-autostart.sh
 ```
 
 Generated builds, package caches, test results, and development logs are kept
-outside the repository in the adjacent `Aurelia Home Other` directory. Test
+outside the repository in the adjacent `Aurelia Other` directory. Test
 source remains in the repository so every checkout can reproduce verification.
 The Mac test script launches all runnable test products from the private
 `~/Library/Caches/Aurelia/TestRuns` directory, so test execution cannot
 accidentally ask for access to the protected Documents folder merely because the
 repository lives there. It removes the temporary test host after copying the log
-and result bundle to `Aurelia Home Other`.
+and result bundle to `Aurelia Other`.
 
 The development server listens on `http://127.0.0.1:43110` by default. Override
 the location of its small data directory with `AURELIA_DATA_DIR` or

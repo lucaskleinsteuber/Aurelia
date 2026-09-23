@@ -24,9 +24,55 @@ public sealed class MetadataMatcherTests
 
         Assert.Equal(exact.Confidence, exactScore);
         Assert.Equal(near.Confidence, nearScore);
-        Assert.True(MetadataMatcher.IsUnambiguous([exact]));
-        Assert.False(MetadataMatcher.IsUnambiguous([near, exact]));
-        Assert.False(MetadataMatcher.IsUnambiguous([Candidate("3", "The Truman Show", 2001, 0.82)]));
+        Assert.True(MetadataMatcher.IsUnambiguous([exact], "The Truman Show", 1998));
+        Assert.True(MetadataMatcher.IsUnambiguous([near, exact], "The Truman Show", 1998));
+        Assert.Equal(exact, MetadataMatcher.SelectAutomaticMatch([near, exact], "The Truman Show", 1998));
+        Assert.False(MetadataMatcher.IsUnambiguous(
+            [Candidate("3", "The Truman Show", 2001, 0.82)], "The Truman Show", 1998));
+    }
+
+    [Fact]
+    public void ExactYearAndOnePluralDifferenceAllowOnlyAnUnambiguousMatch()
+    {
+        var confidence = MetadataMatcher.Score(
+            "Minions & Monster", 2026, "Minions & Monsters", null, 2026);
+        var match = Candidate("1", "Minions & Monsters", 2026, confidence);
+
+        Assert.True(confidence >= 0.86);
+        Assert.True(MetadataMatcher.IsUnambiguous([match], "Minions & Monster", 2026));
+        Assert.False(MetadataMatcher.IsUnambiguous([match], "Minions & Monster", 2025));
+        Assert.False(MetadataMatcher.IsUnambiguous([match], "Minions & Monster", null));
+
+        var closeCompetitor = Candidate("2", "Minion Monsters", 2026, confidence - 0.03);
+        Assert.False(MetadataMatcher.IsUnambiguous(
+            [match, closeCompetitor], "Minions & Monster", 2026));
+
+        var filenameVariant = Candidate(
+            "3",
+            "Minions & Monsters",
+            2026,
+            MetadataMatcher.Score("Minions and Monster", 2026, "Minions & Monsters", null, 2026));
+        Assert.Equal(
+            filenameVariant,
+            MetadataMatcher.SelectAutomaticMatch([filenameVariant], "Minions and Monster", 2026));
+    }
+
+    [Fact]
+    public void ReviewReasonDistinguishesNoSingleAndAmbiguousResults()
+    {
+        Assert.Equal(
+            "TMDB returned no results for the detected title.",
+            MetadataMatcher.ReviewReason("Minions & Monster", 2026, []));
+
+        var single = Candidate("1", "Minions & Monsters", 2025, 0.7);
+        Assert.Contains("2025 instead of 2026", MetadataMatcher.ReviewReason(
+            "Minions & Monster", 2026, [single]));
+
+        var first = Candidate("2", "Example Movie", 2020, 0.82);
+        var second = Candidate("3", "Example Movies", 2020, 0.79);
+        Assert.Equal(
+            "Several similar TMDB matches need confirmation.",
+            MetadataMatcher.ReviewReason("Example Movie", 2020, [first, second]));
     }
 
     [Fact]

@@ -160,9 +160,9 @@ public sealed partial class MetadataJobWorker(
             {
                 var title = item.OverrideTitle ?? item.DetectedTitle;
                 var candidates = await tmdb.SearchAsync(settings.Token, settings.Language, item.Kind, title, item.Year, cancellationToken);
-                if (MetadataMatcher.IsUnambiguous(candidates))
+                var match = MetadataMatcher.SelectAutomaticMatch(candidates, title, item.Year);
+                if (match is not null)
                 {
-                    var match = candidates[0];
                     var details = await tmdb.GetAsync(settings.Token, settings.Language, match.MediaType, match.ProviderMediaId, cancellationToken);
                     await service.ApplyAsync(item, details, match.Confidence, cancellationToken);
                     await service.ApplyEpisodesAsync(item, details, settings, cancellationToken);
@@ -218,9 +218,10 @@ public sealed partial class MetadataJobWorker(
             database.MetadataReviews.Add(review);
         }
         review.Reason = failureReason
-            ?? (candidates.Count == 0
-                ? "No confident TMDB result was found."
-                : "Multiple or uncertain TMDB results need confirmation.");
+            ?? MetadataMatcher.ReviewReason(
+                item.OverrideTitle ?? item.DetectedTitle,
+                item.Year,
+                candidates);
         review.CandidatesJson = JsonSerializer.Serialize(candidates.Take(8), JsonOptions);
         review.State = MetadataReviewState.NeedsReview;
         review.UpdatedAt = now;

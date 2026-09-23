@@ -10,7 +10,7 @@ internal static class TestPaths
             root = FindRepositoryRoot() is { } repositoryRoot
                 ? Path.Combine(
                     Directory.GetParent(repositoryRoot)!.FullName,
-                    "Aurelia Home Other",
+                    "Aurelia Other",
                     "Test Runs")
                 : Path.Combine(Path.GetTempPath(), "AureliaTests");
         }

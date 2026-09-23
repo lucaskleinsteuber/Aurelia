@@ -395,6 +395,9 @@ struct MetadataReviewQueueSheet: View {
                 Text(candidate.title)
                 Spacer()
                 Text(candidate.year.map(String.init) ?? "").foregroundStyle(.secondary)
+                Text("\(Int((candidate.confidence * 100).rounded()))% match")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
                 Button("Use Match") { Task { await choose(review, candidate) } }
                   .disabled(review.state != .needsReview)
               }

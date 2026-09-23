@@ -6,6 +6,11 @@ These rules apply to every task in this repository.
 
 - Aurelia is a self-hosted media server with native clients. Do not replace it
   with a browser-only product or a shortcut that merely opens localhost.
+- This repository's current product name is **Aurelia**. **Aurelia Classic** is
+  the separate, local-only reference application and is read-only. Do not call
+  the current product by its retired two-word label in user-facing text or
+  active documentation. Preserve historic identifiers only when required to
+  discover or migrate data and settings from older releases.
 - Keep all user-facing text in English until localization is an explicit task.
 - Preserve the native Apple TV/macOS design direction, but keep infrastructure
   milestones focused and functional.
@@ -36,8 +41,8 @@ These rules apply to every task in this repository.
   documentation in the repository.
 - Never commit build products, result bundles, logs, caches, runtime data,
   SQLite files, artwork, media, credentials, tokens, or signing material.
-- Generated output remains in the adjacent historical external workspace
-  `/Users/lucaskleinsteuber/Documents/Aurelia Home Other`; do not rename or move
+- Generated output remains in the adjacent external workspace
+  `/Users/lucaskleinsteuber/Documents/Aurelia Other`; do not rename or move
   that directory merely to change the product name. Its standard subdirectories
   are `Build/`, `Package Cache/`, `Test Results/`, `Logs/`, and
   `Aurelia Build summarys/`.
@@ -75,8 +80,8 @@ These rules apply to every task in this repository.
   workflow rule, not behavior that may be added to the production app.
 - A clean test installation removes only Aurelia-owned accounts, sessions,
   preferences, connection profiles, transient host state, logs, databases, and
-  the legacy Aurelia Home migration source that would otherwise restore an old
-  setup. It must never delete, edit, scan, or move user-selected media folders.
+  the pre-1.0.12 server-data migration source that would otherwise restore an
+  old setup. It must never delete, edit, scan, or move user-selected media folders.
   It must never touch Aurelia Classic, `Application Support/Aurelia`,
   `Library.store`, or `com.lucas.aurelia` credentials and containers. Reset
   sandbox preferences through macOS preferences services; preserve the
@@ -100,11 +105,11 @@ These rules apply to every task in this repository.
   unportable paths, generated data, databases, binaries, media, caches, and test
   results.
 - Commit a completed build with exactly its product version as the message
-  (for example `1.0.14`), push to `origin/main`, and verify the remote hash.
+  (for example `1.1.0`), push to `origin/main`, and verify the remote hash.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
 - After verification, create exactly one concise English Markdown summary in
-  `/Users/lucaskleinsteuber/Documents/Aurelia Home Other/Aurelia Build summarys`.
+  `/Users/lucaskleinsteuber/Documents/Aurelia Other/Aurelia Build summarys`.
   Include objective, behavior, important files, verification, installation,
   known limitations, and the verified final Git hash. Do not commit that
   external summary.
