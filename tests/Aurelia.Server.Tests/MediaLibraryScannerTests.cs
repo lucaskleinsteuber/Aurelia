@@ -66,6 +66,139 @@ public sealed class MediaLibraryScannerTests
     }
 
     [Fact]
+    public void MovieScannerAttachesAnExplicitTrailerToOneExactTitleMatch()
+    {
+        var root = CreateDirectory("Trailer Match");
+        try
+        {
+            var moviePath = Touch(root, "The Truman Show (1998).mkv");
+            Touch(root, "The Truman Show - Official Trailer.mp4");
+
+            var result = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None);
+
+            var movie = Assert.Single(result.Items, item => item.Kind == MediaKind.Movie);
+            var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
+            Assert.Equal(moviePath, movie.SourcePath);
+            Assert.Equal(movie.SourcePath, trailer.ParentSourcePath);
+            Assert.Empty(result.ImportReviews!);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, "No exact movie title match was found in this storage location.")]
+    [InlineData(true, "More than one movie has this title in this storage location.")]
+    public void MovieScannerRequiresReviewWhenATrailerMatchIsNotUnique(
+        bool ambiguous,
+        string expectedReason)
+    {
+        var root = CreateDirectory("Trailer Review");
+        try
+        {
+            if (ambiguous)
+            {
+                Touch(root, "First/The Truman Show (1998).mkv");
+                Touch(root, "Second/The Truman Show (1998).mkv");
+            }
+            else
+            {
+                Touch(root, "Other Movie (1998).mkv");
+            }
+
+            var trailerPath = Touch(root, "The Truman Show - Trailer.mp4");
+            var result = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None);
+
+            Assert.Contains(result.Items, item =>
+                item.Kind == MediaKind.Trailer
+                && item.SourcePath == trailerPath
+                && item.ParentSourcePath is null);
+            var review = Assert.Single(result.ImportReviews!);
+            Assert.Equal(trailerPath, review.SourcePath);
+            Assert.Equal("The Truman Show", review.DetectedTitle);
+            Assert.Equal(expectedReason, review.Reason);
+            Assert.DoesNotContain(result.Items, item =>
+                item.Kind == MediaKind.Movie && item.SourcePath == trailerPath);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Theory]
+    [InlineData(LibraryImportReviewState.Assigned, true)]
+    [InlineData(LibraryImportReviewState.Ignored, false)]
+    public void MovieScannerPreservesExplicitTrailerReviewDecisions(
+        LibraryImportReviewState state,
+        bool expectParent)
+    {
+        var root = CreateDirectory("Trailer Decision");
+        try
+        {
+            var moviePath = Touch(root, "The Truman Show (1998).mkv");
+            var trailerPath = Touch(root, "Unrelated Name - Trailer.mp4");
+            var decisions = new[]
+            {
+                new ExistingImportReviewDecision(trailerPath, state, expectParent ? moviePath : null),
+            };
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Movies,
+                [],
+                null,
+                CancellationToken.None,
+                importReviewDecisions: decisions);
+
+            var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
+            Assert.Equal(expectParent ? moviePath : null, trailer.ParentSourcePath);
+            Assert.Empty(result.ImportReviews!);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Theory]
+    [InlineData(LibraryImportReviewState.Assigned, true)]
+    [InlineData(LibraryImportReviewState.Ignored, false)]
+    public void MovieScannerAppliesReviewDecisionsToTrailersInsideExtrasFolders(
+        LibraryImportReviewState state,
+        bool expectParent)
+    {
+        var root = CreateDirectory("Trailer Extras Decision");
+        try
+        {
+            var moviePath = Touch(root, "The Truman Show (1998).mkv");
+            var trailerPath = Touch(root, "Extras/Trailers/Unrelated Name.mp4");
+            var decision = new ExistingImportReviewDecision(
+                trailerPath,
+                state,
+                expectParent ? moviePath : null);
+
+            var result = scanner.Scan(
+                root,
+                LibraryKind.Movies,
+                [],
+                null,
+                CancellationToken.None,
+                importReviewDecisions: [decision]);
+
+            var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
+            Assert.Equal(expectParent ? moviePath : null, trailer.ParentSourcePath);
+            Assert.Empty(result.ImportReviews!);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
     public void TvScannerBuildsSeasonsAndSeriesLevelExtras()
     {
         var root = CreateDirectory("Breaking Bad");

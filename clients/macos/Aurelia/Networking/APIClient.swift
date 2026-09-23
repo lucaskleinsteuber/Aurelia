@@ -185,6 +185,26 @@ struct APIClient: Sendable {
     try await get("/api/v1/libraries/\(id.uuidString.lowercased())/discoveries")
   }
 
+  func libraryImportReviews(id: UUID) async throws -> [LibraryImportReviewSummary] {
+    try await get("/api/v1/libraries/\(id.uuidString.lowercased())/import-reviews")
+  }
+
+  func updateLibraryImportReview(
+    libraryId: UUID,
+    reviewId: UUID,
+    action: LibraryImportReviewAction,
+    movieId: UUID? = nil
+  ) async throws -> LibraryScanSummary {
+    let body = try JSONEncoder().encode(
+      UpdateLibraryImportReviewRequest(action: action, movieId: movieId))
+    let data = try await perform(
+      path:
+        "/api/v1/libraries/\(libraryId.uuidString.lowercased())/import-reviews/\(reviewId.uuidString.lowercased())",
+      method: "PUT",
+      body: body)
+    return try Self.decode(LibraryScanSummary.self, from: data)
+  }
+
   func updateClassification(
     libraryId: UUID,
     discoveryId: UUID,
@@ -350,6 +370,18 @@ struct APIClient: Sendable {
     return try await allPages(
       path: "/api/v1/catalog/search",
       query: try Self.query(name: "query", value: query))
+  }
+
+  func searchMoviesForImportReview(
+    _ query: String,
+    libraryId: UUID
+  ) async throws -> [CatalogItemSummary] {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return [] }
+    let encodedQuery = try Self.query(name: "query", value: trimmed)
+    let page: PagedResponse<CatalogItemSummary> = try await get(
+      "/api/v1/catalog/search?\(encodedQuery)&kind=movie&libraryId=\(libraryId.uuidString.lowercased())&offset=0&limit=25")
+    return page.items
   }
 
   func collections() async throws -> [CollectionSummary] {

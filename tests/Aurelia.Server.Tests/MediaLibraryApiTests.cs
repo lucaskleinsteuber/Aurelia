@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
+using Aurelia.Server.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -193,6 +194,275 @@ public sealed class MediaLibraryApiTests
         }
         finally
         {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public async Task TrailerImportReviewsArePrivatePersistentAndLimitedToSameLibraryMovies()
+    {
+        var root = CreateDirectory("Trailer Import Review");
+        var foreignRoot = CreateDirectory("Foreign Trailer Review");
+        Touch(root, "Target Movie (2020).mkv");
+        Touch(root, "Unmatched Movie - Official Trailer.mp4");
+        Touch(root, "Another Unmatched Film - Teaser.mp4");
+        Touch(foreignRoot, "Foreign Movie.mkv");
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.Movies);
+            var foreignLibrary = await CreateLibraryAsync(
+                client, owner.Token, foreignRoot, LibraryKind.Movies);
+            _ = await StartAndWaitForScanAsync(client, owner.Token, foreignLibrary.Id);
+            var firstScan = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+            Assert.Equal(LibraryScanState.Completed, firstScan.State);
+
+            var sameLibraryMovie = Assert.Single(
+                (await GetLibraryMoviesAsync(client, owner.Token, library.Id)).Items);
+            var foreignMovie = Assert.Single(
+                (await GetLibraryMoviesAsync(client, owner.Token, foreignLibrary.Id)).Items);
+            List<LibraryImportReviewSummary> reviews;
+            using (var request = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       $"/api/v1/libraries/{library.Id}/import-reviews",
+                       owner.Token))
+            using (var response = await client.SendAsync(request))
+            {
+                response.EnsureSuccessStatusCode();
+                var json = await response.Content.ReadAsStringAsync();
+                Assert.DoesNotContain(root, json, StringComparison.Ordinal);
+                reviews = await ApiTestClient.ReadAsync<List<LibraryImportReviewSummary>>(response);
+            }
+
+            Assert.Equal(2, reviews.Count);
+            Assert.All(reviews, review => Assert.Equal(LibraryImportReviewState.Pending, review.State));
+            var assignedReview = Assert.Single(
+                reviews, review => review.RelativePath == "Unmatched Movie - Official Trailer.mp4");
+            var ignoredReview = Assert.Single(
+                reviews, review => review.RelativePath == "Another Unmatched Film - Teaser.mp4");
+            var viewer = await CreateUserAsync(client, owner.Token);
+            var viewerLogin = await LoginAsync(client, viewer.Username, "a secure viewer password");
+            using (var forbiddenRequest = ApiTestClient.Authorized(
+                       HttpMethod.Get,
+                       $"/api/v1/libraries/{library.Id}/import-reviews",
+                       viewerLogin.Token))
+            using (var forbiddenResponse = await client.SendAsync(forbiddenRequest))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+            }
+
+            using (var crossLibraryRequest = ApiTestClient.Authorized(
+                       HttpMethod.Put,
+                       $"/api/v1/libraries/{library.Id}/import-reviews/{assignedReview.Id}",
+                       owner.Token,
+                       new UpdateLibraryImportReviewRequest(
+                           LibraryImportReviewAction.AssignToMovie,
+                           foreignMovie.Id)))
+            using (var crossLibraryResponse = await client.SendAsync(crossLibraryRequest))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, crossLibraryResponse.StatusCode);
+                Assert.Equal("movie_not_found", (await ApiTestClient.ReadAsync<ApiProblem>(crossLibraryResponse)).Code);
+            }
+
+            var trailerIds = await GetTrailerIdsAsync(factory, library.Id);
+            var assignScan = await DecideTrailerReviewAsync(
+                client,
+                owner.Token,
+                library.Id,
+                assignedReview.Id,
+                new UpdateLibraryImportReviewRequest(
+                    LibraryImportReviewAction.AssignToMovie,
+                    sameLibraryMovie.Id));
+            Assert.Equal(LibraryScanState.Completed, assignScan.State);
+
+            using (var ignoreRequest = ApiTestClient.Authorized(
+                       HttpMethod.Put,
+                       $"/api/v1/libraries/{library.Id}/import-reviews/{ignoredReview.Id}",
+                       owner.Token,
+                       new UpdateLibraryImportReviewRequest(LibraryImportReviewAction.Ignore)))
+            using (var ignoreResponse = await client.SendAsync(ignoreRequest))
+            {
+                Assert.Equal(HttpStatusCode.Accepted, ignoreResponse.StatusCode);
+                var queued = await ApiTestClient.ReadAsync<LibraryScanSummary>(ignoreResponse);
+                Assert.Equal(LibraryScanState.Completed,
+                    (await WaitForScanAsync(client, owner.Token, queued.Id)).State);
+            }
+
+            _ = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+            Assert.Empty(await GetImportReviewsAsync(client, owner.Token, library.Id));
+            using var scope = factory.Services.CreateScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var persisted = await database.LibraryImportReviews
+                .Where(review => review.LibraryRootId == library.Id)
+                .ToListAsync();
+            Assert.Equal(2, persisted.Count);
+            Assert.Equal(LibraryImportReviewState.Assigned,
+                Assert.Single(persisted, review => review.Id == assignedReview.Id).State);
+            Assert.Equal(sameLibraryMovie.Id,
+                Assert.Single(persisted, review => review.Id == assignedReview.Id).AssignedMovieId);
+            Assert.Equal(LibraryImportReviewState.Ignored,
+                Assert.Single(persisted, review => review.Id == ignoredReview.Id).State);
+
+            var assignedTrailer = await database.MediaItems.SingleAsync(
+                item => item.LibraryRootId == library.Id
+                    && item.SourcePath.EndsWith("Unmatched Movie - Official Trailer.mp4"));
+            var ignoredTrailer = await database.MediaItems.SingleAsync(
+                item => item.LibraryRootId == library.Id
+                    && item.SourcePath.EndsWith("Another Unmatched Film - Teaser.mp4"));
+            Assert.Equal(MediaKind.Trailer, assignedTrailer.Kind);
+            Assert.Equal(sameLibraryMovie.Id, assignedTrailer.ParentId);
+            Assert.Equal(MediaKind.Trailer, ignoredTrailer.Kind);
+            Assert.Null(ignoredTrailer.ParentId);
+            Assert.Equal(trailerIds[assignedTrailer.SourcePath], assignedTrailer.Id);
+            Assert.Equal(trailerIds[ignoredTrailer.SourcePath], ignoredTrailer.Id);
+        }
+        finally
+        {
+            DeleteFixture(root);
+            DeleteFixture(foreignRoot);
+        }
+    }
+
+    [Fact]
+    public async Task ExactSiblingTrailerRepairsAnOldMovieImportWithoutReplacingItsIdentity()
+    {
+        var root = CreateDirectory("Legacy Trailer Repair");
+        var moviePath = Touch(root, "The Truman Show (1998).mkv");
+        var trailerPath = Touch(root, "The Truman Show - Official Trailer.mp4");
+        var legacyTrailerId = Guid.NewGuid();
+        var originalCreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(
+            DateTimeOffset.UtcNow.AddDays(-3).ToUnixTimeMilliseconds());
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.Movies);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var libraryRoot = await database.LibraryRoots.SingleAsync(item => item.Id == library.Id);
+                database.MediaItems.Add(new MediaItem
+                {
+                    Id = legacyTrailerId,
+                    LibraryRootId = library.Id,
+                    LibraryRoot = libraryRoot,
+                    Kind = MediaKind.Movie,
+                    SourcePath = trailerPath,
+                    NormalizedSourcePath = MediaPath.Normalize(trailerPath),
+                    DetectedTitle = "The Truman Show - Official Trailer",
+                    OverrideTitle = "My Manually Named Trailer",
+                    Extension = ".mp4",
+                    FileSize = 3,
+                    Availability = MediaAvailability.Available,
+                    CreatedAt = originalCreatedAt,
+                    UpdatedAt = originalCreatedAt,
+                });
+                await database.SaveChangesAsync();
+            }
+
+            var scan = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+            Assert.Equal(LibraryScanState.Completed, scan.State);
+            Assert.Equal(2, scan.FilesDiscovered);
+            Assert.Equal(1, scan.UpdatedFiles);
+
+            using var verificationScope = factory.Services.CreateScope();
+            var verificationDatabase = verificationScope.ServiceProvider
+                .GetRequiredService<AureliaDbContext>();
+            var trailer = await verificationDatabase.MediaItems.SingleAsync(
+                item => item.LibraryRootId == library.Id && item.SourcePath == trailerPath);
+            var movie = await verificationDatabase.MediaItems.SingleAsync(
+                item => item.LibraryRootId == library.Id && item.SourcePath == moviePath);
+            Assert.Equal(legacyTrailerId, trailer.Id);
+            Assert.Equal(MediaKind.Trailer, trailer.Kind);
+            Assert.Equal(movie.Id, trailer.ParentId);
+            Assert.Equal("My Manually Named Trailer", trailer.OverrideTitle);
+            Assert.Equal(originalCreatedAt, trailer.CreatedAt);
+            Assert.Empty(await verificationDatabase.LibraryImportReviews
+                .Where(review => review.LibraryRootId == library.Id)
+                .ToListAsync());
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public async Task ImportReviewDecisionRemainsPendingWhenAnotherScanIsAlreadyRunning()
+    {
+        var root = CreateDirectory("Atomic Trailer Decision");
+        var blockingScanner = new BlockingScanner();
+        try
+        {
+            using var factory = new AureliaServerFactory(
+                configureServices: services =>
+                {
+                    services.RemoveAll<IMediaLibraryScanner>();
+                    services.AddSingleton<IMediaLibraryScanner>(blockingScanner);
+                });
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.Movies);
+            var reviewId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var libraryRoot = await database.LibraryRoots.SingleAsync(item => item.Id == library.Id);
+                database.LibraryImportReviews.Add(new LibraryImportReview
+                {
+                    Id = reviewId,
+                    LibraryRootId = library.Id,
+                    LibraryRoot = libraryRoot,
+                    RelativePath = "Unmatched - Trailer.mp4",
+                    NormalizedRelativePath = "UNMATCHED - TRAILER.MP4",
+                    DetectedTitle = "Unmatched",
+                    Reason = "No exact movie title match was found in this storage location.",
+                    State = LibraryImportReviewState.Pending,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+                await database.SaveChangesAsync();
+            }
+
+            using var scanRequest = ApiTestClient.Authorized(
+                HttpMethod.Post,
+                $"/api/v1/libraries/{library.Id}/scans",
+                owner.Token);
+            using var scanResponse = await client.SendAsync(scanRequest);
+            Assert.Equal(HttpStatusCode.Accepted, scanResponse.StatusCode);
+            var scan = await ApiTestClient.ReadAsync<LibraryScanSummary>(scanResponse);
+            Assert.True(blockingScanner.Started.Wait(TimeSpan.FromSeconds(5)));
+
+            using var decisionRequest = ApiTestClient.Authorized(
+                HttpMethod.Put,
+                $"/api/v1/libraries/{library.Id}/import-reviews/{reviewId}",
+                owner.Token,
+                new UpdateLibraryImportReviewRequest(LibraryImportReviewAction.Ignore));
+            using var decisionResponse = await client.SendAsync(decisionRequest);
+            Assert.Equal(HttpStatusCode.Conflict, decisionResponse.StatusCode);
+            Assert.Equal("library_scan_active",
+                (await ApiTestClient.ReadAsync<ApiProblem>(decisionResponse)).Code);
+
+            using (var verificationScope = factory.Services.CreateScope())
+            {
+                var database = verificationScope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var review = await database.LibraryImportReviews
+                    .AsNoTracking()
+                    .SingleAsync(item => item.Id == reviewId);
+                Assert.Equal(LibraryImportReviewState.Pending, review.State);
+            }
+
+            blockingScanner.Release.Set();
+            Assert.Equal(LibraryScanState.Completed,
+                (await WaitForScanAsync(client, owner.Token, scan.Id)).State);
+        }
+        finally
+        {
+            blockingScanner.Release.Set();
             DeleteFixture(root);
         }
     }
@@ -739,6 +1009,63 @@ public sealed class MediaLibraryApiTests
         return await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response);
     }
 
+    private static async Task<PagedResponse<CatalogItemSummary>> GetLibraryMoviesAsync(
+        HttpClient client,
+        string token,
+        Guid libraryId)
+    {
+        using var request = ApiTestClient.Authorized(
+            HttpMethod.Get,
+            $"/api/v1/catalog/items?kind=movie&libraryId={libraryId}&offset=0&limit=100",
+            token);
+        using var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response);
+    }
+
+    private static async Task<Dictionary<string, Guid>> GetTrailerIdsAsync(
+        AureliaServerFactory factory,
+        Guid libraryId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        return await database.MediaItems
+            .Where(item => item.LibraryRootId == libraryId && item.Kind == MediaKind.Trailer)
+            .ToDictionaryAsync(item => item.SourcePath, item => item.Id);
+    }
+
+    private static async Task<List<LibraryImportReviewSummary>> GetImportReviewsAsync(
+        HttpClient client,
+        string token,
+        Guid libraryId)
+    {
+        using var request = ApiTestClient.Authorized(
+            HttpMethod.Get,
+            $"/api/v1/libraries/{libraryId}/import-reviews",
+            token);
+        using var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return await ApiTestClient.ReadAsync<List<LibraryImportReviewSummary>>(response);
+    }
+
+    private static async Task<LibraryScanSummary> DecideTrailerReviewAsync(
+        HttpClient client,
+        string token,
+        Guid libraryId,
+        Guid reviewId,
+        UpdateLibraryImportReviewRequest decision)
+    {
+        using var request = ApiTestClient.Authorized(
+            HttpMethod.Put,
+            $"/api/v1/libraries/{libraryId}/import-reviews/{reviewId}",
+            token,
+            decision);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var scan = await ApiTestClient.ReadAsync<LibraryScanSummary>(response);
+        return await WaitForScanAsync(client, token, scan.Id);
+    }
+
     private static async Task<LibrarySummary> CreateLibraryAsync(
         HttpClient client,
         string token,
@@ -893,7 +1220,9 @@ public sealed class MediaLibraryApiTests
             IReadOnlyList<Aurelia.Server.Services.ExistingEpisodeBinding> existingEpisodes,
             Action<int>? progress,
             CancellationToken cancellationToken,
-            IReadOnlyList<Aurelia.Server.Services.ExistingClassificationDecision>? classificationDecisions = null)
+            IReadOnlyList<Aurelia.Server.Services.ExistingClassificationDecision>? classificationDecisions = null,
+            IReadOnlyList<Aurelia.Server.Services.ExistingMovieBinding>? existingMovies = null,
+            IReadOnlyList<Aurelia.Server.Services.ExistingImportReviewDecision>? importReviewDecisions = null)
         {
             Started.Set();
             Release.Wait(cancellationToken);

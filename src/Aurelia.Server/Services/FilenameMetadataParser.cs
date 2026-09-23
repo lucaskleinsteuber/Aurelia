@@ -12,7 +12,18 @@ public static partial class FilenameMetadataParser
 
     public static MovieIdentity Movie(string path)
     {
-        var title = CleanTitle(Path.GetFileNameWithoutExtension(path));
+        var filename = Path.GetFileNameWithoutExtension(path);
+        var trailerSuffix = TrailerSuffixExpression().Match(filename);
+        if (trailerSuffix.Success)
+        {
+            filename = filename[..trailerSuffix.Index];
+        }
+
+        var title = CleanTitle(filename);
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = "Trailer";
+        }
         var match = MovieYearExpression().Match(title);
         if (!match.Success || !int.TryParse(match.Groups[2].Value, out var year))
         {
@@ -38,6 +49,25 @@ public static partial class FilenameMetadataParser
         return year >= 1888 && year <= DateTime.UtcNow.Year + 2
             ? new MovieIdentity(match.Groups[1].Value.Trim(), year)
             : new MovieIdentity(title, null);
+    }
+
+    public static bool IsExplicitTrailerFile(string path) =>
+        TrailerSuffixExpression().IsMatch(Path.GetFileNameWithoutExtension(path));
+
+    public static string NormalizeMatchTitle(string value)
+    {
+        var normalized = value.Normalize(NormalizationForm.FormKD);
+        var builder = new StringBuilder(normalized.Length);
+        foreach (var character in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark
+                && char.IsLetterOrDigit(character))
+            {
+                builder.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return builder.ToString();
     }
 
     public static EpisodeIdentity Episode(string path, int? expectedSeason)
@@ -202,6 +232,9 @@ public static partial class FilenameMetadataParser
 
     [GeneratedRegex(@"^(.+?)\s+\(?((?:19|20)\d{2})\)?$", RegexOptions.CultureInvariant)]
     private static partial Regex MovieYearExpression();
+
+    [GeneratedRegex(@"^(?:official[\s._-]+)?(?:teaser|trailer)(?:[\s._-]*\d+)?$|(?:[\s._-]+)(?:official[\s._-]+)?(?:teaser|trailer)(?:[\s._-]*\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailerSuffixExpression();
 
     [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SeasonEpisodeExpression();

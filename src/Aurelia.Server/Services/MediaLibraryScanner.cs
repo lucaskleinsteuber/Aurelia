@@ -9,6 +9,18 @@ public sealed record ExistingEpisodeBinding(
     int EpisodeNumber,
     string FilePath);
 
+public sealed record ExistingMovieBinding(Guid Id, string SourcePath, int? Year);
+
+public sealed record ExistingImportReviewDecision(
+    string SourcePath,
+    LibraryImportReviewState State,
+    string? ParentSourcePath);
+
+public sealed record DiscoveredImportReview(
+    string SourcePath,
+    string DetectedTitle,
+    string Reason);
+
 public sealed record DiscoveredMediaItem(
     MediaKind Kind,
     string SourcePath,
@@ -44,7 +56,8 @@ public sealed record MediaScanDiscovery(
     IReadOnlyList<ScanDiscoveryIssue> Issues,
     int FilesDiscovered,
     int SkippedFiles,
-    IReadOnlyList<DiscoveredClassification>? Classifications = null);
+    IReadOnlyList<DiscoveredClassification>? Classifications = null,
+    IReadOnlyList<DiscoveredImportReview>? ImportReviews = null);
 
 public interface IMediaLibraryScanner
 {
@@ -54,7 +67,9 @@ public interface IMediaLibraryScanner
         IReadOnlyList<ExistingEpisodeBinding> existingEpisodes,
         Action<int>? progress,
         CancellationToken cancellationToken,
-        IReadOnlyList<ExistingClassificationDecision>? classificationDecisions = null);
+        IReadOnlyList<ExistingClassificationDecision>? classificationDecisions = null,
+        IReadOnlyList<ExistingMovieBinding>? existingMovies = null,
+        IReadOnlyList<ExistingImportReviewDecision>? importReviewDecisions = null);
 }
 
 public sealed class MediaLibraryScanner : IMediaLibraryScanner
@@ -88,23 +103,30 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         IReadOnlyList<ExistingEpisodeBinding> existingEpisodes,
         Action<int>? progress,
         CancellationToken cancellationToken,
-        IReadOnlyList<ExistingClassificationDecision>? classificationDecisions = null)
+        IReadOnlyList<ExistingClassificationDecision>? classificationDecisions = null,
+        IReadOnlyList<ExistingMovieBinding>? existingMovies = null,
+        IReadOnlyList<ExistingImportReviewDecision>? importReviewDecisions = null)
     {
         var files = EnumerateVideoFiles(rootPath, progress, cancellationToken);
         return kind switch
         {
-            LibraryKind.Movies => ScanMovies(rootPath, files.Files, files.Issues),
+            LibraryKind.Movies => ScanMovies(
+                rootPath, files.Files, files.Issues, existingMovies, importReviewDecisions),
             LibraryKind.TvShows => ScanTvShows(
                 rootPath,
                 files.Files,
                 files.Issues,
-                existingEpisodes),
+                existingEpisodes,
+                existingMovies,
+                importReviewDecisions),
             LibraryKind.Automatic => ScanAutomatic(
                 rootPath,
                 files.Files,
                 files.Issues,
                 existingEpisodes,
-                classificationDecisions ?? []),
+                classificationDecisions ?? [],
+                existingMovies ?? [],
+                importReviewDecisions ?? []),
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         };
     }
@@ -114,7 +136,9 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         IReadOnlyList<ScannedFile> files,
         IReadOnlyList<ScanDiscoveryIssue> enumerationIssues,
         IReadOnlyList<ExistingEpisodeBinding> existingEpisodes,
-        IReadOnlyList<ExistingClassificationDecision> decisions)
+        IReadOnlyList<ExistingClassificationDecision> decisions,
+        IReadOnlyList<ExistingMovieBinding> existingMovies,
+        IReadOnlyList<ExistingImportReviewDecision> importReviewDecisions)
     {
         var normalizedRoot = Path.GetFullPath(rootPath);
         var decisionByPath = decisions.ToDictionary(
@@ -125,6 +149,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         DiscoverAutomaticCandidates(normalizedRoot, normalizedRoot, files, candidates, isRoot: true);
 
         var items = new List<DiscoveredMediaItem>();
+        var importReviews = new List<DiscoveredImportReview>();
         var issues = new List<ScanDiscoveryIssue>(enumerationIssues);
         var classifications = new List<DiscoveredClassification>();
         var skipped = 0;
@@ -175,19 +200,23 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             }
 
             var result = selectedKind == LibraryKind.Movies
-                ? ScanMovies(candidate.Path, candidate.Files, [])
+                ? ScanMovies(candidate.Path, candidate.Files, [], existingMovies, importReviewDecisions)
                 : ScanTvShows(
                     candidate.Path,
                     candidate.Files,
                     [],
                     existingEpisodes,
+                    existingMovies: existingMovies,
+                    importReviewDecisions: importReviewDecisions,
                     forceSeriesRoot: true);
             items.AddRange(result.Items);
             issues.AddRange(result.Issues);
+            importReviews.AddRange(result.ImportReviews ?? []);
             skipped += result.SkippedFiles;
         }
 
-        return new MediaScanDiscovery(items, issues, files.Count, skipped, classifications);
+        return new MediaScanDiscovery(
+            items, issues, files.Count, skipped, classifications, importReviews);
     }
 
     private static void DiscoverAutomaticCandidates(
@@ -241,7 +270,9 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             return;
         }
 
-        var directMainFiles = directFiles.Where(file => !IsSupplementPath(directoryPath, file.Path))
+        var directMainFiles = directFiles.Where(file =>
+                !IsSupplementPath(directoryPath, file.Path)
+                && !FilenameMetadataParser.IsExplicitTrailerFile(file.Path))
             .ToList();
         var directCandidateFiles = directFiles.Concat(
             immediateDirectories
@@ -253,6 +284,9 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             .OrderBy(file => file.Path, StringComparer.Ordinal)
             .ToList();
 
+        var hasTrailerWithoutMovie = directMainFiles.Count == 0
+            && directCandidateFiles.Any(file => !IsSupplementPath(directoryPath, file.Path)
+                && FilenameMetadataParser.IsExplicitTrailerFile(file.Path));
         if (directEpisodeEvidence)
         {
             candidates.Add(new AutomaticCandidate(
@@ -280,6 +314,15 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 "multiple_unmatched_videos",
                 directCandidateFiles));
         }
+        else if (hasTrailerWithoutMovie)
+        {
+            candidates.Add(new AutomaticCandidate(
+                directoryPath,
+                DisplayTitle(directoryPath),
+                LibraryKind.Movies,
+                "trailer_without_movie",
+                directCandidateFiles));
+        }
 
         if (contentDirectories.Count > 0)
         {
@@ -291,7 +334,7 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             return;
         }
 
-        if (directMainFiles.Count > 0)
+        if (directMainFiles.Count > 0 || hasTrailerWithoutMovie)
         {
             return;
         }
@@ -355,11 +398,15 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
     private static MediaScanDiscovery ScanMovies(
         string rootPath,
         IReadOnlyList<ScannedFile> files,
-        IReadOnlyList<ScanDiscoveryIssue> enumerationIssues)
+        IReadOnlyList<ScanDiscoveryIssue> enumerationIssues,
+        IReadOnlyList<ExistingMovieBinding>? existingMovies = null,
+        IReadOnlyList<ExistingImportReviewDecision>? importReviewDecisions = null)
     {
         var movies = new List<DiscoveredMediaItem>();
         var pendingSupplements = new List<PendingSupplement>();
+        var pendingTrailers = new List<ScannedFile>();
         var issues = new List<ScanDiscoveryIssue>(enumerationIssues);
+        var importReviews = new List<DiscoveredImportReview>();
 
         foreach (var file in files)
         {
@@ -367,6 +414,12 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
             if (context.ExtrasIndex is null)
             {
                 var identity = FilenameMetadataParser.Movie(file.Path);
+                if (FilenameMetadataParser.IsExplicitTrailerFile(file.Path))
+                {
+                    pendingTrailers.Add(file);
+                    continue;
+                }
+
                 movies.Add(ToItem(file, MediaKind.Movie, null, identity.Title, identity.Year));
                 continue;
             }
@@ -380,9 +433,73 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         var items = movies
             .OrderBy(movie => movie.SourcePath, NaturalPathComparer)
             .ToList();
+        var movieCandidates = movies.Select(movie => new MovieCandidate(
+                movie.SourcePath,
+                movie.DetectedTitle,
+                movie.Year))
+            .Concat((existingMovies ?? []).Where(movie => File.Exists(movie.SourcePath)).Select(movie =>
+            {
+                var identity = FilenameMetadataParser.Movie(movie.SourcePath);
+                return new MovieCandidate(movie.SourcePath, identity.Title, movie.Year ?? identity.Year);
+            }))
+            .DistinctBy(movie => MediaPath.Normalize(movie.SourcePath), StringComparer.Ordinal)
+            .ToList();
+        var decisions = (importReviewDecisions ?? []).ToDictionary(
+            decision => MediaPath.Normalize(decision.SourcePath),
+            StringComparer.Ordinal);
         var skipped = 0;
         foreach (var supplement in pendingSupplements)
         {
+            var trailerDecision = decisions.GetValueOrDefault(
+                MediaPath.Normalize(supplement.File.Path));
+            if (supplement.Context.IsTrailer
+                && trailerDecision?.State == LibraryImportReviewState.Ignored)
+            {
+                var ignoredIdentity = FilenameMetadataParser.Movie(supplement.File.Path);
+                items.Add(ToItem(
+                    supplement.File,
+                    MediaKind.Trailer,
+                    null,
+                    ignoredIdentity.Title,
+                    ignoredIdentity.Year,
+                    category: supplement.Context.Category));
+                continue;
+            }
+
+            if (supplement.Context.IsTrailer
+                && trailerDecision?.State == LibraryImportReviewState.Assigned)
+            {
+                var assignedOwner = trailerDecision.ParentSourcePath is null
+                    ? null
+                    : movieCandidates.FirstOrDefault(candidate =>
+                        MediaPath.Normalize(candidate.SourcePath)
+                        == MediaPath.Normalize(trailerDecision.ParentSourcePath));
+                if (assignedOwner is null)
+                {
+                    var identity = FilenameMetadataParser.Movie(supplement.File.Path);
+                    AddUnresolvedTrailer(
+                        supplement.File,
+                        identity.Title,
+                        "The selected movie is no longer available in this storage location.",
+                        items,
+                        importReviews,
+                        issues);
+                }
+                else
+                {
+                    items.Add(ToItem(
+                        supplement.File,
+                        MediaKind.Trailer,
+                        assignedOwner.SourcePath,
+                        FilenameMetadataParser.SupplementTitle(
+                            supplement.File.Path,
+                            assignedOwner.Title),
+                        category: supplement.Context.Category));
+                }
+
+                continue;
+            }
+
             var directMatches = movies.Where(movie =>
                 Path.GetDirectoryName(movie.SourcePath) is { } directory
                 && MediaPath.Normalize(directory) == MediaPath.Normalize(supplement.OwnerDirectory))
@@ -395,6 +512,19 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
 
             if (possibleOwners.Count != 1)
             {
+                if (supplement.Context.IsTrailer)
+                {
+                    var identity = FilenameMetadataParser.Movie(supplement.File.Path);
+                    AddUnresolvedTrailer(
+                        supplement.File,
+                        identity.Title,
+                        "The trailer could not be matched to exactly one movie in this storage location.",
+                        items,
+                        importReviews,
+                        issues);
+                    continue;
+                }
+
                 skipped += 1;
                 issues.Add(new ScanDiscoveryIssue(
                     "ambiguous_movie_extra",
@@ -414,14 +544,96 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 category: supplement.Context.Category));
         }
 
-        return new MediaScanDiscovery(items, issues, files.Count, skipped);
+        foreach (var trailer in pendingTrailers)
+        {
+            var identity = FilenameMetadataParser.Movie(trailer.Path);
+            var normalizedPath = MediaPath.Normalize(trailer.Path);
+            var titleKey = FilenameMetadataParser.NormalizeMatchTitle(identity.Title);
+            var decision = decisions.GetValueOrDefault(normalizedPath);
+            MovieCandidate? owner = null;
+            if (decision?.State == LibraryImportReviewState.Assigned
+                && decision.ParentSourcePath is not null)
+            {
+                owner = movieCandidates.FirstOrDefault(candidate =>
+                    MediaPath.Normalize(candidate.SourcePath)
+                    == MediaPath.Normalize(decision.ParentSourcePath));
+            }
+            else if (decision?.State != LibraryImportReviewState.Ignored && titleKey.Length > 0)
+            {
+                var matches = movieCandidates.Where(candidate =>
+                        MediaPath.Normalize(candidate.SourcePath) != normalizedPath
+                        && FilenameMetadataParser.NormalizeMatchTitle(candidate.Title) == titleKey
+                        && (!identity.Year.HasValue || !candidate.Year.HasValue
+                            || identity.Year == candidate.Year))
+                    .ToList();
+                if (matches.Count == 1)
+                {
+                    owner = matches[0];
+                }
+
+                if (owner is null)
+                {
+                    var reason = matches.Count == 0
+                        ? "No exact movie title match was found in this storage location."
+                        : "More than one movie has this title in this storage location.";
+                    AddUnresolvedTrailer(
+                        trailer,
+                        identity.Title,
+                        reason,
+                        items,
+                        importReviews,
+                        issues);
+                    continue;
+                }
+            }
+
+            var parentPath = owner?.SourcePath;
+            if (decision?.State == LibraryImportReviewState.Assigned && owner is null)
+            {
+                AddUnresolvedTrailer(
+                    trailer,
+                    identity.Title,
+                    "The selected movie is no longer available in this storage location.",
+                    items,
+                    importReviews,
+                    issues);
+                continue;
+            }
+
+            items.Add(ToItem(
+                trailer,
+                MediaKind.Trailer,
+                parentPath,
+                string.IsNullOrWhiteSpace(identity.Title) ? "Trailer" : identity.Title,
+                identity.Year));
+        }
+
+        return new MediaScanDiscovery(items, issues, files.Count, skipped, ImportReviews: importReviews);
     }
+
+    private static void AddUnresolvedTrailer(
+        ScannedFile file,
+        string title,
+        string reason,
+        List<DiscoveredMediaItem> items,
+        List<DiscoveredImportReview> importReviews,
+        List<ScanDiscoveryIssue> issues)
+    {
+        var readableTitle = string.IsNullOrWhiteSpace(title) ? "Trailer" : title;
+        items.Add(ToItem(file, MediaKind.Trailer, null, readableTitle));
+        importReviews.Add(new DiscoveredImportReview(file.Path, readableTitle, reason));
+        issues.Add(new ScanDiscoveryIssue("trailer_needs_review", reason, file.Path));
+    }
+
+    private sealed record MovieCandidate(string SourcePath, string Title, int? Year);
 
     private static MediaScanDiscovery ScanTvShows(
         string rootPath,
         IReadOnlyList<ScannedFile> files,
         IReadOnlyList<ScanDiscoveryIssue> enumerationIssues,
         IReadOnlyList<ExistingEpisodeBinding> existingEpisodes,
+        IReadOnlyList<ExistingMovieBinding>? existingMovies = null,
+        IReadOnlyList<ExistingImportReviewDecision>? importReviewDecisions = null,
         bool forceSeriesRoot = false)
     {
         var seriesByPath = new Dictionary<string, DiscoveredMediaItem>(StringComparer.Ordinal);
@@ -429,11 +641,79 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
         var implicitEpisodes = new List<PendingImplicitEpisode>();
         var supplements = new List<DiscoveredMediaItem>();
         var issues = new List<ScanDiscoveryIssue>(enumerationIssues);
+        var importReviews = new List<DiscoveredImportReview>();
         var skipped = 0;
+        var movieCandidates = (existingMovies ?? []).Where(movie => File.Exists(movie.SourcePath)).Select(movie =>
+        {
+            var identity = FilenameMetadataParser.Movie(movie.SourcePath);
+            return new MovieCandidate(movie.SourcePath, identity.Title, movie.Year ?? identity.Year);
+        }).ToList();
+        var reviewDecisions = (importReviewDecisions ?? []).ToDictionary(
+            decision => MediaPath.Normalize(decision.SourcePath),
+            StringComparer.Ordinal);
 
         foreach (var file in files)
         {
             var context = FolderContext.Create(rootPath, file.Path);
+            if (context.ExtrasIndex is null
+                && FilenameMetadataParser.IsExplicitTrailerFile(file.Path))
+            {
+                var trailerIdentity = FilenameMetadataParser.Movie(file.Path);
+                var decision = reviewDecisions.GetValueOrDefault(MediaPath.Normalize(file.Path));
+                MovieCandidate? owner = null;
+                if (decision?.State == LibraryImportReviewState.Assigned
+                    && decision.ParentSourcePath is not null)
+                {
+                    owner = movieCandidates.FirstOrDefault(candidate =>
+                        MediaPath.Normalize(candidate.SourcePath)
+                        == MediaPath.Normalize(decision.ParentSourcePath));
+                }
+                else if (decision?.State != LibraryImportReviewState.Ignored)
+                {
+                    var titleKey = FilenameMetadataParser.NormalizeMatchTitle(trailerIdentity.Title);
+                    var matches = movieCandidates.Where(candidate =>
+                            titleKey.Length > 0
+                            && FilenameMetadataParser.NormalizeMatchTitle(candidate.Title) == titleKey
+                            && (!trailerIdentity.Year.HasValue || !candidate.Year.HasValue
+                                || trailerIdentity.Year == candidate.Year))
+                        .ToList();
+                    if (matches.Count == 1) owner = matches[0];
+                    else
+                    {
+                        AddUnresolvedTrailer(
+                            file,
+                            trailerIdentity.Title,
+                            matches.Count == 0
+                                ? "No exact movie title match was found in this storage location."
+                                : "More than one movie has this title in this storage location.",
+                            supplements,
+                            importReviews,
+                            issues);
+                        continue;
+                    }
+                }
+
+                if (decision?.State == LibraryImportReviewState.Assigned && owner is null)
+                {
+                    AddUnresolvedTrailer(
+                        file,
+                        trailerIdentity.Title,
+                        "The selected movie is no longer available in this storage location.",
+                        supplements,
+                        importReviews,
+                        issues);
+                    continue;
+                }
+
+                supplements.Add(ToItem(
+                    file,
+                    MediaKind.Trailer,
+                    owner?.SourcePath,
+                    string.IsNullOrWhiteSpace(trailerIdentity.Title) ? "Trailer" : trailerIdentity.Title,
+                    trailerIdentity.Year));
+                continue;
+            }
+
             var seriesPath = forceSeriesRoot
                 ? rootPath
                 : DetermineSeriesPath(rootPath, file.Path, context);
@@ -584,7 +864,8 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
                 .OrderBy(supplement => supplement.SeasonNumber)
                 .ThenBy(supplement => supplement.SourcePath, NaturalPathComparer))
             .ToList();
-        return new MediaScanDiscovery(items, issues, files.Count, skipped);
+        return new MediaScanDiscovery(
+            items, issues, files.Count, skipped, ImportReviews: importReviews);
     }
 
     private static string DetermineSeriesPath(
@@ -747,8 +1028,8 @@ public sealed class MediaLibraryScanner : IMediaLibraryScanner
     private static bool IsTrailerToken(string value)
     {
         var normalized = FilenameMetadataParser.NormalizeFolderToken(value);
-        return normalized.Contains("trailer", StringComparison.Ordinal)
-            || normalized.Contains("teaser", StringComparison.Ordinal);
+        return normalized is "trailer" or "trailers" or "teaser" or "teasers"
+            || FilenameMetadataParser.IsExplicitTrailerFile(value);
     }
 
     private sealed record ScannedFile(

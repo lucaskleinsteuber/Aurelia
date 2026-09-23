@@ -121,6 +121,31 @@ struct UpdateClassificationDecisionsRequest: Encodable, Sendable {
   let decisions: [ClassificationDecisionUpdate]
 }
 
+enum LibraryImportReviewState: String, Codable, Sendable {
+  case pending
+  case assigned
+  case ignored
+}
+
+struct LibraryImportReviewSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let libraryId: UUID
+  let relativePath: String
+  let detectedTitle: String
+  let reason: String
+  let state: LibraryImportReviewState
+}
+
+enum LibraryImportReviewAction: String, Encodable, Sendable {
+  case assignToMovie
+  case ignore
+}
+
+struct UpdateLibraryImportReviewRequest: Encodable, Sendable {
+  let action: LibraryImportReviewAction
+  let movieId: UUID?
+}
+
 struct LibrarySummary: Codable, Identifiable, Equatable, Sendable {
   let id: UUID
   let name: String

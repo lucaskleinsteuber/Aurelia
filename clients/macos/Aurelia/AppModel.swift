@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var activeScans: [LibraryScanSummary] = []
   @Published private(set) var recentScans: [LibraryScanSummary] = []
   @Published private(set) var libraryDiscoveries: [LibraryDiscoverySummary] = []
+  @Published private(set) var libraryImportReviews: [LibraryImportReviewSummary] = []
   @Published private(set) var pairingCode: PairingCodeResponse?
   @Published private(set) var sessions: [DeviceSessionSummary] = []
   @Published private(set) var metadataProvider: MetadataProviderStatus?
@@ -362,6 +363,7 @@ final class AppModel: ObservableObject {
       }
       recentScans = Self.uniqueScans(history).sorted { $0.createdAt > $1.createdAt }
       libraryDiscoveries = try await loadDiscoveries(client: client, libraries: libraries)
+      libraryImportReviews = try await loadImportReviews(client: client, libraries: libraries)
       metadataProvider = try await client.metadataProviderStatus()
       startScanPolling()
     } catch { errorMessage = error.localizedDescription }
@@ -654,6 +656,36 @@ final class AppModel: ObservableObject {
     return try await APIClient(profile: profile).searchCatalog(trimmed)
   }
 
+  func searchMoviesForImportReview(
+    _ query: String,
+    libraryId: UUID
+  ) async throws -> [CatalogItemSummary] {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await APIClient(profile: profile).searchMoviesForImportReview(
+      query,
+      libraryId: libraryId)
+  }
+
+  func resolveImportReview(
+    _ review: LibraryImportReviewSummary,
+    action: LibraryImportReviewAction,
+    movieId: UUID? = nil
+  ) async {
+    guard let profile, canManageMedia else { return }
+    do {
+      let scan = try await APIClient(profile: profile).updateLibraryImportReview(
+        libraryId: review.libraryId,
+        reviewId: review.id,
+        action: action,
+        movieId: movieId)
+      activeScans.append(scan)
+      libraryImportReviews.removeAll { $0.id == review.id }
+      startScanPolling()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
   func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin",
@@ -838,6 +870,11 @@ final class AppModel: ObservableObject {
     catalogItems = []
     home = nil
     collections = []
+    libraries = []
+    activeScans = []
+    recentScans = []
+    libraryDiscoveries = []
+    libraryImportReviews = []
     homeRefreshTask?.cancel()
     homeRefreshTask = nil
     artworkLoader.removeAll()
@@ -1024,6 +1061,10 @@ final class AppModel: ObservableObject {
         (try? await loadDiscoveries(
           client: client,
           libraries: refreshedLibraries)) ?? libraryDiscoveries
+      libraryImportReviews =
+        (try? await loadImportReviews(
+          client: client,
+          libraries: refreshedLibraries)) ?? libraryImportReviews
     }
   }
 
@@ -1041,6 +1082,19 @@ final class AppModel: ObservableObject {
       discoveries.append(contentsOf: try await client.libraryDiscoveries(id: library.id))
     }
     return discoveries.sorted {
+      $0.detectedTitle.localizedCaseInsensitiveCompare($1.detectedTitle) == .orderedAscending
+    }
+  }
+
+  private func loadImportReviews(
+    client: APIClient,
+    libraries: [LibrarySummary]
+  ) async throws -> [LibraryImportReviewSummary] {
+    var reviews: [LibraryImportReviewSummary] = []
+    for library in libraries {
+      reviews.append(contentsOf: try await client.libraryImportReviews(id: library.id))
+    }
+    return reviews.sorted {
       $0.detectedTitle.localizedCaseInsensitiveCompare($1.detectedTitle) == .orderedAscending
     }
   }

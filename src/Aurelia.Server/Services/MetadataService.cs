@@ -231,7 +231,8 @@ public sealed class MetadataService(
         await database.MediaCredits.Where(credit => credit.MediaItemId == item.Id)
             .ExecuteDeleteAsync(cancellationToken);
         metadata.Credits.Clear();
-        var credits = provider.Credits.Select(credit => new MediaCredit
+        var deduplicatedCredits = MetadataCreditDeduplicator.Deduplicate(provider.Credits);
+        var credits = deduplicatedCredits.Select(credit => new MediaCredit
         {
             Id = Guid.NewGuid(),
             MediaItemId = item.Id,
@@ -247,7 +248,7 @@ public sealed class MetadataService(
         metadata.Credits.AddRange(credits);
         await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken);
         await artworkStore.StoreAsync(database, item.Id, item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, provider.BackdropPath, cancellationToken);
-        foreach (var profilePath in provider.Credits.Select(credit => credit.ProfilePath).Where(path => path is not null).Distinct().Take(20))
+        foreach (var profilePath in deduplicatedCredits.Select(credit => credit.ProfilePath).Where(path => path is not null).Distinct().Take(20))
             await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Profile, profilePath, cancellationToken);
         var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
         if (review is not null) review.State = MetadataReviewState.Matched;

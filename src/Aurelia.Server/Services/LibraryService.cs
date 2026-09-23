@@ -154,6 +154,17 @@ public sealed class LibraryService(
                 CreatedAt = now,
                 UpdatedAt = now,
             });
+
+            var importedReviews = await database.LibraryImportReviews
+                .Where(review => review.LibraryRootId == existing.Id)
+                .ToListAsync(cancellationToken);
+            foreach (var review in importedReviews)
+            {
+                review.RelativePath = Path.Combine(relativePath, review.RelativePath);
+                review.NormalizedRelativePath = NormalizeRelativePath(review.RelativePath);
+                review.LibraryRootId = combined.Id;
+                review.LibraryRoot = combined;
+            }
         }
 
         await database.MediaItems
@@ -198,6 +209,134 @@ public sealed class LibraryService(
                 discovery.Reason,
                 discovery.Decision))
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<LibraryImportReviewSummary>> ListImportReviewsAsync(
+        Guid libraryId,
+        CancellationToken cancellationToken)
+    {
+        _ = await RequireLibraryAsync(libraryId, cancellationToken);
+        return await database.LibraryImportReviews
+            .AsNoTracking()
+            .Where(review => review.LibraryRootId == libraryId
+                && review.State == LibraryImportReviewState.Pending)
+            .OrderBy(review => review.DetectedTitle)
+            .ThenBy(review => review.RelativePath)
+            .Select(review => new LibraryImportReviewSummary(
+                review.Id,
+                review.LibraryRootId,
+                review.RelativePath,
+                review.DetectedTitle,
+                review.Reason,
+                review.State))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<LibraryScanSummary> UpdateImportReviewAsync(
+        Guid libraryId,
+        Guid reviewId,
+        UpdateLibraryImportReviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        var library = await RequireLibraryAsync(libraryId, cancellationToken);
+        if (!Enum.IsDefined(request.Action))
+        {
+            throw BadRequest("invalid_import_review_action", "The import review action is not valid.");
+        }
+
+        var review = await database.LibraryImportReviews.SingleOrDefaultAsync(
+            candidate => candidate.Id == reviewId && candidate.LibraryRootId == libraryId,
+            cancellationToken)
+            ?? throw new LibraryException(
+                "import_review_not_found",
+                "The import review no longer exists.",
+                StatusCodes.Status404NotFound);
+        if (review.State != LibraryImportReviewState.Pending)
+        {
+            throw new LibraryException(
+                "import_review_already_decided",
+                "This import review has already been resolved.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (request.Action == LibraryImportReviewAction.AssignToMovie)
+        {
+            if (!request.MovieId.HasValue)
+            {
+                throw BadRequest("movie_required", "Choose a movie for this trailer.");
+            }
+
+            var movieExists = await database.MediaItems.AnyAsync(
+                item => item.Id == request.MovieId.Value
+                    && item.LibraryRootId == libraryId
+                    && item.Kind == MediaKind.Movie,
+                cancellationToken);
+            if (!movieExists)
+            {
+                throw new LibraryException(
+                    "movie_not_found",
+                    "Choose a movie from this storage location.",
+                    StatusCodes.Status404NotFound);
+            }
+
+        }
+        else if (request.MovieId.HasValue)
+        {
+            throw BadRequest("unexpected_movie", "Ignore does not accept a movie selection.");
+        }
+
+        if (!scanQueue.TryReserve(libraryId))
+        {
+            throw ScanAlreadyActive();
+        }
+
+        try
+        {
+            var hasActiveScan = await database.LibraryScans.AnyAsync(
+                scan => scan.LibraryRootId == libraryId
+                    && (scan.State == LibraryScanState.Queued
+                        || scan.State == LibraryScanState.Running
+                        || scan.State == LibraryScanState.WaitingForStorage),
+                cancellationToken);
+            if (hasActiveScan)
+            {
+                throw ScanAlreadyActive();
+            }
+
+            await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+            if (request.Action == LibraryImportReviewAction.AssignToMovie)
+            {
+                review.State = LibraryImportReviewState.Assigned;
+                review.AssignedMovieId = request.MovieId;
+            }
+            else
+            {
+                review.State = LibraryImportReviewState.Ignored;
+                review.AssignedMovieId = null;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            review.UpdatedAt = now;
+            var scan = new LibraryScan
+            {
+                Id = Guid.NewGuid(),
+                LibraryRootId = library.Id,
+                LibraryRoot = library,
+                State = LibraryScanState.Queued,
+                Trigger = LibraryScanTrigger.ClassificationChanged,
+                CreatedAt = now,
+            };
+            database.LibraryScans.Add(scan);
+            await database.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            scanQueue.Pulse();
+            return ToSummary(scan, []);
+        }
+        catch
+        {
+            scanQueue.Release(libraryId);
+            throw;
+        }
     }
 
     public async Task<LibraryScanSummary> UpdateClassificationDecisionsAsync(

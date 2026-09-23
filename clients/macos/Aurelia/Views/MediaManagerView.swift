@@ -20,6 +20,7 @@ struct MediaManagerView: View {
           configuredLibraries
           scanActivity
           classifications
+          importReview
         }
         .padding(AureliaDesign.pagePadding)
       }
@@ -194,6 +195,112 @@ struct MediaManagerView: View {
           }
         }
       }
+    }
+  }
+
+  @ViewBuilder
+  private var importReview: some View {
+    if model.canManageMedia && !model.libraryImportReviews.isEmpty {
+      AureliaSettingsSection(
+        "Import Review",
+        symbol: "film.stack",
+        description: "Review trailers that could not be safely matched to a movie.") {
+          VStack(spacing: 10) {
+            ForEach(model.libraryImportReviews) { review in
+              TrailerImportReviewRow(review: review)
+            }
+          }
+        }
+    }
+  }
+}
+
+private struct TrailerImportReviewRow: View {
+  @EnvironmentObject private var model: AppModel
+  let review: LibraryImportReviewSummary
+
+  @State private var query: String
+  @State private var candidates: [CatalogItemSummary] = []
+  @State private var errorMessage: String?
+  @State private var isSearching = false
+
+  init(review: LibraryImportReviewSummary) {
+    self.review = review
+    _query = State(initialValue: review.detectedTitle)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text(review.detectedTitle).font(.headline)
+          Text(review.relativePath)
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+          Text(review.reason).font(.caption).foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("Ignore", role: .destructive) {
+          Task { await model.resolveImportReview(review, action: .ignore) }
+        }
+        .disabled(model.isWorking)
+      }
+
+      HStack {
+        TextField("Search movies in this location", text: $query)
+          .textFieldStyle(.roundedBorder)
+        Button("Search Movies") { Task { await searchMovies() } }
+          .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSearching)
+      }
+
+      if isSearching { ProgressView().controlSize(.small) }
+      ForEach(candidates) { movie in
+        HStack {
+          Text(movie.year.map { "\(movie.title) (\($0))" } ?? movie.title)
+            .lineLimit(1)
+          Spacer()
+          Button("Assign to Movie") {
+            Task {
+              await model.resolveImportReview(
+                review,
+                action: .assignToMovie,
+                movieId: movie.id)
+            }
+          }
+          .disabled(model.isWorking)
+        }
+        .padding(.leading, 10)
+      }
+      if let errorMessage {
+        Text(errorMessage).font(.caption).foregroundStyle(.orange)
+      }
+    }
+    .padding(12)
+    .background(
+      AureliaDesign.raisedSurface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+        .stroke(AureliaDesign.hairline, lineWidth: 1)
+    }
+    .accessibilityIdentifier("trailer-import-review-\(review.id.uuidString.lowercased())")
+  }
+
+  private func searchMovies() async {
+    isSearching = true
+    errorMessage = nil
+    defer { isSearching = false }
+    do {
+      candidates = try await model.searchMoviesForImportReview(
+        query,
+        libraryId: review.libraryId)
+      if candidates.isEmpty {
+        errorMessage = "No movies matched that search in this location."
+      }
+    } catch {
+      errorMessage = error.localizedDescription
     }
   }
 }

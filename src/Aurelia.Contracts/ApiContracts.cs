@@ -166,6 +166,31 @@ public sealed record ClassificationDecisionUpdate(
 public sealed record UpdateClassificationDecisionsRequest(
     IReadOnlyList<ClassificationDecisionUpdate> Decisions);
 
+public enum LibraryImportReviewState
+{
+    Pending,
+    Assigned,
+    Ignored,
+}
+
+public enum LibraryImportReviewAction
+{
+    AssignToMovie,
+    Ignore,
+}
+
+public sealed record LibraryImportReviewSummary(
+    Guid Id,
+    Guid LibraryId,
+    string RelativePath,
+    string DetectedTitle,
+    string Reason,
+    LibraryImportReviewState State);
+
+public sealed record UpdateLibraryImportReviewRequest(
+    LibraryImportReviewAction Action,
+    Guid? MovieId = null);
+
 public sealed record LibrarySummary(
     Guid Id,
     string Name,

@@ -25,6 +25,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
     public DbSet<LibraryDiscovery> LibraryDiscoveries => Set<LibraryDiscovery>();
 
+    public DbSet<LibraryImportReview> LibraryImportReviews => Set<LibraryImportReview>();
+
     public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
 
     public DbSet<PlaybackProgress> PlaybackProgress => Set<PlaybackProgress>();
@@ -59,7 +61,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                     changes.Add((SyncChangeArea.Libraries, null, null));
                     changes.Add((SyncChangeArea.Catalog, null, null));
                     break;
-                case LibraryScan or LibraryScanIssue or LibraryDiscovery:
+                case LibraryScan or LibraryScanIssue or LibraryDiscovery or LibraryImportReview:
                     changes.Add((SyncChangeArea.Libraries, null, null));
                     break;
                 case MediaItem item:
@@ -282,6 +284,29 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 .WithMany(library => library.Discoveries)
                 .HasForeignKey(discovery => discovery.LibraryRootId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryImportReview>(entity =>
+        {
+            entity.HasKey(review => review.Id);
+            entity.Property(review => review.RelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(review => review.NormalizedRelativePath).HasMaxLength(4096).IsRequired();
+            entity.Property(review => review.DetectedTitle).HasMaxLength(512).IsRequired();
+            entity.Property(review => review.Reason).HasMaxLength(256).IsRequired();
+            entity.Property(review => review.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(review => review.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(review => review.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(review => new { review.LibraryRootId, review.NormalizedRelativePath })
+                .IsUnique();
+            entity.HasIndex(review => new { review.LibraryRootId, review.State, review.DetectedTitle });
+            entity.HasOne(review => review.LibraryRoot)
+                .WithMany(library => library.ImportReviews)
+                .HasForeignKey(review => review.LibraryRootId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(review => review.AssignedMovie)
+                .WithMany()
+                .HasForeignKey(review => review.AssignedMovieId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<PlaybackTicket>(entity =>

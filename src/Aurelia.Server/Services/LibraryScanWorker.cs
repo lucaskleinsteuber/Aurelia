@@ -205,6 +205,40 @@ public sealed partial class LibraryScanWorker(
                     Path.GetRelativePath(scanRoot, decision.FullPath),
                 decision.Decision))
             .ToList();
+        var existingMovies = await database.MediaItems
+            .AsNoTracking()
+            .Where(item => item.LibraryRootId == library.Id && item.Kind == MediaKind.Movie)
+            .Select(item => new ExistingMovieBinding(item.Id, item.SourcePath, item.Year))
+            .ToListAsync(cancellationToken);
+        var moviePathsById = existingMovies.ToDictionary(movie => movie.Id, movie => movie.SourcePath);
+        var storedImportReviews = await database.LibraryImportReviews
+            .AsNoTracking()
+            .Where(review => review.LibraryRootId == library.Id
+                && review.State != LibraryImportReviewState.Pending)
+            .Select(review => new
+            {
+                review.RelativePath,
+                review.State,
+                review.AssignedMovieId,
+            })
+            .ToListAsync(cancellationToken);
+        var importReviewDecisions = storedImportReviews
+            .Select(review => new
+            {
+                SourcePath = Path.GetFullPath(Path.Combine(library.Path, review.RelativePath)),
+                review.State,
+                ParentSourcePath = review.AssignedMovieId is { } movieId
+                    ? moviePathsById.GetValueOrDefault(movieId)
+                    : null,
+            })
+            .Where(review => MediaPath.IsSameOrDescendant(
+                MediaPath.Normalize(review.SourcePath),
+                MediaPath.Normalize(library.Path)))
+            .Select(review => new ExistingImportReviewDecision(
+                review.SourcePath,
+                review.State,
+                review.ParentSourcePath))
+            .ToList();
 
         var discoveredCount = 0;
         var discoveryTask = Task.Run(
@@ -214,7 +248,9 @@ public sealed partial class LibraryScanWorker(
                 existingEpisodes,
                 count => Volatile.Write(ref discoveredCount, count),
                 cancellationToken,
-                classificationDecisions),
+                classificationDecisions,
+                existingMovies,
+                importReviewDecisions),
             cancellationToken);
         var lastReportedCount = -1;
         while (!discoveryTask.IsCompleted)
@@ -424,8 +460,24 @@ public sealed partial class LibraryScanWorker(
         foreach (var candidate in discovery.Items.Where(item =>
                      item.Kind is not (MediaKind.Movie or MediaKind.Series)))
         {
-            var normalizedParentPath = MediaPath.Normalize(candidate.ParentSourcePath!);
-            if (!parentsByPath.TryGetValue(normalizedParentPath, out var parent))
+            MediaItem? parent = null;
+            if (candidate.ParentSourcePath is not null)
+            {
+                var normalizedParentPath = MediaPath.Normalize(candidate.ParentSourcePath);
+                if (!parentsByPath.TryGetValue(normalizedParentPath, out parent))
+                {
+                    parent = allItems.FirstOrDefault(item =>
+                        item.LibraryRootId == library.Id
+                        && item.Kind == MediaKind.Movie
+                        && item.NormalizedSourcePath == normalizedParentPath);
+                }
+
+                if (parent is null)
+                {
+                    continue;
+                }
+            }
+            else if (candidate.Kind != MediaKind.Trailer)
             {
                 continue;
             }
@@ -433,7 +485,7 @@ public sealed partial class LibraryScanWorker(
             var item = Upsert(
                 database,
                 candidate,
-                parent.Id,
+                parent?.Id,
                 library,
                 scan.Id,
                 now,
@@ -453,6 +505,15 @@ public sealed partial class LibraryScanWorker(
                 updatedFiles += 1;
             }
         }
+
+        await ReconcileImportReviewsAsync(
+            database,
+            library,
+            scan.Id,
+            discovery,
+            allItems,
+            now,
+            cancellationToken);
 
         var missingFiles = 0;
         foreach (var item in allItems.Where(item => item.Kind != MediaKind.Series
@@ -516,6 +577,81 @@ public sealed partial class LibraryScanWorker(
         }
 
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task ReconcileImportReviewsAsync(
+        AureliaDbContext database,
+        LibraryRoot library,
+        Guid scanId,
+        MediaScanDiscovery discovery,
+        IReadOnlyList<MediaItem> allItems,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var stored = await database.LibraryImportReviews
+            .Where(review => review.LibraryRootId == library.Id)
+            .ToListAsync(cancellationToken);
+        var byPath = stored.ToDictionary(review => review.NormalizedRelativePath, StringComparer.Ordinal);
+        var unresolved = (discovery.ImportReviews ?? []).ToDictionary(
+            review => NormalizeRelativePath(Path.GetRelativePath(library.Path, review.SourcePath)),
+            StringComparer.Ordinal);
+        var trailers = discovery.Items.Where(item => item.Kind == MediaKind.Trailer);
+
+        foreach (var trailer in trailers)
+        {
+            var relativePath = Path.GetRelativePath(library.Path, trailer.SourcePath);
+            var normalized = NormalizeRelativePath(relativePath);
+            unresolved.TryGetValue(normalized, out var pending);
+            if (!byPath.TryGetValue(normalized, out var review))
+            {
+                if (pending is null)
+                {
+                    continue;
+                }
+
+                review = new LibraryImportReview
+                {
+                    Id = Guid.NewGuid(),
+                    LibraryRootId = library.Id,
+                    LibraryRoot = library,
+                    NormalizedRelativePath = normalized,
+                    CreatedAt = now,
+                };
+                database.LibraryImportReviews.Add(review);
+                byPath[normalized] = review;
+            }
+
+            review.RelativePath = relativePath;
+            review.LastSeenScanId = scanId;
+            review.UpdatedAt = now;
+            if (pending is not null)
+            {
+                if (review.State != LibraryImportReviewState.Ignored)
+                {
+                    review.DetectedTitle = pending.DetectedTitle;
+                    review.Reason = pending.Reason;
+                    review.State = LibraryImportReviewState.Pending;
+                    review.AssignedMovieId = null;
+                }
+
+                continue;
+            }
+
+            if (review.State == LibraryImportReviewState.Pending
+                && trailer.ParentSourcePath is { } parentPath)
+            {
+                var parent = allItems.FirstOrDefault(item =>
+                    item.LibraryRootId == library.Id
+                    && item.Kind == MediaKind.Movie
+                    && item.NormalizedSourcePath == MediaPath.Normalize(parentPath));
+                if (parent is not null)
+                {
+                    review.State = LibraryImportReviewState.Assigned;
+                    review.AssignedMovieId = parent.Id;
+                    review.Reason = "Automatically matched to a unique movie title.";
+                }
+            }
+        }
     }
 
     private static async Task ReconcileDiscoveriesAsync(

@@ -5,6 +5,9 @@ repository_root=${0:A:h:h}
 other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Home Other"}
 developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 dotnet_bin=${DOTNET_BIN:-"$other_root/Package Cache/dotnet/dotnet"}
+provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-/Applications/Aurelia.app/Contents/embedded.provisionprofile}
+bundle_identifier=com.lucas.aurelia.media
+team_identifier=B5N7JVK37J
 build_parent="$other_root/Build"
 build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
 if [[ -z "$build_number" ]]; then
@@ -17,11 +20,62 @@ stage_root=$(mktemp -d "$build_parent/.build${build_number}.XXXXXX")
 derived_data="$stage_root/DerivedData"
 publish_root="$stage_root/Server"
 candidate="$stage_root/Aurelia.app"
+profile_plist="$stage_root/provisioning-profile.plist"
+release_entitlements="$stage_root/Aurelia-release.entitlements"
 
 cleanup() {
   rm -rf -- "$stage_root"
 }
 trap cleanup EXIT
+
+if [[ ! -r "$provisioning_profile" ]]; then
+  echo "Aurelia provisioning profile is unavailable: $provisioning_profile" >&2
+  echo "Set AURELIA_PROVISIONING_PROFILE to a valid profile for $bundle_identifier." >&2
+  exit 1
+fi
+if ! /usr/bin/security cms -D -i "$provisioning_profile" >"$profile_plist"; then
+  echo "Unable to decode the Aurelia provisioning profile." >&2
+  exit 1
+fi
+
+profile_bundle_identifier=$(/usr/libexec/PlistBuddy \
+  -c 'Print :Entitlements:com.apple.application-identifier' "$profile_plist" 2>/dev/null || true)
+profile_team_identifier=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$profile_plist" 2>/dev/null || true)
+if [[ "$profile_bundle_identifier" != "$team_identifier.$bundle_identifier" \
+  || "$profile_team_identifier" != "$team_identifier" ]]; then
+  echo "The Aurelia provisioning profile does not match $bundle_identifier and team $team_identifier." >&2
+  exit 1
+fi
+
+profile_expiration=$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$profile_plist" 2>/dev/null || true)
+profile_expiration_epoch=$(/bin/date -j -f '%a %b %d %H:%M:%S %Z %Y' \
+  "$profile_expiration" +%s 2>/dev/null || true)
+if [[ -z "$profile_expiration_epoch" || "$profile_expiration_epoch" -le $(/bin/date +%s) ]]; then
+  echo "The Aurelia provisioning profile is expired or has an unreadable expiration date." >&2
+  exit 1
+fi
+
+profile_certificate_fingerprint=$(/usr/bin/security cms -D -i "$provisioning_profile" \
+  | /usr/bin/plutil -extract DeveloperCertificates.0 raw -o - - \
+  | /usr/bin/base64 -D \
+  | /usr/bin/openssl x509 -inform DER -noout -fingerprint -sha1 \
+  | /usr/bin/sed -E 's/^[^=]*=//; s/://g' \
+  | /usr/bin/tr '[:lower:]' '[:upper:]')
+signing_identity=${AURELIA_SIGNING_IDENTITY:-$profile_certificate_fingerprint}
+if [[ -z "$signing_identity" ]]; then
+  echo "No valid Apple Development signing identity is available." >&2
+  exit 1
+fi
+if [[ "$signing_identity" != "$profile_certificate_fingerprint" ]]; then
+  echo "The selected signing identity is not authorized by the Aurelia provisioning profile." >&2
+  echo "Set AURELIA_SIGNING_IDENTITY to its matching SHA-1 fingerprint." >&2
+  exit 1
+fi
+if ! /usr/bin/security find-identity -v -p codesigning \
+  | /usr/bin/awk -v identity="$signing_identity" '$2 == identity { found = 1 } END { exit !found }'; then
+  echo "The provisioning profile's signing identity is not available in the keychain." >&2
+  exit 1
+fi
 
 mkdir -p "$publish_root"
 "$repository_root/scripts/prepare-vlckit.sh"
@@ -38,7 +92,7 @@ for runtime in osx-arm64 osx-x64; do
     --output "$publish_root/$runtime"
 done
 
-DEVELOPER_DIR="$developer_dir" xcodebuild \
+DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
   -scheme Aurelia \
   -configuration Release \
@@ -46,9 +100,11 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
   -derivedDataPath "$derived_data" \
   ARCHS='arm64 x86_64' \
   ONLY_ACTIVE_ARCH=NO \
+  CODE_SIGNING_ALLOWED=NO \
   build
 
 /usr/bin/ditto "$derived_data/Build/Products/Release/Aurelia.app" "$candidate"
+/usr/bin/ditto "$provisioning_profile" "$candidate/Contents/embedded.provisionprofile"
 mkdir -p "$candidate/Contents/Resources/Server"
 for runtime in osx-arm64 osx-x64; do
   /usr/bin/ditto "$publish_root/$runtime" "$candidate/Contents/Resources/Server/$runtime"
@@ -57,22 +113,28 @@ done
 while IFS= read -r -d '' binary; do
   if file "$binary" | grep -q 'Mach-O'; then
     if [[ "${binary:t}" == 'Aurelia.Server' ]]; then
-      codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
+      codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
         --entitlements "$repository_root/clients/macos/Configuration/ServerRuntime.entitlements" \
         "$binary"
     else
-      codesign --force --sign 'Apple Development' --options runtime --timestamp=none "$binary"
+      codesign --force --sign "$signing_identity" --options runtime --timestamp=none "$binary"
     fi
   fi
 done < <(find "$candidate/Contents/Resources/Server" -type f -print0)
 
-codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
+codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
   "$candidate/Contents/Frameworks/VLCKit.framework"
-codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
+codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
   --entitlements "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app"
-codesign --force --sign 'Apple Development' --options runtime --timestamp=none \
-  --preserve-metadata=entitlements "$candidate"
+cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release_entitlements"
+/usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team_identifier.$bundle_identifier" \
+  "$release_entitlements"
+/usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $team_identifier" \
+  "$release_entitlements"
+codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
+  --entitlements "$release_entitlements" \
+  "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"
 
 if [[ -e "$final_root" ]]; then

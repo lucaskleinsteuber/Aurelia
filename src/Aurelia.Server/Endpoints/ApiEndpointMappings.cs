@@ -51,6 +51,10 @@ public static class ApiEndpointMappings
         libraries.MapPost("/{libraryId:guid}/scans", StartLibraryScanAsync);
         libraries.MapGet("/{libraryId:guid}/scans", ListLibraryScansAsync);
         libraries.MapGet("/{libraryId:guid}/discoveries", ListLibraryDiscoveriesAsync);
+        libraries.MapGet("/{libraryId:guid}/import-reviews", ListLibraryImportReviewsAsync);
+        libraries.MapPut(
+            "/{libraryId:guid}/import-reviews/{reviewId:guid}",
+            UpdateLibraryImportReviewAsync);
         libraries.MapPut(
             "/{libraryId:guid}/classification-decisions",
             UpdateClassificationDecisionsAsync);
@@ -369,6 +373,32 @@ public static class ApiEndpointMappings
         CancellationToken cancellationToken)
     {
         return ExecuteAsync(() => libraries.ListDiscoveriesAsync(libraryId, cancellationToken));
+    }
+
+    private static Task<IResult> ListLibraryImportReviewsAsync(
+        Guid libraryId,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteAsync(() => libraries.ListImportReviewsAsync(libraryId, cancellationToken));
+    }
+
+    private static async Task<IResult> UpdateLibraryImportReviewAsync(
+        Guid libraryId,
+        Guid reviewId,
+        UpdateLibraryImportReviewRequest request,
+        LibraryService libraries,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResultAsync(async () =>
+        {
+            var scan = await libraries.UpdateImportReviewAsync(
+                libraryId,
+                reviewId,
+                request,
+                cancellationToken);
+            return Results.Accepted($"/api/v1/scans/{scan.Id}", scan);
+        });
     }
 
     private static async Task<IResult> UpdateClassificationDecisionsAsync(

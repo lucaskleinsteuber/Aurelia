@@ -33,4 +33,6 @@ public sealed class LibraryRoot
     public List<LibraryScan> Scans { get; } = [];
 
     public List<LibraryDiscovery> Discoveries { get; } = [];
+
+    public List<LibraryImportReview> ImportReviews { get; } = [];
 }

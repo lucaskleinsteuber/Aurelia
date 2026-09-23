@@ -40,6 +40,8 @@ public sealed class MetadataPresentationTests
             var metadata = await SendAsync<MediaMetadataSummary>(client, owner.Token, HttpMethod.Get, $"/api/v1/media/{movie.Id}/metadata");
             Assert.Equal("El Camino: A Breaking Bad Movie", metadata.Title);
             Assert.Equal("tmdb", metadata.Provider);
+            Assert.Equal(7.0, metadata.Rating);
+            Assert.Equal("R", metadata.ContentRating);
             Assert.NotNull(metadata.Poster);
             Assert.DoesNotContain("test-token", JsonContent(metadata), StringComparison.Ordinal);
 
@@ -87,7 +89,9 @@ public sealed class MetadataPresentationTests
             var job = await SendAsync<MetadataJobSummary>(client, owner.Token, HttpMethod.Post, "/api/v1/metadata/jobs");
             job = await WaitForMetadataAsync(client, owner.Token, job.Id);
             Assert.Equal(1, job.ItemsNeedingReview);
-            Assert.Single(await SendAsync<List<MetadataReviewSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/metadata/reviews"));
+            var review = Assert.Single(await SendAsync<List<MetadataReviewSummary>>(
+                client, owner.Token, HttpMethod.Get, "/api/v1/metadata/reviews"));
+            Assert.Equal("Multiple or uncertain TMDB results need confirmation.", review.Reason);
 
             var edited = await SendAsync<MediaMetadataSummary>(client, owner.Token, HttpMethod.Put, $"/api/v1/media/{movie.Id}/metadata",
                 new UpdateMediaMetadataRequest(Title: "My Title", Overview: "My description", Genres: ["Drama"]));
@@ -99,6 +103,56 @@ public sealed class MetadataPresentationTests
             var cleared = await SendAsync<MediaMetadataSummary>(client, owner.Token, HttpMethod.Delete, $"/api/v1/media/{movie.Id}/metadata/match");
             Assert.Equal("My Title", cleared.Title);
             Assert.Null(cleared.Provider);
+        }
+        finally { Directory.Delete(mediaRoot, recursive: true); }
+    }
+
+    [Fact]
+    public async Task MissingProviderResultsUseADistinctReviewReason()
+    {
+        var mediaRoot = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(mediaRoot);
+        await File.WriteAllBytesAsync(Path.Combine(mediaRoot, "No Match Movie.mkv"), [1]);
+        try
+        {
+            using var factory = CreateFactory(noResults: true);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await SendAsync<LibrarySummary>(
+                client,
+                owner.Token,
+                HttpMethod.Post,
+                "/api/v1/libraries",
+                new CreateLibraryRequest("Movies", mediaRoot, LibraryKind.Movies));
+            var scan = await SendAsync<LibraryScanSummary>(
+                client,
+                owner.Token,
+                HttpMethod.Post,
+                $"/api/v1/libraries/{library.Id}/scans");
+            await WaitForScanAsync(client, owner.Token, scan.Id);
+            _ = await SendAsync<MetadataProviderStatus>(
+                client,
+                owner.Token,
+                HttpMethod.Put,
+                "/api/v1/metadata/provider",
+                new UpdateMetadataProviderRequest(
+                    true,
+                    "en",
+                    "test-token-value-with-more-than-thirty-two-characters"));
+            var job = await SendAsync<MetadataJobSummary>(
+                client,
+                owner.Token,
+                HttpMethod.Post,
+                "/api/v1/metadata/jobs");
+            job = await WaitForMetadataAsync(client, owner.Token, job.Id);
+            Assert.Equal(1, job.ItemsNeedingReview);
+            var review = Assert.Single(await SendAsync<List<MetadataReviewSummary>>(
+                client,
+                owner.Token,
+                HttpMethod.Get,
+                "/api/v1/metadata/reviews"));
+            Assert.Empty(review.Candidates);
+            Assert.Equal("No confident TMDB result was found.", review.Reason);
         }
         finally { Directory.Delete(mediaRoot, recursive: true); }
     }
@@ -181,11 +235,13 @@ public sealed class MetadataPresentationTests
         Assert.All(handler.AuthorizationValues, value => Assert.Equal("Bearer temporary-test-token", value));
     }
 
-    private static AureliaServerFactory CreateFactory(bool ambiguous = false) => new(
+    private static AureliaServerFactory CreateFactory(
+        bool ambiguous = false,
+        bool noResults = false) => new(
         configureServices: services =>
         {
             services.RemoveAll<ITmdbClient>();
-            services.AddSingleton<ITmdbClient>(new FakeTmdbClient(ambiguous));
+            services.AddSingleton<ITmdbClient>(new FakeTmdbClient(ambiguous, noResults));
         });
 
     private static async Task<T> SendAsync<T>(HttpClient client, string token, HttpMethod method, string path, object? body = null)
@@ -220,12 +276,14 @@ public sealed class MetadataPresentationTests
 
     private static string JsonContent<T>(T value) => System.Text.Json.JsonSerializer.Serialize(value, ApiTestClient.JsonOptions);
 
-    private sealed class FakeTmdbClient(bool ambiguous) : ITmdbClient
+    private sealed class FakeTmdbClient(bool ambiguous, bool noResults) : ITmdbClient
     {
         public Task ValidateAsync(string token, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<IReadOnlyList<MetadataCandidateSummary>> SearchAsync(string token, string language, MediaKind kind, string title, int? year, CancellationToken cancellationToken)
         {
-            IReadOnlyList<MetadataCandidateSummary> values = ambiguous
+            IReadOnlyList<MetadataCandidateSummary> values = noResults
+                ? []
+                : ambiguous
                 ? [new("tmdb", "559", "movie", "Unknown", null, null, null, null, 0.8), new("tmdb", "560", "movie", "Unknown Again", null, null, null, null, 0.78)]
                 : [new("tmdb", "559", kind == MediaKind.Movie ? "movie" : "tv", "El Camino: A Breaking Bad Movie", "El Camino", 2019, "Jesse Pinkman begins again.", "/poster.jpg", 1)];
             return Task.FromResult(values);

@@ -158,6 +158,64 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("LibraryDiscoveries");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryImportReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AssignedMovieId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DetectedTitle")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LastSeenScanId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedRelativePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedMovieId");
+
+                    b.HasIndex("LibraryRootId", "NormalizedRelativePath")
+                        .IsUnique();
+
+                    b.HasIndex("LibraryRootId", "State", "DetectedTitle");
+
+                    b.ToTable("LibraryImportReviews");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.LibraryRoot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1001,6 +1059,24 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("LibraryRoot");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryImportReview", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "AssignedMovie")
+                        .WithMany()
+                        .HasForeignKey("AssignedMovieId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Aurelia.Server.Data.LibraryRoot", "LibraryRoot")
+                        .WithMany("ImportReviews")
+                        .HasForeignKey("LibraryRootId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AssignedMovie");
+
+                    b.Navigation("LibraryRoot");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.LibraryScan", b =>
                 {
                     b.HasOne("Aurelia.Server.Data.LibraryRoot", "LibraryRoot")
@@ -1177,6 +1253,8 @@ namespace Aurelia.Server.Data.Migrations
             modelBuilder.Entity("Aurelia.Server.Data.LibraryRoot", b =>
                 {
                     b.Navigation("Discoveries");
+
+                    b.Navigation("ImportReviews");
 
                     b.Navigation("MediaItems");
 

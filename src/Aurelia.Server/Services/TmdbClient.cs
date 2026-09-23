@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using Aurelia.Contracts;
 
@@ -64,13 +65,14 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
         await EnsureSuccessAsync(response, cancellationToken);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
         var results = document.RootElement.GetProperty("results").EnumerateArray().Take(8);
-        return results.Select((result, index) =>
+        return results.Select(result =>
         {
             var candidateTitle = GetString(result, mediaType == "movie" ? "title" : "name") ?? "Untitled";
             var originalTitle = GetString(result, mediaType == "movie" ? "original_title" : "original_name");
             var date = GetString(result, mediaType == "movie" ? "release_date" : "first_air_date");
             var candidateYear = ParseYear(date);
-            var confidence = MetadataMatcher.Score(title, year, candidateTitle, originalTitle, candidateYear, index);
+            var confidence = MetadataMatcher.Score(
+                title, year, candidateTitle, originalTitle, candidateYear);
             return new MetadataCandidateSummary(
                 "tmdb",
                 result.GetProperty("id").GetInt32().ToString(CultureInfo.InvariantCulture),
@@ -300,7 +302,7 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
             ? values.EnumerateArray().Select(value => GetString(value, "iso_3166_1") ?? GetString(value, "name")).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToList()
             : [];
 
-    private static List<TmdbCredit> ParseCredits(JsonElement credits)
+    private static IReadOnlyList<TmdbCredit> ParseCredits(JsonElement credits)
     {
         var result = new List<TmdbCredit>();
         if (credits.TryGetProperty("cast", out var cast))
@@ -330,7 +332,7 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
                     GetString(person, "profile_path"))));
         }
 
-        return result;
+        return MetadataCreditDeduplicator.Deduplicate(result);
     }
 
     private static string? GetMovieCertification(JsonElement root)
@@ -361,14 +363,48 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
 
 public static class MetadataMatcher
 {
-    public static double Score(string requested, int? requestedYear, string title, string? originalTitle, int? candidateYear, int index)
+    public static double Score(
+        string requested,
+        int? requestedYear,
+        string title,
+        string? originalTitle,
+        int? candidateYear)
     {
         var requestedNormalized = Normalize(requested);
-        var titleMatch = requestedNormalized == Normalize(title) || requestedNormalized == Normalize(originalTitle ?? string.Empty);
-        var yearMatch = !requestedYear.HasValue || !candidateYear.HasValue || requestedYear == candidateYear;
-        if (titleMatch && yearMatch) return 1;
-        if (titleMatch) return 0.88;
-        return Math.Max(0.1, 0.72 - (index * 0.05));
+        if (requestedNormalized.Length == 0)
+        {
+            return 0.1;
+        }
+
+        var candidateTitles = new[] { title, originalTitle ?? string.Empty }
+            .Select(Normalize)
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var exactTitleMatch = candidateTitles.Contains(requestedNormalized, StringComparer.Ordinal);
+        if (exactTitleMatch)
+        {
+            return requestedYear.HasValue && candidateYear.HasValue
+                ? requestedYear == candidateYear ? 1 : 0.82
+                : 0.96;
+        }
+
+        var titleSimilarity = candidateTitles
+            .Select(candidate => Similarity(requestedNormalized, candidate))
+            .DefaultIfEmpty(0)
+            .Max();
+        var score = 0.1 + titleSimilarity * 0.82;
+        if (requestedYear.HasValue && candidateYear.HasValue)
+        {
+            score = requestedYear == candidateYear
+                ? score + 0.01
+                : score * 0.7;
+        }
+
+        // Only an exact normalized title can be automatically applied. Similarity
+        // still gives reviewers a useful, deterministic ordering without letting a
+        // provider's result position act as evidence.
+        return Math.Clamp(score, 0.1, 0.94);
     }
 
     public static bool IsUnambiguous(IReadOnlyList<MetadataCandidateSummary> candidates) =>
@@ -376,7 +412,65 @@ public static class MetadataMatcher
         && candidates[0].Confidence >= 0.95
         && (candidates.Count == 1 || candidates[0].Confidence - candidates[1].Confidence >= 0.08);
 
-    private static string Normalize(string value) => new(value.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+    private static string Normalize(string value) =>
+        FilenameMetadataParser.NormalizeMatchTitle(value);
+
+    private static double Similarity(string left, string right)
+    {
+        var previous = Enumerable.Range(0, right.Length + 1).ToArray();
+        var current = new int[right.Length + 1];
+        for (var leftIndex = 1; leftIndex <= left.Length; leftIndex++)
+        {
+            current[0] = leftIndex;
+            for (var rightIndex = 1; rightIndex <= right.Length; rightIndex++)
+            {
+                var substitution = left[leftIndex - 1] == right[rightIndex - 1] ? 0 : 1;
+                current[rightIndex] = Math.Min(
+                    Math.Min(current[rightIndex - 1] + 1, previous[rightIndex] + 1),
+                    previous[rightIndex - 1] + substitution);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return 1 - (double)previous[right.Length] / Math.Max(left.Length, right.Length);
+    }
+}
+
+public static class MetadataCreditDeduplicator
+{
+    public static IReadOnlyList<TmdbCredit> Deduplicate(IEnumerable<TmdbCredit> credits)
+    {
+        var seen = new HashSet<CreditKey>();
+        var result = new List<TmdbCredit>();
+        foreach (var credit in credits)
+        {
+            if (string.IsNullOrWhiteSpace(credit.ProviderId))
+            {
+                result.Add(credit);
+                continue;
+            }
+
+            var key = new CreditKey(
+                Normalize(credit.ProviderId),
+                Normalize(credit.Job),
+                Normalize(credit.Character));
+            if (seen.Add(key))
+            {
+                result.Add(credit);
+            }
+        }
+
+        return result;
+    }
+
+    private static string Normalize(string? value) =>
+        (value ?? string.Empty).Trim().Normalize(NormalizationForm.FormKC).ToUpperInvariant();
+
+    private readonly record struct CreditKey(
+        string ProviderId,
+        string Job,
+        string Character);
 }
 
 public sealed record TmdbMetadata(
