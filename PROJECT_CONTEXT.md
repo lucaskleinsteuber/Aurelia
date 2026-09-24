@@ -95,6 +95,10 @@ The complete path is:
   action makes unresolved metadata easier for administrators to find. The
   current product is Aurelia; Aurelia Classic remains a separate, local-only
   reference app.
+- Aurelia 1.1.1 (Build 20) uses Lucas's supplied Aurelia app icon in a native
+  macOS AppIcon asset catalog with ten 1x/2x renditions from 16 pt through 512
+  pt. The unchanged source artwork is resized mechanically for each slot; the
+  app icon is compiled into the asset catalog in Debug and Release.
 
 The Build 11 host handoff retained by Aurelia 1.0.12 keeps the primary app sandboxed. Launch Services opens
 the separately signed, windowless helper; both processes resolve a shared App
@@ -163,7 +167,7 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message matching the build (`1.1.0` for Build 19), push immediately, verify
+    message matching the build (`1.1.1` for Build 20), push immediately, verify
     the remote hash, and write exactly one English external summary for the
     completed build.
 
@@ -176,17 +180,19 @@ native client and reliable library engine are the release baseline.
 
 ## Latest release and verification
 
-- Installed bundle: `/Applications/Aurelia.app`, version `1.1.0`, build `19`.
+- Installed bundle: `/Applications/Aurelia.app`, version `1.1.1`, build `20`.
 - Each agent-installed version is a clean tester install. The reset removes
   Aurelia's accounts, server database, preferences, connection profiles, and
   logs, but never user-selected media or Aurelia Classic data.
-- Build 19 verification: 94/94 server tests passed; .NET format verification
+- Build 20 verification: 94/94 server tests passed; .NET format verification
   passed; release server build completed with zero warnings; universal arm64 and
   x86_64 app/helper and server payloads were packaged and signature-verified.
   Launch Services smoke verified helper autostart, `/api/v1/server/info`, and
-  clean shutdown. The installed app reported version `1.1.0` and a fresh
-  `isSetup: false` response.
-- Swift sources and test targets compiled. XCTest execution did not reach test
-  cases because the local macOS test host exited before XCTest bootstrap with
-  `Failed to establish connection to the IDE`; do not describe UI tests as
-  passed until that runner issue is resolved and they are rerun.
+  clean shutdown. Xcode compiled all ten AppIcon renditions into `Assets.car`;
+  the installed app reports `CFBundleIconName=AppIcon`, version `1.1.1`, and a
+  fresh `isSetup: false` response.
+- Swift Debug and Release app builds and `build-for-testing` succeeded. UI test
+  cases were not executed for this icon-only release. The prior Build 19 XCTest
+  run exited before reaching test cases with `Failed to establish connection
+  to the IDE`; do not report UI tests as passed until the runner issue is
+  resolved and they are rerun.
