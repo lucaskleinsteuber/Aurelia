@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
 using Aurelia.Server.Data;
@@ -36,6 +37,17 @@ if (commandLine.Command == "server")
 {
     Environment.ExitCode = await ServerIdentityCommandClient.RunAsync(
         commandLine,
+        CancellationToken.None);
+    return;
+}
+
+if (commandLine.Command == "database")
+{
+    var configuration = new ConfigurationBuilder().Build();
+    var databaseRuntime = ServerRuntimeOptions.Resolve(configuration, args);
+    Environment.ExitCode = await DatabaseCommandClient.RunAsync(
+        commandLine,
+        databaseRuntime,
         CancellationToken.None);
     return;
 }
@@ -79,6 +91,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddDbContext<AureliaDbContext>(options =>
     options.UseSqlite(connectionString));
 builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<LibraryService>();
@@ -164,6 +177,9 @@ try
     {
         instanceLock = ServerInstanceLock.Acquire(runtime.DataDirectory);
     }
+
+    await app.Services.GetRequiredService<DatabaseBackupService>()
+        .RecoverPendingRestoreAsync(CancellationToken.None);
 
     await DatabaseInitializer.InitializeAsync(app.Services, CancellationToken.None);
 

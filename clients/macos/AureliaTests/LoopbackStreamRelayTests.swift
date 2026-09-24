@@ -9,6 +9,7 @@ final class LoopbackStreamRelayTests: XCTestCase {
     let relay = try LoopbackStreamRelay(
       sourceURL: source,
       publicKeyFingerprint: String(repeating: "A", count: 64),
+      authorizationToken: "test-device-token",
       sessionFactory: Self.stubSession)
     let localURL = try await relay.start()
     defer { relay.stop() }
@@ -46,6 +47,9 @@ final class LoopbackStreamRelayTests: XCTestCase {
     relay.updateSourceURL(URL(string: "https://relay.test/new")!)
     let (renewed, _) = try await URLSession.shared.data(from: localURL)
     XCTAssertEqual(renewed, RelayURLProtocol.newPayload)
+    XCTAssertEqual(
+      RelayURLProtocol.authorizationRecorder.latestValue,
+      "Bearer test-device-token")
   }
 
   func testWrongSecretAndMethodStayLocalAndAreRejected() async throws {
@@ -88,6 +92,7 @@ final class LoopbackStreamRelayTests: XCTestCase {
 private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
   static let oldPayload = Data("0123456789ABCDEF".utf8)
   static let newPayload = Data("renewed-ticket".utf8)
+  static let authorizationRecorder = AuthorizationRecorder()
 
   override class func canInit(with request: URLRequest) -> Bool {
     request.url?.host == "relay.test"
@@ -96,6 +101,7 @@ private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
+    Self.authorizationRecorder.record(request.value(forHTTPHeaderField: "Authorization"))
     let payload = request.url?.path == "/new" ? Self.newPayload : Self.oldPayload
     let range = request.value(forHTTPHeaderField: "Range")
     let result = Self.response(for: range, payload: payload)
@@ -137,5 +143,18 @@ private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
       ? payload.count - 1
       : min(Int(parts[1]) ?? payload.count - 1, payload.count - 1)
     return (206, Data(payload[start...end]), "bytes \(start)-\(end)/\(payload.count)")
+  }
+}
+
+private final class AuthorizationRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: String?
+
+  var latestValue: String? {
+    lock.withLock { value }
+  }
+
+  func record(_ value: String?) {
+    lock.withLock { self.value = value }
   }
 }

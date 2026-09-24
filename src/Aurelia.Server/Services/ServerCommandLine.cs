@@ -19,9 +19,10 @@ public sealed record ServerCommandLine(
             || argument.Equals("library", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("metadata", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("pairing", StringComparison.OrdinalIgnoreCase)
-            || argument.Equals("server", StringComparison.OrdinalIgnoreCase));
+            || argument.Equals("server", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("database", StringComparison.OrdinalIgnoreCase));
         var command = commandIndex >= 0 ? args[commandIndex].ToLowerInvariant() : "run";
-        var action = command is "library" or "metadata" or "pairing" or "server"
+        var action = command is "library" or "metadata" or "pairing" or "server" or "database"
             && commandIndex + 1 < args.Length
             && !args[commandIndex + 1].StartsWith("--", StringComparison.Ordinal)
                 ? args[commandIndex + 1].ToLowerInvariant()

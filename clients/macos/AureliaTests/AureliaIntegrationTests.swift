@@ -45,7 +45,8 @@ final class AureliaIntegrationTests: XCTestCase {
       XCTAssertEqual(playback.mediaId, movie.id)
       let relay = try LoopbackStreamRelay(
         sourceURL: client.streamURL(path: playback.streamPath),
-        publicKeyFingerprint: profile.publicKeyFingerprint)
+        publicKeyFingerprint: profile.publicKeyFingerprint,
+        authorizationToken: profile.token)
       let localURL = try await relay.start()
       var rangeRequest = URLRequest(url: localURL)
       rangeRequest.setValue("bytes=0-7", forHTTPHeaderField: "Range")

@@ -34,6 +34,8 @@ public sealed partial class MaintenanceService(
         await using var scope = scopeFactory.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
         var now = DateTimeOffset.UtcNow;
+        await scope.ServiceProvider.GetRequiredService<DatabaseBackupService>()
+            .CreateScheduledBackupIfDueAsync(now, cancellationToken);
         await scope.ServiceProvider.GetRequiredService<PlaybackService>()
             .PruneExpiredAsync(now, cancellationToken);
 

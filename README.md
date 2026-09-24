@@ -27,6 +27,9 @@ native app.
 
 - .NET 10 and ASP.NET Core
 - SQLite with versioned Entity Framework Core migrations
+- Verified SQLite online backups, fail-closed pre-migration snapshots, and
+  explicitly confirmed offline database restore; see
+  [DATABASE_RECOVERY.md](DATABASE_RECOVERY.md)
 - One-time local owner setup
 - Owner, administrator, and user roles
 - Password login, revocable device sessions, and one-time pairing codes

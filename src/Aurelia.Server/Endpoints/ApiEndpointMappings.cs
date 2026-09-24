@@ -117,6 +117,7 @@ public static class ApiEndpointMappings
         playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
 
         api.MapMethods("/streams/{ticket}", [HttpMethods.Get, HttpMethods.Head], StreamAsync)
+            .RequireAuthorization()
             .WithDisplayName("Stream media");
         api.MapMethods("/artwork/{artworkId:guid}", [HttpMethods.Get, HttpMethods.Head], ArtworkAsync)
             .RequireAuthorization()
@@ -770,7 +771,11 @@ public static class ApiEndpointMappings
         PlaybackService playback,
         CancellationToken cancellationToken)
     {
-        var source = await playback.OpenStreamAsync(ticket, cancellationToken);
+        var source = await playback.OpenStreamAsync(
+            ticket,
+            context.User.RequireUserId(),
+            context.User.RequireSessionId(),
+            cancellationToken);
         if (source is null)
         {
             return Results.NotFound();

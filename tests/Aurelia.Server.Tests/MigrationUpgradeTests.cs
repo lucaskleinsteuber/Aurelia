@@ -14,6 +14,59 @@ namespace Aurelia.Server.Tests;
 public sealed class MigrationUpgradeTests
 {
     [Fact]
+    public async Task UnknownMigrationHistoryStopsStartupWithoutReplacingOrBackingUpDatabase()
+    {
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(dataDirectory);
+        var databasePath = Path.Combine(dataDirectory, "aurelia.db");
+
+        try
+        {
+            var options = new DbContextOptionsBuilder<AureliaDbContext>()
+                .UseSqlite($"Data Source={databasePath}")
+                .Options;
+            await using (var database = new AureliaDbContext(options))
+            {
+                await database.Database.MigrateAsync();
+                await database.Database.ExecuteSqlRawAsync("""
+                    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+                    VALUES ('20991231000000_FutureSchema', '10.0.0');
+                    """);
+            }
+
+            Exception? startupError = null;
+            using (var factory = new AureliaServerFactory(dataDirectory))
+            {
+                try
+                {
+                    using var client = factory.CreateClient();
+                    using var response = await client.GetAsync("/api/v1/health");
+                }
+                catch (Exception exception)
+                {
+                    startupError = exception;
+                }
+            }
+
+            Assert.NotNull(startupError);
+            Assert.Contains("verification failed", startupError.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.False(Directory.Exists(Path.Combine(dataDirectory, "Backups")));
+
+            await using var verifyDatabase = new AureliaDbContext(options);
+            Assert.Contains(
+                await verifyDatabase.Database.GetAppliedMigrationsAsync(),
+                migration => migration == "20991231000000_FutureSchema");
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+            {
+                Directory.Delete(dataDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task OrphanedMigrationLockIsRecoveredWithoutChangingServerData()
     {
         var dataDirectory = TestPaths.CreateDataDirectory();
@@ -97,6 +150,15 @@ public sealed class MigrationUpgradeTests
             using var client = factory.CreateClient();
             using var response = await client.GetAsync("/api/v1/health");
             response.EnsureSuccessStatusCode();
+
+            var preMigrationBackup = Assert.Single(Directory.EnumerateFiles(
+                Path.Combine(dataDirectory, "Backups"),
+                "aurelia-database-pre-migration-*.db"));
+            var backupVerification = await factory.Services
+                .GetRequiredService<DatabaseBackupService>()
+                .VerifyAsync(preMigrationBackup, CancellationToken.None);
+            Assert.True(backupVerification.IsValid, backupVerification.Message);
+            Assert.True(backupVerification.AppliedMigrationCount < 8);
 
             await using var connection = new SqliteConnection(
                 $"Data Source={databasePath};Mode=ReadOnly");

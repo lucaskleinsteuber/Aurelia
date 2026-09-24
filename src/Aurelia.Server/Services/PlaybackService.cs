@@ -117,6 +117,8 @@ public sealed class PlaybackService(
 
     public async Task<PlaybackStreamSource?> OpenStreamAsync(
         string rawToken,
+        Guid userId,
+        Guid deviceSessionId,
         CancellationToken cancellationToken)
     {
         if (!IsValidToken(rawToken))
@@ -133,6 +135,8 @@ public sealed class PlaybackService(
             .ThenInclude(media => media.LibraryRoot)
             .SingleOrDefaultAsync(
                 candidate => candidate.TokenHash == tokenHash
+                    && candidate.UserId == userId
+                    && candidate.DeviceSessionId == deviceSessionId
                     && candidate.RevokedAt == null
                     && candidate.ExpiresAt > now
                     && candidate.DeviceSession.RevokedAt == null

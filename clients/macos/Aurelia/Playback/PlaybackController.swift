@@ -126,7 +126,10 @@ final class PlaybackController: ObservableObject {
     self.volume = preferences.normalized.defaultVolume
     self.queuedItems = presentation.queue
     self.relayFactory = { url, fingerprint in
-      try LoopbackStreamRelay(sourceURL: url, publicKeyFingerprint: fingerprint)
+      try LoopbackStreamRelay(
+        sourceURL: url,
+        publicKeyFingerprint: fingerprint,
+        authorizationToken: profile.token)
     }
     connectEngineCallbacks()
   }

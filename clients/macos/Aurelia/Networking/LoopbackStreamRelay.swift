@@ -32,6 +32,7 @@ final class LoopbackStreamRelay: @unchecked Sendable {
   private let lock = NSLock()
   private let secret: String
   private let publicKeyFingerprint: String
+  private let authorizationToken: String?
   private let sessionFactory: SessionFactory
   private var sourceURL: URL
   private var listener: NWListener?
@@ -42,10 +43,12 @@ final class LoopbackStreamRelay: @unchecked Sendable {
   init(
     sourceURL: URL,
     publicKeyFingerprint: String,
+    authorizationToken: String? = nil,
     sessionFactory: @escaping SessionFactory = LoopbackStreamRelay.productionSession
   ) throws {
     self.sourceURL = sourceURL
     self.publicKeyFingerprint = publicKeyFingerprint
+    self.authorizationToken = authorizationToken
     self.sessionFactory = sessionFactory
     self.secret = try Self.makeSecret()
   }
@@ -254,6 +257,9 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     request.httpMethod = relayRequest.method
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+    if let authorizationToken {
+      request.setValue("Bearer \(authorizationToken)", forHTTPHeaderField: "Authorization")
+    }
     if let range = relayRequest.range {
       request.setValue(range, forHTTPHeaderField: "Range")
     }
