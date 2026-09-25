@@ -5,6 +5,7 @@ struct MediaDetailView: View {
   let mediaId: UUID
   let onBack: () -> Void
   var onHeroOffsetChange: (CGFloat) -> Void = { _ in }
+  var onHeroArtworkChange: (ArtworkSummary?) -> Void = { _ in }
   @State private var detail: CatalogDetailPresentation?
   @State private var errorMessage: String?
   @State private var selectedSeason: Int?
@@ -89,11 +90,15 @@ struct MediaDetailView: View {
 
   private func load() async {
     do {
-      detail = try await model.catalogDetail(id: mediaId)
-      selectedSeason = selectedSeason ?? detail?.seasons.first?.number
+      let loadedDetail = try await model.catalogDetail(id: mediaId)
+      guard !Task.isCancelled else { return }
+      detail = loadedDetail
+      selectedSeason = selectedSeason ?? loadedDetail.seasons.first?.number
       errorMessage = nil
+      onHeroArtworkChange(
+        loadedDetail.metadata.backdrop ?? loadedDetail.metadata.still ?? loadedDetail.item.backdrop)
     } catch {
-      if detail == nil { errorMessage = error.localizedDescription }
+      if !Task.isCancelled, detail == nil { errorMessage = error.localizedDescription }
     }
   }
 
@@ -321,20 +326,23 @@ private struct DetailHero: View {
       AuthenticatedArtwork(
         artwork: detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop,
         symbol: detail.item.kind == .movie ? "film.fill" : "tv.fill",
-        extendsBlurredEdges: true,
+        contentMode: .fill,
         placeholderSymbolSize: 64)
       LinearGradient(
         stops: [
-          .init(color: .black.opacity(0.9), location: 0),
-          .init(color: .black.opacity(0.52), location: 0.36),
-          .init(color: .clear, location: 0.74),
+          .init(color: .black.opacity(0.46), location: 0),
+          .init(color: .black.opacity(0.24), location: 0.38),
+          .init(color: .black.opacity(0.04), location: 0.72),
+          .init(color: .clear, location: 1),
         ],
         startPoint: .leading,
         endPoint: .trailing)
+        .frame(maxWidth: 860)
+        .frame(maxWidth: .infinity, alignment: .leading)
       LinearGradient(
         stops: [
-          .init(color: .clear, location: 0.5),
-          .init(color: AureliaDesign.canvas.opacity(0.26), location: 0.76),
+          .init(color: .clear, location: 0.58),
+          .init(color: AureliaDesign.canvas.opacity(0.18), location: 0.78),
           .init(color: AureliaDesign.canvas, location: 1),
         ],
         startPoint: .top,

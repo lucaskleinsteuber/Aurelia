@@ -41,6 +41,7 @@ struct LibraryShellView: View {
   @State private var destination: LibraryDestination = .home
   @State private var selection: MediaSelection?
   @State private var heroOffset: CGFloat = 0
+  @State private var detailHeroArtwork: ArtworkSummary?
 
   var body: some View {
     ZStack {
@@ -70,7 +71,10 @@ struct LibraryShellView: View {
       if scenePhase == .active { Task { await model.refreshHome() } }
     }
     .onChange(of: destination) { heroOffset = 0 }
-    .onChange(of: selection) { heroOffset = 0 }
+    .onChange(of: selection) {
+      heroOffset = 0
+      detailHeroArtwork = nil
+    }
   }
 
   private var shellBackdrop: some View {
@@ -83,18 +87,10 @@ struct LibraryShellView: View {
             symbol: activeHeroSymbol,
             extendsBlurredEdges: true)
           LinearGradient(
-            colors: [
-              AureliaDesign.canvas.opacity(0.84),
-              AureliaDesign.canvas.opacity(0.18),
-              .clear,
-            ],
-            startPoint: .leading,
-            endPoint: .trailing)
-          LinearGradient(
-            colors: [
-              .clear,
-              AureliaDesign.canvas.opacity(0.18),
-              AureliaDesign.canvas.opacity(0.92),
+            stops: [
+              .init(color: .clear, location: 0.62),
+              .init(color: AureliaDesign.canvas.opacity(0.12), location: 0.80),
+              .init(color: AureliaDesign.canvas, location: 1),
             ],
             startPoint: .top,
             endPoint: .bottom)
@@ -111,6 +107,7 @@ struct LibraryShellView: View {
   private var activeHeroArtwork: ArtworkSummary? {
     switch selection {
     case .media(let id):
+      if let detailHeroArtwork { return detailHeroArtwork }
       let item = model.catalogItems.first { $0.id == id }
       return item?.backdrop ?? item?.poster
     case .collection(let id):
@@ -173,7 +170,8 @@ struct LibraryShellView: View {
         MediaDetailView(
           mediaId: id,
           onBack: { selection = nil },
-          onHeroOffsetChange: { heroOffset = $0 })
+          onHeroOffsetChange: { heroOffset = $0 },
+          onHeroArtworkChange: { detailHeroArtwork = $0 })
       case .collection(let id):
         if let collection = model.collections.first(where: { $0.id == id }) {
           CollectionDetailView(
