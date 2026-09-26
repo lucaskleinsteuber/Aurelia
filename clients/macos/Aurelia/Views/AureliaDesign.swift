@@ -34,16 +34,42 @@ enum AureliaDesign {
 }
 
 struct AureliaSidebarBackground: View {
+  let artwork: ArtworkSummary?
+  let symbol: String
+  let verticalOffset: CGFloat
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
-    Group {
+    ZStack(alignment: .top) {
+      AureliaDesign.canvas
+      if !reduceTransparency, let artwork {
+        ZStack {
+          AuthenticatedArtwork(
+            artwork: artwork,
+            symbol: symbol,
+            contentMode: .fill)
+          LinearGradient(
+            stops: [
+              .init(color: .clear, location: 0.52),
+              .init(color: AureliaDesign.canvas.opacity(0.34), location: 0.78),
+              .init(color: AureliaDesign.canvas, location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom)
+        }
+        .frame(height: 540)
+        .offset(y: min(verticalOffset, 0))
+        .blur(radius: 18)
+        .opacity(0.72)
+      }
       if reduceTransparency {
         AureliaDesign.canvas.opacity(0.98)
       } else {
         Rectangle().fill(.ultraThinMaterial)
+        AureliaDesign.canvas.opacity(0.14)
       }
     }
+    .clipped()
     .ignoresSafeArea()
   }
 }

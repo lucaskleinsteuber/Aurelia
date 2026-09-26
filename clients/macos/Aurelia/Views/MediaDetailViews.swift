@@ -32,7 +32,8 @@ struct MediaDetailView: View {
             onEdit: model.profile?.user?.role.canManageLibraries == true
               ? { showingMetadataEditor = true } : nil,
             onMatch: model.profile?.user?.role.canManageLibraries == true
-              ? { showingMatchEditor = true } : nil)
+              ? { showingMatchEditor = true } : nil
+          )
           .aureliaTrackHeroOffset(onChange: onHeroOffsetChange)
 
           if !detail.seasons.isEmpty {
@@ -62,11 +63,6 @@ struct MediaDetailView: View {
             .controlSize(.large)
         }
         .frame(height: 500)
-        .clipShape(
-          UnevenRoundedRectangle(
-            bottomLeadingRadius: AureliaDesign.heroRadius,
-            bottomTrailingRadius: AureliaDesign.heroRadius)
-        )
       }
     }
     .coordinateSpace(name: "aurelia-content-scroll")
@@ -336,13 +332,15 @@ private struct DetailHero: View {
           .init(color: .clear, location: 1),
         ],
         startPoint: .leading,
-        endPoint: .trailing)
-        .frame(maxWidth: 860)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        endPoint: .trailing
+      )
+      .frame(maxWidth: 860)
+      .frame(maxWidth: .infinity, alignment: .leading)
       LinearGradient(
         stops: [
-          .init(color: .clear, location: 0.58),
-          .init(color: AureliaDesign.canvas.opacity(0.18), location: 0.78),
+          .init(color: .clear, location: 0.42),
+          .init(color: AureliaDesign.canvas.opacity(0.24), location: 0.64),
+          .init(color: AureliaDesign.canvas.opacity(0.72), location: 0.86),
           .init(color: AureliaDesign.canvas, location: 1),
         ],
         startPoint: .top,
@@ -421,11 +419,6 @@ private struct DetailHero: View {
       }
     }
     .frame(height: 540)
-    .clipShape(
-      UnevenRoundedRectangle(
-        bottomLeadingRadius: AureliaDesign.heroRadius,
-        bottomTrailingRadius: AureliaDesign.heroRadius)
-    )
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("media-hero")
   }

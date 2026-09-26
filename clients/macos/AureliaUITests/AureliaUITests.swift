@@ -387,6 +387,13 @@ final class AureliaUITests: XCTestCase {
     defer { app.terminate() }
 
     app.buttons["media-10000000-0000-0000-0000-000000000001"].click()
+    let hero = app.descendants(matching: .any)["media-hero"]
+    XCTAssertTrue(hero.waitForExistence(timeout: 5))
+    let detailScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    detailScreenshot.name = "Movie detail hero transition"
+    detailScreenshot.lifetime = .keepAlways
+    add(detailScreenshot)
+
     XCTAssertTrue(app.buttons["play-media"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.descendants(matching: .any)["media-actions"].exists)
     app.buttons["play-media"].click()

@@ -144,7 +144,12 @@ struct LibraryShellView: View {
     }
     .listStyle(.sidebar)
     .scrollContentBackground(.hidden)
-    .background { AureliaSidebarBackground() }
+    .background {
+      AureliaSidebarBackground(
+        artwork: activeHeroArtwork,
+        symbol: activeHeroSymbol,
+        verticalOffset: heroOffset)
+    }
     .accessibilityIdentifier("primary-sidebar")
   }
 
