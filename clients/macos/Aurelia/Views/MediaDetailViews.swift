@@ -166,10 +166,10 @@ struct MediaDetailView: View {
             .foregroundStyle(.secondary)
         }
       }
-      .padding(.horizontal, AureliaDesign.pagePadding)
+      .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
 
       if let season = activeSeason(detail) {
-        AureliaHorizontalRail {
+        AureliaHorizontalRail(leadingInset: AureliaDesign.detailRailLeadingInset) {
           ForEach(season.episodes) { episode in
             Button {
               play(
@@ -203,8 +203,8 @@ struct MediaDetailView: View {
     ForEach(supplementGroups(supplements), id: \.title) { group in
       VStack(alignment: .leading, spacing: 14) {
         Text(group.title).font(AureliaDesign.sectionTitle)
-          .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail {
+          .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
+        AureliaHorizontalRail(leadingInset: AureliaDesign.detailRailLeadingInset) {
           ForEach(group.items) { supplement in
             Button {
               model.startPlayback(
@@ -250,8 +250,11 @@ struct MediaDetailView: View {
     if !values.isEmpty {
       VStack(alignment: .leading, spacing: 16) {
         Text("Cast & Crew").font(AureliaDesign.sectionTitle)
-          .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail(spacing: 30) {
+          .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
+        AureliaHorizontalRail(
+          spacing: 30,
+          leadingInset: AureliaDesign.detailRailLeadingInset
+        ) {
           ForEach(values.sorted { $0.order < $1.order }) { credit in
             VStack(spacing: 8) {
               AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")

@@ -4,6 +4,8 @@ import SwiftUI
 enum AureliaDesign {
   static let canvasRGB = (red: UInt8(32), green: UInt8(35), blue: UInt8(38))
   static let pagePadding: CGFloat = 32
+  static let homeRailLeadingInset: CGFloat = 32
+  static let detailRailLeadingInset: CGFloat = 48
   static let sectionSpacing: CGFloat = 30
   static let rowSpacing: CGFloat = 20
   static let cardRadius: CGFloat = 18
@@ -88,15 +90,18 @@ struct AureliaBackdrop: View {
 struct AureliaHorizontalRail<Content: View>: View {
   let spacing: CGFloat
   let alignment: VerticalAlignment
+  let leadingInset: CGFloat
   let content: Content
 
   init(
     spacing: CGFloat = AureliaDesign.rowSpacing,
     alignment: VerticalAlignment = .top,
+    leadingInset: CGFloat = 0,
     @ViewBuilder content: () -> Content
   ) {
     self.spacing = spacing
     self.alignment = alignment
+    self.leadingInset = leadingInset
     self.content = content()
   }
 
@@ -108,11 +113,8 @@ struct AureliaHorizontalRail<Content: View>: View {
       .scrollTargetLayout()
       .padding(.vertical, 8)
     }
-    .contentMargins(
-      .horizontal,
-      AureliaDesign.pagePadding,
-      for: .scrollContent
-    )
+    .contentMargins(.leading, AureliaDesign.pagePadding + leadingInset, for: .scrollContent)
+    .contentMargins(.trailing, AureliaDesign.pagePadding, for: .scrollContent)
     .padding(.horizontal, -AureliaDesign.pagePadding)
     .scrollClipDisabled()
     .scrollBounceBehavior(.basedOnSize)

@@ -281,7 +281,7 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: title, count: items.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail {
+        AureliaHorizontalRail(leadingInset: AureliaDesign.homeRailLeadingInset) {
           ForEach(items) { item in
             Button {
               onSelect(item.id)
@@ -302,7 +302,7 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: title, count: items.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail {
+        AureliaHorizontalRail(leadingInset: AureliaDesign.homeRailLeadingInset) {
           ForEach(items) { item in
             Button {
               onSelect(item.id)
@@ -323,7 +323,7 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: "Collections", count: collections.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail {
+        AureliaHorizontalRail(leadingInset: AureliaDesign.homeRailLeadingInset) {
           ForEach(collections) { collection in
             Button {
               onSelectCollection(collection.id)
