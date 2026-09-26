@@ -5,6 +5,72 @@ import Testing
 
 struct AureliaTests {
   @Test
+  func seriesInformationUsesYearOneCountryAndActualEpisodes() {
+    let detail = informationFixture(kind: .series)
+    let fields = MediaInformationPresentation.fields(for: detail)
+
+    #expect(
+      fields.map(\.title) == [
+        "Seasons", "Episodes", "Studio", "Released", "Country of Origin", "Genres",
+      ])
+    #expect(fields.map(\.value) == ["1", "1", "Test Studio", "2019", "US", "Drama"])
+    #expect(!fields.map(\.title).contains("Content Rating"))
+    #expect(!fields.map(\.title).contains("Original Title"))
+  }
+
+  @Test
+  func movieInformationOnlyIncludesMovieFields() {
+    let fields = MediaInformationPresentation.fields(for: informationFixture(kind: .movie))
+
+    #expect(
+      fields.map(\.title) == [
+        "Runtime", "Release Year", "Genres", "Studio", "Country of Origin",
+      ])
+    #expect(fields.map(\.value) == ["103 min", "2019", "Drama", "Test Studio", "US"])
+  }
+
+  @Test
+  func sidebarArtworkFollowsScrollAndLeavesTheHero() {
+    #expect(AureliaSidebarArtworkPosition.verticalOffset(contentOffset: -20, topInset: 20) == 0)
+    #expect(AureliaSidebarArtworkPosition.verticalOffset(contentOffset: 180, topInset: 20) == -200)
+    #expect(AureliaSidebarArtworkPosition.verticalOffset(contentOffset: 800, topInset: 20) == -540)
+  }
+
+  private func informationFixture(kind: MediaKind) -> CatalogDetailPresentation {
+    let id = UUID()
+    let item = CatalogItemSummary(
+      id: id, kind: kind, title: "Test Title", originalTitle: "Other Title", year: 2018,
+      overview: nil, genres: ["Drama"], poster: nil, backdrop: nil,
+      availability: .available, isFavorite: false, progress: nil,
+      addedAt: "2026-09-26T00:00:00Z")
+    let episode = CatalogItemSummary(
+      id: UUID(), kind: .episode, title: "Episode 1", originalTitle: nil, year: 2019,
+      overview: nil, genres: [], poster: nil, backdrop: nil,
+      availability: .available, isFavorite: false, progress: nil,
+      addedAt: "2026-09-26T00:00:00Z")
+    let extra = CatalogItemSummary(
+      id: UUID(), kind: .extra, title: "Featurette", originalTitle: nil, year: nil,
+      overview: nil, genres: [], poster: nil, backdrop: nil,
+      availability: .available, isFavorite: false, progress: nil,
+      addedAt: "2026-09-26T00:00:00Z")
+    let metadata = MediaMetadataSummary(
+      mediaId: id, title: item.title, originalTitle: item.originalTitle, overview: nil,
+      releaseDate: "2019-05-06", year: 2019, runtimeMinutes: 103,
+      rating: nil, contentRating: "TV-MA", genres: ["Drama"], studios: ["Test Studio"],
+      countries: ["US", "GB"], credits: [], poster: nil, backdrop: nil, still: nil,
+      provider: nil, providerMediaId: nil, reviewState: .matched)
+    return CatalogDetailPresentation(
+      item: item, metadata: metadata,
+      seasons: [
+        SeasonPresentation(
+          number: 1,
+          episodes: [EpisodePresentation(item: episode, seasonNumber: 1, episodeNumber: 1)],
+          supplements: [SupplementPresentation(item: extra, category: "Extras", seasonNumber: 1)])
+      ],
+      supplements: [SupplementPresentation(item: extra, category: "Extras", seasonNumber: nil)])
+  }
+
+  @Test
   func classicCanvasUsesTheMeasuredReferenceColor() {
     #expect(AureliaDesign.canvasRGB.red == 32)
     #expect(AureliaDesign.canvasRGB.green == 35)

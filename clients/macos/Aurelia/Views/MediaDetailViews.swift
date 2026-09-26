@@ -34,7 +34,6 @@ struct MediaDetailView: View {
             onMatch: model.profile?.user?.role.canManageLibraries == true
               ? { showingMatchEditor = true } : nil
           )
-          .aureliaTrackHeroOffset(onChange: onHeroOffsetChange)
 
           if !detail.seasons.isEmpty {
             seasons(detail)
@@ -65,7 +64,12 @@ struct MediaDetailView: View {
         .frame(height: 500)
       }
     }
-    .coordinateSpace(name: "aurelia-content-scroll")
+    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+      AureliaSidebarArtworkPosition.verticalOffset(
+        contentOffset: geometry.contentOffset.y, topInset: geometry.contentInsets.top)
+    } action: { _, offset in
+      onHeroOffsetChange(offset)
+    }
     .defaultScrollAnchor(.top)
     .scrollIndicators(.visible)
     .accessibilityIdentifier("media-detail-scroll")
@@ -85,11 +89,18 @@ struct MediaDetailView: View {
   }
 
   private func load() async {
+    if detail?.item.id != mediaId {
+      detail = nil
+      selectedSeason = nil
+      onHeroArtworkChange(nil)
+    }
     do {
       let loadedDetail = try await model.catalogDetail(id: mediaId)
       guard !Task.isCancelled else { return }
       detail = loadedDetail
-      selectedSeason = selectedSeason ?? loadedDetail.seasons.first?.number
+      if !loadedDetail.seasons.contains(where: { $0.number == selectedSeason }) {
+        selectedSeason = loadedDetail.seasons.first?.number
+      }
       errorMessage = nil
       onHeroArtworkChange(
         loadedDetail.metadata.backdrop ?? loadedDetail.metadata.still ?? loadedDetail.item.backdrop)
@@ -148,16 +159,32 @@ struct MediaDetailView: View {
   private func seasons(_ detail: CatalogDetailPresentation) -> some View {
     VStack(alignment: .leading, spacing: 16) {
       HStack(alignment: .center) {
-        Picker(
-          "Season",
-          selection: Binding(
-            get: { selectedSeason ?? detail.seasons.first?.number ?? 0 },
-            set: { selectedSeason = $0 })
-        ) {
-          ForEach(detail.seasons) { season in Text("Season \(season.number)").tag(season.number) }
+        Menu {
+          ForEach(detail.seasons) { season in
+            Button {
+              selectedSeason = season.number
+            } label: {
+              if season.number == selectedSeason {
+                Label("Season \(season.number)", systemImage: "checkmark")
+              } else {
+                Text("Season \(season.number)")
+              }
+            }
+          }
+        } label: {
+          HStack(spacing: 6) {
+            Image(systemName: "chevron.up.chevron.down")
+              .font(.system(size: 13, weight: .medium))
+            Text("Season \(selectedSeason ?? detail.seasons.first?.number ?? 0)")
+              .font(AureliaDesign.sectionTitle)
+            Image(systemName: "chevron.down")
+              .font(.system(size: 11, weight: .semibold))
+          }
+          .contentShape(Rectangle())
         }
-        .pickerStyle(.menu)
-        .font(AureliaDesign.sectionTitle)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .accessibilityIdentifier("season-\(selectedSeason ?? detail.seasons.first?.number ?? 0)")
         Spacer()
         if let season = activeSeason(detail) {
@@ -285,30 +312,59 @@ struct MediaDetailView: View {
       }
       Text("Information").font(AureliaDesign.sectionTitle)
       LazyVGrid(
-        columns: [GridItem(.adaptive(minimum: 210, maximum: 320), spacing: 46)],
+        columns: detail.item.kind == .series
+          ? [GridItem(.adaptive(minimum: 240, maximum: 320), spacing: 46)]
+          : Array(repeating: GridItem(.flexible(minimum: 160), alignment: .leading), count: 2),
         alignment: .leading,
         spacing: 22
       ) {
-        InfoValue(
-          title: "Released",
-          value: detail.metadata.releaseDate ?? detail.metadata.year.map(String.init))
-        InfoValue(title: "Runtime", value: detail.metadata.runtimeMinutes.map { "\($0) min" })
-        InfoValue(title: "Content Rating", value: detail.metadata.contentRating)
-        InfoValue(title: "Studio", value: detail.metadata.studios.first)
-        InfoValue(title: "Country", value: detail.metadata.countries.joined(separator: ", "))
-        InfoValue(title: "Genres", value: detail.metadata.genres.joined(separator: ", "))
-        if !detail.seasons.isEmpty {
-          InfoValue(title: "Seasons", value: String(detail.seasons.count))
-          InfoValue(
-            title: "Episodes",
-            value: String(detail.seasons.reduce(0) { $0 + $1.episodes.count }))
-          InfoValue(title: "Original Title", value: detail.metadata.originalTitle)
+        ForEach(MediaInformationPresentation.fields(for: detail)) { field in
+          InfoValue(title: field.title, value: field.value)
         }
       }
     }
     .padding(.horizontal, AureliaDesign.pagePadding)
     .frame(maxWidth: 1040, alignment: .leading)
     .accessibilityIdentifier("media-information")
+  }
+}
+
+struct MediaInformationField: Identifiable, Equatable {
+  let title: String
+  let value: String?
+
+  var id: String { title }
+}
+
+enum MediaInformationPresentation {
+  static func fields(for detail: CatalogDetailPresentation) -> [MediaInformationField] {
+    let metadata = detail.metadata
+    let country = metadata.countries.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    let studio = metadata.studios.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    let genres = metadata.genres.joined(separator: ", ")
+    let year = metadata.year ?? detail.item.year
+
+    if detail.item.kind == .series {
+      return [
+        MediaInformationField(title: "Seasons", value: String(detail.seasons.count)),
+        MediaInformationField(
+          title: "Episodes",
+          value: String(detail.seasons.reduce(0) { $0 + $1.episodes.count })),
+        MediaInformationField(title: "Studio", value: studio),
+        MediaInformationField(title: "Released", value: year.map(String.init)),
+        MediaInformationField(title: "Country of Origin", value: country),
+        MediaInformationField(title: "Genres", value: genres),
+      ]
+    }
+
+    return [
+      MediaInformationField(
+        title: "Runtime", value: metadata.runtimeMinutes.map { "\($0) min" }),
+      MediaInformationField(title: "Release Year", value: year.map(String.init)),
+      MediaInformationField(title: "Genres", value: genres),
+      MediaInformationField(title: "Studio", value: studio),
+      MediaInformationField(title: "Country of Origin", value: country),
+    ]
   }
 }
 
@@ -356,9 +412,6 @@ private struct DetailHero: View {
           .font(AureliaDesign.heroTitle)
           .tracking(-0.6)
           .lineLimit(2)
-        if let original = detail.metadata.originalTitle, original != detail.metadata.title {
-          Text(original).font(.title3).foregroundStyle(.white.opacity(0.7))
-        }
         if !detail.metadata.genres.isEmpty {
           Text(detail.metadata.genres.prefix(3).joined(separator: "  ·  "))
             .font(.callout.weight(.semibold)).foregroundStyle(.white.opacity(0.78))
@@ -429,8 +482,9 @@ private struct DetailHero: View {
   private var metadataLine: String {
     var values = [detail.item.kind == .movie ? "MOVIE" : "TV SHOW"]
     if let year = detail.metadata.year { values.append(String(year)) }
-    if let runtime = detail.metadata.runtimeMinutes { values.append("\(runtime) MIN") }
-    if let rating = detail.metadata.contentRating { values.append(rating.uppercased()) }
+    if detail.item.kind == .movie, let runtime = detail.metadata.runtimeMinutes {
+      values.append("\(runtime) MIN")
+    }
     return values.joined(separator: "  ·  ")
   }
 }

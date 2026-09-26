@@ -49,7 +49,9 @@ struct AureliaSidebarBackground: View {
           AuthenticatedArtwork(
             artwork: artwork,
             symbol: symbol,
-            contentMode: .fill)
+            contentMode: .fill
+          )
+          .id(artwork.id)
           LinearGradient(
             stops: [
               .init(color: .clear, location: 0.52),
@@ -62,13 +64,13 @@ struct AureliaSidebarBackground: View {
         .frame(height: 540)
         .offset(y: min(verticalOffset, 0))
         .blur(radius: 18)
-        .opacity(0.72)
+        .opacity(0.8)
       }
       if reduceTransparency {
         AureliaDesign.canvas.opacity(0.98)
       } else {
         Rectangle().fill(.ultraThinMaterial)
-        AureliaDesign.canvas.opacity(0.14)
+        AureliaDesign.canvas.opacity(0.08)
       }
     }
     .clipped()
@@ -121,28 +123,9 @@ struct AureliaHorizontalRail<Content: View>: View {
   }
 }
 
-private struct AureliaHeroOffsetPreferenceKey: PreferenceKey {
-  static let defaultValue: CGFloat = 0
-
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-    value = nextValue()
-  }
-}
-
-extension View {
-  func aureliaTrackHeroOffset(
-    in coordinateSpace: String = "aurelia-content-scroll",
-    onChange: @escaping (CGFloat) -> Void
-  ) -> some View {
-    background {
-      GeometryReader { proxy in
-        Color.clear.preference(
-          key: AureliaHeroOffsetPreferenceKey.self,
-          value: proxy.frame(in: .named(coordinateSpace)).minY
-        )
-      }
-    }
-    .onPreferenceChange(AureliaHeroOffsetPreferenceKey.self, perform: onChange)
+enum AureliaSidebarArtworkPosition {
+  static func verticalOffset(contentOffset: CGFloat, topInset: CGFloat) -> CGFloat {
+    -min(max(contentOffset + topInset, 0), 540)
   }
 }
 

@@ -244,7 +244,6 @@ private struct HomePage: View {
         LazyVStack(alignment: .leading, spacing: 34) {
           if let recommendation = model.home?.recommendation {
             HomeHero(item: recommendation) { onSelect(recommendation.id) }
-              .aureliaTrackHeroOffset(onChange: onHeroOffsetChange)
           }
           landscapeRow(
             "Continue Watching",
@@ -259,7 +258,12 @@ private struct HomePage: View {
         }
         .padding(.bottom, 48)
       }
-      .coordinateSpace(name: "aurelia-content-scroll")
+      .onScrollGeometryChange(for: CGFloat.self) { geometry in
+        AureliaSidebarArtworkPosition.verticalOffset(
+          contentOffset: geometry.contentOffset.y, topInset: geometry.contentInsets.top)
+      } action: { _, offset in
+        onHeroOffsetChange(offset)
+      }
       .defaultScrollAnchor(.top)
       .scrollIndicators(.visible)
       .accessibilityElement(children: .contain)
@@ -871,7 +875,6 @@ private struct CollectionDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 30) {
         collectionHero
-          .aureliaTrackHeroOffset(onChange: onHeroOffsetChange)
         VStack(alignment: .leading, spacing: 16) {
           AureliaSectionHeading(title: "Titles", count: collection.items.count)
           posterGrid(collection.items, onSelect: onSelect)
@@ -881,7 +884,12 @@ private struct CollectionDetailView: View {
       .padding(.bottom, 48)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .coordinateSpace(name: "aurelia-content-scroll")
+    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+      AureliaSidebarArtworkPosition.verticalOffset(
+        contentOffset: geometry.contentOffset.y, topInset: geometry.contentInsets.top)
+    } action: { _, offset in
+      onHeroOffsetChange(offset)
+    }
     .sheet(isPresented: $showingEditor) {
       CollectionEditorSheet(collection: collection).environmentObject(model)
     }
