@@ -278,6 +278,24 @@ final class AureliaUITests: XCTestCase {
   }
 
   @MainActor
+  func testSidebarCanHideAndRestoreWithoutChangingTheLibrary() throws {
+    let app = launchLibrary()
+    defer { app.terminate() }
+
+    let toggle = app.buttons["toggle-sidebar"]
+    XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+    toggle.click()
+    XCTAssertFalse(app.descendants(matching: .any)["sidebar-library"].exists)
+    XCTAssertTrue(app.buttons["media-10000000-0000-0000-0000-000000000001"].exists)
+    XCTAssertEqual(toggle.label, "Show Sidebar")
+
+    toggle.click()
+    XCTAssertTrue(app.descendants(matching: .any)["sidebar-library"].waitForExistence(timeout: 5))
+    XCTAssertEqual(toggle.label, "Hide Sidebar")
+    XCTAssertTrue(app.buttons["media-10000000-0000-0000-0000-000000000001"].exists)
+  }
+
+  @MainActor
   func testBuildTenHomeShowsHeroRowsCollectionsAndArtworkFallbacks() throws {
     let app = XCUIApplication()
     configureTestLaunch(app)

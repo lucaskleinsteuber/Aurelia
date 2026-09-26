@@ -42,26 +42,66 @@ struct LibraryShellView: View {
   @State private var selection: MediaSelection?
   @State private var heroOffset: CGFloat = 0
   @State private var detailHeroArtwork: ArtworkSummary?
+  @State private var sidebarVisible = true
+  @State private var sidebarWidth = AureliaDesign.sidebarWidth
+  @State private var resizeStartWidth: CGFloat?
 
   var body: some View {
-    ZStack {
-      shellBackdrop
-
-      NavigationSplitView {
-        sidebar
-          .navigationSplitViewColumnWidth(
-            min: 210,
-            ideal: AureliaDesign.sidebarWidth,
-            max: 300)
-      } detail: {
+    GeometryReader { geometry in
+      ZStack(alignment: .leading) {
+        AureliaDesign.canvas
+          .ignoresSafeArea()
+        if sidebarVisible {
+          AureliaSidebarBackground(
+            artwork: activeHeroArtwork,
+            symbol: activeHeroSymbol,
+            verticalOffset: heroOffset
+          )
+          .frame(
+            width: sidebarWidth,
+            height: geometry.size.height + geometry.safeAreaInsets.top
+          )
+          .clipped()
+          .offset(y: -geometry.safeAreaInsets.top)
+          .allowsHitTesting(false)
+        }
         content
-          .ignoresSafeArea(.container, edges: .top)
+          .frame(
+            width: max(
+              geometry.size.width - (sidebarVisible ? sidebarWidth : 0), 0),
+            height: geometry.size.height + geometry.safeAreaInsets.top
+          )
           .background(AureliaDesign.canvas)
+          .offset(
+            x: sidebarVisible ? sidebarWidth : 0,
+            y: -geometry.safeAreaInsets.top)
+        if sidebarVisible {
+          sidebar
+            .frame(width: sidebarWidth, height: geometry.size.height)
+            .clipped()
+          Color.clear
+            .frame(width: 8, height: geometry.size.height)
+            .contentShape(Rectangle())
+            .gesture(
+              DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                  if resizeStartWidth == nil { resizeStartWidth = sidebarWidth }
+                  sidebarWidth = min(
+                    max((resizeStartWidth ?? sidebarWidth) + value.translation.width, 210), 300)
+                }
+                .onEnded { _ in resizeStartWidth = nil }
+            )
+            .offset(x: sidebarWidth - 4)
+        }
       }
-      .navigationSplitViewStyle(.balanced)
-      .ignoresSafeArea(.container, edges: .top)
+      .overlay(alignment: .topLeading) {
+        sidebarToggle
+          .padding(.leading, sidebarVisible ? sidebarWidth - 44 : 76)
+          .padding(.top, 8 - geometry.safeAreaInsets.top)
+      }
       .aureliaRemoveEmptyWindowToolbar()
     }
+    .background(AureliaDesign.canvas)
     .overlay(alignment: .bottom) {
       if let error = model.errorMessage {
         ErrorBanner(message: error) { Task { await model.refreshFromUI() } }
@@ -75,33 +115,6 @@ struct LibraryShellView: View {
       heroOffset = 0
       detailHeroArtwork = nil
     }
-  }
-
-  private var shellBackdrop: some View {
-    ZStack(alignment: .top) {
-      AureliaDesign.canvas
-      if let artwork = activeHeroArtwork {
-        ZStack {
-          AuthenticatedArtwork(
-            artwork: artwork,
-            symbol: activeHeroSymbol,
-            extendsBlurredEdges: true)
-          LinearGradient(
-            stops: [
-              .init(color: .clear, location: 0.62),
-              .init(color: AureliaDesign.canvas.opacity(0.12), location: 0.80),
-              .init(color: AureliaDesign.canvas, location: 1),
-            ],
-            startPoint: .top,
-            endPoint: .bottom)
-        }
-        .frame(height: 540)
-        .offset(y: min(heroOffset, 0))
-        .transition(.opacity)
-      }
-    }
-    .ignoresSafeArea()
-    .animation(.easeOut(duration: 0.18), value: activeHeroArtwork?.id)
   }
 
   private var activeHeroArtwork: ArtworkSummary? {
@@ -144,13 +157,22 @@ struct LibraryShellView: View {
     }
     .listStyle(.sidebar)
     .scrollContentBackground(.hidden)
-    .background {
-      AureliaSidebarBackground(
-        artwork: activeHeroArtwork,
-        symbol: activeHeroSymbol,
-        verticalOffset: heroOffset)
-    }
     .accessibilityIdentifier("primary-sidebar")
+  }
+
+  private var sidebarToggle: some View {
+    Button {
+      sidebarVisible.toggle()
+    } label: {
+      Image(systemName: "sidebar.left")
+        .font(.system(size: 15, weight: .medium))
+        .frame(width: 34, height: 34)
+        .background(.ultraThinMaterial, in: Circle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+    .accessibilityIdentifier("toggle-sidebar")
+    .keyboardShortcut("s", modifiers: [.command, .control])
   }
 
   private func sidebarButton(_ item: LibraryDestination) -> some View {
@@ -258,6 +280,7 @@ private struct HomePage: View {
         }
         .padding(.bottom, 48)
       }
+      .scrollClipDisabled()
       .onScrollGeometryChange(for: CGFloat.self) { geometry in
         AureliaSidebarArtworkPosition.verticalOffset(
           contentOffset: geometry.contentOffset.y, topInset: geometry.contentInsets.top)
@@ -415,11 +438,6 @@ private struct HomeHero: View {
       .padding(.bottom, 22)
     }
     .frame(height: 500)
-    .clipShape(
-      UnevenRoundedRectangle(
-        bottomLeadingRadius: AureliaDesign.heroRadius,
-        bottomTrailingRadius: AureliaDesign.heroRadius)
-    )
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("home-hero")
   }

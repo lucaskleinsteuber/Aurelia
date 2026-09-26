@@ -71,6 +71,7 @@ struct MediaDetailView: View {
       onHeroOffsetChange(offset)
     }
     .defaultScrollAnchor(.top)
+    .scrollClipDisabled()
     .scrollIndicators(.visible)
     .accessibilityIdentifier("media-detail-scroll")
     .task(id: mediaId) { await load() }

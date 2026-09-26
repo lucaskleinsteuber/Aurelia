@@ -63,18 +63,17 @@ struct AureliaSidebarBackground: View {
         }
         .frame(height: 540)
         .offset(y: min(verticalOffset, 0))
-        .blur(radius: 18)
+        .blur(radius: 8)
         .opacity(0.8)
       }
       if reduceTransparency {
-        AureliaDesign.canvas.opacity(0.98)
+        AureliaDesign.canvas
       } else {
-        Rectangle().fill(.ultraThinMaterial)
-        AureliaDesign.canvas.opacity(0.08)
+        Rectangle().fill(.ultraThinMaterial).opacity(0.28)
+        AureliaDesign.canvas.opacity(0.04)
       }
     }
     .clipped()
-    .ignoresSafeArea()
   }
 }
 
