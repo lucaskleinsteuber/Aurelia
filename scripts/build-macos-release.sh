@@ -5,7 +5,7 @@ repository_root=${0:A:h:h}
 other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
 developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 dotnet_bin=${DOTNET_BIN:-"$other_root/Package Cache/dotnet/dotnet"}
-provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-/Applications/Aurelia.app/Contents/embedded.provisionprofile}
+provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-}
 bundle_identifier=com.lucas.aurelia.media
 team_identifier=B5N7JVK37J
 build_parent="$other_root/Build"
@@ -28,9 +28,48 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [[ -z "$provisioning_profile" ]]; then
+  profile_directory="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+  profile_candidates=()
+  if [[ -d "$profile_directory" ]]; then
+    while IFS= read -r -d '' candidate_profile; do
+      profile_candidates+=("$candidate_profile")
+    done < <(find "$profile_directory" -maxdepth 1 -type f \
+      \( -name '*.provisionprofile' -o -name '*.mobileprovision' \) -print0)
+  fi
+  profile_candidates+=(/Applications/Aurelia.app/Contents/embedded.provisionprofile)
+  selected_expiration=0
+  for candidate_profile in "${profile_candidates[@]}"; do
+    [[ -r "$candidate_profile" ]] || continue
+    /usr/bin/security cms -D -i "$candidate_profile" >"$profile_plist" 2>/dev/null || continue
+    candidate_app_id=$(/usr/libexec/PlistBuddy \
+      -c 'Print :Entitlements:com.apple.application-identifier' "$profile_plist" 2>/dev/null || true)
+    candidate_team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$profile_plist" 2>/dev/null || true)
+    [[ "$candidate_app_id" == "$team_identifier.$bundle_identifier" \
+      && "$candidate_team" == "$team_identifier" ]] || continue
+    candidate_expiration=$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$profile_plist" 2>/dev/null || true)
+    candidate_epoch=$(/bin/date -j -f '%a %b %d %H:%M:%S %Z %Y' \
+      "$candidate_expiration" +%s 2>/dev/null || true)
+    [[ -n "$candidate_epoch" && "$candidate_epoch" -gt $(/bin/date +%s) \
+      && "$candidate_epoch" -gt "$selected_expiration" ]] || continue
+    candidate_fingerprint=$(/usr/bin/plutil -extract DeveloperCertificates.0 raw -o - "$profile_plist" \
+      | /usr/bin/base64 -D \
+      | /usr/bin/openssl x509 -inform DER -noout -fingerprint -sha1 \
+      | /usr/bin/sed -E 's/^[^=]*=//; s/://g' \
+      | /usr/bin/tr '[:lower:]' '[:upper:]' 2>/dev/null || true)
+    [[ -n "$candidate_fingerprint" ]] || continue
+    if /usr/bin/security find-identity -v -p codesigning \
+      | /usr/bin/awk -v identity="$candidate_fingerprint" \
+        '$2 == identity { found = 1 } END { exit !found }'; then
+      provisioning_profile="$candidate_profile"
+      selected_expiration="$candidate_epoch"
+    fi
+  done
+fi
+
 if [[ ! -r "$provisioning_profile" ]]; then
-  echo "Aurelia provisioning profile is unavailable: $provisioning_profile" >&2
-  echo "Set AURELIA_PROVISIONING_PROFILE to a valid profile for $bundle_identifier." >&2
+  echo "No valid Aurelia provisioning profile is available for $bundle_identifier." >&2
+  echo "Renew it in Xcode or set AURELIA_PROVISIONING_PROFILE to a valid profile." >&2
   exit 1
 fi
 if ! /usr/bin/security cms -D -i "$provisioning_profile" >"$profile_plist"; then
