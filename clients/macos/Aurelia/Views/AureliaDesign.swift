@@ -43,34 +43,38 @@ struct AureliaSidebarBackground: View {
 
   var body: some View {
     ZStack(alignment: .top) {
-      AureliaDesign.canvas
-      if !reduceTransparency, let artwork {
-        ZStack {
+      if reduceTransparency {
+        AureliaDesign.canvas
+      } else {
+        Rectangle().fill(.ultraThinMaterial).opacity(0.55)
+        // The hero contributes light, never a second recognizable image.
+        // Rails are rendered behind this material by LibraryShellView.
+        if let artwork {
           AuthenticatedArtwork(
             artwork: artwork,
             symbol: symbol,
             contentMode: .fill
           )
           .id(artwork.id)
-          LinearGradient(
-            stops: [
-              .init(color: .clear, location: 0.52),
-              .init(color: AureliaDesign.canvas.opacity(0.34), location: 0.78),
-              .init(color: AureliaDesign.canvas, location: 1),
-            ],
-            startPoint: .top,
-            endPoint: .bottom)
+          .frame(height: 540)
+          .scaleEffect(1.6)
+          .offset(y: min(verticalOffset, 0))
+          .blur(radius: 120)
+          .saturation(0.75)
+          .opacity(0.32)
+          .mask {
+            LinearGradient(
+              stops: [
+                .init(color: .white, location: 0),
+                .init(color: .white, location: 0.24),
+                .init(color: .clear, location: 0.62),
+              ],
+              startPoint: .top,
+              endPoint: .bottom)
+          }
+          .accessibilityHidden(true)
         }
-        .frame(height: 540)
-        .offset(y: min(verticalOffset, 0))
-        .blur(radius: 8)
-        .opacity(0.8)
-      }
-      if reduceTransparency {
-        AureliaDesign.canvas
-      } else {
-        Rectangle().fill(.ultraThinMaterial).opacity(0.28)
-        AureliaDesign.canvas.opacity(0.04)
+        AureliaDesign.canvas.opacity(0.12)
       }
     }
     .clipped()

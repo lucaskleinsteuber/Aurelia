@@ -51,6 +51,16 @@ struct LibraryShellView: View {
       ZStack(alignment: .leading) {
         AureliaDesign.canvas
           .ignoresSafeArea()
+        content
+          .frame(
+            width: max(
+              geometry.size.width - (sidebarVisible ? sidebarWidth : 0), 0),
+            height: geometry.size.height + geometry.safeAreaInsets.top
+          )
+          .background(AureliaDesign.canvas)
+          .offset(
+            x: sidebarVisible ? sidebarWidth : 0,
+            y: -geometry.safeAreaInsets.top)
         if sidebarVisible {
           AureliaSidebarBackground(
             artwork: activeHeroArtwork,
@@ -64,18 +74,6 @@ struct LibraryShellView: View {
           .clipped()
           .offset(y: -geometry.safeAreaInsets.top)
           .allowsHitTesting(false)
-        }
-        content
-          .frame(
-            width: max(
-              geometry.size.width - (sidebarVisible ? sidebarWidth : 0), 0),
-            height: geometry.size.height + geometry.safeAreaInsets.top
-          )
-          .background(AureliaDesign.canvas)
-          .offset(
-            x: sidebarVisible ? sidebarWidth : 0,
-            y: -geometry.safeAreaInsets.top)
-        if sidebarVisible {
           sidebar
             .frame(width: sidebarWidth, height: geometry.size.height)
             .clipped()
