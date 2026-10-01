@@ -46,7 +46,7 @@ public sealed class MetadataPresentationTests
             Assert.DoesNotContain("test-token", JsonContent(metadata), StringComparison.Ordinal);
 
             using var artworkRequest = ApiTestClient.Authorized(HttpMethod.Get, metadata.Poster!.Path, owner.Token);
-            using var artworkResponse = await client.SendAsync(artworkRequest);
+            using var artworkResponse = await ApiTestClient.SendAsync(client, artworkRequest);
             Assert.Equal(HttpStatusCode.OK, artworkResponse.StatusCode);
             Assert.Equal("image/jpeg", artworkResponse.Content.Headers.ContentType?.MediaType);
             using var unauthenticatedArtwork = await client.GetAsync(metadata.Poster.Path);
@@ -168,10 +168,10 @@ public sealed class MetadataPresentationTests
         Assert.Equal(UserRole.User, user.Role);
         using var login = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/auth/login", owner.Token,
             new LoginRequest("viewer", "another correct horse password", "Viewer Mac"));
-        using var loginResponse = await client.SendAsync(login);
+        using var loginResponse = await ApiTestClient.SendAsync(client, login);
         var authentication = await ApiTestClient.ReadAsync<AuthenticationResponse>(loginResponse);
         using var forbidden = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/metadata/provider", authentication.Token);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(forbidden)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await ApiTestClient.SendAsync(client, forbidden)).StatusCode);
         var home = await SendAsync<HomeResponse>(client, authentication.Token, HttpMethod.Get, "/api/v1/home");
         Assert.Empty(home.Favorites);
     }
@@ -210,13 +210,13 @@ public sealed class MetadataPresentationTests
             Assert.Equal(UserRole.User, user.Role);
             using var login = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/auth/login", owner.Token,
                 new LoginRequest("viewer", "another correct horse password", "Viewer Mac"));
-            using var loginResponse = await client.SendAsync(login);
+            using var loginResponse = await ApiTestClient.SendAsync(client, login);
             var authentication = await ApiTestClient.ReadAsync<AuthenticationResponse>(loginResponse);
             using var forbidden = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/collections/{created.Id}", authentication.Token);
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(forbidden)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await ApiTestClient.SendAsync(client, forbidden)).StatusCode);
 
             using var delete = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/collections/{created.Id}", owner.Token);
-            Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(delete)).StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await ApiTestClient.SendAsync(client, delete)).StatusCode);
             Assert.Empty(await SendAsync<List<CollectionSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/catalog/collections"));
         }
         finally { Directory.Delete(mediaRoot, recursive: true); }
@@ -247,7 +247,7 @@ public sealed class MetadataPresentationTests
     private static async Task<T> SendAsync<T>(HttpClient client, string token, HttpMethod method, string path, object? body = null)
     {
         using var request = ApiTestClient.Authorized(method, path, token, body);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<T>(response);
     }

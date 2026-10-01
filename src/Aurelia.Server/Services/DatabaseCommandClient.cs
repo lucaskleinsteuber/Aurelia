@@ -20,6 +20,14 @@ public static class DatabaseCommandClient
         {
             switch (commandLine.Action)
             {
+                case "restore-prepared":
+                    {
+                        if (!Guid.TryParse(commandLine.Option("--id"), out var id)) throw new ArgumentException("A verified restore ID is required.");
+                        using var instanceLock = ServerInstanceLock.Acquire(runtime.DataDirectory);
+                        await FullServerBackupService.ApplyPreparedAsync(runtime, id, cancellationToken);
+                        Console.WriteLine("Full server restore verified. All device sessions were revoked.");
+                        return 0;
+                    }
                 case "backup":
                     {
                         var path = await backups.CreateBackupAsync(
@@ -53,13 +61,13 @@ public static class DatabaseCommandClient
                         if (!commandLine.HasFlag("--confirm"))
                         {
                             Console.Error.WriteLine(
-                                "Restore was not started. Stop Aurelia Server and repeat with --confirm after checking the source.");
+                                "Restore was not started. Restoring signs out every device. Stop Aurelia Server and repeat with --confirm after checking the source.");
                             return 2;
                         }
 
                         using var instanceLock = ServerInstanceLock.Acquire(runtime.DataDirectory);
                         await backups.RestoreAsync(path, cancellationToken);
-                        Console.WriteLine("Database restore verified. Start Aurelia Server to apply any required migrations.");
+                        Console.WriteLine("Database restore verified. All device sessions were revoked. Start Aurelia Server to apply any required migrations and sign in again.");
                         return 0;
                     }
                 default:

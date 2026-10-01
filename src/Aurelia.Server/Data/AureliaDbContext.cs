@@ -7,6 +7,9 @@ namespace Aurelia.Server.Data;
 public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     : DbContext(options)
 {
+    public Guid? AccessUserId { get; set; }
+    public bool AccessIsOwner { get; set; }
+    public DbSet<UserLibraryGrant> UserLibraryGrants => Set<UserLibraryGrant>();
     public DbSet<ServerUser> Users => Set<ServerUser>();
 
     public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
@@ -51,20 +54,30 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     private void AppendSyncChanges()
     {
         var changes = new HashSet<(SyncChangeArea Area, Guid? UserId, Guid? MediaId)>();
+        var affectedLibraries = new HashSet<Guid>();
+        var changedCollections = new HashSet<Guid>();
         foreach (var entry in ChangeTracker.Entries().Where(entry =>
                      (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
                      && entry.Entity is not SyncChange))
         {
             switch (entry.Entity)
             {
-                case LibraryRoot:
+                case LibraryRoot root:
+                    affectedLibraries.Add(root.Id);
                     changes.Add((SyncChangeArea.Libraries, null, null));
                     changes.Add((SyncChangeArea.Catalog, null, null));
                     break;
-                case LibraryScan or LibraryScanIssue or LibraryDiscovery or LibraryImportReview:
+                case LibraryScan or LibraryDiscovery or LibraryImportReview:
+                    var rootId = entry.Property("LibraryRootId").CurrentValue as Guid?;
+                    if (rootId.HasValue) affectedLibraries.Add(rootId.Value);
+                    changes.Add((SyncChangeArea.Libraries, null, null));
+                    break;
+                case LibraryScanIssue issue:
+                    if (issue.LibraryScan is not null) affectedLibraries.Add(issue.LibraryScan.LibraryRootId);
                     changes.Add((SyncChangeArea.Libraries, null, null));
                     break;
                 case MediaItem item:
+                    if (entry.State == EntityState.Deleted) affectedLibraries.Add(item.LibraryRootId);
                     changes.Add((SyncChangeArea.Catalog, null, item.Id));
                     break;
                 case MediaMetadata metadata:
@@ -76,7 +89,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 case ArtworkAsset artwork:
                     changes.Add((SyncChangeArea.Metadata, null, artwork.MediaItemId));
                     break;
-                case MediaCollectionRecord:
+                case MediaCollectionRecord collection:
+                    changedCollections.Add(collection.Id);
                     changes.Add((SyncChangeArea.Collections, null, null));
                     break;
                 case MediaCollectionMember member:
@@ -90,6 +104,23 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                     break;
             }
         }
+
+        // Root-only and deleted-media changes cannot be checked through a surviving
+        // media row. Target resets to the users who had access before the commit;
+        // do not broadcast hidden libraries or collection names/counts globally.
+        if (affectedLibraries.Count > 0)
+            foreach (var userId in UserLibraryGrants.Where(grant => affectedLibraries.Contains(grant.LibraryRootId))
+                .Select(grant => grant.UserId).Distinct().ToList())
+            {
+                changes.Add((SyncChangeArea.Libraries, userId, null));
+                changes.Add((SyncChangeArea.Catalog, userId, null));
+            }
+        if (changedCollections.Count > 0)
+            foreach (var userId in UserLibraryGrants.Where(grant => MediaCollectionMembers.IgnoreQueryFilters()
+                    .Any(member => changedCollections.Contains(member.CollectionId)
+                        && member.MediaItem.LibraryRootId == grant.LibraryRootId))
+                .Select(grant => grant.UserId).Distinct().ToList())
+                changes.Add((SyncChangeArea.Collections, userId, null));
 
         var now = DateTimeOffset.UtcNow;
         foreach (var change in changes)
@@ -106,6 +137,49 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<UserLibraryGrant>(entity =>
+        {
+            entity.HasKey(grant => new { grant.UserId, grant.LibraryRootId });
+            entity.HasOne(grant => grant.User).WithMany(user => user.LibraryGrants)
+                .HasForeignKey(grant => grant.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(grant => grant.LibraryRoot).WithMany()
+                .HasForeignKey(grant => grant.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<UserLibraryGrant>().HasQueryFilter(grant => AccessUserId == null || AccessIsOwner || grant.UserId == AccessUserId);
+        modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == library.Id));
+        modelBuilder.Entity<MediaItem>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<LibraryScan>().HasQueryFilter(scan => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == scan.LibraryRootId));
+        modelBuilder.Entity<LibraryDiscovery>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportReview>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<LibraryScanIssue>().HasQueryFilter(issue => AccessUserId == null || AccessIsOwner
+            || LibraryScans.Any(scan => scan.Id == issue.LibraryScanId));
+        modelBuilder.Entity<MediaMetadata>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<MediaCredit>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<ArtworkAsset>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<MetadataReview>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == item.MediaItemId));
+        modelBuilder.Entity<MetadataJob>().HasQueryFilter(job => AccessUserId == null || AccessIsOwner
+            || (job.LibraryRootId != null && LibraryRoots.Any(root => root.Id == job.LibraryRootId))
+            || (job.MediaItemId != null && MediaItems.Any(media => media.Id == job.MediaItemId)));
+        modelBuilder.Entity<MediaCollectionMember>().HasQueryFilter(member => AccessUserId == null || AccessIsOwner
+            || MediaItems.Any(media => media.Id == member.MediaItemId));
+        modelBuilder.Entity<PlaybackTicket>().HasQueryFilter(ticket => AccessUserId == null
+            || (ticket.UserId == AccessUserId && MediaItems.Any(media => media.Id == ticket.MediaItemId)));
+        modelBuilder.Entity<PlaybackProgress>().HasQueryFilter(progress => AccessUserId == null
+            || (progress.UserId == AccessUserId && MediaItems.Any(media => media.Id == progress.MediaItemId)));
+        modelBuilder.Entity<UserFavorite>().HasQueryFilter(favorite => AccessUserId == null
+            || (favorite.UserId == AccessUserId && MediaItems.Any(media => media.Id == favorite.MediaItemId)));
+        modelBuilder.Entity<SyncChange>().HasQueryFilter(change => AccessUserId == null || AccessIsOwner
+            || (change.UserId == AccessUserId && change.MediaItemId == null)
+            || (change.MediaItemId != null && MediaItems.Any(media => media.Id == change.MediaItemId)));
         var dateTimeOffsetConverter = new ValueConverter<DateTimeOffset, long>(
             value => value.ToUnixTimeMilliseconds(),
             value => DateTimeOffset.FromUnixTimeMilliseconds(value));

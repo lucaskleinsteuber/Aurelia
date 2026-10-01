@@ -6,6 +6,7 @@ namespace Aurelia.Server.Services;
 
 public sealed class BonjourAdvertisementService(
     ServerRuntimeOptions runtime,
+    ServerConfigurationStore configuration,
     IServiceScopeFactory scopeFactory,
     ILogger<BonjourAdvertisementService> logger) : IHostedService, IAsyncDisposable
 {
@@ -28,7 +29,7 @@ public sealed class BonjourAdvertisementService(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (!runtime.LanAccessEnabled)
+        if (!runtime.LanAccessEnabled || !configuration.Current.BonjourEnabled)
         {
             return;
         }

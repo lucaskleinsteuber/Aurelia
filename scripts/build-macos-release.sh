@@ -14,7 +14,15 @@ if [[ -z "$build_number" ]]; then
   echo "Unable to read the Aurelia build number." >&2
   exit 1
 fi
-final_root="$build_parent/Build $build_number"
+final_root=${AURELIA_CANDIDATE_OUTPUT:-"$build_parent/Build $build_number"}
+if [[ "$final_root" != "$build_parent/Build $build_number" && "$final_root" != "$build_parent/Preflight-"* ]]; then
+  echo "Candidate output must be the numbered build or a fresh Preflight directory under Aurelia Other/Build." >&2
+  exit 1
+fi
+if [[ "$final_root" == "$build_parent/Preflight-"* && -e "$final_root" ]]; then
+  echo "Preflight output must be a new directory." >&2
+  exit 1
+fi
 mkdir -p "$build_parent"
 stage_root=$(mktemp -d "$build_parent/.build${build_number}.XXXXXX")
 derived_data="$stage_root/DerivedData"
@@ -139,10 +147,21 @@ DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   -derivedDataPath "$derived_data" \
   ARCHS='arm64 x86_64' \
   ONLY_ACTIVE_ARCH=NO \
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
   CODE_SIGNING_ALLOWED=NO \
   build
 
 /usr/bin/ditto "$derived_data/Build/Products/Release/Aurelia.app" "$candidate"
+for agent in com.lucas.aurelia.media.host.background com.lucas.aurelia.media.host.login; do
+  agent_plist="$candidate/Contents/Library/LaunchAgents/$agent.plist"
+  /usr/bin/plutil -lint "$agent_plist"
+  agent_program=$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$agent_plist")
+  if [[ "$agent_program" != 'Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost' \
+    || ! -x "$candidate/$agent_program" ]]; then
+    echo "The launch agent does not point to the bundled Aurelia host." >&2
+    exit 1
+  fi
+done
 /usr/bin/ditto "$provisioning_profile" "$candidate/Contents/embedded.provisionprofile"
 mkdir -p "$candidate/Contents/Resources/Server"
 for runtime in osx-arm64 osx-x64; do

@@ -16,6 +16,48 @@ namespace Aurelia.Server.Tests;
 public sealed class PlaybackStreamingTests
 {
     [Fact]
+    public async Task RevokingDeviceCancelsAnAlreadyOpenHttpStream()
+    {
+        var root = CreateDirectory("Live Revocation");
+        var path = Path.Combine(root, "Synthetic Stream.mkv");
+        await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+            file.SetLength(32 * 1024 * 1024);
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+                new LoginRequest("lucas", "correct horse battery staple", "Revoking device"), ApiTestClient.JsonOptions);
+            var second = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
+            var mediaId = await AddMediaAsync(factory, root, path);
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, playback.StreamPath, owner.Token);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            var buffer = new byte[4096];
+            Assert.True(await stream.ReadAsync(buffer) > 0);
+            Assert.True(factory.Services.GetRequiredService<ActiveStreamRegistry>().Count > 0);
+            using var revoke = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/auth/sessions/{owner.SessionId}", second.Token);
+            using var revoked = await client.SendAsync(revoke);
+            revoked.EnsureSuccessStatusCode();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var received = 4096L;
+            try
+            {
+                int count;
+                while ((count = await stream.ReadAsync(buffer, timeout.Token)) > 0) received += count;
+            }
+            catch (IOException) { }
+            catch (OperationCanceledException) when (!timeout.IsCancellationRequested) { }
+            Assert.False(timeout.IsCancellationRequested);
+            Assert.True(received < 32 * 1024 * 1024, "Revocation must stop the response before the entire synthetic file is delivered.");
+        }
+        finally { DeleteDirectory(root); }
+    }
+
+    [Fact]
     public async Task PlaybackTicketsAreIsolatedPerSessionAndIndependentClientsCanSeek()
     {
         var root = CreateDirectory("Concurrent Playback Clients");
@@ -120,7 +162,7 @@ public sealed class PlaybackStreamingTests
                        HttpMethod.Get,
                        playback.StreamPath,
                        owner.Token))
-            using (var response = await client.SendAsync(
+            using (var response = await ApiTestClient.SendAsync(client,
                        request,
                        HttpCompletionOption.ResponseHeadersRead,
                        cancellation.Token))
@@ -133,7 +175,7 @@ public sealed class PlaybackStreamingTests
             }
 
             using var seek = RangeRequest(playback.StreamPath, 1024, 1055, owner.Token);
-            using var seekResponse = await client.SendAsync(seek);
+            using var seekResponse = await ApiTestClient.SendAsync(client, seek);
             Assert.Equal(HttpStatusCode.PartialContent, seekResponse.StatusCode);
             Assert.Equal(new byte[32], await seekResponse.Content.ReadAsByteArrayAsync());
         }
@@ -197,7 +239,7 @@ public sealed class PlaybackStreamingTests
                 Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
             }
 
-            using (var fullResponse = await client.SendAsync(
+            using (var fullResponse = await ApiTestClient.SendAsync(client,
                        ApiTestClient.Authorized(HttpMethod.Get, playback.StreamPath, viewer.Token)))
             {
                 Assert.Equal(HttpStatusCode.OK, fullResponse.StatusCode);
@@ -209,7 +251,7 @@ public sealed class PlaybackStreamingTests
             }
 
             using (var headRequest = ApiTestClient.Authorized(HttpMethod.Head, playback.StreamPath, viewer.Token))
-            using (var headResponse = await client.SendAsync(headRequest))
+            using (var headResponse = await ApiTestClient.SendAsync(client, headRequest))
             {
                 Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
                 Assert.Equal(content.Length, headResponse.Content.Headers.ContentLength);
@@ -220,7 +262,7 @@ public sealed class PlaybackStreamingTests
                 ifRangeRequest.Headers.TryAddWithoutValidation(
                     "If-Range",
                     headResponse.Headers.ETag.Tag);
-                using var ifRangeResponse = await client.SendAsync(ifRangeRequest);
+                using var ifRangeResponse = await ApiTestClient.SendAsync(client, ifRangeRequest);
                 Assert.Equal(HttpStatusCode.PartialContent, ifRangeResponse.StatusCode);
                 Assert.Equal(content[100..200], await ifRangeResponse.Content.ReadAsByteArrayAsync());
             }
@@ -235,7 +277,7 @@ public sealed class PlaybackStreamingTests
                        viewer.Token))
             {
                 invalidRequest.Headers.TryAddWithoutValidation("Range", "bytes=invalid");
-                using var invalidResponse = await client.SendAsync(invalidRequest);
+                using var invalidResponse = await ApiTestClient.SendAsync(client, invalidRequest);
                 Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, invalidResponse.StatusCode);
                 Assert.Equal($"bytes */{content.Length}", invalidResponse.Content.Headers.ContentRange?.ToString());
             }
@@ -245,7 +287,7 @@ public sealed class PlaybackStreamingTests
                        content.Length + 100,
                        content.Length + 200,
                        viewer.Token))
-            using (var unsatisfiedResponse = await client.SendAsync(unsatisfiedRequest))
+            using (var unsatisfiedResponse = await ApiTestClient.SendAsync(client, unsatisfiedRequest))
             {
                 Assert.Equal(HttpStatusCode.RequestedRangeNotSatisfiable, unsatisfiedResponse.StatusCode);
                 Assert.Equal($"bytes */{content.Length}", unsatisfiedResponse.Content.Headers.ContentRange?.ToString());
@@ -255,7 +297,7 @@ public sealed class PlaybackStreamingTests
             {
                 var start = index * 100;
                 using var request = RangeRequest(playback.StreamPath, start, start + 99, viewer.Token);
-                using var response = await client.SendAsync(request);
+                using var response = await ApiTestClient.SendAsync(client, request);
                 Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
                 Assert.Equal(content[start..(start + 100)], await response.Content.ReadAsByteArrayAsync());
             });
@@ -265,12 +307,12 @@ public sealed class PlaybackStreamingTests
                        HttpMethod.Delete,
                        $"/api/v1/playback/{playback.Id}",
                        viewer.Token))
-            using (var revokeResponse = await client.SendAsync(revokeRequest))
+            using (var revokeResponse = await ApiTestClient.SendAsync(client, revokeRequest))
             {
                 Assert.Equal(HttpStatusCode.NoContent, revokeResponse.StatusCode);
             }
 
-            using var revokedResponse = await client.SendAsync(
+            using var revokedResponse = await ApiTestClient.SendAsync(client,
                 ApiTestClient.Authorized(HttpMethod.Get, playback.StreamPath, viewer.Token));
             Assert.Equal(HttpStatusCode.NotFound, revokedResponse.StatusCode);
         }
@@ -304,7 +346,7 @@ public sealed class PlaybackStreamingTests
                 await database.SaveChangesAsync();
             }
 
-            using (var expiredResponse = await client.SendAsync(
+            using (var expiredResponse = await ApiTestClient.SendAsync(client,
                        ApiTestClient.Authorized(HttpMethod.Get, expired.StreamPath, owner.Token)))
             {
                 Assert.Equal(HttpStatusCode.NotFound, expiredResponse.StatusCode);
@@ -321,12 +363,12 @@ public sealed class PlaybackStreamingTests
                        HttpMethod.Post,
                        "/api/v1/auth/logout",
                        owner.Token))
-            using (var logoutResponse = await client.SendAsync(logout))
+            using (var logoutResponse = await ApiTestClient.SendAsync(client, logout))
             {
                 Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
             }
 
-            using var afterLogout = await client.SendAsync(
+            using var afterLogout = await ApiTestClient.SendAsync(client,
                 ApiTestClient.Authorized(HttpMethod.Get, active.StreamPath, owner.Token));
             Assert.Equal(HttpStatusCode.Unauthorized, afterLogout.StatusCode);
         }
@@ -394,7 +436,7 @@ public sealed class PlaybackStreamingTests
                        HttpMethod.Post,
                        $"/api/v1/media/{Guid.NewGuid()}/playback",
                        owner.Token))
-            using (var unknownResponse = await client.SendAsync(unknown))
+            using (var unknownResponse = await ApiTestClient.SendAsync(client, unknown))
             {
                 await AssertProblemAsync(unknownResponse, HttpStatusCode.NotFound, "media_not_found");
             }
@@ -479,7 +521,7 @@ public sealed class PlaybackStreamingTests
             var deletedId = await AddMediaAsync(factory, deletedRoot, deletedPath);
             var deletedPlayback = await CreatePlaybackAsync(client, owner.Token, deletedId);
             File.Delete(deletedPath);
-            using var deletedResponse = await client.SendAsync(
+            using var deletedResponse = await ApiTestClient.SendAsync(client,
                 ApiTestClient.Authorized(HttpMethod.Get, deletedPlayback.StreamPath, owner.Token));
             Assert.Equal(HttpStatusCode.NotFound, deletedResponse.StatusCode);
         }
@@ -511,7 +553,7 @@ public sealed class PlaybackStreamingTests
             var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
             var rawTicket = Path.GetFileName(playback.StreamPath);
 
-            using var streamResponse = await client.SendAsync(
+            using var streamResponse = await ApiTestClient.SendAsync(client,
                 ApiTestClient.Authorized(HttpMethod.Get, playback.StreamPath, owner.Token));
             Assert.Equal(HttpStatusCode.OK, streamResponse.StatusCode);
             Assert.DoesNotContain(
@@ -657,8 +699,9 @@ public sealed class PlaybackStreamingTests
                 "viewer",
                 "a secure viewer password",
                 UserRole.User));
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
+        await ApiTestClient.GrantExistingLibrariesAsync(client, ownerToken, (await ApiTestClient.ReadAsync<UserSummary>(response)).Id);
     }
 
     private static async Task<AuthenticationResponse> LoginAsync(HttpClient client)
@@ -680,7 +723,7 @@ public sealed class PlaybackStreamingTests
             HttpMethod.Post,
             $"/api/v1/media/{mediaId}/playback",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<PlaybackSourceResponse>(response);
     }
@@ -705,7 +748,7 @@ public sealed class PlaybackStreamingTests
         string token)
     {
         using var request = RangeRequest(path, from, to, token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
         var finalIndex = to ?? content.Length - 1;
         Assert.Equal(content[from..(finalIndex + 1)], await response.Content.ReadAsByteArrayAsync());
@@ -724,7 +767,7 @@ public sealed class PlaybackStreamingTests
         using var request = ApiTestClient.Authorized(HttpMethod.Get, path, token);
         request.Headers.Range = new RangeHeaderValue();
         request.Headers.Range.Ranges.Add(new RangeItemHeaderValue(null, length));
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
         Assert.Equal(content[^length..], await response.Content.ReadAsByteArrayAsync());
         Assert.Equal(
@@ -742,7 +785,7 @@ public sealed class PlaybackStreamingTests
             HttpMethod.Post,
             $"/api/v1/media/{mediaId}/playback",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         await AssertProblemAsync(response, HttpStatusCode.Conflict, code);
     }
 

@@ -61,9 +61,6 @@ public static class DatabaseInitializer
             "PRAGMA foreign_keys=ON;",
             cancellationToken);
 
-        var searchIndex = scope.ServiceProvider.GetRequiredService<MediaSearchIndexService>();
-        await searchIndex.RebuildAsync(cancellationToken);
-
         var playback = scope.ServiceProvider.GetRequiredService<PlaybackService>();
         await playback.PruneExpiredAsync(DateTimeOffset.UtcNow, cancellationToken);
 

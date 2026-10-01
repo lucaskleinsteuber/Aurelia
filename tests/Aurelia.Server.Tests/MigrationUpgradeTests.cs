@@ -14,6 +14,34 @@ namespace Aurelia.Server.Tests;
 public sealed class MigrationUpgradeTests
 {
     [Fact]
+    public async Task AccessMigrationGrantsExistingLibrariesOnceWithoutSharingNewLibraries()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>().UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.MigrateAsync();
+            var user = new ServerUser { Id = Guid.NewGuid(), Username = "existing viewer", NormalizedUsername = "EXISTING VIEWER", PasswordHash = "synthetic", Role = UserRole.User, CreatedAt = DateTimeOffset.UtcNow };
+            var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Existing", Path = Path.Combine(root, "existing"), NormalizedPath = Path.Combine(root, "existing"), Kind = LibraryKind.Movies, CreatedAt = DateTimeOffset.UtcNow };
+            database.Users.Add(user); database.LibraryRoots.Add(library);
+            await database.SaveChangesAsync();
+            var migrations = (await database.Database.GetAppliedMigrationsAsync()).ToArray();
+            await database.Database.GetService<IMigrator>().MigrateAsync(migrations[^2]);
+            database.ChangeTracker.Clear();
+            await database.Database.MigrateAsync();
+            var grant = await database.UserLibraryGrants.SingleAsync();
+            Assert.Equal(user.Id, grant.UserId); Assert.Equal(library.Id, grant.LibraryRootId);
+            database.LibraryRoots.Add(new LibraryRoot { Id = Guid.NewGuid(), Name = "New private library", Path = Path.Combine(root, "new"), NormalizedPath = Path.Combine(root, "new"), Kind = LibraryKind.Movies, CreatedAt = DateTimeOffset.UtcNow });
+            await database.SaveChangesAsync();
+            await database.Database.MigrateAsync();
+            Assert.Single(await database.UserLibraryGrants.ToListAsync());
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task UnknownMigrationHistoryStopsStartupWithoutReplacingOrBackingUpDatabase()
     {
         var dataDirectory = TestPaths.CreateDataDirectory();
@@ -112,7 +140,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(8L, await command.ExecuteScalarAsync());
+            Assert.Equal(9L, await command.ExecuteScalarAsync());
             command.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsLock';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
@@ -165,7 +193,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(8L, await command.ExecuteScalarAsync());
+            Assert.Equal(9L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='SyncChanges';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaSearchIndex';";
@@ -210,7 +238,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(8L, await command.ExecuteScalarAsync());
+            Assert.Equal(9L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaMetadata';";
@@ -266,7 +294,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(8L, await command.ExecuteScalarAsync());
+            Assert.Equal(9L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaItems';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MetadataJobs';";

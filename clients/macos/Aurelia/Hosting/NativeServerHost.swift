@@ -2,6 +2,23 @@ import AppKit
 @preconcurrency import Foundation
 import Security
 
+// Release preflight uses the real app/helper/API, but never the personal Keychain,
+// operating-mode preferences or a previously registered background service.
+// Both the executable and synthetic data must belong to the same private test run.
+enum NativePreflightIsolation {
+  static var isActive: Bool {
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["AURELIA_PREFLIGHT_TEST"] == "1", let data = environment["AURELIA_DATA_DIR"]
+    else { return false }
+    let bundle = Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+    let run = bundle.deletingLastPathComponent()
+    guard run.path.hasPrefix("/private/tmp/Aurelia/"), bundle.lastPathComponent == "Aurelia.app"
+    else { return false }
+    return URL(fileURLWithPath: data).standardizedFileURL.resolvingSymlinksInPath()
+      == run.appendingPathComponent("Data", isDirectory: true)
+  }
+}
+
 enum OperatingMode: String, Codable, Sendable {
   case host
   case client
@@ -65,6 +82,31 @@ final class NativeServerHost {
   private var isStarting = false
 
   func start(serverName: String, lanPort: Int = 43_111) async throws -> NativeHostSnapshot {
+    if !NativePreflightIsolation.isActive, BackgroundHostingController.permitted,
+      let settings = try? HostServiceSettings.load(),
+      let directory = try? HostBootstrapLocation.directory()
+    {
+      let rendezvous = directory.appendingPathComponent(
+        HostServiceSettings.backgroundRendezvousName)
+      for attempt in 0..<80 {
+        if (try? HostLaunchSecurity.validateConfigurationFile(
+          at: rendezvous.path, bootstrapDirectory: directory)) != nil,
+          let data = try? Data(contentsOf: rendezvous),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let port = object["port"] as? Int, (1...65535).contains(port),
+          let url = URL(string: "http://127.0.0.1:\(port)/\(settings.controlSecret)"),
+          let snapshot = try? await status(at: url),
+          snapshot.state != .stopped && snapshot.state != .failed
+        {
+          controlURL = url
+          runningApplication = nil
+          return snapshot
+        }
+        if attempt == 0 { try await BackgroundHostingController.startRegisteredService() }
+        try await Task.sleep(for: .milliseconds(100))
+      }
+      throw NativeServerHostError.couldNotLaunch
+    }
     if let controlURL {
       do {
         let snapshot = try await status(at: controlURL)
@@ -168,6 +210,25 @@ final class NativeServerHost {
   func restart() async throws {
     _ = try await request(action: "restart", method: "POST")
   }
+  func hostingSettingsApplied(operationID: UUID, permitted: Bool) async throws {
+    _ = try await request(
+      action: "hosting-applied", method: "POST",
+      body: JSONEncoder().encode([
+        "id": operationID.uuidString, "state": permitted ? "completed" : "awaitingPermission",
+      ]))
+  }
+  var isBackgroundService: Bool {
+    controlURL != nil && runningApplication == nil && BackgroundHostingController.permitted
+  }
+  func handoffToBackground() async throws {
+    _ = try await request(action: "handoff-background", method: "POST")
+    for _ in 0..<100 {
+      if runningApplication?.isTerminated == true { break }
+      try await Task.sleep(for: .milliseconds(100))
+    }
+    guard runningApplication?.isTerminated != false else { throw NativeServerHostError.rejected }
+    clearLaunchState()
+  }
 
   func stop() async {
     if controlURL == nil {
@@ -177,7 +238,11 @@ final class NativeServerHost {
     }
     _ = try? await request(action: "shutdown", method: "POST")
     for _ in 0..<100 {
-      if runningApplication?.isTerminated ?? true { break }
+      if let application = runningApplication {
+        if application.isTerminated { break }
+      } else if let controlURL, (try? await status(at: controlURL)) == nil {
+        break
+      }
       try? await Task.sleep(for: .milliseconds(100))
     }
     if runningApplication?.isTerminated == false { runningApplication?.forceTerminate() }

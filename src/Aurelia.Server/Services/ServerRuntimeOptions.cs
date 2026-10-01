@@ -57,7 +57,8 @@ public sealed record ServerRuntimeOptions(
 
         var listenUrl = lanAccessEnabled
             ? $"{localListenUrl};https://*:{lanHttpsPort}"
-            : localListenUrl;
+            : File.Exists(Path.Combine(dataDirectory, "server-certificate.pem"))
+                ? $"{localListenUrl};https://127.0.0.1:{lanHttpsPort}" : localListenUrl;
 
         return new ServerRuntimeOptions(
             dataDirectory,
@@ -209,7 +210,25 @@ public sealed record ServerHostSettings(
     int Version,
     string ServerName,
     bool LanAccessEnabled,
-    int LanHttpsPort)
+    int LanHttpsPort,
+    long Revision = 1,
+    bool PairingEnabled = true,
+    int DeviceSessionDays = 90,
+    int GlobalStreamLimit = 32,
+    int UserStreamLimit = 4,
+    bool BonjourEnabled = true,
+    string[]? AllowedNetworks = null,
+    bool MonitoringEnabled = true,
+    int ReconciliationMinutes = 360,
+    int MaintenanceStartHour = 0,
+    int MaintenanceEndHour = 24,
+    int JobQueueLimit = 1000,
+    bool AutomaticBackupsEnabled = true,
+    int BackupIntervalHours = 24,
+    int DailyBackupsRetained = 7,
+    int WeeklyBackupsRetained = 4,
+    int EventRetentionDays = 30,
+    int MaximumEvents = 10000)
 {
     public const string FileName = "server-settings.json";
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions =
@@ -227,10 +246,15 @@ public sealed record ServerHostSettings(
             File.ReadAllText(path),
             JsonOptions);
         if (settings is null
-            || settings.Version != 1
+            || settings.Version is not 1 and not 2
             || string.IsNullOrWhiteSpace(settings.ServerName)
             || settings.ServerName.Length > 128
-            || settings.LanHttpsPort is < 1024 or > 65535)
+            || settings.LanHttpsPort is < 1024 or > 65535
+            || settings.Revision < 1
+            || settings.DeviceSessionDays is < 1 or > 365
+            || settings.GlobalStreamLimit is < 1 or > 128
+            || settings.UserStreamLimit is < 1 or > 16
+            || settings.UserStreamLimit > settings.GlobalStreamLimit)
         {
             throw new InvalidDataException("The server host settings file is invalid.");
         }

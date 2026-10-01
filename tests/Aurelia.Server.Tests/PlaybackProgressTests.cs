@@ -51,7 +51,7 @@ public sealed class PlaybackProgressTests
                        HttpMethod.Post,
                        $"/api/v1/media/{mediaId}/playback",
                        owner.Token))
-            using (var playbackResponse = await client.SendAsync(playbackRequest))
+            using (var playbackResponse = await ApiTestClient.SendAsync(client, playbackRequest))
             {
                 playbackResponse.EnsureSuccessStatusCode();
                 var playback = await ApiTestClient.ReadAsync<PlaybackSourceResponse>(
@@ -151,6 +151,7 @@ public sealed class PlaybackProgressTests
                 MediaAvailability.Missing,
                 LibraryAvailability.Unavailable);
             var viewer = await CreateViewerAsync(client, owner.Token);
+            await ApiTestClient.GrantExistingLibrariesAsync(client, owner.Token, viewer.User.Id);
 
             await PutAsync(
                 client,
@@ -170,7 +171,7 @@ public sealed class PlaybackProgressTests
                        HttpMethod.Post,
                        "/api/v1/auth/logout",
                        viewer.Token))
-            using (var response = await client.SendAsync(logout))
+            using (var response = await ApiTestClient.SendAsync(client, logout))
             {
                 Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
             }
@@ -200,7 +201,7 @@ public sealed class PlaybackProgressTests
                        HttpMethod.Get,
                        $"/api/v1/media/{seriesId}/progress",
                        owner.Token))
-            using (var response = await client.SendAsync(get))
+            using (var response = await ApiTestClient.SendAsync(client, get))
             {
                 Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
                 Assert.Equal(
@@ -244,7 +245,7 @@ public sealed class PlaybackProgressTests
             $"/api/v1/media/{mediaId}/progress",
             token,
             new UpdatePlaybackProgressRequest(position, duration, false));
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(
             "invalid_playback_progress",
@@ -260,7 +261,7 @@ public sealed class PlaybackProgressTests
             HttpMethod.Get,
             $"/api/v1/media/{mediaId}/progress",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<PlaybackProgressResponse>(response);
     }
@@ -276,7 +277,7 @@ public sealed class PlaybackProgressTests
             $"/api/v1/media/{mediaId}/progress",
             token,
             progress);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<PlaybackProgressResponse>(response);
     }
@@ -290,7 +291,7 @@ public sealed class PlaybackProgressTests
                    "/api/v1/users",
                    ownerToken,
                    new CreateUserRequest("viewer", "a secure viewer password", UserRole.User)))
-        using (var response = await client.SendAsync(create))
+        using (var response = await ApiTestClient.SendAsync(client, create))
         {
             response.EnsureSuccessStatusCode();
         }

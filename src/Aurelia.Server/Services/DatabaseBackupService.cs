@@ -18,13 +18,12 @@ public sealed record DatabaseVerificationResult(
     string Message,
     int AppliedMigrationCount);
 
-public sealed class DatabaseBackupService(ServerRuntimeOptions runtime)
+public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerConfigurationStore? configuration = null)
 {
     private const string BackupPrefix = "aurelia-database-";
     private const string RestoreStageName = ".database-restore.pending.db";
     private const string RestoreMarkerName = ".database-restore.pending";
     private const string OperationLockName = ".database-backup-operation.lock";
-    private static readonly TimeSpan ScheduledInterval = TimeSpan.FromHours(24);
     private static readonly TimeSpan WeeklyInterval = TimeSpan.FromDays(7);
 
     public string BackupDirectory => Path.Combine(runtime.DataDirectory, "Backups");
@@ -42,6 +41,7 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime)
         CancellationToken cancellationToken)
     {
         using var operationLock = AcquireOperationLock();
+        if (configuration?.Current.AutomaticBackupsEnabled == false) return null;
         if (!File.Exists(runtime.DatabasePath) || new FileInfo(runtime.DatabasePath).Length == 0)
         {
             return null;
@@ -57,7 +57,7 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime)
             .OrderByDescending(backup => backup.CreatedAt)
             .FirstOrDefault();
         string? latestPath = null;
-        if (daily is null || now - daily.CreatedAt >= ScheduledInterval)
+        if (daily is null || now - daily.CreatedAt >= TimeSpan.FromHours(configuration?.Current.BackupIntervalHours ?? 24))
         {
             latestPath = await CreateBackupLockedAsync(DatabaseBackupKind.Daily, cancellationToken);
         }
@@ -335,6 +335,20 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime)
                 throw new InvalidOperationException($"Pending restore failed verification: {stageVerification.Message}");
             }
 
+            // Restores must never revive a device token that was revoked after the backup.
+            await using (var staged = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = stagePath, Pooling = false }.ToString()))
+            {
+                await staged.OpenAsync(cancellationToken);
+                await using var command = staged.CreateCommand();
+                command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='DeviceSessions';";
+                if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) > 0)
+                {
+                    command.CommandText = "UPDATE DeviceSessions SET RevokedAt=$now WHERE RevokedAt IS NULL; UPDATE PairingCodes SET ConsumedAt=$now WHERE ConsumedAt IS NULL; DELETE FROM PlaybackTickets;";
+                    command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                    await command.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
+
             SqliteConnection.ClearAllPools();
             DeleteDatabaseSidecar(runtime.DatabasePath + "-wal");
             DeleteDatabaseSidecar(runtime.DatabasePath + "-shm");
@@ -420,8 +434,8 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime)
     {
         var retention = kind switch
         {
-            DatabaseBackupKind.Daily => 7,
-            DatabaseBackupKind.Weekly => 4,
+            DatabaseBackupKind.Daily => configuration?.Current.DailyBackupsRetained ?? 7,
+            DatabaseBackupKind.Weekly => configuration?.Current.WeeklyBackupsRetained ?? 4,
             DatabaseBackupKind.PreMigration => 8,
             DatabaseBackupKind.PreRestore => 4,
             DatabaseBackupKind.Manual => 10,
@@ -437,7 +451,7 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime)
         }
     }
 
-    private List<DatabaseBackupFile> ListBackups()
+    public List<DatabaseBackupFile> ListBackups()
     {
         if (!Directory.Exists(BackupDirectory))
         {
@@ -527,7 +541,7 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime)
         ? StringComparison.OrdinalIgnoreCase
         : StringComparison.Ordinal;
 
-    private sealed record DatabaseBackupFile(
+    public sealed record DatabaseBackupFile(
         string Path,
         DatabaseBackupKind Kind,
         DateTime CreatedAt);

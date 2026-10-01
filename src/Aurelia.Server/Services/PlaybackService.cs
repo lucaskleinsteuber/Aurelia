@@ -141,7 +141,11 @@ public sealed class PlaybackService(
                     && candidate.ExpiresAt > now
                     && candidate.DeviceSession.RevokedAt == null
                     && candidate.DeviceSession.ExpiresAt > now
-                    && candidate.DeviceSession.UserId == candidate.UserId,
+                    && candidate.DeviceSession.UserId == candidate.UserId
+                    && candidate.DeviceSession.User.IsEnabled
+                    && (candidate.DeviceSession.User.Role == UserRole.Owner
+                        || database.UserLibraryGrants.Any(grant => grant.UserId == userId
+                            && grant.LibraryRootId == candidate.MediaItem.LibraryRootId)),
                 cancellationToken);
         if (ticket is null
             || ticket.MediaItem.Kind == MediaKind.Series

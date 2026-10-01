@@ -11,6 +11,17 @@ public sealed class MetadataProviderSettingsStore(ServerRuntimeOptions runtime)
     private readonly string settingsPath = Path.Combine(runtime.DataDirectory, "metadata-settings.json");
     private readonly string tokenPath = Path.Combine(runtime.DataDirectory, "Secrets", "tmdb-token");
 
+    public IReadOnlyDictionary<string, string> BackupSnapshot()
+    {
+        lock (gate)
+        {
+            var snapshot = new Dictionary<string, string>();
+            if (File.Exists(settingsPath)) snapshot["metadata-settings.json"] = File.ReadAllText(settingsPath);
+            if (File.Exists(tokenPath)) snapshot["Secrets/tmdb-token"] = File.ReadAllText(tokenPath);
+            return snapshot;
+        }
+    }
+
     public MetadataProviderConfiguration Load()
     {
         lock (gate)
@@ -103,8 +114,13 @@ public sealed class MetadataProviderSettingsStore(ServerRuntimeOptions runtime)
         var temporaryPath = path + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.WriteAllText(temporaryPath, contents);
-            PrivateFilePermissions.ProtectFile(temporaryPath);
+            using (var file = PrivateFilePermissions.OpenNewPrivateFile(temporaryPath))
+            {
+                using var writer = new StreamWriter(file, leaveOpen: true);
+                writer.Write(contents);
+                writer.Flush();
+                file.Flush(flushToDisk: true);
+            }
             File.Move(temporaryPath, path, overwrite: true);
             PrivateFilePermissions.ProtectFile(path);
         }

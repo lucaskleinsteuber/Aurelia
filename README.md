@@ -25,6 +25,9 @@ native app.
 
 ## Current server
 
+- Owner-managed server settings, per-account library grants, password-confirmed
+  administration, bounded diagnostics, and encrypted full-server recovery; see
+  [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md)
 - .NET 10 and ASP.NET Core
 - SQLite with versioned Entity Framework Core migrations
 - Verified SQLite online backups, fail-closed pre-migration snapshots, and
@@ -79,6 +82,8 @@ native app.
 - App-Group-secured server bootstrap, bounded private logs, retry, and crash recovery
 - Simple local setup with one password, storage selection, background scan status,
   pairing, and sessions
+- A dedicated Server settings tab with network trials, users/devices, job
+  controls, backups, diagnostics, and explicit user-level background hosting
 - A unified Add Media / Manage Media sheet for multiple folders and drives,
   library type selection, persistent scan history, rescans, safe removal, and
   classification review
@@ -121,6 +126,7 @@ scripts/test-macos.sh
 scripts/build-macos-release.sh
 scripts/test-native-host.sh
 scripts/test-release-app-autostart.sh
+scripts/test-recovery-disk-full.sh
 ```
 
 Generated builds, package caches, test results, and development logs are kept
@@ -152,8 +158,10 @@ dotnet run --project src/Aurelia.Server -- run --lan
 
 This keeps the local CLI on `http://127.0.0.1:43110` and adds HTTPS on LAN port
 `43111`. The server creates its long-lived TLS identity inside its private data
-directory and prints a short verification fingerprint. Password login and owner
-setup are rejected over the network; other devices use pairing.
+directory and prints a short verification fingerprint. Initial owner setup is
+loopback-only. Password login and sensitive administration require HTTPS outside
+loopback; native clients pin the server's public key before sending credentials.
+Other devices can also use one-time pairing.
 
 While the server is running, create a one-time code for the Mac app:
 
@@ -166,9 +174,10 @@ Compare the fingerprint shown by the app with the local CLI output before
 entering the pairing code. If the server identity changes later, the app blocks
 the connection until the server is deliberately forgotten and paired again.
 
-While the server is running, an owner or administrator can manage libraries
-through the local CLI. The password is prompted without echo and the temporary
-CLI session is revoked afterward:
+While the server is running, an owner can add or remove libraries through the
+local CLI. Administrators can scan and edit their explicitly shared libraries.
+The password is prompted without echo and the temporary CLI session is revoked
+afterward:
 
 ```sh
 dotnet run --project src/Aurelia.Server -- library add \
@@ -189,13 +198,13 @@ packages, and symbolic links are ignored.
 An authenticated client requests a twelve-hour, single-file playback URL with
 `POST /api/v1/media/{mediaId}/playback`. The returned relative URL accepts `GET`
 and `HEAD`, including byte ranges for seeking. It contains a dedicated playback
-ticket rather than the long-lived device token. Transcoding and automatic file
-watchers are not part of the current build.
+ticket rather than the long-lived device token. Transcoding is not supported;
+automatic filesystem monitoring is configurable per library.
 Automatic classification stays local and uses only the same filesystem facts
 as the scanner.
 
 Online metadata is optional and disabled until an owner supplies a TMDB API
-Read Access Token under Advanced settings or through the CLI. The token is kept
+Read Access Token under Metadata settings or through the CLI. The token is kept
 in a private server file and never returned by the API or written to logs.
 Metadata matching is deliberately conservative; uncertain titles remain local
 and appear in a review queue instead of being guessed. Artwork is authenticated,

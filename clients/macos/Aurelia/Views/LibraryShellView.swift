@@ -40,8 +40,6 @@ struct LibraryShellView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var destination: LibraryDestination = .home
   @State private var selection: MediaSelection?
-  @State private var heroOffset: CGFloat = 0
-  @State private var detailHeroArtwork: ArtworkSummary?
   @State private var sidebarVisible = true
   @State private var sidebarWidth = AureliaDesign.sidebarWidth
   @State private var resizeStartWidth: CGFloat?
@@ -52,28 +50,25 @@ struct LibraryShellView: View {
         AureliaDesign.canvas
           .ignoresSafeArea()
         content
+          .backgroundExtensionEffect()
+          .safeAreaInset(edge: .leading, spacing: 0) {
+            Color.clear.frame(width: sidebarVisible ? sidebarWidth : 0)
+          }
           .frame(
-            width: max(
-              geometry.size.width - (sidebarVisible ? sidebarWidth : 0), 0),
+            width: geometry.size.width,
             height: geometry.size.height + geometry.safeAreaInsets.top
           )
           .background(AureliaDesign.canvas)
-          .offset(
-            x: sidebarVisible ? sidebarWidth : 0,
-            y: -geometry.safeAreaInsets.top)
-        if sidebarVisible {
-          AureliaSidebarBackground(
-            artwork: activeHeroArtwork,
-            symbol: activeHeroSymbol,
-            verticalOffset: heroOffset
-          )
-          .frame(
-            width: sidebarWidth,
-            height: geometry.size.height + geometry.safeAreaInsets.top
-          )
-          .clipped()
           .offset(y: -geometry.safeAreaInsets.top)
-          .allowsHitTesting(false)
+        if sidebarVisible {
+          AureliaSidebarBackground()
+            .frame(
+              width: sidebarWidth,
+              height: geometry.size.height + geometry.safeAreaInsets.top
+            )
+            .clipped()
+            .offset(y: -geometry.safeAreaInsets.top)
+            .allowsHitTesting(false)
           sidebar
             .frame(width: sidebarWidth, height: geometry.size.height)
             .clipped()
@@ -107,37 +102,6 @@ struct LibraryShellView: View {
     }
     .onChange(of: scenePhase) {
       if scenePhase == .active { Task { await model.refreshHome() } }
-    }
-    .onChange(of: destination) { heroOffset = 0 }
-    .onChange(of: selection) {
-      heroOffset = 0
-      detailHeroArtwork = nil
-    }
-  }
-
-  private var activeHeroArtwork: ArtworkSummary? {
-    switch selection {
-    case .media(let id):
-      if let detailHeroArtwork { return detailHeroArtwork }
-      let item = model.catalogItems.first { $0.id == id }
-      return item?.backdrop ?? item?.poster
-    case .collection(let id):
-      let collection = model.collections.first { $0.id == id }
-      return collection?.items.first?.backdrop ?? collection?.poster
-    case nil:
-      guard destination == .home else { return nil }
-      return model.home?.recommendation?.backdrop ?? model.home?.recommendation?.poster
-    }
-  }
-
-  private var activeHeroSymbol: String {
-    switch selection {
-    case .media(let id):
-      return model.catalogItems.first { $0.id == id }?.kind == .movie ? "film.fill" : "tv.fill"
-    case .collection:
-      return "rectangle.stack.fill"
-    case nil:
-      return "play.rectangle.on.rectangle"
     }
   }
 
@@ -194,16 +158,13 @@ struct LibraryShellView: View {
       case .media(let id):
         MediaDetailView(
           mediaId: id,
-          onBack: { selection = nil },
-          onHeroOffsetChange: { heroOffset = $0 },
-          onHeroArtworkChange: { detailHeroArtwork = $0 })
+          onBack: { selection = nil })
       case .collection(let id):
         if let collection = model.collections.first(where: { $0.id == id }) {
           CollectionDetailView(
             collection: collection,
             onBack: { selection = nil },
-            onSelect: { selection = .media($0) },
-            onHeroOffsetChange: { heroOffset = $0 })
+            onSelect: { selection = .media($0) })
         }
       }
     } else {
@@ -211,8 +172,7 @@ struct LibraryShellView: View {
       case .home:
         HomePage(
           onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) },
-          onHeroOffsetChange: { heroOffset = $0 })
+          onSelectCollection: { selection = .collection($0) })
       case .library:
         LibraryPage(
           onSelect: { selection = .media($0) },
@@ -248,7 +208,6 @@ private struct HomePage: View {
   @EnvironmentObject private var model: AppModel
   let onSelect: (UUID) -> Void
   let onSelectCollection: (UUID) -> Void
-  let onHeroOffsetChange: (CGFloat) -> Void
 
   var body: some View {
     if model.catalogItems.isEmpty, model.home?.recommendation == nil {
@@ -279,12 +238,6 @@ private struct HomePage: View {
         .padding(.bottom, 48)
       }
       .scrollClipDisabled()
-      .onScrollGeometryChange(for: CGFloat.self) { geometry in
-        AureliaSidebarArtworkPosition.verticalOffset(
-          contentOffset: geometry.contentOffset.y, topInset: geometry.contentInsets.top)
-      } action: { _, offset in
-        onHeroOffsetChange(offset)
-      }
       .defaultScrollAnchor(.top)
       .scrollIndicators(.visible)
       .accessibilityElement(children: .contain)
@@ -884,7 +837,6 @@ private struct CollectionDetailView: View {
   let collection: CollectionSummary
   let onBack: () -> Void
   let onSelect: (UUID) -> Void
-  let onHeroOffsetChange: (CGFloat) -> Void
   @State private var showingEditor = false
 
   var body: some View {
@@ -899,12 +851,6 @@ private struct CollectionDetailView: View {
       }
       .padding(.bottom, 48)
       .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    .onScrollGeometryChange(for: CGFloat.self) { geometry in
-      AureliaSidebarArtworkPosition.verticalOffset(
-        contentOffset: geometry.contentOffset.y, topInset: geometry.contentInsets.top)
-    } action: { _, offset in
-      onHeroOffsetChange(offset)
     }
     .sheet(isPresented: $showingEditor) {
       CollectionEditorSheet(collection: collection).environmentObject(model)

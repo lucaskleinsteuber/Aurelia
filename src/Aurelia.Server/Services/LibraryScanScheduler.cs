@@ -5,7 +5,7 @@ namespace Aurelia.Server.Services;
 
 public sealed record QueuedLibraryScan(Guid ScanId, Guid LibraryId, string? TargetRelativePath);
 
-public sealed class LibraryScanScheduler
+public sealed class LibraryScanScheduler(ServerConfigurationStore configuration)
 {
     private readonly Channel<bool> wake = Channel.CreateBounded<bool>(
         new BoundedChannelOptions(1)
@@ -22,6 +22,7 @@ public sealed class LibraryScanScheduler
     {
         lock (gate)
         {
+            if (reservedLibraries.Count >= configuration.Current.JobQueueLimit) return false;
             return reservedLibraries.Add(libraryId);
         }
     }

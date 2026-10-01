@@ -32,7 +32,7 @@ public static class PairingCommandClient
         try
         {
             var baseAddress = LocalServerAddress(commandLine);
-            using var client = new HttpClient { BaseAddress = baseAddress };
+            using var client = CommandClientSecurity.CreateClient(baseAddress);
             var username = commandLine.Username;
             if (string.IsNullOrWhiteSpace(username))
             {

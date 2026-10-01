@@ -1,5 +1,6 @@
 import AppKit
 @preconcurrency import Foundation
+import IOKit.pwr_mgt
 @preconcurrency import Network
 import OSLog
 import Security
@@ -97,6 +98,12 @@ private struct ResolvedHostLaunch {
   let lanPort: Int
 }
 
+private enum ChildServerReadiness: Equatable {
+  case waiting
+  case ready
+  case stopping
+}
+
 private final class ServerHostRuntime: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.lucas.aurelia.media.server-host")
   private let secret: String
@@ -112,9 +119,15 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var status = HostStatus(
     state: .starting, message: nil, bootstrapToken: nil, serverInfo: nil)
   private var pendingRestartLAN: Bool?
+  private var pendingRestoreID: UUID?
+  private var restoreProcess: Process?
+  private var pendingBackgroundHandoff = false
+  private var sleepAssertion: IOPMAssertionID = 0
   private var shuttingDown = false
   private var restartDates: [Date] = []
   private var readinessGeneration: UInt64 = 0
+  private var serverReadyGeneration: UInt64?
+  private var serverStoppingGeneration: UInt64?
 
   init(
     environment: [String: String],
@@ -157,6 +170,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
     listener.stateUpdateHandler = { [weak self] state in self?.listenerChanged(state) }
     listener.start(queue: queue)
     startParentMonitor()
+    updateSleepAssertion()
   }
 
   func shutdown() {
@@ -168,6 +182,16 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private static func resolveLaunch(environment: [String: String]) throws -> ResolvedHostLaunch {
+    if ProcessInfo.processInfo.arguments.contains("--background") {
+      let settings = try HostServiceSettings.load()
+      guard settings.backgroundEnabled else { throw HostError.invalidLaunchDescription }
+      return ResolvedHostLaunch(
+        secret: settings.controlSecret, parentProcessID: 0,
+        rendezvousURL: try HostBootstrapLocation.directory().appendingPathComponent(
+          HostServiceSettings.backgroundRendezvousName),
+        dataDirectory: defaultDataDirectory, logDirectory: defaultLogDirectory,
+        serverName: "Aurelia", lanPort: 43_111)
+    }
     let mainContents = Bundle.main.bundleURL
       .deletingLastPathComponent()
       .deletingLastPathComponent()
@@ -289,13 +313,36 @@ private final class ServerHostRuntime: @unchecked Sendable {
     guard !shuttingDown else { return }
     readinessGeneration &+= 1
     let generation = readinessGeneration
+    serverReadyGeneration = nil
+    serverStoppingGeneration = nil
     do {
       let executable = try serverExecutableURL()
       let settings = try loadSettings()
       let bootstrapToken = lan ? nil : try Self.randomSecret()
+      let readinessNonce = try Self.randomSecret()
       updateStatus(lan ? .restarting : .starting, bootstrapToken: bootstrapToken)
 
-      let logSink = try BoundedLogSink(directory: logDirectory)
+      let logSink = try BoundedLogSink(
+        directory: logDirectory,
+        readinessNonce: readinessNonce,
+        onServerStopping: { [weak self] in
+          guard let runtime = self else { return }
+          runtime.queue.async {
+            guard runtime.readinessGeneration == generation else { return }
+            runtime.serverReadyGeneration = nil
+            runtime.serverStoppingGeneration = generation
+          }
+        },
+        onServerReady: { [weak self] in
+          guard let runtime = self else { return }
+          runtime.queue.async {
+            guard runtime.readinessGeneration == generation,
+              runtime.process?.isRunning == true
+            else { return }
+            runtime.serverReadyGeneration = generation
+          }
+        }
+      )
       self.logSink = logSink
       let child = Process()
       child.executableURL = executable
@@ -311,6 +358,10 @@ private final class ServerHostRuntime: @unchecked Sendable {
       environment["AURELIA_SERVER_NAME"] = settings.serverName
       environment["AURELIA_LAN_ENABLED"] = lan ? "true" : "false"
       environment["AURELIA_BOOTSTRAP_TOKEN"] = bootstrapToken
+      environment["AURELIA_HOST_READY_NONCE"] = readinessNonce
+      if let port = listener?.port {
+        environment["AURELIA_HOST_CONTROL_URL"] = "http://127.0.0.1:\(port.rawValue)/\(secret)"
+      }
       child.environment = environment
       child.standardOutput = logSink.pipe
       child.standardError = logSink.pipe
@@ -330,12 +381,25 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private func waitForServer(lan: Bool, bootstrapToken: String?, generation: UInt64) {
     Task { [weak self] in
       for _ in 0..<75 {
-        guard let self, !self.shuttingDown else { return }
+        guard let self else { return }
+        switch await self.serverReadinessState(generation: generation) {
+        case .waiting:
+          try? await Task.sleep(for: .milliseconds(200))
+          continue
+        case .stopping:
+          return
+        case .ready:
+          break
+        }
         if let info = try? await Self.readServerInfo() {
+          guard await self.serverReadinessState(generation: generation) == .ready else { return }
           self.queue.async {
-            guard self.readinessGeneration == generation else { return }
-            guard self.process?.isRunning == true else { return }
-            if !lan && info.isSetup {
+            guard self.readinessGeneration == generation,
+              self.serverReadyGeneration == generation,
+              self.serverStoppingGeneration != generation,
+              self.process?.isRunning == true
+            else { return }
+            if !lan && info.isSetup && (try? self.loadSettings().lanAccessEnabled) == true {
               self.restart(lan: true)
             } else {
               self.status = HostStatus(
@@ -343,6 +407,12 @@ private final class ServerHostRuntime: @unchecked Sendable {
                 message: nil,
                 bootstrapToken: info.isSetup ? nil : bootstrapToken,
                 serverInfo: info)
+              if var operation = try? self.readOperation(),
+                operation["state"] as? String == "restarting"
+              {
+                operation["state"] = "completed"
+                try? self.writeOperation(operation)
+              }
             }
           }
           return
@@ -357,6 +427,23 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
   }
 
+  private func serverReadinessState(generation: UInt64) async -> ChildServerReadiness {
+    await withCheckedContinuation { continuation in
+      queue.async {
+        guard !self.shuttingDown,
+          self.readinessGeneration == generation,
+          self.process?.isRunning == true,
+          self.serverStoppingGeneration != generation
+        else {
+          continuation.resume(returning: .stopping)
+          return
+        }
+        continuation.resume(
+          returning: self.serverReadyGeneration == generation ? .ready : .waiting)
+      }
+    }
+  }
+
   private func restart(lan: Bool) {
     guard !shuttingDown else { return }
     if pendingRestartLAN != nil {
@@ -364,6 +451,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
       return
     }
     readinessGeneration &+= 1
+    serverReadyGeneration = nil
+    serverStoppingGeneration = nil
     pendingRestartLAN = lan
     updateStatus(.restarting)
     if let process, process.isRunning {
@@ -376,11 +465,50 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private func serverTerminated(status terminationStatus: Int32) {
     process = nil
+    serverReadyGeneration = nil
+    serverStoppingGeneration = nil
     logSink?.close()
     logSink = nil
     if shuttingDown {
       updateStatus(.stopped)
       DispatchQueue.main.async { [terminationHandler] in terminationHandler() }
+      return
+    }
+    if let restoreID = pendingRestoreID {
+      pendingRestoreID = nil
+      applyPreparedRestore(restoreID)
+      return
+    }
+    if pendingBackgroundHandoff {
+      pendingBackgroundHandoff = false
+      do {
+        let settings = try HostServiceSettings.load()
+        guard settings.backgroundEnabled else { throw HostError.invalidSettings }
+        let launcher = Process()
+        launcher.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        launcher.arguments = ["kickstart", "-k", "gui/\(getuid())/\(settings.agentName)"]
+        launcher.standardOutput = FileHandle.nullDevice
+        launcher.standardError = FileHandle.nullDevice
+        launcher.terminationHandler = { [weak self] command in
+          self?.queue.async { [weak self] in
+            guard let self else { return }
+            if command.terminationStatus == 0 {
+              self.beginShutdown()
+            } else {
+              self.updateStatus(
+                .failed,
+                message: "The background service could not start. Check its macOS permission.")
+            }
+          }
+        }
+        try launcher.run()
+        queue.asyncAfter(deadline: .now() + 5) { [weak launcher] in
+          if launcher?.isRunning == true { launcher?.terminate() }
+        }
+      } catch {
+        updateStatus(
+          .failed, message: "The background service could not start. Check its macOS permission.")
+      }
       return
     }
     if let requestedLAN = pendingRestartLAN {
@@ -406,12 +534,19 @@ private final class ServerHostRuntime: @unchecked Sendable {
     guard !shuttingDown else { return }
     shuttingDown = true
     readinessGeneration &+= 1
+    serverReadyGeneration = nil
+    serverStoppingGeneration = nil
     updateStatus(.stopping)
     parentTimer?.cancel()
     parentTimer = nil
+    if sleepAssertion != 0 {
+      IOPMAssertionRelease(sleepAssertion)
+      sleepAssertion = 0
+    }
     listener?.cancel()
     listener = nil
     try? FileManager.default.removeItem(at: rendezvousURL)
+    if restoreProcess?.isRunning == true { return }
     guard let process, process.isRunning else {
       updateStatus(.stopped)
       DispatchQueue.main.async { [terminationHandler] in terminationHandler() }
@@ -431,7 +566,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
     timer.schedule(deadline: .now() + 1, repeating: 1)
     timer.setEventHandler { [weak self] in
       guard let self else { return }
-      if kill(self.parentProcessID, 0) != 0 && errno == ESRCH {
+      self.rollbackExpiredNetworkChange()
+      self.updateSleepAssertion()
+      if self.parentProcessID > 1 && kill(self.parentProcessID, 0) != 0 && errno == ESRCH {
         self.beginShutdown()
       }
     }
@@ -470,13 +607,137 @@ private final class ServerHostRuntime: @unchecked Sendable {
       return
     }
     switch (request.method, request.action) {
+    case ("POST", "hosting-authorized"):
+      do {
+        let settings = try JSONDecoder().decode(HostServiceRequest.self, from: request.body)
+        guard settings.backgroundEnabled || !settings.startAtLogin,
+          let operation = try? readOperation(),
+          (operation["id"] as? String)?.lowercased() == settings.id.uuidString.lowercased(),
+          operation["kind"] as? String == "hosting"
+        else { throw HostError.invalidSettings }
+        try settings.save()
+        respond(connection, status: 204, body: Data())
+      } catch { respond(connection, status: 400, body: Data()) }
+    case ("POST", "hosting-applied"):
+      guard let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+        let state = body["state"] as? String, ["completed", "awaitingPermission"].contains(state),
+        let id = body["id"] as? String,
+        var operation = try? readOperation(), operation["kind"] as? String == "hosting",
+        (operation["id"] as? String)?.lowercased() == id.lowercased(),
+        let pending = try? HostServiceRequest.load(),
+        pending.id.uuidString.lowercased() == id.lowercased()
+      else {
+        respond(connection, status: 409, body: Data())
+        return
+      }
+      do {
+        operation["state"] = state
+        try writeOperation(operation)
+        if state == "completed" {
+          try? FileManager.default.removeItem(at: HostServiceRequest.location())
+        }
+        respond(connection, status: 204, body: Data())
+      } catch { respond(connection, status: 500, body: Data()) }
+    case ("GET", "hosting-status"):
+      let settings = (try? HostServiceSettings.load()) ?? HostServiceSettings()
+      let operation = try? readOperation()
+      let state =
+        operation?["kind"] as? String == "hosting"
+        ? (operation?["state"] as? String ?? "unknown") : "unchanged"
+      let body = try? JSONSerialization.data(withJSONObject: [
+        "backgroundEnabled": parentProcessID == 0,
+        "backgroundRequested": settings.backgroundEnabled, "startAtLogin": settings.startAtLogin,
+        "preventIdleSleep": settings.preventIdleSleep, "state": state,
+      ])
+      respond(connection, status: 200, body: body ?? Data())
     case ("GET", "status"):
       let body = (try? JSONEncoder().encode(status)) ?? Data()
       respond(connection, status: 200, body: body)
     case ("POST", "restart"):
-      restart(lan: true)
       respond(connection, status: 202, body: Data())
+      queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        guard let self else { return }
+        self.restart(lan: (try? self.loadSettings().lanAccessEnabled) ?? false)
+      }
+    case ("POST", "network-trial"):
+      guard let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+        let id = body["id"] as? String, let operation = try? readOperation(),
+        (operation["id"] as? String)?.lowercased() == id.lowercased(),
+        operation["state"] as? String == "awaitingConfirmation"
+      else {
+        respond(connection, status: 409, body: Data())
+        return
+      }
+      respond(connection, status: 202, body: Data())
+      queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        guard let self else { return }
+        self.restart(lan: (try? self.loadSettings().lanAccessEnabled) ?? false)
+      }
+    case ("POST", "network-confirm"):
+      guard let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+        let id = body["id"] as? String, var operation = try? readOperation(),
+        (operation["id"] as? String)?.lowercased() == id.lowercased(),
+        operation["state"] as? String == "awaitingConfirmation",
+        let deadline = operation["confirmBefore"] as? String,
+        Self.operationDate(deadline).map({ $0 > Date() }) == true
+      else {
+        respond(connection, status: 409, body: Data())
+        return
+      }
+      do {
+        operation["state"] = "completed"
+        operation["confirmBefore"] = NSNull()
+        operation["previousSettings"] = NSNull()
+        try writeOperation(operation)
+        respond(connection, status: 204, body: Data())
+      } catch { respond(connection, status: 500, body: Data()) }
+    case ("POST", "restore-prepared"):
+      guard restoreProcess == nil, pendingRestoreID == nil,
+        let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+        let idString = body["id"] as? String, let id = UUID(uuidString: idString),
+        let operation = try? readOperation(), operation["kind"] as? String == "restore",
+        (operation["id"] as? String)?.lowercased() == idString.lowercased()
+      else {
+        respond(connection, status: 409, body: Data())
+        return
+      }
+      respond(connection, status: 202, body: Data())
+      queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        guard let self else { return }
+        self.updateStatus(
+          .restarting,
+          message: "Restoring verified server state. All devices will need to sign in again.")
+        if let process = self.process, process.isRunning {
+          self.pendingRestoreID = id
+          process.terminate()
+        } else {
+          self.applyPreparedRestore(id)
+        }
+      }
+    case ("POST", "handoff-background"):
+      guard parentProcessID > 1, (try? HostServiceSettings.load().backgroundEnabled) == true,
+        restoreProcess == nil, pendingRestoreID == nil
+      else {
+        respond(connection, status: 409, body: Data())
+        return
+      }
+      respond(connection, status: 202, body: Data())
+      queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        guard let self else { return }
+        self.pendingBackgroundHandoff = true
+        if let process = self.process, process.isRunning {
+          process.terminate()
+        } else {
+          self.serverTerminated(status: 0)
+        }
+      }
     case ("POST", "configure"):
+      // Only initial owner setup may use the legacy bootstrap command. After setup,
+      // versioned settings belong to the authenticated .NET management API.
+      guard status.serverInfo?.isSetup == false else {
+        respond(connection, status: 409, body: Data())
+        return
+      }
       do {
         let settings = try JSONDecoder().decode(HostSettings.self, from: request.body)
         try saveSettings(settings)
@@ -514,6 +775,12 @@ private final class ServerHostRuntime: @unchecked Sendable {
     message: String? = nil,
     bootstrapToken: String? = nil
   ) {
+    if state == .failed, var operation = try? readOperation(),
+      operation["state"] as? String == "restarting"
+    {
+      operation["state"] = "failed"
+      try? writeOperation(operation)
+    }
     status = HostStatus(
       state: state,
       message: message,
@@ -523,6 +790,102 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private func loadSettings() throws -> HostSettings {
     try JSONDecoder().decode(HostSettings.self, from: Data(contentsOf: settingsURL))
+  }
+
+  private var operationURL: URL { dataDirectory.appendingPathComponent("host-operation.json") }
+  private func updateSleepAssertion() {
+    let requested = (try? HostServiceSettings.load().preventIdleSleep) == true
+    if requested && sleepAssertion == 0 {
+      var assertion: IOPMAssertionID = 0
+      if IOPMAssertionCreateWithName(
+        kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
+        IOPMAssertionLevel(kIOPMAssertionLevelOn), "Aurelia Server hosting" as CFString, &assertion)
+        == kIOReturnSuccess
+      {
+        sleepAssertion = assertion
+      }
+    } else if !requested && sleepAssertion != 0 {
+      IOPMAssertionRelease(sleepAssertion)
+      sleepAssertion = 0
+    }
+  }
+  private func applyPreparedRestore(_ id: UUID) {
+    do {
+      let child = Process()
+      child.executableURL = try serverExecutableURL()
+      child.arguments = [
+        "database", "restore-prepared", "--id", id.uuidString, "--data-dir", dataDirectory.path,
+      ]
+      child.standardOutput = FileHandle.nullDevice
+      child.standardError = FileHandle.nullDevice
+      child.terminationHandler = { [weak self] completed in
+        guard let runtime = self else { return }
+        let succeeded = completed.terminationStatus == 0
+        runtime.queue.async {
+          runtime.restoreProcess = nil
+          if var operation = try? runtime.readOperation() {
+            operation["state"] = succeeded ? "completed" : "failed"
+            try? runtime.writeOperation(operation)
+          }
+          if runtime.shuttingDown {
+            DispatchQueue.main.async { [handler = runtime.terminationHandler] in handler() }
+          } else {
+            runtime.startServer(lan: (try? runtime.loadSettings().lanAccessEnabled) ?? false)
+          }
+        }
+      }
+      restoreProcess = child
+      try child.run()
+    } catch {
+      restoreProcess = nil
+      updateStatus(
+        .failed,
+        message:
+          "The verified restore could not be applied. Start the host again to recover safely.")
+    }
+  }
+  private func readOperation() throws -> [String: Any] {
+    try HostLaunchSecurity.validateConfigurationFile(
+      at: operationURL.path, bootstrapDirectory: dataDirectory)
+    guard
+      let value = try JSONSerialization.jsonObject(with: Data(contentsOf: operationURL))
+        as? [String: Any],
+      value["version"] as? Int == 1
+    else { throw HostError.invalidSettings }
+    return value
+  }
+  private func writeOperation(_ value: [String: Any]) throws {
+    try JSONSerialization.data(withJSONObject: value).write(to: operationURL, options: [.atomic])
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: operationURL.path)
+  }
+  private static func operationDate(_ value: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: value) { return date }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: value)
+  }
+  private func rollbackExpiredNetworkChange() {
+    guard var operation = try? readOperation(),
+      operation["state"] as? String == "awaitingConfirmation",
+      let deadline = operation["confirmBefore"] as? String,
+      Self.operationDate(deadline).map({ $0 <= Date() }) == true,
+      let previous = operation["previousSettings"] as? [String: Any]
+    else { return }
+    do {
+      try JSONSerialization.data(withJSONObject: previous).write(
+        to: settingsURL, options: [.atomic])
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o600], ofItemAtPath: settingsURL.path)
+      operation["state"] = "rolledBack"
+      operation["confirmBefore"] = NSNull()
+      operation["previousSettings"] = NSNull()
+      try writeOperation(operation)
+      restart(lan: (try loadSettings()).lanAccessEnabled)
+    } catch {
+      updateStatus(.failed, message: "The previous network settings could not be restored.")
+    }
   }
 
   private func saveSettings(_ settings: HostSettings) throws {
@@ -537,7 +900,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
     let canonical = HostSettings(
       version: 1,
       serverName: name,
-      lanAccessEnabled: true,
+      lanAccessEnabled: settings.lanAccessEnabled,
       lanHttpsPort: settings.lanHttpsPort)
     let data = try JSONEncoder().encode(canonical)
     try data.write(to: settingsURL, options: [.atomic])
@@ -606,11 +969,27 @@ private final class BoundedLogSink: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.lucas.aurelia.media.server-host.log")
   private let currentURL: URL
   private let previousURL: URL
+  private let readinessMarker: Data
+  private let stoppingMarker: Data
+  private let onServerStopping: @Sendable () -> Void
+  private let onServerReady: @Sendable () -> Void
   private var handle: FileHandle?
   private var currentSize = 0
   private var isClosed = false
+  private var pendingOutput = Data()
+  private var didSignalReadiness = false
+  private var didSignalStopping = false
 
-  init(directory: URL) throws {
+  init(
+    directory: URL,
+    readinessNonce: String,
+    onServerStopping: @escaping @Sendable () -> Void,
+    onServerReady: @escaping @Sendable () -> Void
+  ) throws {
+    readinessMarker = Data("AURELIA_SERVER_READY:\(readinessNonce)".utf8)
+    stoppingMarker = Data("AURELIA_SERVER_STOPPING:\(readinessNonce)".utf8)
+    self.onServerStopping = onServerStopping
+    self.onServerReady = onServerReady
     try FileManager.default.createDirectory(
       at: directory,
       withIntermediateDirectories: true,
@@ -644,6 +1023,10 @@ private final class BoundedLogSink: @unchecked Sendable {
     pipe.fileHandleForReading.readabilityHandler = nil
     queue.sync {
       guard !isClosed else { return }
+      if !pendingOutput.isEmpty {
+        appendToLog(pendingOutput)
+        pendingOutput.removeAll(keepingCapacity: false)
+      }
       isClosed = true
       try? handle?.synchronize()
       try? handle?.close()
@@ -654,6 +1037,44 @@ private final class BoundedLogSink: @unchecked Sendable {
   }
 
   private func append(_ data: Data) {
+    guard !isClosed else { return }
+    pendingOutput.append(data)
+    while let newline = pendingOutput.firstIndex(of: 0x0A) {
+      let line = Data(pendingOutput[..<newline])
+      let afterNewline = pendingOutput.index(after: newline)
+      pendingOutput.removeSubrange(pendingOutput.startIndex..<afterNewline)
+      var comparableLine = line
+      if comparableLine.last == 0x0D {
+        comparableLine.removeLast()
+      }
+      if comparableLine == readinessMarker {
+        if !didSignalReadiness {
+          didSignalReadiness = true
+          onServerReady()
+        }
+      } else if comparableLine == stoppingMarker {
+        if !didSignalStopping {
+          didSignalStopping = true
+          onServerStopping()
+        }
+      } else {
+        var logLine = line
+        logLine.append(0x0A)
+        appendToLog(logLine)
+      }
+    }
+
+    let preservedTailCount = readinessMarker.count + 2
+    if pendingOutput.count > 16_384 {
+      let flushCount = pendingOutput.count - preservedTailCount
+      if flushCount > 0 {
+        appendToLog(Data(pendingOutput.prefix(flushCount)))
+        pendingOutput.removeSubrange(0..<flushCount)
+      }
+    }
+  }
+
+  private func appendToLog(_ data: Data) {
     guard !isClosed else { return }
     var offset = 0
     while offset < data.count {

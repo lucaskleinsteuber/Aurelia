@@ -20,8 +20,14 @@ final_log="$log_root/Aurelia-macOS-$run_id.log"
 mkdir -p "$runtime_root" "$result_root" "$log_root"
 
 stop_test_hosts() {
-  pkill -x Aurelia 2>/dev/null || true
-  pkill -x AureliaUITests-Runner 2>/dev/null || true
+  # Never stop the installed app or another task's host. Only this run owns these PIDs.
+  local test_pid test_command
+  for test_pid in $(pgrep -x Aurelia 2>/dev/null || true) $(pgrep -x AureliaUITests-Runner 2>/dev/null || true); do
+    test_command=$(ps -p "$test_pid" -o command= 2>/dev/null || true)
+    if [[ "$test_command" == "$runtime_root/"* ]]; then
+      kill -TERM "$test_pid" 2>/dev/null || true
+    fi
+  done
 }
 
 finish() {
@@ -51,6 +57,7 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$derived_data" \
   -enableCodeCoverage NO \
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
   build-for-testing 2>&1 | tee "$temporary_log"
 
 DEVELOPER_DIR="$developer_dir" xcodebuild \

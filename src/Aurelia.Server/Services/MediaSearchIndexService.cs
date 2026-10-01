@@ -45,7 +45,13 @@ public sealed class MediaSearchIndexService(AureliaDbContext database)
             await connection.OpenAsync(cancellationToken);
 
         await using var count = connection.CreateCommand();
-        count.CommandText = "SELECT count(*) FROM MediaSearchIndex WHERE MediaSearchIndex MATCH $query;";
+        const string visibility = """
+            AND ($unrestricted = 1 OR EXISTS (
+                SELECT 1 FROM MediaItems m JOIN UserLibraryGrants g ON g.LibraryRootId = m.LibraryRootId
+                WHERE lower(replace(m.Id, '-', '')) = MediaSearchIndex.MediaId AND g.UserId = $user))
+            """;
+        count.CommandText = "SELECT count(*) FROM MediaSearchIndex WHERE MediaSearchIndex MATCH $query " + visibility;
+        AddAccessParameters(count);
         var countParameter = count.CreateParameter();
         countParameter.ParameterName = "$query";
         countParameter.Value = expression;
@@ -56,9 +62,11 @@ public sealed class MediaSearchIndexService(AureliaDbContext database)
         command.CommandText = """
             SELECT MediaId FROM MediaSearchIndex
             WHERE MediaSearchIndex MATCH $query
+            """ + " " + visibility + " " + """
             ORDER BY bm25(MediaSearchIndex, 0.0, 10.0, 7.0, 1.0), rowid
             LIMIT $limit OFFSET $offset;
             """;
+        AddAccessParameters(command);
         foreach (var (name, value) in new[] { ("$query", (object)expression), ("$limit", limit), ("$offset", offset) })
         {
             var parameter = command.CreateParameter();
@@ -75,5 +83,20 @@ public sealed class MediaSearchIndexService(AureliaDbContext database)
             if (compact.Length == 32 && Guid.TryParseExact(compact, "N", out var id)) ids.Add(id);
         }
         return (ids, total);
+    }
+
+    private void AddAccessParameters(System.Data.Common.DbCommand command)
+    {
+        foreach (var (name, value) in new[]
+                 {
+                     ("$unrestricted", (object)(database.AccessUserId == null || database.AccessIsOwner ? 1 : 0)),
+                     ("$user", (object)(database.AccessUserId?.ToString().ToUpperInvariant() ?? string.Empty)),
+                 })
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            command.Parameters.Add(parameter);
+        }
     }
 }

@@ -34,8 +34,8 @@ public sealed class PresentationService(
         var query = BaseItems(userId).Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
         query = ApplyFilters(query, userId, request);
         var total = await query.CountAsync(cancellationToken);
-        var items = await Order(query, userId, request.Sort, request.Direction)
-            .Skip(request.Offset).Take(request.Limit).ToListAsync(cancellationToken);
+        var items = await Cards(Order(query, userId, request.Sort, request.Direction)
+            .Skip(request.Offset).Take(request.Limit), userId).ToListAsync(cancellationToken);
         return new PagedResponse<CatalogItemSummary>(
             items.Select(item => ToCatalog(item, userId)).ToList(), request.Offset, request.Limit, total);
     }
@@ -46,12 +46,13 @@ public sealed class PresentationService(
         CancellationToken cancellationToken)
     {
         var item = await BaseItems(userId)
+            .Include(candidate => candidate.Metadata)!.ThenInclude(metadata => metadata!.Credits)
             .SingleOrDefaultAsync(candidate => candidate.Id == mediaId
                 && (candidate.Kind == MediaKind.Movie || candidate.Kind == MediaKind.Series), cancellationToken)
             ?? throw new MetadataException("media_not_found", "The movie or series was not found.", StatusCodes.Status404NotFound);
-        var children = await BaseItems(userId).Where(candidate => candidate.ParentId == mediaId)
+        var children = await Cards(BaseItems(userId).Where(candidate => candidate.ParentId == mediaId)
             .OrderBy(candidate => candidate.SeasonNumber).ThenBy(candidate => candidate.EpisodeNumber)
-            .ThenBy(candidate => candidate.DetectedTitle).ThenBy(candidate => candidate.Id)
+            .ThenBy(candidate => candidate.DetectedTitle).ThenBy(candidate => candidate.Id), userId)
             .ToListAsync(cancellationToken);
 
         var seasons = children.Where(child => child.SeasonNumber.HasValue)
@@ -90,7 +91,7 @@ public sealed class PresentationService(
             && request.Sort == CatalogSort.Title && request.Direction == SortDirection.Ascending)
         {
             var result = await searchIndex.SearchAsync(term, request.Offset, request.Limit, cancellationToken);
-            var indexedItems = await BaseItems(userId).Where(item => result.Ids.Contains(item.Id))
+            var indexedItems = await Cards(BaseItems(userId).Where(item => result.Ids.Contains(item.Id)), userId)
                 .ToListAsync(cancellationToken);
             var byId = indexedItems.ToDictionary(item => item.Id);
             return new PagedResponse<CatalogItemSummary>(
@@ -123,7 +124,7 @@ public sealed class PresentationService(
                 || (item.OverrideTitle != null && EF.Functions.Like(item.OverrideTitle, prefix, "\\")))
             .ThenBy(item => item.DetectedTitle)
             .ThenBy(item => item.Id);
-        var items = await ordered.Skip(request.Offset).Take(request.Limit).ToListAsync(cancellationToken);
+        var items = await Cards(ordered.Skip(request.Offset).Take(request.Limit), userId).ToListAsync(cancellationToken);
         return new PagedResponse<CatalogItemSummary>(items.Select(item => ToCatalog(item, userId)).ToList(), request.Offset, request.Limit, total);
     }
 
@@ -132,7 +133,7 @@ public sealed class PresentationService(
         var available = BaseItems(userId)
             .Where(item => item.Availability == MediaAvailability.Available);
         var topLevel = available.Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
-        var continueItems = await available
+        var continueItems = await Cards(available
             .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Episode)
             .Where(item => item.PlaybackProgress.Any(progress => progress.UserId == userId
                 && !progress.IsCompleted && progress.PositionMilliseconds > 10_000))
@@ -140,13 +141,13 @@ public sealed class PresentationService(
                 .Where(progress => progress.UserId == userId)
                 .Select(progress => progress.LastPlayedAt)
                 .First())
-            .ThenBy(item => item.Id).Take(20).ToListAsync(cancellationToken);
-        var recentItems = await topLevel.OrderByDescending(item => item.CreatedAt)
-            .ThenBy(item => item.Id).Take(30).ToListAsync(cancellationToken);
-        var favoriteItems = await topLevel
+            .ThenBy(item => item.Id).Take(20), userId).ToListAsync(cancellationToken);
+        var recentItems = await Cards(topLevel.OrderByDescending(item => item.CreatedAt)
+            .ThenBy(item => item.Id).Take(30), userId).ToListAsync(cancellationToken);
+        var favoriteItems = await Cards(topLevel
             .Where(item => item.Favorites.Any(value => value.UserId == userId))
             .OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id)
-            .Take(30).ToListAsync(cancellationToken);
+            .Take(30), userId).ToListAsync(cancellationToken);
         var now = timeProvider.GetUtcNow();
         var hour = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero);
         var preferred = topLevel.Where(item => !item.PlaybackProgress.Any(
@@ -158,8 +159,8 @@ public sealed class PresentationService(
             : preferredCount;
         var recommendationItem = recommendationCount == 0
             ? null
-            : await recommendationQuery.OrderBy(item => item.Id)
-                .Skip(StableIndex(userId, hour, recommendationCount)).Take(1)
+            : await Cards(recommendationQuery.OrderBy(item => item.Id)
+                .Skip(StableIndex(userId, hour, recommendationCount)).Take(1), userId)
                 .SingleAsync(cancellationToken);
         return new HomeResponse(
             recommendationItem is null ? null : ToCatalog(recommendationItem, userId),
@@ -265,10 +266,60 @@ public sealed class PresentationService(
 
     private IQueryable<MediaItem> BaseItems(Guid userId) => database.MediaItems.AsNoTracking()
         .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
-        .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Credits)
         .Include(item => item.Parent)!.ThenInclude(parent => parent!.Metadata)
         .Include(item => item.Favorites.Where(value => value.UserId == userId))
         .Include(item => item.PlaybackProgress.Where(value => value.UserId == userId));
+
+    // Project only the fields used by cards. Credits, profile artwork, source paths,
+    // provider bookkeeping and full information panels belong to the detail query.
+    private static IQueryable<MediaItem> Cards(IQueryable<MediaItem> query, Guid userId) => query.Select(item => new MediaItem
+    {
+        Id = item.Id,
+        Kind = item.Kind,
+        DetectedTitle = item.DetectedTitle,
+        OverrideTitle = item.OverrideTitle,
+        Year = item.Year,
+        Availability = item.Availability,
+        CreatedAt = item.CreatedAt,
+        SeasonNumber = item.SeasonNumber,
+        EpisodeNumber = item.EpisodeNumber,
+        Category = item.Category,
+        Parent = item.Parent == null ? null : new MediaItem
+        {
+            DetectedTitle = item.Parent.DetectedTitle,
+            OverrideTitle = item.Parent.OverrideTitle,
+            Metadata = item.Parent.Metadata == null ? null : new MediaMetadata
+            { ManualTitle = item.Parent.Metadata.ManualTitle, ProviderTitle = item.Parent.Metadata.ProviderTitle },
+        },
+        Metadata = item.Metadata == null ? null : new MediaMetadata
+        {
+            MediaItemId = item.Id,
+            ManualTitle = item.Metadata.ManualTitle,
+            ProviderTitle = item.Metadata.ProviderTitle,
+            ManualOriginalTitle = item.Metadata.ManualOriginalTitle,
+            ProviderOriginalTitle = item.Metadata.ProviderOriginalTitle,
+            ManualOverview = item.Metadata.ManualOverview,
+            ProviderOverview = item.Metadata.ProviderOverview,
+            ManualReleaseDate = item.Metadata.ManualReleaseDate,
+            ProviderReleaseDate = item.Metadata.ProviderReleaseDate,
+            ManualGenresJson = item.Metadata.ManualGenresJson,
+            ProviderGenresJson = item.Metadata.ProviderGenresJson,
+            Artwork = item.Metadata.Artwork.Where(art => art.Kind != ArtworkKind.Profile).Select(art => new ArtworkAsset
+            { Id = art.Id, Kind = art.Kind, ContentType = art.ContentType, ContentLength = art.ContentLength }).ToList(),
+        },
+        Favorites = item.Favorites.Where(favorite => favorite.UserId == userId).Select(favorite => new UserFavorite { UserId = favorite.UserId }).ToList(),
+        PlaybackProgress = item.PlaybackProgress.Where(progress => progress.UserId == userId).Select(progress => new PlaybackProgress
+        {
+            UserId = progress.UserId,
+            User = null!,
+            MediaItem = null!,
+            PositionMilliseconds = progress.PositionMilliseconds,
+            DurationMilliseconds = progress.DurationMilliseconds,
+            IsCompleted = progress.IsCompleted,
+            LastPlayedAt = progress.LastPlayedAt,
+            UpdatedAt = progress.UpdatedAt,
+        }).ToList(),
+    });
 
     private static CatalogItemSummary ToCatalog(MediaItem item, Guid userId)
     {

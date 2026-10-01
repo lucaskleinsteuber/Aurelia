@@ -107,6 +107,10 @@ public sealed class LibraryService(
         }
 
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var oldGrants = await database.UserLibraryGrants.Where(grant => existingIds.Contains(grant.LibraryRootId)).ToListAsync(cancellationToken);
+        var sharedUsers = oldGrants.GroupBy(grant => grant.UserId).ToArray();
+        if (sharedUsers.Any(group => group.Count() != existingIds.Count))
+            throw new LibraryException("different_library_access", "Libraries with different user access cannot be combined. Review their grants first.", 409);
         var now = DateTimeOffset.UtcNow;
         var combined = new LibraryRoot
         {
@@ -124,6 +128,7 @@ public sealed class LibraryService(
             LastScanCompletedAt = existingLibraries.Max(library => library.LastScanCompletedAt),
         };
         database.LibraryRoots.Add(combined);
+        database.UserLibraryGrants.AddRange(sharedUsers.Select(group => new UserLibraryGrant { UserId = group.Key, LibraryRootId = combined.Id }));
         await database.SaveChangesAsync(cancellationToken);
 
         foreach (var existing in existingLibraries)

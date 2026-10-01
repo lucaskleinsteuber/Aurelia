@@ -47,7 +47,7 @@ public sealed class PresentationApiTests
                 client, owner.Token, "/api/v1/catalog/items?kind=series&offset=0&limit=200")).Items);
             using var detailRequest = ApiTestClient.Authorized(
                 HttpMethod.Get, $"/api/v1/catalog/items/{show.Id}", owner.Token);
-            using var detailResponse = await client.SendAsync(detailRequest);
+            using var detailResponse = await ApiTestClient.SendAsync(client, detailRequest);
             detailResponse.EnsureSuccessStatusCode();
             var json = await detailResponse.Content.ReadAsStringAsync();
             Assert.DoesNotContain(fixture, json, StringComparison.Ordinal);
@@ -70,7 +70,7 @@ public sealed class PresentationApiTests
 
             using var invalidKind = ApiTestClient.Authorized(
                 HttpMethod.Get, "/api/v1/catalog/items?kind=episode", owner.Token);
-            Assert.Equal(HttpStatusCode.BadRequest, (await client.SendAsync(invalidKind)).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await ApiTestClient.SendAsync(client, invalidKind)).StatusCode);
 
             // The Build 9 catalog remains available to existing clients.
             var legacy = await SendAsync<PagedResponse<SeriesSummary>>(
@@ -159,7 +159,7 @@ public sealed class PresentationApiTests
         object? body = null)
     {
         using var request = ApiTestClient.Authorized(method ?? HttpMethod.Get, path, token, body);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<T>(response);
     }

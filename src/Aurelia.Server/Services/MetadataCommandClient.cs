@@ -21,18 +21,17 @@ public static class MetadataCommandClient
         try
         {
             var serverUrl = commandLine.Option("--server") ?? "http://127.0.0.1:43110";
-            if (!Uri.TryCreate(serverUrl, UriKind.Absolute, out var baseAddress)
-                || baseAddress.Scheme is not ("http" or "https"))
-                throw new InvalidOperationException("--server must be an absolute HTTP or HTTPS URL.");
-            using var client = new HttpClient { BaseAddress = baseAddress };
+            var baseAddress = CommandClientSecurity.ValidateAddress(serverUrl);
+            using var client = CommandClientSecurity.CreateClient(baseAddress);
             var username = commandLine.Username;
             if (string.IsNullOrWhiteSpace(username))
             {
                 Console.Error.Write("Username: ");
                 username = Console.ReadLine();
             }
+            var password = commandLine.ReadPassword();
             using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
-                new LoginRequest(username ?? string.Empty, commandLine.ReadPassword(), $"Aurelia CLI on {Environment.MachineName}"),
+                new LoginRequest(username ?? string.Empty, password, $"Aurelia CLI on {Environment.MachineName}"),
                 JsonOptions, cancellationToken);
             var authentication = await ReadAsync<AuthenticationResponse>(login, cancellationToken);
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authentication.Token);
@@ -41,10 +40,10 @@ public static class MetadataCommandClient
                 return commandLine.Action switch
                 {
                     "status" => await StatusAsync(client, cancellationToken),
-                    "configure" => await ConfigureAsync(client, commandLine, cancellationToken),
+                    "configure" => await ConfigureAsync(client, commandLine, password, cancellationToken),
                     "refresh" => await RefreshAsync(client, commandLine, cancellationToken),
                     "reviews" => await ReviewsAsync(client, cancellationToken),
-                    "disable" => await DisableAsync(client, cancellationToken),
+                    "disable" => await DisableAsync(client, password, cancellationToken),
                     _ => throw new InvalidOperationException($"Unknown metadata action '{commandLine.Action}'."),
                 };
             }
@@ -67,11 +66,11 @@ public static class MetadataCommandClient
         return 0;
     }
 
-    private static async Task<int> ConfigureAsync(HttpClient client, ServerCommandLine commandLine, CancellationToken cancellationToken)
+    private static async Task<int> ConfigureAsync(HttpClient client, ServerCommandLine commandLine, string password, CancellationToken cancellationToken)
     {
         var token = commandLine.ReadSecret("TMDB API Read Access Token: ");
-        using var response = await client.PutAsJsonAsync("/api/v1/metadata/provider",
-            new UpdateMetadataProviderRequest(true, commandLine.Option("--language") ?? "en-US", token), JsonOptions, cancellationToken);
+        using var response = await CommandClientSecurity.SendConfirmedAsync(client, HttpMethod.Put, "/api/v1/metadata/provider",
+            new UpdateMetadataProviderRequest(true, commandLine.Option("--language") ?? "en-US", token), password, cancellationToken);
         PrintStatus(await ReadAsync<MetadataProviderStatus>(response, cancellationToken));
         return 0;
     }
@@ -103,9 +102,9 @@ public static class MetadataCommandClient
         return 0;
     }
 
-    private static async Task<int> DisableAsync(HttpClient client, CancellationToken cancellationToken)
+    private static async Task<int> DisableAsync(HttpClient client, string password, CancellationToken cancellationToken)
     {
-        using var response = await client.DeleteAsync("/api/v1/metadata/provider/token", cancellationToken);
+        using var response = await CommandClientSecurity.SendConfirmedAsync(client, HttpMethod.Delete, "/api/v1/metadata/provider/token", null, password, cancellationToken);
         PrintStatus(await ReadAsync<MetadataProviderStatus>(response, cancellationToken));
         return 0;
     }

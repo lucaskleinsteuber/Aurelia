@@ -29,6 +29,7 @@ public sealed class BackendSecurityTests
             var libraryId = await AddPrivateMediaAsync(factory, root, mediaPath);
             await CreateUserAsync(client, owner.Token);
             var viewer = await LoginViewerAsync(client);
+            await ApiTestClient.GrantExistingLibrariesAsync(client, owner.Token, viewer.User.Id);
 
             foreach (var path in new[]
                      {
@@ -41,11 +42,11 @@ public sealed class BackendSecurityTests
                 Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
 
                 using var userRequest = ApiTestClient.Authorized(HttpMethod.Get, path, viewer.Token);
-                using var userResponse = await client.SendAsync(userRequest);
+                using var userResponse = await ApiTestClient.SendAsync(client, userRequest);
                 Assert.Equal(HttpStatusCode.Forbidden, userResponse.StatusCode);
 
                 using var ownerRequest = ApiTestClient.Authorized(HttpMethod.Get, path, owner.Token);
-                using var ownerResponse = await client.SendAsync(ownerRequest);
+                using var ownerResponse = await ApiTestClient.SendAsync(client, ownerRequest);
                 Assert.Equal(HttpStatusCode.OK, ownerResponse.StatusCode);
             }
 
@@ -53,7 +54,7 @@ public sealed class BackendSecurityTests
                        HttpMethod.Get,
                        $"/api/v1/libraries/{libraryId}/scans",
                        viewer.Token))
-            using (var userLibraryResponse = await client.SendAsync(userLibrary))
+            using (var userLibraryResponse = await ApiTestClient.SendAsync(client, userLibrary))
             {
                 Assert.Equal(HttpStatusCode.Forbidden, userLibraryResponse.StatusCode);
             }
@@ -67,7 +68,7 @@ public sealed class BackendSecurityTests
                      })
             {
                 using var request = ApiTestClient.Authorized(HttpMethod.Get, path, viewer.Token);
-                using var response = await client.SendAsync(request);
+                using var response = await ApiTestClient.SendAsync(client, request);
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
                 var json = await response.Content.ReadAsStringAsync();
                 Assert.DoesNotContain(root, json, StringComparison.Ordinal);
@@ -78,7 +79,7 @@ public sealed class BackendSecurityTests
                 HttpMethod.Get,
                 "/api/v1/libraries",
                 owner.Token);
-            using var ownerLibraryResponse = await client.SendAsync(ownerLibraryRequest);
+            using var ownerLibraryResponse = await ApiTestClient.SendAsync(client, ownerLibraryRequest);
             var ownerJson = await ownerLibraryResponse.Content.ReadAsStringAsync();
             Assert.Contains(root, ownerJson, StringComparison.Ordinal);
         }
@@ -108,7 +109,7 @@ public sealed class BackendSecurityTests
         }
 
         using var request = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/auth/me", session.Token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -168,7 +169,7 @@ public sealed class BackendSecurityTests
             "/api/v1/users",
             ownerToken,
             new CreateUserRequest("privacy-viewer", "secure privacy viewer password", UserRole.User));
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
     }
 

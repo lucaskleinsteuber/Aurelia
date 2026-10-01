@@ -195,8 +195,6 @@ public sealed partial class MetadataJobWorker(
         job.CompletedAt = DateTimeOffset.UtcNow;
         job.LeaseExpiresAt = null;
         await database.SaveChangesAsync(cancellationToken);
-        await scope.ServiceProvider.GetRequiredService<MediaSearchIndexService>()
-            .RebuildAsync(cancellationToken);
         await PruneJobsAsync(database, job.Id, cancellationToken);
     }
 

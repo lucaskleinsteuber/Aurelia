@@ -16,6 +16,10 @@ public sealed class ServerUser
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    public bool IsEnabled { get; set; } = true;
+
+    public List<UserLibraryGrant> LibraryGrants { get; set; } = [];
+
     public List<DeviceSession> Sessions { get; set; } = [];
 
     public List<PairingCode> PairingCodes { get; set; } = [];

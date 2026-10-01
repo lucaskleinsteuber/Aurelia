@@ -7,7 +7,7 @@ struct AppSettingsView: View {
     case playback
     case library
     case metadata
-    case advanced
+    case server
   }
 
   @EnvironmentObject private var model: AppModel
@@ -68,13 +68,14 @@ struct AppSettingsView: View {
 
       settingsPage {
         if let profile = model.profile {
+          if profile.user?.role == .owner { ServerManagementView() }
           advanced(profile)
         } else {
           disconnectedState
         }
       }
-      .tabItem { Label("Advanced", systemImage: "gearshape.2") }
-      .tag(SettingsPage.advanced)
+      .tabItem { Label("Server", systemImage: "server.rack") }
+      .tag(SettingsPage.server)
     }
     .frame(width: 760, height: 640)
     .background(AureliaBackdrop())
@@ -461,7 +462,13 @@ struct AppSettingsView: View {
         "Use your own TMDB API Read Access Token to download English metadata and artwork. File paths are never sent."
     ) {
       VStack(alignment: .leading, spacing: 14) {
-        if model.metadataProvider?.hasToken == true {
+        if model.profile?.user?.role != .owner {
+          Text("An owner manages the metadata provider and its credentials.")
+            .font(.caption).foregroundStyle(.secondary)
+          Button("Enrich Shared Libraries") { Task { await model.enrichLibrary() } }
+            .disabled(model.libraries.isEmpty)
+          Button("Review Queue") { showingReviewQueue = true }
+        } else if model.metadataProvider?.hasToken == true {
           LabeledContent(
             "TMDB", value: model.metadataProvider?.enabled == true ? "Enabled" : "Disabled")
           if let status = model.metadataProvider {

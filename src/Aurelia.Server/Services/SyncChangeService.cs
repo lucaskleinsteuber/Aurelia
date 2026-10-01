@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Services;
 
-public sealed class SyncChangeService(AureliaDbContext database)
+public sealed class SyncChangeService(AureliaDbContext database, DatabaseChangeSignal signal)
 {
     private const int MaximumChangedMediaIds = 200;
 
@@ -26,13 +26,17 @@ public sealed class SyncChangeService(AureliaDbContext database)
         var deadline = DateTimeOffset.UtcNow.AddSeconds(waitSeconds);
         while (true)
         {
+            var wake = signal.Snapshot();
             var response = await ReadAsync(userId, isAdministrator, after, cancellationToken);
             if (response.ResetRequired || response.Cursor > after || DateTimeOffset.UtcNow >= deadline)
             {
                 return response;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) return response;
+            try { await wake.WaitAsync(remaining < TimeSpan.FromSeconds(5) ? remaining : TimeSpan.FromSeconds(5), cancellationToken); }
+            catch (TimeoutException) { /* Low-frequency reconciliation if an external writer changed SQLite. */ }
         }
     }
 

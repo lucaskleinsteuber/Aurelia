@@ -944,6 +944,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("NormalizedUsername")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1024,6 +1027,21 @@ namespace Aurelia.Server.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("UserFavorites");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.UserLibraryGrant", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId", "LibraryRootId");
+
+                    b.HasIndex("LibraryRootId");
+
+                    b.ToTable("UserLibraryGrants");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.ArtworkAsset", b =>
@@ -1245,6 +1263,25 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.UserLibraryGrant", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.LibraryRoot", "LibraryRoot")
+                        .WithMany()
+                        .HasForeignKey("LibraryRootId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany("LibraryGrants")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LibraryRoot");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.DeviceSession", b =>
                 {
                     b.Navigation("PlaybackTickets");
@@ -1298,6 +1335,8 @@ namespace Aurelia.Server.Data.Migrations
             modelBuilder.Entity("Aurelia.Server.Data.ServerUser", b =>
                 {
                     b.Navigation("Favorites");
+
+                    b.Navigation("LibraryGrants");
 
                     b.Navigation("PairingCodes");
 

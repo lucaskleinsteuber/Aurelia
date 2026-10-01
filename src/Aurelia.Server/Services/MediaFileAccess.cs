@@ -80,13 +80,7 @@ public static class MediaFileAccess
                 throw Unavailable();
             }
 
-            var stream = new FileStream(
-                fullSourcePath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 128 * 1024,
-                FileOptions.Asynchronous | FileOptions.RandomAccess);
+            var stream = PinnedMediaHandle.Open(libraryPath, fullSourcePath);
             try
             {
                 file.Refresh();
@@ -99,9 +93,7 @@ public static class MediaFileAccess
                     stream,
                     contentType,
                     stream.Length,
-                    DateTimeOffset.FromUnixTimeMilliseconds(
-                        new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero)
-                            .ToUnixTimeMilliseconds()));
+                    new DateTimeOffset(File.GetLastWriteTimeUtc(stream.SafeFileHandle), TimeSpan.Zero));
             }
             catch
             {

@@ -71,20 +71,21 @@ These rules apply to every task in this repository.
 
 ## Installation and version handling
 
-- Install the verified release as `/Applications/Aurelia.app`.
-- While Aurelia is in Lucas's pre-release tester phase, every version installed
-  by an agent must be a clean test installation unless Lucas explicitly asks to
-  preserve the current setup. Before installing the verified app, run
-  `scripts/reset-installed-test-state.sh --confirm-clean-test-install` and
-  verify that the next launch shows the first-run setup. This is an installation
-  workflow rule, not behavior that may be added to the production app.
-- A clean test installation removes only Aurelia-owned accounts, sessions,
-  preferences, connection profiles, transient host state, logs, databases, and
-  the pre-1.0.12 server-data migration source that would otherwise restore an
-  old setup. It must never delete, edit, scan, or move user-selected media folders.
-  It must never touch Aurelia Classic, `Application Support/Aurelia`,
-  `Library.store`, or `com.lucas.aurelia` credentials and containers. Reset
-  sandbox preferences through macOS preferences services; preserve the
+- After each successful, verified, launchable macOS app build made for Lucas to
+  test, install that build on this MacBook as `/Applications/Aurelia.app`; do
+  not wait for a separate install request. Never install a failed or incomplete
+  candidate. This rule applies only to the server-backed Aurelia app in this
+  repository, never to Aurelia Classic.
+- Installation replaces only the app bundle. Preserve the existing library
+  and all Aurelia setup state across builds and updates, including the server
+  database, local server data, accounts, sessions, preferences, connection
+  profiles, and server settings. Do not run
+  `scripts/reset-installed-test-state.sh`, clear Keychain or preferences, or
+  move any Aurelia data to Trash as part of a normal install. Reset or recreate
+  setup only when Lucas explicitly asks for it.
+- Never delete, edit, scan, or move user-selected media folders as part of an
+  install. Never touch Aurelia Classic, `Application Support/Aurelia`,
+  `Library.store`, or `com.lucas.aurelia` credentials and containers. Preserve
   OS-managed sandbox and App Group container shells rather than bypassing macOS
   container protections.
 - Before replacement, read the installed bundle's real `CFBundleVersion` and

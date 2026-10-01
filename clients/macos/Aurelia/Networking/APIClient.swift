@@ -1,3 +1,4 @@
+import CryptoKit
 @preconcurrency import Foundation
 
 enum APIClientError: LocalizedError, Equatable {
@@ -64,7 +65,8 @@ struct APIClient: Sendable {
     let info = try decode(ServerInfoResponse.self, from: data)
     guard let fingerprint = delegate.capturedFingerprint,
       fingerprint.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame,
-      info.lanAccessEnabled
+      info.lanAccessEnabled || baseURL.host == "127.0.0.1" || baseURL.host == "localhost"
+        || baseURL.host == "::1"
     else {
       throw APIClientError.serverIdentityMismatch
     }
@@ -153,6 +155,62 @@ struct APIClient: Sendable {
 
   func serverInfo() async throws -> ServerInfoResponse {
     try await get("/api/v1/server/info")
+  }
+
+  func serverSettings() async throws -> ServerConfigurationResponse {
+    try await get("/api/v1/server/settings")
+  }
+
+  func saveServerSettings(_ settings: ServerPolicySettings) async throws
+    -> ServerConfigurationResponse
+  {
+    let data = try await perform(
+      path: "/api/v1/server/settings", method: "PUT", body: JSONEncoder().encode(settings))
+    return try Self.decode(ServerConfigurationResponse.self, from: data)
+  }
+
+  func serverStatus() async throws -> ServerStatusSummary { try await get("/api/v1/server/status") }
+  func serverUsers() async throws -> [UserAccessSummary] { try await get("/api/v1/server/users") }
+  func userSessions(_ id: UUID) async throws -> [DeviceSessionSummary] {
+    try await get("/api/v1/server/sessions/\(id.uuidString)")
+  }
+  func revokeManagedSession(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/server/sessions/\(id.uuidString)", method: "DELETE")
+  }
+
+  func createUser(username: String, password: String, role: UserRole) async throws {
+    struct Payload: Encodable {
+      let username: String
+      let password: String
+      let role: UserRole
+    }
+    _ = try await perform(
+      path: "/api/v1/users", method: "POST",
+      body: JSONEncoder().encode(Payload(username: username, password: password, role: role)))
+  }
+  func updateUserAccess(id: UUID, enabled: Bool, libraries: [UUID]) async throws {
+    struct Payload: Encodable {
+      let isEnabled: Bool
+      let libraryIds: [UUID]
+    }
+    _ = try await perform(
+      path: "/api/v1/users/\(id.uuidString)/access", method: "PUT",
+      body: JSONEncoder().encode(Payload(isEnabled: enabled, libraryIds: libraries)))
+  }
+  func changeUserRole(id: UUID, role: UserRole) async throws {
+    struct Payload: Encodable { let role: UserRole }
+    _ = try await perform(
+      path: "/api/v1/users/\(id.uuidString)/role", method: "PUT",
+      body: JSONEncoder().encode(Payload(role: role)))
+  }
+  func resetUserPassword(id: UUID, password: String) async throws {
+    struct Payload: Encodable { let password: String }
+    _ = try await perform(
+      path: "/api/v1/users/\(id.uuidString)/password", method: "PUT",
+      body: JSONEncoder().encode(Payload(password: password)))
+  }
+  func revokeUserSessions(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/users/\(id.uuidString)/sessions", method: "DELETE")
   }
 
   func currentUser() async throws -> UserSummary {
@@ -303,8 +361,11 @@ struct APIClient: Sendable {
     return try Self.decode(MetadataProviderStatus.self, from: data)
   }
 
-  func startMetadataJob() async throws -> MetadataJobSummary {
-    let data = try await perform(path: "/api/v1/metadata/jobs", method: "POST")
+  func startMetadataJob(libraryId: UUID? = nil) async throws -> MetadataJobSummary {
+    let body = try libraryId.map {
+      try JSONEncoder().encode(["libraryId": $0.uuidString.lowercased()])
+    }
+    let data = try await perform(path: "/api/v1/metadata/jobs", method: "POST", body: body)
     return try Self.decode(MetadataJobSummary.self, from: data)
   }
 
@@ -380,7 +441,8 @@ struct APIClient: Sendable {
     guard !trimmed.isEmpty else { return [] }
     let encodedQuery = try Self.query(name: "query", value: trimmed)
     let page: PagedResponse<CatalogItemSummary> = try await get(
-      "/api/v1/catalog/search?\(encodedQuery)&kind=movie&libraryId=\(libraryId.uuidString.lowercased())&offset=0&limit=25")
+      "/api/v1/catalog/search?\(encodedQuery)&kind=movie&libraryId=\(libraryId.uuidString.lowercased())&offset=0&limit=25"
+    )
     return page.items
   }
 
@@ -562,10 +624,40 @@ struct APIClient: Sendable {
 
   private func perform(
     path: String,
-    method: String,
+    method: String = "GET",
     body: Data? = nil,
     timeout: TimeInterval = 15
   ) async throws -> Data {
+    #if DEBUG
+      if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "server-settings"
+        || profile.baseURL.host == "server-settings-preview.invalid"
+      {
+        guard method == "GET" else { throw APIClientError.invalidResponse }
+        return try Self.serverSettingsFixture(path: path)
+      }
+    #endif
+    var headers: [String: String] = [:]
+    if Self.requiresAdministrationApproval(path: path, method: method) {
+      guard profile.user?.role == .owner else {
+        throw APIClientError.serverRejected(
+          code: "owner_required", message: "Only an owner may change global server settings.")
+      }
+      let password = try await AdministrationPasswordPrompt.confirm(serverName: profile.name)
+      struct Confirmation: Encodable {
+        let action: String
+        let payloadHash: String
+        let password: String
+      }
+      struct Approval: Decodable { let token: String }
+      let hash = SHA256.hash(data: body ?? Data()).map { String(format: "%02x", $0) }.joined()
+      let confirmation = Confirmation(
+        action: "\(method) \(path)", payloadHash: hash, password: password)
+      let (approvalData, _, _) = try await Self.request(
+        baseURL: profile.baseURL, path: "/api/v1/server/approval",
+        method: "POST", token: profile.token, body: JSONEncoder().encode(confirmation),
+        trustMode: .pinned(profile.publicKeyFingerprint))
+      headers["X-Aurelia-Approval"] = try Self.decode(Approval.self, from: approvalData).token
+    }
     let (data, _, _) = try await Self.request(
       baseURL: profile.baseURL,
       path: path,
@@ -573,9 +665,224 @@ struct APIClient: Sendable {
       token: profile.token,
       body: body,
       trustMode: .pinned(profile.publicKeyFingerprint),
+      additionalHeaders: headers,
       timeout: timeout)
     return data
   }
+
+  static func requiresAdministrationApproval(path: String, method: String) -> Bool {
+    guard method != "GET", method != "HEAD" else { return false }
+    let path = path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let normalized = "/" + path
+    if normalized.hasPrefix("/api/v1/server/operations/"), normalized.hasSuffix("/confirm") {
+      return false
+    }
+    if method == "PUT", normalized.hasPrefix("/api/v1/server/backups/uploads/") { return false }
+    if method == "DELETE", normalized.hasPrefix("/api/v1/server/backups/transfers/") {
+      return false
+    }
+    return normalized == "/api/v1/server/settings"
+      || normalized.hasPrefix("/api/v1/server/operations")
+      || normalized.hasPrefix("/api/v1/server/sessions")
+      || normalized.hasPrefix("/api/v1/server/backups") || normalized.hasPrefix("/api/v1/users")
+      || normalized.hasPrefix("/api/v1/metadata/provider")
+      || (normalized.hasPrefix("/api/v1/libraries")
+        && (method == "DELETE" || normalized == "/api/v1/libraries"))
+  }
+
+  func serverCapabilities() async throws -> ServerCapabilities {
+    try Self.decode(
+      ServerCapabilities.self, from: await perform(path: "/api/v1/server/capabilities"))
+  }
+  func serverBackups() async throws -> [ServerBackupSummary] {
+    try Self.decode([ServerBackupSummary].self, from: await perform(path: "/api/v1/server/backups"))
+  }
+  func serverDiagnostics() async throws -> [ServerDiagnosticEvent] {
+    try Self.decode(
+      [ServerDiagnosticEvent].self, from: await perform(path: "/api/v1/server/diagnostics"))
+  }
+  func serverDiagnosticsExport() async throws -> Data {
+    try await perform(path: "/api/v1/server/diagnostics/export")
+  }
+  func createDatabaseBackup() async throws {
+    _ = try await perform(path: "/api/v1/server/backups/database", method: "POST", timeout: 120)
+  }
+  func verifyDatabaseBackup(name: String) async throws {
+    struct Verification: Decodable { let isValid: Bool }
+    let result = try Self.decode(
+      Verification.self,
+      from: await perform(
+        path: "/api/v1/server/backups/\(name)/verify", method: "POST", timeout: 120))
+    guard result.isValid else { throw APIClientError.invalidResponse }
+  }
+  func serverJobs() async throws -> ServerJobHistory { try await get("/api/v1/server/jobs") }
+  func retryMetadataJob(id: UUID) async throws {
+    _ = try await perform(path: "/api/v1/metadata/jobs/\(id.uuidString)/retry", method: "POST")
+  }
+  func currentHostOperation() async throws -> HostOperationStatus? {
+    let data = try await perform(path: "/api/v1/server/operations/current")
+    if String(data: data, encoding: .utf8) == "null" { return nil }
+    return try Self.decode(HostOperationStatus.self, from: data)
+  }
+  func restartServer() async throws -> HostOperationStatus {
+    try Self.decode(
+      HostOperationStatus.self,
+      from: await perform(path: "/api/v1/server/operations/restart", method: "POST"))
+  }
+  func serverHosting() async throws -> ServerHostingStatus {
+    try await get("/api/v1/server/hosting")
+  }
+  func authorizeHostingChange(_ settings: HostServiceSettings) async throws -> HostOperationStatus {
+    struct Request: Encodable {
+      let backgroundEnabled: Bool
+      let startAtLogin: Bool
+      let preventIdleSleep: Bool
+    }
+    return try Self.decode(
+      HostOperationStatus.self,
+      from: await perform(
+        path: "/api/v1/server/operations/hosting", method: "POST",
+        body: JSONEncoder().encode(
+          Request(
+            backgroundEnabled: settings.backgroundEnabled, startAtLogin: settings.startAtLogin,
+            preventIdleSleep: settings.preventIdleSleep))))
+  }
+  func trialNetwork(_ settings: ServerPolicySettings, confirmDisconnect: Bool) async throws
+    -> HostOperationStatus
+  {
+    struct Request: Encodable {
+      let settings: ServerPolicySettings
+      let confirmRemoteAccessDisabled: Bool
+    }
+    return try Self.decode(
+      HostOperationStatus.self,
+      from: await perform(
+        path: "/api/v1/server/operations/network", method: "POST",
+        body: JSONEncoder().encode(
+          Request(settings: settings, confirmRemoteAccessDisabled: confirmDisconnect))))
+  }
+  func confirmNetwork(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/server/operations/\(id.uuidString)/confirm", method: "POST")
+  }
+  func exportEncryptedServerBackup(passphrase: String, to destination: URL) async throws {
+    let access = destination.startAccessingSecurityScopedResource()
+    defer { if access { destination.stopAccessingSecurityScopedResource() } }
+    struct Request: Encodable { let passphrase: String }
+    struct Response: Decodable { let id: UUID }
+    let result = try Self.decode(
+      Response.self,
+      from: await perform(
+        path: "/api/v1/server/backups/export", method: "POST",
+        body: JSONEncoder().encode(Request(passphrase: passphrase)), timeout: 300))
+    defer {
+      Task {
+        _ = try? await self.perform(
+          path: "/api/v1/server/backups/transfers/\(result.id.uuidString)", method: "DELETE")
+      }
+    }
+    let url = profile.baseURL.appendingPathComponent(
+      "api/v1/server/backups/transfers/\(result.id.uuidString)")
+    var request = URLRequest(url: url)
+    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
+    let delegate = TLSTrustDelegate(
+      mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
+    let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+    defer { session.invalidateAndCancel() }
+    let (temporary, response) = try await session.download(for: request)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+      throw APIClientError.invalidResponse
+    }
+    if FileManager.default.fileExists(atPath: destination.path) {
+      _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+    } else {
+      try FileManager.default.moveItem(at: temporary, to: destination)
+    }
+  }
+  func prepareServerRestore(
+    from file: URL, passphrase: String, acceptDifferentIdentity: Bool = false
+  ) async throws -> PreparedServerRestore {
+    let access = file.startAccessingSecurityScopedResource()
+    defer { if access { file.stopAccessingSecurityScopedResource() } }
+    let id = UUID()
+    defer {
+      Task {
+        _ = try? await self.perform(
+          path: "/api/v1/server/backups/transfers/\(id.uuidString)", method: "DELETE")
+      }
+    }
+    let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+    guard size > 0, Int64(size) <= 4 * 1024 * 1024 * 1024 else {
+      throw APIClientError.invalidResponse
+    }
+    var request = URLRequest(
+      url: profile.baseURL.appendingPathComponent("api/v1/server/backups/uploads/\(id.uuidString)"))
+    request.httpMethod = "PUT"
+    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+    request.setValue("\(size)", forHTTPHeaderField: "Content-Length")
+    let delegate = TLSTrustDelegate(
+      mode: .pinned(profile.publicKeyFingerprint), allowedHost: profile.baseURL.host ?? "")
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForResource = 600
+    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+    defer { session.invalidateAndCancel() }
+    let (_, response) = try await session.upload(for: request, fromFile: file)
+    guard (response as? HTTPURLResponse)?.statusCode == 204 else {
+      throw APIClientError.invalidResponse
+    }
+    struct Restore: Encodable {
+      let uploadId: UUID
+      let passphrase: String
+      let revokeAllSessions: Bool
+      let acceptDifferentServerIdentity: Bool
+    }
+    return try Self.decode(
+      PreparedServerRestore.self,
+      from: await perform(
+        path: "/api/v1/server/backups/restore/prepare", method: "POST",
+        body: JSONEncoder().encode(
+          Restore(
+            uploadId: id, passphrase: passphrase, revokeAllSessions: true,
+            acceptDifferentServerIdentity: acceptDifferentIdentity)), timeout: 300))
+  }
+  func applyServerRestore(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/server/backups/restore/\(id.uuidString)/apply", method: "POST")
+  }
+
+  #if DEBUG
+    private static func serverSettingsFixture(path: String) throws -> Data {
+      let configuration = """
+        {"stored":{"version":2,"serverName":"Synthetic UI Server","lanAccessEnabled":true,"lanHttpsPort":43111,
+        "revision":1,"pairingEnabled":true,"deviceSessionDays":90,"globalStreamLimit":32,"userStreamLimit":4,
+        "bonjourEnabled":true,"allowedNetworks":[],"monitoringEnabled":true,"reconciliationMinutes":360,
+        "maintenanceStartHour":0,"maintenanceEndHour":24,"jobQueueLimit":1000,"automaticBackupsEnabled":true,
+        "backupIntervalHours":24,"dailyBackupsRetained":7,"weeklyBackupsRetained":4,"eventRetentionDays":30,"maximumEvents":10000},
+        "active":{"serverName":"Synthetic UI Server","lanAccessEnabled":true,"lanHttpsPort":43111},"restartRequired":false}
+        """
+      let response: String
+      switch path {
+      case "/api/v1/server/settings": response = configuration
+      case "/api/v1/server/capabilities":
+        response =
+          "{\"nativeHostOperations\":false,\"encryptedBackups\":true,\"transcoding\":false}"
+      case "/api/v1/server/status":
+        response = """
+          {"state":"running","version":"\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2")","uptimeSeconds":3600,"activeStreams":0,"databaseBytes":1048576,
+          "users":1,"libraries":0,"freeDiskBytes":10737418240,"certificateExpiresAt":"2036-10-01T12:00:00Z","networkAddresses":["192.168.1.10"]}
+          """
+      case "/api/v1/server/users", "/api/v1/server/backups", "/api/v1/server/diagnostics",
+        "/api/v1/libraries":
+        response = "[]"
+      case "/api/v1/server/jobs": response = "{\"scans\":[],\"metadata\":[]}"
+      case "/api/v1/server/operations/current": response = "null"
+      default: throw APIClientError.invalidResponse
+      }
+      return Data(response.utf8)
+    }
+  #endif
 
   private static func request(
     baseURL: URL,

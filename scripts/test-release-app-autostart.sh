@@ -17,9 +17,12 @@ application="$candidate/Contents/MacOS/Aurelia"
 helper="$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
 application_pid=''
 helper_pid=''
+cleanup_finished=false
 
 cleanup() {
-  exit_code=$?
+  local exit_code=${1:-$?}
+  [[ "$cleanup_finished" == true ]] && return "$exit_code"
+  cleanup_finished=true
   set +e
   if [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null; then
     kill "$application_pid" 2>/dev/null || true
@@ -35,7 +38,12 @@ cleanup() {
   fi
   return "$exit_code"
 }
-trap cleanup EXIT
+trap 'cleanup $?' EXIT
+TRAPZERR() {
+  local failure_code=$?
+  cleanup "$failure_code"
+  exit "$failure_code"
+}
 
 fail() {
   print -r -- "FAIL: $1" | tee -a "$report" >&2
@@ -43,6 +51,7 @@ fail() {
 }
 
 mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root"
+chmod 700 "$runtime_root" "$data_root" "$host_log_root"
 [[ -d "$source_candidate" ]] || fail "The Build $build_number app candidate does not exist."
 /usr/bin/ditto "$source_candidate" "$candidate"
 [[ -x "$application" && -x "$helper" ]] || fail "The staged release app is incomplete."
@@ -58,6 +67,7 @@ print -r -- "Aurelia Build $build_number release app autostart smoke test" >"$re
 print -r -- "Run: $run_id" >>"$report"
 
 /usr/bin/open -n -g \
+  --env AURELIA_PREFLIGHT_TEST=1 \
   --env "AURELIA_DATA_DIR=$data_root" \
   --env "AURELIA_LOG_DIR=$host_log_root" \
   "$candidate" --args \
@@ -90,7 +100,9 @@ done
 [[ "$(jq -r 'if has("isSetup") then .isSetup else empty end' "$runtime_root/server-info.json" 2>/dev/null)" == false ]] \
   || fail "The fresh loopback server did not become ready for owner setup."
 
-/usr/bin/osascript -e 'tell application id "com.lucas.aurelia.media" to quit' >/dev/null
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/swift -e \
+  'import AppKit; guard let pid = Int32(CommandLine.arguments[1]), let app = NSRunningApplication(processIdentifier: pid), app.terminate() else { exit(1) }' \
+  "$application_pid"
 for _ in {1..150}; do
   if ! kill -0 "$application_pid" 2>/dev/null && ! kill -0 "$helper_pid" 2>/dev/null; then
     break

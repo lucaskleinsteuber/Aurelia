@@ -32,7 +32,7 @@ public sealed class ServerTlsIdentity : IDisposable
 
     public static ServerTlsIdentity LoadOrCreate(ServerRuntimeOptions runtime)
     {
-        if (!runtime.LanAccessEnabled)
+        if (!runtime.LanAccessEnabled && !File.Exists(runtime.CertificatePath))
         {
             return Disabled;
         }
@@ -54,6 +54,16 @@ public sealed class ServerTlsIdentity : IDisposable
         var certificate = X509Certificate2.CreateFromPemFile(
             runtime.CertificatePath,
             runtime.PrivateKeyPath);
+        if (certificate.NotAfter.ToUniversalTime() < DateTime.UtcNow.AddDays(30))
+        {
+            // Renew with the existing private key: paired clients pin its SPKI,
+            // so a routine certificate renewal is not a new server identity.
+            using var existingKey = certificate.GetECDsaPrivateKey()
+                ?? throw new InvalidOperationException("The TLS private key is unavailable.");
+            CreateCertificate(runtime, existingKey);
+            certificate.Dispose();
+            certificate = X509Certificate2.CreateFromPemFile(runtime.CertificatePath, runtime.PrivateKeyPath);
+        }
         using var publicKey = certificate.GetECDsaPublicKey()
             ?? throw new InvalidOperationException("The server certificate does not contain an ECDSA public key.");
         var fingerprint = Convert.ToHexString(
@@ -76,6 +86,11 @@ public sealed class ServerTlsIdentity : IDisposable
     private static void Create(ServerRuntimeOptions runtime)
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        WritePrivateFile(runtime.PrivateKeyPath, key.ExportPkcs8PrivateKeyPem());
+        CreateCertificate(runtime, key);
+    }
+    private static void CreateCertificate(ServerRuntimeOptions runtime, ECDsa key)
+    {
         var request = new CertificateRequest(
             "CN=Aurelia Server",
             key,
@@ -115,7 +130,6 @@ public sealed class ServerTlsIdentity : IDisposable
             DateTimeOffset.UtcNow.AddYears(10));
 
         WritePrivateFile(runtime.CertificatePath, certificate.ExportCertificatePem());
-        WritePrivateFile(runtime.PrivateKeyPath, key.ExportPkcs8PrivateKeyPem());
     }
 
     private static IEnumerable<IPAddress> LocalAddresses()
@@ -135,9 +149,14 @@ public sealed class ServerTlsIdentity : IDisposable
         var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
-            File.WriteAllText(temporaryPath, contents);
-            PrivateFilePermissions.ProtectFile(temporaryPath);
-            File.Move(temporaryPath, path);
+            using (var file = PrivateFilePermissions.OpenNewPrivateFile(temporaryPath))
+            {
+                using var writer = new StreamWriter(file, leaveOpen: true);
+                writer.Write(contents);
+                writer.Flush();
+                file.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, path, true);
             PrivateFilePermissions.ProtectFile(path);
         }
         finally

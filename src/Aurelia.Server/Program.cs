@@ -56,10 +56,20 @@ var builder = WebApplication.CreateBuilder(args);
 var runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 
 PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
+using var instanceLock = appInstanceLock();
+await FullServerBackupService.RecoverInterruptedRestoreAsync(runtime, CancellationToken.None);
+runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
+await new DatabaseBackupService(runtime).RecoverPendingRestoreAsync(CancellationToken.None);
 using var tlsIdentity = ServerTlsIdentity.LoadOrCreate(runtime);
 var dataProtectionDirectory = Path.Combine(runtime.DataDirectory, "DataProtectionKeys");
 PrivateFilePermissions.CreatePrivateDirectory(dataProtectionDirectory);
 builder.WebHost.UseUrls(runtime.ListenUrl);
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = ServerRequestGuard.MaximumJsonBytes;
+    options.Limits.MaxRequestHeadersTotalSize = 16_384;
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(15);
+});
 if (tlsIdentity.Certificate is not null)
 {
     builder.WebHost.ConfigureKestrel(options =>
@@ -88,12 +98,25 @@ builder.Services.AddSingleton<BootstrapSetupAuthorizer>();
 builder.Services.AddDataProtection()
     .SetApplicationName("Aurelia.Server")
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionDirectory));
-builder.Services.AddDbContext<AureliaDbContext>(options =>
-    options.UseSqlite(connectionString));
+builder.Services.AddSingleton<DatabaseChangeSignal>();
+builder.Services.AddSingleton<DatabaseSaveSignal>();
+builder.Services.AddSingleton<DatabaseCommitSignal>();
+builder.Services.AddDbContext<AureliaDbContext>((services, options) =>
+    options.UseSqlite(connectionString).AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>()));
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<DatabaseBackupService>();
+builder.Services.AddSingleton<FullServerBackupService>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<LibraryAccessService>();
+builder.Services.AddSingleton<ServerConfigurationStore>();
+builder.Services.AddSingleton<CredentialAttemptGuard>();
+builder.Services.AddSingleton<ActiveStreamRegistry>();
+builder.Services.AddSingleton<AdministrationApprovalStore>();
+builder.Services.AddSingleton<ServerRequestGuard>();
+builder.Services.AddSingleton<NativeHostOperations>();
+builder.Services.AddSingleton<ServerDiagnosticsStore>();
+builder.Services.AddHostedService(services => services.GetRequiredService<ServerDiagnosticsStore>());
 builder.Services.AddScoped<LibraryService>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<PlaybackService>();
@@ -131,6 +154,7 @@ builder.Services
         DeviceTokenAuthenticationHandler.SchemeName,
         _ => { });
 builder.Services.AddAuthorizationBuilder()
+    .AddPolicy("Owner", policy => policy.RequireRole(UserRole.Owner.ToString()))
     .AddPolicy("Administrator", policy => policy.RequireRole(
         UserRole.Owner.ToString(),
         UserRole.Admin.ToString()));
@@ -144,6 +168,11 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.Headers.RetryAfter = "60";
+        await context.HttpContext.Response.WriteAsJsonAsync(new ApiProblem("rate_limited", "Too many requests. Try again shortly."), token);
+    };
     options.AddPolicy("authentication", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "local",
         _ => new FixedWindowRateLimiterOptions
@@ -165,22 +194,91 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
-app.UseRateLimiter();
+HostReadinessSignal.Register(
+    app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>(),
+    Console.Out,
+    Environment.GetEnvironmentVariable(HostReadinessSignal.EnvironmentVariableName));
+app.Use(async (context, next) =>
+{
+    if (!context.RequestServices.GetRequiredService<ServerRequestGuard>().Admit(context.Connection.RemoteIpAddress))
+    {
+        context.Response.StatusCode = 429;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_rate_limited", "warning", status: 429);
+        context.Response.Headers.RetryAfter = "60";
+        await context.Response.WriteAsJsonAsync(new ApiProblem("rate_limited", "Too many requests. Try again shortly."));
+        return;
+    }
+    var networks = context.RequestServices.GetRequiredService<ServerConfigurationStore>().Current.AllowedNetworks;
+    if (!ServerRequestGuard.NetworkAllowed(context.Connection.RemoteIpAddress, networks))
+    {
+        context.Response.StatusCode = 403;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("network_access_rejected", "warning", status: 403);
+        return;
+    }
+    var backupUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase);
+    var maximumBytes = backupUpload ? EncryptedBackupContainer.MaximumBytes : ServerRequestGuard.MaximumJsonBytes;
+    if (backupUpload && context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
+        feature.MaxRequestBodySize = maximumBytes;
+    if (context.Request.ContentLength > maximumBytes)
+    {
+        context.Response.StatusCode = 413;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_too_large", "warning", status: 413);
+        return;
+    }
+    await next(context);
+    if (context.Response.StatusCode >= 400)
+    {
+        var status = context.Response.StatusCode;
+        var code = status switch { 401 => "authentication_rejected", 403 => "access_rejected", 429 => "request_rate_limited", >= 500 => "request_failed", _ => "request_rejected" };
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(code, status >= 500 ? "error" : "warning",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, status);
+    }
+});
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    context.RequestServices.GetRequiredService<LibraryAccessService>().Bind(context);
+    try
+    {
+        await ServerRequestGuard.RequireApprovalAsync(context, context.RequestServices.GetRequiredService<AdministrationApprovalStore>());
+        if (context.User.Identity?.IsAuthenticated == true && context.Request.Path.StartsWithSegments("/api/v1/streams"))
+        {
+            var limits = context.RequestServices.GetRequiredService<ServerConfigurationStore>().Current;
+            using var lease = context.RequestServices.GetRequiredService<ActiveStreamRegistry>().Enter(
+                context.User.RequireUserId(), context.User.RequireSessionId(), limits.GlobalStreamLimit, limits.UserStreamLimit, context.RequestAborted);
+            context.RequestAborted = lease.Token;
+            await next(context);
+        }
+        else await next(context);
+        if (context.Items["Aurelia.AdministrationApproved"] is true && context.Response.StatusCode < 400)
+            context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("owner_change_completed", "information", context.User.RequireUserId(), context.Response.StatusCode);
+    }
+    catch (AccountException exception) when (!context.Response.HasStarted)
+    {
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(exception.Code, "warning", context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
+        context.Response.StatusCode = exception.StatusCode;
+        if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = "60";
+        await context.Response.WriteAsJsonAsync(new ApiProblem(exception.Code, exception.Message));
+    }
+    catch (InvalidDataException) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = 400;
+        await context.Response.WriteAsJsonAsync(new ApiProblem("invalid_server_data", "The operation data could not be validated. Active server data was not replaced."));
+    }
+    catch (IOException) when (!context.Response.HasStarted && context.Request.Path.StartsWithSegments("/api/v1/server"))
+    {
+        context.Response.StatusCode = 507;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("server_storage_operation_failed", "error");
+        await context.Response.WriteAsJsonAsync(new ApiProblem("server_storage_unavailable", "The storage operation failed. Check available disk space and permissions."));
+    }
+});
 app.MapAureliaApi();
+app.MapServerManagement();
 
-ServerInstanceLock? instanceLock = null;
 try
 {
-    if (!app.Environment.IsEnvironment("Testing"))
-    {
-        instanceLock = ServerInstanceLock.Acquire(runtime.DataDirectory);
-    }
-
-    await app.Services.GetRequiredService<DatabaseBackupService>()
-        .RecoverPendingRestoreAsync(CancellationToken.None);
-
     await DatabaseInitializer.InitializeAsync(app.Services, CancellationToken.None);
 
     if (runtime.LanAccessEnabled)
@@ -247,6 +345,10 @@ finally
 {
     instanceLock?.Dispose();
 }
+
+ServerInstanceLock? appInstanceLock() => builder.Environment.IsEnvironment("Testing")
+    ? null
+    : ServerInstanceLock.Acquire(runtime.DataDirectory);
 
 public partial class Program
 {

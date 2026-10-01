@@ -11,7 +11,7 @@ public sealed class MetadataService(
     ITmdbClient tmdb,
     MetadataJobScheduler scheduler,
     ArtworkStore artworkStore,
-    MediaSearchIndexService searchIndex)
+    ServerConfigurationStore configuration)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -59,14 +59,22 @@ public sealed class MetadataService(
         RequireEnabled();
         var libraryId = request.LibraryId;
         var mediaId = request.MediaId;
+        if (database.AccessUserId != null && !database.AccessIsOwner && libraryId == null && mediaId == null)
+            throw new MetadataException("owner_required", "Select one of your shared libraries. Only an owner may refresh the entire server.", 403);
         if (libraryId.HasValue && !await database.LibraryRoots.AnyAsync(item => item.Id == libraryId, cancellationToken))
             throw NotFound("library_not_found", "The storage location was not found.");
         if (mediaId.HasValue && !await database.MediaItems.AnyAsync(item => item.Id == mediaId, cancellationToken))
             throw NotFound("media_not_found", "The media item was not found.");
         if (request.Mode == MetadataJobMode.SingleItem && !mediaId.HasValue)
             throw new MetadataException("metadata_item_required", "Single-item metadata refresh requires a media ID.", StatusCodes.Status400BadRequest);
-        if (await database.MetadataJobs.AnyAsync(job => job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running, cancellationToken))
-            throw new MetadataException("metadata_job_active", "A metadata job is already running.", StatusCodes.Status409Conflict);
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        var duplicate = await database.MetadataJobs.AsNoTracking().FirstOrDefaultAsync(job =>
+            (job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running)
+            && job.LibraryRootId == libraryId && job.MediaItemId == mediaId && job.Mode == request.Mode, cancellationToken);
+        if (duplicate is not null) return ToSummary(duplicate);
+        if (await database.MetadataJobs.IgnoreQueryFilters().CountAsync(job => job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running, cancellationToken)
+            >= configuration.Current.JobQueueLimit)
+            throw new MetadataException("job_queue_full", "The metadata queue is full. Wait for existing jobs to finish.", 409);
 
         var job = new MetadataJob
         {
@@ -79,6 +87,7 @@ public sealed class MetadataService(
         };
         database.MetadataJobs.Add(job);
         await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         scheduler.Pulse();
         return ToSummary(job);
     }
@@ -86,6 +95,14 @@ public sealed class MetadataService(
     public async Task<MetadataJobSummary> GetJobAsync(Guid id, CancellationToken cancellationToken) =>
         ToSummary(await database.MetadataJobs.AsNoTracking().SingleOrDefaultAsync(job => job.Id == id, cancellationToken)
             ?? throw NotFound("metadata_job_not_found", "The metadata job was not found."));
+    public async Task<MetadataJobSummary> RetryJobAsync(Guid id, CancellationToken token)
+    {
+        var job = await database.MetadataJobs.AsNoTracking().SingleOrDefaultAsync(value => value.Id == id, token)
+            ?? throw NotFound("metadata_job_not_found", "The metadata job was not found.");
+        if (job.State is not MetadataJobState.Failed and not MetadataJobState.Interrupted and not MetadataJobState.Cancelled)
+            throw new MetadataException("job_not_retryable", "Only a failed, interrupted or cancelled job can be retried.", 409);
+        return await StartAsync(new StartMetadataJobRequest(job.Mode, job.LibraryRootId, job.MediaItemId), token);
+    }
 
     public async Task<IReadOnlyList<MetadataJobSummary>> ListJobsAsync(
         bool activeOnly,
@@ -149,7 +166,6 @@ public sealed class MetadataService(
         // metadata job does. Previously only the series record was updated, so
         // choosing a TV result from the review queue left its episodes unmatched.
         await ApplyEpisodesAsync(item, provider, configuration, cancellationToken);
-        await searchIndex.RebuildAsync(cancellationToken);
         return MetadataPresentation.ToSummary(item);
     }
 
@@ -179,7 +195,6 @@ public sealed class MetadataService(
         foreach (var field in request.ClearFields ?? []) ClearField(metadata, field);
         metadata.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
-        await searchIndex.RebuildAsync(cancellationToken);
         return MetadataPresentation.ToSummary(item);
     }
 
@@ -198,7 +213,6 @@ public sealed class MetadataService(
             item.Metadata.UpdatedAt = DateTimeOffset.UtcNow;
             await database.SaveChangesAsync(cancellationToken);
         }
-        await searchIndex.RebuildAsync(cancellationToken);
         return MetadataPresentation.ToSummary(item);
     }
 

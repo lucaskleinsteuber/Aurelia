@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Reflection;
 using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
 using Aurelia.Server.Data;
@@ -37,7 +36,7 @@ public static class ApiEndpointMappings
             .RequireAuthorization()
             .RequireRateLimiting("pairing");
 
-        var users = api.MapGroup("/users").RequireAuthorization("Administrator");
+        var users = api.MapGroup("/users").RequireAuthorization("Owner");
         users.MapGet(string.Empty, ListUsersAsync);
         users.MapPost(string.Empty, CreateUserAsync);
         users.MapPut("/{userId:guid}/role", ChangeUserRoleAsync);
@@ -77,10 +76,10 @@ public static class ApiEndpointMappings
         catalog.MapGet("/items/{mediaId:guid}", GetCatalogDetailAsync);
         catalog.MapGet("/search", SearchCatalogAsync);
         catalog.MapPost("/search/rebuild", RebuildCatalogSearchAsync)
-            .RequireAuthorization("Administrator");
+            .RequireAuthorization("Owner");
         catalog.MapGet("/collections", ListCollectionsAsync);
 
-        var collections = api.MapGroup("/collections").RequireAuthorization("Administrator");
+        var collections = api.MapGroup("/collections").RequireAuthorization("Owner");
         collections.MapPost(string.Empty, CreateCollectionAsync);
         collections.MapPut("/{collectionId:guid}", UpdateCollectionAsync);
         collections.MapDelete("/{collectionId:guid}", DeleteCollectionAsync);
@@ -96,7 +95,7 @@ public static class ApiEndpointMappings
         metadata.MapGet("/jobs/{jobId:guid}", GetMetadataJobAsync);
         metadata.MapDelete("/jobs/{jobId:guid}", CancelMetadataJobAsync);
         metadata.MapGet("/reviews", ListMetadataReviewsAsync);
-        metadata.MapPost("/artwork/prune", PruneArtworkAsync);
+        metadata.MapPost("/artwork/prune", PruneArtworkAsync).RequireAuthorization("Owner");
 
         var media = api.MapGroup("/media").RequireAuthorization();
         media.MapPost("/{mediaId:guid}/playback", CreatePlaybackAsync);
@@ -129,7 +128,7 @@ public static class ApiEndpointMappings
         AureliaDbContext database,
         CancellationToken cancellationToken)
     {
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+        var version = ServerProductVersion.Current;
         try
         {
             var canConnect = await database.Database.CanConnectAsync(cancellationToken);
@@ -161,7 +160,7 @@ public static class ApiEndpointMappings
             .AsNoTracking()
             .SingleAsync(candidate => candidate.Id == 1, cancellationToken);
         var isSetup = await database.Users.AnyAsync(cancellationToken);
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+        var version = ServerProductVersion.Current;
         return Results.Ok(new ServerInfoResponse(
             identity.ServerId,
             runtime.ServerName,
@@ -224,7 +223,7 @@ public static class ApiEndpointMappings
         AccountService accounts,
         CancellationToken cancellationToken)
     {
-        if (!IsLoopback(context, environment))
+        if (!IsLoopback(context, environment) && !context.Request.IsHttps)
         {
             return Task.FromResult(Problem(
                 "local_login_required",
@@ -824,7 +823,7 @@ public static class ApiEndpointMappings
                 userId,
                 isAdministrator,
                 context.RequestAborted);
-            var tag = $"\"revision-{cursor}\"";
+            var tag = $"\"revision-{userId:N}-{cursor}\"";
             context.Response.Headers.ETag = tag;
             var matches = context.Request.Headers.IfNoneMatch.ToString()
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

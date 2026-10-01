@@ -21,15 +21,26 @@ secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
 owner_password='native-host-smoke-password-123!'
 helper_pid=''
 application_pid=''
+conflict_pid=''
 bootstrap_root="$runtime_root/Host"
 rendezvous="$bootstrap_root/rendezvous-$run_id.json"
 configuration=''
 secret_pipe=''
+last_phase='bootstrap'
+cleanup_finished=false
 
 cleanup() {
-  exit_code=$?
+  local exit_code=${1:-$?}
+  [[ "$cleanup_finished" == true ]] && return "$exit_code"
+  cleanup_finished=true
   set +e
+  [[ -n "$conflict_pid" ]] && kill "$conflict_pid" 2>/dev/null || true
   if [[ "$exit_code" -ne 0 ]]; then
+    print -r -- "Failed phase: $last_phase" >>"$report"
+    for response_path in "$runtime_root"/*.json(N); do
+      jq -c 'select(type == "object" and (.code | type) == "string" and (.message | type) == "string") | {code,message}' \
+        "$response_path" >>"$report" 2>/dev/null || true
+    done
     if [[ -f "$runtime_root/helper-output.log" ]]; then
       cp "$runtime_root/helper-output.log" "$log_root/Aurelia-NativeHost-$run_id-helper.log"
     fi
@@ -58,7 +69,14 @@ cleanup() {
   fi
   return "$exit_code"
 }
-trap cleanup EXIT
+trap 'cleanup $?' EXIT
+# zsh ERR_EXIT inside a function does not invoke a top-level EXIT trap.
+# Clean only this run's resources before preserving the failing status.
+TRAPZERR() {
+  local failure_code=$?
+  cleanup "$failure_code"
+  exit "$failure_code"
+}
 
 fail() {
   if [[ -f "$runtime_root/helper-output.log" ]]; then
@@ -95,6 +113,7 @@ wait_for_state() {
 }
 
 mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root"
+chmod 700 "$runtime_root"
 mkdir -m 700 "$bootstrap_root"
 [[ -d "$source_candidate" ]] || fail "The Build $build_number app candidate does not exist."
 /usr/bin/ditto "$source_candidate" "$candidate"
@@ -109,14 +128,15 @@ print -r -- "Aurelia Build $build_number native host smoke test" >"$report"
 print -r -- "Run: $run_id" >>"$report"
 
 lan_port="$(ruby -rsocket -e 'server = TCPServer.new("127.0.0.1", 0); puts server.addr[1]; server.close')"
-open -na "$candidate" --args -AureliaOperatingMode client
+open -n -g --env AURELIA_PREFLIGHT_TEST=1 --env "AURELIA_DATA_DIR=$data_root" \
+  "$candidate" --args -AureliaOperatingMode client
 for _ in {1..50}; do
   application_pid="$(pgrep -f "^$application( |$)" | tail -1 || true)"
   [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null && break
   sleep 0.1
 done
 [[ -n "$application_pid" ]] && kill -0 "$application_pid" 2>/dev/null \
-  || fail "The parent Aurelia app did not start through Launch Services."
+  || fail "The isolated parent Aurelia app did not start through Launch Services."
 
 mkdir -p "$bootstrap_root"
 configuration="$bootstrap_root/launch-$application_pid.json"
@@ -157,11 +177,19 @@ wrong_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
 
 bootstrap="$(jq -r '.bootstrapToken // empty' "$runtime_root/status.json")"
 [[ ${#bootstrap} -ge 43 ]] || fail "The helper did not provide a one-time bootstrap token."
+configure_body="$(jq -cn \
+  --arg serverName 'Aurelia Host Smoke' --argjson lanHttpsPort "$lan_port" \
+  '{version:1,serverName:$serverName,lanAccessEnabled:true,lanHttpsPort:$lanHttpsPort}')"
+last_phase='initial configuration'
+curl --silent --show-error --fail-with-body \
+  --request POST --header 'Content-Type: application/json' --data "$configure_body" \
+  "$control_base/configure" >"$runtime_root/configure-response.json"
 setup_body="$(jq -cn \
   --arg username 'host-smoke-owner' \
   --arg password "$owner_password" \
   --arg deviceName 'Native Host Smoke' \
   '{username:$username,password:$password,deviceName:$deviceName}')"
+last_phase='owner setup'
 curl --silent --show-error --fail-with-body \
   --header 'Content-Type: application/json' \
   --header "X-Aurelia-Bootstrap-Token: $bootstrap" \
@@ -170,13 +198,7 @@ curl --silent --show-error --fail-with-body \
 
 token="$(jq -r '.token // empty' "$runtime_root/authentication.json")"
 [[ ${#token} -ge 43 ]] || fail "Owner setup did not return a device token."
-configure_body="$(jq -cn \
-  --arg serverName 'Aurelia Host Smoke' \
-  --argjson lanHttpsPort "$lan_port" \
-  '{version:1,serverName:$serverName,lanAccessEnabled:true,lanHttpsPort:$lanHttpsPort}')"
-curl --silent --show-error --fail-with-body \
-  --request POST --header 'Content-Type: application/json' --data "$configure_body" \
-  "$control_base/configure" >/dev/null
+last_phase='LAN restart'
 curl --silent --show-error --fail-with-body --request POST \
   "$control_base/restart" >/dev/null
 wait_for_state running || fail "The helper did not restart the server with LAN HTTPS enabled."
@@ -197,29 +219,48 @@ observed_fingerprint="$( { openssl s_client -connect "127.0.0.1:$lan_port" -serv
   | shasum -a 256 | awk '{print toupper($1)}')"
 [[ -n "$reported_fingerprint" && "$reported_fingerprint" == "$observed_fingerprint" ]] \
   || fail "The advertised TLS public-key fingerprint did not match the live certificate."
+expected_fingerprint="$(openssl x509 -in "$data_root/server-certificate.pem" -pubkey -noout \
+  | openssl pkey -pubin -outform DER | shasum -a 256 | awk '{print toupper($1)}')"
+[[ "$reported_fingerprint" == "$expected_fingerprint" ]] || fail "The live certificate differs from the private synthetic server identity."
+curl_pin="sha256//$(openssl x509 -in "$data_root/server-certificate.pem" -pubkey -noout \
+  | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)"
 
 curl --silent --show-error --fail-with-body --insecure \
+  --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/auth/me" >"$runtime_root/me.json"
 [[ "$(jq -r '.role // empty' "$runtime_root/me.json")" == owner ]] \
   || fail "The authenticated owner identity was not returned by /auth/me."
 
 fixture="$runtime_root/Fixture Movies"
+last_phase='synthetic library'
 mkdir -p "$fixture"
 dd if=/dev/zero of="$fixture/Host Smoke Movie 2026.mkv" bs=1024 count=1 status=none
 library_body="$(jq -cn --arg path "$fixture" \
   '{path:$path,kind:"automatic"}')"
+approval_body="$(jq -cn --arg password "$owner_password" --arg action 'POST /api/v1/libraries' \
+  --arg payloadHash "$(print -rn -- "$library_body" | shasum -a 256 | awk '{print $1}')" \
+  '{password:$password,action:$action,payloadHash:$payloadHash}')"
 curl --silent --show-error --fail-with-body --insecure \
+  --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+  --data "$approval_body" "$https_base/api/v1/server/approval" >"$runtime_root/approval.json"
+approval="$(jq -r '.token' "$runtime_root/approval.json")"
+curl --silent --show-error --fail-with-body --insecure \
+  --pinnedpubkey "$curl_pin" \
+  --header "X-Aurelia-Approval: $approval" \
   --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
   --data "$library_body" "$https_base/api/v1/libraries" >"$runtime_root/library.json"
 library_id="$(jq -r '.id // empty' "$runtime_root/library.json")"
 [[ -n "$library_id" ]] || fail "The test library was not created."
 curl --silent --show-error --fail-with-body --insecure --request POST \
+  --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/libraries/$library_id/scans" >"$runtime_root/scan.json"
 scan_id="$(jq -r '.id // empty' "$runtime_root/scan.json")"
 for _ in {1..100}; do
   curl --silent --show-error --fail-with-body --insecure \
+    --pinnedpubkey "$curl_pin" \
     --header "Authorization: Bearer $token" \
     "$https_base/api/v1/scans/$scan_id" >"$runtime_root/scan.json"
   scan_state="$(jq -r '.state // empty' "$runtime_root/scan.json")"
@@ -232,32 +273,143 @@ done
   || fail "The bounded test scan timed out."
 
 curl --silent --show-error --fail-with-body --insecure \
+  --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/catalog/items?kind=movie&offset=0&limit=10" \
   >"$runtime_root/catalog.json"
 media_id="$(jq -r '.items[0].id // empty' "$runtime_root/catalog.json")"
 [[ -n "$media_id" ]] || fail "The bounded test movie did not appear in the presentation catalog."
 curl --silent --show-error --fail-with-body --insecure --request POST \
+  --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/media/$media_id/playback" >"$runtime_root/playback.json"
 stream_path="$(jq -r '.streamPath // empty' "$runtime_root/playback.json")"
 [[ "$stream_path" == /api/v1/streams/* ]] || fail "Direct Play did not return a relative ticket URL."
 range_status="$(curl --silent --insecure --output "$runtime_root/range.bin" \
-  --write-out '%{http_code}' --header 'Range: bytes=0-63' "$https_base$stream_path")"
+  --pinnedpubkey "$curl_pin" \
+  --write-out '%{http_code}' --header "Authorization: Bearer $token" --header 'Range: bytes=0-63' "$https_base$stream_path")"
 [[ "$range_status" == 206 ]] || fail "Direct Play did not honor the bounded byte range."
 [[ "$(stat -f '%z' "$runtime_root/range.bin")" == 64 ]] \
   || fail "Direct Play returned an unexpected byte count."
 
 curl --silent --show-error --fail-with-body --insecure --request POST \
+  --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/auth/pairings" >"$runtime_root/pairing.json"
 [[ "$(jq -r '.code // empty | length' "$runtime_root/pairing.json")" == 8 ]] \
   || fail "The server did not create an eight-digit pairing code."
 curl --silent --show-error --fail-with-body --insecure \
+  --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
   "$https_base/api/v1/auth/sessions" >"$runtime_root/sessions.json"
 [[ "$(jq 'length' "$runtime_root/sessions.json")" -ge 1 ]] \
   || fail "The owner session was not listed."
+
+approved_post() {
+  local action_path=$1 request_body=$2 approval_payload approval_token
+  last_phase="password confirmation: $action_path"
+  approval_payload="$(jq -cn --arg password "$owner_password" --arg action "POST $action_path" \
+    --arg payloadHash "$(print -rn -- "$request_body" | shasum -a 256 | awk '{print toupper($1)}')" \
+    '{password:$password,action:$action,payloadHash:$payloadHash}')"
+  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+    --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+    --data "$approval_payload" "$https_base/api/v1/server/approval" >"$runtime_root/operation-approval.json"
+  approval_token="$(jq -r '.token' "$runtime_root/operation-approval.json")"
+  last_phase="operation: $action_path"
+  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+    --header "Authorization: Bearer $token" --header "X-Aurelia-Approval: $approval_token" \
+    --header 'Content-Type: application/json' --data "$request_body" "$https_base$action_path"
+}
+
+wait_for_network() {
+  local expected_name=$1
+  for _ in {1..150}; do
+    if curl --silent --insecure --pinnedpubkey "$curl_pin" --max-time 1 \
+      "$https_base/api/v1/server/info" >"$runtime_root/server-info.json" 2>/dev/null \
+      && [[ "$(jq -r '.name // empty' "$runtime_root/server-info.json")" == "$expected_name" ]]; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
+
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" "$https_base/api/v1/server/settings" >"$runtime_root/settings.json"
+trial_port="$(ruby -rsocket -e 'server = TCPServer.new("127.0.0.1", 0); puts server.addr[1]; server.close')"
+trial_body="$(jq -c --argjson port "$trial_port" \
+  '{settings:(.stored | .serverName="Confirmed Host Trial" | .lanHttpsPort=$port | .bonjourEnabled=false),confirmRemoteAccessDisabled:false}' \
+  "$runtime_root/settings.json")"
+approved_post /api/v1/server/operations/network "$trial_body" >"$runtime_root/trial.json"
+trial_id="$(jq -r '.id' "$runtime_root/trial.json")"
+https_base="https://127.0.0.1:$trial_port"
+wait_for_network 'Confirmed Host Trial' || fail "The new network configuration did not become reachable."
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" --request POST \
+  --header "Authorization: Bearer $token" "$https_base/api/v1/server/operations/$trial_id/confirm" >/dev/null
+[[ "$(jq -r '.state' "$data_root/host-operation.json")" == completed ]] || fail "The network trial was not confirmed."
+[[ "$(jq -r '.publicKeyFingerprint' "$runtime_root/server-info.json")" == "$reported_fingerprint" ]] \
+  || fail "A network change replaced the TLS identity."
+
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" "$https_base/api/v1/server/settings" >"$runtime_root/settings.json"
+trial_body="$(jq -c '{settings:(.stored | .serverName="Unconfirmed Host Trial"),confirmRemoteAccessDisabled:false}' "$runtime_root/settings.json")"
+approved_post /api/v1/server/operations/network "$trial_body" >"$runtime_root/trial.json"
+wait_for_network 'Unconfirmed Host Trial' || fail "The unconfirmed network trial was not applied."
+for _ in {1..140}; do
+  [[ "$(jq -r '.state' "$data_root/host-operation.json")" == rolledBack ]] && break
+  sleep 0.5
+done
+[[ "$(jq -r '.state' "$data_root/host-operation.json")" == rolledBack ]] || fail "The unconfirmed network did not roll back after 60 seconds."
+wait_for_network 'Confirmed Host Trial' || fail "The previous network did not return after rollback."
+
+approved_post /api/v1/server/backups/export '{"passphrase":"isolated full backup passphrase"}' >"$runtime_root/export.json"
+export_id="$(jq -r '.id' "$runtime_root/export.json")"
+[[ "$(jq -r '.includesMedia' "$runtime_root/export.json")" == false ]] || fail "Full backup unexpectedly included media."
+restore_body="$(jq -cn --arg uploadId "$export_id" \
+  '{uploadId:$uploadId,passphrase:"isolated full backup passphrase",revokeAllSessions:true,acceptDifferentServerIdentity:false}')"
+approved_post /api/v1/server/backups/restore/prepare "$restore_body" >"$runtime_root/prepared.json"
+restore_id="$(jq -r '.id' "$runtime_root/prepared.json")"
+approved_post "/api/v1/server/backups/restore/$restore_id/apply" '' >"$runtime_root/restore-operation.json"
+for _ in {1..120}; do
+  operation_state="$(jq -r '.state // empty' "$data_root/host-operation.json")"
+  [[ "$operation_state" == completed ]] && break
+  [[ "$operation_state" == failed ]] && fail "The prepared full restore failed in the native host."
+  sleep 0.25
+done
+[[ "$(jq -r '.state' "$data_root/host-operation.json")" == completed ]] || fail "The native full restore timed out."
+wait_for_network 'Confirmed Host Trial' || fail "The restored server was not reachable."
+revoked_status="$(curl --silent --insecure --pinnedpubkey "$curl_pin" --output /dev/null --write-out '%{http_code}' \
+  --header "Authorization: Bearer $token" "$https_base/api/v1/auth/me")"
+[[ "$revoked_status" == 401 ]] || fail "Restore made the old device token valid again."
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" --header 'Content-Type: application/json' \
+  --data "$setup_body" "$https_base/api/v1/auth/login" >"$runtime_root/restored-authentication.json"
+token="$(jq -r '.token' "$runtime_root/restored-authentication.json")"
+[[ ${#token} -ge 43 ]] || fail "The owner could not sign in after restore."
+[[ "$(jq -r '.publicKeyFingerprint' "$runtime_root/server-info.json")" == "$reported_fingerprint" ]] || fail "Restore lost the existing TLS identity."
+[[ "$(sqlite3 "$data_root/aurelia.db" 'SELECT count(*) FROM LibraryRoots;')" == 1 ]] || fail "The isolated library was not restored."
+
+# A deliberately occupied HTTPS port is isolated to this test's child process.
+ruby -rsocket -e 'server=TCPServer.new("0.0.0.0",0); STDOUT.sync=true; puts server.addr[1]; sleep 180' >"$runtime_root/conflict-port.txt" &
+conflict_pid=$!
+for _ in {1..30}; do
+  [[ -s "$runtime_root/conflict-port.txt" ]] && break
+  sleep 0.1
+done
+conflict_port="$(<"$runtime_root/conflict-port.txt")"
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" "$https_base/api/v1/server/settings" >"$runtime_root/settings.json"
+trial_body="$(jq -c --argjson port "$conflict_port" \
+  '{settings:(.stored | .lanHttpsPort=$port),confirmRemoteAccessDisabled:false}' "$runtime_root/settings.json")"
+approved_post /api/v1/server/operations/network "$trial_body" >"$runtime_root/trial.json"
+for _ in {1..140}; do
+  [[ "$(jq -r '.state' "$data_root/host-operation.json")" == rolledBack ]] && break
+  sleep 0.5
+done
+[[ "$(jq -r '.state' "$data_root/host-operation.json")" == rolledBack ]] || fail "The occupied-port trial did not roll back."
+wait_for_network 'Confirmed Host Trial' || fail "The host did not recover from the HTTPS port conflict."
+kill "$conflict_pid"
+wait "$conflict_pid" 2>/dev/null || true
+conflict_pid=''
 
 curl --silent --show-error --fail-with-body --request POST \
   "$control_base/shutdown" >/dev/null
@@ -332,8 +484,12 @@ fi
   print -r -- "PASS: live TLS public-key fingerprint matched server identity"
   print -r -- "PASS: /auth/me, library creation, bounded scan, pairing, and sessions"
   print -r -- "PASS: authenticated Direct Play returned the requested 64-byte original-file range"
+  print -r -- "PASS: confirmed network change retained TLS identity and device sessions"
+  print -r -- "PASS: unconfirmed network change rolled back after 60 seconds"
+  print -r -- "PASS: native encrypted restore retained library/TLS identity and revoked old tokens"
+  print -r -- "PASS: occupied HTTPS port rolled back to the reachable previous network"
   print -r -- "PASS: graceful helper/server shutdown"
-  print -r -- "PASS: helper stopped when its PID-bound parent app disappeared"
+  print -r -- "PASS: helper stopped when its isolated PID-bound parent app disappeared"
   print -r -- "PASS: SQLite quick_check and integrity_check; foreign keys clean"
   print -r -- "PASS: bounded logs contain no tested secrets"
 } >>"$report"

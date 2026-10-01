@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F80000000000000000000001 = {isa = PBXBuildFile; fileRef = F80000000000000000000011; };
+		F80000000000000000000002 = {isa = PBXBuildFile; fileRef = F80000000000000000000012; };
+		F80000000000000000000003 = {isa = PBXBuildFile; fileRef = F80000000000000000000013; };
 		D50000000000000000000001 /* VLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; };
 		D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000011 /* VLCKit-COPYING.txt */; };
@@ -40,6 +43,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		F80000000000000000000020 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = Contents/Library/LaunchAgents; dstSubfolderSpec = 1; files = (F80000000000000000000001, F80000000000000000000002, ); name = "Embed Launch Agents"; runOnlyForDeploymentPostprocessing = 0; };
 		D50000000000000000000020 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -65,6 +69,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F80000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.lucas.aurelia.media.host.background.plist; sourceTree = "<group>"; };
+		F80000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.lucas.aurelia.media.host.login.plist; sourceTree = "<group>"; };
+		F80000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aurelia/Hosting/HostServiceSettings.swift; sourceTree = "<group>"; };
 		A40000000000000000000001 /* Aurelia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Aurelia.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40000000000000000000001 /* AureliaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AureliaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40000000000000000000002 /* AureliaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AureliaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -99,6 +106,7 @@
 			isa = PBXGroup;
 			children = (
 				E7000000000000000000000B /* HostLaunchSecurity.swift */,
+				F80000000000000000000013,
 				E7000000000000000000000D /* ServerDataMigrator.swift */,
 				A40000000000000000000002 /* Aurelia */,
 				E70000000000000000000006 /* AureliaServerHost */,
@@ -124,6 +132,8 @@
 		C40000000000000000000004 /* Configuration */ = {
 			isa = PBXGroup;
 			children = (
+				F80000000000000000000011,
+				F80000000000000000000012,
 				C40000000000000000000001 /* Aurelia-Info.plist */,
 				E70000000000000000000005 /* AureliaServerHost-Info.plist */,
 				C40000000000000000000002 /* Aurelia.entitlements */,
@@ -153,6 +163,7 @@
 				A40000000000000000000003 /* Frameworks */,
 				D50000000000000000000020 /* Embed Frameworks */,
 				E70000000000000000000004 /* Embed Server Host */,
+				F80000000000000000000020 /* Embed Launch Agents */,
 				A40000000000000000000009 /* Resources */,
 			);
 			buildRules = ();
@@ -262,7 +273,7 @@
 		A40000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		E70000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (E7000000000000000000000A /* HostLaunchSecurity.swift in Sources */, E7000000000000000000000C /* ServerDataMigrator.swift in Sources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		E70000000000000000000008 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (E7000000000000000000000A /* HostLaunchSecurity.swift in Sources */, E7000000000000000000000C /* ServerDataMigrator.swift in Sources */, F80000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

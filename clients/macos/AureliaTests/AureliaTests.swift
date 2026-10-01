@@ -5,6 +5,44 @@ import Testing
 
 struct AureliaTests {
   @Test
+  func hostingDefaultsDoNotOptIntoBackgroundOrLoginServices() throws {
+    let settings = HostServiceSettings()
+    #expect(!settings.backgroundEnabled)
+    #expect(!settings.startAtLogin)
+    #expect(!settings.preventIdleSleep)
+    #expect(settings.controlSecret.isEmpty)
+    let request = HostServiceRequest(
+      id: UUID(), backgroundEnabled: false, startAtLogin: false, preventIdleSleep: true)
+    let data = try JSONEncoder().encode(request)
+    #expect(try JSONDecoder().decode(HostServiceRequest.self, from: data) == request)
+    #expect(String(data: data, encoding: .utf8)?.contains("controlSecret") == false)
+  }
+
+  @Test
+  func administrationApprovalCoversSensitiveChangesButNotTemporaryTransferCleanup() {
+    #expect(
+      APIClient.requiresAdministrationApproval(path: "/API/V1/SERVER/SETTINGS/", method: "PUT"))
+    #expect(
+      APIClient.requiresAdministrationApproval(path: "/api/v1/users/123/access", method: "PUT"))
+    #expect(
+      APIClient.requiresAdministrationApproval(
+        path: "/api/v1/server/sessions/123", method: "DELETE"))
+    #expect(
+      !APIClient.requiresAdministrationApproval(path: "/api/v1/auth/sessions/123", method: "DELETE")
+    )
+    #expect(
+      !APIClient.requiresAdministrationApproval(
+        path: "/api/v1/server/backups/uploads/123", method: "PUT"))
+    #expect(
+      !APIClient.requiresAdministrationApproval(
+        path: "/api/v1/server/backups/transfers/123", method: "DELETE"))
+    #expect(
+      !APIClient.requiresAdministrationApproval(
+        path: "/api/v1/server/operations/123/confirm", method: "POST"))
+    #expect(
+      !APIClient.requiresAdministrationApproval(path: "/api/v1/server/settings", method: "GET"))
+  }
+  @Test
   func seriesInformationUsesYearOneCountryAndActualEpisodes() {
     let detail = informationFixture(kind: .series)
     let fields = MediaInformationPresentation.fields(for: detail)
@@ -27,13 +65,6 @@ struct AureliaTests {
         "Runtime", "Release Year", "Genres", "Studio", "Country of Origin",
       ])
     #expect(fields.map(\.value) == ["103 min", "2019", "Drama", "Test Studio", "US"])
-  }
-
-  @Test
-  func sidebarArtworkFollowsScrollAndLeavesTheHero() {
-    #expect(AureliaSidebarArtworkPosition.verticalOffset(contentOffset: -20, topInset: 20) == 0)
-    #expect(AureliaSidebarArtworkPosition.verticalOffset(contentOffset: 180, topInset: 20) == -200)
-    #expect(AureliaSidebarArtworkPosition.verticalOffset(contentOffset: 800, topInset: 20) == -540)
   }
 
   private func informationFixture(kind: MediaKind) -> CatalogDetailPresentation {

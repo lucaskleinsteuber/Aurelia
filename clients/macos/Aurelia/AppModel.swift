@@ -66,6 +66,32 @@ final class AppModel: ObservableObject {
     hasStarted = true
 
     #if DEBUG
+      if Self.uiTestMode == "server-settings" {
+        operatingMode = .client
+        profile = Self.previewOwnerProfile
+        isStarting = false
+        if let path = ProcessInfo.processInfo.environment["AURELIA_SERVER_SETTINGS_RENDER"] {
+          do {
+            let writesDescriptor =
+              ProcessInfo.processInfo.environment["AURELIA_SERVER_SETTINGS_RENDER_STDOUT"] == "1"
+            let destination = try ServerSettingsVisualProbe.validatedOutput(
+              path, allowsEmptyOutputDescriptor: writesDescriptor)
+            let png = try await ServerSettingsVisualProbe.render()
+            if writesDescriptor {
+              // The sandbox can write the output descriptor supplied by Launch
+              // Services without granting access to an external test directory.
+              try FileHandle.standardOutput.write(contentsOf: png)
+            } else {
+              try png.write(to: destination, options: .atomic)
+            }
+            NSApplication.shared.terminate(nil)
+          } catch {
+            fputs("Isolated server settings render failed: \(error.localizedDescription)\n", stderr)
+            exit(2)
+          }
+        }
+        return
+      }
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
         operatingMode = .client
         profile =
@@ -184,6 +210,14 @@ final class AppModel: ObservableObject {
           artworkLimitBytes: 1_073_741_824,
           provider: "TMDB",
           attribution: "This product uses the TMDB API but is not endorsed or certified by TMDB.")
+        isStarting = false
+        return
+      }
+    #endif
+
+    #if DEBUG
+      if Self.isTestProcess && Self.uiTestMode == nil {
+        operatingMode = .client
         isStarting = false
         return
       }
@@ -314,7 +348,13 @@ final class AppModel: ObservableObject {
       await startNativeHost()
       return
     }
-    do { try await serverHost.restart() } catch { errorMessage = error.localizedDescription }
+    do {
+      if let profile {
+        _ = try await APIClient(profile: profile).restartServer()
+      } else {
+        try await serverHost.restart()
+      }
+    } catch { errorMessage = error.localizedDescription }
   }
 
   func completeInitialLibrarySetup() {
@@ -364,7 +404,9 @@ final class AppModel: ObservableObject {
       recentScans = Self.uniqueScans(history).sorted { $0.createdAt > $1.createdAt }
       libraryDiscoveries = try await loadDiscoveries(client: client, libraries: libraries)
       libraryImportReviews = try await loadImportReviews(client: client, libraries: libraries)
-      metadataProvider = try await client.metadataProviderStatus()
+      if profile.user?.role == .owner {
+        metadataProvider = try await client.metadataProviderStatus()
+      }
       startScanPolling()
     } catch { errorMessage = error.localizedDescription }
   }
@@ -507,13 +549,24 @@ final class AppModel: ObservableObject {
   func enrichLibrary() async {
     guard let profile else { return }
     do {
-      metadataJob = try await APIClient(profile: profile).startMetadataJob()
+      let client = APIClient(profile: profile)
+      if profile.user?.role == .owner {
+        metadataJob = try await client.startMetadataJob()
+      } else {
+        // Administrators can request only explicitly shared libraries, never a
+        // server-wide metadata refresh or a change to provider credentials.
+        for library in libraries {
+          metadataJob = try await client.startMetadataJob(libraryId: library.id)
+        }
+      }
       guard let jobID = metadataJob?.id else { return }
       while metadataJob?.state == .queued || metadataJob?.state == .running {
         try await Task.sleep(for: .seconds(1))
         metadataJob = try await APIClient(profile: profile).metadataJob(id: jobID)
       }
-      metadataProvider = try await APIClient(profile: profile).metadataProviderStatus()
+      if profile.user?.role == .owner {
+        metadataProvider = try await client.metadataProviderStatus()
+      }
     } catch { errorMessage = error.localizedDescription }
   }
 
@@ -532,8 +585,46 @@ final class AppModel: ObservableObject {
     scanPollTask?.cancel()
     syncRefreshTask?.cancel()
     await syncController.stop()
-    if operatingMode == .host { await serverHost.stop() }
+    if operatingMode == .host && !serverHost.isBackgroundService { await serverHost.stop() }
     endTerminationProtection()
+  }
+  func saveHostingSettings(_ settings: HostServiceSettings) async throws {
+    guard isLocalHost, profile?.user?.role == .owner else { throw NativeServerHostError.rejected }
+    guard let profile else { throw NativeServerHostError.rejected }
+    let operation = try await APIClient(profile: profile).authorizeHostingChange(settings)
+    let wasBackground = serverHost.isBackgroundService
+    let previous = try HostServiceSettings.load()
+    if wasBackground && (!settings.backgroundEnabled || previous.agentName != settings.agentName) {
+      // Release the old independent host before unregistering its agent; report
+      // completion through the new host, not a control channel macOS just removed.
+      await serverHost.stop()
+      _ = try await BackgroundHostingController.save(settings)
+      await startNativeHost()
+      guard hostSnapshot.state != .failed else { throw NativeServerHostError.couldNotLaunch }
+      try await serverHost.hostingSettingsApplied(
+        operationID: operation.id,
+        permitted: !settings.backgroundEnabled || BackgroundHostingController.permitted)
+      return
+    }
+    let permitted = try await BackgroundHostingController.save(settings)
+    try await serverHost.hostingSettingsApplied(
+      operationID: operation.id, permitted: !settings.backgroundEnabled || permitted)
+    if settings.backgroundEnabled && permitted {
+      if !serverHost.isBackgroundService { try await serverHost.handoffToBackground() }
+      await startNativeHost()
+    } else if !settings.backgroundEnabled {
+      await serverHost.stop()
+      await startNativeHost()
+    }
+  }
+
+  func acceptConfirmedNetwork(profile updated: StoredServerProfile) throws {
+    guard profile?.serverId == updated.serverId, profile?.sessionId == updated.sessionId,
+      profile?.publicKeyFingerprint == updated.publicKeyFingerprint
+    else { throw APIClientError.invalidResponse }
+    try store.save(updated)
+    profile = updated
+    startSync()
   }
 
   func inspect(address: String) async {
@@ -946,6 +1037,7 @@ final class AppModel: ObservableObject {
   }
 
   private func persistOperatingMode(explicit: Bool) {
+    guard !Self.isTestProcess else { return }
     guard let operatingMode else { return }
     UserDefaults.standard.set(operatingMode.rawValue, forKey: Self.operatingModeKey)
     if explicit {
@@ -1100,6 +1192,20 @@ final class AppModel: ObservableObject {
   }
 
   #if DEBUG
+    static func serverSettingsRenderPreview() -> AppModel {
+      let model = AppModel(store: InMemoryServerProfileStore())
+      model.hasStarted = true
+      model.operatingMode = .client
+      let original = previewOwnerProfile
+      model.profile = StoredServerProfile(
+        serverId: original.serverId, name: original.name,
+        baseURL: URL(string: "https://server-settings-preview.invalid")!,
+        publicKeyFingerprint: original.publicKeyFingerprint, token: original.token,
+        sessionId: original.sessionId, expiresAt: original.expiresAt, user: original.user)
+      model.isStarting = false
+      return model
+    }
+
     private static let previewMovieID = UUID(
       uuidString: "10000000-0000-0000-0000-000000000001")!
     private static let previewSeriesID = UUID(
@@ -1317,11 +1423,7 @@ final class AppModel: ObservableObject {
   }
 
   private static var defaultStore: any ServerProfileStore {
-    #if DEBUG
-      if isTestProcess {
-        return InMemoryServerProfileStore()
-      }
-    #endif
+    if isTestProcess { return InMemoryServerProfileStore() }
     return KeychainServerStore()
   }
 
@@ -1329,8 +1431,10 @@ final class AppModel: ObservableObject {
     #if DEBUG
       uiTestMode != nil
         || ProcessInfo.processInfo.environment["AURELIA_RUNNING_TESTS"] == "1"
+        || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        || NSClassFromString("XCTestCase") != nil
     #else
-      false
+      NativePreflightIsolation.isActive
     #endif
   }
 }

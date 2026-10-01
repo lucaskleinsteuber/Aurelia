@@ -279,8 +279,6 @@ public sealed partial class LibraryScanWorker(
             request.TargetRelativePath,
             cancellationToken);
         await RebuildLocalCollectionsAsync(database, library, cancellationToken);
-        await scope.ServiceProvider.GetRequiredService<MediaSearchIndexService>()
-            .RebuildAsync(cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
         if (metadataSettings.Load().Enabled
             && !await database.MetadataJobs.AnyAsync(

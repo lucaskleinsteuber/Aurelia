@@ -41,12 +41,22 @@ public sealed class DeviceTokenAuthenticationHandler(
             .SingleOrDefaultAsync(
                 candidate => candidate.TokenHash == tokenHash
                     && candidate.RevokedAt == null
-                    && candidate.ExpiresAt > now,
+                    && candidate.ExpiresAt > now
+                    && candidate.User.IsEnabled,
                 Context.RequestAborted);
 
         if (session is null)
         {
             return AuthenticateResult.Fail("Invalid or expired device token.");
+        }
+
+        if (session.LastSeenAt <= now.AddMinutes(-1))
+        {
+            var cutoff = now.AddMinutes(-1);
+            await database.DeviceSessions.Where(candidate => candidate.Id == session.Id
+                    && candidate.LastSeenAt <= cutoff && candidate.RevokedAt == null)
+                .ExecuteUpdateAsync(update => update.SetProperty(candidate => candidate.LastSeenAt, now),
+                    Context.RequestAborted);
         }
 
         var claims = new[]

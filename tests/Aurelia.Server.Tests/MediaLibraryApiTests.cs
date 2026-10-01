@@ -34,7 +34,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        "/api/v1/libraries",
                        userLogin.Token))
-            using (var forbiddenResponse = await client.SendAsync(forbiddenRequest))
+            using (var forbiddenResponse = await ApiTestClient.SendAsync(client, forbiddenRequest))
             {
                 Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
             }
@@ -65,7 +65,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        $"/api/v1/catalog/series/{seriesId}",
                        userLogin.Token))
-            using (var detailResponse = await client.SendAsync(detailRequest))
+            using (var detailResponse = await ApiTestClient.SendAsync(client, detailRequest))
             {
                 detailResponse.EnsureSuccessStatusCode();
                 var json = await detailResponse.Content.ReadAsStringAsync();
@@ -118,7 +118,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Delete,
                        $"/api/v1/scans/{waitingScanId}",
                        owner.Token))
-            using (var cancelResponse = await client.SendAsync(cancelWaiting))
+            using (var cancelResponse = await ApiTestClient.SendAsync(client, cancelWaiting))
             {
                 Assert.Equal(HttpStatusCode.NoContent, cancelResponse.StatusCode);
             }
@@ -127,7 +127,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        "/api/v1/catalog/series?limit=0",
                        userLogin.Token))
-            using (var invalidPageResponse = await client.SendAsync(invalidPage))
+            using (var invalidPageResponse = await ApiTestClient.SendAsync(client, invalidPage))
             {
                 Assert.Equal(HttpStatusCode.BadRequest, invalidPageResponse.StatusCode);
             }
@@ -136,7 +136,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Delete,
                        $"/api/v1/libraries/{library.Id}",
                        owner.Token))
-            using (var removeResponse = await client.SendAsync(removeRequest))
+            using (var removeResponse = await ApiTestClient.SendAsync(client, removeRequest))
             {
                 Assert.Equal(HttpStatusCode.NoContent, removeResponse.StatusCode);
             }
@@ -172,7 +172,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 "/api/v1/catalog/movies",
                 owner.Token);
-            using var listResponse = await client.SendAsync(listRequest);
+            using var listResponse = await ApiTestClient.SendAsync(client, listRequest);
             listResponse.EnsureSuccessStatusCode();
             var catalog = await ApiTestClient.ReadAsync<PagedResponse<MovieSummary>>(listResponse);
             var movie = Assert.Single(catalog.Items);
@@ -181,7 +181,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 $"/api/v1/catalog/movies/{movie.Id}",
                 owner.Token);
-            using var detailResponse = await client.SendAsync(detailRequest);
+            using var detailResponse = await ApiTestClient.SendAsync(client, detailRequest);
             detailResponse.EnsureSuccessStatusCode();
             var json = await detailResponse.Content.ReadAsStringAsync();
             Assert.DoesNotContain(root, json, StringComparison.Ordinal);
@@ -228,7 +228,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        $"/api/v1/libraries/{library.Id}/import-reviews",
                        owner.Token))
-            using (var response = await client.SendAsync(request))
+            using (var response = await ApiTestClient.SendAsync(client, request))
             {
                 response.EnsureSuccessStatusCode();
                 var json = await response.Content.ReadAsStringAsync();
@@ -248,7 +248,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        $"/api/v1/libraries/{library.Id}/import-reviews",
                        viewerLogin.Token))
-            using (var forbiddenResponse = await client.SendAsync(forbiddenRequest))
+            using (var forbiddenResponse = await ApiTestClient.SendAsync(client, forbiddenRequest))
             {
                 Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
             }
@@ -260,7 +260,7 @@ public sealed class MediaLibraryApiTests
                        new UpdateLibraryImportReviewRequest(
                            LibraryImportReviewAction.AssignToMovie,
                            foreignMovie.Id)))
-            using (var crossLibraryResponse = await client.SendAsync(crossLibraryRequest))
+            using (var crossLibraryResponse = await ApiTestClient.SendAsync(client, crossLibraryRequest))
             {
                 Assert.Equal(HttpStatusCode.NotFound, crossLibraryResponse.StatusCode);
                 Assert.Equal("movie_not_found", (await ApiTestClient.ReadAsync<ApiProblem>(crossLibraryResponse)).Code);
@@ -282,7 +282,7 @@ public sealed class MediaLibraryApiTests
                        $"/api/v1/libraries/{library.Id}/import-reviews/{ignoredReview.Id}",
                        owner.Token,
                        new UpdateLibraryImportReviewRequest(LibraryImportReviewAction.Ignore)))
-            using (var ignoreResponse = await client.SendAsync(ignoreRequest))
+            using (var ignoreResponse = await ApiTestClient.SendAsync(client, ignoreRequest))
             {
                 Assert.Equal(HttpStatusCode.Accepted, ignoreResponse.StatusCode);
                 var queued = await ApiTestClient.ReadAsync<LibraryScanSummary>(ignoreResponse);
@@ -432,7 +432,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Post,
                 $"/api/v1/libraries/{library.Id}/scans",
                 owner.Token);
-            using var scanResponse = await client.SendAsync(scanRequest);
+            using var scanResponse = await ApiTestClient.SendAsync(client, scanRequest);
             Assert.Equal(HttpStatusCode.Accepted, scanResponse.StatusCode);
             var scan = await ApiTestClient.ReadAsync<LibraryScanSummary>(scanResponse);
             Assert.True(blockingScanner.Started.Wait(TimeSpan.FromSeconds(5)));
@@ -442,7 +442,7 @@ public sealed class MediaLibraryApiTests
                 $"/api/v1/libraries/{library.Id}/import-reviews/{reviewId}",
                 owner.Token,
                 new UpdateLibraryImportReviewRequest(LibraryImportReviewAction.Ignore));
-            using var decisionResponse = await client.SendAsync(decisionRequest);
+            using var decisionResponse = await ApiTestClient.SendAsync(client, decisionRequest);
             Assert.Equal(HttpStatusCode.Conflict, decisionResponse.StatusCode);
             Assert.Equal("library_scan_active",
                 (await ApiTestClient.ReadAsync<ApiProblem>(decisionResponse)).Code);
@@ -486,7 +486,7 @@ public sealed class MediaLibraryApiTests
                 "/api/v1/libraries",
                 owner.Token,
                 new CreateLibraryRequest(null, root, LibraryKind.Automatic));
-            using var createResponse = await client.SendAsync(createRequest);
+            using var createResponse = await ApiTestClient.SendAsync(client, createRequest);
             Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
             var library = await ApiTestClient.ReadAsync<LibrarySummary>(createResponse);
             Assert.Equal("Mixed Storage", library.Name);
@@ -499,7 +499,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 $"/api/v1/libraries/{library.Id}/discoveries",
                 owner.Token);
-            using var discoveriesResponse = await client.SendAsync(discoveriesRequest);
+            using var discoveriesResponse = await ApiTestClient.SendAsync(client, discoveriesRequest);
             discoveriesResponse.EnsureSuccessStatusCode();
             var discoveryJson = await discoveriesResponse.Content.ReadAsStringAsync();
             Assert.DoesNotContain(root, discoveryJson, StringComparison.Ordinal);
@@ -515,7 +515,7 @@ public sealed class MediaLibraryApiTests
                 owner.Token,
                 new UpdateClassificationDecisionsRequest(
                     [new ClassificationDecisionUpdate(tiktok.Id, ClassificationDecision.Ignore)]));
-            using var decideResponse = await client.SendAsync(decideRequest);
+            using var decideResponse = await ApiTestClient.SendAsync(client, decideRequest);
             Assert.Equal(HttpStatusCode.Accepted, decideResponse.StatusCode);
             var rescan = await ApiTestClient.ReadAsync<LibraryScanSummary>(decideResponse);
             var completed = await WaitForScanAsync(client, owner.Token, rescan.Id);
@@ -526,7 +526,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 $"/api/v1/libraries/{library.Id}/discoveries",
                 owner.Token);
-            using var afterResponse = await client.SendAsync(afterRequest);
+            using var afterResponse = await ApiTestClient.SendAsync(client, afterRequest);
             afterResponse.EnsureSuccessStatusCode();
             var after = await ApiTestClient.ReadAsync<List<LibraryDiscoverySummary>>(afterResponse);
             Assert.Equal(
@@ -537,7 +537,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Delete,
                 $"/api/v1/libraries/{library.Id}/classification-decisions/{tiktok.Id}",
                 owner.Token);
-            using var resetResponse = await client.SendAsync(resetRequest);
+            using var resetResponse = await ApiTestClient.SendAsync(client, resetRequest);
             Assert.Equal(HttpStatusCode.Accepted, resetResponse.StatusCode);
             var resetScan = await ApiTestClient.ReadAsync<LibraryScanSummary>(resetResponse);
             var resetCompleted = await WaitForScanAsync(client, owner.Token, resetScan.Id);
@@ -548,7 +548,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 $"/api/v1/libraries/{library.Id}/discoveries",
                 owner.Token);
-            using var resetDiscoveriesResponse = await client.SendAsync(resetDiscoveriesRequest);
+            using var resetDiscoveriesResponse = await ApiTestClient.SendAsync(client, resetDiscoveriesRequest);
             resetDiscoveriesResponse.EnsureSuccessStatusCode();
             var resetDiscoveries = await ApiTestClient.ReadAsync<List<LibraryDiscoverySummary>>(
                 resetDiscoveriesResponse);
@@ -562,7 +562,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 $"/api/v1/libraries/{library.Id}/discoveries",
                 viewerLogin.Token);
-            using var forbiddenResponse = await client.SendAsync(forbiddenRequest);
+            using var forbiddenResponse = await ApiTestClient.SendAsync(client, forbiddenRequest);
             Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
         }
         finally
@@ -618,7 +618,7 @@ public sealed class MediaLibraryApiTests
                 "/api/v1/libraries",
                 owner.Token,
                 new CreateLibraryRequest(null, storage, LibraryKind.Automatic, CombineExisting: true));
-            using var combineResponse = await client.SendAsync(combineRequest);
+            using var combineResponse = await ApiTestClient.SendAsync(client, combineRequest);
             Assert.Equal(HttpStatusCode.Created, combineResponse.StatusCode);
             var combined = await ApiTestClient.ReadAsync<LibrarySummary>(combineResponse);
             Assert.Equal(LibraryKind.Automatic, combined.Kind);
@@ -669,7 +669,7 @@ public sealed class MediaLibraryApiTests
                     storage,
                     LibraryKind.Automatic,
                     CombineExisting: true));
-            using var duplicateResponse = await client.SendAsync(duplicateRequest);
+            using var duplicateResponse = await ApiTestClient.SendAsync(client, duplicateRequest);
 
             Assert.Equal(HttpStatusCode.Conflict, duplicateResponse.StatusCode);
             var problem = await ApiTestClient.ReadAsync<ApiProblem>(duplicateResponse);
@@ -762,7 +762,7 @@ public sealed class MediaLibraryApiTests
                        new CreateLibraryRequest("Nested", Path.Combine(root, "Nested"), LibraryKind.Movies)))
             {
                 Directory.CreateDirectory(Path.Combine(root, "Nested"));
-                using var overlappingResponse = await client.SendAsync(overlappingRequest);
+                using var overlappingResponse = await ApiTestClient.SendAsync(client, overlappingRequest);
                 Assert.Equal(HttpStatusCode.Conflict, overlappingResponse.StatusCode);
             }
 
@@ -770,7 +770,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Post,
                 $"/api/v1/libraries/{library.Id}/scans",
                 owner.Token);
-            using var firstResponse = await client.SendAsync(firstRequest);
+            using var firstResponse = await ApiTestClient.SendAsync(client, firstRequest);
             Assert.Equal(HttpStatusCode.Accepted, firstResponse.StatusCode);
             var firstScan = await ApiTestClient.ReadAsync<LibraryScanSummary>(firstResponse);
             Assert.True(blockingScanner.Started.Wait(TimeSpan.FromSeconds(5)));
@@ -779,7 +779,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Post,
                 $"/api/v1/libraries/{library.Id}/scans",
                 owner.Token);
-            using var secondResponse = await client.SendAsync(secondRequest);
+            using var secondResponse = await ApiTestClient.SendAsync(client, secondRequest);
             Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
 
             blockingScanner.Release.Set();
@@ -815,7 +815,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Post,
                 $"/api/v1/libraries/{library.Id}/scans",
                 owner.Token);
-            using var startResponse = await client.SendAsync(startRequest);
+            using var startResponse = await ApiTestClient.SendAsync(client, startRequest);
             Assert.Equal(HttpStatusCode.Accepted, startResponse.StatusCode);
             var started = await ApiTestClient.ReadAsync<LibraryScanSummary>(startResponse);
             Assert.True(blockingScanner.Started.Wait(TimeSpan.FromSeconds(5)));
@@ -824,7 +824,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        "/api/v1/libraries/scans",
                        owner.Token))
-            using (var activeResponse = await client.SendAsync(activeRequest))
+            using (var activeResponse = await ApiTestClient.SendAsync(client, activeRequest))
             {
                 activeResponse.EnsureSuccessStatusCode();
                 var active = await ApiTestClient.ReadAsync<List<LibraryScanSummary>>(activeResponse);
@@ -843,7 +843,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        $"/api/v1/libraries/{library.Id}/scans?limit=1",
                        owner.Token))
-            using (var historyResponse = await client.SendAsync(historyRequest))
+            using (var historyResponse = await ApiTestClient.SendAsync(client, historyRequest))
             {
                 historyResponse.EnsureSuccessStatusCode();
                 var history = await ApiTestClient.ReadAsync<List<LibraryScanSummary>>(historyResponse);
@@ -855,7 +855,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 $"/api/v1/libraries/{library.Id}/scans?limit=101",
                 owner.Token);
-            using var invalidResponse = await client.SendAsync(invalidRequest);
+            using var invalidResponse = await ApiTestClient.SendAsync(client, invalidRequest);
             Assert.Equal(HttpStatusCode.BadRequest, invalidResponse.StatusCode);
         }
         finally
@@ -882,7 +882,7 @@ public sealed class MediaLibraryApiTests
                        $"/api/v1/libraries/{library.Id}/monitoring",
                        owner.Token,
                        new UpdateLibraryMonitoringRequest(false)))
-            using (var response = await client.SendAsync(disable))
+            using (var response = await ApiTestClient.SendAsync(client, disable))
             {
                 response.EnsureSuccessStatusCode();
                 var updated = await ApiTestClient.ReadAsync<LibrarySummary>(response);
@@ -900,7 +900,7 @@ public sealed class MediaLibraryApiTests
                        $"/api/v1/media/{movie.Id}/favorite",
                        owner.Token,
                        new SetFavoriteRequest(true)))
-            using (var response = await client.SendAsync(favorite))
+            using (var response = await ApiTestClient.SendAsync(client, favorite))
                 response.EnsureSuccessStatusCode();
 
             var moved = Path.Combine(root, "Renamed", "Arrival Final.mkv");
@@ -919,7 +919,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        "/api/v1/catalog/items?offset=0&limit=100",
                        owner.Token))
-            using (var response = await client.SendAsync(catalog))
+            using (var response = await ApiTestClient.SendAsync(client, catalog))
             {
                 response.EnsureSuccessStatusCode();
                 Assert.NotNull(response.Headers.ETag);
@@ -932,7 +932,7 @@ public sealed class MediaLibraryApiTests
                        owner.Token))
             {
                 unchanged.Headers.TryAddWithoutValidation("If-None-Match", entityTag);
-                using var response = await client.SendAsync(unchanged);
+                using var response = await ApiTestClient.SendAsync(client, unchanged);
                 Assert.Equal(HttpStatusCode.NotModified, response.StatusCode);
                 Assert.Empty(await response.Content.ReadAsByteArrayAsync());
             }
@@ -941,7 +941,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        "/api/v1/catalog/search?query=Arrival&offset=0&limit=10",
                        owner.Token))
-            using (var response = await client.SendAsync(search))
+            using (var response = await ApiTestClient.SendAsync(client, search))
             {
                 response.EnsureSuccessStatusCode();
                 Assert.Equal(movie.Id, Assert.Single(
@@ -952,7 +952,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        $"/api/v1/catalog/items?kind=movie&libraryId={library.Id}&favorite=true&availability=available&sort=dateAdded&direction=descending",
                        owner.Token))
-            using (var response = await client.SendAsync(filtered))
+            using (var response = await ApiTestClient.SendAsync(client, filtered))
             {
                 response.EnsureSuccessStatusCode();
                 Assert.Equal(movie.Id, Assert.Single(
@@ -963,7 +963,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        "/api/v1/catalog/items?yearFrom=2020&yearTo=2010",
                        owner.Token))
-            using (var response = await client.SendAsync(invalidFilter))
+            using (var response = await ApiTestClient.SendAsync(client, invalidFilter))
             {
                 Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
                 Assert.Equal("invalid_year_range", (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code);
@@ -973,7 +973,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Post,
                        "/api/v1/catalog/search/rebuild",
                        owner.Token))
-            using (var response = await client.SendAsync(rebuild))
+            using (var response = await ApiTestClient.SendAsync(client, rebuild))
             {
                 Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
             }
@@ -982,7 +982,7 @@ public sealed class MediaLibraryApiTests
                        HttpMethod.Get,
                        "/api/v1/sync/changes?after=0&waitSeconds=0",
                        owner.Token))
-            using (var response = await client.SendAsync(sync))
+            using (var response = await ApiTestClient.SendAsync(client, sync))
             {
                 response.EnsureSuccessStatusCode();
                 var changes = await ApiTestClient.ReadAsync<SyncChangesResponse>(response);
@@ -1004,7 +1004,7 @@ public sealed class MediaLibraryApiTests
             HttpMethod.Get,
             "/api/v1/catalog/items?offset=0&limit=100",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response);
     }
@@ -1018,7 +1018,7 @@ public sealed class MediaLibraryApiTests
             HttpMethod.Get,
             $"/api/v1/catalog/items?kind=movie&libraryId={libraryId}&offset=0&limit=100",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response);
     }
@@ -1043,7 +1043,7 @@ public sealed class MediaLibraryApiTests
             HttpMethod.Get,
             $"/api/v1/libraries/{libraryId}/import-reviews",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<List<LibraryImportReviewSummary>>(response);
     }
@@ -1060,7 +1060,7 @@ public sealed class MediaLibraryApiTests
             $"/api/v1/libraries/{libraryId}/import-reviews/{reviewId}",
             token,
             decision);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         var scan = await ApiTestClient.ReadAsync<LibraryScanSummary>(response);
         return await WaitForScanAsync(client, token, scan.Id);
@@ -1077,7 +1077,7 @@ public sealed class MediaLibraryApiTests
             "/api/v1/libraries",
             token,
             new CreateLibraryRequest(Path.GetFileName(path), path, kind));
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return await ApiTestClient.ReadAsync<LibrarySummary>(response);
     }
@@ -1089,9 +1089,11 @@ public sealed class MediaLibraryApiTests
             "/api/v1/users",
             token,
             new CreateUserRequest("viewer", "a secure viewer password", UserRole.User));
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
-        return await ApiTestClient.ReadAsync<UserSummary>(response);
+        var user = await ApiTestClient.ReadAsync<UserSummary>(response);
+        await ApiTestClient.GrantExistingLibrariesAsync(client, token, user.Id);
+        return user;
     }
 
     private static async Task<AuthenticationResponse> LoginAsync(
@@ -1116,7 +1118,7 @@ public sealed class MediaLibraryApiTests
             HttpMethod.Post,
             $"/api/v1/libraries/{libraryId}/scans",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         var scan = await ApiTestClient.ReadAsync<LibraryScanSummary>(response);
         return await WaitForScanAsync(client, token, scan.Id);
@@ -1133,7 +1135,7 @@ public sealed class MediaLibraryApiTests
                 HttpMethod.Get,
                 $"/api/v1/scans/{scanId}",
                 token);
-            using var response = await client.SendAsync(request);
+            using var response = await ApiTestClient.SendAsync(client, request);
             response.EnsureSuccessStatusCode();
             var scan = await ApiTestClient.ReadAsync<LibraryScanSummary>(response);
             if (scan.State is not (LibraryScanState.Queued or LibraryScanState.Running))
@@ -1152,7 +1154,7 @@ public sealed class MediaLibraryApiTests
         string token)
     {
         using var request = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/libraries", token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<List<LibrarySummary>>(response);
     }
@@ -1162,7 +1164,7 @@ public sealed class MediaLibraryApiTests
         string token)
     {
         using var request = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/catalog/series", token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<PagedResponse<SeriesSummary>>(response);
     }
@@ -1176,7 +1178,7 @@ public sealed class MediaLibraryApiTests
             HttpMethod.Get,
             $"/api/v1/catalog/series/{seriesId}",
             token);
-        using var response = await client.SendAsync(request);
+        using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<SeriesDetail>(response);
     }

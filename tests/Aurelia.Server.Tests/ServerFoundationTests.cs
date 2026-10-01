@@ -104,7 +104,7 @@ public sealed class ServerFoundationTests
             HttpMethod.Get,
             "/api/v1/auth/me",
             secondSession.Token);
-        using var meResponse = await client.SendAsync(meRequest);
+        using var meResponse = await ApiTestClient.SendAsync(client, meRequest);
         meResponse.EnsureSuccessStatusCode();
         var currentUser = await ApiTestClient.ReadAsync<UserSummary>(meResponse);
         Assert.Equal(owner.User.Id, currentUser.Id);
@@ -114,7 +114,7 @@ public sealed class ServerFoundationTests
             HttpMethod.Get,
             "/api/v1/auth/sessions",
             secondSession.Token);
-        using var listResponse = await client.SendAsync(listRequest);
+        using var listResponse = await ApiTestClient.SendAsync(client, listRequest);
         listResponse.EnsureSuccessStatusCode();
         var sessions = await ApiTestClient.ReadAsync<List<DeviceSessionSummary>>(listResponse);
         Assert.Equal(2, sessions.Count);
@@ -124,14 +124,14 @@ public sealed class ServerFoundationTests
             HttpMethod.Post,
             "/api/v1/auth/logout",
             secondSession.Token);
-        using var logoutResponse = await client.SendAsync(logoutRequest);
+        using var logoutResponse = await ApiTestClient.SendAsync(client, logoutRequest);
         Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
 
         using var rejectedRequest = ApiTestClient.Authorized(
             HttpMethod.Get,
             "/api/v1/auth/sessions",
             secondSession.Token);
-        using var rejectedResponse = await client.SendAsync(rejectedRequest);
+        using var rejectedResponse = await ApiTestClient.SendAsync(client, rejectedRequest);
         Assert.Equal(HttpStatusCode.Unauthorized, rejectedResponse.StatusCode);
     }
 
@@ -150,7 +150,7 @@ public sealed class ServerFoundationTests
             "/api/v1/users",
             owner.Token,
             new CreateUserRequest("second-admin", "secure admin password", UserRole.Admin));
-        using var createAdminResponse = await client.SendAsync(createAdminRequest);
+        using var createAdminResponse = await ApiTestClient.SendAsync(client, createAdminRequest);
         createAdminResponse.EnsureSuccessStatusCode();
         var admin = await ApiTestClient.ReadAsync<UserSummary>(createAdminResponse);
         Assert.Equal(UserRole.Admin, admin.Role);
@@ -167,15 +167,15 @@ public sealed class ServerFoundationTests
             "/api/v1/users",
             adminLogin.Token,
             new CreateUserRequest("third-admin", "another secure password", UserRole.Admin));
-        using var createAnotherAdminResponse = await client.SendAsync(createAnotherAdminRequest);
-        Assert.Equal(HttpStatusCode.OK, createAnotherAdminResponse.StatusCode);
+        using var createAnotherAdminResponse = await ApiTestClient.SendAsync(client, createAnotherAdminRequest);
+        Assert.Equal(HttpStatusCode.Forbidden, createAnotherAdminResponse.StatusCode);
 
         using var createOwnerRequest = ApiTestClient.Authorized(
             HttpMethod.Post,
             "/api/v1/users",
             adminLogin.Token,
             new CreateUserRequest("forbidden-owner", "another secure password", UserRole.Owner));
-        using var createOwnerResponse = await client.SendAsync(createOwnerRequest);
+        using var createOwnerResponse = await ApiTestClient.SendAsync(client, createOwnerRequest);
         Assert.Equal(HttpStatusCode.Forbidden, createOwnerResponse.StatusCode);
 
         using var demoteOwnerRequest = ApiTestClient.Authorized(
@@ -183,7 +183,7 @@ public sealed class ServerFoundationTests
             $"/api/v1/users/{owner.User.Id}/role",
             owner.Token,
             new ChangeUserRoleRequest(UserRole.Admin));
-        using var demoteOwnerResponse = await client.SendAsync(demoteOwnerRequest);
+        using var demoteOwnerResponse = await ApiTestClient.SendAsync(client, demoteOwnerRequest);
         Assert.Equal(HttpStatusCode.Conflict, demoteOwnerResponse.StatusCode);
     }
 
@@ -198,7 +198,7 @@ public sealed class ServerFoundationTests
             HttpMethod.Post,
             "/api/v1/auth/pairings",
             owner.Token);
-        using var codeResponse = await client.SendAsync(codeRequest);
+        using var codeResponse = await ApiTestClient.SendAsync(client, codeRequest);
         codeResponse.EnsureSuccessStatusCode();
         var pairingCode = await ApiTestClient.ReadAsync<PairingCodeResponse>(codeResponse);
         Assert.Matches("^[0-9]{8}$", pairingCode.Code);
@@ -230,7 +230,7 @@ public sealed class ServerFoundationTests
             HttpMethod.Post,
             "/api/v1/auth/pairings",
             owner.Token);
-        using var codeResponse = await client.SendAsync(codeRequest);
+        using var codeResponse = await ApiTestClient.SendAsync(client, codeRequest);
         codeResponse.EnsureSuccessStatusCode();
         var pairing = await ApiTestClient.ReadAsync<PairingCodeResponse>(codeResponse);
 

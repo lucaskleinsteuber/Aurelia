@@ -10,10 +10,12 @@ namespace Aurelia.Server.Services;
 public sealed class AccountService(
     AureliaDbContext database,
     IPasswordHasher<ServerUser> passwordHasher,
-    TokenService tokenService)
+    TokenService tokenService,
+    ServerConfigurationStore configuration,
+    CredentialAttemptGuard credentialAttempts,
+    ActiveStreamRegistry streams)
 {
-    private static readonly TimeSpan DeviceSessionLifetime = TimeSpan.FromDays(90);
-    private static readonly TimeSpan PairingCodeLifetime = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan PairingCodeLifetime = TimeSpan.FromMinutes(5);
 
     public async Task<AuthenticationResponse> SetupOwnerAsync(
         SetupOwnerRequest request,
@@ -45,7 +47,7 @@ public sealed class AccountService(
             Role = UserRole.Owner,
             CreatedAt = now,
         };
-        user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
+        using (await credentialAttempts.EnterAsync(cancellationToken)) user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
         database.Users.Add(user);
 
         var response = CreateSession(user, deviceName, now);
@@ -58,24 +60,17 @@ public sealed class AccountService(
         LoginRequest request,
         CancellationToken cancellationToken)
     {
-        var normalizedUsername = NormalizeUsername(request.Username);
+        var normalizedUsername = NormalizeUsername(ValidateUsername(request.Username));
+        if (request.Password is null || request.Password.Length is < 1 or > 1024)
+            throw new AccountException("invalid_credentials", "Username or password is incorrect.", 401);
         var deviceName = ValidateDeviceName(request.DeviceName);
         var user = await database.Users.SingleOrDefaultAsync(
             candidate => candidate.NormalizedUsername == normalizedUsername,
             cancellationToken);
 
-        if (user is null || passwordHasher.VerifyHashedPassword(
-                user,
-                user.PasswordHash,
-                request.Password) == PasswordVerificationResult.Failed)
-        {
-            throw new AccountException(
-                "invalid_credentials",
-                "Username or password is incorrect.",
-                StatusCodes.Status401Unauthorized);
-        }
+        await VerifyPasswordAsync(user, request.Password, cancellationToken);
 
-        var response = CreateSession(user, deviceName, DateTimeOffset.UtcNow);
+        var response = CreateSession(user!, deviceName, DateTimeOffset.UtcNow);
         await database.SaveChangesAsync(cancellationToken);
         return response;
     }
@@ -104,8 +99,7 @@ public sealed class AccountService(
         ValidatePassword(request.Password);
         ValidateRole(request.Role);
 
-        if (actor.Role == UserRole.User
-            || (actor.Role == UserRole.Admin && request.Role == UserRole.Owner))
+        if (actor.Role != UserRole.Owner)
         {
             throw Forbidden();
         }
@@ -130,7 +124,7 @@ public sealed class AccountService(
             Role = request.Role,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
+        using (await credentialAttempts.EnterAsync(cancellationToken)) user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
         database.Users.Add(user);
         await database.SaveChangesAsync(cancellationToken);
         return ToSummary(user);
@@ -142,13 +136,12 @@ public sealed class AccountService(
         UserRole newRole,
         CancellationToken cancellationToken)
     {
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         var actor = await RequireUserAsync(actorId, cancellationToken);
         var target = await RequireUserAsync(targetId, cancellationToken);
         ValidateRole(newRole);
 
-        if (actor.Role == UserRole.User
-            || (actor.Role == UserRole.Admin
-                && (target.Role == UserRole.Owner || newRole == UserRole.Owner)))
+        if (actor.Role != UserRole.Owner)
         {
             throw Forbidden();
         }
@@ -156,9 +149,9 @@ public sealed class AccountService(
         if (target.Role == UserRole.Owner && newRole != UserRole.Owner)
         {
             var ownerCount = await database.Users.CountAsync(
-                user => user.Role == UserRole.Owner,
+                user => user.Role == UserRole.Owner && user.IsEnabled,
                 cancellationToken);
-            if (ownerCount == 1)
+            if (target.IsEnabled && ownerCount == 1)
             {
                 throw new AccountException(
                     "last_owner_required",
@@ -169,6 +162,8 @@ public sealed class AccountService(
 
         target.Role = newRole;
         await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        streams.RevokeUser(targetId);
         return ToSummary(target);
     }
 
@@ -177,6 +172,7 @@ public sealed class AccountService(
         Guid targetId,
         CancellationToken cancellationToken)
     {
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         var actor = await RequireUserAsync(actorId, cancellationToken);
         var target = await RequireUserAsync(targetId, cancellationToken);
 
@@ -188,8 +184,7 @@ public sealed class AccountService(
                 StatusCodes.Status409Conflict);
         }
 
-        if (actor.Role == UserRole.User
-            || (actor.Role == UserRole.Admin && target.Role == UserRole.Owner))
+        if (actor.Role != UserRole.Owner)
         {
             throw Forbidden();
         }
@@ -197,9 +192,9 @@ public sealed class AccountService(
         if (target.Role == UserRole.Owner)
         {
             var ownerCount = await database.Users.CountAsync(
-                user => user.Role == UserRole.Owner,
+                user => user.Role == UserRole.Owner && user.IsEnabled,
                 cancellationToken);
-            if (ownerCount == 1)
+            if (target.IsEnabled && ownerCount == 1)
             {
                 throw new AccountException(
                     "last_owner_required",
@@ -210,6 +205,8 @@ public sealed class AccountService(
 
         database.Users.Remove(target);
         await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        streams.RevokeUser(targetId);
     }
 
     public async Task<PairingCodeResponse> CreatePairingCodeAsync(
@@ -217,6 +214,7 @@ public sealed class AccountService(
         CancellationToken cancellationToken)
     {
         var user = await RequireUserAsync(userId, cancellationToken);
+        if (!configuration.Current.PairingEnabled || !user.IsEnabled) throw Forbidden();
         var now = DateTimeOffset.UtcNow;
 
         var activeCodes = await database.PairingCodes
@@ -247,6 +245,7 @@ public sealed class AccountService(
         CancellationToken cancellationToken)
     {
         var deviceName = ValidateDeviceName(request.DeviceName);
+        if (!configuration.Current.PairingEnabled) throw Forbidden();
         var normalizedCode = request.Code?.Trim() ?? string.Empty;
         if (normalizedCode.Length != 8 || normalizedCode.Any(character => !char.IsAsciiDigit(character)))
         {
@@ -262,7 +261,7 @@ public sealed class AccountService(
             .Include(candidate => candidate.User)
             .SingleOrDefaultAsync(candidate => candidate.CodeHash == codeHash, cancellationToken);
 
-        if (code is null || code.ConsumedAt is not null || code.ExpiresAt <= now)
+        if (code is null || code.ConsumedAt is not null || code.ExpiresAt <= now || !code.User.IsEnabled)
         {
             throw InvalidPairingCode();
         }
@@ -307,7 +306,7 @@ public sealed class AccountService(
             .SingleOrDefaultAsync(session => session.Id == targetSessionId, cancellationToken)
             ?? throw NotFound("session_not_found", "The device session was not found.");
 
-        if (target.UserId != actorId && actor.Role == UserRole.User)
+        if (target.UserId != actorId && actor.Role != UserRole.Owner)
         {
             throw Forbidden();
         }
@@ -319,6 +318,7 @@ public sealed class AccountService(
 
         target.RevokedAt ??= DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
+        streams.RevokeSession(targetSessionId);
     }
 
     private AuthenticationResponse CreateSession(
@@ -336,7 +336,7 @@ public sealed class AccountService(
             TokenHash = tokenService.Hash(rawToken),
             CreatedAt = now,
             LastSeenAt = now,
-            ExpiresAt = now.Add(DeviceSessionLifetime),
+            ExpiresAt = now.AddDays(configuration.Current.DeviceSessionDays),
         };
         database.DeviceSessions.Add(session);
         return new AuthenticationResponse(
@@ -352,6 +352,99 @@ public sealed class AccountService(
     {
         return await database.Users.SingleOrDefaultAsync(user => user.Id == id, cancellationToken)
             ?? throw NotFound("user_not_found", "The user was not found.");
+    }
+
+    public async Task ConfirmPasswordAsync(Guid userId, string password, CancellationToken cancellationToken)
+    {
+        await VerifyPasswordAsync(await RequireUserAsync(userId, cancellationToken), password, cancellationToken);
+        await database.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task VerifyPasswordAsync(ServerUser? user, string password, CancellationToken cancellationToken)
+    {
+        if (password is null || password.Length is < 1 or > 1024)
+            throw new AccountException("invalid_credentials", "Username or password is incorrect.", 401);
+        var now = DateTimeOffset.UtcNow;
+        var key = user?.Id ?? Guid.Empty;
+        credentialAttempts.Check(key, now);
+        using var work = await credentialAttempts.EnterAsync(cancellationToken);
+        // Unknown accounts still do password work; no fast username-existence oracle.
+        var result = PasswordVerificationResult.Failed;
+        if (user is null)
+            _ = passwordHasher.HashPassword(new ServerUser { Username = "unknown", NormalizedUsername = "UNKNOWN", PasswordHash = "" }, password);
+        else result = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
+        var success = user?.IsEnabled == true && result != PasswordVerificationResult.Failed;
+        credentialAttempts.Record(key, success, now);
+        if (!success) throw new AccountException("invalid_credentials", "Username or password is incorrect.", 401);
+        if (result == PasswordVerificationResult.SuccessRehashNeeded)
+            user!.PasswordHash = passwordHasher.HashPassword(user, password);
+    }
+
+    public async Task<IReadOnlyList<UserAccessSummary>> ListAccessAsync(CancellationToken cancellationToken)
+    {
+        return await database.Users.AsNoTracking().Include(user => user.LibraryGrants).OrderBy(user => user.Username)
+            .Select(user => new UserAccessSummary(ToSummary(user), user.IsEnabled,
+                user.LibraryGrants.Select(grant => grant.LibraryRootId).ToList())).ToListAsync(cancellationToken);
+    }
+
+    public async Task UpdateAccessAsync(Guid actorId, Guid targetId, UpdateUserAccessRequest request, CancellationToken cancellationToken)
+    {
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var actor = await RequireUserAsync(actorId, cancellationToken);
+        if (actor.Role != UserRole.Owner) throw Forbidden();
+        var target = await database.Users.Include(user => user.LibraryGrants).SingleOrDefaultAsync(user => user.Id == targetId, cancellationToken)
+            ?? throw NotFound("user_not_found", "The user was not found.");
+        if (target.Role == UserRole.Owner && target.IsEnabled && !request.IsEnabled
+            && await database.Users.CountAsync(user => user.Role == UserRole.Owner && user.IsEnabled, cancellationToken) <= 1)
+            throw new AccountException("last_owner_required", "The final active owner cannot be disabled.", 409);
+        if (request.LibraryIds is null || request.LibraryIds.Count > 1_000) throw new AccountException("invalid_libraries", "Invalid library grants.", 400);
+        var ids = request.LibraryIds.Distinct().ToArray();
+        if (await database.LibraryRoots.CountAsync(root => ids.Contains(root.Id), cancellationToken) != ids.Length)
+            throw new AccountException("invalid_libraries", "A selected library does not exist.", 400);
+        database.UserLibraryGrants.RemoveRange(target.LibraryGrants.Where(grant => !ids.Contains(grant.LibraryRootId)));
+        var old = target.LibraryGrants.Select(grant => grant.LibraryRootId).ToHashSet();
+        database.UserLibraryGrants.AddRange(ids.Where(id => !old.Contains(id)).Select(id => new UserLibraryGrant { UserId = targetId, LibraryRootId = id }));
+        target.IsEnabled = request.IsEnabled;
+        database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Catalog, UserId = targetId, CreatedAt = DateTimeOffset.UtcNow });
+        if (!target.IsEnabled)
+        {
+            var sessions = await database.DeviceSessions.Where(session => session.UserId == targetId && session.RevokedAt == null).ToListAsync(cancellationToken);
+            foreach (var session in sessions) session.RevokedAt = DateTimeOffset.UtcNow;
+            var codes = await database.PairingCodes.Where(code => code.UserId == targetId && code.ConsumedAt == null).ToListAsync(cancellationToken);
+            foreach (var code in codes) code.ConsumedAt = DateTimeOffset.UtcNow;
+        }
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        streams.RevokeUser(targetId);
+    }
+
+    public async Task ResetPasswordAsync(Guid actorId, Guid targetId, string password, CancellationToken cancellationToken)
+    {
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        if ((await RequireUserAsync(actorId, cancellationToken)).Role != UserRole.Owner) throw Forbidden();
+        ValidatePassword(password);
+        var target = await RequireUserAsync(targetId, cancellationToken);
+        using (await credentialAttempts.EnterAsync(cancellationToken)) target.PasswordHash = passwordHasher.HashPassword(target, password);
+        var sessions = await database.DeviceSessions.Where(session => session.UserId == targetId && session.RevokedAt == null).ToListAsync(cancellationToken);
+        foreach (var session in sessions) session.RevokedAt = DateTimeOffset.UtcNow;
+        var codes = await database.PairingCodes.Where(code => code.UserId == targetId && code.ConsumedAt == null).ToListAsync(cancellationToken);
+        foreach (var code in codes) code.ConsumedAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        streams.RevokeUser(targetId);
+    }
+
+    public async Task RevokeAllSessionsAsync(Guid actorId, Guid targetId, CancellationToken cancellationToken)
+    {
+        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        if (actorId != targetId && (await RequireUserAsync(actorId, cancellationToken)).Role != UserRole.Owner) throw Forbidden();
+        var sessions = await database.DeviceSessions.Where(session => session.UserId == targetId && session.RevokedAt == null).ToListAsync(cancellationToken);
+        foreach (var session in sessions) session.RevokedAt = DateTimeOffset.UtcNow;
+        var codes = await database.PairingCodes.Where(code => code.UserId == targetId && code.ConsumedAt == null).ToListAsync(cancellationToken);
+        foreach (var code in codes) code.ConsumedAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        streams.RevokeUser(targetId);
     }
 
     private static UserSummary ToSummary(ServerUser user)

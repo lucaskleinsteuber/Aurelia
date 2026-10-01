@@ -9,7 +9,8 @@ file directly as a backup.
 
 While the server is running, its maintenance worker creates a verified daily
 snapshot and a separate weekly snapshot. It retains the newest seven daily and
-four weekly snapshots. It also makes a verified snapshot immediately before an
+four weekly snapshots by default; owners can change interval and retention in
+Server settings. It also makes a verified snapshot immediately before an
 upgrade migration. Backup files live in the private `Backups` subdirectory of
 the server data directory; their file and directory permissions are restricted
 to the account running Aurelia.
@@ -20,7 +21,7 @@ pre-migration snapshot. If verification or the snapshot fails, startup stops
 before the migration. A failed migration also stops startup. Aurelia never
 automatically restores a backup after corruption or a failed migration.
 
-Backups contain only the SQLite database. They do not contain media files,
+These automatic database backups contain only SQLite. They do not contain media files,
 artwork, TLS identity, application settings, or the rest of the server data
 directory. Because automatic backups are stored on the same volume as the
 database, they do not protect against that volume failing; copy selected verified
@@ -53,5 +54,15 @@ verifies a SQLite backup copy, and preserves the current database before
 replacing it. A pending explicit restore is resumed safely if the process exits
 during replacement. An invalid source leaves the active database untouched. On
 the next start, Aurelia applies any required forward migrations after creating
-their own pre-migration snapshot. Restore is local-only; no HTTP restore route
-exists.
+their own pre-migration snapshot. Explicit database restoration signs out all
+devices and consumes old pairing codes/playback tickets. Normal updates do not.
+
+## Encrypted full-server recovery
+
+The Server settings tab also provides a password-confirmed, encrypted export
+and guided full-server restore. It includes configuration and server identity,
+but excludes video files and artwork. Restoring requires confirmation that all
+devices will be signed out and a separate confirmation for another server's
+identity. Validation and rollback preparation happen before active files are
+replaced. See [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md) for format, limits,
+hosting requirements, and verification.

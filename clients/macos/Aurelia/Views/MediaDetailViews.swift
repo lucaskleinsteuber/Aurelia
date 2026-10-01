@@ -4,8 +4,6 @@ struct MediaDetailView: View {
   @EnvironmentObject private var model: AppModel
   let mediaId: UUID
   let onBack: () -> Void
-  var onHeroOffsetChange: (CGFloat) -> Void = { _ in }
-  var onHeroArtworkChange: (ArtworkSummary?) -> Void = { _ in }
   @State private var detail: CatalogDetailPresentation?
   @State private var errorMessage: String?
   @State private var selectedSeason: Int?
@@ -64,12 +62,6 @@ struct MediaDetailView: View {
         .frame(height: 500)
       }
     }
-    .onScrollGeometryChange(for: CGFloat.self) { geometry in
-      AureliaSidebarArtworkPosition.verticalOffset(
-        contentOffset: geometry.contentOffset.y, topInset: geometry.contentInsets.top)
-    } action: { _, offset in
-      onHeroOffsetChange(offset)
-    }
     .defaultScrollAnchor(.top)
     .scrollClipDisabled()
     .scrollIndicators(.visible)
@@ -93,7 +85,6 @@ struct MediaDetailView: View {
     if detail?.item.id != mediaId {
       detail = nil
       selectedSeason = nil
-      onHeroArtworkChange(nil)
     }
     do {
       let loadedDetail = try await model.catalogDetail(id: mediaId)
@@ -103,8 +94,6 @@ struct MediaDetailView: View {
         selectedSeason = loadedDetail.seasons.first?.number
       }
       errorMessage = nil
-      onHeroArtworkChange(
-        loadedDetail.metadata.backdrop ?? loadedDetail.metadata.still ?? loadedDetail.item.backdrop)
     } catch {
       if !Task.isCancelled, detail == nil { errorMessage = error.localizedDescription }
     }

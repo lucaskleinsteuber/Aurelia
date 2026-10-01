@@ -28,13 +28,8 @@ public static class LibraryCommandClient
         try
         {
             var serverUrl = commandLine.Option("--server") ?? "http://127.0.0.1:43110";
-            if (!Uri.TryCreate(serverUrl, UriKind.Absolute, out var baseAddress)
-                || baseAddress.Scheme is not ("http" or "https"))
-            {
-                throw new InvalidOperationException("--server must be an absolute HTTP or HTTPS URL.");
-            }
-
-            using var client = new HttpClient { BaseAddress = baseAddress };
+            var baseAddress = CommandClientSecurity.ValidateAddress(serverUrl);
+            using var client = CommandClientSecurity.CreateClient(baseAddress);
             var username = commandLine.Username;
             if (string.IsNullOrWhiteSpace(username))
             {
@@ -62,10 +57,10 @@ public static class LibraryCommandClient
             {
                 return commandLine.Action switch
                 {
-                    "add" => await AddAsync(client, commandLine, cancellationToken),
+                    "add" => await AddAsync(client, commandLine, password, cancellationToken),
                     "list" => await ListAsync(client, cancellationToken),
                     "scan" => await ScanAsync(client, commandLine, cancellationToken),
-                    "remove" => await RemoveAsync(client, commandLine, cancellationToken),
+                    "remove" => await RemoveAsync(client, commandLine, password, cancellationToken),
                     _ => throw new InvalidOperationException(
                         $"Unknown library action '{commandLine.Action}'."),
                 };
@@ -92,6 +87,7 @@ public static class LibraryCommandClient
     private static async Task<int> AddAsync(
         HttpClient client,
         ServerCommandLine commandLine,
+        string password,
         CancellationToken cancellationToken)
     {
         var path = RequiredOption(commandLine, "--path");
@@ -106,10 +102,10 @@ public static class LibraryCommandClient
         };
         var name = commandLine.Option("--name")
             ?? Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
-        using var response = await client.PostAsJsonAsync(
+        using var response = await CommandClientSecurity.SendConfirmedAsync(client, HttpMethod.Post,
             "/api/v1/libraries",
             new CreateLibraryRequest(name, path, kind),
-            JsonOptions,
+            password,
             cancellationToken);
         var library = await ReadSuccessAsync<LibrarySummary>(response, cancellationToken);
         Console.WriteLine($"Added {library.Kind}: {library.Name} ({library.Id})");
@@ -199,6 +195,7 @@ public static class LibraryCommandClient
     private static async Task<int> RemoveAsync(
         HttpClient client,
         ServerCommandLine commandLine,
+        string password,
         CancellationToken cancellationToken)
     {
         if (!commandLine.HasFlag("--yes"))
@@ -208,7 +205,8 @@ public static class LibraryCommandClient
         }
 
         var id = RequiredGuid(commandLine, "--id");
-        using var response = await client.DeleteAsync($"/api/v1/libraries/{id}", cancellationToken);
+        using var response = await CommandClientSecurity.SendConfirmedAsync(client, HttpMethod.Delete,
+            $"/api/v1/libraries/{id}", null, password, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
         Console.WriteLine($"Removed library {id}. Media files were not changed.");
         return 0;

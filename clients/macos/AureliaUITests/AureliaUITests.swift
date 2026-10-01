@@ -209,6 +209,36 @@ final class AureliaUITests: XCTestCase {
   }
 
   @MainActor
+  func testServerSettingsExposeAllEightSectionsWithoutEnablingBackgroundService() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "server-settings"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+    app.typeKey(",", modifierFlags: .command)
+    let serverTab = app.buttons["Server"]
+    XCTAssertTrue(serverTab.waitForExistence(timeout: 8))
+    serverTab.click()
+    XCTAssertTrue(app.staticTexts["Overview"].waitForExistence(timeout: 8))
+    for section in [
+      "Network", "Hosting", "Users & Access", "Devices & Security", "Library & Jobs", "Backups",
+      "Diagnostics",
+    ] {
+      XCTAssertTrue(app.staticTexts[section].exists, "Missing server settings section: \(section)")
+    }
+    XCTAssertTrue(app.staticTexts["Only while Aurelia is running"].exists)
+    XCTAssertFalse(app.buttons["Try Network Settings (60-second rollback)"].isEnabled)
+    XCTAssertFalse(app.buttons["Restart Server"].isEnabled)
+    let screenshot = XCTAttachment(screenshot: app.screenshot())
+    screenshot.name = "Server settings - synthetic owner, no native host"
+    screenshot.lifetime = .keepAlways
+    add(screenshot)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
   func testClosingWindowAndReopeningThroughLaunchServicesRestoresIt() throws {
     continueAfterFailure = false
     let app = XCUIApplication()

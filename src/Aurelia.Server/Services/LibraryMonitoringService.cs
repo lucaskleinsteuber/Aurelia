@@ -7,11 +7,11 @@ namespace Aurelia.Server.Services;
 
 public sealed partial class LibraryMonitoringService(
     IServiceScopeFactory scopeFactory,
-    ILogger<LibraryMonitoringService> logger) : BackgroundService
+    ILogger<LibraryMonitoringService> logger,
+    ServerConfigurationStore configuration) : BackgroundService
 {
     private static readonly TimeSpan Debounce = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan StabilityDelay = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan ReconciliationInterval = TimeSpan.FromHours(6);
     private static readonly TimeSpan RecentStartupScan = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan LibraryRefreshInterval = TimeSpan.FromSeconds(30);
     private readonly ConcurrentDictionary<Guid, PendingChanges> pending = new();
@@ -85,14 +85,14 @@ public sealed partial class LibraryMonitoringService(
         foreach (var library in libraries)
         {
             var reachable = IsReadableDirectory(library.Path);
-            if (!library.MonitoringEnabled || !reachable)
+            if (!configuration.Current.MonitoringEnabled || !library.MonitoringEnabled || !reachable)
             {
                 if (watchers.Remove(library.Id, out var old))
                 {
                     old.Dispose();
                 }
 
-                if (library.MonitoringEnabled && !reachable)
+                if (configuration.Current.MonitoringEnabled && library.MonitoringEnabled && !reachable)
                 {
                     await EnsureWaitingScanAsync(service, library, cancellationToken);
                 }
@@ -121,22 +121,25 @@ public sealed partial class LibraryMonitoringService(
             }
 
             var latestFullScan = latestFullScans.GetValueOrDefault(library.Id);
-            var needsStartup = startupConsidered.Add(library.Id)
+            var reconciliationInterval = TimeSpan.FromMinutes(configuration.Current.ReconciliationMinutes);
+            var needsStartup = !startupConsidered.Contains(library.Id)
                 && (!latestFullScan.HasValue
                     || now - latestFullScan.Value > RecentStartupScan);
             var needsScheduled = latestFullScan.HasValue
-                && now - latestFullScan.Value >= ReconciliationInterval
+                && now - latestFullScan.Value >= reconciliationInterval
                 && (!library.LastScanStartedAt.HasValue
-                    || now - library.LastScanStartedAt.Value >= ReconciliationInterval);
-            if (needsStartup || needsScheduled)
+                    || now - library.LastScanStartedAt.Value >= reconciliationInterval);
+            if ((needsStartup || needsScheduled) && configuration.IsMaintenanceWindow(now))
             {
-                await TryStartAsync(
+                var started = await TryStartAsync(
                     service,
                     library.Id,
                     needsStartup ? LibraryScanTrigger.Startup : LibraryScanTrigger.Scheduled,
                     targetRelativePath: null,
                     cancellationToken);
+                if (started) startupConsidered.Add(library.Id);
             }
+            else if (!needsStartup && configuration.IsMaintenanceWindow(now)) startupConsidered.Add(library.Id);
         }
 
     }
@@ -181,6 +184,8 @@ public sealed partial class LibraryMonitoringService(
 
     private async Task FlushPendingAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
+        if (!configuration.Current.MonitoringEnabled) { pending.Clear(); return; }
+        if (!configuration.IsMaintenanceWindow(now)) return;
         foreach (var (libraryId, changes) in pending.ToArray())
         {
             if (!changes.Ready(now, Debounce, StabilityDelay, out var target))

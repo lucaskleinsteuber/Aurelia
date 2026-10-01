@@ -3,12 +3,53 @@ using System.Net.Http.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Services;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Aurelia.Server.Tests;
 
 public sealed class Build7HostingTests
 {
+    [Fact]
+    public void HostReadinessSignalIsNonceBoundAndEmittedOnlyAfterApplicationStarted()
+    {
+        using var lifetime = new TestApplicationLifetime();
+        using var output = new StringWriter();
+        const string nonce = "0123456789abcdefghijklmnopqrstuvwxyz_AB-CD";
+
+        Assert.True(HostReadinessSignal.Register(lifetime, output, nonce));
+        Assert.Equal(string.Empty, output.ToString());
+
+        lifetime.Start();
+
+        Assert.Equal(
+            $"{HostReadinessSignal.MarkerPrefix}{nonce}{Environment.NewLine}",
+            output.ToString());
+
+        lifetime.Stop();
+
+        Assert.Equal(
+            $"{HostReadinessSignal.MarkerPrefix}{nonce}{Environment.NewLine}"
+                + $"{HostReadinessSignal.StoppingMarkerPrefix}{nonce}{Environment.NewLine}",
+            output.ToString());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("short")]
+    [InlineData("0123456789abcdefghijklmnopqrstuvwxyz/+")]
+    public void HostReadinessSignalRejectsMissingOrUnsafeNonces(string? nonce)
+    {
+        using var lifetime = new TestApplicationLifetime();
+        using var output = new StringWriter();
+
+        Assert.False(HostReadinessSignal.Register(lifetime, output, nonce));
+        lifetime.Start();
+        lifetime.Stop();
+
+        Assert.Equal(string.Empty, output.ToString());
+    }
+
     [Fact]
     public async Task OwnerSetupRejectsMissingAndIncorrectBootstrapSecrets()
     {
@@ -72,6 +113,42 @@ public sealed class Build7HostingTests
         finally
         {
             Directory.Delete(dataDirectory, recursive: true);
+        }
+    }
+
+    private sealed class TestApplicationLifetime : IHostApplicationLifetime, IDisposable
+    {
+        private readonly CancellationTokenSource started = new();
+        private readonly CancellationTokenSource stopping = new();
+        private readonly CancellationTokenSource stopped = new();
+
+        public CancellationToken ApplicationStarted => started.Token;
+
+        public CancellationToken ApplicationStopping => stopping.Token;
+
+        public CancellationToken ApplicationStopped => stopped.Token;
+
+        public void Start()
+        {
+            started.Cancel();
+        }
+
+        public void Stop()
+        {
+            stopping.Cancel();
+        }
+
+        public void StopApplication()
+        {
+            stopping.Cancel();
+            stopped.Cancel();
+        }
+
+        public void Dispose()
+        {
+            started.Dispose();
+            stopping.Dispose();
+            stopped.Dispose();
         }
     }
 }

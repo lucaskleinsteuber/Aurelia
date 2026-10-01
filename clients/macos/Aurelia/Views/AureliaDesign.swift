@@ -36,48 +36,26 @@ enum AureliaDesign {
 }
 
 struct AureliaSidebarBackground: View {
-  let artwork: ArtworkSummary?
-  let symbol: String
-  let verticalOffset: CGFloat
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
-    ZStack(alignment: .top) {
-      if reduceTransparency {
-        AureliaDesign.canvas
-      } else {
-        Rectangle().fill(.ultraThinMaterial).opacity(0.55)
-        // The hero contributes light, never a second recognizable image.
-        // Rails are rendered behind this material by LibraryShellView.
-        if let artwork {
-          AuthenticatedArtwork(
-            artwork: artwork,
-            symbol: symbol,
-            contentMode: .fill
-          )
-          .id(artwork.id)
-          .frame(height: 540)
-          .scaleEffect(1.6)
-          .offset(y: min(verticalOffset, 0))
-          .blur(radius: 120)
-          .saturation(0.75)
-          .opacity(0.32)
-          .mask {
-            LinearGradient(
-              stops: [
-                .init(color: .white, location: 0),
-                .init(color: .white, location: 0.24),
-                .init(color: .clear, location: 0.62),
-              ],
-              startPoint: .top,
-              endPoint: .bottom)
-          }
-          .accessibilityHidden(true)
-        }
-        AureliaDesign.canvas.opacity(0.12)
-      }
+    if reduceTransparency {
+      AureliaDesign.canvas
+    } else {
+      SidebarMaterial()
     }
-    .clipped()
+  }
+
+  private struct SidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+      let view = NSVisualEffectView()
+      view.material = .sidebar
+      view.blendingMode = .withinWindow
+      view.state = .active
+      return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
   }
 }
 
@@ -123,12 +101,6 @@ struct AureliaHorizontalRail<Content: View>: View {
     .padding(.horizontal, -AureliaDesign.pagePadding)
     .scrollClipDisabled()
     .scrollBounceBehavior(.basedOnSize)
-  }
-}
-
-enum AureliaSidebarArtworkPosition {
-  static func verticalOffset(contentOffset: CGFloat, topInset: CGFloat) -> CGFloat {
-    -min(max(contentOffset + topInset, 0), 540)
   }
 }
 
