@@ -13,7 +13,8 @@ public sealed record PreparedRestore(Guid Id, Guid ServerId, bool RevokesAllSess
 internal sealed record RestoreActivationJournal(int Version, Guid Id, string[] Originals, string[] Replacements);
 
 public sealed class FullServerBackupService(ServerRuntimeOptions runtime, DatabaseBackupService databaseBackups,
-    ServerConfigurationStore configuration, MetadataProviderSettingsStore? metadataSettings = null) : IDisposable
+    ServerConfigurationStore configuration, MetadataProviderSettingsStore? metadataSettings = null,
+    CatalogMutationGate? mutations = null) : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -29,6 +30,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         string? output = null;
         try
         {
+            using var catalogLease = mutations is null ? null : await mutations.EnterAsync(token);
             PrepareTransferDirectory();
             var id = Guid.NewGuid();
             stage = Path.Combine(DirectoryPath, ".export-" + id.ToString("N"));
@@ -36,7 +38,9 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
             var backup = await databaseBackups.CreateBackupAsync(DatabaseBackupKind.Manual, token);
             await CopyPrivateAsync(backup, Path.Combine(stage, "aurelia.db"), token);
             foreach (var name in StateFiles(runtime.DataDirectory).Where(name => name != "aurelia.db" && name != ServerHostSettings.FileName
-                && name is not "metadata-settings.json" and not "Secrets/tmdb-token"))
+                && name is not "metadata-settings.json" and not "Secrets/tmdb-token" && !name.StartsWith("Artwork/", StringComparison.Ordinal)))
+                await CopyPrivateAsync(Path.Combine(runtime.DataDirectory, name), Path.Combine(stage, name), token);
+            foreach (var name in await ManualArtworkFilesAsync(Path.Combine(stage, "aurelia.db"), token))
                 await CopyPrivateAsync(Path.Combine(runtime.DataDirectory, name), Path.Combine(stage, name), token);
             // Settings and their credential must describe the same provider revision.
             foreach (var entry in (metadataSettings ?? new MetadataProviderSettingsStore(runtime)).BackupSnapshot())
@@ -58,7 +62,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
                 await stream.FlushAsync(token);
                 stream.Flush(flushToDisk: true);
             }
-            return new(id, new FileInfo(output).Length);
+            return new(id, new FileInfo(output).Length, IncludesArtwork: StateFiles(stage).Any(name => name.StartsWith("Artwork/", StringComparison.Ordinal)));
         }
         catch { if (output is not null && File.Exists(output)) File.Delete(output); throw; }
         finally { if (stage is not null && Directory.Exists(stage)) Directory.Delete(stage, true); gate.Release(); }
@@ -147,7 +151,9 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         if (receipt?.Id != id || !receipt.RevokesAllSessions) throw new InvalidDataException("Invalid restore receipt.");
         await ValidateStageAsync(stage, backups, token);
         if (receipt.ServerId != await ServerIdAsync(Path.Combine(stage, "aurelia.db"), token)) throw new InvalidDataException("The prepared restore identity changed.");
-        // Mandatory rollback copy contains DB + configuration + keys, never media/artwork.
+        // Mandatory rollback copy includes database, configuration, keys and managed
+        // PNG artwork so failed activation cannot lose a user's imported images.
+        // Original video files are never included.
         // An unsuccessful pre-activation attempt must not prevent retrying the
         // same prepared restore after freeing disk space.
         var rollback = Path.Combine(backups.BackupDirectory, "pre-full-restore-" + Guid.NewGuid().ToString("N"));
@@ -262,6 +268,13 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         }
         await using var database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path.Combine(stage, "aurelia.db"), Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         await database.OpenAsync(token);
+        var requiredArtwork = await ManualArtworkFilesAsync(Path.Combine(stage, "aurelia.db"), token);
+        foreach (var name in requiredArtwork)
+        {
+            if (!EncryptedBackupContainer.AllowedName(name) || !File.Exists(Path.Combine(stage, name)))
+                throw new InvalidDataException("The backup is missing referenced manual artwork.");
+            EditorArtworkStore.ValidateStoredImage(Path.Combine(stage, name));
+        }
         await using var command = database.CreateCommand();
         command.CommandText = "SELECT count(*) FROM pragma_table_info('Users') WHERE name='IsEnabled';";
         var hasEnabled = Convert.ToInt64(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture) > 0;
@@ -308,7 +321,35 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
             if (new DirectoryInfo(keys).LinkTarget is not null) throw new InvalidDataException("Unsafe key directory.");
             names.AddRange(Directory.EnumerateFiles(keys, "key-*.xml").Select(path => "DataProtectionKeys/" + Path.GetFileName(path)));
         }
+        var artwork = Path.Combine(directory, "Artwork");
+        if (Directory.Exists(artwork))
+        {
+            if (new DirectoryInfo(artwork).LinkTarget is not null) throw new InvalidDataException("Unsafe artwork directory.");
+            names.AddRange(Directory.EnumerateFiles(artwork).Select(path => "Artwork/" + Path.GetFileName(path)).Where(EncryptedBackupContainer.AllowedName));
+        }
         return names;
+    }
+    private static async Task<IReadOnlyList<string>> ManualArtworkFilesAsync(string path, CancellationToken token)
+    {
+        await using var database = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        await database.OpenAsync(token);
+        await using var command = database.CreateCommand();
+        command.CommandText = "SELECT count(*) FROM pragma_table_info('ArtworkAssets') WHERE name='IsManual';";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture) == 0) return [];
+        command.CommandText = "SELECT RelativeFilePath, OriginalFilePath FROM ArtworkAssets WHERE IsManual=1;";
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            for (var index = 0; index < 2; index++)
+            {
+                if (reader.IsDBNull(index)) continue;
+                var name = "Artwork/" + reader.GetString(index);
+                if (!EncryptedBackupContainer.AllowedName(name)) throw new InvalidDataException("Invalid manual artwork reference.");
+                names.Add(name);
+            }
+        }
+        return names.ToArray();
     }
     private static string RestoreStage(ServerRuntimeOptions runtime, Guid id) => Path.Combine(runtime.DataDirectory, "Backups", ".restore-" + id.ToString("N"));
     private static async Task CopyPrivateAsync(string source, string destination, CancellationToken token)

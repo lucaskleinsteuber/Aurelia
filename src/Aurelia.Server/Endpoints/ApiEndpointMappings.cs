@@ -352,12 +352,15 @@ public static class ApiEndpointMappings
         });
     }
 
-    private static Task<IResult> RemoveLibraryAsync(
+    private static async Task<IResult> RemoveLibraryAsync(
         Guid libraryId,
-        LibraryService libraries,
+        LibraryMutationService libraries,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
-        return ExecuteNoContentAsync(() => libraries.RemoveAsync(libraryId, cancellationToken));
+        var preview = await libraries.PreviewAsync([libraryId], cancellationToken);
+        var result = await libraries.ResetAsync(context.User.RequireUserId(), new ResetLibraryRequest([libraryId], preview.Revision), cancellationToken);
+        return result.State == "completed" ? Results.NoContent() : Results.Accepted($"/api/v1/library-operations/{result.Id}", result);
     }
 
     private static Task<IResult> UpdateLibraryMonitoringAsync(
@@ -768,8 +771,10 @@ public static class ApiEndpointMappings
         HttpContext context,
         string ticket,
         PlaybackService playback,
+        CatalogMutationGate mutations,
         CancellationToken cancellationToken)
     {
+        using var mutationLease = await mutations.EnterAsync(cancellationToken);
         var source = await playback.OpenStreamAsync(
             ticket,
             context.User.RequireUserId(),
@@ -779,6 +784,8 @@ public static class ApiEndpointMappings
         {
             return Results.NotFound();
         }
+
+        if (context.Items["Aurelia.StreamLease"] is ActiveStreamRegistry.Lease lease) lease.BindMedia(source.MediaId);
 
         context.Response.Headers.CacheControl = "private, no-store";
         context.Response.Headers.XContentTypeOptions = "nosniff";

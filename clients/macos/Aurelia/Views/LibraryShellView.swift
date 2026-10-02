@@ -928,6 +928,7 @@ private func posterGrid(_ items: [CatalogItemSummary], onSelect: @escaping (UUID
       }
       .buttonStyle(.plain)
       .accessibilityIdentifier("media-\(item.id.uuidString)")
+      .mediaActions(item: item)
     }
   }
 }

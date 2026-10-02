@@ -22,6 +22,7 @@ public sealed class ActiveStreamRegistry
 
     public void RevokeUser(Guid userId) => Cancel(stream => stream.UserId == userId);
     public void RevokeSession(Guid sessionId) => Cancel(stream => stream.SessionId == sessionId);
+    public void RevokeMedia(IReadOnlyCollection<Guid> ids) => Cancel(stream => stream.MediaId is { } id && ids.Contains(id));
 
     private void Cancel(Func<Lease, bool> predicate)
     {
@@ -46,6 +47,8 @@ public sealed class ActiveStreamRegistry
         }
         public Guid UserId { get; }
         public Guid SessionId { get; }
+        public Guid? MediaId { get; private set; }
+        public void BindMedia(Guid id) { lock (registry.gate) MediaId = id; }
         public CancellationToken Token => source.Token;
         internal void Cancel() { lock (gate) { if (!disposed) source.Cancel(); } }
         public void Dispose()

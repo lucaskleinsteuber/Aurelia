@@ -183,7 +183,7 @@ public sealed class PresentationService(
         return collections.Select(collection => new CollectionSummary(
             collection.Id,
             collection.Name,
-            collection.Members.OrderBy(member => member.SortOrder).Select(member => member.MediaItem.Metadata?.Artwork.FirstOrDefault(asset => asset.Kind == ArtworkKind.Poster)).FirstOrDefault(asset => asset is not null) is { } poster ? MetadataPresentation.ToArtwork(poster) : null,
+            collection.Members.OrderBy(member => member.SortOrder).Select(member => MetadataPresentation.ToSummary(member.MediaItem).Poster).FirstOrDefault(poster => poster is not null),
             collection.Members.OrderBy(member => member.SortOrder).Select(member => ToCatalog(member.MediaItem, userId)).ToList())).ToList();
     }
 
@@ -301,11 +301,15 @@ public sealed class PresentationService(
             ManualOverview = item.Metadata.ManualOverview,
             ProviderOverview = item.Metadata.ProviderOverview,
             ManualReleaseDate = item.Metadata.ManualReleaseDate,
+            ManualReleaseYear = item.Metadata.ManualReleaseYear,
+            ManualFieldsJson = item.Metadata.ManualFieldsJson,
+            ManualPosterId = item.Metadata.ManualPosterId,
+            ManualBackdropId = item.Metadata.ManualBackdropId,
             ProviderReleaseDate = item.Metadata.ProviderReleaseDate,
             ManualGenresJson = item.Metadata.ManualGenresJson,
             ProviderGenresJson = item.Metadata.ProviderGenresJson,
             Artwork = item.Metadata.Artwork.Where(art => art.Kind != ArtworkKind.Profile).Select(art => new ArtworkAsset
-            { Id = art.Id, Kind = art.Kind, ContentType = art.ContentType, ContentLength = art.ContentLength }).ToList(),
+            { Id = art.Id, Kind = art.Kind, IsManual = art.IsManual, ContentType = art.ContentType, ContentLength = art.ContentLength }).ToList(),
         },
         Favorites = item.Favorites.Where(favorite => favorite.UserId == userId).Select(favorite => new UserFavorite { UserId = favorite.UserId }).ToList(),
         PlaybackProgress = item.PlaybackProgress.Where(progress => progress.UserId == userId).Select(progress => new PlaybackProgress
@@ -359,8 +363,8 @@ public sealed class PresentationService(
         if (request.Kind.HasValue) query = query.Where(item => item.Kind == request.Kind.Value);
         if (request.LibraryId.HasValue) query = query.Where(item => item.LibraryRootId == request.LibraryId.Value);
         if (request.Availability.HasValue) query = query.Where(item => item.Availability == request.Availability.Value);
-        if (request.YearFrom.HasValue) query = query.Where(item => item.Year >= request.YearFrom.Value);
-        if (request.YearTo.HasValue) query = query.Where(item => item.Year <= request.YearTo.Value);
+        if (request.YearFrom.HasValue) query = query.Where(item => (item.Metadata != null && item.Metadata.ManualFieldsJson.Contains("\"releaseYear\"") ? item.Metadata.ManualReleaseYear : item.Year) >= request.YearFrom.Value);
+        if (request.YearTo.HasValue) query = query.Where(item => (item.Metadata != null && item.Metadata.ManualFieldsJson.Contains("\"releaseYear\"") ? item.Metadata.ManualReleaseYear : item.Year) <= request.YearTo.Value);
         if (request.Favorite.HasValue)
         {
             query = request.Favorite.Value
@@ -408,8 +412,8 @@ public sealed class PresentationService(
                 ? query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id)
                 : query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
             CatalogSort.ReleaseYear => descending
-                ? query.OrderByDescending(item => item.Year).ThenBy(item => item.DetectedTitle).ThenBy(item => item.Id)
-                : query.OrderBy(item => item.Year).ThenBy(item => item.DetectedTitle).ThenBy(item => item.Id),
+                ? query.OrderByDescending(item => item.Metadata != null && item.Metadata.ManualFieldsJson.Contains("\"releaseYear\"") ? item.Metadata.ManualReleaseYear : item.Year).ThenBy(item => item.DetectedTitle).ThenBy(item => item.Id)
+                : query.OrderBy(item => item.Metadata != null && item.Metadata.ManualFieldsJson.Contains("\"releaseYear\"") ? item.Metadata.ManualReleaseYear : item.Year).ThenBy(item => item.DetectedTitle).ThenBy(item => item.Id),
             CatalogSort.LastPlayed => descending
                 ? query.OrderByDescending(item => item.PlaybackProgress
                     .Where(progress => progress.UserId == userId)
@@ -420,8 +424,8 @@ public sealed class PresentationService(
                     .Select(progress => (DateTimeOffset?)progress.LastPlayedAt)
                     .FirstOrDefault()).ThenBy(item => item.Id),
             _ => descending
-                ? query.OrderByDescending(item => item.DetectedTitle).ThenByDescending(item => item.Id)
-                : query.OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id),
+                ? query.OrderByDescending(item => item.Metadata != null ? item.Metadata.ManualTitle ?? item.Metadata.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle : item.OverrideTitle ?? item.DetectedTitle).ThenByDescending(item => item.Id)
+                : query.OrderBy(item => item.Metadata != null ? item.Metadata.ManualTitle ?? item.Metadata.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle : item.OverrideTitle ?? item.DetectedTitle).ThenBy(item => item.Id),
         };
     }
 

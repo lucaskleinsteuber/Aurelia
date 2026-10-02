@@ -11,6 +11,7 @@ struct AppSettingsView: View {
   }
 
   @EnvironmentObject private var model: AppModel
+  @Environment(\.scenePhase) private var scenePhase
   @ObservedObject private var playbackPreferences = PlaybackPreferencesStore.shared
   @State private var selectedPage: SettingsPage = .general
   @State private var libraryToRemove: LibrarySummary?
@@ -39,6 +40,7 @@ struct AppSettingsView: View {
       settingsPage {
         if model.profile?.user?.role.canManageLibraries == true {
           storage
+          LibraryMaintenanceView()
         } else if model.profile != nil {
           ContentUnavailableView(
             "Library Management Unavailable",
@@ -83,6 +85,13 @@ struct AppSettingsView: View {
       isLoadingAdministration = true
       await model.reloadAdministration()
       isLoadingAdministration = false
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(5)) } catch { break }
+        if scenePhase == .active { await model.reloadDevices() }
+      }
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active { Task { await model.reloadDevices() } }
     }
     .confirmationDialog(
       "Remove \(libraryToRemove?.name ?? "Storage Location")?",
@@ -434,7 +443,7 @@ struct AppSettingsView: View {
         }
         Button("Pair Another Device") { Task { await model.generatePairingCode() } }
           .buttonStyle(AureliaPrimaryActionButtonStyle())
-        ForEach(model.sessions) { session in
+        ForEach(model.sessions.filter(\.isActive)) { session in
           HStack {
             VStack(alignment: .leading) {
               Text(session.deviceName)

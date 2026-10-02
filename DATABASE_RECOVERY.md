@@ -61,7 +61,9 @@ devices and consumes old pairing codes/playback tickets. Normal updates do not.
 
 The Server settings tab also provides a password-confirmed, encrypted export
 and guided full-server restore. It includes configuration and server identity,
-but excludes video files and artwork. Restoring requires confirmation that all
+and manually imported artwork originals/crops (full-server format 2), but excludes
+video files and provider artwork caches. Version 1 backups remain readable.
+Restoring requires confirmation that all
 devices will be signed out and a separate confirmation for another server's
 identity. Validation and rollback preparation happen before active files are
 replaced. See [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md) for format, limits,

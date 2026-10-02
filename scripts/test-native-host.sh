@@ -292,6 +292,52 @@ range_status="$(curl --silent --insecure --output "$runtime_root/range.bin" \
 [[ "$(stat -f '%z' "$runtime_root/range.bin")" == 64 ]] \
   || fail "Direct Play returned an unexpected byte count."
 
+last_phase='packaged metadata editor and image processing'
+/usr/bin/swift -warnings-as-errors -module-cache-path "$runtime_root/SwiftModules" -e '
+import AppKit
+let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 60, pixelsHigh: 90,
+  bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+  colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+let color = NSColor(calibratedRed: 0.1, green: 0.3, blue: 0.8, alpha: 1)
+for y in 0..<90 { for x in 0..<60 { bitmap.setColor(color, atX: x, y: y) } }
+try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1]))
+' "$runtime_root/editor-source.png"
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" \
+  "$https_base/api/v1/media/$media_id/editor" >"$runtime_root/editor-before.json"
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" --header 'Content-Type: image/png' \
+  --data-binary "@$runtime_root/editor-source.png" \
+  "$https_base/api/v1/media/$media_id/editor/uploads" >"$runtime_root/editor-upload.json"
+editor_upload="$(jq -r '.id' "$runtime_root/editor-upload.json")"
+editor_body="$(jq -c --arg upload "$editor_upload" --arg person "$(uuidgen)" \
+  '{revision:.revision,values:(.values | .title="Edited Host Movie" | .releaseYear=2026 |
+    .runtimeMinutes=98 | .fskAge=12 | .overview="" |
+    .poster={uploadId:$upload,crop:{x:0,y:0,width:1,height:1,rotation:0}} |
+    .credits=[{id:$person,name:"Synthetic Performer",department:"Acting",job:"Actor",
+      character:"Host Character",profile:{uploadId:$upload}}]),
+    overrideFields:["title","releaseYear","runtimeMinutes","fsk","overview","poster","credits"]}' \
+  "$runtime_root/editor-before.json")"
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" --request PUT \
+  --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+  --data "$editor_body" "$https_base/api/v1/media/$media_id/editor" >"$runtime_root/editor-saved.json"
+[[ "$(jq -r '.values.title' "$runtime_root/editor-saved.json")" == 'Edited Host Movie' \
+  && "$(jq -r '.values.overview' "$runtime_root/editor-saved.json")" == '' \
+  && "$(jq '.values.credits | length' "$runtime_root/editor-saved.json")" == 1 ]] \
+  || fail "The packaged editor did not retain manual metadata and credits."
+editor_asset="$(jq -r '.values.poster.assetId' "$runtime_root/editor-saved.json")"
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" \
+  "$https_base/api/v1/media/$media_id/editor/artwork/$editor_asset" >"$runtime_root/editor-original.png"
+[[ "$(stat -f '%z' "$runtime_root/editor-original.png")" -gt 0 ]] \
+  || fail "The packaged image processor did not retain the sanitized original."
+editor_original_hash="$(shasum -a 256 "$runtime_root/editor-original.png" | awk '{print $1}')"
+stale_status="$(curl --silent --insecure --pinnedpubkey "$curl_pin" --request PUT \
+  --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+  --data "$editor_body" --output "$runtime_root/editor-conflict.json" --write-out '%{http_code}' \
+  "$https_base/api/v1/media/$media_id/editor")"
+[[ "$stale_status" == 409 ]] || fail "The packaged editor accepted a stale revision."
+
 curl --silent --show-error --fail-with-body --insecure --request POST \
   --pinnedpubkey "$curl_pin" \
   --header "Authorization: Bearer $token" \
@@ -387,6 +433,17 @@ token="$(jq -r '.token' "$runtime_root/restored-authentication.json")"
 [[ ${#token} -ge 43 ]] || fail "The owner could not sign in after restore."
 [[ "$(jq -r '.publicKeyFingerprint' "$runtime_root/server-info.json")" == "$reported_fingerprint" ]] || fail "Restore lost the existing TLS identity."
 [[ "$(sqlite3 "$data_root/aurelia.db" 'SELECT count(*) FROM LibraryRoots;')" == 1 ]] || fail "The isolated library was not restored."
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" \
+  "$https_base/api/v1/media/$media_id/editor" >"$runtime_root/editor-restored.json"
+[[ "$(jq -r '.values.title' "$runtime_root/editor-restored.json")" == 'Edited Host Movie' \
+  && "$(jq -r '.values.poster.assetId' "$runtime_root/editor-restored.json")" == "$editor_asset" ]] \
+  || fail "Full restore lost manual metadata or image identity."
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" \
+  "$https_base/api/v1/media/$media_id/editor/artwork/$editor_asset" >"$runtime_root/editor-restored-original.png"
+[[ "$(shasum -a 256 "$runtime_root/editor-restored-original.png" | awk '{print $1}')" == "$editor_original_hash" ]] \
+  || fail "Full restore changed or lost the imported original image."
 
 # A deliberately occupied HTTPS port is isolated to this test's child process.
 ruby -rsocket -e 'server=TCPServer.new("0.0.0.0",0); STDOUT.sync=true; puts server.addr[1]; sleep 180' >"$runtime_root/conflict-port.txt" &
@@ -484,9 +541,11 @@ fi
   print -r -- "PASS: live TLS public-key fingerprint matched server identity"
   print -r -- "PASS: /auth/me, library creation, bounded scan, pairing, and sessions"
   print -r -- "PASS: authenticated Direct Play returned the requested 64-byte original-file range"
+  print -r -- "PASS: packaged metadata editor imported/cropped an image, saved credits/manual blanks, and rejected stale revisions"
   print -r -- "PASS: confirmed network change retained TLS identity and device sessions"
   print -r -- "PASS: unconfirmed network change rolled back after 60 seconds"
   print -r -- "PASS: native encrypted restore retained library/TLS identity and revoked old tokens"
+  print -r -- "PASS: encrypted full restore retained manual metadata and imported image identity/bytes"
   print -r -- "PASS: occupied HTTPS port rolled back to the reachable previous network"
   print -r -- "PASS: graceful helper/server shutdown"
   print -r -- "PASS: helper stopped when its isolated PID-bound parent app disappeared"

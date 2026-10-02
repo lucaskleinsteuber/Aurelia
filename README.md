@@ -25,6 +25,9 @@ native app.
 
 ## Current server
 
+- Revisioned, complete manual metadata and title-specific cast/image editing;
+  protected file reassignment, persistent source exclusions, scoped title removal,
+  and password-confirmed library reset; see [MEDIA_EDITING.md](MEDIA_EDITING.md)
 - Owner-managed server settings, per-account library grants, password-confirmed
   administration, bounded diagnostics, and encrypted full-server recovery; see
   [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md)
@@ -77,6 +80,10 @@ native app.
   search; episode results open Direct Play immediately
 - One consistent native sheet family for metadata, provider matching, review,
   and collection editing, restricted to owners and administrators
+- A four-section native metadata editor with durable manual blanks, cast/crew
+  ordering, image import/recropping, and a protected server-file browser
+- Library right-click actions and detail-page administration gear; active-only
+  device lists and explicit, password-confirmed selected-library reset
 - Reliable host-first startup with an explicit, remembered remote-client mode
 - Separately signed, windowless host helper with both self-contained server architectures
 - App-Group-secured server bootstrap, bounded private logs, retry, and crash recovery
@@ -125,6 +132,7 @@ scripts/verify-build-number.sh
 scripts/test-macos.sh
 scripts/build-macos-release.sh
 scripts/test-native-host.sh
+scripts/test-server-x64.sh
 scripts/test-release-app-autostart.sh
 scripts/test-recovery-disk-full.sh
 ```

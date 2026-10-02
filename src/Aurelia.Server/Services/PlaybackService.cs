@@ -8,7 +8,8 @@ public sealed record PlaybackStreamSource(
     FileStream Stream,
     string ContentType,
     long ContentLength,
-    DateTimeOffset LastModified);
+    DateTimeOffset LastModified,
+    Guid MediaId);
 
 public sealed class PlaybackService(
     AureliaDbContext database,
@@ -162,7 +163,8 @@ public sealed class PlaybackService(
                 file.Stream,
                 file.ContentType,
                 file.Length,
-                file.LastModified);
+                file.LastModified,
+                ticket.MediaItemId);
         }
         catch (PlaybackException)
         {

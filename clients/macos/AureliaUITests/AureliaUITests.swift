@@ -91,7 +91,7 @@ final class AureliaUITests: XCTestCase {
       app.staticTexts["/private/tmp/Aurelia/UIFixture"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.staticTexts["/private/tmp/Aurelia/SecondFixture"].exists)
     XCTAssertTrue(app.buttons["start-storage-scan"].isEnabled)
-    XCTAssertFalse(app.dialogs.firstMatch.exists)
+    XCTAssertFalse(app.dialogs.firstMatch.exists, app.dialogs.debugDescription)
     XCTAssertFalse(app.alerts.firstMatch.exists)
   }
 
@@ -228,13 +228,14 @@ final class AureliaUITests: XCTestCase {
     ] {
       XCTAssertTrue(app.staticTexts[section].exists, "Missing server settings section: \(section)")
     }
-    XCTAssertTrue(app.staticTexts["Only while Aurelia is running"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["server-hosting-mode"].exists)
     XCTAssertFalse(app.buttons["Try Network Settings (60-second rollback)"].isEnabled)
     XCTAssertFalse(app.buttons["Restart Server"].isEnabled)
     let screenshot = XCTAttachment(screenshot: app.screenshot())
     screenshot.name = "Server settings - synthetic owner, no native host"
     screenshot.lifetime = .keepAlways
     add(screenshot)
+    XCTAssertFalse(app.staticTexts["The server returned an invalid response."].exists)
     assertNoUnexpectedDialog(in: app)
   }
 
@@ -427,6 +428,49 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["Edit Metadata"].exists)
     XCTAssertTrue(app.buttons["Save"].exists)
     XCTAssertTrue(app.buttons["Cancel"].exists)
+    let title = app.textFields["metadata-title"]
+    XCTAssertTrue(title.waitForExistence(timeout: 5))
+    title.click()
+    title.typeKey("a", modifierFlags: .command)
+    title.typeText("Corrected Test Title")
+    app.buttons["Cancel"].click()
+    let keepEditing = app.windows.firstMatch.buttons["Keep Editing"]
+    XCTAssertTrue(keepEditing.waitForExistence(timeout: 5))
+    keepEditing.click()
+    XCTAssertEqual(title.value as? String, "Corrected Test Title")
+    for section in ["Production & Release", "Cast & Crew", "Artwork & File", "General"] {
+      app.descendants(matching: .any)[section].firstMatch.click()
+    }
+    app.buttons["Save"].click()
+    XCTAssertTrue(
+      app.descendants(matching: .any)["metadata-editor"].waitForNonExistence(timeout: 5))
+    actions.click()
+    editMetadata.click()
+    XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.textFields["metadata-title"].value as? String, "Corrected Test Title")
+    app.buttons["Cancel"].click()
+  }
+
+  @MainActor
+  func testLibraryRightClickKeepsNavigationAndExposesScopedActions() throws {
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "library-admin"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+    app.descendants(matching: .any)["sidebar-library"].click()
+    let movie = app.buttons["media-10000000-0000-0000-0000-000000000001"]
+    XCTAssertTrue(movie.waitForExistence(timeout: 8))
+    movie.rightClick()
+    XCTAssertTrue(app.menuItems["Remove from Favorites"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.menuItems["Edit Metadata…"].exists)
+    XCTAssertTrue(app.menuItems["Remove from Library…"].exists)
+    app.menuItems["Edit Metadata…"].click()
+    XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
+    app.buttons["Cancel"].click()
+    movie.click()
+    XCTAssertTrue(app.buttons["play-media"].waitForExistence(timeout: 5))
   }
 
   @MainActor
@@ -578,7 +622,10 @@ final class AureliaUITests: XCTestCase {
   @MainActor
   private func assertNoUnexpectedDialog(in app: XCUIApplication) {
     XCTAssertFalse(app.alerts.firstMatch.exists)
-    XCTAssertFalse(app.dialogs.firstMatch.exists)
+    // macOS also exposes disabled, non-visible auxiliary panels as Dialogs.
+    // They do not interrupt the app; visible dialogs, alerts and sheets do.
+    XCTAssertFalse(
+      app.dialogs.allElementsBoundByIndex.contains { $0.isHittable }, app.dialogs.debugDescription)
     XCTAssertFalse(app.sheets.firstMatch.exists)
   }
 

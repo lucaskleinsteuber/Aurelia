@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Buffers.Binary;
 using System.Security.Cryptography.X509Certificates;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -13,6 +14,111 @@ namespace Aurelia.Server.Tests;
 
 public sealed class ServerBackupSecurityTests
 {
+    [Fact]
+    public async Task FullBackupPreservesImportedArtworkOriginalsAndCropsWithoutVideosOrProviderCache()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        PrivateFilePermissions.CreatePrivateDirectory(root);
+        var runtime = ServerRuntimeOptions.Resolve(new ConfigurationBuilder().Build(), ["--data-dir", root]);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>().UseSqlite($"Data Source={runtime.DatabasePath};Pooling=False").Options;
+        var media = Guid.NewGuid(); var manual = Guid.NewGuid(); var provider = Guid.NewGuid();
+        var png = MediaEditingTests.Png(120, 180);
+        var original = MediaEditingTests.Png(180, 180);
+        try
+        {
+            var artwork = Path.Combine(root, "Artwork"); PrivateFilePermissions.CreatePrivateDirectory(artwork);
+            await File.WriteAllBytesAsync(Path.Combine(artwork, manual.ToString("N") + ".png"), png);
+            await File.WriteAllBytesAsync(Path.Combine(artwork, manual.ToString("N") + ".original.png"), original);
+            await File.WriteAllBytesAsync(Path.Combine(artwork, provider.ToString("N") + ".png"), png);
+            var movies = Path.Combine(root, "Videos"); Directory.CreateDirectory(movies);
+            var video = Path.Combine(movies, "Synthetic.mkv"); await File.WriteAllBytesAsync(video, [4, 5, 6]);
+            await using (var database = new AureliaDbContext(options))
+            {
+                await database.Database.MigrateAsync();
+                database.ServerIdentities.Add(new ServerIdentity { Id = 1, ServerId = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow });
+                database.Users.Add(new ServerUser { Id = Guid.NewGuid(), Username = "owner", NormalizedUsername = "OWNER", PasswordHash = "synthetic hash", Role = UserRole.Owner, CreatedAt = DateTimeOffset.UtcNow });
+                var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", Path = movies, NormalizedPath = MediaPath.Normalize(movies), Kind = LibraryKind.Movies, CreatedAt = DateTimeOffset.UtcNow };
+                database.LibraryRoots.Add(library);
+                var metadata = new MediaMetadata { MediaItemId = media, ManualTitle = "Corrected title", ManualFieldsJson = "[\"title\",\"poster\"]", ManualPosterId = manual, UpdatedAt = DateTimeOffset.UtcNow };
+                metadata.Artwork.Add(new ArtworkAsset
+                {
+                    Id = manual,
+                    MediaItemId = media,
+                    IsManual = true,
+                    Kind = ArtworkKind.Poster,
+                    ProviderPath = "manual/" + manual.ToString("N"),
+                    RelativeFilePath = manual.ToString("N") + ".png",
+                    OriginalFilePath = manual.ToString("N") + ".original.png",
+                    CropJson = "{\"x\":0.1666666667,\"y\":0,\"width\":0.6666666666,\"height\":1,\"rotation\":90}",
+                    ContentType = "image/png",
+                    ContentLength = png.Length,
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+                metadata.Artwork.Add(new ArtworkAsset { Id = provider, MediaItemId = media, Kind = ArtworkKind.Poster, ProviderPath = "/provider.png", RelativeFilePath = provider.ToString("N") + ".png", ContentType = "image/png", ContentLength = png.Length, CreatedAt = DateTimeOffset.UtcNow });
+                database.MediaItems.Add(new MediaItem { Id = media, LibraryRootId = library.Id, Kind = MediaKind.Movie, SourcePath = video, NormalizedSourcePath = MediaPath.Normalize(video), DetectedTitle = "Synthetic", Metadata = metadata, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
+                await database.SaveChangesAsync();
+            }
+            var configuration = new ServerConfigurationStore(runtime); var backups = new DatabaseBackupService(runtime, configuration);
+            using var full = new FullServerBackupService(runtime, backups, configuration);
+            var export = await full.ExportAsync("long backup passphrase", CancellationToken.None);
+            Assert.True(export.IncludesArtwork); Assert.False(export.IncludesMedia);
+            var stage = Path.Combine(root, "inspection");
+            BackupManifest manifest;
+            await using (var encrypted = File.OpenRead(full.TransferPath(export.Id)))
+                manifest = await EncryptedBackupContainer.DecryptAsync(encrypted, stage, "long backup passphrase", CancellationToken.None);
+            Assert.Equal(2, manifest.Version); Assert.True(manifest.IncludesArtwork);
+            Assert.Contains(manifest.Files, file => file.Name == "Artwork/" + manual.ToString("N") + ".original.png");
+            Assert.DoesNotContain(manifest.Files, file => file.Name.Contains(provider.ToString("N"), StringComparison.Ordinal) || file.Name.Contains(".mkv", StringComparison.Ordinal));
+            Assert.Equal(original, await File.ReadAllBytesAsync(Path.Combine(stage, "Artwork", manual.ToString("N") + ".original.png")));
+            var prepared = await full.PrepareRestoreAsync(new(export.Id, "long backup passphrase", true), CancellationToken.None);
+            await File.WriteAllBytesAsync(Path.Combine(artwork, manual.ToString("N") + ".png"), [0]);
+            await FullServerBackupService.ApplyPreparedAsync(runtime, prepared.Id, CancellationToken.None);
+            await using var restored = new AureliaDbContext(options);
+            Assert.Equal("Corrected title", (await restored.MediaMetadata.SingleAsync()).ManualTitle);
+            Assert.Contains("\"rotation\":90", (await restored.ArtworkAssets.SingleAsync(asset => asset.Id == manual)).CropJson!, StringComparison.Ordinal);
+            Assert.Equal(png, await File.ReadAllBytesAsync(Path.Combine(artwork, manual.ToString("N") + ".png")));
+            Assert.Equal(original, await File.ReadAllBytesAsync(Path.Combine(artwork, manual.ToString("N") + ".original.png")));
+            Assert.Equal(new byte[] { 4, 5, 6 }, await File.ReadAllBytesAsync(video));
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task VersionOneContainerRemainsReadableWithItsOriginalAuthenticatedFormat()
+    {
+        var root = TestPaths.CreateDataDirectory(); Directory.CreateDirectory(root);
+        try
+        {
+            var plaintext = new byte[] { 1, 2, 3, 4, 5 };
+            var salt = RandomNumberGenerator.GetBytes(16); var noncePrefix = RandomNumberGenerator.GetBytes(8);
+            var manifest = new BackupManifest(1, 1_048_576, 600_000, Convert.ToBase64String(salt), Convert.ToBase64String(noncePrefix), Guid.NewGuid(), DateTimeOffset.UtcNow,
+                [new BackupManifestFile("aurelia.db", plaintext.Length, Convert.ToHexString(SHA256.HashData(plaintext)))]);
+            var header = JsonSerializer.SerializeToUtf8Bytes(manifest, ApiTestClient.JsonOptions);
+            using var encrypted = new MemoryStream(); encrypted.Write("AURBK001"u8);
+            var length = new byte[4]; BinaryPrimitives.WriteInt32BigEndian(length, header.Length); encrypted.Write(length); encrypted.Write(header);
+            var key = Rfc2898DeriveBytes.Pbkdf2("long backup passphrase", salt, 600_000, HashAlgorithmName.SHA256, 32);
+            try
+            {
+                using var aes = new AesGcm(key, 16); var headerHash = SHA256.HashData(header);
+                for (uint index = 0; index < 2; index++)
+                {
+                    var count = index == 0 ? plaintext.Length : 0;
+                    var nonce = new byte[12]; noncePrefix.CopyTo(nonce, 0); BinaryPrimitives.WriteUInt32BigEndian(nonce.AsSpan(8), index);
+                    var aad = new byte[40]; headerHash.CopyTo(aad, 0); BinaryPrimitives.WriteUInt32BigEndian(aad.AsSpan(32), index); BinaryPrimitives.WriteInt32BigEndian(aad.AsSpan(36), count);
+                    var ciphertext = new byte[count]; var tag = new byte[16];
+                    aes.Encrypt(nonce, count == 0 ? [] : plaintext, ciphertext, tag, aad);
+                    BinaryPrimitives.WriteInt32BigEndian(length, count); encrypted.Write(length); encrypted.Write(tag); encrypted.Write(ciphertext);
+                }
+            }
+            finally { CryptographicOperations.ZeroMemory(key); }
+            encrypted.Position = 0;
+            var restored = await EncryptedBackupContainer.DecryptAsync(encrypted, Path.Combine(root, "restore"), "long backup passphrase", CancellationToken.None);
+            Assert.Equal(1, restored.Version); Assert.False(restored.IncludesArtwork);
+            Assert.Equal(plaintext, await File.ReadAllBytesAsync(Path.Combine(root, "restore", "aurelia.db")));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public async Task BackupConfigurationEntriesAreBoundedBeforeEncryptionAndParsing()
     {

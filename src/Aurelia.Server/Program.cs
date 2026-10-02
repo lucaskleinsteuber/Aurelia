@@ -109,6 +109,11 @@ builder.Services.AddSingleton<FullServerBackupService>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<LibraryAccessService>();
+builder.Services.AddSingleton<CatalogMutationGate>();
+builder.Services.AddSingleton<EditorArtworkStore>();
+builder.Services.AddScoped<MediaEditorService>();
+builder.Services.AddScoped<LibraryMutationService>();
+builder.Services.AddHostedService<LibraryCleanupWorker>();
 builder.Services.AddSingleton<ServerConfigurationStore>();
 builder.Services.AddSingleton<CredentialAttemptGuard>();
 builder.Services.AddSingleton<ActiveStreamRegistry>();
@@ -216,8 +221,11 @@ app.Use(async (context, next) =>
         return;
     }
     var backupUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase);
-    var maximumBytes = backupUpload ? EncryptedBackupContainer.MaximumBytes : ServerRequestGuard.MaximumJsonBytes;
-    if (backupUpload && context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
+    var editorPath = (context.Request.Path.Value ?? "").Contains("/editor", StringComparison.Ordinal);
+    var imageUpload = editorPath && HttpMethods.IsPost(context.Request.Method) && context.Request.Path.Value!.EndsWith("/uploads", StringComparison.Ordinal);
+    var maximumBytes = backupUpload ? EncryptedBackupContainer.MaximumBytes : imageUpload ? EditorArtworkStore.MaximumUploadBytes
+        : editorPath ? 1024 * 1024 : ServerRequestGuard.MaximumJsonBytes;
+    if (context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
         feature.MaxRequestBodySize = maximumBytes;
     if (context.Request.ContentLength > maximumBytes)
     {
@@ -249,6 +257,7 @@ app.Use(async (context, next) =>
             using var lease = context.RequestServices.GetRequiredService<ActiveStreamRegistry>().Enter(
                 context.User.RequireUserId(), context.User.RequireSessionId(), limits.GlobalStreamLimit, limits.UserStreamLimit, context.RequestAborted);
             context.RequestAborted = lease.Token;
+            context.Items["Aurelia.StreamLease"] = lease;
             await next(context);
         }
         else await next(context);
@@ -267,7 +276,8 @@ app.Use(async (context, next) =>
         context.Response.StatusCode = 400;
         await context.Response.WriteAsJsonAsync(new ApiProblem("invalid_server_data", "The operation data could not be validated. Active server data was not replaced."));
     }
-    catch (IOException) when (!context.Response.HasStarted && context.Request.Path.StartsWithSegments("/api/v1/server"))
+    catch (IOException) when (!context.Response.HasStarted && (context.Request.Path.StartsWithSegments("/api/v1/server")
+        || context.Request.Path.StartsWithSegments("/api/v1/media") || context.Request.Path.StartsWithSegments("/api/v1/libraries")))
     {
         context.Response.StatusCode = 507;
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("server_storage_operation_failed", "error");
@@ -276,6 +286,7 @@ app.Use(async (context, next) =>
 });
 app.MapAureliaApi();
 app.MapServerManagement();
+app.MapMediaEditing();
 
 try
 {

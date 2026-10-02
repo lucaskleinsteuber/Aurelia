@@ -500,6 +500,77 @@ struct APIClient: Sendable {
     )
   }
 
+  func mediaEditor(id: UUID) async throws -> MediaEditorDocument {
+    try await get("/api/v1/media/\(id.uuidString)/editor")
+  }
+  func saveMediaEditor(id: UUID, request: SaveMediaEditorRequest) async throws
+    -> MediaEditorDocument
+  {
+    try Self.decode(
+      MediaEditorDocument.self,
+      from: await perform(
+        path: "/api/v1/media/\(id.uuidString)/editor", method: "PUT",
+        body: JSONEncoder().encode(request), timeout: 120))
+  }
+  func uploadEditorImage(id: UUID, png: Data) async throws -> EditorUploadSummary {
+    try Self.decode(
+      EditorUploadSummary.self,
+      from: await perform(
+        path: "/api/v1/media/\(id.uuidString)/editor/uploads", method: "POST", body: png,
+        timeout: 120))
+  }
+  func editorImage(id: UUID, selection: EditorArtwork) async throws -> Data {
+    let path: String
+    if let upload = selection.uploadId {
+      path = "/api/v1/media/\(id.uuidString)/editor/uploads/\(upload.uuidString)"
+    } else if let asset = selection.assetId {
+      path = "/api/v1/media/\(id.uuidString)/editor/artwork/\(asset.uuidString)"
+    } else {
+      throw APIClientError.invalidResponse
+    }
+    return try await perform(path: path)
+  }
+  func discardEditorImage(id: UUID, upload: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/media/\(id.uuidString)/editor/uploads/\(upload.uuidString)", method: "DELETE")
+  }
+  func editorFiles(id: UUID, path: String) async throws -> ServerFileListing {
+    try await get(
+      "/api/v1/media/\(id.uuidString)/editor/files?\(try Self.query(name: "path", value: path))")
+  }
+  func removeMedia(id: UUID) async throws -> LibraryMutationResult {
+    try Self.decode(
+      LibraryMutationResult.self,
+      from: await perform(path: "/api/v1/media/\(id.uuidString)", method: "DELETE", timeout: 120))
+  }
+  func libraryMutation(id: UUID) async throws -> LibraryMutationResult {
+    try await get("/api/v1/library-operations/\(id.uuidString)")
+  }
+  func previewReset(libraries: [UUID]) async throws -> ResetLibraryPreview {
+    try Self.decode(
+      ResetLibraryPreview.self,
+      from: await perform(
+        path: "/api/v1/libraries/reset/preview", method: "POST",
+        body: JSONEncoder().encode(libraries)))
+  }
+  func resetLibrary(preview: ResetLibraryPreview) async throws -> LibraryMutationResult {
+    try Self.decode(
+      LibraryMutationResult.self,
+      from: await perform(
+        path: "/api/v1/libraries/reset", method: "POST",
+        body: JSONEncoder().encode(
+          ResetLibraryRequest(libraryIds: preview.libraryIds, revision: preview.revision)),
+        timeout: 120))
+  }
+  func excludedItems(library: UUID) async throws -> [ExcludedMediaSummary] {
+    try await get("/api/v1/libraries/\(library.uuidString)/exclusions")
+  }
+  func reinclude(library: UUID, excluded: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/libraries/\(library.uuidString)/exclusions/\(excluded.uuidString)",
+      method: "DELETE")
+  }
+
   func selectMetadataMatch(
     mediaId: UUID,
     providerMediaId: String,
@@ -629,6 +700,13 @@ struct APIClient: Sendable {
     timeout: TimeInterval = 15
   ) async throws -> Data {
     #if DEBUG
+      if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "library-admin",
+        path == "/api/v1/metadata/reviews" || path.hasSuffix("/editor")
+          || path.hasSuffix("/metadata")
+      {
+        return try await MetadataEditorUITestFixture.response(
+          path: path, method: method, body: body)
+      }
       if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "server-settings"
         || profile.baseURL.host == "server-settings-preview.invalid"
       {
@@ -638,7 +716,11 @@ struct APIClient: Sendable {
     #endif
     var headers: [String: String] = [:]
     if Self.requiresAdministrationApproval(path: path, method: method) {
-      guard profile.user?.role == .owner else {
+      let libraryReset = path == "/api/v1/libraries/reset"
+      guard
+        profile.user?.role == .owner
+          || (libraryReset && profile.user?.role.canManageLibraries == true)
+      else {
         throw APIClientError.serverRejected(
           code: "owner_required", message: "Only an owner may change global server settings.")
       }
@@ -653,7 +735,8 @@ struct APIClient: Sendable {
       let confirmation = Confirmation(
         action: "\(method) \(path)", payloadHash: hash, password: password)
       let (approvalData, _, _) = try await Self.request(
-        baseURL: profile.baseURL, path: "/api/v1/server/approval",
+        baseURL: profile.baseURL,
+        path: libraryReset ? "/api/v1/libraries/reset/approval" : "/api/v1/server/approval",
         method: "POST", token: profile.token, body: JSONEncoder().encode(confirmation),
         trustMode: .pinned(profile.publicKeyFingerprint))
       headers["X-Aurelia-Approval"] = try Self.decode(Approval.self, from: approvalData).token
@@ -681,6 +764,8 @@ struct APIClient: Sendable {
     if method == "DELETE", normalized.hasPrefix("/api/v1/server/backups/transfers/") {
       return false
     }
+    if normalized.contains("/exclusions/") { return false }
+    if normalized == "/api/v1/libraries/reset" { return true }
     return normalized == "/api/v1/server/settings"
       || normalized.hasPrefix("/api/v1/server/operations")
       || normalized.hasPrefix("/api/v1/server/sessions")
@@ -874,8 +959,13 @@ struct APIClient: Sendable {
           "users":1,"libraries":0,"freeDiskBytes":10737418240,"certificateExpiresAt":"2036-10-01T12:00:00Z","networkAddresses":["192.168.1.10"]}
           """
       case "/api/v1/server/users", "/api/v1/server/backups", "/api/v1/server/diagnostics",
-        "/api/v1/libraries":
+        "/api/v1/libraries", "/api/v1/auth/sessions", "/api/v1/libraries/scans":
         response = "[]"
+      case "/api/v1/metadata/provider":
+        response = """
+          {"enabled":false,"hasToken":false,"language":"en-US","artworkBytes":0,
+          "artworkLimitBytes":1073741824,"provider":"TMDB","attribution":"Synthetic test provider"}
+          """
       case "/api/v1/server/jobs": response = "{\"scans\":[],\"metadata\":[]}"
       case "/api/v1/server/operations/current": response = "null"
       default: throw APIClientError.invalidResponse
@@ -920,7 +1010,9 @@ struct APIClient: Sendable {
     }
     if let body {
       request.httpBody = body
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue(
+        path.hasSuffix("/editor/uploads") ? "image/png" : "application/json",
+        forHTTPHeaderField: "Content-Type")
     }
 
     let (data, response) = try await session.data(for: request)

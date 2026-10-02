@@ -5,7 +5,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Aurelia.Server.Tests" />
     <ProjectReference Include="../Aurelia.Contracts/Aurelia.Contracts.csproj" />
+    <PackageReference Include="SkiaSharp" />
     <PackageReference Include="Haukcode.Mdns" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">

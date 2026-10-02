@@ -8,38 +8,67 @@ public static class MetadataPresentation
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static MediaMetadataSummary ToSummary(MediaItem item)
+    public static HashSet<string> ManualFields(MediaMetadata? metadata)
+    {
+        var fields = ParseList(metadata?.ManualFieldsJson).ToHashSet(StringComparer.Ordinal);
+        if (metadata?.ManualTitle is not null) fields.Add("title");
+        if (metadata?.ManualOverview is not null) fields.Add("overview");
+        if (metadata?.ManualReleaseDate is not null) fields.Add("releaseYear");
+        if (metadata?.ManualRuntimeMinutes is not null) fields.Add("runtimeMinutes");
+        if (metadata?.ManualContentRating is not null) fields.Add("fsk");
+        if (metadata?.ManualGenresJson is not null) fields.Add("genres");
+        if (metadata?.ManualStudiosJson is not null) fields.Add("studios");
+        if (metadata?.ManualCountriesJson is not null) fields.Add("country");
+        return fields;
+    }
+
+    public static MediaMetadataSummary ToSummary(MediaItem item, bool automatic = false)
     {
         var metadata = item.Metadata;
-        var artwork = metadata?.Artwork.Where(asset => asset.Kind != ArtworkKind.Profile)
+        var fields = automatic ? [] : ManualFields(metadata);
+        var artwork = metadata?.Artwork.Where(asset => asset.Kind != ArtworkKind.Profile && !asset.IsManual)
             .GroupBy(asset => asset.Kind).ToDictionary(group => group.Key, group => group.First());
+        ArtworkAsset? Selected(string field, ArtworkKind kind, Guid? manualId) => fields.Contains(field)
+            ? metadata?.Artwork.FirstOrDefault(asset => asset.Id == manualId)
+            : artwork?.GetValueOrDefault(kind);
+        var poster = Selected("poster", ArtworkKind.Poster, metadata?.ManualPosterId);
+        var backdrop = Selected("backdrop", item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, metadata?.ManualBackdropId);
+        var contentRating = !automatic ? metadata?.ManualContentRating ?? metadata?.ProviderContentRating : metadata?.ProviderContentRating;
         return new MediaMetadataSummary(
             item.Id,
-            metadata?.ManualTitle ?? metadata?.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle,
+            (!automatic ? metadata?.ManualTitle : null) ?? metadata?.ProviderTitle ?? item.OverrideTitle ?? item.DetectedTitle,
             metadata?.ManualOriginalTitle ?? metadata?.ProviderOriginalTitle,
-            metadata?.ManualOverview ?? metadata?.ProviderOverview,
+            fields.Contains("overview") ? metadata?.ManualOverview : metadata?.ProviderOverview,
             metadata?.ManualReleaseDate ?? metadata?.ProviderReleaseDate,
-            ParseYear(metadata?.ManualReleaseDate ?? metadata?.ProviderReleaseDate) ?? item.Year,
-            metadata?.ManualRuntimeMinutes ?? metadata?.ProviderRuntimeMinutes,
+            fields.Contains("releaseYear") ? metadata?.ManualReleaseYear ?? ParseYear(metadata?.ManualReleaseDate) : ParseYear(metadata?.ProviderReleaseDate) ?? item.Year,
+            fields.Contains("runtimeMinutes") ? metadata?.ManualRuntimeMinutes : metadata?.ProviderRuntimeMinutes,
             metadata?.ManualRating ?? metadata?.ProviderRating,
-            metadata?.ManualContentRating ?? metadata?.ProviderContentRating,
-            ParseList(metadata?.ManualGenresJson ?? metadata?.ProviderGenresJson),
-            ParseList(metadata?.ManualStudiosJson ?? metadata?.ProviderStudiosJson),
-            ParseList(metadata?.ManualCountriesJson ?? metadata?.ProviderCountriesJson),
+            contentRating,
+            ParseList(!automatic ? metadata?.ManualGenresJson ?? metadata?.ProviderGenresJson : metadata?.ProviderGenresJson),
+            ParseList(!automatic ? metadata?.ManualStudiosJson ?? metadata?.ProviderStudiosJson : metadata?.ProviderStudiosJson),
+            ParseList(!automatic ? metadata?.ManualCountriesJson ?? metadata?.ProviderCountriesJson : metadata?.ProviderCountriesJson),
             metadata?.Credits.OrderBy(credit => credit.SortOrder).Select(credit => new CreditSummary(
                 credit.Name,
                 credit.Department,
                 credit.Job,
                 credit.Character,
                 credit.SortOrder,
-                metadata.Artwork.FirstOrDefault(asset => asset.Kind == ArtworkKind.Profile && asset.ProviderPath == credit.ProfilePath) is { } profile
-                    ? ToArtwork(profile) : null)).ToList() ?? [],
-            artwork?.GetValueOrDefault(ArtworkKind.Poster) is { } poster ? ToArtwork(poster) : null,
-            artwork?.GetValueOrDefault(ArtworkKind.Backdrop) is { } backdrop ? ToArtwork(backdrop) : null,
-            artwork?.GetValueOrDefault(ArtworkKind.Still) is { } still ? ToArtwork(still) : null,
+                metadata.Artwork.FirstOrDefault(asset => credit.ProfileAssetId != null ? asset.Id == credit.ProfileAssetId
+                    : asset.Kind == ArtworkKind.Profile && asset.ProviderPath == credit.ProfilePath) is { } profile
+                    ? ToArtwork(profile) : null, credit.Id)).ToList() ?? [],
+            poster is not null ? ToArtwork(poster) : null,
+            backdrop is not null ? ToArtwork(backdrop) : null,
+            item.Kind == MediaKind.Episode && backdrop is not null ? ToArtwork(backdrop) : null,
             metadata?.Provider,
             metadata?.ProviderMediaId,
-            metadata?.ReviewState ?? MetadataReviewState.NeedsReview);
+            metadata?.ReviewState ?? MetadataReviewState.NeedsReview,
+            ParseFsk(contentRating));
+    }
+
+    public static int? ParseFsk(string? value)
+    {
+        if (value is null || !value.StartsWith("FSK ", StringComparison.OrdinalIgnoreCase)) return null;
+        return int.TryParse(value.AsSpan(4), out var age) && age is 0 or 6 or 12 or 16 or 18 ? age : null;
     }
 
     public static ArtworkSummary ToArtwork(ArtworkAsset asset) => new(

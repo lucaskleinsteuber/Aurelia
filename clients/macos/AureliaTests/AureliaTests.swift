@@ -49,9 +49,9 @@ struct AureliaTests {
 
     #expect(
       fields.map(\.title) == [
-        "Seasons", "Episodes", "Studio", "Released", "Country of Origin", "Genres",
+        "Seasons", "Episodes", "Studio", "Released", "Country of Origin", "Genres", "FSK",
       ])
-    #expect(fields.map(\.value) == ["1", "1", "Test Studio", "2019", "US", "Drama"])
+    #expect(fields.map(\.value) == ["1", "1", "Test Studio", "2019", "US", "Drama", "FSK 12"])
     #expect(!fields.map(\.title).contains("Content Rating"))
     #expect(!fields.map(\.title).contains("Original Title"))
   }
@@ -62,9 +62,9 @@ struct AureliaTests {
 
     #expect(
       fields.map(\.title) == [
-        "Runtime", "Release Year", "Genres", "Studio", "Country of Origin",
+        "Runtime", "Release Year", "Genres", "Studio", "Country of Origin", "FSK",
       ])
-    #expect(fields.map(\.value) == ["103 min", "2019", "Drama", "Test Studio", "US"])
+    #expect(fields.map(\.value) == ["103 min", "2019", "Drama", "Test Studio", "US", "FSK 12"])
   }
 
   private func informationFixture(kind: MediaKind) -> CatalogDetailPresentation {
@@ -89,7 +89,7 @@ struct AureliaTests {
       releaseDate: "2019-05-06", year: 2019, runtimeMinutes: 103,
       rating: nil, contentRating: "TV-MA", genres: ["Drama"], studios: ["Test Studio"],
       countries: ["US", "GB"], credits: [], poster: nil, backdrop: nil, still: nil,
-      provider: nil, providerMediaId: nil, reviewState: .matched)
+      provider: nil, providerMediaId: nil, reviewState: .matched, fskAge: 12)
     return CatalogDetailPresentation(
       item: item, metadata: metadata,
       seasons: [

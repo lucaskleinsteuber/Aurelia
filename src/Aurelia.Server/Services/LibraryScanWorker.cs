@@ -270,6 +270,34 @@ public sealed partial class LibraryScanWorker(
             discovery = PrefixClassifications(discovery, request.TargetRelativePath);
         }
 
+        using var mutationLease = await scope.ServiceProvider.GetRequiredService<CatalogMutationGate>().EnterAsync(cancellationToken);
+        database.ChangeTracker.Clear();
+        var currentLibrary = await database.LibraryRoots.SingleOrDefaultAsync(root => root.Id == request.LibraryId, cancellationToken);
+        var currentScan = await database.LibraryScans.SingleOrDefaultAsync(value => value.Id == request.ScanId, cancellationToken);
+        if (currentLibrary is null || currentScan is null || currentScan.CancelRequestedAt is not null || currentScan.State == LibraryScanState.Cancelled) return;
+        library = currentLibrary;
+        scan = currentScan;
+        var exclusions = await database.MediaExclusions.Where(value => value.LibraryRootId == library.Id).ToArrayAsync(cancellationToken);
+        bool Excluded(string path, string? identity = null) => exclusions.Any(value =>
+            value.NormalizedSourcePath == MediaPath.Normalize(path)
+            || value.IsDirectory && MediaPath.Normalize(path).StartsWith(value.NormalizedSourcePath.TrimEnd('/') + "/", StringComparison.Ordinal)
+            || identity is not null && value.FileSystemIdentity == identity);
+        var bindings = await database.MediaItems.Where(item => item.LibraryRootId == library.Id && item.ManualSourceBinding).ToDictionaryAsync(item => item.NormalizedSourcePath, cancellationToken);
+        discovery = discovery with
+        {
+            Items = discovery.Items.Where(item => !Excluded(item.SourcePath, item.FileSystemIdentity)).Select(candidate =>
+                bindings.TryGetValue(MediaPath.Normalize(candidate.SourcePath), out var bound) ? candidate with
+                {
+                    Kind = bound.Kind,
+                    DetectedTitle = bound.DetectedTitle,
+                    Year = bound.Year,
+                    SeasonNumber = bound.SeasonNumber,
+                    EpisodeNumber = bound.EpisodeNumber,
+                    Category = bound.Category
+                } : candidate).ToArray(),
+            ImportReviews = discovery.ImportReviews?.Where(review => !Excluded(review.SourcePath)).ToArray(),
+        };
+
         await ReconcileAsync(
             database,
             library,
@@ -843,15 +871,18 @@ public sealed partial class LibraryScanWorker(
             || item.FileModifiedAt != candidate.FileModifiedAt
             || item.FileSystemIdentity != candidate.FileSystemIdentity
             || item.Availability != MediaAvailability.Available);
-        item.ParentId = parentId;
-        item.Kind = candidate.Kind;
+        if (!item.ManualSourceBinding)
+        {
+            item.ParentId = parentId;
+            item.Kind = candidate.Kind;
+            item.DetectedTitle = candidate.DetectedTitle;
+            item.Year = candidate.Year;
+            item.SeasonNumber = candidate.SeasonNumber;
+            item.EpisodeNumber = candidate.EpisodeNumber;
+            item.Category = candidate.Category;
+        }
         item.SourcePath = candidate.SourcePath;
         item.NormalizedSourcePath = normalizedPath;
-        item.DetectedTitle = candidate.DetectedTitle;
-        item.Year = candidate.Year;
-        item.SeasonNumber = candidate.SeasonNumber;
-        item.EpisodeNumber = candidate.EpisodeNumber;
-        item.Category = candidate.Category;
         item.Extension = candidate.Extension;
         item.FileSize = candidate.FileSize;
         item.FileModifiedAt = candidate.FileModifiedAt;

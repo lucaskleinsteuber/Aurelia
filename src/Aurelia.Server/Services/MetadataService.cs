@@ -11,7 +11,8 @@ public sealed class MetadataService(
     ITmdbClient tmdb,
     MetadataJobScheduler scheduler,
     ArtworkStore artworkStore,
-    ServerConfigurationStore configuration)
+    ServerConfigurationStore configuration,
+    CatalogMutationGate mutations)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -171,6 +172,7 @@ public sealed class MetadataService(
 
     public async Task<MediaMetadataSummary> UpdateAsync(Guid mediaId, UpdateMediaMetadataRequest request, CancellationToken cancellationToken)
     {
+        using var lease = await mutations.EnterAsync(cancellationToken);
         var item = await database.MediaItems.Include(media => media.Metadata)!
             .ThenInclude(metadata => metadata!.Artwork)
             .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Credits)
@@ -182,13 +184,13 @@ public sealed class MetadataService(
             database.MediaMetadata.Add(item.Metadata);
         }
         var metadata = item.Metadata;
-        metadata.ManualTitle = Clean(request.Title, 512);
-        metadata.ManualOriginalTitle = Clean(request.OriginalTitle, 512);
-        metadata.ManualOverview = Clean(request.Overview, 8192);
-        metadata.ManualReleaseDate = Clean(request.ReleaseDate, 32);
-        metadata.ManualRuntimeMinutes = ValidateRuntime(request.RuntimeMinutes);
-        metadata.ManualRating = ValidateRating(request.Rating);
-        metadata.ManualContentRating = Clean(request.ContentRating, 32);
+        if (request.Title is not null) metadata.ManualTitle = Clean(request.Title, 512);
+        if (request.OriginalTitle is not null) metadata.ManualOriginalTitle = Clean(request.OriginalTitle, 512);
+        if (request.Overview is not null) metadata.ManualOverview = Clean(request.Overview, 8192) ?? "";
+        if (request.ReleaseDate is not null) { metadata.ManualReleaseDate = Clean(request.ReleaseDate, 32); metadata.ManualReleaseYear = null; }
+        if (request.RuntimeMinutes is not null && item.Kind == MediaKind.Movie) metadata.ManualRuntimeMinutes = ValidateRuntime(request.RuntimeMinutes);
+        if (request.Rating is not null) metadata.ManualRating = ValidateRating(request.Rating);
+        if (request.ContentRating is not null) metadata.ManualContentRating = Clean(request.ContentRating, 32) ?? "";
         metadata.ManualGenresJson = request.Genres is null ? metadata.ManualGenresJson : MetadataPresentation.SerializeList(request.Genres);
         metadata.ManualStudiosJson = request.Studios is null ? metadata.ManualStudiosJson : MetadataPresentation.SerializeList(request.Studios);
         metadata.ManualCountriesJson = request.Countries is null ? metadata.ManualCountriesJson : MetadataPresentation.SerializeList(request.Countries);
@@ -200,14 +202,16 @@ public sealed class MetadataService(
 
     public async Task<MediaMetadataSummary> ClearMatchAsync(Guid mediaId, CancellationToken cancellationToken)
     {
+        using var lease = await mutations.EnterAsync(cancellationToken);
         var item = await database.MediaItems.Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
             .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Credits)
             .SingleOrDefaultAsync(media => media.Id == mediaId, cancellationToken)
             ?? throw NotFound("media_not_found", "The media item was not found.");
         if (item.Metadata is not null)
         {
-            database.MediaCredits.RemoveRange(item.Metadata.Credits);
-            database.ArtworkAssets.RemoveRange(item.Metadata.Artwork);
+            if (!MetadataPresentation.ManualFields(item.Metadata).Contains("credits")) database.MediaCredits.RemoveRange(item.Metadata.Credits);
+            database.ArtworkAssets.RemoveRange(item.Metadata.Artwork.Where(asset => !asset.IsManual));
+            item.Metadata.ProviderCreditsJson = "[]";
             ClearProvider(item.Metadata);
             item.Metadata.ReviewState = MetadataReviewState.NeedsReview;
             item.Metadata.UpdatedAt = DateTimeOffset.UtcNow;
@@ -218,6 +222,18 @@ public sealed class MetadataService(
 
     internal async Task ApplyAsync(MediaItem item, TmdbMetadata provider, double confidence, CancellationToken cancellationToken)
     {
+        using var lease = await mutations.EnterAsync(cancellationToken);
+        // Refresh catalog entities after waiting for an editor/deletion transaction,
+        // without detaching the worker's durable job counters and completion state.
+        foreach (var entry in database.ChangeTracker.Entries().Where(entry => entry.Entity is
+            MediaItem or MediaMetadata or MediaCredit or ArtworkAsset or MetadataReview
+            or MediaCollectionRecord or MediaCollectionMember).ToArray())
+            entry.State = EntityState.Detached;
+        var fresh = await database.MediaItems.Include(media => media.Metadata)!.ThenInclude(meta => meta!.Credits)
+            .Include(media => media.Metadata)!.ThenInclude(meta => meta!.Artwork).SingleOrDefaultAsync(media => media.Id == item.Id, cancellationToken);
+        if (fresh is null) return;
+        var original = item;
+        item = fresh;
         if (item.Metadata is null)
         {
             item.Metadata = new MediaMetadata { MediaItemId = item.Id };
@@ -242,9 +258,8 @@ public sealed class MetadataService(
         metadata.ProviderUpdatedAt = DateTimeOffset.UtcNow;
         metadata.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
-        await database.MediaCredits.Where(credit => credit.MediaItemId == item.Id)
-            .ExecuteDeleteAsync(cancellationToken);
-        metadata.Credits.Clear();
+        var manualCredits = MetadataPresentation.ManualFields(metadata).Contains("credits");
+        if (!manualCredits) { database.MediaCredits.RemoveRange(metadata.Credits); metadata.Credits.Clear(); }
         var deduplicatedCredits = MetadataCreditDeduplicator.Deduplicate(provider.Credits);
         var credits = deduplicatedCredits.Select(credit => new MediaCredit
         {
@@ -258,17 +273,18 @@ public sealed class MetadataService(
             SortOrder = credit.Order,
             ProfilePath = credit.ProfilePath,
         }).ToList();
-        database.MediaCredits.AddRange(credits);
-        metadata.Credits.AddRange(credits);
+        if (!manualCredits) database.MediaCredits.AddRange(credits);
         await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken);
         await artworkStore.StoreAsync(database, item.Id, item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, provider.BackdropPath, cancellationToken);
         foreach (var profilePath in deduplicatedCredits.Select(credit => credit.ProfilePath).Where(path => path is not null).Distinct().Take(20))
             await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Profile, profilePath, cancellationToken);
+        metadata.ProviderCreditsJson = JsonSerializer.Serialize(credits.Select(credit => MediaEditorService.Credit(item, credit)), MediaEditorService.Json);
         var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
         if (review is not null) review.State = MetadataReviewState.Matched;
         if (provider.Collection is not null && item.Kind == MediaKind.Movie)
             await UpsertCollectionAsync(item, provider.Collection, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
+        original.Metadata = metadata;
     }
 
     internal async Task ApplyEpisodesAsync(MediaItem series, TmdbMetadata provider, MetadataProviderConfiguration configuration, CancellationToken cancellationToken)
@@ -284,6 +300,10 @@ public sealed class MetadataService(
             {
                 var match = providerEpisodes.SingleOrDefault(value => value.EpisodeNumber == item.EpisodeNumber);
                 if (match is null) continue;
+                using var lease = await mutations.EnterAsync(cancellationToken);
+                await database.Entry(item).ReloadAsync(cancellationToken);
+                if (database.Entry(item).State == EntityState.Detached) continue;
+                if (item.Metadata is not null) await database.Entry(item.Metadata).ReloadAsync(cancellationToken);
                 if (item.Metadata is null)
                 {
                     item.Metadata = new MediaMetadata { MediaItemId = item.Id };
@@ -350,12 +370,15 @@ public sealed class MetadataService(
     private static double? ValidateRating(double? value) => value is null or >= 0 and <= 10 ? value : throw new MetadataException("invalid_metadata", "Rating must be between 0 and 10.", StatusCodes.Status400BadRequest);
     private static void ClearField(MediaMetadata metadata, string field)
     {
+        var fields = MetadataPresentation.ManualFields(metadata);
+        fields.Remove(field.Trim().ToLowerInvariant() switch { "releasedate" => "releaseYear", "runtimeminutes" => "runtimeMinutes", "contentrating" => "fsk", "countries" => "country", var name => name });
+        metadata.ManualFieldsJson = JsonSerializer.Serialize(fields, JsonOptions);
         switch (field.Trim().ToLowerInvariant())
         {
             case "title": metadata.ManualTitle = null; break;
             case "originaltitle": metadata.ManualOriginalTitle = null; break;
             case "overview": metadata.ManualOverview = null; break;
-            case "releasedate": metadata.ManualReleaseDate = null; break;
+            case "releasedate": metadata.ManualReleaseDate = null; metadata.ManualReleaseYear = null; break;
             case "runtimeminutes": metadata.ManualRuntimeMinutes = null; break;
             case "rating": metadata.ManualRating = null; break;
             case "contentrating": metadata.ManualContentRating = null; break;

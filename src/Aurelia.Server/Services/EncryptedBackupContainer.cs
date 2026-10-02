@@ -17,12 +17,22 @@ public static class EncryptedBackupContainer
     private const int Iterations = 600_000;
     // Only the database can be large. Configuration, certificates and keys are
     // deliberately bounded before parsing them during restore validation.
-    public static long MaximumEntryBytes(string name) => name == "aurelia.db" ? MaximumBytes : 1_048_576;
+    public static long MaximumEntryBytes(string name) => name == "aurelia.db" ? MaximumBytes
+        : name.StartsWith("Artwork/", StringComparison.Ordinal) ? EditorArtworkStore.MaximumUploadBytes : 1_048_576;
 
     public static bool AllowedName(string? name) => name is "aurelia.db" or "server-settings.json" or "server-certificate.pem"
         or "server-private-key.pem" or "metadata-settings.json" or "Secrets/tmdb-token"
         || (name is not null && name.StartsWith("DataProtectionKeys/key-", StringComparison.Ordinal) && name.EndsWith(".xml", StringComparison.Ordinal)
-            && Guid.TryParseExact(name["DataProtectionKeys/key-".Length..^4], "D", out _));
+            && Guid.TryParseExact(name["DataProtectionKeys/key-".Length..^4], "D", out _)) || ArtworkName(name);
+
+    private static bool ArtworkName(string? name)
+    {
+        if (name is null || !name.StartsWith("Artwork/", StringComparison.Ordinal)) return false;
+        var file = name[8..];
+        var stem = file.EndsWith(".original.png", StringComparison.Ordinal) ? file[..^13]
+            : file.EndsWith(".png", StringComparison.Ordinal) ? file[..^4] : "";
+        return Guid.TryParseExact(stem, "N", out _);
+    }
 
     public static async Task<BackupManifest> EncryptAsync(string directory, IReadOnlyList<string> names, Guid serverId,
         Stream destination, string passphrase, CancellationToken token)
@@ -39,10 +49,11 @@ public static class EncryptedBackupContainer
             await using var input = File.OpenRead(path);
             files.Add(new(name, input.Length, Convert.ToHexString(await SHA256.HashDataAsync(input, token))));
         }
-        var manifest = new BackupManifest(1, ChunkBytes, Iterations, Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)),
-            Convert.ToBase64String(RandomNumberGenerator.GetBytes(8)), serverId, DateTimeOffset.UtcNow, files);
+        var manifest = new BackupManifest(2, ChunkBytes, Iterations, Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)),
+            Convert.ToBase64String(RandomNumberGenerator.GetBytes(8)), serverId, DateTimeOffset.UtcNow, files, IncludesArtwork: names.Any(ArtworkName));
         ValidateManifest(manifest);
         var header = JsonSerializer.SerializeToUtf8Bytes(manifest, Json);
+        if (header.Length > 8 * 1024 * 1024) throw new InvalidDataException("The backup manifest exceeds the format limit.");
         await destination.WriteAsync(Magic, token);
         await WriteIntAsync(destination, header.Length, token);
         await destination.WriteAsync(header, token);
@@ -85,7 +96,7 @@ public static class EncryptedBackupContainer
         await source.ReadExactlyAsync(magic, token);
         if (!magic.SequenceEqual(Magic)) throw new InvalidDataException("Unsupported backup format.");
         var headerLength = await ReadIntAsync(source, token);
-        if (headerLength is < 1 or > 65_536) throw new InvalidDataException("Invalid backup header.");
+        if (headerLength is < 1 or > 8 * 1024 * 1024) throw new InvalidDataException("Invalid backup header.");
         var header = new byte[headerLength];
         await source.ReadExactlyAsync(header, token);
         var manifest = JsonSerializer.Deserialize<BackupManifest>(header, Json) ?? throw new InvalidDataException("Invalid backup manifest.");
@@ -140,13 +151,14 @@ public static class EncryptedBackupContainer
     }
     private static void ValidateManifest(BackupManifest value)
     {
-        if (value.Version != 1 || value.ChunkBytes != ChunkBytes || value.Iterations != Iterations
-            || value.ServerId == Guid.Empty || value.IncludesMedia || value.IncludesArtwork
-            || value.Files is null || value.Files.Count is < 1 or > 256 || value.Files.Any(file => file is null)
+        if (value.Version is not 1 and not 2 || value.ChunkBytes != ChunkBytes || value.Iterations != Iterations
+            || value.ServerId == Guid.Empty || value.IncludesMedia || value.Version == 1 && value.IncludesArtwork
+            || value.Files is null || value.Files.Count < 1 || value.Files.Count > (value.Version == 1 ? 256 : 50_000) || value.Files.Any(file => file is null)
             || !value.Files.Any(file => file.Name == "aurelia.db")
             || value.Files.Select(file => file.Name).Distinct(StringComparer.Ordinal).Count() != value.Files.Count
             || value.Files.Any(file => !AllowedName(file.Name) || file.Length < 0 || file.Length > MaximumEntryBytes(file.Name) || file.Sha256 is null || file.Sha256.Length != 64 || !file.Sha256.All(char.IsAsciiHexDigit))
-            || value.Files.Sum(file => file.Length) > MaximumBytes
+            || value.Files.Any(file => ArtworkName(file.Name)) != value.IncludesArtwork
+            || value.Files.Sum(file => file.Length) > MaximumBytes - 16 * 1024 * 1024
             || value.Salt is null || value.NoncePrefix is null
             || Convert.FromBase64String(value.Salt).Length != 16 || Convert.FromBase64String(value.NoncePrefix).Length != 8)
             throw new InvalidDataException("The backup manifest is incompatible or unsafe.");

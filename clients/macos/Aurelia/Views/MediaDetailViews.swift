@@ -9,6 +9,7 @@ struct MediaDetailView: View {
   @State private var selectedSeason: Int?
   @State private var showingMetadataEditor = false
   @State private var showingMatchEditor = false
+  @State private var showingRemoveConfirmation = false
 
   var body: some View {
     ScrollView {
@@ -30,7 +31,9 @@ struct MediaDetailView: View {
             onEdit: model.profile?.user?.role.canManageLibraries == true
               ? { showingMetadataEditor = true } : nil,
             onMatch: model.profile?.user?.role.canManageLibraries == true
-              ? { showingMatchEditor = true } : nil
+              ? { showingMatchEditor = true } : nil,
+            onRemove: model.profile?.user?.role.canManageLibraries == true
+              ? { showingRemoveConfirmation = true } : nil
           )
 
           if !detail.seasons.isEmpty {
@@ -67,6 +70,32 @@ struct MediaDetailView: View {
     .scrollIndicators(.visible)
     .accessibilityIdentifier("media-detail-scroll")
     .task(id: mediaId) { await load() }
+    .confirmationDialog(
+      "Remove \(detail?.item.title ?? "Title")?", isPresented: $showingRemoveConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("Remove from Library", role: .destructive) {
+        Task {
+          do {
+            try await model.removeMedia(id: mediaId)
+            onBack()
+          } catch { errorMessage = error.localizedDescription }
+        }
+      }
+    } message: {
+      Text(
+        "This removes Aurelia metadata, images, favorites and playback history, including associated episodes and extras. Videos are never changed. Scans will not reimport the excluded sources."
+      )
+    }
+    .alert(
+      "Library Action Failed",
+      isPresented: Binding(
+        get: { detail != nil && errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+    ) {
+      Button("OK") { errorMessage = nil }
+    } message: {
+      Text(errorMessage ?? "")
+    }
     .sheet(isPresented: $showingMetadataEditor) {
       if let detail {
         MetadataEditorSheet(metadata: detail.metadata) { await load() }
@@ -189,6 +218,7 @@ struct MediaDetailView: View {
         AureliaHorizontalRail(leadingInset: AureliaDesign.detailRailLeadingInset) {
           ForEach(season.episodes) { episode in
             Button {
+              guard episode.item.availability == .available else { return }
               play(
                 episode,
                 seriesTitle: detail.item.title,
@@ -197,8 +227,8 @@ struct MediaDetailView: View {
               EpisodeCard(episode: episode)
             }
             .buttonStyle(.plain)
-            .disabled(episode.item.availability != .available)
             .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
+            .mediaActions(item: episode.item)
           }
         }
         supplementSections(
@@ -330,9 +360,9 @@ enum MediaInformationPresentation {
   static func fields(for detail: CatalogDetailPresentation) -> [MediaInformationField] {
     let metadata = detail.metadata
     let country = metadata.countries.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-    let studio = metadata.studios.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    let studio = metadata.studios.isEmpty ? nil : metadata.studios.joined(separator: ", ")
     let genres = metadata.genres.joined(separator: ", ")
-    let year = metadata.year ?? detail.item.year
+    let year = metadata.year
 
     if detail.item.kind == .series {
       return [
@@ -344,17 +374,23 @@ enum MediaInformationPresentation {
         MediaInformationField(title: "Released", value: year.map(String.init)),
         MediaInformationField(title: "Country of Origin", value: country),
         MediaInformationField(title: "Genres", value: genres),
+        MediaInformationField(title: "FSK", value: metadata.fskAge.map { "FSK \($0)" }),
       ]
     }
 
-    return [
-      MediaInformationField(
-        title: "Runtime", value: metadata.runtimeMinutes.map { "\($0) min" }),
+    var fields = [
       MediaInformationField(title: "Release Year", value: year.map(String.init)),
       MediaInformationField(title: "Genres", value: genres),
       MediaInformationField(title: "Studio", value: studio),
       MediaInformationField(title: "Country of Origin", value: country),
+      MediaInformationField(title: "FSK", value: metadata.fskAge.map { "FSK \($0)" }),
     ]
+    if detail.item.kind == .movie {
+      fields.insert(
+        MediaInformationField(title: "Runtime", value: metadata.runtimeMinutes.map { "\($0) min" }),
+        at: 0)
+    }
+    return fields
   }
 }
 
@@ -365,6 +401,7 @@ private struct DetailHero: View {
   let onFavorite: () -> Void
   let onEdit: (() -> Void)?
   let onMatch: (() -> Void)?
+  let onRemove: (() -> Void)?
 
   var body: some View {
     ZStack(alignment: .bottomLeading) {
@@ -450,8 +487,12 @@ private struct DetailHero: View {
             Menu {
               if let onEdit { Button("Edit Metadata", action: onEdit) }
               if let onMatch { Button("Find Metadata Match", action: onMatch) }
+              if let onRemove {
+                Divider()
+                Button("Remove from Library…", role: .destructive, action: onRemove)
+              }
             } label: {
-              Image(systemName: "ellipsis").font(.headline).frame(width: 44, height: 44)
+              Image(systemName: "gearshape").font(.headline).frame(width: 44, height: 44)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
             }

@@ -92,16 +92,20 @@ Save a `.aureliabackup` export to separate trusted storage using a strong,
 unique passphrase (12–1,024 characters). The container includes a verified
 SQLite database, authoritative server settings, TLS identity, metadata-provider
 configuration/credential when present, and data-protection keys. It does not
-include videos, artwork, macOS Keychain profiles, or Login Items permission.
-Media remains at the recorded original paths; artwork can be fetched again.
+include videos, provider-downloaded artwork, macOS Keychain profiles, or Login
+Items permission. Format 2 additionally includes manually imported image
+originals and rendered crops. Media remains at the recorded original paths;
+provider artwork can be fetched again. See [MEDIA_EDITING.md](MEDIA_EDITING.md).
 
-Format version 1 uses .NET AES-256-GCM in 1 MiB blocks, a fresh salt/nonce prefix,
+Format version 2 uses .NET AES-256-GCM in 1 MiB blocks, a fresh salt/nonce prefix,
 and PBKDF2-HMAC-SHA256 with 600,000 iterations. Authentication covers the
 manifest, block indices/lengths/order, and final completion record; truncated,
 reordered, extended, or modified containers fail validation. The implementation
 uses built-in cryptographic primitives, not a new encryption algorithm.
-Transfers and database payloads are bounded at 4 GiB; individual configuration
-or key entries at 1 MiB; at most 256 allowlisted entries. At most four saved
+Version 1 backups remain readable. Transfers and total payloads are bounded at
+4 GiB; individual configuration/key entries at 1 MiB and owned image entries at
+20 MiB. Version 2 accepts at most 50,000 allowlisted entries; version 1 retains
+its 256-entry limit. At most four saved
 transfers are retained, with 24-hour expiry on transfer housekeeping.
 
 Restore decrypts into a private staging directory and checks integrity, paths,

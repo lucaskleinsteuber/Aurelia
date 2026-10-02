@@ -82,6 +82,6 @@ if [[ "${AURELIA_SKIP_UI_TESTS:-0}" != "1" ]]; then
     -resultBundlePath "$temporary_ui_result" \
     -enableCodeCoverage NO \
     -parallel-testing-enabled NO \
-    -only-testing:AureliaUITests \
+    -only-testing:"${AURELIA_UI_TEST_FILTER:-AureliaUITests}" \
     test-without-building 2>&1 | tee -a "$temporary_log"
 fi

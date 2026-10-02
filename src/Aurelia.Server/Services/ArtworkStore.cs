@@ -7,7 +7,8 @@ namespace Aurelia.Server.Services;
 public sealed class ArtworkStore(
     ServerRuntimeOptions runtime,
     MetadataProviderSettingsStore settings,
-    ITmdbClient tmdb)
+    ITmdbClient tmdb,
+    CatalogMutationGate mutations)
 {
     private readonly string artworkDirectory = Path.Combine(runtime.DataDirectory, "Artwork");
 
@@ -23,7 +24,7 @@ public sealed class ArtworkStore(
         if (!configuration.Enabled || configuration.Token is null) return null;
 
         var existing = await database.ArtworkAssets.SingleOrDefaultAsync(
-            asset => asset.MediaItemId == mediaId && asset.Kind == kind
+            asset => asset.MediaItemId == mediaId && asset.Kind == kind && !asset.IsManual
                 && (kind == ArtworkKind.Profile ? asset.ProviderPath == providerPath : true),
             cancellationToken);
         if (existing?.ProviderPath == providerPath
@@ -98,8 +99,10 @@ public sealed class ArtworkStore(
 
     public async Task<int> PruneOrphansAsync(AureliaDbContext database, CancellationToken cancellationToken)
     {
+        using var lease = await mutations.EnterAsync(cancellationToken);
         PrivateFilePermissions.CreatePrivateDirectory(artworkDirectory);
-        var referenced = await database.ArtworkAssets.AsNoTracking().Select(asset => asset.RelativeFilePath).ToHashSetAsync(cancellationToken);
+        var assets = await database.ArtworkAssets.IgnoreQueryFilters().AsNoTracking().Select(asset => new { asset.RelativeFilePath, asset.OriginalFilePath }).ToListAsync(cancellationToken);
+        var referenced = assets.SelectMany(asset => new[] { asset.RelativeFilePath, asset.OriginalFilePath }).Where(path => path is not null).ToHashSet(StringComparer.Ordinal);
         var deleted = 0;
         foreach (var file in Directory.EnumerateFiles(artworkDirectory))
         {

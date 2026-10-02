@@ -22,6 +22,8 @@ public sealed class MediaItem
 
     public string NormalizedSourcePath { get; set; } = string.Empty;
 
+    public bool ManualSourceBinding { get; set; }
+
     public string DetectedTitle { get; set; } = string.Empty;
 
     public string? OverrideTitle { get; set; }

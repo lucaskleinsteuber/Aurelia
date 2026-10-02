@@ -12,19 +12,16 @@ public sealed class CatalogService(AureliaDbContext database)
         CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
-        var query = database.MediaItems.AsNoTracking().Where(item => item.Kind == MediaKind.Movie);
+        var query = database.MediaItems.AsNoTracking().Include(item => item.Metadata).Where(item => item.Kind == MediaKind.Movie);
         var total = await query.CountAsync(cancellationToken);
-        var items = await query
+        var movies = await query
             .OrderBy(item => item.OverrideTitle ?? item.DetectedTitle)
             .ThenBy(item => item.Id)
             .Skip(offset)
             .Take(limit)
-            .Select(item => new MovieSummary(
-                item.Id,
-                item.OverrideTitle ?? item.DetectedTitle,
-                item.Year,
-                item.Availability))
             .ToListAsync(cancellationToken);
+        var items = movies.Select(item => new MovieSummary(item.Id, MetadataPresentation.ToSummary(item).Title,
+            MetadataPresentation.ToSummary(item).Year, item.Availability)).ToArray();
         return new PagedResponse<MovieSummary>(items, offset, limit, total);
     }
 
@@ -32,6 +29,7 @@ public sealed class CatalogService(AureliaDbContext database)
     {
         var movie = await database.MediaItems
             .AsNoTracking()
+            .Include(item => item.Metadata)
             .SingleOrDefaultAsync(item => item.Id == id && item.Kind == MediaKind.Movie, cancellationToken)
             ?? throw NotFound("movie_not_found", "The movie was not found.");
         var supplementItems = await database.MediaItems
@@ -43,8 +41,8 @@ public sealed class CatalogService(AureliaDbContext database)
             .ToListAsync(cancellationToken);
         return new MovieDetail(
             movie.Id,
-            movie.OverrideTitle ?? movie.DetectedTitle,
-            movie.Year,
+            MetadataPresentation.ToSummary(movie).Title,
+            MetadataPresentation.ToSummary(movie).Year,
             movie.Availability,
             supplementItems.Select(ToSupplement).ToList());
     }
@@ -55,7 +53,7 @@ public sealed class CatalogService(AureliaDbContext database)
         CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
-        var query = database.MediaItems.AsNoTracking().Where(item => item.Kind == MediaKind.Series);
+        var query = database.MediaItems.AsNoTracking().Include(item => item.Metadata).Where(item => item.Kind == MediaKind.Series);
         var total = await query.CountAsync(cancellationToken);
         var series = await query
             .OrderBy(item => item.OverrideTitle ?? item.DetectedTitle)
@@ -76,7 +74,7 @@ public sealed class CatalogService(AureliaDbContext database)
             var children = episodes.Where(episode => episode.ParentId == item.Id).ToList();
             return new SeriesSummary(
                 item.Id,
-                item.OverrideTitle ?? item.DetectedTitle,
+                MetadataPresentation.ToSummary(item).Title,
                 item.Availability,
                 children.Where(episode => episode.SeasonNumber.HasValue)
                     .Select(episode => episode.SeasonNumber!.Value)
@@ -91,10 +89,12 @@ public sealed class CatalogService(AureliaDbContext database)
     {
         var series = await database.MediaItems
             .AsNoTracking()
+            .Include(item => item.Metadata)
             .SingleOrDefaultAsync(item => item.Id == id && item.Kind == MediaKind.Series, cancellationToken)
             ?? throw NotFound("series_not_found", "The series was not found.");
         var children = await database.MediaItems
             .AsNoTracking()
+            .Include(item => item.Metadata)
             .Where(item => item.ParentId == id)
             .OrderBy(item => item.SeasonNumber)
             .ThenBy(item => item.EpisodeNumber)
@@ -110,7 +110,7 @@ public sealed class CatalogService(AureliaDbContext database)
                 group.Where(item => item.Kind == MediaKind.Episode)
                     .Select(item => new EpisodeSummary(
                         item.Id,
-                        item.OverrideTitle ?? item.DetectedTitle,
+                        MetadataPresentation.ToSummary(item).Title,
                         item.SeasonNumber!.Value,
                         item.EpisodeNumber!.Value,
                         item.Availability))
@@ -126,7 +126,7 @@ public sealed class CatalogService(AureliaDbContext database)
             .ToList();
         return new SeriesDetail(
             series.Id,
-            series.OverrideTitle ?? series.DetectedTitle,
+            MetadataPresentation.ToSummary(series).Title,
             series.Availability,
             seasons,
             seriesSupplements);
@@ -136,7 +136,7 @@ public sealed class CatalogService(AureliaDbContext database)
     {
         return new SupplementSummary(
             item.Id,
-            item.OverrideTitle ?? item.DetectedTitle,
+            MetadataPresentation.ToSummary(item).Title,
             item.Kind,
             item.Category,
             item.SeasonNumber,

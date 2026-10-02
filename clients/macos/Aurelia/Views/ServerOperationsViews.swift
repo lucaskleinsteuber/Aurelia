@@ -147,7 +147,7 @@ struct ServerHostingEditor: View {
         Picker("Operating mode", selection: $settings.backgroundEnabled) {
           Text("Only while Aurelia is running").tag(false)
           Text("Run in background").tag(true)
-        }
+        }.accessibilityIdentifier("server-hosting-mode")
         Toggle("Start server at Mac login", isOn: $settings.startAtLogin).disabled(
           !settings.backgroundEnabled)
         Toggle("Prevent automatic idle sleep while hosting", isOn: $settings.preventIdleSleep)

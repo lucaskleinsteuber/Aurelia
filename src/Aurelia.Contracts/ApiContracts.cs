@@ -397,7 +397,8 @@ public sealed record CreditSummary(
     string? Job,
     string? Character,
     int Order,
-    ArtworkSummary? Profile);
+    ArtworkSummary? Profile,
+    Guid? Id = null);
 
 public sealed record MediaMetadataSummary(
     Guid MediaId,
@@ -418,7 +419,8 @@ public sealed record MediaMetadataSummary(
     ArtworkSummary? Still,
     string? Provider,
     string? ProviderMediaId,
-    MetadataReviewState ReviewState);
+    MetadataReviewState ReviewState,
+    int? FskAge = null);
 
 public sealed record MetadataReviewSummary(
     Guid Id,

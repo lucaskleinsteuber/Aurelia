@@ -479,7 +479,14 @@ final class AppModel: ObservableObject {
   func removeLibrary(id: UUID) async {
     guard let profile else { return }
     do {
-      try await APIClient(profile: profile).removeLibrary(id: id)
+      let client = APIClient(profile: profile)
+      let preview = try await client.previewReset(libraries: [id])
+      let result = try await client.resetLibrary(preview: preview)
+      guard result.state == "completed" else {
+        throw APIClientError.serverRejected(
+          code: "cleanup_pending",
+          message: result.error ?? "The library reset is awaiting artwork cleanup.")
+      }
       libraries.removeAll { $0.id == id }
       try await refresh()
     } catch { errorMessage = error.localizedDescription }
@@ -527,6 +534,7 @@ final class AppModel: ObservableObject {
     guard let profile else { return }
     do {
       try await APIClient(profile: profile).revokeSession(id: id)
+      sessions.removeAll { $0.id == id }
       sessions = try await APIClient(profile: profile).sessions()
     } catch { errorMessage = error.localizedDescription }
   }
@@ -678,6 +686,9 @@ final class AppModel: ObservableObject {
   }
 
   func refresh() async throws {
+    #if DEBUG
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" { return }
+    #endif
     guard let profile else { return }
     isWorking = true
     defer { isWorking = false }
@@ -809,6 +820,25 @@ final class AppModel: ObservableObject {
     let result = try await APIClient(profile: profile).updateMediaMetadata(id: id, request: request)
     try await refresh()
     return result
+  }
+
+  func removeMedia(id: UUID) async throws {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let result = try await APIClient(profile: profile).removeMedia(id: id)
+    try await refresh()
+    guard result.state == "completed" else {
+      throw APIClientError.serverRejected(
+        code: "cleanup_pending",
+        message: result.error
+          ?? "The title was removed. Artwork cleanup is pending and will be retried automatically.")
+    }
+  }
+
+  func reloadDevices() async {
+    guard let profile else { return }
+    do { sessions = try await APIClient(profile: profile).sessions() } catch {
+      errorMessage = error.localizedDescription
+    }
   }
 
   func metadataCandidates(mediaId: UUID, query: String) async throws

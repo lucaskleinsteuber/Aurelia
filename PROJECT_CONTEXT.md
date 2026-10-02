@@ -135,7 +135,8 @@ should avoid unrelated visual redesigns.
 - Generated builds, caches, tests, databases, and logs:
   `/Users/lucaskleinsteuber/Documents/Aurelia Other`
 - Record durable build summaries in
-  `/Users/lucaskleinsteuber/Documents/Aurelia/PROJECT_CONTEXT.md`.
+  `/Users/lucaskleinsteuber/Documents/Aurelia Other/Aurelia Build summarys`.
+  Keep this source handoff current without duplicating external build reports.
 
 Never edit or migrate the Aurelia Classic repository, its `Library.store`, or
 its `Application Support/Aurelia` data. Do not copy its binaries or database
@@ -167,7 +168,7 @@ back after execution. Pre-install smoke candidates use
 9. Audit the diff for media, databases, binaries, local-only paths, tokens,
    credentials, and generated files.
 10. Commit directly to `main` using the exact product version as the commit
-    message matching the build (`1.1.1` for Build 20), push immediately, verify
+    message matching the build, push immediately, verify
     the remote hash, and write exactly one English external summary for the
     completed build.
 
@@ -180,19 +181,18 @@ native client and reliable library engine are the release baseline.
 
 ## Latest release and verification
 
-- Installed bundle: `/Applications/Aurelia.app`, version `1.1.1`, build `20`.
-- Each agent-installed version is a clean tester install. The reset removes
-  Aurelia's accounts, server database, preferences, connection profiles, and
-  logs, but never user-selected media or Aurelia Classic data.
-- Build 20 verification: 94/94 server tests passed; .NET format verification
-  passed; release server build completed with zero warnings; universal arm64 and
-  x86_64 app/helper and server payloads were packaged and signature-verified.
-  Launch Services smoke verified helper autostart, `/api/v1/server/info`, and
-  clean shutdown. Xcode compiled all ten AppIcon renditions into `Assets.car`;
-  the installed app reports `CFBundleIconName=AppIcon`, version `1.1.1`, and a
-  fresh `isSetup: false` response.
-- Swift Debug and Release app builds and `build-for-testing` succeeded. UI test
-  cases were not executed for this icon-only release. The prior Build 19 XCTest
-  run exited before reaching test cases with `Failed to establish connection
-  to the IDE`; do not report UI tests as passed until the runner issue is
-  resolved and they are rerun.
+- Updates replace only `/Applications/Aurelia.app`. Preserve accounts, library,
+  server data/settings, preferences, Keychain profiles, and TLS identity. Do not
+  perform a clean tester reset; the older Build 20 instructions are obsolete.
+- Aurelia 1.2 adds scoped library grants, server settings, native background-host
+  controls, password-confirmed administration, diagnostics, and encrypted recovery.
+- Aurelia 1.2.1 adds the four-section revisioned editor, private SkiaSharp image
+  drafts/originals/crops, stable manual cast lists and deliberately blank overrides,
+  no-follow file reassignment, source exclusions, scoped removal/reset with durable
+  cleanup, active-only device polling, and backward-compatible full backup format 2.
+  See [MEDIA_EDITING.md](MEDIA_EDITING.md) for behavior and APIs.
+- Read the installed bundle's real version/build and the latest external build
+  summary for release verification. Do not infer installed state from old prose.
+- Native tests use synthetic state. The explicit installed-host XCTest is skipped
+  in the ordinary suite; signed staged host/autostart checks exercise the release
+  payload separately without touching personal data.

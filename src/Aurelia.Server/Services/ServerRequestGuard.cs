@@ -53,6 +53,8 @@ public sealed class ServerRequestGuard
         if (HttpMethods.IsPut(request.Method) && path.StartsWith("/api/v1/server/backups/uploads/", StringComparison.Ordinal)) return false;
         // Removing a temporary encrypted transfer is not a restore or persistent backup deletion.
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/server/backups/transfers/", StringComparison.Ordinal)) return false;
+        if (path.Contains("/exclusions/", StringComparison.Ordinal)) return false;
+        if (path == "/api/v1/libraries/reset") return true;
         return path == "/api/v1/server/settings" || path.StartsWith("/api/v1/server/operations", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/server/backups", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/server/sessions", StringComparison.Ordinal)
@@ -76,7 +78,8 @@ public sealed class ServerRequestGuard
             required = await database.DeviceSessions.AnyAsync(session => session.Id == targetId && session.UserId != actorId, context.RequestAborted);
         }
         if (!required) return;
-        if (!context.User.IsInRole(UserRole.Owner.ToString()))
+        var reset = context.Request.Path.Equals(new PathString("/api/v1/libraries/reset"));
+        if (!context.User.IsInRole(UserRole.Owner.ToString()) && !(reset && context.User.IsInRole(UserRole.Admin.ToString())))
             throw new AccountException("owner_required", "Only an owner may change global server settings.", 403);
         context.Request.EnableBuffering(bufferThreshold: 65_536, bufferLimit: MaximumJsonBytes + 1);
         using var payload = new MemoryStream();
@@ -96,7 +99,7 @@ public sealed class ServerRequestGuard
         var sessionId = context.User.RequireSessionId();
         var now = DateTimeOffset.UtcNow;
         if (!await database.DeviceSessions.AnyAsync(session => session.Id == sessionId && session.RevokedAt == null
-                && session.ExpiresAt > now && session.User.IsEnabled && session.User.Role == UserRole.Owner, context.RequestAborted))
+                && session.ExpiresAt > now && session.User.IsEnabled && (session.User.Role == UserRole.Owner || reset && session.User.Role == UserRole.Admin), context.RequestAborted))
             throw new AccountException("owner_session_revoked", "The owner session is no longer authorized.", 403);
         context.Items["Aurelia.AdministrationApproved"] = true;
     }

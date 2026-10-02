@@ -43,6 +43,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<MediaCollectionRecord> MediaCollections => Set<MediaCollectionRecord>();
     public DbSet<MediaCollectionMember> MediaCollectionMembers => Set<MediaCollectionMember>();
     public DbSet<SyncChange> SyncChanges => Set<SyncChange>();
+    public DbSet<MediaExclusion> MediaExclusions => Set<MediaExclusion>();
+    public DbSet<LibraryMutation> LibraryMutations => Set<LibraryMutation>();
 
     public override Task<int> SaveChangesAsync(
         CancellationToken cancellationToken = default)
@@ -53,6 +55,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
     private void AppendSyncChanges()
     {
+        foreach (var entry in ChangeTracker.Entries<MediaMetadata>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+            entry.Entity.EditorRevision++;
         var changes = new HashSet<(SyncChangeArea Area, Guid? UserId, Guid? MediaId)>();
         var affectedLibraries = new HashSet<Guid>();
         var changedCollections = new HashSet<Guid>();
@@ -146,6 +150,23 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 .HasForeignKey(grant => grant.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<UserLibraryGrant>().HasQueryFilter(grant => AccessUserId == null || AccessIsOwner || grant.UserId == AccessUserId);
+        modelBuilder.Entity<MediaExclusion>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<LibraryMutation>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner || item.UserId == AccessUserId);
+        modelBuilder.Entity<MediaExclusion>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.LibraryRootId, item.NormalizedSourcePath }).IsUnique();
+            entity.Property(item => item.RelativePath).HasMaxLength(4096);
+            entity.Property(item => item.NormalizedSourcePath).HasMaxLength(4096);
+            entity.HasOne(item => item.LibraryRoot).WithMany().HasForeignKey(item => item.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<LibraryMutation>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.Property(item => item.State).HasMaxLength(32);
+            entity.Property(item => item.Error).HasMaxLength(512);
+        });
         modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessIsOwner
             || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == library.Id));
         modelBuilder.Entity<MediaItem>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
@@ -430,6 +451,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         modelBuilder.Entity<MediaMetadata>(entity =>
         {
             entity.HasKey(metadata => metadata.MediaItemId);
+            entity.Property(metadata => metadata.EditorRevision).IsConcurrencyToken();
             entity.Property(metadata => metadata.Provider).HasMaxLength(32);
             entity.Property(metadata => metadata.ProviderMediaId).HasMaxLength(64);
             entity.Property(metadata => metadata.ProviderMediaType).HasMaxLength(16);

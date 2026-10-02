@@ -203,6 +203,16 @@ struct DeviceSessionSummary: Codable, Identifiable, Equatable, Sendable {
   let expiresAt: String
   let revokedAt: String?
   let isCurrent: Bool
+
+  var isActive: Bool {
+    guard revokedAt == nil else { return false }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let fractional = formatter.date(from: expiresAt)
+    formatter.formatOptions = [.withInternetDateTime]
+    guard let expiry = fractional ?? formatter.date(from: expiresAt) else { return false }
+    return expiry > Date()
+  }
 }
 
 struct APIProblem: Decodable, Error, Sendable {
@@ -282,6 +292,7 @@ struct MediaMetadataSummary: Codable, Identifiable, Equatable, Sendable {
   let provider: String?
   let providerMediaId: String?
   let reviewState: MetadataReviewState
+  var fskAge: Int? = nil
 
   var id: UUID { mediaId }
 }

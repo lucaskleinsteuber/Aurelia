@@ -34,12 +34,21 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("CropJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsManual")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalFilePath")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProviderPath")
@@ -214,6 +223,36 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("LibraryRootId", "State", "DetectedTitle");
 
                     b.ToTable("LibraryImportReviews");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryMutation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FilesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RemovedItems")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("LibraryMutations");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.LibraryRoot", b =>
@@ -463,6 +502,9 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ProfileAssetId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ProfilePath")
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
@@ -479,6 +521,39 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("MediaItemId", "SortOrder");
 
                     b.ToTable("MediaCredits");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaExclusion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileSystemIdentity")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDirectory")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedSourcePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LibraryRootId", "NormalizedSourcePath")
+                        .IsUnique();
+
+                    b.ToTable("MediaExclusions");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaItem", b =>
@@ -533,6 +608,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<Guid>("LibraryRootId")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("ManualSourceBinding")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("NormalizedSourcePath")
                         .IsRequired()
                         .HasMaxLength(4096)
@@ -582,12 +660,23 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<Guid>("MediaItemId")
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("EditorRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("ManualBackdropId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ManualContentRating")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ManualCountriesJson")
                         .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManualFieldsJson")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ManualGenresJson")
@@ -602,12 +691,18 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(8192)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ManualPosterId")
+                        .HasColumnType("TEXT");
+
                     b.Property<double?>("ManualRating")
                         .HasColumnType("REAL");
 
                     b.Property<string>("ManualReleaseDate")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("ManualReleaseYear")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("ManualRuntimeMinutes")
                         .HasColumnType("INTEGER");
@@ -634,6 +729,10 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<string>("ProviderCountriesJson")
                         .IsRequired()
                         .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderCreditsJson")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProviderGenresJson")
@@ -1145,6 +1244,17 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Metadata");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaExclusion", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.LibraryRoot", "LibraryRoot")
+                        .WithMany()
+                        .HasForeignKey("LibraryRootId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LibraryRoot");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaItem", b =>

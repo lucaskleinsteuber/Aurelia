@@ -30,6 +30,12 @@ public sealed class MediaMetadata
     public string? ManualGenresJson { get; set; }
     public string? ManualStudiosJson { get; set; }
     public string? ManualCountriesJson { get; set; }
+    public int? ManualReleaseYear { get; set; }
+    public string ManualFieldsJson { get; set; } = "[]";
+    public string ProviderCreditsJson { get; set; } = "[]";
+    public long EditorRevision { get; set; }
+    public Guid? ManualPosterId { get; set; }
+    public Guid? ManualBackdropId { get; set; }
     public MetadataReviewState ReviewState { get; set; } = MetadataReviewState.NeedsReview;
     public DateTimeOffset? ProviderUpdatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -49,6 +55,7 @@ public sealed class MediaCredit
     public string? Character { get; set; }
     public int SortOrder { get; set; }
     public string? ProfilePath { get; set; }
+    public Guid? ProfileAssetId { get; set; }
 }
 
 public sealed class ArtworkAsset
@@ -61,6 +68,9 @@ public sealed class ArtworkAsset
     public string RelativeFilePath { get; set; } = string.Empty;
     public string ContentType { get; set; } = string.Empty;
     public long ContentLength { get; set; }
+    public bool IsManual { get; set; }
+    public string? OriginalFilePath { get; set; }
+    public string? CropJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 

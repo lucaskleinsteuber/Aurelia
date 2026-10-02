@@ -290,7 +290,7 @@ private struct ServerUserEditor: View {
         }.disabled(working)
         Divider()
         Text("Devices").font(.headline)
-        ForEach(sessions) { session in
+        ForEach(sessions.filter(\.isActive)) { session in
           HStack {
             VStack(alignment: .leading) {
               Text(session.deviceName)
@@ -328,8 +328,11 @@ private struct ServerUserEditor: View {
       }.padding(24)
     }.frame(width: 580, height: 600)
       .task {
-        do { sessions = try await client.userSessions(access.id) } catch {
-          self.error = error.localizedDescription
+        while !Task.isCancelled {
+          do { sessions = try await client.userSessions(access.id) } catch {
+            self.error = error.localizedDescription
+          }
+          do { try await Task.sleep(for: .seconds(5)) } catch { break }
         }
       }
   }
