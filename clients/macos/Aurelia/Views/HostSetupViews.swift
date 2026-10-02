@@ -298,12 +298,21 @@ struct InitialLibrarySetupView: View {
       HStack {
         Button("Skip for Now") { model.completeInitialLibrarySetup() }
           .accessibilityIdentifier("skip-library-setup")
-        Button("Start Scanning") {
-          Task { _ = await model.createStorageLocations(locations) }
+        Button("Analyze and Preview") {
+          Task {
+            if await model.createStorageLocations(locations) { locations = [] }
+          }
         }
         .buttonStyle(AureliaPrimaryActionButtonStyle())
         .disabled(locations.isEmpty || model.isWorking)
         .accessibilityIdentifier("start-storage-scan")
+      }
+      ForEach(model.libraries.filter { $0.importPreviewRequired == true }) { library in
+        HStack {
+          Text(library.name).font(.headline)
+          Spacer()
+          Button("Review Import…") { model.importPreviewLibrary = library }
+        }.frame(maxWidth: 620)
       }
       if !model.activeScans.isEmpty { ProgressView("Scanning in the background…") }
       if let error = model.errorMessage {
@@ -313,6 +322,9 @@ struct InitialLibrarySetupView: View {
     }
     .padding(36)
     .background(AureliaBackdrop())
+    .sheet(item: $model.importPreviewLibrary) { library in
+      ImportPreviewView(library: library).environmentObject(model)
+    }
   }
 }
 

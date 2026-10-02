@@ -3,6 +3,78 @@ import XCTest
 
 final class AureliaUITests: XCTestCase {
   @MainActor
+  func testImportPreviewExpandsFeaturettesAndEditsSeasonAssignmentsWithoutImporting() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "import-preview"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+
+    XCTAssertTrue(app.staticTexts["Import Preview"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["17 files"].exists)
+    XCTAssertTrue(app.staticTexts["12 extras · 0 trailers"].exists)
+    XCTAssertFalse(app.webViews.firstMatch.exists)
+    recordImportScreenshot(app, named: "Import Preview - Collapsed Synthetic Series")
+
+    let firstTriangle = app.windows.firstMatch.disclosureTriangles.element(boundBy: 0)
+    XCTAssertTrue(firstTriangle.waitForExistence(timeout: 5), app.debugDescription)
+    firstTriangle.click()
+    XCTAssertTrue(app.staticTexts["Featurettes"].waitForExistence(timeout: 5))
+    let featurettesTriangle = app.windows.firstMatch.disclosureTriangles.element(boundBy: 1)
+    XCTAssertTrue(featurettesTriangle.exists, app.debugDescription)
+    featurettesTriangle.click()
+    XCTAssertTrue(app.staticTexts["Interview with the Director"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["Chernobyl/Featurettes/Featurette 1.mkv"].exists)
+    recordImportScreenshot(app, named: "Import Preview - Expanded Featurettes")
+
+    app.staticTexts["Interview with the Director"].click()
+    let edit = app.buttons["import-edit-assignment"]
+    XCTAssertTrue(edit.exists)
+    XCTAssertTrue(edit.isEnabled)
+    edit.click()
+    XCTAssertTrue(app.staticTexts["Edit Import Assignment"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.descendants(matching: .any)["import-assignment-parent"].exists)
+    XCTAssertTrue(app.textFields["import-assignment-category"].exists)
+    XCTAssertEqual(
+      app.textFields["import-assignment-title"].value as? String,
+      "Interview with the Director")
+    let entireSeries = app.descendants(matching: .any)["import-entire-series"]
+    XCTAssertTrue(entireSeries.exists)
+    XCTAssertFalse(app.textFields["import-assignment-season"].exists)
+    recordImportScreenshot(app, named: "Import Assignment - Entire Series Extra")
+
+    entireSeries.click()
+    let season = app.textFields["import-assignment-season"]
+    XCTAssertTrue(season.waitForExistence(timeout: 5))
+    XCTAssertEqual(season.value as? String, "1")
+    XCTAssertTrue(app.descendants(matching: .any)["Choose Existing Season"].exists)
+    XCTAssertTrue(app.buttons["Save Assignment"].isEnabled)
+    recordImportScreenshot(app, named: "Import Assignment - Season Specific Extra")
+
+    let kind = app.descendants(matching: .any)["import-assignment-kind"]
+    kind.click()
+    let episode = app.menuItems["Episode"]
+    XCTAssertTrue(episode.waitForExistence(timeout: 5))
+    episode.click()
+    XCTAssertTrue(app.textFields["import-assignment-episode"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.descendants(matching: .any)["import-entire-series"].exists)
+    app.buttons["Cancel"].click()
+    XCTAssertTrue(app.staticTexts["Edit Import Assignment"].waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["12 extras · 0 trailers"].exists)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
+  private func recordImportScreenshot(_ app: XCUIApplication, named name: String) {
+    let screenshot = XCTAttachment(screenshot: app.screenshot())
+    screenshot.name = name
+    screenshot.lifetime = .keepAlways
+    add(screenshot)
+  }
+
+  @MainActor
   func testDefaultHostLaunchShowsServerStartingState() throws {
     continueAfterFailure = false
     let app = XCUIApplication()
@@ -257,7 +329,10 @@ final class AureliaUITests: XCTestCase {
     guard
       let applicationURL = NSRunningApplication.runningApplications(
         withBundleIdentifier: "com.lucas.aurelia.media"
-      ).first?.bundleURL
+      ).first(where: {
+        $0.bundleURL?.deletingLastPathComponent()
+          == Bundle.main.bundleURL.deletingLastPathComponent()
+      })?.bundleURL
     else {
       XCTFail("The running Aurelia bundle URL was unavailable")
       return

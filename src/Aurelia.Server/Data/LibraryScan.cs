@@ -5,6 +5,7 @@ namespace Aurelia.Server.Data;
 public sealed class LibraryScan
 {
     public Guid Id { get; set; }
+    public Guid? ConfirmedPreviewId { get; set; }
 
     public Guid LibraryRootId { get; set; }
 
@@ -41,6 +42,11 @@ public sealed class LibraryScan
     public int MissingFiles { get; set; }
 
     public int SkippedFiles { get; set; }
+    public string Phase { get; set; } = "Queued";
+    public int RecognizedFiles { get; set; }
+    public int PendingFiles { get; set; }
+    public int IgnoredFiles { get; set; }
+    public int FailedFiles { get; set; }
 
     public string? Error { get; set; }
 

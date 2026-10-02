@@ -167,6 +167,108 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("LibraryDiscoveries");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryImportAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("EpisodeNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDirectory")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedRelativePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentRelativePath")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("SeasonNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LibraryRootId", "NormalizedRelativePath", "IsDirectory")
+                        .IsUnique();
+
+                    b.ToTable("LibraryImportAssignments");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryImportPreview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AssignmentsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BaseAssignmentRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Confirmed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ItemsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Manifest")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Revision")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SummaryJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("WasInitialImport")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LibraryRootId");
+
+                    b.ToTable("LibraryImportPreviews");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.LibraryImportReview", b =>
                 {
                     b.Property<Guid>("Id")
@@ -269,6 +371,12 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long>("ImportAssignmentRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ImportPreviewRequired")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -331,12 +439,18 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long?>("CompletedAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("ConfirmedPreviewId")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Error")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedFiles")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("FilesDiscovered")
                         .HasColumnType("INTEGER");
@@ -347,6 +461,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<long?>("HeartbeatAt")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("IgnoredFiles")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("LeaseExpiresAt")
                         .HasColumnType("INTEGER");
 
@@ -354,6 +471,16 @@ namespace Aurelia.Server.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int>("MissingFiles")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PendingFiles")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Phase")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RecognizedFiles")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("SkippedFiles")
@@ -1169,6 +1296,28 @@ namespace Aurelia.Server.Data.Migrations
                 {
                     b.HasOne("Aurelia.Server.Data.LibraryRoot", "LibraryRoot")
                         .WithMany("Discoveries")
+                        .HasForeignKey("LibraryRootId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LibraryRoot");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryImportAssignment", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.LibraryRoot", "LibraryRoot")
+                        .WithMany()
+                        .HasForeignKey("LibraryRootId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LibraryRoot");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryImportPreview", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.LibraryRoot", "LibraryRoot")
+                        .WithMany()
                         .HasForeignKey("LibraryRootId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

@@ -83,6 +83,8 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
             || entry.Entity.LibraryRootId is { } root && roots.Contains(root)).ToArray()) entry.State = EntityState.Detached;
         if (exclude)
         {
+            foreach (var library in items.Select(item => item.LibraryRoot).DistinctBy(library => library.Id))
+                library.ImportAssignmentRevision++;
             foreach (var item in items)
             {
                 if (!await database.MediaExclusions.AnyAsync(value => value.LibraryRootId == item.LibraryRootId && value.NormalizedSourcePath == item.NormalizedSourcePath, token))

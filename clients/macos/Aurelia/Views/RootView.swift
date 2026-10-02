@@ -9,7 +9,11 @@ struct RootView: View {
       AureliaBackdrop()
 
       Group {
-        if model.isStarting {
+        if model.isImportPreviewUITest {
+          #if DEBUG
+            ImportPreviewView.uiTestFixture
+          #endif
+        } else if model.isStarting {
           VStack(spacing: 22) {
             Image(systemName: "play.rectangle.on.rectangle.fill")
               .font(.system(size: 46, weight: .medium))

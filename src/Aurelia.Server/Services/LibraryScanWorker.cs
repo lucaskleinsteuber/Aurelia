@@ -126,6 +126,7 @@ public sealed partial class LibraryScanWorker(
             if (scan.CancelRequestedAt.HasValue)
             {
                 scan.State = LibraryScanState.Cancelled;
+                scan.Phase = "Cancelled";
                 scan.CompletedAt = DateTimeOffset.UtcNow;
                 await database.SaveChangesAsync(cancellationToken);
                 queue.Release(scan.LibraryRootId);
@@ -160,9 +161,25 @@ public sealed partial class LibraryScanWorker(
         library.LastScanStartedAt = startedAt;
         library.LastObservedAt = startedAt;
         library.LastError = null;
+        scan.Phase = "Analyzing";
         await database.SaveChangesAsync(cancellationToken);
 
-        var scanRoot = ResolveScanRoot(library.Path, request.TargetRelativePath);
+        if (library.ImportPreviewRequired)
+            throw new LibraryException("import_preview_required", "Confirm a new import preview before scanning this storage location.", 409);
+        var savedAssignments = await database.LibraryImportAssignments.AsNoTracking()
+            .Where(value => value.LibraryRootId == library.Id).ToArrayAsync(cancellationToken);
+        var protectedSources = await database.MediaItems.AsNoTracking()
+            .Where(item => item.LibraryRootId == library.Id).ToArrayAsync(cancellationToken);
+        var sourceExclusions = await database.MediaExclusions.AsNoTracking()
+            .Where(value => value.LibraryRootId == library.Id).ToArrayAsync(cancellationToken);
+        // Watcher targets are hints for scheduling, never resolver roots. Even an
+        // unassigned Featurettes directory needs its enclosing title/season context.
+        // Keep all passes identical to the full preview's title-aware root scan.
+        string? effectiveTarget = null;
+        var scanRoot = ResolveScanRoot(library.Path, effectiveTarget);
+        var assignments = ImportPlanningService.ComposeScannerAssignments(library, savedAssignments.Select(value => new ExistingImportAssignment(value.RelativePath,
+            value.IsDirectory, value.Kind, value.ParentRelativePath, value.SeasonNumber, value.EpisodeNumber,
+            value.Category, value.Title)).ToArray(), protectedSources, sourceExclusions);
         EnsureReadableRoot(scanRoot);
         var allExistingEpisodes = await database.MediaItems
             .AsNoTracking()
@@ -241,6 +258,7 @@ public sealed partial class LibraryScanWorker(
             .ToList();
 
         var discoveredCount = 0;
+        var discoveryPhase = "Discovering";
         var discoveryTask = Task.Run(
             () => scanner.Scan(
                 scanRoot,
@@ -250,24 +268,41 @@ public sealed partial class LibraryScanWorker(
                 cancellationToken,
                 classificationDecisions,
                 existingMovies,
-                importReviewDecisions),
+                importReviewDecisions,
+                assignments,
+                phase => Volatile.Write(ref discoveryPhase, phase)),
             cancellationToken);
         var lastReportedCount = -1;
+        string? lastReportedPhase = null;
         while (!discoveryTask.IsCompleted)
         {
             await Task.WhenAny(discoveryTask, Task.Delay(500, cancellationToken));
             var currentCount = Volatile.Read(ref discoveredCount);
-            if (currentCount != lastReportedCount)
+            var currentPhase = Volatile.Read(ref discoveryPhase);
+            if (currentCount != lastReportedCount || currentPhase != lastReportedPhase)
             {
-                await UpdateProgressAsync(request.ScanId, currentCount, cancellationToken);
+                await UpdateProgressAsync(request.ScanId, currentCount, currentPhase, cancellationToken);
                 lastReportedCount = currentCount;
+                lastReportedPhase = currentPhase;
             }
         }
 
         var discovery = await discoveryTask;
-        if (request.TargetRelativePath is not null)
+        LibraryImportPreview? confirmedPreview = null;
+        if (scan.ConfirmedPreviewId is { } previewId)
         {
-            discovery = PrefixClassifications(discovery, request.TargetRelativePath);
+            var confirmed = await database.LibraryImportPreviews.AsNoTracking().SingleOrDefaultAsync(value => value.Id == previewId, cancellationToken);
+            confirmedPreview = confirmed;
+            if (confirmed is null || confirmed.Manifest != ImportPlanningService.Manifest(discovery, library))
+            {
+                if (confirmed?.WasInitialImport == true) library.ImportPreviewRequired = true;
+                await database.SaveChangesAsync(cancellationToken);
+                throw new LibraryException("import_source_changed", "Source files changed after confirmation. Analyze a fresh preview before importing; no catalog data was changed.", 409);
+            }
+        }
+        if (effectiveTarget is not null)
+        {
+            discovery = PrefixClassifications(discovery, effectiveTarget);
         }
 
         using var mutationLease = await scope.ServiceProvider.GetRequiredService<CatalogMutationGate>().EnterAsync(cancellationToken);
@@ -277,18 +312,25 @@ public sealed partial class LibraryScanWorker(
         if (currentLibrary is null || currentScan is null || currentScan.CancelRequestedAt is not null || currentScan.State == LibraryScanState.Cancelled) return;
         library = currentLibrary;
         scan = currentScan;
+        if (confirmedPreview is not null && library.ImportAssignmentRevision != confirmedPreview.BaseAssignmentRevision + 1)
+        {
+            if (confirmedPreview.WasInitialImport) library.ImportPreviewRequired = true;
+            await database.SaveChangesAsync(cancellationToken);
+            throw new LibraryException("import_preview_conflict", "An import assignment or protected video binding changed after confirmation. Analyze a fresh preview; no catalog data was changed.", 409);
+        }
         var exclusions = await database.MediaExclusions.Where(value => value.LibraryRootId == library.Id).ToArrayAsync(cancellationToken);
         bool Excluded(string path, string? identity = null) => exclusions.Any(value =>
             value.NormalizedSourcePath == MediaPath.Normalize(path)
             || value.IsDirectory && MediaPath.Normalize(path).StartsWith(value.NormalizedSourcePath.TrimEnd('/') + "/", StringComparison.Ordinal)
             || identity is not null && value.FileSystemIdentity == identity);
-        var bindings = await database.MediaItems.Where(item => item.LibraryRootId == library.Id && item.ManualSourceBinding).ToDictionaryAsync(item => item.NormalizedSourcePath, cancellationToken);
+        var bindings = await database.MediaItems.Include(item => item.Parent).Where(item => item.LibraryRootId == library.Id && item.ManualSourceBinding).ToDictionaryAsync(item => item.NormalizedSourcePath, cancellationToken);
         discovery = discovery with
         {
             Items = discovery.Items.Where(item => !Excluded(item.SourcePath, item.FileSystemIdentity)).Select(candidate =>
                 bindings.TryGetValue(MediaPath.Normalize(candidate.SourcePath), out var bound) ? candidate with
                 {
                     Kind = bound.Kind,
+                    ParentSourcePath = bound.Parent?.SourcePath,
                     DetectedTitle = bound.DetectedTitle,
                     Year = bound.Year,
                     SeasonNumber = bound.SeasonNumber,
@@ -297,6 +339,24 @@ public sealed partial class LibraryScanWorker(
                 } : candidate).ToArray(),
             ImportReviews = discovery.ImportReviews?.Where(review => !Excluded(review.SourcePath)).ToArray(),
         };
+        scan.Phase = "Committing";
+        scan.RecognizedFiles = discovery.Items.Count(item => item.IsFile);
+        var recognizedPaths = discovery.Items.Where(item => item.IsFile).Select(item => MediaPath.Normalize(item.SourcePath)).ToHashSet(StringComparer.Ordinal);
+        var unresolvedFiles = (discovery.Files ?? []).Where(file => !recognizedPaths.Contains(MediaPath.Normalize(file.SourcePath))).ToArray();
+        bool Ignored(DiscoveredScanFile file)
+        {
+            if (Excluded(file.SourcePath, file.FileSystemIdentity)) return true;
+            var relative = NormalizeRelativePath(Path.GetRelativePath(library.Path, file.SourcePath));
+            var assignment = savedAssignments.OrderByDescending(value => !value.IsDirectory).ThenByDescending(value => value.RelativePath.Length)
+                .FirstOrDefault(value => value.NormalizedRelativePath == relative || value.IsDirectory &&
+                    (value.NormalizedRelativePath.Length == 0 || relative.StartsWith(value.NormalizedRelativePath + "/", StringComparison.Ordinal)));
+            return assignment is { Kind: null } || discovery.Classifications?.Any(value => value.Reason == "manual_ignore" &&
+                MediaPath.IsSameOrDescendant(MediaPath.Normalize(file.SourcePath), MediaPath.Normalize(Path.Combine(library.Path, value.RelativePath)))) == true;
+        }
+        scan.IgnoredFiles = unresolvedFiles.Count(Ignored);
+        scan.PendingFiles = unresolvedFiles.Length - scan.IgnoredFiles;
+        scan.FailedFiles = discovery.Issues.Count(issue => issue.Code is "unreadable_directory" or "unreadable_entry" or "unreadable_file");
+        await database.SaveChangesAsync(cancellationToken);
 
         await ReconcileAsync(
             database,
@@ -304,7 +364,7 @@ public sealed partial class LibraryScanWorker(
             scan,
             discovery,
             scanRoot,
-            request.TargetRelativePath,
+            effectiveTarget,
             cancellationToken);
         await RebuildLocalCollectionsAsync(database, library, cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
@@ -542,8 +602,11 @@ public sealed partial class LibraryScanWorker(
             cancellationToken);
 
         var missingFiles = 0;
+        var unreadable = discovery.Issues.Where(issue => issue.Code is "unreadable_directory" or "unreadable_entry" or "unreadable_file")
+            .Select(issue => issue.Path is null ? MediaPath.Normalize(scanRoot) : MediaPath.Normalize(issue.Path)).ToArray();
         foreach (var item in allItems.Where(item => item.Kind != MediaKind.Series
                      && !seenIds.Contains(item.Id)
+                     && !unreadable.Any(path => MediaPath.IsSameOrDescendant(item.NormalizedSourcePath, path))
                      && MediaPath.IsSameOrDescendant(
                          item.NormalizedSourcePath,
                          MediaPath.Normalize(scanRoot))))
@@ -584,10 +647,11 @@ public sealed partial class LibraryScanWorker(
         scan.AddedFiles = addedFiles;
         scan.UpdatedFiles = updatedFiles;
         scan.MissingFiles = missingFiles;
+        scan.Phase = "Completed";
         scan.SkippedFiles = discovery.SkippedFiles;
-        library.Availability = LibraryAvailability.Available;
+        library.Availability = unreadable.Length == 0 ? LibraryAvailability.Available : LibraryAvailability.Error;
         library.LastScanCompletedAt = now;
-        library.LastError = null;
+        library.LastError = unreadable.Length == 0 ? null : "Some source entries could not be read. Existing data in those paths was preserved.";
         try
         {
             await database.SaveChangesAsync(cancellationToken);
@@ -621,6 +685,50 @@ public sealed partial class LibraryScanWorker(
         var unresolved = (discovery.ImportReviews ?? []).ToDictionary(
             review => NormalizeRelativePath(Path.GetRelativePath(library.Path, review.SourcePath)),
             StringComparer.Ordinal);
+        foreach (var pending in discovery.ImportReviews ?? [])
+        {
+            var path = Path.GetRelativePath(library.Path, pending.SourcePath);
+            var normalized = NormalizeRelativePath(path);
+            if (!byPath.TryGetValue(normalized, out var review))
+            {
+                review = new LibraryImportReview
+                {
+                    Id = Guid.NewGuid(),
+                    LibraryRootId = library.Id,
+                    LibraryRoot = library,
+                    RelativePath = path,
+                    NormalizedRelativePath = normalized,
+                    CreatedAt = now,
+                };
+                database.LibraryImportReviews.Add(review);
+                byPath[normalized] = review;
+            }
+            if (review.State != LibraryImportReviewState.Ignored)
+            {
+                review.DetectedTitle = pending.DetectedTitle;
+                review.Reason = pending.Reason;
+                review.State = LibraryImportReviewState.Pending;
+                review.AssignedMovieId = null;
+            }
+            review.LastSeenScanId = scanId;
+            review.UpdatedAt = now;
+        }
+        // Generic assignments resolve reviews of episodes and extras too, not
+        // only the legacy movie-trailer case. Saved choices live in their table.
+        var recognizedPaths = discovery.Items.Select(item => NormalizeRelativePath(Path.GetRelativePath(library.Path, item.SourcePath))).ToHashSet(StringComparer.Ordinal);
+        var rules = await database.LibraryImportAssignments.Where(value => value.LibraryRootId == library.Id).ToArrayAsync(cancellationToken);
+        foreach (var review in stored.Where(value => value.State == LibraryImportReviewState.Pending && !unresolved.ContainsKey(value.NormalizedRelativePath)))
+        {
+            if (recognizedPaths.Contains(review.NormalizedRelativePath))
+            {
+                review.State = LibraryImportReviewState.Assigned;
+                review.UpdatedAt = now;
+            }
+            else if (rules.Any(rule => rule.Kind == null && (rule.NormalizedRelativePath == review.NormalizedRelativePath || rule.IsDirectory && review.NormalizedRelativePath.StartsWith(rule.NormalizedRelativePath + "/", StringComparison.Ordinal))))
+            {
+                database.LibraryImportReviews.Remove(review);
+            }
+        }
         var trailers = discovery.Items.Where(item => item.Kind == MediaKind.Trailer);
 
         foreach (var trailer in trailers)
@@ -914,6 +1022,7 @@ public sealed partial class LibraryScanWorker(
     private async Task UpdateProgressAsync(
         Guid scanId,
         int count,
+        string phase,
         CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -924,6 +1033,7 @@ public sealed partial class LibraryScanWorker(
                 updates => updates
                     .SetProperty(scan => scan.FilesDiscovered, count)
                     .SetProperty(scan => scan.FilesProcessed, count)
+                    .SetProperty(scan => scan.Phase, phase)
                     .SetProperty(scan => scan.HeartbeatAt, DateTimeOffset.UtcNow)
                     .SetProperty(scan => scan.LeaseExpiresAt, DateTimeOffset.UtcNow.Add(LeaseDuration)),
                 cancellationToken);
@@ -987,10 +1097,12 @@ public sealed partial class LibraryScanWorker(
                 : "The library scan failed.";
             if (scan is not null)
             {
-                var retry = scan.Attempt < 3 && !scan.CancelRequestedAt.HasValue;
+                var retry = scan.Attempt < 3 && !scan.CancelRequestedAt.HasValue
+                    && exception is not LibraryException { Code: "import_source_changed" or "import_preview_required" or "import_preview_conflict" };
                 scan.State = retry ? LibraryScanState.Queued : LibraryScanState.Failed;
                 scan.CompletedAt = retry ? null : DateTimeOffset.UtcNow;
                 scan.Error = message;
+                scan.Phase = retry ? "Queued" : "Failed";
                 scan.LeaseExpiresAt = null;
                 scan.HeartbeatAt = DateTimeOffset.UtcNow;
                 if (retry)
@@ -1030,6 +1142,7 @@ public sealed partial class LibraryScanWorker(
             if (scan is not null)
             {
                 scan.State = LibraryScanState.WaitingForStorage;
+                scan.Phase = "WaitingForStorage";
                 scan.Error = exception.Message;
                 scan.LeaseExpiresAt = null;
                 scan.HeartbeatAt = DateTimeOffset.UtcNow;
@@ -1073,6 +1186,7 @@ public sealed partial class LibraryScanWorker(
             scan.State = serverStopping && !scan.CancelRequestedAt.HasValue
                 ? LibraryScanState.Queued
                 : LibraryScanState.Cancelled;
+            scan.Phase = scan.State == LibraryScanState.Cancelled ? "Cancelled" : "Queued";
             scan.CompletedAt = scan.State == LibraryScanState.Cancelled
                 ? DateTimeOffset.UtcNow
                 : null;

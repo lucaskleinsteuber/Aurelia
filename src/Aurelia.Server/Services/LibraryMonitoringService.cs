@@ -84,6 +84,12 @@ public sealed partial class LibraryMonitoringService(
 
         foreach (var library in libraries)
         {
+            if (library.ImportPreviewRequired)
+            {
+                if (watchers.Remove(library.Id, out var unconfirmed)) unconfirmed.Dispose();
+                pending.TryRemove(library.Id, out _);
+                continue;
+            }
             var reachable = IsReadableDirectory(library.Path);
             if (!configuration.Current.MonitoringEnabled || !library.MonitoringEnabled || !reachable)
             {

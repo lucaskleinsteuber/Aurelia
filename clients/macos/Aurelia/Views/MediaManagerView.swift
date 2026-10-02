@@ -4,7 +4,6 @@ struct MediaManagerView: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.dismiss) private var dismiss
   @State private var drafts: [StorageLocationDraft] = []
-  @State private var combineExisting = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -19,8 +18,7 @@ struct MediaManagerView: View {
           }
           configuredLibraries
           scanActivity
-          classifications
-          importReview
+          importAssignments
         }
         .padding(AureliaDesign.pagePadding)
       }
@@ -39,6 +37,9 @@ struct MediaManagerView: View {
     .frame(width: 800, height: 720)
     .background(AureliaBackdrop())
     .task { await model.reloadAdministration() }
+    .sheet(item: $model.importPreviewLibrary) { library in
+      ImportPreviewView(library: library).environmentObject(model)
+    }
   }
 
   private var header: some View {
@@ -119,14 +120,11 @@ struct MediaManagerView: View {
           Button("Choose Folders or Drives…") { chooseStorageLocations(into: &drafts) }
             .frame(minHeight: AureliaDesign.minimumControlSize)
             .accessibilityIdentifier("media-manager-choose-locations")
-          Toggle("Combine compatible overlapping libraries", isOn: $combineExisting)
-            .toggleStyle(.checkbox)
-            .font(.caption)
           Spacer()
-          Button("Add and Scan") {
+          Button("Analyze and Preview") {
             let selected = drafts
             Task {
-              if await model.addStorageLocations(selected, combineExisting: combineExisting) {
+              if await model.addStorageLocations(selected) {
                 drafts = []
               }
             }
@@ -179,19 +177,29 @@ struct MediaManagerView: View {
   }
 
   @ViewBuilder
-  private var classifications: some View {
-    if !model.libraryDiscoveries.isEmpty {
+  private var importAssignments: some View {
+    if model.canManageMedia && !model.libraries.isEmpty {
       AureliaSettingsSection(
-        "Folder Classification",
-        symbol: "rectangle.3.group.bubble"
+        "Import Assignments",
+        symbol: "rectangle.3.group.bubble",
+        description:
+          "Review files and folders, assign extras and trailers to a title or season, and change saved manual rules."
       ) {
         VStack(alignment: .leading, spacing: 10) {
-          Text(
-            "Choose how ambiguous folders should be imported, or ignore them. TV Show · Force Import accepts unnumbered videos in natural filename order as Season 1 episodes."
-          )
-          .font(.caption).foregroundStyle(.secondary)
-          ForEach(model.libraryDiscoveries) { discovery in
-            DiscoveryDecisionCard(discovery: discovery)
+          ForEach(model.libraries) { library in
+            HStack {
+              VStack(alignment: .leading, spacing: 3) {
+                Text(library.name).font(.headline)
+                Text(
+                  library.importPreviewRequired == true
+                    ? "Awaiting import confirmation" : "Automatic detection and saved assignments"
+                )
+                .font(.caption).foregroundStyle(.secondary)
+              }
+              Spacer()
+              Button("Review Import…") { model.importPreviewLibrary = library }
+                .accessibilityIdentifier("review-import-\(library.id.uuidString.lowercased())")
+            }
           }
         }
       }
@@ -204,13 +212,14 @@ struct MediaManagerView: View {
       AureliaSettingsSection(
         "Import Review",
         symbol: "film.stack",
-        description: "Review trailers that could not be safely matched to a movie.") {
-          VStack(spacing: 10) {
-            ForEach(model.libraryImportReviews) { review in
-              TrailerImportReviewRow(review: review)
-            }
+        description: "Review trailers that could not be safely matched to a movie."
+      ) {
+        VStack(spacing: 10) {
+          ForEach(model.libraryImportReviews) { review in
+            TrailerImportReviewRow(review: review)
           }
         }
+      }
     }
   }
 }
@@ -280,7 +289,8 @@ private struct TrailerImportReviewRow: View {
     .padding(12)
     .background(
       AureliaDesign.raisedSurface,
-      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
+    )
     .overlay {
       RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous)
         .stroke(AureliaDesign.hairline, lineWidth: 1)
@@ -334,6 +344,9 @@ private struct LibraryLocationRow: View {
       Text(library.availability.rawValue.capitalized)
         .font(.caption).foregroundStyle(.secondary)
       if canEdit {
+        if library.importPreviewRequired == true {
+          Button("Preview…") { model.importPreviewLibrary = library }
+        }
         if library.monitoringEnabled != nil {
           Toggle(
             "Monitor",
@@ -347,9 +360,11 @@ private struct LibraryLocationRow: View {
           .controlSize(.small)
           .accessibilityIdentifier("library-monitor-\(library.id.uuidString.lowercased())")
           .help("Automatically detect changes in this storage location")
+          .disabled(library.importPreviewRequired == true)
         }
         Button("Rescan") { Task { await model.scanLibrary(id: library.id) } }
           .frame(minHeight: AureliaDesign.minimumControlSize)
+          .disabled(library.importPreviewRequired == true)
         Button(role: .destructive) {
           Task { await model.removeLibrary(id: library.id) }
         } label: {
@@ -399,6 +414,10 @@ private struct ScanStatusRow: View {
         }
       }
       if scan.state == .queued || scan.state == .running {
+        if let phase = scan.phase {
+          Text(phase == "Completed" ? "Catalog complete; metadata runs separately." : phase)
+            .font(.caption).foregroundStyle(.secondary)
+        }
         ProgressView(
           value: Double(scan.filesProcessed), total: Double(max(scan.filesDiscovered, 1)))
       }
@@ -411,6 +430,12 @@ private struct ScanStatusRow: View {
         "Found \(scan.filesDiscovered) · Added \(scan.addedFiles) · Updated \(scan.updatedFiles) · Missing \(scan.missingFiles) · Skipped \(scan.skippedFiles)"
       )
       .font(.caption).foregroundStyle(.secondary)
+      if let recognized = scan.recognizedFiles {
+        Text(
+          "Recognized \(recognized) · Review \(scan.pendingFiles ?? 0) · Ignored \(scan.ignoredFiles ?? 0) · Failed \(scan.failedFiles ?? 0)"
+        )
+        .font(.caption).foregroundStyle(.secondary)
+      }
       if let error = scan.error, !error.isEmpty {
         Text(error).font(.caption).foregroundStyle(.orange)
       }

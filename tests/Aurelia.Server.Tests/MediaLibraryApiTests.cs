@@ -266,7 +266,7 @@ public sealed class MediaLibraryApiTests
                 Assert.Equal("movie_not_found", (await ApiTestClient.ReadAsync<ApiProblem>(crossLibraryResponse)).Code);
             }
 
-            var trailerIds = await GetTrailerIdsAsync(factory, library.Id);
+            Assert.Empty(await GetTrailerIdsAsync(factory, library.Id));
             var assignScan = await DecideTrailerReviewAsync(
                 client,
                 owner.Token,
@@ -276,6 +276,8 @@ public sealed class MediaLibraryApiTests
                     LibraryImportReviewAction.AssignToMovie,
                     sameLibraryMovie.Id));
             Assert.Equal(LibraryScanState.Completed, assignScan.State);
+            var trailerIds = await GetTrailerIdsAsync(factory, library.Id);
+            Assert.Single(trailerIds);
 
             using (var ignoreRequest = ApiTestClient.Authorized(
                        HttpMethod.Put,
@@ -308,15 +310,12 @@ public sealed class MediaLibraryApiTests
             var assignedTrailer = await database.MediaItems.SingleAsync(
                 item => item.LibraryRootId == library.Id
                     && item.SourcePath.EndsWith("Unmatched Movie - Official Trailer.mp4"));
-            var ignoredTrailer = await database.MediaItems.SingleAsync(
-                item => item.LibraryRootId == library.Id
-                    && item.SourcePath.EndsWith("Another Unmatched Film - Teaser.mp4"));
             Assert.Equal(MediaKind.Trailer, assignedTrailer.Kind);
             Assert.Equal(sameLibraryMovie.Id, assignedTrailer.ParentId);
-            Assert.Equal(MediaKind.Trailer, ignoredTrailer.Kind);
-            Assert.Null(ignoredTrailer.ParentId);
             Assert.Equal(trailerIds[assignedTrailer.SourcePath], assignedTrailer.Id);
-            Assert.Equal(trailerIds[ignoredTrailer.SourcePath], ignoredTrailer.Id);
+            Assert.False(await database.MediaItems.AnyAsync(
+                item => item.LibraryRootId == library.Id
+                    && item.SourcePath.EndsWith("Another Unmatched Film - Teaser.mp4")));
         }
         finally
         {
@@ -520,7 +519,10 @@ public sealed class MediaLibraryApiTests
             var rescan = await ApiTestClient.ReadAsync<LibraryScanSummary>(decideResponse);
             var completed = await WaitForScanAsync(client, owner.Token, rescan.Id);
             Assert.Equal(LibraryScanState.Completed, completed.State);
-            Assert.Equal(2, completed.FilesDiscovered);
+            // Targeted changes are resolved against the full title-aware root.
+            Assert.Equal(4, completed.FilesDiscovered);
+            Assert.Equal(2, completed.RecognizedFiles);
+            Assert.Equal(2, completed.IgnoredFiles);
 
             using var afterRequest = ApiTestClient.Authorized(
                 HttpMethod.Get,
@@ -542,7 +544,7 @@ public sealed class MediaLibraryApiTests
             var resetScan = await ApiTestClient.ReadAsync<LibraryScanSummary>(resetResponse);
             var resetCompleted = await WaitForScanAsync(client, owner.Token, resetScan.Id);
             Assert.Equal(LibraryScanState.Completed, resetCompleted.State);
-            Assert.Equal(2, resetCompleted.FilesDiscovered);
+            Assert.Equal(4, resetCompleted.FilesDiscovered);
 
             using var resetDiscoveriesRequest = ApiTestClient.Authorized(
                 HttpMethod.Get,
@@ -1224,7 +1226,9 @@ public sealed class MediaLibraryApiTests
             CancellationToken cancellationToken,
             IReadOnlyList<Aurelia.Server.Services.ExistingClassificationDecision>? classificationDecisions = null,
             IReadOnlyList<Aurelia.Server.Services.ExistingMovieBinding>? existingMovies = null,
-            IReadOnlyList<Aurelia.Server.Services.ExistingImportReviewDecision>? importReviewDecisions = null)
+            IReadOnlyList<Aurelia.Server.Services.ExistingImportReviewDecision>? importReviewDecisions = null,
+            IReadOnlyList<Aurelia.Server.Services.ExistingImportAssignment>? assignments = null,
+            Action<string>? onPhase = null)
         {
             Started.Set();
             Release.Wait(cancellationToken);

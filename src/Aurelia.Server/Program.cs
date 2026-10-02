@@ -123,6 +123,7 @@ builder.Services.AddSingleton<NativeHostOperations>();
 builder.Services.AddSingleton<ServerDiagnosticsStore>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ServerDiagnosticsStore>());
 builder.Services.AddScoped<LibraryService>();
+builder.Services.AddScoped<ImportPlanningService>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<PlaybackService>();
 builder.Services.AddScoped<PlaybackProgressService>();
@@ -287,6 +288,7 @@ app.Use(async (context, next) =>
 app.MapAureliaApi();
 app.MapServerManagement();
 app.MapMediaEditing();
+app.MapImportPlanning();
 
 try
 {

@@ -29,6 +29,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<LibraryDiscovery> LibraryDiscoveries => Set<LibraryDiscovery>();
 
     public DbSet<LibraryImportReview> LibraryImportReviews => Set<LibraryImportReview>();
+    public DbSet<LibraryImportAssignment> LibraryImportAssignments => Set<LibraryImportAssignment>();
+    public DbSet<LibraryImportPreview> LibraryImportPreviews => Set<LibraryImportPreview>();
 
     public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
 
@@ -71,7 +73,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                     changes.Add((SyncChangeArea.Libraries, null, null));
                     changes.Add((SyncChangeArea.Catalog, null, null));
                     break;
-                case LibraryScan or LibraryDiscovery or LibraryImportReview:
+                case LibraryScan or LibraryDiscovery or LibraryImportReview or LibraryImportAssignment:
                     var rootId = entry.Property("LibraryRootId").CurrentValue as Guid?;
                     if (rootId.HasValue) affectedLibraries.Add(rootId.Value);
                     changes.Add((SyncChangeArea.Libraries, null, null));
@@ -141,6 +143,29 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<LibraryImportAssignment>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportPreview>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
+            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportAssignment>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.LibraryRootId, item.NormalizedRelativePath, item.IsDirectory }).IsUnique();
+            entity.Property(item => item.RelativePath).HasMaxLength(4096);
+            entity.Property(item => item.NormalizedRelativePath).HasMaxLength(4096);
+            entity.Property(item => item.ParentRelativePath).HasMaxLength(4096);
+            entity.Property(item => item.Category).HasMaxLength(1024);
+            entity.Property(item => item.Title).HasMaxLength(500);
+            entity.HasOne(item => item.LibraryRoot).WithMany().HasForeignKey(item => item.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<LibraryImportPreview>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => item.LibraryRootId);
+            entity.Property(item => item.Revision).HasMaxLength(64).IsConcurrencyToken();
+            entity.Property(item => item.Manifest).HasMaxLength(64);
+            entity.HasOne(item => item.LibraryRoot).WithMany().HasForeignKey(item => item.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<UserLibraryGrant>(entity =>
         {
             entity.HasKey(grant => new { grant.UserId, grant.LibraryRootId });

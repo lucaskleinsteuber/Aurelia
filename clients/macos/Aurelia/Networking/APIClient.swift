@@ -225,7 +225,8 @@ struct APIClient: Sendable {
     name: String? = nil,
     path: String,
     kind: LibraryKind = .automatic,
-    combineExisting: Bool = false
+    combineExisting: Bool = false,
+    requireImportPreview: Bool = false
   ) async throws
     -> LibrarySummary
   {
@@ -234,13 +235,56 @@ struct APIClient: Sendable {
         name: name,
         path: path,
         kind: kind,
-        combineExisting: combineExisting))
+        combineExisting: combineExisting,
+        requireImportPreview: requireImportPreview))
     let data = try await perform(path: "/api/v1/libraries", method: "POST", body: body)
     return try Self.decode(LibrarySummary.self, from: data)
   }
 
   func libraryDiscoveries(id: UUID) async throws -> [LibraryDiscoverySummary] {
     try await get("/api/v1/libraries/\(id.uuidString.lowercased())/discoveries")
+  }
+
+  func analyzeImport(libraryId: UUID) async throws -> ImportPreviewSummary {
+    let data = try await perform(
+      path: "/api/v1/libraries/\(libraryId.uuidString.lowercased())/import-preview",
+      method: "POST")
+    return try Self.decode(ImportPreviewSummary.self, from: data)
+  }
+
+  func importPreviewItems(libraryId: UUID, previewId: UUID, offset: Int = 0, limit: Int = 200)
+    async throws -> ImportPreviewPage
+  {
+    try await get(
+      "/api/v1/libraries/\(libraryId.uuidString.lowercased())/import-preview/\(previewId.uuidString.lowercased())/items?offset=\(offset)&limit=\(limit)"
+    )
+  }
+
+  func updateImportPreview(
+    libraryId: UUID, previewId: UUID, revision: String, assignments: [ImportAssignmentUpdate]
+  ) async throws -> ImportPreviewSummary {
+    let body = try JSONEncoder().encode(
+      ImportAssignmentsRequest(revision: revision, assignments: assignments))
+    let data = try await perform(
+      path:
+        "/api/v1/libraries/\(libraryId.uuidString.lowercased())/import-preview/\(previewId.uuidString.lowercased())/assignments",
+      method: "PUT", body: body)
+    return try Self.decode(ImportPreviewSummary.self, from: data)
+  }
+
+  func confirmImportPreview(libraryId: UUID, previewId: UUID, revision: String)
+    async throws -> LibraryScanSummary
+  {
+    let body = try JSONEncoder().encode(ConfirmImportPreviewRequest(revision: revision))
+    let data = try await perform(
+      path:
+        "/api/v1/libraries/\(libraryId.uuidString.lowercased())/import-preview/\(previewId.uuidString.lowercased())/confirm",
+      method: "POST", body: body)
+    return try Self.decode(LibraryScanSummary.self, from: data)
+  }
+
+  func importAssignments(libraryId: UUID) async throws -> ImportAssignmentsSummary {
+    try await get("/api/v1/libraries/\(libraryId.uuidString.lowercased())/import-assignments")
   }
 
   func libraryImportReviews(id: UUID) async throws -> [LibraryImportReviewSummary] {

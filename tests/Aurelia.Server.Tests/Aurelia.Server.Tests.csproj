@@ -5,6 +5,7 @@
     <RootNamespace>Aurelia.Server.Tests</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Fixtures/ImportStructurePaths.txt" />
     <ProjectReference Include="../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />
     <ProjectReference Include="../../src/Aurelia.Server/Aurelia.Server.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />

@@ -49,6 +49,8 @@ public sealed class LibraryService(
 
         if (overlaps.Count > 0)
         {
+            if (request.RequireImportPreview)
+                throw new LibraryException("preview_combine_not_supported", "Existing libraries cannot be combined through a first-import preview. Keep their current storage locations.", 409);
             if (request.Kind != LibraryKind.Automatic
                 || overlaps.Any(existing => existing.Kind == LibraryKind.Automatic)
                 || overlaps.Any(existing => !MediaPath.IsSameOrDescendant(
@@ -77,6 +79,7 @@ public sealed class LibraryService(
             NormalizedPath = normalizedPath,
             Kind = request.Kind,
             Availability = LibraryAvailability.Unknown,
+            ImportPreviewRequired = request.RequireImportPreview,
             CreatedAt = DateTimeOffset.UtcNow,
         };
         database.LibraryRoots.Add(library);
@@ -92,6 +95,13 @@ public sealed class LibraryService(
         CancellationToken cancellationToken)
     {
         var existingIds = existingLibraries.Select(library => library.Id).ToList();
+        if (existingLibraries.Any(library => library.ImportPreviewRequired)
+            || await database.LibraryImportAssignments.AnyAsync(value => existingIds.Contains(value.LibraryRootId), cancellationToken)
+            || await database.MediaExclusions.AnyAsync(value => existingIds.Contains(value.LibraryRootId), cancellationToken)
+            || await database.LibraryImportPreviews.AnyAsync(value => existingIds.Contains(value.LibraryRootId) && !value.Confirmed, cancellationToken))
+        {
+            throw new LibraryException("libraries_have_import_assignments", "Libraries with import previews, saved assignments or excluded sources cannot be combined. Keep their existing storage locations so these decisions remain intact.", 409);
+        }
         var activeScan = await database.LibraryScans.AnyAsync(
             scan => existingIds.Contains(scan.LibraryRootId)
                 && (scan.State == LibraryScanState.Queued
@@ -322,6 +332,7 @@ public sealed class LibraryService(
 
             var now = DateTimeOffset.UtcNow;
             review.UpdatedAt = now;
+            library.ImportAssignmentRevision++;
             var scan = new LibraryScan
             {
                 Id = Guid.NewGuid(),
@@ -386,6 +397,7 @@ public sealed class LibraryService(
         }
 
         var updates = request.Decisions.ToDictionary(update => update.DiscoveryId);
+        library.ImportAssignmentRevision++;
         var now = DateTimeOffset.UtcNow;
         foreach (var discovery in discoveries)
         {
@@ -424,6 +436,7 @@ public sealed class LibraryService(
                 StatusCodes.Status404NotFound);
 
         discovery.Decision = null;
+        library.ImportAssignmentRevision++;
         discovery.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
         return await StartScanAsync(
@@ -477,7 +490,9 @@ public sealed class LibraryService(
         string? targetRelativePath,
         CancellationToken cancellationToken)
     {
-        _ = await RequireLibraryAsync(libraryId, cancellationToken);
+        var library = await RequireLibraryAsync(libraryId, cancellationToken);
+        if (library.ImportPreviewRequired)
+            throw new LibraryException("import_preview_required", "Review and confirm the first import before starting a scan.", 409);
         if (!scanQueue.TryReserve(libraryId))
         {
             throw ScanAlreadyActive();
@@ -527,7 +542,7 @@ public sealed class LibraryService(
         library.MonitoringEnabled = enabled;
         library.LastObservedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
-        if (enabled && !wasEnabled)
+        if (enabled && !wasEnabled && !library.ImportPreviewRequired)
         {
             try
             {
@@ -567,6 +582,7 @@ public sealed class LibraryService(
         if (scan.State is LibraryScanState.Queued or LibraryScanState.WaitingForStorage)
         {
             scan.State = LibraryScanState.Cancelled;
+            scan.Phase = "Cancelled";
             scan.CompletedAt = DateTimeOffset.UtcNow;
             scan.Error = null;
             scanQueue.Release(scan.LibraryRootId);
@@ -776,7 +792,8 @@ public sealed class LibraryService(
                 LibraryAvailability.Unavailable => LibraryHealthStatus.WaitingForStorage,
                 LibraryAvailability.Error => LibraryHealthStatus.Error,
                 _ => LibraryHealthStatus.Unknown,
-            });
+            },
+            library.ImportPreviewRequired);
     }
 
     private static LibraryScanSummary ToSummary(
@@ -803,7 +820,12 @@ public sealed class LibraryService(
                 issue.Path)).ToList(),
             scan.Trigger,
             scan.Attempt,
-            scan.TargetRelativePath);
+            scan.TargetRelativePath,
+            scan.Phase,
+            scan.RecognizedFiles,
+            scan.PendingFiles,
+            scan.IgnoredFiles,
+            scan.FailedFiles);
     }
 
     private static LibraryException ScanAlreadyActive()

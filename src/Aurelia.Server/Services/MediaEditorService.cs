@@ -133,6 +133,9 @@ public sealed class MediaEditorService(AureliaDbContext database, CatalogMutatio
                 });
             await database.MediaExclusions.Where(exclude => exclude.LibraryRootId == item.LibraryRootId && exclude.NormalizedSourcePath == normalized).ExecuteDeleteAsync(token);
             item.SourcePath = source; item.NormalizedSourcePath = normalized; item.ManualSourceBinding = true;
+            // An import draft was resolved against the old binding. Invalidate
+            // it atomically with the editor save, without penalizing metadata edits.
+            item.LibraryRoot.ImportAssignmentRevision++;
             item.Extension = Path.GetExtension(source).ToLowerInvariant(); item.FileSize = handle.Length;
             item.FileModifiedAt = File.GetLastWriteTimeUtc(source); item.FileSystemIdentity = null;
             item.Availability = MediaAvailability.Available;

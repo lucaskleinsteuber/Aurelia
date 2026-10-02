@@ -28,6 +28,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var isWorking = false
   @Published var errorMessage: String?
   @Published var isMediaManagerPresented = false
+  @Published var importPreviewLibrary: LibrarySummary?
 
   let artworkLoader = ArtworkLoader()
 
@@ -45,6 +46,13 @@ final class AppModel: ObservableObject {
 
   var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true }
   var isLocalHost: Bool { operatingMode == .host }
+  var isImportPreviewUITest: Bool {
+    #if DEBUG
+      Self.uiTestMode == "import-preview"
+    #else
+      false
+    #endif
+  }
 
   func showMediaManager() {
     isMediaManagerPresented = true
@@ -66,6 +74,12 @@ final class AppModel: ObservableObject {
     hasStarted = true
 
     #if DEBUG
+      if Self.uiTestMode == "import-preview" {
+        operatingMode = .client
+        profile = Self.previewOwnerProfile
+        isStarting = false
+        return
+      }
       if Self.uiTestMode == "server-settings" {
         operatingMode = .client
         profile = Self.previewOwnerProfile
@@ -373,17 +387,18 @@ final class AppModel: ObservableObject {
         let library = try await client.createLibrary(
           name: location.resolvedName,
           path: location.path,
-          kind: location.kind)
+          kind: location.kind,
+          requireImportPreview: true)
         created.append(library)
-        activeScans.append(try await client.startLibraryScan(id: library.id))
       }
       libraries = try await client.libraries()
-      needsInitialLibrarySetup = false
-      startScanPolling()
-      try await refresh()
+      importPreviewLibrary = created.first
       return true
     } catch {
       errorMessage = error.localizedDescription
+      if let registered = try? await APIClient(profile: profile).libraries() {
+        libraries = registered
+      }
       return false
     }
   }
@@ -417,6 +432,7 @@ final class AppModel: ObservableObject {
   ) async -> Bool {
     guard let profile else { return false }
     isWorking = true
+    errorMessage = nil
     defer { isWorking = false }
     do {
       let client = APIClient(profile: profile)
@@ -426,17 +442,28 @@ final class AppModel: ObservableObject {
           name: location.resolvedName,
           path: location.path,
           kind: location.kind,
-          combineExisting: combineExisting)
+          combineExisting: combineExisting,
+          requireImportPreview: true)
         created.append(library)
-        activeScans.append(try await client.startLibraryScan(id: library.id))
       }
-      libraries.append(contentsOf: created)
-      libraries.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-      startScanPolling()
+      libraries = try await client.libraries()
+      importPreviewLibrary = created.first
       return true
     } catch {
       errorMessage = error.localizedDescription
+      if let registered = try? await APIClient(profile: profile).libraries() {
+        libraries = registered
+      }
       return false
+    }
+  }
+
+  func didConfirmImport(scan: LibraryScanSummary) async {
+    activeScans = Self.uniqueScans(activeScans + [scan])
+    startScanPolling()
+    await reloadAdministration()
+    if !libraries.contains(where: { $0.importPreviewRequired == true }) {
+      needsInitialLibrarySetup = false
     }
   }
 

@@ -62,7 +62,11 @@ public static partial class FilenameMetadataParser
     }
 
     public static bool IsExplicitTrailerFile(string path) =>
-        TrailerSuffixExpression().IsMatch(Path.GetFileNameWithoutExtension(path));
+        TrailerSuffixExpression().IsMatch(Path.GetFileNameWithoutExtension(path))
+        || TrailerPrefixExpression().IsMatch(Path.GetFileNameWithoutExtension(path));
+
+    public static bool IsExplicitExtraFile(string path) =>
+        ExtraSuffixExpression().IsMatch(Path.GetFileNameWithoutExtension(path));
 
     public static string NormalizeMatchTitle(string value)
     {
@@ -247,6 +251,12 @@ public static partial class FilenameMetadataParser
 
     [GeneratedRegex(@"(?:^|[\s._-]+)(?:official[\s._-]+)?(?:teaser|trailer)(?:[\s._-]*\d+)?(?:[\s._-]+\(?(?<year>(?:19|20)\d{2})\)?)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TrailerSuffixExpression();
+
+    [GeneratedRegex(@"^(?:official[\s._-]+)?(?:teaser|trailer)(?:[\s._]*\d+)?\s*[-–—:]\s*\S", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TrailerPrefixExpression();
+
+    [GeneratedRegex(@"[-_]+\s*(?:extra|featurette|behind[ ._-]*the[ ._-]*scenes|deleted[ ._-]*scenes?|deleted|interview|scene|clip|short|other)(?:[\s._-]*\d+)?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ExtraSuffixExpression();
 
     [GeneratedRegex(@"S(\d{1,2})[ ._-]*E(\d{1,3})\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SeasonEpisodeExpression();

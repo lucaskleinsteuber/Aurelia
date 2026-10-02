@@ -17,6 +17,8 @@ public sealed class LibraryRoot
     public LibraryAvailability Availability { get; set; }
 
     public bool MonitoringEnabled { get; set; } = true;
+    public bool ImportPreviewRequired { get; set; }
+    public long ImportAssignmentRevision { get; set; }
 
     public DateTimeOffset? LastObservedAt { get; set; }
 

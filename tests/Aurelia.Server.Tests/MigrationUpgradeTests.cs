@@ -140,7 +140,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(10L, await command.ExecuteScalarAsync());
+            Assert.Equal(11L, await command.ExecuteScalarAsync());
             command.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsLock';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
@@ -193,7 +193,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(10L, await command.ExecuteScalarAsync());
+            Assert.Equal(11L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='SyncChanges';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaSearchIndex';";
@@ -238,7 +238,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(10L, await command.ExecuteScalarAsync());
+            Assert.Equal(11L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaMetadata';";
@@ -294,7 +294,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(10L, await command.ExecuteScalarAsync());
+            Assert.Equal(11L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaItems';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MetadataJobs';";

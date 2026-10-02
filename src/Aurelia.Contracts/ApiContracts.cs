@@ -146,7 +146,8 @@ public sealed record CreateLibraryRequest(
     string? Name,
     string Path,
     LibraryKind Kind,
-    bool CombineExisting = false);
+    bool CombineExisting = false,
+    bool RequireImportPreview = false);
 
 public sealed record UpdateLibraryMonitoringRequest(bool Enabled);
 
@@ -203,7 +204,8 @@ public sealed record LibrarySummary(
     string? LastError,
     bool MonitoringEnabled = true,
     DateTimeOffset? LastObservedAt = null,
-    LibraryHealthStatus Health = LibraryHealthStatus.Unknown);
+    LibraryHealthStatus Health = LibraryHealthStatus.Unknown,
+    bool ImportPreviewRequired = false);
 
 public sealed record LibraryScanIssueSummary(
     string Code,
@@ -227,7 +229,12 @@ public sealed record LibraryScanSummary(
     IReadOnlyList<LibraryScanIssueSummary> Issues,
     LibraryScanTrigger Trigger = LibraryScanTrigger.Manual,
     int Attempt = 0,
-    string? TargetRelativePath = null);
+    string? TargetRelativePath = null,
+    string Phase = "Queued",
+    int RecognizedFiles = 0,
+    int PendingFiles = 0,
+    int IgnoredFiles = 0,
+    int FailedFiles = 0);
 
 public sealed record PagedResponse<T>(
     IReadOnlyList<T> Items,

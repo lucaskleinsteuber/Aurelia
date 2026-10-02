@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Aurelia.Contracts;
 using Aurelia.Server.Services;
 using Xunit;
@@ -154,10 +155,7 @@ public sealed class MediaLibraryScannerTests
             var trailerPath = Touch(root, "The Truman Show - Trailer.mp4");
             var result = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None);
 
-            Assert.Contains(result.Items, item =>
-                item.Kind == MediaKind.Trailer
-                && item.SourcePath == trailerPath
-                && item.ParentSourcePath is null);
+            Assert.DoesNotContain(result.Items, item => item.SourcePath == trailerPath);
             var review = Assert.Single(result.ImportReviews!);
             Assert.Equal(trailerPath, review.SourcePath);
             Assert.Equal("The Truman Show", review.DetectedTitle);
@@ -196,8 +194,12 @@ public sealed class MediaLibraryScannerTests
                 CancellationToken.None,
                 importReviewDecisions: decisions);
 
-            var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
-            Assert.Equal(expectParent ? moviePath : null, trailer.ParentSourcePath);
+            if (expectParent)
+            {
+                var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
+                Assert.Equal(moviePath, trailer.ParentSourcePath);
+            }
+            else Assert.DoesNotContain(result.Items, item => item.Kind == MediaKind.Trailer);
             Assert.Empty(result.ImportReviews!);
         }
         finally
@@ -231,8 +233,12 @@ public sealed class MediaLibraryScannerTests
                 CancellationToken.None,
                 importReviewDecisions: [decision]);
 
-            var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
-            Assert.Equal(expectParent ? moviePath : null, trailer.ParentSourcePath);
+            if (expectParent)
+            {
+                var trailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
+                Assert.Equal(moviePath, trailer.ParentSourcePath);
+            }
+            else Assert.DoesNotContain(result.Items, item => item.Kind == MediaKind.Trailer);
             Assert.Empty(result.ImportReviews!);
         }
         finally
@@ -612,6 +618,209 @@ public sealed class MediaLibraryScannerTests
         }
         Assert.DoesNotContain(result.Items, item =>
             Path.GetFileName(item.SourcePath).StartsWith("._", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AmbiguousHardLinkIdentityDoesNotApplyAProtectedBindingToBothPaths()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var root = CreateDirectory("Hard Link Bindings");
+        try
+        {
+            var original = Touch(root, "Original Movie.mkv");
+            var first = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None);
+            var source = Assert.Single(first.Files!);
+            var alias = Path.Combine(root, "Alias Movie.mkv");
+            var arguments = new ProcessStartInfo("/bin/ln") { UseShellExecute = false };
+            arguments.ArgumentList.Add(original);
+            arguments.ArgumentList.Add(alias);
+            using var process = Process.Start(arguments);
+            Assert.NotNull(process);
+            Assert.True(process.WaitForExit(5000));
+            Assert.Equal(0, process.ExitCode);
+            var assignment = new ExistingImportAssignment("Original Movie.mkv", false, MediaKind.Movie,
+                null, null, null, null, "Protected original",
+                source.FileSystemIdentity, source.FileSize, source.FileModifiedAt);
+            var result = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None,
+                assignments: [assignment]);
+            var item = Assert.Single(result.Items);
+            Assert.Equal(original, item.SourcePath);
+            Assert.Equal("Protected original", item.DetectedTitle);
+            Assert.Contains(result.Files!, file => file.SourcePath == alias);
+            Assert.Contains(result.Classifications!, value => value.NeedsReview);
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Fact]
+    public void ScannerReportsDiscoveryThenResolutionWithoutReadingVideoContent()
+    {
+        var root = CreateDirectory("Import Phases");
+        try
+        {
+            Touch(root, "Movie.mkv");
+            var phases = new List<string>();
+            var result = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None,
+                onPhase: phases.Add);
+            Assert.Equal(["Discovering", "Resolving"], phases);
+            Assert.Single(result.Items);
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Fact]
+    public void SeparateEpisodeFolderRulesHonorTheirOwnStartingNumbers()
+    {
+        var root = CreateDirectory("Explicit Episode Groups");
+        try
+        {
+            Touch(root, "Parts One/A.mkv");
+            Touch(root, "Parts One/B.mkv");
+            Touch(root, "Parts Two/A.mkv");
+            Touch(root, "Parts Two/B.mkv");
+            Touch(root, "Show/Season 1/Show S01E20.mkv");
+            var result = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None,
+                assignments:
+                [
+                    new("Parts One", true, MediaKind.Episode, "Show", 1, 1, null, null),
+                    new("Parts Two", true, MediaKind.Episode, "Show", 1, 10, null, null),
+                ]);
+            Assert.Equal([1, 2, 10, 11, 20], result.Items.Where(item => item.Kind == MediaKind.Episode)
+                .Select(item => item.EpisodeNumber).Order().ToArray());
+            Assert.Empty(result.ImportReviews!);
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Fact]
+    public void ExistingManualMovieBindingSurvivesARenameThatLooksLikeAnEpisode()
+    {
+        var root = CreateDirectory("Manual Movie Binding");
+        try
+        {
+            var original = Touch(root, "Original Movie.mkv");
+            var first = scanner.Scan(root, LibraryKind.Movies, [], null, CancellationToken.None);
+            var source = Assert.Single(first.Files!);
+            Assert.NotNull(source.FileSystemIdentity);
+            var moved = Path.Combine(root, "Show S02E03.mkv");
+            File.Move(original, moved);
+            var assignment = new ExistingImportAssignment("Original Movie.mkv", false, MediaKind.Movie,
+                null, null, null, null, "My manually selected movie",
+                source.FileSystemIdentity, source.FileSize, source.FileModifiedAt);
+            var result = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None,
+                assignments: [assignment]);
+            var movie = Assert.Single(result.Items);
+            Assert.Equal(MediaKind.Movie, movie.Kind);
+            Assert.Equal(moved, movie.SourcePath);
+            Assert.Equal(source.FileSystemIdentity, movie.FileSystemIdentity);
+            Assert.Equal("My manually selected movie", movie.DetectedTitle);
+            Assert.Empty(result.ImportReviews!);
+            Assert.DoesNotContain(result.Classifications!, item => item.NeedsReview);
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Fact]
+    public void AutomaticUnnumberedVideosWithinRecognizedSeriesRequireReview()
+    {
+        var root = CreateDirectory("Numbered Show");
+        try
+        {
+            Touch(root, "Season 1/Show S01E01 Pilot.mkv");
+            var unknown = Touch(root, "Season 1/Interview without numbers.mkv");
+            var result = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None);
+            Assert.Single(result.Items, item => item.Kind == MediaKind.Episode);
+            Assert.DoesNotContain(result.Items, item => item.SourcePath == unknown);
+            Assert.Contains(result.ImportReviews!, review => review.SourcePath == unknown);
+            Assert.Equal(2, result.Files!.Count);
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Fact]
+    public void FileAssignmentOverridesInheritedDirectoryAssignmentAndSurvivesRescan()
+    {
+        var root = CreateDirectory("Assignment Storage");
+        try
+        {
+            Touch(root, "Show/Season 1/Show S01E01.mkv");
+            var extra = Touch(root, "Miscellaneous/Unusual Interview S09E01.mkv");
+            var trailer = Touch(root, "Miscellaneous/Custom Promotion.mkv");
+            var ignored = Touch(root, "Miscellaneous/Ignore me.mkv");
+            ExistingImportAssignment[] assignments =
+            [
+                new("Miscellaneous", true, MediaKind.Extra, "Show", 1, null, "Interviews", null),
+                new("Miscellaneous/Custom Promotion.mkv", false, MediaKind.Trailer, "Show", null, null, "", "My trailer"),
+                new("Miscellaneous/Ignore me.mkv", false, null, null, null, null, null, null),
+            ];
+            var result = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None,
+                assignments: assignments);
+            var firstExtra = Assert.Single(result.Items, item => item.Kind == MediaKind.Extra);
+            Assert.Equal(extra, firstExtra.SourcePath);
+            Assert.Equal(Path.Combine(root, "Show"), firstExtra.ParentSourcePath);
+            Assert.Equal(1, firstExtra.SeasonNumber);
+            Assert.Equal("Interviews", firstExtra.Category);
+            var firstTrailer = Assert.Single(result.Items, item => item.Kind == MediaKind.Trailer);
+            Assert.Equal(trailer, firstTrailer.SourcePath);
+            Assert.Null(firstTrailer.SeasonNumber);
+            Assert.Equal("My trailer", firstTrailer.DetectedTitle);
+            Assert.DoesNotContain(result.Items, item => item.SourcePath == ignored);
+            Assert.Empty(result.ImportReviews!);
+            Assert.Equal(4, result.Files!.Count);
+            var repeated = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None,
+                assignments: assignments);
+            Assert.Equal(result.Items, repeated.Items);
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Fact]
+    public void ExplicitSeriesFolderRulePartitionsBeforeAutomaticClassification()
+    {
+        var root = CreateDirectory("Forced TV Storage");
+        try
+        {
+            Touch(root, "Parts/Inner/Part 10.mkv");
+            Touch(root, "Parts/Inner/Part 2.mkv");
+            Touch(root, "Parts/Inner/Part 1.mkv");
+            var result = scanner.Scan(root, LibraryKind.Automatic, [], null, CancellationToken.None,
+                assignments: [new("Parts", true, MediaKind.Series, null, null, null, null, null)]);
+            var series = Assert.Single(result.Items, item => item.Kind == MediaKind.Series);
+            Assert.Equal(Path.Combine(root, "Parts"), series.SourcePath);
+            Assert.Equal(3, result.Items.Count(item => item.Kind == MediaKind.Episode));
+            Assert.Equal(["Part 1.mkv", "Part 2.mkv", "Part 10.mkv"], result.Items
+                .Where(item => item.Kind == MediaKind.Episode).OrderBy(item => item.EpisodeNumber)
+                .Select(item => Path.GetFileName(item.SourcePath)).ToArray());
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Fact]
+    public void SeriesTrailersHaveSeriesOwnersRatherThanBorrowingMatchingMovies()
+    {
+        var root = CreateDirectory("Show");
+        try
+        {
+            Touch(root, "Season 1/Show S01E01.mkv");
+            var trailer = Touch(root, "Show - Trailer.mp4");
+            var movie = Touch(root, "Elsewhere/Unrelated.mkv");
+            var result = scanner.Scan(root, LibraryKind.TvShows, [], null, CancellationToken.None,
+                existingMovies: [new(Guid.NewGuid(), movie, null)]);
+            var item = Assert.Single(result.Items, item => item.SourcePath == trailer);
+            Assert.Equal(MediaKind.Trailer, item.Kind);
+            Assert.Equal(root, item.ParentSourcePath);
+        }
+        finally { DeleteFixture(root); }
+    }
+
+    [Theory]
+    [InlineData("Trailer Park Boys.mkv", false)]
+    [InlineData("Teaser - On the Radio.mkv", true)]
+    [InlineData("Trailer - First look.mkv", true)]
+    [InlineData("Show.Official.Trailer.2020.mkv", true)]
+    public void TrailerMatchingUsesBoundedNamesInsteadOfArbitrarySubstrings(string filename, bool expected)
+    {
+        Assert.Equal(expected, FilenameMetadataParser.IsExplicitTrailerFile(filename));
     }
 
     [Fact]

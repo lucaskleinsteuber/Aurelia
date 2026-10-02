@@ -39,7 +39,9 @@ struct MediaDetailView: View {
           if !detail.seasons.isEmpty {
             seasons(detail)
           }
-          supplementSections(detail.supplements, parentTitle: detail.item.title)
+          supplementSections(
+            detail.supplements, parentTitle: detail.item.title,
+            headingPrefix: detail.item.kind == .series ? "Series " : "")
           credits(detail.metadata.credits)
           about(detail)
         }
@@ -245,11 +247,12 @@ struct MediaDetailView: View {
   @ViewBuilder
   private func supplementSections(
     _ supplements: [SupplementPresentation],
-    parentTitle: String
+    parentTitle: String,
+    headingPrefix: String = ""
   ) -> some View {
     ForEach(supplementGroups(supplements), id: \.title) { group in
       VStack(alignment: .leading, spacing: 14) {
-        Text(group.title).font(AureliaDesign.sectionTitle)
+        Text(headingPrefix + group.title).font(AureliaDesign.sectionTitle)
           .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
         AureliaHorizontalRail(leadingInset: AureliaDesign.detailRailLeadingInset) {
           ForEach(group.items) { supplement in

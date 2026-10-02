@@ -64,9 +64,14 @@ public static class MediaEditingEndpoints
             {
                 var source = await database.MediaExclusions.SingleOrDefaultAsync(value => value.LibraryRootId == id && value.Id == excluded, token)
                     ?? throw new AccountException("exclusion_not_found", "The excluded source was not found.", 404);
+                var root = await database.LibraryRoots.SingleAsync(value => value.Id == id, token);
+                await using var transaction = await database.Database.BeginTransactionAsync(token);
                 var prefix = source.NormalizedSourcePath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
                 await database.MediaExclusions.Where(value => value.LibraryRootId == id
                     && (value.Id == excluded || source.IsDirectory && value.NormalizedSourcePath.StartsWith(prefix))).ExecuteDeleteAsync(token);
+                root.ImportAssignmentRevision++;
+                await database.SaveChangesAsync(token);
+                await transaction.CommitAsync(token);
             }
             return await libraries.StartScanAsync(id, token);
         });

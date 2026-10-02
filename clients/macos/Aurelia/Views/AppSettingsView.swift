@@ -316,6 +316,7 @@ struct AppSettingsView: View {
             Text(library.availability.rawValue.capitalized)
               .font(.caption).foregroundStyle(.secondary)
             Button("Scan") { Task { await model.scanLibrary(id: library.id) } }
+              .disabled(library.importPreviewRequired == true)
             Button(role: .destructive) {
               libraryToRemove = library
             } label: {
@@ -329,62 +330,11 @@ struct AppSettingsView: View {
           ProgressView("Scanning in the background…")
         }
 
-        let unresolved = model.libraryDiscoveries.filter {
-          $0.suggestedKind == nil && $0.decision == nil
-        }
-        if !unresolved.isEmpty {
-          Divider()
-          Text("Needs Your Help").font(.headline)
-          Text(
-            "Aurelia did not guess these folders. Choose TV Show · Force Import for episode files without S01E01 names; their natural filename order becomes Season 1."
-          )
-          .font(.caption).foregroundStyle(.secondary)
-          ForEach(unresolved) { discovery in
-            DiscoveryDecisionCard(discovery: discovery)
-          }
-        }
-
-        let recognized = model.libraryDiscoveries.filter {
-          $0.suggestedKind != nil && $0.decision != .ignore
-        }
-        if !recognized.isEmpty {
-          DisclosureGroup("Review Recognized Folders") {
-            VStack(spacing: 8) {
-              ForEach(recognized) { discovery in
-                HStack {
-                  Image(systemName: effectiveKind(discovery) == .movies ? "film" : "tv")
-                  Text(discovery.detectedTitle).lineLimit(1)
-                  Spacer()
-                  Menu("Change") {
-                    classificationButton("Movie", .movie, discovery)
-                    classificationButton("TV Show · Force Import", .tvShows, discovery)
-                    classificationButton("Ignore", .ignore, discovery)
-                  }
-                }
-              }
-            }
-            .padding(.top, 8)
-          }
-        }
-
-        let ignored = model.libraryDiscoveries.filter { $0.decision == .ignore }
-        if !ignored.isEmpty {
-          DisclosureGroup("Ignored Folders") {
-            VStack(spacing: 8) {
-              ForEach(ignored) { discovery in
-                HStack {
-                  Image(systemName: "eye.slash")
-                  Text(discovery.detectedTitle).lineLimit(1)
-                  Spacer()
-                  Button("Review Again") {
-                    Task { await model.reviewIgnoredDiscovery(discovery) }
-                  }
-                }
-              }
-            }
-            .padding(.top, 8)
-          }
-        }
+        Text("Import Review & Assignments").font(.headline)
+        Text(
+          "Preview all files, choose Extra or Trailer, assign a target title and season, or change saved folder rules in Manage Media."
+        )
+        .font(.caption).foregroundStyle(.secondary)
 
         Button("Manage Media…") { showingMediaManager = true }
           .frame(maxWidth: .infinity, alignment: .leading)

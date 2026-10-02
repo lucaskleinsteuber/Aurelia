@@ -94,6 +94,7 @@ struct CreateLibraryRequest: Encodable, Sendable {
   let path: String
   let kind: LibraryKind
   let combineExisting: Bool
+  var requireImportPreview = false
 }
 
 enum ClassificationDecision: String, Codable, Sendable {
@@ -159,6 +160,7 @@ struct LibrarySummary: Codable, Identifiable, Equatable, Sendable {
   var monitoringEnabled: Bool? = nil
   var lastObservedAt: String? = nil
   var health: LibraryHealthStatus? = nil
+  var importPreviewRequired: Bool? = nil
 
   var isMonitoringEnabled: Bool { monitoringEnabled ?? false }
 }
@@ -187,6 +189,11 @@ struct LibraryScanSummary: Codable, Identifiable, Equatable, Sendable {
   var trigger: LibraryScanTrigger? = nil
   var attempt: Int? = nil
   var targetRelativePath: String? = nil
+  var phase: String? = nil
+  var recognizedFiles: Int? = nil
+  var pendingFiles: Int? = nil
+  var ignoredFiles: Int? = nil
+  var failedFiles: Int? = nil
 }
 
 struct PairingCodeResponse: Codable, Equatable, Sendable {
