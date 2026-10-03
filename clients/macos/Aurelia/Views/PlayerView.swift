@@ -537,7 +537,9 @@ struct PlayerView: View {
   }
 
   private func interaction(_ reason: String, active: Bool) {
-    controlsPolicy.hold(reason, active: active)
+    // Dismantled native menu buttons report focus-end even without prior focus.
+    // Cleanup must not resurrect the overlay that just removed those buttons.
+    guard controlsPolicy.hold(reason, active: active), active || controlsVisible else { return }
     revealControls(scheduleHide: !active)
   }
 
@@ -684,6 +686,7 @@ private final class PlayerTrackingView: NSView {
   var onInteraction: (() -> Void)?
   var onKeyDown: ((NSEvent) -> Bool)?
   private var trackingArea: NSTrackingArea?
+  private var pointerActivity = PlayerPointerActivity(position: NSEvent.mouseLocation)
 
   override var acceptsFirstResponder: Bool { true }
 
@@ -696,18 +699,20 @@ private final class PlayerTrackingView: NSView {
   }
 
   override func updateTrackingAreas() {
-    if let trackingArea { removeTrackingArea(trackingArea) }
-    let trackingArea = NSTrackingArea(
-      rect: bounds,
-      options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect],
-      owner: self)
-    addTrackingArea(trackingArea)
-    self.trackingArea = trackingArea
+    // inVisibleRect follows the viewport; keep the area across overlay/layout changes.
+    if trackingArea == nil {
+      let trackingArea = NSTrackingArea(
+        rect: .zero, options: [.activeAlways, .mouseMoved, .inVisibleRect], owner: self)
+      addTrackingArea(trackingArea)
+      self.trackingArea = trackingArea
+    }
     super.updateTrackingAreas()
   }
 
-  override func mouseMoved(with event: NSEvent) { onInteraction?() }
-  override func mouseEntered(with event: NSEvent) { onInteraction?() }
+  override func mouseMoved(with event: NSEvent) {
+    guard pointerActivity.moved(to: NSEvent.mouseLocation) else { return }
+    onInteraction?()
+  }
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
     onInteraction?()

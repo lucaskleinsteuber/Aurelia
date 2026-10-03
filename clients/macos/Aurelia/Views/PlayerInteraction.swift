@@ -6,9 +6,11 @@ struct PlayerControlsPolicy {
   private(set) var holds: Set<String> = []
   private(set) var generation: UInt64 = 0
 
-  mutating func hold(_ reason: String, active: Bool) {
-    if active { holds.insert(reason) } else { holds.remove(reason) }
+  @discardableResult mutating func hold(_ reason: String, active: Bool) -> Bool {
+    let changed = active ? holds.insert(reason).inserted : holds.remove(reason) != nil
+    guard changed else { return false }
     invalidate()
+    return true
   }
 
   @discardableResult mutating func invalidate() -> UInt64 {
@@ -18,6 +20,19 @@ struct PlayerControlsPolicy {
 
   func permitsHide(_ token: UInt64, preparing: Bool, error: Bool) -> Bool {
     token == generation && holds.isEmpty && !preparing && !error
+  }
+}
+
+/// Tracking-area/layout updates are not physical pointer movement.
+struct PlayerPointerActivity {
+  private var position: CGPoint
+
+  init(position: CGPoint) { self.position = position }
+
+  mutating func moved(to position: CGPoint) -> Bool {
+    guard position.x.isFinite, position.y.isFinite, position != self.position else { return false }
+    self.position = position
+    return true
   }
 }
 

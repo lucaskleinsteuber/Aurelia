@@ -320,6 +320,8 @@ final class CinemaUITests: XCTestCase {
       ("player-rate-menu", "Standard"), ("player-sleep-menu", "15 minutes"),
       ("player-chapter-menu", "Introduction  0:00"),
     ] {
+      app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.35))
+        .hover()
       let menu = app.buttons[identifier]
       XCTAssertTrue(menu.waitForExistence(timeout: 5))
       menu.hover()

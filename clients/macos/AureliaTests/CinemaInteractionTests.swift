@@ -39,6 +39,50 @@ import Testing
     }
   }
 
+  @Test func idleControlTeardownDoesNotChangeTheScheduledHideGeneration() {
+    var policy = PlayerControlsPolicy()
+    let scheduled = policy.invalidate()
+    // Native menu dismantling reports focus-end even when it never held focus.
+    for reason in ["focus-subtitle", "focus-audio", "focus-rate", "back-hover", "keyboard"] {
+      policy.hold(reason, active: false)
+      #expect(policy.generation == scheduled)
+      #expect(policy.permitsHide(scheduled, preparing: false, error: false))
+    }
+  }
+
+  @Test func duplicateHoldsAndLateEndNotificationsAreNotNewInteractions() {
+    var policy = PlayerControlsPolicy()
+    let openedMenu = policy.hold("menu", active: true)
+    #expect(openedMenu)
+    let opened = policy.generation
+    let duplicateOpen = policy.hold("menu", active: true)
+    #expect(!duplicateOpen)
+    #expect(policy.generation == opened)
+    let closedMenu = policy.hold("menu", active: false)
+    #expect(closedMenu)
+    let closed = policy.generation
+    let duplicateClose = policy.hold("menu", active: false)
+    #expect(!duplicateClose)
+    #expect(policy.generation == closed)
+    #expect(policy.permitsHide(closed, preparing: false, error: false))
+  }
+
+  @Test func unchangedScreenPositionAndInvalidEventsAreNotPointerMovement() {
+    var pointer = PlayerPointerActivity(position: CGPoint(x: 720, y: 350))
+    for _ in 0..<20 {
+      let moved = pointer.moved(to: CGPoint(x: 720, y: 350))
+      #expect(!moved)
+    }
+    let movements = [
+      pointer.moved(to: CGPoint(x: CGFloat.nan, y: 350)),
+      pointer.moved(to: CGPoint(x: 720, y: CGFloat.infinity)),
+      pointer.moved(to: CGPoint(x: 720.5, y: 350)),
+      pointer.moved(to: CGPoint(x: 720.5, y: 350)),
+      pointer.moved(to: CGPoint(x: -20, y: 350)),
+    ]
+    #expect(movements == [false, false, true, false, true])
+  }
+
   @Test func tenSecondTransportUsesNumberedSymbols() {
     #expect(PlayerSeekGlyph.numberedSymbol(interval: 10, forward: false) == "gobackward.10")
     #expect(PlayerSeekGlyph.numberedSymbol(interval: 10, forward: true) == "goforward.10")

@@ -220,6 +220,7 @@
     func stop() {}
   }
   @MainActor private final class FixturePlaybackEngine: PlaybackEngine {
+    private var tickTask: Task<Void, Never>?
     var onUpdate: (() -> Void)?
     var onEnded: (() -> Void)?
     var onError: ((String) -> Void)?
@@ -249,12 +250,31 @@
     func play() {
       isPlaying = true
       onUpdate?()
+      // Stress overlay/layout updates during these opt-in idle-pointer tests.
+      // Other fixtures retain their deterministic, explicitly stepped timeline.
+      guard ProcessInfo.processInfo.environment["AURELIA_AUTO_HIDE_UI_TESTS"] == "1",
+        tickTask == nil
+      else { return }
+      tickTask = Task { [weak self] in
+        while !Task.isCancelled {
+          try? await Task.sleep(for: .milliseconds(250))
+          guard let self, !Task.isCancelled, self.isPlaying else { return }
+          self.currentTimeMilliseconds += 250
+          self.onUpdate?()
+        }
+      }
     }
     func pause() {
       isPlaying = false
+      tickTask?.cancel()
+      tickTask = nil
       onUpdate?()
     }
-    func stop() { isPlaying = false }
+    func stop() {
+      isPlaying = false
+      tickTask?.cancel()
+      tickTask = nil
+    }
     func seek(to milliseconds: Int64) {
       currentTimeMilliseconds = milliseconds
       onUpdate?()

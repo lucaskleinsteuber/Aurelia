@@ -79,7 +79,10 @@ final class ContinueWatchingUITests: XCTestCase {
   @MainActor
   private func assertPlayer(_ app: XCUIApplication, title: String, elapsed: String) {
     XCTAssertTrue(app.descendants(matching: .any)["native-player"].waitForExistence(timeout: 5))
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.35)).hover()
     XCTAssertTrue(app.buttons["player-play-pause"].waitForExistence(timeout: 5))
+    // Reading several AX snapshots can exceed the real two-second idle delay.
+    app.buttons["player-play-pause"].hover()
     let playerTitle = app.staticTexts["player-title"]
     XCTAssertTrue(playerTitle.waitForExistence(timeout: 5), app.debugDescription)
     XCTAssertEqual(text(playerTitle), title, app.debugDescription)
