@@ -27,6 +27,24 @@ enum HomePresentationLogic {
   }
 }
 
+enum CatalogPlaybackLogic {
+  static func presentation(for item: CatalogItemSummary) -> PlaybackPresentation? {
+    guard item.isPlayable else { return nil }
+    return PlaybackPresentation(
+      mediaId: item.id, title: item.title, subtitle: subtitle(for: item))
+  }
+
+  static func subtitle(for item: CatalogItemSummary) -> String? {
+    guard item.kind == .episode else { return nil }
+    let parts = [
+      item.parentTitle,
+      item.seasonNumber.map { "Season \($0)" },
+      item.episodeNumber.map { "Episode \($0)" },
+    ].compactMap { $0 }.filter { !$0.isEmpty }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+}
+
 enum HomeRefreshPolicy {
   static func delay(
     until recommendationChangesAt: String,

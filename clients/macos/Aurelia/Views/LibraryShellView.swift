@@ -142,6 +142,7 @@ struct LibraryShellView: View {
     Button {
       selection = nil
       destination = item
+      if item == .home { Task { await model.refreshHome() } }
     } label: {
       Label(item.title, systemImage: item.symbol)
         .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
@@ -173,7 +174,9 @@ struct LibraryShellView: View {
       case .home:
         HomePage(
           onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) })
+          onSelectCollection: { selection = .collection($0) }
+        )
+        .task { await model.refreshHome() }
       case .library:
         LibraryPage(
           onSelect: { selection = .media($0) },
@@ -211,7 +214,9 @@ private struct HomePage: View {
   let onSelectCollection: (UUID) -> Void
 
   var body: some View {
-    if model.catalogItems.isEmpty, model.home?.recommendation == nil {
+    if model.catalogItems.isEmpty, model.home?.recommendation == nil,
+      model.home?.continueWatching.isEmpty != false
+    {
       EmptyLibraryState(
         title: "Your Library Is Ready",
         message: "Add a folder or drive to begin building your private library.",
@@ -267,11 +272,16 @@ private struct HomePage: View {
         ) {
           ForEach(items) { item in
             Button {
-              onSelect(item.id)
+              model.startPlayback(item: item)
             } label: {
               LandscapeMediaCard(item: item, eyebrow: eyebrow)
             }
             .buttonStyle(.plain)
+            .disabled(!item.isPlayable)
+            .accessibilityLabel(
+              ["Continue \(item.title)", CatalogPlaybackLogic.subtitle(for: item)]
+                .compactMap { $0 }.joined(separator: ", ")
+            )
             .accessibilityIdentifier("continue-\(item.id.uuidString.lowercased())")
           }
         }
@@ -677,10 +687,7 @@ private struct LibraryPage: View {
           ) {
             ForEach(episodes) { episode in
               Button {
-                model.startPlayback(
-                  mediaId: episode.id,
-                  title: episode.title,
-                  subtitle: episodeSearchSubtitle(episode))
+                model.startPlayback(item: episode)
               } label: {
                 LandscapeMediaCard(
                   item: episode,
@@ -690,7 +697,7 @@ private struct LibraryPage: View {
               .buttonStyle(.plain)
               .disabled(!episode.isPlayable)
               .accessibilityLabel(
-                "\(episode.title), \(episodeSearchSubtitle(episode) ?? "Episode")"
+                "\(episode.title), \(CatalogPlaybackLogic.subtitle(for: episode) ?? "Episode")"
               )
               .accessibilityIdentifier("search-episode-\(episode.id.uuidString.lowercased())")
             }
@@ -710,15 +717,6 @@ private struct LibraryPage: View {
       .joined(separator: " · ")
   }
 
-  private func episodeSearchSubtitle(_ item: CatalogItemSummary) -> String? {
-    let number = [
-      item.seasonNumber.map { "Season \($0)" },
-      item.episodeNumber.map { "Episode \($0)" },
-    ].compactMap { $0 }.joined(separator: " · ")
-    return [item.parentTitle, number.isEmpty ? nil : number]
-      .compactMap { $0 }
-      .joined(separator: " · ")
-  }
 }
 
 private struct CatalogPage: View {

@@ -35,6 +35,7 @@ final class AppModel: ObservableObject {
   private let store: any ServerProfileStore
   private let serverHost: NativeServerHost
   private let syncController = LibrarySyncController()
+  private let homeRefresher = HomeRefreshCoordinator()
   private var hasStarted = false
   private var hostPollTask: Task<Void, Never>?
   private var homeRefreshTask: Task<Void, Never>?
@@ -719,13 +720,20 @@ final class AppModel: ObservableObject {
     guard let profile else { return }
     isWorking = true
     defer { isWorking = false }
+    let homeRequest = homeRefresher.beginRequest()
     let client = APIClient(profile: profile)
     let info = try await client.serverInfo()
     guard info.serverId == profile.serverId else {
       throw APIClientError.serverIdentityMismatch
     }
+    guard self.profile?.serverId == profile.serverId,
+      self.profile?.sessionId == profile.sessionId
+    else { return }
     if profile.user == nil {
       let user = try await client.currentUser()
+      guard self.profile?.serverId == profile.serverId,
+        self.profile?.sessionId == profile.sessionId
+      else { return }
       let updated = StoredServerProfile(
         serverId: profile.serverId,
         name: info.name,
@@ -741,14 +749,22 @@ final class AppModel: ObservableObject {
     async let loadedMovies = client.movies()
     async let loadedSeries = client.series()
     async let loadedCatalog = client.catalogItems()
-    async let loadedHome = client.home()
+    async let loadedHome = homeRefresher.load(request: homeRequest, profile: profile)
     async let loadedCollections = client.collections()
-    movies = try await loadedMovies
-    series = try await loadedSeries
-    catalogItems = try await loadedCatalog
-    home = try await loadedHome
-    collections = try await loadedCollections
-    scheduleHomeRefresh()
+    let (newMovies, newSeries, newCatalog, newHome, newCollections) = try await (
+      loadedMovies, loadedSeries, loadedCatalog, loadedHome, loadedCollections
+    )
+    guard self.profile?.serverId == profile.serverId,
+      self.profile?.sessionId == profile.sessionId
+    else { return }
+    movies = newMovies
+    series = newSeries
+    catalogItems = newCatalog
+    collections = newCollections
+    if let newHome, homeRefresher.isCurrent(homeRequest) {
+      home = newHome
+      scheduleHomeRefresh()
+    }
   }
 
   func refreshHome() async {
@@ -761,8 +777,13 @@ final class AppModel: ObservableObject {
       if Self.uiTestMode != nil { return }
     #endif
     guard let profile else { return }
+    let request = homeRefresher.beginRequest()
     do {
-      home = try await APIClient(profile: profile).home()
+      guard let refreshed = try await homeRefresher.load(request: request, profile: profile),
+        self.profile?.serverId == profile.serverId,
+        self.profile?.sessionId == profile.sessionId
+      else { return }
+      home = refreshed
       scheduleHomeRefresh()
     } catch {
       errorMessage = error.localizedDescription
@@ -1003,13 +1024,23 @@ final class AppModel: ObservableObject {
       queue: queue)
   }
 
-  func closePlayback() {
+  func startPlayback(item: CatalogItemSummary) {
+    guard profile != nil, let presentation = CatalogPlaybackLogic.presentation(for: item) else {
+      return
+    }
+    playback = presentation
+  }
+
+  // The player awaits its final progress write before calling this method.
+  func closePlayback() async {
     playback = nil
+    await refreshHome()
   }
 
   func disconnect() async {
     let current = profile
     profile = nil
+    homeRefresher.invalidate()
     await syncController.stop()
     syncRefreshTask?.cancel()
     syncRefreshTask = nil

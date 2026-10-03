@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using Aurelia.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -76,6 +77,99 @@ public sealed class PresentationApiTests
             var legacy = await SendAsync<PagedResponse<SeriesSummary>>(
                 client, owner.Token, "/api/v1/catalog/series");
             Assert.Single(legacy.Items);
+        }
+        finally
+        {
+            if (Directory.Exists(fixture)) Directory.Delete(fixture, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ContinueWatchingPublishesSavedEpisodesAndMoviesAndResumesTheExactFilePerUser()
+    {
+        var fixture = TestPaths.CreateDataDirectory();
+        var movies = Path.Combine(fixture, "Movies");
+        var shows = Path.Combine(fixture, "Shows");
+        Touch(movies, "Example Movie.mkv");
+        Touch(shows, "Example Show/Season 1/Example Show S01E01 Pilot.mkv");
+
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            await ScanAsync(client, owner.Token, movies, LibraryKind.Movies);
+            await ScanAsync(client, owner.Token, shows, LibraryKind.TvShows);
+            var catalog = await SendAsync<PagedResponse<CatalogItemSummary>>(
+                client, owner.Token, "/api/v1/catalog/items");
+            var movie = Assert.Single(catalog.Items, item => item.Kind == MediaKind.Movie);
+            var show = Assert.Single(catalog.Items, item => item.Kind == MediaKind.Series);
+            var detail = await SendAsync<CatalogDetailPresentation>(
+                client, owner.Token, $"/api/v1/catalog/items/{show.Id}");
+            var episode = Assert.Single(Assert.Single(detail.Seasons).Episodes).Item;
+            Assert.DoesNotContain(catalog.Items, item => item.Id == episode.Id);
+            Assert.Empty((await SendAsync<HomeResponse>(client, owner.Token, "/api/v1/home")).ContinueWatching);
+            var before = await SendAsync<SyncChangesResponse>(
+                client, owner.Token, "/api/v1/sync/changes?after=0&waitSeconds=0");
+
+            await SendAsync<PlaybackProgressResponse>(client, owner.Token,
+                $"/api/v1/media/{episode.Id}/progress", HttpMethod.Put,
+                new UpdatePlaybackProgressRequest(20_000, 120_000, false));
+            var resumed = Assert.Single((await SendAsync<HomeResponse>(
+                client, owner.Token, "/api/v1/home")).ContinueWatching);
+            Assert.Equal(episode.Id, resumed.Id);
+            Assert.Equal(MediaKind.Episode, resumed.Kind);
+            Assert.Equal(show.Title, resumed.ParentTitle);
+            Assert.Equal(1, resumed.SeasonNumber);
+            Assert.Equal(1, resumed.EpisodeNumber);
+            Assert.Equal(20_000, resumed.Progress!.PositionMilliseconds);
+            var changes = await SendAsync<SyncChangesResponse>(
+                client, owner.Token, $"/api/v1/sync/changes?after={before.Cursor}&waitSeconds=0");
+            Assert.Contains(SyncChangeArea.UserState, changes.ChangedAreas);
+            Assert.Contains(episode.Id, changes.ChangedMediaIds);
+
+            var playback = await SendAsync<PlaybackSourceResponse>(client, owner.Token,
+                $"/api/v1/media/{resumed.Id}/playback", HttpMethod.Post);
+            Assert.Equal(episode.Id, playback.MediaId);
+            Assert.Equal(20_000, playback.Progress.PositionMilliseconds);
+            using (var stream = ApiTestClient.Authorized(HttpMethod.Get, playback.StreamPath, owner.Token))
+            {
+                stream.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+                using var response = await ApiTestClient.SendAsync(client, stream);
+                Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
+                Assert.Equal(new byte[] { 1 }, await response.Content.ReadAsByteArrayAsync());
+            }
+            await SendAsync<PlaybackProgressResponse>(client, owner.Token,
+                $"/api/v1/media/{movie.Id}/progress", HttpMethod.Put,
+                new UpdatePlaybackProgressRequest(30_000, 120_000, false));
+            Assert.Equal(2, (await SendAsync<HomeResponse>(client, owner.Token, "/api/v1/home")).ContinueWatching.Count);
+
+            await SendAsync<UserSummary>(client, owner.Token, "/api/v1/users", HttpMethod.Post,
+                new CreateUserRequest("viewer", "a secure viewer password", UserRole.User));
+            using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+                new LoginRequest("viewer", "a secure viewer password", "Viewer Mac"), ApiTestClient.JsonOptions);
+            login.EnsureSuccessStatusCode();
+            var viewer = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
+            Assert.Empty((await SendAsync<HomeResponse>(client, viewer.Token, "/api/v1/home")).ContinueWatching);
+            await ApiTestClient.GrantExistingLibrariesAsync(client, owner.Token, viewer.User.Id);
+            await SendAsync<PlaybackProgressResponse>(client, viewer.Token,
+                $"/api/v1/media/{episode.Id}/progress", HttpMethod.Put,
+                new UpdatePlaybackProgressRequest(40_000, 120_000, false));
+            Assert.Equal(40_000, Assert.Single((await SendAsync<HomeResponse>(
+                client, viewer.Token, "/api/v1/home")).ContinueWatching).Progress!.PositionMilliseconds);
+            Assert.Equal(20_000, (await SendAsync<HomeResponse>(client, owner.Token, "/api/v1/home"))
+                .ContinueWatching.Single(item => item.Id == episode.Id).Progress!.PositionMilliseconds);
+
+            // Finished and deliberately restarted titles are removed; another user's Home is unchanged.
+            await SendAsync<PlaybackProgressResponse>(client, viewer.Token,
+                $"/api/v1/media/{episode.Id}/progress", HttpMethod.Put,
+                new UpdatePlaybackProgressRequest(120_000, 120_000, true));
+            Assert.Empty((await SendAsync<HomeResponse>(client, viewer.Token, "/api/v1/home")).ContinueWatching);
+            await SendAsync<PlaybackProgressResponse>(client, owner.Token,
+                $"/api/v1/media/{episode.Id}/progress", HttpMethod.Put,
+                new UpdatePlaybackProgressRequest(0, 120_000, false));
+            Assert.Equal(movie.Id, Assert.Single((await SendAsync<HomeResponse>(
+                client, owner.Token, "/api/v1/home")).ContinueWatching).Id);
         }
         finally
         {

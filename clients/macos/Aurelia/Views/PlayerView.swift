@@ -294,6 +294,7 @@ struct PlayerView: View {
           Text(controller.presentation.subtitle ?? "NOW PLAYING")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.white.opacity(0.68))
+            .accessibilityIdentifier("player-subtitle")
           Text(controller.presentation.title)
             .font(.title3.weight(.semibold))
             .lineLimit(2)
@@ -305,7 +306,9 @@ struct PlayerView: View {
 
       HStack(spacing: 10) {
         Text(formatTime(displayedPosition)).monospacedDigit().frame(
-          minWidth: 44, alignment: .trailing)
+          minWidth: 44, alignment: .trailing
+        )
+        .accessibilityIdentifier("player-elapsed")
         PlayerTimeline(
           position: Binding(
             get: { displayedPosition },
@@ -555,7 +558,7 @@ struct PlayerView: View {
     showCursor()
     Task {
       await controller.shutdown()
-      model.closePlayback()
+      await model.closePlayback()
     }
   }
 

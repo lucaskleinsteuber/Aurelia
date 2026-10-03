@@ -56,9 +56,62 @@
       }
       return HomeResponse(
         recommendation: base.recommendation.map(decorate),
-        continueWatching: base.continueWatching.map(decorate), recentlyAdded: items,
+        continueWatching: continuationCards(base) ?? base.continueWatching.map(decorate),
+        recentlyAdded: items,
         favorites: base.favorites.map(decorate), collections: base.collections,
         recommendationChangesAt: base.recommendationChangesAt)
+    }
+
+    static var testsContinueWatching: Bool {
+      enabled && ProcessInfo.processInfo.environment["AURELIA_CONTINUE_UI_TESTS"] != nil
+    }
+
+    private static let resumeEpisodeID = UUID(
+      uuidString: "20000000-0000-0000-0000-000000000010")!
+    private static let resumeMovieID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+    static var savedProgress: [UUID: PlaybackProgressResponse] = {
+      guard ProcessInfo.processInfo.environment["AURELIA_CONTINUE_UI_TESTS"] == "seeded" else {
+        return [:]
+      }
+      return Dictionary(
+        uniqueKeysWithValues: [(resumeEpisodeID, Int64(30_000)), (resumeMovieID, 45_000)]
+          .map { id, position in
+            (
+              id,
+              PlaybackProgressResponse(
+                mediaId: id, positionMilliseconds: position, durationMilliseconds: 120_000,
+                isCompleted: false, lastPlayedAt: "2026-10-03T00:00:00Z",
+                updatedAt: "2026-10-03T00:00:00Z")
+            )
+          })
+    }()
+
+    private static func continuationCards(_ base: HomeResponse) -> [CatalogItemSummary]? {
+      guard testsContinueWatching else { return nil }
+      let episodes = [
+        (resumeEpisodeID, "Pilot"),
+        (UUID(uuidString: "20000000-0000-0000-0000-000000000101")!, "Episode 1"),
+      ]
+      .map { id, title in
+        CatalogItemSummary(
+          id: id, kind: .episode, title: title, originalTitle: nil, year: 2008,
+          overview: "A synthetic saved episode, absent from the top-level catalog.",
+          genres: ["Drama"], poster: artwork, backdrop: artwork, availability: .available,
+          isFavorite: false, progress: nil, addedAt: "2026-10-03T00:00:00Z",
+          parentTitle: "Breaking Bad", seasonNumber: 1, episodeNumber: 1)
+      }
+      return (episodes + base.continueWatching).compactMap { item in
+        guard let progress = savedProgress[item.id], !progress.isCompleted,
+          progress.positionMilliseconds > 10_000
+        else { return nil }
+        return CatalogItemSummary(
+          id: item.id, kind: item.kind, title: item.title, originalTitle: item.originalTitle,
+          year: item.year, overview: item.overview, genres: item.genres,
+          poster: artwork, backdrop: artwork, availability: item.availability,
+          isFavorite: item.isFavorite, progress: progress, addedAt: item.addedAt,
+          parentTitle: item.parentTitle, seasonNumber: item.seasonNumber,
+          episodeNumber: item.episodeNumber)
+      }
     }
     static let credits: [CreditSummary] =
       (0..<14).map { index in
@@ -137,17 +190,26 @@
         id: UUID(), mediaId: mediaId, streamPath: "/synthetic",
         contentType: "video/test", contentLength: 0, expiresAt: "2099-01-01T00:00:00Z",
         progress: PlaybackProgressResponse(
-          mediaId: mediaId, positionMilliseconds: 0,
+          mediaId: mediaId,
+          positionMilliseconds: CinemaUITestFixture.testsContinueWatching
+            ? CinemaUITestFixture.savedProgress[mediaId]?.positionMilliseconds ?? 0 : 0,
           durationMilliseconds: 120_000, isCompleted: false, lastPlayedAt: nil, updatedAt: nil))
     }
     func updatePlaybackProgress(
       mediaId: UUID, positionMilliseconds: Int64,
       durationMilliseconds: Int64, isFinished: Bool
     ) async throws -> PlaybackProgressResponse {
-      PlaybackProgressResponse(
-        mediaId: mediaId, positionMilliseconds: positionMilliseconds,
-        durationMilliseconds: durationMilliseconds, isCompleted: isFinished, lastPlayedAt: nil,
+      let completed = isFinished || positionMilliseconds >= durationMilliseconds - 45_000
+      let result = PlaybackProgressResponse(
+        mediaId: mediaId,
+        positionMilliseconds: completed || positionMilliseconds <= 10_000
+          ? 0 : positionMilliseconds,
+        durationMilliseconds: durationMilliseconds, isCompleted: completed, lastPlayedAt: nil,
         updatedAt: nil)
+      if CinemaUITestFixture.testsContinueWatching {
+        CinemaUITestFixture.savedProgress[mediaId] = result
+      }
+      return result
     }
     func revokePlayback(id: UUID) async throws {}
     func streamURL(path: String) throws -> URL { URL(string: "https://fixture.invalid/synthetic")! }
