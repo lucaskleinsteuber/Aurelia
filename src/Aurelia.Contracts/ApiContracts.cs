@@ -405,7 +405,8 @@ public sealed record CreditSummary(
     string? Character,
     int Order,
     ArtworkSummary? Profile,
-    Guid? Id = null);
+    Guid? Id = null,
+    string? PersonKey = null);
 
 public sealed record MediaMetadataSummary(
     Guid MediaId,

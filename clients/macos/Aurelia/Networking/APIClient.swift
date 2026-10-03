@@ -744,6 +744,11 @@ struct APIClient: Sendable {
     timeout: TimeInterval = 15
   ) async throws -> Data {
     #if DEBUG
+      if await CinemaUITestFixture.enabled, method == "GET",
+        path.hasPrefix("/api/v1/artwork/") || path.contains("/editor/artwork/")
+      {
+        return await CinemaUITestFixture.png
+      }
       if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "library-admin",
         path == "/api/v1/metadata/reviews" || path.hasSuffix("/editor")
           || path.hasSuffix("/metadata")

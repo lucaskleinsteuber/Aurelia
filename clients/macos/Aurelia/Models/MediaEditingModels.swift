@@ -19,6 +19,7 @@ struct EditorCredit: Codable, Equatable, Identifiable, Sendable {
   var job: String?
   var character: String?
   var profile: EditorArtwork?
+  var personKey: String? = nil
 }
 struct MediaEditorValues: Codable, Equatable, Sendable {
   var title = ""

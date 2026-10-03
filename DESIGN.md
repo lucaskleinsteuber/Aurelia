@@ -103,7 +103,9 @@ every button, input, badge, and panel pill-shaped.
 
 ## Window and sidebar composition
 
-Aurelia uses a native `NavigationSplitView` with a native sidebar `List`.
+Aurelia uses one full-window composition with a native sidebar `List` over
+the content. The overlay preserves native selection and window behavior while
+allowing a single horizontal rail to continue underneath the sidebar.
 
 ### Release blocker: no top strip
 
@@ -126,16 +128,17 @@ a top strip, visual acceptance fails regardless of passing unit tests.
   the content.
 - The sidebar order is Home, Library, Recently Added, TV Shows, and Movies.
 - Selection uses native active and inactive window behavior.
-- The sidebar content background is hidden and `ultraThinMaterial` provides the
+- The sidebar content background is hidden and native sidebar material provides the
   structural layer.
 - Do not draw a custom selection pill or an extra separator at the split edge.
 
-On Home and artwork detail pages, the same authenticated backdrop is rendered
-behind both the detail column and the sidebar. The sidebar does not use a
-calculated dominant color. Real pixels from the artwork must remain visible
-through the material. The backdrop and readability gradients move with the
-hero's vertical scroll position; after the hero leaves the viewport, the
-sidebar settles onto `#202326`.
+On Home and artwork detail pages, background extension applies only to the
+authenticated image, never the page, title or controls. The hero contributes
+diffuse light and color under the sidebar, not a recognizable second person.
+Scrollable cards themselves continue under the material on their actual row;
+there is no separately positioned duplicate rail. Both effects stay local to
+the source content and leave the viewport with it. The sidebar does not use
+a calculated dominant color or a permanently stretched backdrop.
 
 With Reduce Transparency enabled, replace material with an opaque,
 high-contrast neutral surface. With Increase Contrast enabled, strengthen
@@ -175,6 +178,12 @@ and Cast & Crew use the same rail behavior.
 - Card shadows and the 1.2% hover scale must not clip or flicker.
 - Horizontal indicators are hidden unless a future accessibility requirement
   explicitly needs them.
+- Hover and keyboard focus reveal compact vertical material chevrons at the
+  visible column edges, immediately outside the sidebar. Show only directions
+  with remaining content; non-overflowing rows have no arrows. Page by complete
+  cards and keep trackpad, keyboard and VoiceOver navigation available.
+- Vertical indicators use app-local native overlay scrollers, not reserved
+  tracks or a change to macOS preferences.
 - Refreshing metadata or synchronized catalog state must not reset a user's
   horizontal position or close the current detail page.
 
@@ -200,7 +209,10 @@ and Cast & Crew use the same rail behavior.
 
 ### People
 
-- Use circular profile artwork with name, job or role, and character.
+- Use one circular profile per provider-identified person: name and character
+  for actors, or compact job names for crew. Do not repeat the generic Acting
+  label. Keep every raw credit and editable role in the metadata editor; do not
+  merge unidentified people by name.
 - Missing profiles use a neutral person placeholder, never invented imagery.
 
 Missing artwork uses a neutral media-specific placeholder with an SF Symbol and

@@ -67,9 +67,10 @@ struct MediaDetailView: View {
         .frame(height: 500)
       }
     }
-    .defaultScrollAnchor(.top)
+    .defaultScrollAnchor(.topLeading)
     .scrollClipDisabled()
-    .scrollIndicators(.visible)
+    .scrollIndicators(.automatic, axes: .vertical)
+    .aureliaOverlayScrollbars()
     .accessibilityIdentifier("media-detail-scroll")
     .task(id: mediaId) { await load() }
     .confirmationDialog(
@@ -217,7 +218,10 @@ struct MediaDetailView: View {
       .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
 
       if let season = activeSeason(detail) {
-        AureliaHorizontalRail(leadingInset: AureliaDesign.detailRailLeadingInset) {
+        AureliaHorizontalRail(
+          leadingInset: AureliaDesign.detailRailLeadingInset, cardWidth: 420,
+          itemCount: season.episodes.count, title: "Episodes"
+        ) {
           ForEach(season.episodes) { episode in
             Button {
               guard episode.item.availability == .available else { return }
@@ -233,6 +237,7 @@ struct MediaDetailView: View {
             .mediaActions(item: episode.item)
           }
         }
+        .id(season.number)
         supplementSections(
           season.supplements,
           parentTitle: "\(detail.item.title) · Season \(season.number)")
@@ -254,7 +259,10 @@ struct MediaDetailView: View {
       VStack(alignment: .leading, spacing: 14) {
         Text(headingPrefix + group.title).font(AureliaDesign.sectionTitle)
           .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
-        AureliaHorizontalRail(leadingInset: AureliaDesign.detailRailLeadingInset) {
+        AureliaHorizontalRail(
+          leadingInset: AureliaDesign.detailRailLeadingInset, cardWidth: 360,
+          itemCount: group.items.count, title: headingPrefix + group.title
+        ) {
           ForEach(group.items) { supplement in
             Button {
               model.startPlayback(
@@ -303,18 +311,19 @@ struct MediaDetailView: View {
           .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
         AureliaHorizontalRail(
           spacing: 30,
-          leadingInset: AureliaDesign.detailRailLeadingInset
+          leadingInset: AureliaDesign.detailRailLeadingInset,
+          cardWidth: 132, itemCount: CreditPresentation.people(values).count, title: "Cast & Crew",
+          arrowHeight: 112
         ) {
-          ForEach(values.sorted { $0.order < $1.order }) { credit in
+          ForEach(CreditPresentation.people(values)) { credit in
             VStack(spacing: 8) {
               AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
                 .frame(width: 112, height: 112)
                 .clipShape(Circle())
                 .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 1) }
               Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
-              Text(credit.job ?? credit.department).font(.caption).foregroundStyle(.secondary)
-              if let character = credit.character {
-                Text(character).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+              if let subtitle = credit.subtitle {
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
               }
             }
             .frame(width: 132)
@@ -412,7 +421,9 @@ private struct DetailHero: View {
         artwork: detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop,
         symbol: detail.item.kind == .movie ? "film.fill" : "tv.fill",
         contentMode: .fill,
-        placeholderSymbolSize: 64)
+        placeholderSymbolSize: 64
+      )
+      .backgroundExtensionEffect()
       LinearGradient(
         stops: [
           .init(color: .black.opacity(0.46), location: 0),
@@ -526,7 +537,7 @@ private struct DetailHero: View {
 private struct EpisodeCard: View {
   let episode: EpisodePresentation
   @State private var hovering = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     ZStack(alignment: .bottomLeading) {

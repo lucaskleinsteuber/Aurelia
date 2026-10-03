@@ -66,6 +66,17 @@
           id: UUID(), name: "Test Actor", department: "Acting", job: "Actor",
           character: "Main Character")
       ]
+      if CinemaUITestFixture.enabled {
+        values.poster = EditorArtwork(assetId: CinemaUITestFixture.assetID, crop: nil)
+        values.backdrop = EditorArtwork(assetId: CinemaUITestFixture.assetID, crop: nil)
+        values.credits = CinemaUITestFixture.credits.map { credit in
+          EditorCredit(
+            id: credit.creditId!, name: credit.name, department: credit.department,
+            job: credit.job, character: credit.character,
+            profile: EditorArtwork(assetId: CinemaUITestFixture.assetID, crop: nil),
+            personKey: credit.personKey)
+        }
+      }
       return MediaEditorDocument(
         mediaId: id, libraryId: UUID(), kind: series ? episode ? .episode : .series : .movie,
         revision: 1, values: values, overrideFields: [], sourcePath: "/synthetic/Movies/Test.mkv",

@@ -124,7 +124,8 @@ struct MetadataEditorSheet: View {
       }.padding(20)
       Picker("Editor section", selection: $page) {
         ForEach(Page.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-      }.pickerStyle(.segmented).padding(.horizontal, 20).padding(.bottom, 16)
+      }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 20).padding(.bottom, 16)
+        .accessibilityIdentifier("metadata-section-picker")
       Divider()
       if draft.document != nil {
         ScrollView {
@@ -136,7 +137,11 @@ struct MetadataEditorSheet: View {
             case .artwork: artwork
             }
           }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
-        }.disabled(draft.busy)
+        }
+        .scrollIndicators(.automatic, axes: .vertical)
+        .accessibilityIdentifier("metadata-editor-scroll")
+        .aureliaOverlayScrollbars()
+        .disabled(draft.busy)
       } else {
         ProgressView("Loading editor…").frame(maxWidth: .infinity, maxHeight: .infinity)
       }
@@ -162,10 +167,10 @@ struct MetadataEditorSheet: View {
       }.padding(16)
     }
     .frame(
-      minWidth: 820, idealWidth: 940, maxWidth: .infinity, minHeight: 610, idealHeight: 720,
+      minWidth: 700, idealWidth: 940, maxWidth: .infinity, minHeight: 610, idealHeight: 720,
       maxHeight: .infinity
     )
-    .background(AureliaBackdrop())
+    .background(AureliaDesign.canvas)
     .interactiveDismissDisabled(draft.dirty || draft.busy)
     .accessibilityIdentifier("metadata-editor")
     .task { if draft.document == nil { await load() } }
@@ -246,8 +251,8 @@ struct MetadataEditorSheet: View {
         }
       }
       field("Description", key: "overview") {
-        TextEditor(text: draft.text(\.overview, field: "overview")).frame(minHeight: 155)
-          .padding(6).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        EditorDescriptionInput(text: draft.text(\.overview, field: "overview"))
+          .frame(minHeight: 150, idealHeight: 180, maxHeight: 230)
       }
       field("Genres", key: "genres") {
         EditorTagList(values: draft.binding(\.genres, field: "genres"), placeholder: "Add genre")
@@ -279,11 +284,11 @@ struct MetadataEditorSheet: View {
       }
       ForEach(Array(draft.values.credits.enumerated()), id: \.element.id) { index, person in
         HStack(alignment: .top, spacing: 16) {
-          VStack {
+          VStack(spacing: 12) {
             EditorImagePreview(
-              client: client, mediaId: metadata.mediaId, selection: person.profile, circular: true
+              client: client, mediaId: metadata.mediaId, selection: person.profile,
+              width: 96, height: 96, circular: true
             )
-            .frame(width: 86, height: 86)
             Menu("Photo") {
               Button("Choose Image…") {
                 Task { await chooseImage(field: "credits", person: person.id) }
@@ -296,13 +301,13 @@ struct MetadataEditorSheet: View {
               }
             }
           }
-          VStack(alignment: .leading, spacing: 8) {
-            TextField("Name", text: personText(person.id, key: \.name))
-            HStack {
-              TextField("Department", text: personText(person.id, key: \.department))
-              TextField("Job / Role", text: personOptionalText(person.id, key: \.job))
+          VStack(alignment: .leading, spacing: 12) {
+            personField("Name", text: personText(person.id, key: \.name))
+            HStack(alignment: .top, spacing: 16) {
+              personField("Department", text: personText(person.id, key: \.department))
+              personField("Job / Role", text: personOptionalText(person.id, key: \.job))
             }
-            TextField(
+            personField(
               "Character / Name in Film", text: personOptionalText(person.id, key: \.character))
           }.textFieldStyle(.roundedBorder)
           VStack {
@@ -310,20 +315,25 @@ struct MetadataEditorSheet: View {
               movePerson(index, by: -1)
             } label: {
               Image(systemName: "chevron.up")
-            }.disabled(index == 0)
+            }.disabled(index == 0).accessibilityLabel("Move \(person.name) Up")
             Button {
               movePerson(index, by: 1)
             } label: {
               Image(systemName: "chevron.down")
-            }.disabled(index == draft.values.credits.count - 1)
+            }.disabled(index == draft.values.credits.count - 1).accessibilityLabel(
+              "Move \(person.name) Down")
             Button(role: .destructive) {
               draft.values.credits.removeAll { $0.id == person.id }
               draft.overrides.insert("credits")
             } label: {
               Image(systemName: "trash")
             }
+            .accessibilityLabel("Remove \(person.name)")
           }.buttonStyle(.borderless)
-        }.padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+        }.padding(16).background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 12))
+          .overlay {
+            RoundedRectangle(cornerRadius: 12).stroke(AureliaDesign.hairline, lineWidth: 0.5)
+          }
       }
       if draft.values.credits.isEmpty {
         Text("No cast or crew. Add a person to begin.").foregroundStyle(.secondary).padding(
@@ -333,12 +343,10 @@ struct MetadataEditorSheet: View {
   }
   private var artwork: some View {
     VStack(alignment: .leading, spacing: 24) {
-      HStack(alignment: .top, spacing: 32) {
-        artworkControl(
-          "Cover", field: "poster", selection: draft.values.poster, width: 170, height: 255)
-        artworkControl(
-          "Background", field: "backdrop", selection: draft.values.backdrop, width: 390, height: 219
-        )
+      ViewThatFits(in: .horizontal) {
+        HStack(alignment: .top, spacing: 32) { artworkPreviews }
+          .fixedSize(horizontal: true, vertical: false)
+        VStack(alignment: .leading, spacing: 28) { artworkPreviews }
       }
       Divider()
       Text(draft.document?.kind == .series ? "Series Folder" : "Video File").font(.headline)
@@ -353,6 +361,19 @@ struct MetadataEditorSheet: View {
         Text("Edit an individual episode to change its video file.").font(.caption).foregroundStyle(
           .secondary)
       }
+    }
+  }
+  @ViewBuilder private var artworkPreviews: some View {
+    artworkControl(
+      "Cover", field: "poster", selection: draft.values.poster, width: 180, height: 270)
+    artworkControl(
+      "Background", field: "backdrop", selection: draft.values.backdrop, width: 420, height: 236.25)
+  }
+
+  private func personField(_ label: String, text: Binding<String>) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text(label).font(.caption).foregroundStyle(.secondary)
+      TextField(label, text: text).textFieldStyle(.roundedBorder)
     }
   }
   private func field<Content: View>(
@@ -376,13 +397,21 @@ struct MetadataEditorSheet: View {
   ) -> some View {
     VStack(alignment: .leading, spacing: 12) {
       Text(title).font(.headline)
-      EditorImagePreview(client: client, mediaId: metadata.mediaId, selection: selection).frame(
-        width: width, height: height)
-      HStack {
+      EditorImagePreview(
+        client: client, mediaId: metadata.mediaId, selection: selection, width: width,
+        height: height)
+      HStack(spacing: 8) {
         Button("Choose…") { Task { await chooseImage(field: field) } }
         Button("Crop…") { Task { await recrop(selection, field: field) } }.disabled(
-          selection == nil)
-        Button("Remove", role: .destructive) { setArtwork(nil, field: field) }
+          selection == nil
+        ).accessibilityIdentifier("metadata-crop-\(field)")
+        Menu {
+          Button("Remove Image", role: .destructive) { setArtwork(nil, field: field) }
+            .disabled(selection == nil)
+        } label: {
+          Image(systemName: "ellipsis")
+        }
+        .menuIndicator(.hidden).fixedSize().accessibilityLabel("\(title) Image Actions")
       }
       automatic(field)
     }
@@ -571,154 +600,67 @@ enum EditorImageImport {
   }
 }
 
-private struct EditorImagePreview: View {
-  let client: APIClient?
-  let mediaId: UUID
-  let selection: EditorArtwork?
-  var circular = false
-  @State private var image: NSImage?
-  var body: some View {
-    ZStack {
-      RoundedRectangle(cornerRadius: 10).fill(.quaternary)
-      if let image {
-        Image(nsImage: image).resizable().scaledToFill()
-      } else {
-        Image(systemName: circular ? "person.crop.circle" : "photo").font(.largeTitle)
-          .foregroundStyle(.secondary)
-      }
-    }.clipped().clipShape(RoundedRectangle(cornerRadius: circular ? 1000 : 10))
-      .task(id: selection) {
-        image = nil
-        guard let selection, let client,
-          let bytes = try? await client.editorImage(id: mediaId, selection: selection),
-          let original = NSImage(data: bytes)
-        else { return }
-        image = CropImage.render(original, crop: selection.crop)
-      }
-  }
-}
-
 enum CropImage {
   @MainActor static func rotated(_ image: NSImage, degrees: Int) -> NSImage {
     guard degrees != 0 else { return image }
-    let size =
-      degrees % 180 == 0 ? image.size : NSSize(width: image.size.height, height: image.size.width)
-    let result = NSImage(size: size)
-    result.lockFocus()
-    let transform = AffineTransform(translationByX: size.width / 2, byY: size.height / 2)
-    let mutable = (transform as NSAffineTransform)
-    mutable.rotate(byDegrees: CGFloat(-degrees))
-    mutable.concat()
-    image.draw(
-      in: NSRect(
-        x: -image.size.width / 2, y: -image.size.height / 2, width: image.size.width,
-        height: image.size.height))
-    result.unlockFocus()
-    return result
+    guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+      return image
+    }
+    let width = degrees % 180 == 0 ? source.width : source.height
+    let height = degrees % 180 == 0 ? source.height : source.width
+    guard let context = bitmap(width: width, height: height) else { return image }
+    context.translateBy(x: CGFloat(width) / 2, y: CGFloat(height) / 2)
+    context.rotate(by: -CGFloat(degrees) * .pi / 180)
+    context.draw(
+      source,
+      in: CGRect(
+        x: -CGFloat(source.width) / 2, y: -CGFloat(source.height) / 2,
+        width: CGFloat(source.width), height: CGFloat(source.height)))
+    guard let result = context.makeImage() else { return image }
+    let logicalSize =
+      degrees % 180 == 0
+      ? image.size
+      : CGSize(width: image.size.height, height: image.size.width)
+    return NSImage(cgImage: result, size: logicalSize)
   }
-  @MainActor static func render(_ image: NSImage, crop: ArtworkCrop?) -> NSImage {
-    guard let crop else { return image }
-    let rotated = rotated(image, degrees: crop.rotation)
-    let size = rotated.size
-    let result = NSImage(
-      size: NSSize(width: size.width * crop.width, height: size.height * crop.height))
-    result.lockFocus()
-    rotated.draw(
-      in: NSRect(origin: .zero, size: result.size),
-      from: NSRect(
-        x: size.width * crop.x,
-        y: size.height * (1 - crop.y - crop.height), width: result.size.width,
-        height: result.size.height), operation: .copy, fraction: 1)
-    result.unlockFocus()
-    return result
-  }
-}
-
-struct ArtworkCropSheet: View {
-  @Environment(\.dismiss) private var dismiss
-  let image: NSImage
-  let ratio: Double
-  let roundPreview: Bool
-  let initial: ArtworkCrop?
-  let onSave: (ArtworkCrop) -> Void
-  @State private var zoom = 1.0
-  @State private var rotation = 0
-  @State private var offset = CGSize.zero
-  @State private var dragStart = CGSize.zero
-  private var size: CGSize { CGSize(width: 360, height: 360 / ratio) }
-  private var rotated: NSImage { CropImage.rotated(image, degrees: rotation) }
-  private var scale: Double {
-    max(size.width / rotated.size.width, size.height / rotated.size.height) * zoom
-  }
-  var body: some View {
-    VStack(spacing: 20) {
-      Text("Crop Image").font(.title2.bold())
-      Text("Drag to move. Adjust zoom or rotate in 90° steps.").foregroundStyle(.secondary)
-      ZStack {
-        Color.black
-        Image(nsImage: rotated).resizable().frame(
-          width: rotated.size.width * scale, height: rotated.size.height * scale
-        ).offset(offset)
-      }.frame(width: size.width, height: size.height).clipped()
-        .clipShape(RoundedRectangle(cornerRadius: roundPreview ? 1000 : 0))
-        .overlay {
-          RoundedRectangle(cornerRadius: roundPreview ? 1000 : 0).stroke(
-            .white.opacity(0.6), lineWidth: 1)
-        }
-        .gesture(
-          DragGesture().onChanged { value in
-            offset = clamped(
-              CGSize(
-                width: dragStart.width + value.translation.width,
-                height: dragStart.height + value.translation.height))
-          }
-          .onEnded { _ in dragStart = offset })
-      HStack {
-        Text("Zoom")
-        Slider(value: $zoom, in: 1...8).onChange(of: zoom) { _, _ in
-          offset = clamped(offset)
-          dragStart = offset
-        }
-        Button("Rotate 90°", systemImage: "rotate.right") {
-          rotation = (rotation + 90) % 360
-          zoom = 1
-          offset = .zero
-          dragStart = .zero
-        }
+  @MainActor static func render(_ image: NSImage, crop: ArtworkCrop?, maximumDimension: Int? = nil)
+    -> NSImage
+  {
+    let oriented = rotated(image, degrees: crop?.rotation ?? 0)
+    var logicalSize = CGSize(
+      width: oriented.size.width * (crop?.width ?? 1),
+      height: oriented.size.height * (crop?.height ?? 1))
+    guard var result = oriented.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+      return image
+    }
+    if let crop {
+      let rect = CGRect(
+        x: CGFloat(result.width) * crop.x, y: CGFloat(result.height) * crop.y,
+        width: CGFloat(result.width) * crop.width, height: CGFloat(result.height) * crop.height)
+      guard let selected = result.cropping(to: rect) else { return image }
+      result = selected
+    }
+    if let maximumDimension, max(result.width, result.height) > maximumDimension {
+      let scale = Double(maximumDimension) / Double(max(result.width, result.height))
+      let width = max(1, Int(Double(result.width) * scale))
+      let height = max(1, Int(Double(result.height) * scale))
+      if let context = bitmap(width: width, height: height) {
+        context.interpolationQuality = .high
+        context.draw(result, in: CGRect(x: 0, y: 0, width: width, height: height))
+        if let small = context.makeImage() { result = small }
       }
-      HStack {
-        Text("The uncropped original is retained for future changes.").font(.caption)
-          .foregroundStyle(.secondary)
-        Spacer()
-        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-        Button("Use Crop") { onSave(crop) }.buttonStyle(AureliaPrimaryActionButtonStyle())
-          .keyboardShortcut(.defaultAction)
-      }
-    }.padding(24).frame(width: 640).background(AureliaBackdrop())
-      .onAppear {
-        guard let initial else { return }
-        rotation = initial.rotation
-        let base = max(size.width / rotated.size.width, size.height / rotated.size.height)
-        zoom = min(8, max(1, size.width / (initial.width * rotated.size.width) / base))
-        offset = clamped(
-          CGSize(
-            width: (0.5 - initial.x - initial.width / 2) * rotated.size.width * scale,
-            height: (0.5 - initial.y - initial.height / 2) * rotated.size.height * scale))
-        dragStart = offset
-      }
+    }
+    if let maximumDimension, max(logicalSize.width, logicalSize.height) > CGFloat(maximumDimension)
+    {
+      let scale = CGFloat(maximumDimension) / max(logicalSize.width, logicalSize.height)
+      logicalSize = CGSize(width: logicalSize.width * scale, height: logicalSize.height * scale)
+    }
+    return NSImage(cgImage: result, size: logicalSize)
   }
-  private func clamped(_ value: CGSize) -> CGSize {
-    let x = max(0, (rotated.size.width * scale - size.width) / 2)
-    let y = max(0, (rotated.size.height * scale - size.height) / 2)
-    return CGSize(width: min(x, max(-x, value.width)), height: min(y, max(-y, value.height)))
-  }
-  private var crop: ArtworkCrop {
-    let width = size.width / scale / rotated.size.width
-    let height = size.height / scale / rotated.size.height
-    return ArtworkCrop(
-      x: max(0, min(1 - width, 0.5 - width / 2 - offset.width / scale / rotated.size.width)),
-      y: max(0, min(1 - height, 0.5 - height / 2 - offset.height / scale / rotated.size.height)),
-      width: min(1, width), height: min(1, height), rotation: rotation)
+  private static func bitmap(width: Int, height: Int) -> CGContext? {
+    CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
   }
 }
 

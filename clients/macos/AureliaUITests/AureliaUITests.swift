@@ -2,6 +2,17 @@ import AppKit
 import XCTest
 
 final class AureliaUITests: XCTestCase {
+  @MainActor private func clickVisibleRailItem(_ item: XCUIElement, in app: XCUIApplication) {
+    let window = app.windows.firstMatch
+    let frame = item.frame
+    XCTAssertTrue(window.frame.contains(CGPoint(x: frame.midX, y: frame.midY)))
+    // AX's implicit scroll-to-visible cannot resolve a negative sidebar inset.
+    // Use the actual onscreen mouse location after explicitly scrolling the page.
+    window.coordinate(withNormalizedOffset: .zero).withOffset(
+      CGVector(dx: frame.midX - window.frame.minX, dy: frame.midY - window.frame.minY)
+    ).click()
+  }
+
   @MainActor
   func testImportPreviewExpandsFeaturettesAndEditsSeasonAssignmentsWithoutImporting() throws {
     continueAfterFailure = false
@@ -377,7 +388,9 @@ final class AureliaUITests: XCTestCase {
       app.buttons["supplement-20000000-0000-0000-0000-000000000020"].exists)
     XCTAssertFalse(app.webViews.firstMatch.exists)
 
-    app.buttons["episode-1-1"].click()
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+      .scroll(byDeltaX: 0, deltaY: -340)
+    clickVisibleRailItem(app.buttons["episode-1-1"], in: app)
     XCTAssertTrue(app.descendants(matching: .any)["native-player"].waitForExistence(timeout: 5))
     XCTAssertFalse(app.webViews.firstMatch.exists)
     assertNoUnexpectedDialog(in: app)
@@ -576,7 +589,9 @@ final class AureliaUITests: XCTestCase {
     app.buttons["media-10000000-0000-0000-0000-000000000001"].click()
     let trailer = app.buttons["supplement-10000000-0000-0000-0000-000000000010"]
     XCTAssertTrue(trailer.waitForExistence(timeout: 5))
-    trailer.click()
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+      .scroll(byDeltaX: 0, deltaY: -380)
+    clickVisibleRailItem(trailer, in: app)
     assertNativePlayer(in: app)
   }
 
@@ -589,8 +604,9 @@ final class AureliaUITests: XCTestCase {
     app.buttons["media-20000000-0000-0000-0000-000000000001"].click()
     let extra = app.buttons["supplement-20000000-0000-0000-0000-000000000020"]
     XCTAssertTrue(extra.waitForExistence(timeout: 5))
-    app.scrollViews["media-detail-scroll"].scroll(byDeltaX: 0, deltaY: -520)
-    extra.click()
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+      .scroll(byDeltaX: 0, deltaY: -520)
+    clickVisibleRailItem(extra, in: app)
     assertNativePlayer(in: app)
   }
 

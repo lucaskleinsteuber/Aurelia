@@ -40,7 +40,8 @@ public sealed class MediaEditorService(AureliaDbContext database, CatalogMutatio
     internal static EditorCredit Credit(MediaItem item, MediaCredit credit) => new(credit.Id, credit.Name,
         credit.Department, credit.Job, credit.Character,
         Artwork(item, credit.ProfileAssetId ?? item.Metadata?.Artwork.FirstOrDefault(asset => !asset.IsManual
-            && asset.Kind == ArtworkKind.Profile && asset.ProviderPath == credit.ProfilePath)?.Id));
+            && asset.Kind == ArtworkKind.Profile && asset.ProviderPath == credit.ProfilePath)?.Id),
+        MetadataPresentation.PersonKey(item.Metadata, credit.ProviderPersonId));
 
     internal static IReadOnlyList<EditorCredit> AutomaticCredits(MediaItem item)
     {
@@ -90,7 +91,8 @@ public sealed class MediaEditorService(AureliaDbContext database, CatalogMutatio
             item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, token))?.Id : null;
         if (fields.Contains("credits") || MetadataPresentation.ManualFields(meta).Contains("credits"))
         {
-            var selected = fields.Contains("credits") ? value.Credits : AutomaticCredits(item);
+            var automaticCredits = AutomaticCredits(item);
+            var selected = fields.Contains("credits") ? value.Credits : automaticCredits;
             var existing = meta.Credits.ToDictionary(credit => credit.Id);
             foreach (var removed in meta.Credits.Where(credit => !selected.Any(value => value.Id == credit.Id)).ToArray())
             { database.MediaCredits.Remove(removed); meta.Credits.Remove(removed); }
@@ -103,6 +105,12 @@ public sealed class MediaEditorService(AureliaDbContext database, CatalogMutatio
                     if (await database.MediaCredits.IgnoreQueryFilters().AnyAsync(credit => credit.Id == draft.Id, token))
                         throw Invalid("A person ID is already in use.");
                     credit = new MediaCredit { Id = draft.Id, MediaItemId = id };
+                    // Only a server-stored snapshot may restore a deleted provider identity.
+                    // PersonKey in an incoming editor draft is never trusted as an assignment.
+                    var trustedKey = automaticCredits.FirstOrDefault(value => value.Id == draft.Id)?.PersonKey;
+                    var prefix = $"{meta.Provider?.ToLowerInvariant()}:person:";
+                    if (meta.Provider is not null && trustedKey?.StartsWith(prefix, StringComparison.Ordinal) == true)
+                        credit.ProviderPersonId = trustedKey[prefix.Length..];
                     database.MediaCredits.Add(credit);
                 }
                 credit.Name = draft.Name.Trim(); credit.Department = draft.Department.Trim();

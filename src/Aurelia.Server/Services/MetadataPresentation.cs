@@ -55,7 +55,8 @@ public static class MetadataPresentation
                 credit.SortOrder,
                 metadata.Artwork.FirstOrDefault(asset => credit.ProfileAssetId != null ? asset.Id == credit.ProfileAssetId
                     : asset.Kind == ArtworkKind.Profile && asset.ProviderPath == credit.ProfilePath) is { } profile
-                    ? ToArtwork(profile) : null, credit.Id)).ToList() ?? [],
+                    ? ToArtwork(profile) : null, credit.Id,
+                PersonKey(metadata, credit.ProviderPersonId))).ToList() ?? [],
             poster is not null ? ToArtwork(poster) : null,
             backdrop is not null ? ToArtwork(backdrop) : null,
             item.Kind == MediaKind.Episode && backdrop is not null ? ToArtwork(backdrop) : null,
@@ -64,6 +65,10 @@ public static class MetadataPresentation
             metadata?.ReviewState ?? MetadataReviewState.NeedsReview,
             ParseFsk(contentRating));
     }
+
+    internal static string? PersonKey(MediaMetadata? metadata, string? providerPersonId) =>
+        string.IsNullOrWhiteSpace(metadata?.Provider) || string.IsNullOrWhiteSpace(providerPersonId)
+            ? null : $"{metadata.Provider.ToLowerInvariant()}:person:{providerPersonId}";
 
     public static int? ParseFsk(string? value)
     {

@@ -50,7 +50,7 @@ struct LibraryShellView: View {
         AureliaDesign.canvas
           .ignoresSafeArea()
         content
-          .backgroundExtensionEffect()
+          .environment(\.aureliaSidebarOverlap, sidebarVisible ? sidebarWidth : 0)
           .safeAreaInset(edge: .leading, spacing: 0) {
             Color.clear.frame(width: sidebarVisible ? sidebarWidth : 0)
           }
@@ -68,7 +68,8 @@ struct LibraryShellView: View {
             )
             .clipped()
             .offset(y: -geometry.safeAreaInsets.top)
-            .allowsHitTesting(false)
+            .contentShape(Rectangle())
+            .onTapGesture {}  // Obscured cards must never receive navigation clicks.
           sidebar
             .frame(width: sidebarWidth, height: geometry.size.height)
             .clipped()
@@ -239,7 +240,8 @@ private struct HomePage: View {
       }
       .scrollClipDisabled()
       .defaultScrollAnchor(.top)
-      .scrollIndicators(.visible)
+      .scrollIndicators(.automatic, axes: .vertical)
+      .aureliaOverlayScrollbars()
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("home-page")
     }
@@ -259,7 +261,10 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: title, count: items.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail(leadingInset: AureliaDesign.homeRailLeadingInset) {
+        AureliaHorizontalRail(
+          leadingInset: AureliaDesign.homeRailLeadingInset, cardWidth: 320, itemCount: items.count,
+          title: title
+        ) {
           ForEach(items) { item in
             Button {
               onSelect(item.id)
@@ -280,7 +285,9 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: title, count: items.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail(leadingInset: AureliaDesign.homeRailLeadingInset) {
+        AureliaHorizontalRail(
+          leadingInset: AureliaDesign.homeRailLeadingInset, itemCount: items.count, title: title
+        ) {
           ForEach(items) { item in
             Button {
               onSelect(item.id)
@@ -301,7 +308,10 @@ private struct HomePage: View {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: "Collections", count: collections.count)
           .padding(.horizontal, AureliaDesign.pagePadding)
-        AureliaHorizontalRail(leadingInset: AureliaDesign.homeRailLeadingInset) {
+        AureliaHorizontalRail(
+          leadingInset: AureliaDesign.homeRailLeadingInset, cardWidth: 210,
+          itemCount: collections.count, title: "Collections"
+        ) {
           ForEach(collections) { collection in
             Button {
               onSelectCollection(collection.id)
@@ -326,7 +336,9 @@ private struct HomeHero: View {
         artwork: item.backdrop ?? item.poster,
         symbol: item.kind == .movie ? "film.fill" : "tv.fill",
         extendsBlurredEdges: true,
-        placeholderSymbolSize: 64)
+        placeholderSymbolSize: 64
+      )
+      .backgroundExtensionEffect()
       LinearGradient(
         stops: [
           .init(color: .black.opacity(0.88), location: 0),
@@ -426,7 +438,9 @@ private struct LibraryPage: View {
         if query.isEmpty, !model.collections.isEmpty {
           VStack(alignment: .leading, spacing: 14) {
             AureliaSectionHeading(title: "Collections", count: model.collections.count)
-            AureliaHorizontalRail {
+            AureliaHorizontalRail(
+              cardWidth: 210, itemCount: model.collections.count, title: "Collections"
+            ) {
               ForEach(model.collections) { collection in
                 Button {
                   onSelectCollection(collection.id)
@@ -806,7 +820,7 @@ private struct EmptyCatalogResults: View {
 private struct CollectionCard: View {
   let collection: CollectionSummary
   @State private var hovering = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -862,7 +876,9 @@ private struct CollectionDetailView: View {
       AuthenticatedArtwork(
         artwork: collection.items.first?.backdrop ?? collection.poster,
         symbol: "rectangle.stack.fill",
-        extendsBlurredEdges: true)
+        extendsBlurredEdges: true
+      )
+      .backgroundExtensionEffect()
       LinearGradient(
         colors: [.black.opacity(0.84), .black.opacity(0.24), .clear],
         startPoint: .leading,

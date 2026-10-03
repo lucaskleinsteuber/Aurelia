@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RootView: View {
   @EnvironmentObject private var model: AppModel
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     ZStack {

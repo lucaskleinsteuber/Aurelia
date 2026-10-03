@@ -13,12 +13,20 @@ struct PlayerView: View {
   @State private var isNativeFullScreen = false
   @State private var isPictureInPicture = false
   @State private var isAdjustingVolume = false
-  @State private var lastHideScheduleRefresh = 0.0
+  @State private var controlsPolicy = PlayerControlsPolicy()
+  @FocusState private var focusedControl: String?
   @State private var cursorHidden = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
   init(profile: StoredServerProfile, presentation: PlaybackPresentation) {
+    #if DEBUG
+      if CinemaUITestFixture.enabled {
+        _controller = StateObject(
+          wrappedValue: CinemaUITestFixture.player(profile: profile, presentation: presentation))
+        return
+      }
+    #endif
     _controller = StateObject(
       wrappedValue: PlaybackController(profile: profile, presentation: presentation))
   }
@@ -91,6 +99,7 @@ struct PlayerView: View {
     .onChange(of: preferencesStore.preferences.controlsAutoHideDelay) {
       revealControls()
     }
+    .onChange(of: focusedControl) { interaction("keyboard", active: focusedControl != nil) }
   }
 
   private func controls(in viewport: CGSize) -> some View {
@@ -108,6 +117,8 @@ struct PlayerView: View {
       HStack {
         controlButton("Back", systemImage: "chevron.left") { closePlayer() }
           .accessibilityIdentifier("player-back")
+          .focused($focusedControl, equals: "back")
+          .onHover { interaction("back-hover", active: $0) }
         Spacer(minLength: 24)
         playerMenus
       }
@@ -139,10 +150,12 @@ struct PlayerView: View {
           .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
           .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
           .accessibilityIdentifier("player-play-pause")
+          .focused($focusedControl, equals: "play")
           seekButton(forward: true)
         }
         .padding(6)
         .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+        .onHover { interaction("transport-hover", active: $0) }
         .position(x: viewport.width / 2, y: viewport.height / 2)
       }
 
@@ -166,98 +179,112 @@ struct PlayerView: View {
 
   private var playerMenus: some View {
     HStack(spacing: 4) {
-      Menu {
-        ForEach(PlaybackPreferences.supportedRates, id: \.self) { rate in
-          menuChoice(
-            rate == 1 ? "Standard" : rateLabel(rate),
-            selected: controller.playbackRate == rate
-          ) {
-            controller.setPlaybackRate(rate)
+      trackedMenu(
+        "Playback Rate", id: "rate",
+        options:
+          PlaybackPreferences.supportedRates.map { rate in
+            PlayerMenuOption(
+              title:
+                rate == 1 ? "Standard" : rateLabel(rate),
+              selected: controller.playbackRate == rate
+            ) {
+              controller.setPlaybackRate(rate)
+              revealControls()
+            }
           }
-        }
-      } label: {
+      ) {
         PlayerControlLabel(height: 42, minWidth: 50) {
           Text(rateLabel(controller.playbackRate))
             .font(.callout.weight(.bold).monospacedDigit())
         }
       }
-      .menuStyle(.borderlessButton)
-      .menuIndicator(.hidden)
-      .accessibilityLabel("Playback Rate")
       .accessibilityValue(rateLabel(controller.playbackRate))
-      .accessibilityIdentifier("player-rate-menu")
 
-      Menu {
-        if controller.audioTracks.isEmpty {
-          Button("No audio tracks available") {}
-            .disabled(true)
-        } else {
-          ForEach(controller.audioTracks) { track in
-            menuChoice(track.title, selected: controller.selectedAudioTrackID == track.id) {
+      trackedMenu(
+        "Audio", id: "audio",
+        options:
+          controller.audioTracks.isEmpty
+          ? [PlayerMenuOption(title: "No audio tracks available", enabled: false)]
+          : controller.audioTracks.map { track in
+            PlayerMenuOption(
+              title: track.title, selected: controller.selectedAudioTrackID == track.id
+            ) {
               controller.selectAudioTrack(track.id)
+              revealControls()
             }
           }
-        }
-      } label: {
+      ) {
         PlayerControlLabel { Image(systemName: "waveform") }
       }
-      .menuStyle(.borderlessButton)
-      .menuIndicator(.hidden)
-      .accessibilityLabel("Audio")
-      .accessibilityIdentifier("player-audio-menu")
 
-      Menu {
-        menuChoice("Off", selected: controller.selectedSubtitleTrackID == nil) {
-          controller.selectSubtitleTrack(nil)
-        }
-        if controller.subtitleTracks.isEmpty {
-          Button("No subtitles available") {}
-            .disabled(true)
-        } else {
-          Divider()
-          ForEach(controller.subtitleTracks) { track in
-            menuChoice(track.title, selected: controller.selectedSubtitleTrackID == track.id) {
-              controller.selectSubtitleTrack(track.id)
-            }
-          }
-        }
-      } label: {
+      trackedMenu("Subtitles", id: "subtitle", options: subtitleOptions) {
         PlayerControlLabel {
           Image(
             systemName: controller.selectedSubtitleTrackID == nil
               ? "captions.bubble" : "captions.bubble.fill")
         }
       }
-      .menuStyle(.borderlessButton)
-      .menuIndicator(.hidden)
-      .accessibilityLabel("Subtitles")
-      .accessibilityIdentifier("player-subtitle-menu")
 
-      Menu {
-        menuChoice("Off", selected: controller.sleepTimer == .off) {
-          controller.setSleepTimer(.off)
-        }
-        Divider()
-        menuChoice("At end of episode", selected: controller.sleepTimer == .endOfEpisode) {
-          controller.setSleepTimer(.endOfEpisode)
-        }
-        ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
-          menuChoice("\(minutes) minutes", selected: controller.sleepTimer == .minutes(minutes)) {
-            controller.setSleepTimer(.minutes(minutes))
-          }
-        }
-      } label: {
+      trackedMenu("Sleep Timer", id: "sleep", options: sleepOptions) {
         PlayerControlLabel {
           Image(systemName: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill")
         }
       }
-      .menuStyle(.borderlessButton)
-      .menuIndicator(.hidden)
-      .accessibilityLabel("Sleep Timer")
-      .accessibilityIdentifier("player-sleep-menu")
     }
     .padding(7)
     .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+    .onHover { interaction("menus-hover", active: $0) }
+  }
+
+  private var subtitleOptions: [PlayerMenuOption] {
+    [
+      PlayerMenuOption(title: "Off", selected: controller.selectedSubtitleTrackID == nil) {
+        controller.selectSubtitleTrack(nil)
+        revealControls()
+      }, .divider,
+    ]
+      + (controller.subtitleTracks.isEmpty
+        ? [PlayerMenuOption(title: "No subtitles available", enabled: false)]
+        : controller.subtitleTracks.map { track in
+          PlayerMenuOption(
+            title: track.title, selected: controller.selectedSubtitleTrackID == track.id
+          ) {
+            controller.selectSubtitleTrack(track.id)
+            revealControls()
+          }
+        })
+  }
+
+  private var sleepOptions: [PlayerMenuOption] {
+    [
+      PlayerMenuOption(title: "Off", selected: controller.sleepTimer == .off) {
+        controller.setSleepTimer(.off)
+        revealControls()
+      }, .divider,
+      PlayerMenuOption(title: "At end of episode", selected: controller.sleepTimer == .endOfEpisode)
+      {
+        controller.setSleepTimer(.endOfEpisode)
+        revealControls()
+      },
+    ]
+      + [15, 30, 45, 60, 90].map { minutes in
+        PlayerMenuOption(
+          title: "\(minutes) minutes", selected: controller.sleepTimer == .minutes(minutes)
+        ) {
+          controller.setSleepTimer(.minutes(minutes))
+          revealControls()
+        }
+      }
+  }
+
+  private func trackedMenu<Label: View>(
+    _ title: String, id: String, options: [PlayerMenuOption],
+    @ViewBuilder label: @escaping () -> Label
+  ) -> some View {
+    TrackedPlayerMenu(
+      title: title, identifier: "player-\(id)-menu", options: options,
+      onOpen: { interaction("menu-\(id)", active: $0) },
+      onFocus: { interaction("focus-\(id)", active: $0) }, label: label)
   }
 
   private var bottomControls: some View {
@@ -292,27 +319,27 @@ struct PlayerView: View {
       .font(.caption)
     }
     .frame(maxWidth: 1_180)
+    .onHover { interaction("bottom-hover", active: $0) }
   }
 
   private var trailingControls: some View {
     HStack(spacing: 2) {
       if !controller.chapters.isEmpty {
-        Menu {
-          ForEach(controller.chapters) { chapter in
-            menuChoice(
-              "\(chapter.title)  \(formatTime(Double(chapter.timeOffsetMilliseconds)))",
-              selected: controller.currentChapterIndex == chapter.index
-            ) {
-              controller.selectChapter(chapter)
+        trackedMenu(
+          "Chapters", id: "chapter",
+          options:
+            controller.chapters.map { chapter in
+              PlayerMenuOption(
+                title: "\(chapter.title)  \(formatTime(Double(chapter.timeOffsetMilliseconds)))",
+                selected: controller.currentChapterIndex == chapter.index
+              ) {
+                controller.selectChapter(chapter)
+                revealControls()
+              }
             }
-          }
-        } label: {
+        ) {
           PlayerControlLabel { Image(systemName: "list.bullet.rectangle") }
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .accessibilityLabel("Chapters")
-        .accessibilityIdentifier("player-chapter-menu")
       }
       Button {
         controller.toggleMute()
@@ -323,19 +350,21 @@ struct PlayerView: View {
       }
       .buttonStyle(.plain)
       .accessibilityLabel(controller.isMuted ? "Unmute" : "Mute")
+      .focused($focusedControl, equals: "mute")
 
       Slider(
         value: Binding(get: { controller.volume }, set: { controller.setVolume($0) }),
         in: 0...1,
         onEditingChanged: { editing in
           isAdjustingVolume = editing
-          revealControls(scheduleHide: !editing)
+          interaction("volume", active: editing)
         }
       )
       .frame(width: 96)
       .frame(minHeight: 42)
       .accessibilityLabel("Volume")
       .accessibilityValue("\(Int(controller.volume * 100)) percent")
+      .focused($focusedControl, equals: "volume")
 
       if !isNativeFullScreen {
         Button {
@@ -349,6 +378,7 @@ struct PlayerView: View {
           isPictureInPicture ? "Exit Picture in Picture" : "Enter Picture in Picture"
         )
         .accessibilityIdentifier("player-picture-in-picture")
+        .focused($focusedControl, equals: "pip")
       }
 
       Button {
@@ -364,6 +394,7 @@ struct PlayerView: View {
       .buttonStyle(.plain)
       .accessibilityLabel(isNativeFullScreen ? "Exit Full Screen" : "Enter Full Screen")
       .accessibilityIdentifier("player-fullscreen")
+      .focused($focusedControl, equals: "fullscreen")
     }
     .padding(7)
     .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
@@ -387,39 +418,18 @@ struct PlayerView: View {
       shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
   }
 
-  private func menuChoice(
-    _ title: String,
-    selected: Bool,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button {
-      action()
-      revealControls()
-    } label: {
-      if selected {
-        Label(title, systemImage: "checkmark")
-      } else {
-        Text(title)
-      }
-    }
-  }
-
   private func seekButton(forward: Bool) -> some View {
     let interval = preferencesStore.preferences.seekInterval
     return Button {
       controller.skip(seconds: Int64(forward ? interval : -interval))
       revealControls()
     } label: {
-      ZStack {
-        Image(systemName: forward ? "goforward" : "gobackward")
-          .font(.system(size: 18, weight: .semibold))
-        Text(String(interval))
-          .font(.system(size: interval >= 10 ? 8 : 9, weight: .bold, design: .rounded))
-      }
-      .frame(width: 42, height: 42)
+      PlayerSeekGlyph(interval: interval, forward: forward)
+        .frame(width: 42, height: 42)
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
     .accessibilityLabel("\(forward ? "Forward" : "Back") \(interval) Seconds")
+    .focused($focusedControl, equals: forward ? "forward" : "backward")
   }
 
   private func controlButton(
@@ -443,6 +453,7 @@ struct PlayerView: View {
 
   private func timelineEditingChanged(_ editing: Bool) {
     isScrubbing = editing
+    controlsPolicy.hold("scrubbing", active: editing)
     if editing {
       scrubPosition = Double(controller.currentTimeMilliseconds)
       revealControls(scheduleHide: false)
@@ -496,20 +507,21 @@ struct PlayerView: View {
   }
 
   private func revealControls(scheduleHide: Bool = true) {
+    hideTask?.cancel()
+    let generation = controlsPolicy.invalidate()
     showCursor()
     let controlsWereHidden = !controlsVisible
     if controlsWereHidden {
       withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) { controlsVisible = true }
     }
     guard scheduleHide, canAutoHide else { return }
-    let now = ProcessInfo.processInfo.systemUptime
-    guard controlsWereHidden || now - lastHideScheduleRefresh >= 0.2 else { return }
-    lastHideScheduleRefresh = now
-    hideTask?.cancel()
     let delay = preferencesStore.preferences.controlsAutoHideDelay
     hideTask = Task {
       try? await Task.sleep(for: .seconds(delay))
-      guard !Task.isCancelled, canAutoHide else { return }
+      guard !Task.isCancelled, canAutoHide,
+        controlsPolicy.permitsHide(
+          generation, preparing: controller.isPreparing, error: controller.errorMessage != nil)
+      else { return }
       withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { controlsVisible = false }
       hideCursor()
     }
@@ -518,6 +530,12 @@ struct PlayerView: View {
   private var canAutoHide: Bool {
     !controller.isPreparing && controller.errorMessage == nil && !isScrubbing
       && !isAdjustingVolume
+      && controlsPolicy.holds.isEmpty
+  }
+
+  private func interaction(_ reason: String, active: Bool) {
+    controlsPolicy.hold(reason, active: active)
+    revealControls(scheduleHide: !active)
   }
 
   private func hideCursor() {

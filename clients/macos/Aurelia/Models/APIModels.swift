@@ -275,8 +275,15 @@ struct CreditSummary: Codable, Identifiable, Equatable, Sendable {
   let character: String?
   let order: Int
   let profile: ArtworkSummary?
+  var personKey: String? = nil
+  var creditId: UUID? = nil
 
-  var id: String { "\(order):\(department):\(name):\(character ?? "")" }
+  enum CodingKeys: String, CodingKey {
+    case name, department, job, character, order, profile, personKey
+    case creditId = "id"
+  }
+
+  var id: String { creditId?.uuidString ?? "\(order):\(department):\(name):\(character ?? "")" }
 }
 
 struct MediaMetadataSummary: Codable, Identifiable, Equatable, Sendable {

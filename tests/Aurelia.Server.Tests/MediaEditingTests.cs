@@ -17,6 +17,72 @@ public sealed class MediaEditingTests
     private static readonly string[] AllFields = ["title", "releaseYear", "overview", "runtimeMinutes", "fsk", "genres", "studios", "country", "credits", "poster", "backdrop"];
 
     [Fact]
+    public async Task ProviderPersonKeysSurviveEditorSnapshotsWithoutAllowingClientIdentityAssignments()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var movie = await fixture.MovieAsync("People.mkv");
+        using (var scope = fixture.Factory.Services.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var item = await database.MediaItems.SingleAsync(item => item.Id == movie.Id);
+            await scope.ServiceProvider.GetRequiredService<MetadataService>().ApplyAsync(item,
+                new TmdbMetadata("123", "movie", "People", null, null, "2020-01-01", 90, null, null,
+                    [], [], [], null, null,
+                    [new TmdbCredit("44", "Actor", "Acting", null, "Character", 0, null),
+                     new TmdbCredit("44", "Actor", "Production", "Producer", null, 9, null)], null),
+                1, CancellationToken.None);
+        }
+        var summary = await fixture.GetAsync<MediaMetadataSummary>($"/api/v1/media/{movie.Id}/metadata");
+        Assert.Equal(2, summary.Credits.Count);
+        Assert.All(summary.Credits, credit => Assert.Equal("tmdb:person:44", credit.PersonKey));
+        var draft = await fixture.GetAsync<MediaEditorDocument>($"/api/v1/media/{movie.Id}/editor");
+        var forged = draft.Values with { Credits = draft.Values.Credits.Select(credit => credit with { PersonKey = "tmdb:person:999" }).ToArray() };
+        var manual = await fixture.SaveAsync(movie.Id, draft, forged, ["credits"]);
+        Assert.All(manual.Values.Credits, credit => Assert.Equal("tmdb:person:44", credit.PersonKey));
+        Assert.All(manual.AutomaticValues.Credits, credit => Assert.Equal("tmdb:person:44", credit.PersonKey));
+        var removed = await fixture.SaveAsync(movie.Id, manual, manual.Values with { Credits = [] }, ["credits"]);
+        var restored = await fixture.SaveAsync(movie.Id, removed, removed.AutomaticValues, []);
+        Assert.Equal(2, restored.Values.Credits.Count);
+        Assert.All(restored.Values.Credits, credit => Assert.Equal("tmdb:person:44", credit.PersonKey));
+        var newPerson = new EditorCredit(Guid.NewGuid(), "Manual Person", "Acting", null, null, null, "tmdb:person:44");
+        var added = await fixture.SaveAsync(movie.Id, restored, restored.Values with { Credits = [newPerson] }, ["credits"]);
+        Assert.Null(Assert.Single(added.Values.Credits).PersonKey);
+    }
+
+    [Fact]
+    public async Task AsymmetricCropCoordinatesUseClockwiseRotationAndTopLeftOrigin()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var movie = await fixture.MovieAsync("Asymmetric.mkv");
+        using var bitmap = new SKBitmap(600, 400);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.Red);
+            using var paint = new SKPaint { Color = SKColors.Green };
+            canvas.DrawRect(new SKRect(300, 0, 600, 200), paint);
+            paint.Color = SKColors.Blue; canvas.DrawRect(new SKRect(0, 200, 300, 400), paint);
+            paint.Color = SKColors.Yellow; canvas.DrawRect(new SKRect(300, 200, 600, 400), paint);
+        }
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
+        using var uploadResponse = await fixture.UploadAsync(movie.Id, encoded.ToArray());
+        var upload = await ApiTestClient.ReadAsync<EditorUploadSummary>(uploadResponse);
+        var draft = await fixture.GetAsync<MediaEditorDocument>($"/api/v1/media/{movie.Id}/editor");
+        var crop = new ArtworkCrop(0, 1d / 3, 1, 2d / 3, 90);
+        var person = new EditorCredit(Guid.NewGuid(), "Asymmetric Person", "Acting", null, null, new(UploadId: upload.Id, Crop: crop));
+        var saved = await fixture.SaveAsync(movie.Id, draft, draft.Values with { Credits = [person] }, ["credits"]);
+        var selected = Assert.Single(saved.Values.Credits).Profile!;
+        Assert.Equal(crop, selected.Crop);
+        using var response = await fixture.SendAsync(HttpMethod.Get, $"/api/v1/artwork/{selected.AssetId}");
+        using var result = SKBitmap.Decode(await response.Content.ReadAsByteArrayAsync());
+        Assert.Equal(400, result.Width); Assert.Equal(400, result.Height);
+        Assert.Equal(SKColors.Blue, result.GetPixel(20, 20));
+        Assert.Equal(SKColors.Red, result.GetPixel(380, 20));
+        Assert.Equal(SKColors.Yellow, result.GetPixel(20, 380));
+        Assert.Equal(SKColors.Green, result.GetPixel(380, 380));
+    }
+
+    [Fact]
     public async Task ManualFieldsIncludingBlanksSurviveProviderRefreshScanAndConflictingEditors()
     {
         using var fixture = await Fixture.CreateAsync();

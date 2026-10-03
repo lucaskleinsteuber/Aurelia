@@ -36,7 +36,7 @@ enum AureliaDesign {
 }
 
 struct AureliaSidebarBackground: View {
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
   var body: some View {
     if reduceTransparency {
@@ -74,34 +74,135 @@ struct AureliaHorizontalRail<Content: View>: View {
   let spacing: CGFloat
   let alignment: VerticalAlignment
   let leadingInset: CGFloat
+  let cardWidth: CGFloat
+  let itemCount: Int
+  let title: String
+  let arrowHeight: CGFloat?
   let content: Content
+  @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @State private var position = ScrollPosition()
+  @State private var metrics = RailNavigationMetrics()
+  @State private var hovering = false
+  @State private var visibleRowWidth: CGFloat = 0
+  @FocusState private var focusedArrow: String?
 
   init(
     spacing: CGFloat = AureliaDesign.rowSpacing,
     alignment: VerticalAlignment = .top,
     leadingInset: CGFloat = 0,
+    cardWidth: CGFloat = 154,
+    itemCount: Int,
+    title: String = "Items",
+    arrowHeight: CGFloat? = nil,
     @ViewBuilder content: () -> Content
   ) {
     self.spacing = spacing
     self.alignment = alignment
     self.leadingInset = leadingInset
+    self.cardWidth = cardWidth
+    self.itemCount = itemCount
+    self.title = title
+    self.arrowHeight = arrowHeight
     self.content = content()
   }
 
   var body: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
+    ScrollView(.horizontal) {
       LazyHStack(alignment: alignment, spacing: spacing) {
         content
       }
       .scrollTargetLayout()
       .padding(.vertical, 8)
+      .padding(.trailing, AureliaDesign.pagePadding)
     }
-    .contentMargins(.leading, AureliaDesign.pagePadding + leadingInset, for: .scrollContent)
+    .contentMargins(
+      .leading, sidebarOverlap + AureliaDesign.pagePadding + leadingInset, for: .scrollContent
+    )
     .contentMargins(.trailing, AureliaDesign.pagePadding, for: .scrollContent)
+    .scrollIndicators(.never, axes: .horizontal)
+    .defaultScrollAnchor(.leading)
+    .scrollPosition($position)
+    .onScrollGeometryChange(for: RailNavigationMetrics.self) { geometry in
+      RailNavigationMetrics(
+        offset: max(0, geometry.contentOffset.x + geometry.contentInsets.leading),
+        maximumOffset: max(
+          0,
+          CGFloat(itemCount) * cardWidth + CGFloat(max(0, itemCount - 1)) * spacing
+            + AureliaDesign.pagePadding - geometry.containerSize.width),
+        visibleWidth: max(0, geometry.containerSize.width - sidebarOverlap),
+        contentInset: geometry.contentInsets.leading)
+    } action: { old, new in
+      metrics = new
+      if old.maximumOffset > new.maximumOffset, new.offset > new.maximumOffset + 1 {
+        position.scrollTo(x: new.maximumOffset)
+      }
+    }
+    .padding(.leading, -sidebarOverlap)
     .padding(.horizontal, -AureliaDesign.pagePadding)
     .scrollClipDisabled()
     .scrollBounceBehavior(.basedOnSize)
+    .overlay {
+      GeometryReader { geometry in
+        HStack {
+          if metrics.canGoBack {
+            RailArrow(forward: false, title: title) { move(forward: false) }
+              .focused($focusedArrow, equals: "previous")
+          }
+          Spacer(minLength: 0)
+          if metrics.canGoForward {
+            RailArrow(forward: true, title: title) { move(forward: true) }
+              .focused($focusedArrow, equals: "next")
+          }
+        }
+        .padding(.horizontal, 4)
+        .frame(height: 60)
+        .position(
+          x: geometry.size.width / 2,
+          y: min(geometry.size.height / 2, (arrowHeight ?? geometry.size.height) / 2 + 8)
+        )
+        // Keep navigation discoverable to keyboards/VoiceOver without idle chrome.
+        .opacity(hovering || focusedArrow != nil ? 1 : 0)
+      }
+    }
+    .background(RailHoverRegion { hovering = $0 }.allowsHitTesting(false))
+    .onGeometryChange(for: CGFloat.self) {
+      $0.size.width
+    } action: {
+      visibleRowWidth = $0
+    }
+    .onDisappear { hovering = false }
+    .focusSection()
+    .onKeyPress(.leftArrow) {
+      move(forward: false)
+      return .handled
+    }
+    .onKeyPress(.rightArrow) {
+      move(forward: true)
+      return .handled
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(title)
+    .accessibilityIdentifier("rail-scroll-\(title)")
+    .accessibilityAction(named: "Next \(title)") { move(forward: true) }
+    .accessibilityAction(named: "Previous \(title)") { move(forward: false) }
+    .aureliaOverlayScrollbars()
   }
+
+  private func move(forward: Bool) {
+    var navigation = metrics
+    // This is the unobscured column. Scroll geometry includes the deliberately
+    // extended region beneath the sidebar and is not the visible paging width.
+    navigation.visibleWidth = visibleRowWidth
+    let target = navigation.destination(
+      forward: forward, cardWidth: cardWidth, spacing: spacing,
+      inset: AureliaDesign.pagePadding + leadingInset)
+    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
+      // ScrollPosition uses an inset-relative offset, unlike contentOffset.
+      position.scrollTo(x: target)
+    }
+  }
+
 }
 
 struct AureliaWindowChrome: NSViewRepresentable {
@@ -109,6 +210,8 @@ struct AureliaWindowChrome: NSViewRepresentable {
   func updateNSView(_ nsView: WindowChromeView, context: Context) { nsView.apply() }
 
   final class WindowChromeView: NSView {
+    private var configuredFixtureSize = false
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
       apply()
@@ -133,6 +236,13 @@ struct AureliaWindowChrome: NSViewRepresentable {
       window.standardWindowButton(.miniaturizeButton)?.isHidden = false
       window.standardWindowButton(.zoomButton)?.isHidden = false
       window.contentView?.needsLayout = true
+      #if DEBUG
+        if !configuredFixtureSize, CinemaUITestFixture.enabled {
+          configuredFixtureSize = true
+          let minimum = ProcessInfo.processInfo.environment["AURELIA_CINEMA_MINIMUM_WINDOW"] == "1"
+          window.setContentSize(NSSize(width: minimum ? 760 : 1470, height: minimum ? 560 : 916))
+        }
+      #endif
     }
   }
 }
@@ -161,7 +271,7 @@ extension View {
 }
 
 struct AureliaSurface<Content: View>: View {
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
   let material: Bool
   let radius: CGFloat
   let padding: CGFloat
@@ -316,7 +426,7 @@ struct AureliaSearchField: View {
 }
 
 struct AureliaIconControl: View {
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
   let symbol: String
   let label: String
   var selected = false
@@ -345,7 +455,7 @@ struct AureliaIconControl: View {
 
 struct AureliaPrimaryActionButtonStyle: ButtonStyle {
   @Environment(\.isEnabled) private var isEnabled
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
@@ -368,31 +478,34 @@ struct AuthenticatedArtwork: View {
   @State private var image: NSImage?
 
   var body: some View {
-    ZStack {
-      MediaArtworkPlaceholder(symbol: symbol, symbolSize: placeholderSymbolSize)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Artwork placeholder")
-        .accessibilityIdentifier("artwork-placeholder")
-      if let image {
-        if extendsBlurredEdges {
-          Image(nsImage: image)
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-            .scaleEffect(1.1)
-            .blur(radius: 30, opaque: true)
-          Image(nsImage: image)
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .transition(.opacity)
-        } else {
-          Image(nsImage: image)
-            .resizable()
-            .aspectRatio(contentMode: contentMode)
-            .transition(.opacity)
+    GeometryReader { geometry in
+      ZStack {
+        MediaArtworkPlaceholder(symbol: symbol, symbolSize: placeholderSymbolSize)
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel("Artwork placeholder")
+          .accessibilityIdentifier("artwork-placeholder")
+        if let image {
+          if extendsBlurredEdges {
+            Image(nsImage: image)
+              .resizable()
+              .aspectRatio(contentMode: .fill)
+              .scaleEffect(1.1)
+              .blur(radius: 30, opaque: true)
+            Image(nsImage: image)
+              .resizable()
+              .aspectRatio(contentMode: .fit)
+              .transition(.opacity)
+          } else {
+            Image(nsImage: image)
+              .resizable()
+              .aspectRatio(contentMode: contentMode)
+              .transition(.opacity)
+          }
         }
       }
+      .frame(width: geometry.size.width, height: geometry.size.height)
+      .clipped()
     }
-    .clipped()
     .accessibilityElement(children: .contain)
     .task(id: taskID) {
       image = nil
@@ -439,7 +552,7 @@ struct MediaPosterCard: View {
   let item: CatalogItemSummary
   var width: CGFloat = 154
   @State private var hovering = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -517,7 +630,7 @@ struct LandscapeMediaCard: View {
   var width: CGFloat = 320
   var eyebrow: String?
   @State private var hovering = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     ZStack(alignment: .bottomLeading) {

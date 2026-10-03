@@ -126,7 +126,7 @@ final class AppModel: ObservableObject {
             episodeCount: 62)
         ]
         catalogItems = Self.previewCatalog
-        home = Self.previewHome
+        home = CinemaUITestFixture.home(Self.previewHome)
         collections = Self.previewHome.collections
         isStarting = false
         return
@@ -754,7 +754,7 @@ final class AppModel: ObservableObject {
   func refreshHome() async {
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
-        home = Self.previewHome
+        home = CinemaUITestFixture.home(Self.previewHome)
         scheduleHomeRefresh()
         return
       }
@@ -1359,6 +1359,7 @@ final class AppModel: ObservableObject {
     private static func previewDetail(for item: CatalogItemSummary)
       -> CatalogDetailPresentation
     {
+      if CinemaUITestFixture.enabled { return CinemaUITestFixture.detail(item) }
       let metadata = MediaMetadataSummary(
         mediaId: item.id,
         title: item.title,

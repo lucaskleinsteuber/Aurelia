@@ -3,7 +3,7 @@ namespace Aurelia.Contracts;
 public sealed record ArtworkCrop(double X, double Y, double Width, double Height, int Rotation = 0);
 public sealed record EditorArtwork(Guid? AssetId = null, Guid? UploadId = null, ArtworkCrop? Crop = null);
 public sealed record EditorCredit(Guid Id, string Name, string Department, string? Job, string? Character,
-    EditorArtwork? Profile);
+    EditorArtwork? Profile, string? PersonKey = null);
 public sealed record MediaEditorValues(string Title, int? ReleaseYear, string? Overview, int? RuntimeMinutes,
     int? FskAge, IReadOnlyList<string> Genres, IReadOnlyList<string> Studios, string? Country,
     IReadOnlyList<EditorCredit> Credits, EditorArtwork? Poster, EditorArtwork? Backdrop);
