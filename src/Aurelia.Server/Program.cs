@@ -56,7 +56,9 @@ var builder = WebApplication.CreateBuilder(args);
 var runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 
 PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
-using var instanceLock = appInstanceLock();
+using var instanceLock = runtime.HostParentProcessId is not null
+    ? await ServerInstanceLock.AcquireForHostAsync(runtime.DataDirectory, CancellationToken.None)
+    : appInstanceLock();
 await FullServerBackupService.RecoverInterruptedRestoreAsync(runtime, CancellationToken.None);
 runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 await new DatabaseBackupService(runtime).RecoverPendingRestoreAsync(CancellationToken.None);
@@ -200,6 +202,9 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+// Long polling and active streams must not hold the old database instance open
+// for the full HTTP shutdown timeout after the native helper disappears.
+app.Use((context, next) => ServerShutdownRequest.RunAsync(context, next, app.Lifetime.ApplicationStopping));
 HostReadinessSignal.Register(
     app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>(),
     Console.Out,

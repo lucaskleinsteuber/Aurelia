@@ -148,7 +148,9 @@ final class CinemaUITests: XCTestCase {
     let app = launch()
     defer { app.terminate() }
     let actions = app.descendants(matching: .any)["media-actions"]
-    actions.click()
+    XCTAssertTrue(
+      app.windows.firstMatch.frame.contains(CGPoint(x: actions.frame.midX, y: actions.frame.midY)))
+    pointer(actions, in: app).click()
     app.menuItems["Edit Metadata"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
     let description = app.textViews["metadata-description"]
@@ -206,7 +208,7 @@ final class CinemaUITests: XCTestCase {
     XCTAssertTrue(app.buttons["crop-use"].waitForNonExistence(timeout: 5))
     app.buttons["Save"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForNonExistence(timeout: 5))
-    actions.click()
+    pointer(actions, in: app).click()
     app.menuItems["Edit Metadata"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
     selectEditorSection("Artwork & File", in: app)

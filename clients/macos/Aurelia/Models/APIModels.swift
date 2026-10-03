@@ -633,6 +633,8 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
   let sessionId: UUID
   let expiresAt: String
   let user: UserSummary?
+  /// Set only after the bundled host and the pinned connection identify the same server.
+  let locallyManaged: Bool?
 
   init(
     serverId: UUID,
@@ -642,7 +644,8 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
     token: String,
     sessionId: UUID,
     expiresAt: String,
-    user: UserSummary? = nil
+    user: UserSummary? = nil,
+    locallyManaged: Bool? = nil
   ) {
     self.serverId = serverId
     self.name = name
@@ -652,6 +655,14 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
     self.sessionId = sessionId
     self.expiresAt = expiresAt
     self.user = user
+    self.locallyManaged = locallyManaged
+  }
+
+  func retainingLocalHosting() -> StoredServerProfile {
+    StoredServerProfile(
+      serverId: serverId, name: name, baseURL: baseURL,
+      publicKeyFingerprint: publicKeyFingerprint, token: token,
+      sessionId: sessionId, expiresAt: expiresAt, user: user, locallyManaged: true)
   }
 }
 

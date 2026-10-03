@@ -92,7 +92,8 @@ struct ServerNetworkEditor: View {
               trialProfile = StoredServerProfile(
                 serverId: profile.serverId, name: draft.serverName, baseURL: address,
                 publicKeyFingerprint: profile.publicKeyFingerprint, token: profile.token,
-                sessionId: profile.sessionId, expiresAt: profile.expiresAt, user: profile.user)
+                sessionId: profile.sessionId, expiresAt: profile.expiresAt, user: profile.user,
+                locallyManaged: profile.locallyManaged)
               operation = pending
               message = nil
             }

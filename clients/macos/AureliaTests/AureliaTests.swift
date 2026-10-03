@@ -189,6 +189,125 @@ struct AureliaTests {
   }
 
   @Test
+  func verifiedLocalOwnershipSurvivesAStaleClientPreferenceAndProfileRoundTrip() throws {
+    let original = StoredServerProfile(
+      serverId: UUID(), name: "Existing server", baseURL: URL(string: "https://127.0.0.1:43111")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "synthetic-session",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z")
+    let legacy = try JSONDecoder().decode(
+      StoredServerProfile.self, from: JSONEncoder().encode(original))
+    #expect(legacy.locallyManaged == nil)
+    #expect(
+      OperatingModePolicy.resolve(storedMode: .client, storedSelectionVersion: 1, profile: legacy)
+        == .client)
+    let owned = original.retainingLocalHosting()
+    let reloaded = try JSONDecoder().decode(
+      StoredServerProfile.self, from: JSONEncoder().encode(owned))
+    #expect(reloaded == owned)
+    #expect(reloaded.serverId == original.serverId)
+    #expect(reloaded.token == original.token)
+    #expect(reloaded.sessionId == original.sessionId)
+    #expect(reloaded.expiresAt == original.expiresAt)
+    #expect(reloaded.publicKeyFingerprint == original.publicKeyFingerprint)
+    #expect(
+      OperatingModePolicy.resolve(storedMode: .client, storedSelectionVersion: 1, profile: reloaded)
+        == .host)
+    #expect(
+      OperatingModePolicy.resolve(storedMode: nil, storedSelectionVersion: 0, profile: reloaded)
+        == .host)
+  }
+
+  @Test(arguments: [
+    "https://server.local:43111", "https://192.168.1.20:43111",
+    "https://127.0.0.1.evil.invalid:43111",
+  ])
+  func localOwnershipNeverStartsHostingForRemoteConnections(address: String) {
+    let profile = StoredServerProfile(
+      serverId: UUID(), name: "Remote", baseURL: URL(string: address)!,
+      publicKeyFingerprint: "test", token: "synthetic", sessionId: UUID(),
+      expiresAt: "2099-01-01", locallyManaged: true)
+    #expect(
+      OperatingModePolicy.resolve(storedMode: .client, storedSelectionVersion: 1, profile: profile)
+        == .client)
+  }
+
+  @Test
+  func localRecoveryRequiresTheExistingServerIdentityAndFingerprint() {
+    let id = UUID()
+    let profile = StoredServerProfile(
+      serverId: id, name: "Existing", baseURL: URL(string: "https://127.0.0.1:43111")!,
+      publicKeyFingerprint: "AABB", token: "synthetic", sessionId: UUID(), expiresAt: "2099")
+    func snapshot(
+      id: UUID, fingerprint: String, state: NativeHostState = .running, setup: Bool = true
+    ) -> NativeHostSnapshot {
+      NativeHostSnapshot(
+        state: state, message: nil, bootstrapToken: nil,
+        serverInfo: ServerInfoResponse(
+          serverId: id, name: "Existing", version: "test", isSetup: setup,
+          lanAccessEnabled: true, lanHttpsPort: 43111, publicKeyFingerprint: fingerprint,
+          displayFingerprint: nil))
+    }
+    #expect(throws: Never.self) {
+      try OperatingModePolicy.validateLocalHost(
+        snapshot(id: id, fingerprint: "aabb"), profile: profile)
+    }
+    #expect(throws: APIClientError.serverIdentityMismatch) {
+      try OperatingModePolicy.validateLocalHost(
+        snapshot(id: UUID(), fingerprint: "AABB"), profile: profile)
+    }
+    #expect(throws: APIClientError.serverIdentityMismatch) {
+      try OperatingModePolicy.validateLocalHost(
+        snapshot(id: id, fingerprint: "CCDD"), profile: profile)
+    }
+    #expect(throws: APIClientError.serverIdentityMismatch) {
+      try OperatingModePolicy.validateLocalHost(
+        snapshot(id: id, fingerprint: "AABB", state: .starting), profile: profile)
+    }
+    #expect(throws: APIClientError.serverIdentityMismatch) {
+      try OperatingModePolicy.validateLocalHost(
+        snapshot(id: id, fingerprint: "AABB", setup: false), profile: profile)
+    }
+  }
+
+  @Test(arguments: [
+    NativeHostState.starting, .restarting, .running, .setupRequired, .failed, .stopped, .stopping,
+  ])
+  func helperReadinessIsNotAssumedFromRendezvous(state: NativeHostState) {
+    #expect(
+      OperatingModePolicy.isAwaitingReadiness(state) == (state == .starting || state == .restarting)
+    )
+  }
+
+  @Test(arguments: [false, true])
+  func preflightIsolationAcceptsDirectoryPathsWithEitherURLSlash(isDirectory: Bool) {
+    #expect(
+      NativePreflightIsolation.accepts(
+        bundleURL: URL(fileURLWithPath: "/private/tmp/Aurelia/synthetic-test/Aurelia.app"),
+        dataDirectory: URL(
+          fileURLWithPath: "/private/tmp/Aurelia/synthetic-test/Data", isDirectory: isDirectory)))
+  }
+
+  @Test
+  func preflightIsolationAcceptsTheMacOSTemporaryDirectoryAlias() {
+    #expect(
+      NativePreflightIsolation.accepts(
+        bundleURL: URL(fileURLWithPath: "/tmp/Aurelia/synthetic-test/Aurelia.app"),
+        dataDirectory: URL(fileURLWithPath: "/private/tmp/Aurelia/synthetic-test/Data")))
+  }
+
+  @Test(arguments: [
+    ("/Applications/Aurelia.app", "/private/tmp/Aurelia/synthetic-test/Data"),
+    ("/private/tmp/Aurelia/synthetic-test/Other.app", "/private/tmp/Aurelia/synthetic-test/Data"),
+    ("/private/tmp/Aurelia/synthetic-test/Aurelia.app", "/private/tmp/Aurelia/other-test/Data"),
+    ("/private/tmp/Aurelia/synthetic-test/Aurelia.app", "/private/tmp/Aurelia/synthetic-test"),
+  ])
+  func preflightIsolationRejectsUnrelatedApplicationsAndData(bundle: String, data: String) {
+    #expect(
+      !NativePreflightIsolation.accepts(
+        bundleURL: URL(fileURLWithPath: bundle), dataDirectory: URL(fileURLWithPath: data)))
+  }
+
+  @Test
   func serverInformationDecodesBuildSixIdentity() throws {
     let json = Data(
       """

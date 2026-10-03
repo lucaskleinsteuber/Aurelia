@@ -33,6 +33,23 @@ public sealed class ServerInstanceLock : IDisposable
         }
     }
 
+    public static async Task<ServerInstanceLock> AcquireForHostAsync(string dataDirectory, CancellationToken cancellationToken)
+    {
+        // A previous child can still be draining requests after its helper died.
+        // Never remove its lock or kill an unknown process; wait a bounded interval.
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try { return Acquire(dataDirectory); }
+            catch (InvalidOperationException exception) when (
+                exception.InnerException is IOException && deadline.Elapsed < TimeSpan.FromSeconds(15))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
+            }
+        }
+    }
+
     public void Dispose()
     {
         if (disposed)

@@ -6,16 +6,32 @@ import Security
 // operating-mode preferences or a previously registered background service.
 // Both the executable and synthetic data must belong to the same private test run.
 enum NativePreflightIsolation {
+  static var isRequested: Bool {
+    ProcessInfo.processInfo.environment["AURELIA_PREFLIGHT_TEST"] == "1"
+  }
   static var isActive: Bool {
     let environment = ProcessInfo.processInfo.environment
     guard environment["AURELIA_PREFLIGHT_TEST"] == "1", let data = environment["AURELIA_DATA_DIR"]
     else { return false }
-    let bundle = Bundle.main.bundleURL.standardizedFileURL.resolvingSymlinksInPath()
-    let run = bundle.deletingLastPathComponent()
-    guard run.path.hasPrefix("/private/tmp/Aurelia/"), bundle.lastPathComponent == "Aurelia.app"
+    return accepts(bundleURL: Bundle.main.bundleURL, dataDirectory: URL(fileURLWithPath: data))
+  }
+
+  static func accepts(bundleURL: URL, dataDirectory: URL) -> Bool {
+    let bundle = bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+    let runPath = canonicalTemporaryPath(bundle.deletingLastPathComponent().path)
+    guard runPath.hasPrefix("/private/tmp/Aurelia/"), bundle.lastPathComponent == "Aurelia.app"
     else { return false }
-    return URL(fileURLWithPath: data).standardizedFileURL.resolvingSymlinksInPath()
-      == run.appendingPathComponent("Data", isDirectory: true)
+    // URL equality also compares the directory slash. In the app sandbox the
+    // filesystem cannot always infer it, so compare canonical paths instead.
+    // Do not resolve the expected Data path: a symlink escaping this run must fail.
+    return canonicalTemporaryPath(dataDirectory.standardizedFileURL.resolvingSymlinksInPath().path)
+      == runPath + "/Data"
+  }
+
+  private static func canonicalTemporaryPath(_ path: String) -> String {
+    // /tmp is macOS's alias of /private/tmp. Foundation may retain that alias
+    // when resolving a path from inside the app sandbox.
+    path.hasPrefix("/tmp/") ? "/private" + path : path
   }
 }
 
@@ -82,6 +98,9 @@ final class NativeServerHost {
   private var isStarting = false
 
   func start(serverName: String, lanPort: Int = 43_111) async throws -> NativeHostSnapshot {
+    guard !NativePreflightIsolation.isRequested || NativePreflightIsolation.isActive else {
+      throw NativeServerHostError.rejected
+    }
     if !NativePreflightIsolation.isActive, BackgroundHostingController.permitted,
       let settings = try? HostServiceSettings.load(),
       let directory = try? HostBootstrapLocation.directory()

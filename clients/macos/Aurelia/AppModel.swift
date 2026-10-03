@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OSLog
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -26,6 +27,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var needsInitialLibrarySetup = false
   @Published private(set) var isStarting = true
   @Published private(set) var isWorking = false
+  @Published private(set) var isRecoveringLocalHost = false
   @Published var errorMessage: String?
   @Published var isMediaManagerPresented = false
   @Published var importPreviewLibrary: LibrarySummary?
@@ -42,11 +44,17 @@ final class AppModel: ObservableObject {
   private var scanPollTask: Task<Void, Never>?
   private var syncRefreshTask: Task<Void, Never>?
   private var isTerminationProtectionActive = false
+  private var automaticHostRecoveryUsed = false
+  private static let hostLogger = Logger(subsystem: "com.lucas.aurelia.media", category: "Hosting")
   private static let operatingModeKey = "AureliaOperatingMode"
   private static let operatingModeSelectionVersionKey = "AureliaOperatingModeSelectionVersion"
 
   var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true }
   var isLocalHost: Bool { operatingMode == .host }
+  var canRestoreLocalHosting: Bool {
+    guard let profile else { return false }
+    return OperatingModePolicy.isLocal(profile.baseURL) && operatingMode != .host
+  }
   var isImportPreviewUITest: Bool {
     #if DEBUG
       Self.uiTestMode == "import-preview"
@@ -73,8 +81,27 @@ final class AppModel: ObservableObject {
   func start() async {
     guard !hasStarted else { return }
     hasStarted = true
+    if NativePreflightIsolation.isRequested {
+      Self.hostLogger.notice(
+        "Preflight isolation active: \(NativePreflightIsolation.isActive); bundle: \(Bundle.main.bundleURL.path, privacy: .public)"
+      )
+      guard NativePreflightIsolation.isActive else {
+        operatingMode = .client
+        errorMessage =
+          "The isolated test launch was rejected. No saved account or host settings were accessed."
+        isStarting = false
+        return
+      }
+    }
 
     #if DEBUG
+      if Self.uiTestMode == "local-host-recovery" {
+        operatingMode = .client
+        profile = Self.previewOwnerProfile
+        errorMessage = "The saved local server is not running. Your account is still connected."
+        isStarting = false
+        return
+      }
       if Self.uiTestMode == "import-preview" {
         operatingMode = .client
         profile = Self.previewOwnerProfile
@@ -246,6 +273,9 @@ final class AppModel: ObservableObject {
           forKey: Self.operatingModeSelectionVersionKey),
         profile: profile)
       persistOperatingMode(explicit: false)
+      Self.hostLogger.info(
+        "Resolved startup mode: \(self.operatingMode?.rawValue ?? "unselected", privacy: .public); managed connection: \(self.profile?.locallyManaged == true)"
+      )
       if operatingMode == .host {
         await startNativeHost()
       } else if profile != nil {
@@ -262,6 +292,30 @@ final class AppModel: ObservableObject {
     operatingMode = .client
     persistOperatingMode(explicit: true)
     errorMessage = nil
+  }
+
+  /// Starts the existing local server without signing out, redeeming a code, or setting up an owner.
+  func restoreLocalHosting() async {
+    guard canRestoreLocalHosting, !isRecoveringLocalHost else { return }
+    errorMessage = nil
+    #if DEBUG
+      if Self.uiTestMode == "local-host-recovery" {
+        isRecoveringLocalHost = true
+        defer { isRecoveringLocalHost = false }
+        try? await Task.sleep(for: .milliseconds(400))
+        profile = profile?.retainingLocalHosting()
+        hostSnapshot = Self.previewHostSnapshot
+        operatingMode = .host
+        home = Self.previewHome
+        catalogItems = Self.previewCatalog
+        return
+      }
+    #endif
+    if await startNativeHost() {
+      operatingMode = .host
+      persistOperatingMode(explicit: true)
+      await reloadAdministration()
+    }
   }
 
   func selectHostMode() async {
@@ -405,6 +459,9 @@ final class AppModel: ObservableObject {
   }
 
   func reloadAdministration() async {
+    #if DEBUG
+      if Self.uiTestMode == "local-host-recovery" { return }
+    #endif
     guard let profile, profile.user?.role.canManageLibraries == true else { return }
     do {
       let client = APIClient(profile: profile)
@@ -742,7 +799,8 @@ final class AppModel: ObservableObject {
         token: profile.token,
         sessionId: profile.sessionId,
         expiresAt: profile.expiresAt,
-        user: user)
+        user: user,
+        locallyManaged: profile.locallyManaged)
       try store.save(updated)
       self.profile = updated
     }
@@ -883,6 +941,9 @@ final class AppModel: ObservableObject {
   }
 
   func reloadDevices() async {
+    #if DEBUG
+      if Self.uiTestMode == "local-host-recovery" { return }
+    #endif
     guard let profile else { return }
     do { sessions = try await APIClient(profile: profile).sessions() } catch {
       errorMessage = error.localizedDescription
@@ -938,6 +999,14 @@ final class AppModel: ObservableObject {
   }
 
   func refreshFromUI() async {
+    guard !isRecoveringLocalHost else { return }
+    if operatingMode == .host,
+      hostSnapshot.state == .failed || hostSnapshot.state == .stopped
+    {
+      errorMessage = nil
+      _ = await startNativeHost()
+      return
+    }
     errorMessage = nil
     do {
       try await refresh()
@@ -1068,7 +1137,15 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func startNativeHost() async {
+  @discardableResult
+  private func startNativeHost() async -> Bool {
+    guard !isRecoveringLocalHost else { return false }
+    isRecoveringLocalHost = true
+    defer { isRecoveringLocalHost = false }
+    await syncController.stop()
+    syncRefreshTask?.cancel()
+    syncRefreshTask = nil
+    errorMessage = nil
     hostSnapshot = NativeHostSnapshot(
       state: .starting,
       message: nil,
@@ -1078,16 +1155,46 @@ final class AppModel: ObservableObject {
       hostSnapshot = try await serverHost.start(
         serverName: "Aurelia on \(Host.current().localizedName ?? "This Mac")")
       beginTerminationProtection()
-      startHostPolling()
-      if profile != nil, hostSnapshot.state == .running {
-        do { try await refresh() } catch { errorMessage = error.localizedDescription }
+      // A live helper may still be starting Kestrel. Do not treat its first
+      // rendezvous response as proof that the saved account can load its library.
+      for _ in 0..<120 {
+        guard OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) else { break }
+        try await Task.sleep(for: .milliseconds(250))
+        hostSnapshot = try await serverHost.status()
       }
+      if OperatingModePolicy.isAwaitingReadiness(hostSnapshot.state) {
+        throw NativeServerHostError.rendezvousTimedOut
+      }
+      guard hostSnapshot.state == .running || hostSnapshot.state == .setupRequired else {
+        throw NativeHostStartupError.failed(
+          hostSnapshot.message ?? "The local server stopped during startup.")
+      }
+      if let profile {
+        try OperatingModePolicy.validateLocalHost(hostSnapshot, profile: profile)
+        try await refresh()  // Uses the existing pinned TLS identity and device session.
+        guard let current = self.profile, current.serverId == profile.serverId,
+          current.sessionId == profile.sessionId
+        else { return false }
+        let managed = current.retainingLocalHosting()
+        try store.save(managed)
+        self.profile = managed
+        startSync()
+      }
+      startHostPolling()
+      writeIsolatedHostResult(ready: true)
+      Self.hostLogger.info("Local host ready; saved connection retained.")
+      return true
     } catch {
       hostSnapshot = NativeHostSnapshot(
         state: .failed,
         message: error.localizedDescription,
         bootstrapToken: nil,
         serverInfo: nil)
+      errorMessage =
+        "Local server could not start: \(error.localizedDescription) Your saved account and library have not been reset."
+      Self.hostLogger.error("Local host startup failed; connection retained.")
+      writeIsolatedHostResult(ready: false)
+      return false
     }
   }
 
@@ -1111,13 +1218,28 @@ final class AppModel: ObservableObject {
         guard let self else { return }
         do {
           let snapshot = try await self.serverHost.status()
+          if snapshot.state == .failed || snapshot.state == .stopped {
+            throw NativeHostStartupError.failed(snapshot.message ?? "The local server stopped.")
+          }
           self.hostSnapshot = snapshot
         } catch {
+          guard !Task.isCancelled else { return }
           self.hostSnapshot = NativeHostSnapshot(
             state: .failed,
             message: error.localizedDescription,
             bootstrapToken: nil,
             serverInfo: nil)
+          if self.operatingMode == .host, self.profile?.locallyManaged == true,
+            !self.automaticHostRecoveryUsed
+          {
+            self.automaticHostRecoveryUsed = true
+            Self.hostLogger.notice("Local host disconnected; attempting one automatic recovery.")
+            _ = await self.startNativeHost()
+          } else {
+            self.errorMessage =
+              "Local server stopped: \(error.localizedDescription) Choose Try Again to restart it. Your saved account is unchanged."
+            self.writeIsolatedHostResult(ready: false)
+          }
           return
         }
       }
@@ -1163,7 +1285,15 @@ final class AppModel: ObservableObject {
       try await Task.sleep(for: .milliseconds(200))
     }
     guard let inspected else { throw NativeServerHostError.rendezvousTimedOut }
-    let localProfile = APIClient.profile(authentication: authentication, inspected: inspected)
+    let connected = APIClient.profile(authentication: authentication, inspected: inspected)
+    var snapshot = try await serverHost.status()
+    for _ in 0..<120 {
+      guard OperatingModePolicy.isAwaitingReadiness(snapshot.state) else { break }
+      try await Task.sleep(for: .milliseconds(250))
+      snapshot = try await serverHost.status()
+    }
+    try OperatingModePolicy.validateLocalHost(snapshot, profile: connected)
+    let localProfile = connected.retainingLocalHosting()
     try store.save(localProfile)
     profile = localProfile
     try await refresh()
@@ -1512,18 +1642,66 @@ final class AppModel: ObservableObject {
   }
 
   private static var defaultStore: any ServerProfileStore {
-    if isTestProcess { return InMemoryServerProfileStore() }
+    if NativePreflightIsolation.isActive,
+      ProcessInfo.processInfo.environment["AURELIA_PREFLIGHT_CONNECTION_TEST"] == "1"
+    {
+      return InMemoryServerProfileStore(profile: isolatedHostProfile)
+    }
+    if isTestProcess || NativePreflightIsolation.isRequested { return InMemoryServerProfileStore() }
     return KeychainServerStore()
   }
 
+  private static var isolatedHostProfile: StoredServerProfile? {
+    guard NativePreflightIsolation.isActive,
+      let value = ProcessInfo.processInfo.environment["AURELIA_PREFLIGHT_PROFILE"],
+      value.utf8.count <= 16_384
+    else { return nil }
+    return try? JSONDecoder().decode(StoredServerProfile.self, from: Data(value.utf8))
+  }
+
+  private func writeIsolatedHostResult(ready: Bool) {
+    guard NativePreflightIsolation.isActive,
+      ProcessInfo.processInfo.environment["AURELIA_PREFLIGHT_CONNECTION_TEST"] == "1"
+    else { return }
+    struct Result: Encodable {
+      let ready: Bool
+      let owned: Bool
+      let catalogCount: Int
+      let unchangedConnection: Bool
+      let failureMessage: String?
+    }
+    let unchanged =
+      profile?.retainingLocalHosting() == Self.isolatedHostProfile?.retainingLocalHosting()
+    if var data = try? JSONEncoder().encode(
+      Result(
+        ready: ready, owned: profile?.locallyManaged == true,
+        catalogCount: catalogItems.count, unchangedConnection: unchanged,
+        failureMessage: ready
+          ? nil
+          : hostSnapshot.message.map {
+            String($0.prefix(512)).replacingOccurrences(
+              of: profile?.token ?? "no-session-token", with: "[redacted]")
+          }))
+    {
+      data.append(0x0A)
+      // Launch Services provides this test-only output handle. No sandbox escape
+      // or direct access to the user's profile storage is required.
+      try? FileHandle.standardOutput.write(contentsOf: data)
+      if let result = String(data: data, encoding: .utf8) {
+        Self.hostLogger.notice("IsolatedHostResult \(result, privacy: .public)")
+      }
+    }
+  }
+
   private static var isTestProcess: Bool {
+    if NativePreflightIsolation.isRequested { return true }
     #if DEBUG
-      uiTestMode != nil
+      return uiTestMode != nil
         || ProcessInfo.processInfo.environment["AURELIA_RUNNING_TESTS"] == "1"
         || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         || NSClassFromString("XCTestCase") != nil
     #else
-      NativePreflightIsolation.isActive
+      return false
     #endif
   }
 }

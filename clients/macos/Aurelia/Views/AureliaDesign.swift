@@ -710,6 +710,8 @@ struct AvailabilityBadge: View {
 struct ErrorBanner: View {
   let message: String
   var retry: (() -> Void)?
+  var retryLabel = "Try Again"
+  var retryDisabled = false
 
   var body: some View {
     HStack(spacing: 12) {
@@ -718,7 +720,10 @@ struct ErrorBanner: View {
       Text(message)
         .font(.callout)
         .frame(maxWidth: .infinity, alignment: .leading)
-      if let retry { Button("Try Again", action: retry) }
+      if let retry {
+        Button(retryLabel, action: retry)
+          .disabled(retryDisabled)
+      }
     }
     .padding(14)
     .frame(maxWidth: 760)

@@ -136,6 +136,54 @@ final class AureliaUITests: XCTestCase {
   }
 
   @MainActor
+  func testExistingLocalConnectionCanRecoverWithoutAccountSetupOrDisconnect() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "local-host-recovery"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+    let recover = app.buttons["Start Local Server"]
+    XCTAssertTrue(recover.waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Server Unavailable"].exists)
+    XCTAssertFalse(app.buttons["Add Media…"].exists)
+    recordImportScreenshot(app, named: "Local server unavailable - saved connection recovery")
+    recover.click()
+    XCTAssertTrue(recover.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["Set Up This Mac"].exists)
+    XCTAssertFalse(app.buttons["create-local-server"].exists)
+    recordImportScreenshot(app, named: "Recovered local connection - existing library")
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
+  func testServerSettingsOfferRecoveryAndRetainSignedInOwner() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "local-host-recovery"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+    app.typeKey(",", modifierFlags: .command)
+    XCTAssertTrue(app.buttons["Server"].waitForExistence(timeout: 8))
+    app.buttons["Server"].click()
+    let restore = app.buttons["restore-local-host"]
+    XCTAssertTrue(restore.waitForExistence(timeout: 8))
+    for _ in 0..<8 where !restore.isHittable { app.scrollViews.firstMatch.swipeUp() }
+    XCTAssertTrue(app.staticTexts["owner · Owner"].exists)
+    recordImportScreenshot(app, named: "Server settings - restore hosting without signing out")
+    restore.click()
+    XCTAssertTrue(restore.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["Restart Server"].exists)
+    XCTAssertTrue(app.staticTexts["owner · Owner"].exists)
+    XCTAssertFalse(app.buttons["Disconnect This Mac"].exists)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
   func testNativeHostSetupCollectsOwnerDetailsWithoutSystemDialogs() throws {
     continueAfterFailure = false
     let app = XCUIApplication()

@@ -98,7 +98,19 @@ struct LibraryShellView: View {
     .background(AureliaDesign.canvas)
     .overlay(alignment: .bottom) {
       if let error = model.errorMessage {
-        ErrorBanner(message: error) { Task { await model.refreshFromUI() } }
+        ErrorBanner(
+          message: error,
+          retry: {
+            Task {
+              if model.canRestoreLocalHosting {
+                await model.restoreLocalHosting()
+              } else {
+                await model.refreshFromUI()
+              }
+            }
+          },
+          retryLabel: model.canRestoreLocalHosting ? "Start Local Server" : "Try Again",
+          retryDisabled: model.isRecoveringLocalHost)
       }
     }
     .onChange(of: scenePhase) {
@@ -217,11 +229,22 @@ private struct HomePage: View {
     if model.catalogItems.isEmpty, model.home?.recommendation == nil,
       model.home?.continueWatching.isEmpty != false
     {
-      EmptyLibraryState(
-        title: "Your Library Is Ready",
-        message: "Add a folder or drive to begin building your private library.",
-        action: model.canManageMedia ? { model.showMediaManager() } : nil
-      )
+      Group {
+        if model.errorMessage != nil || model.isRecoveringLocalHost {
+          ContentUnavailableView(
+            model.isRecoveringLocalHost ? "Starting Local Server" : "Server Unavailable",
+            systemImage: "server.rack",
+            description: Text(
+              "Your saved connection is intact. Your library will appear when the server is ready.")
+          )
+        } else {
+          EmptyLibraryState(
+            title: "Your Library Is Ready",
+            message: "Add a folder or drive to begin building your private library.",
+            action: model.canManageMedia ? { model.showMediaManager() } : nil
+          )
+        }
+      }
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("home-page")
     } else {

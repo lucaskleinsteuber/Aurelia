@@ -757,6 +757,7 @@ struct APIClient: Sendable {
           path: path, method: method, body: body)
       }
       if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "server-settings"
+        || ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "local-host-recovery"
         || profile.baseURL.host == "server-settings-preview.invalid"
       {
         guard method == "GET" else { throw APIClientError.invalidResponse }

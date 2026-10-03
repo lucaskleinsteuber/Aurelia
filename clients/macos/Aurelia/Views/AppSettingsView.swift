@@ -493,6 +493,20 @@ struct AppSettingsView: View {
             showingSwitchConfirmation = true
           }
         } else {
+          if model.canRestoreLocalHosting {
+            VStack(alignment: .leading, spacing: 8) {
+              Text(
+                "This connection points to this Mac. Start its existing server without signing out or resetting your library."
+              )
+              .font(.caption).foregroundStyle(.secondary)
+              Button(model.isRecoveringLocalHost ? "Starting Local Server…" : "Start Local Server")
+              {
+                Task { await model.restoreLocalHosting() }
+              }
+              .disabled(model.isRecoveringLocalHost)
+              .accessibilityIdentifier("restore-local-host")
+            }
+          }
           Button("Disconnect This Mac", role: .destructive) {
             Task { await model.disconnect() }
           }

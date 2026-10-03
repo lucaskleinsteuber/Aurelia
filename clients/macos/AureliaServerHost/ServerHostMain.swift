@@ -114,6 +114,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private let terminationHandler: @MainActor @Sendable () -> Void
   private var listener: NWListener?
   private var process: Process?
+  private var serverLifeline: Pipe?
   private var logSink: BoundedLogSink?
   private var parentTimer: DispatchSourceTimer?
   private var status = HostStatus(
@@ -359,10 +360,14 @@ private final class ServerHostRuntime: @unchecked Sendable {
       environment["AURELIA_LAN_ENABLED"] = lan ? "true" : "false"
       environment["AURELIA_BOOTSTRAP_TOKEN"] = bootstrapToken
       environment["AURELIA_HOST_READY_NONCE"] = readinessNonce
+      environment["AURELIA_HOST_LIFELINE"] = "1"
       if let port = listener?.port {
         environment["AURELIA_HOST_CONTROL_URL"] = "http://127.0.0.1:\(port.rawValue)/\(secret)"
       }
       child.environment = environment
+      let lifeline = Pipe()
+      serverLifeline = lifeline
+      child.standardInput = lifeline
       child.standardOutput = logSink.pipe
       child.standardError = logSink.pipe
       child.terminationHandler = { [weak self] terminated in
@@ -374,13 +379,14 @@ private final class ServerHostRuntime: @unchecked Sendable {
       try child.run()
       waitForServer(lan: lan, bootstrapToken: bootstrapToken, generation: generation)
     } catch {
+      closeServerLifeline()
       updateStatus(.failed, message: "The bundled Aurelia Server could not be started.")
     }
   }
 
   private func waitForServer(lan: Bool, bootstrapToken: String?, generation: UInt64) {
     Task { [weak self] in
-      for _ in 0..<75 {
+      for _ in 0..<150 {
         guard let self else { return }
         switch await self.serverReadinessState(generation: generation) {
         case .waiting:
@@ -465,6 +471,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private func serverTerminated(status terminationStatus: Int32) {
     process = nil
+    closeServerLifeline()
     serverReadyGeneration = nil
     serverStoppingGeneration = nil
     logSink?.close()
@@ -528,6 +535,12 @@ private final class ServerHostRuntime: @unchecked Sendable {
     restartDates.append(now)
     updateStatus(.restarting, message: "Aurelia Server stopped unexpectedly. Restarting…")
     queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.startServer(lan: false) }
+  }
+
+  private func closeServerLifeline() {
+    try? serverLifeline?.fileHandleForWriting.close()
+    try? serverLifeline?.fileHandleForReading.close()
+    serverLifeline = nil
   }
 
   private func beginShutdown() {

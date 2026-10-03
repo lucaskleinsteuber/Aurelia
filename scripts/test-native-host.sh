@@ -79,6 +79,10 @@ TRAPZERR() {
 }
 
 fail() {
+  if [[ -f "$runtime_root/connection-output.jsonl" ]]; then
+    # These are bounded test-only status records, never connection credentials.
+    tail -3 "$runtime_root/connection-output.jsonl" >>"$report"
+  fi
   if [[ -f "$runtime_root/helper-output.log" ]]; then
     cp "$runtime_root/helper-output.log" "$log_root/Aurelia-NativeHost-$run_id-helper.log"
   fi
@@ -114,6 +118,7 @@ wait_for_state() {
 
 mkdir -p "$runtime_root" "$data_root" "$host_log_root" "$result_root" "$log_root"
 chmod 700 "$runtime_root"
+chmod 700 "$data_root"
 mkdir -m 700 "$bootstrap_root"
 [[ -d "$source_candidate" ]] || fail "The Build $build_number app candidate does not exist."
 /usr/bin/ditto "$source_candidate" "$candidate"
@@ -532,6 +537,91 @@ kill -0 "$helper_pid" 2>/dev/null \
 wait "$helper_pid" 2>/dev/null || true
 helper_pid=''
 
+last_phase='saved local connection recovery'
+jq -cn --slurpfile info "$runtime_root/server-info.json" \
+  --slurpfile auth "$runtime_root/restored-authentication.json" --arg baseURL "$https_base" \
+  '{serverId:$info[0].serverId,name:$info[0].name,baseURL:$baseURL,publicKeyFingerprint:$info[0].publicKeyFingerprint,
+    token:$auth[0].token,sessionId:$auth[0].sessionId,expiresAt:$auth[0].expiresAt,user:$auth[0].user}' \
+  >"$data_root/connection.json"
+chmod 600 "$data_root/connection.json"
+connection_before="$(jq -cS 'del(.locallyManaged)' "$data_root/connection.json")"
+
+wait_for_connection_result() {
+  local expected=$1
+  for _ in {1..300}; do
+    /usr/bin/log show --last 1m --style compact \
+      --predicate "processIdentifier == $application_pid AND eventMessage BEGINSWITH 'IsolatedHostResult '" \
+      2>/dev/null | sed -n 's/.*IsolatedHostResult \({.*}\).*/\1/p' >"$runtime_root/connection-output.jsonl"
+    [[ -s "$runtime_root/connection-output.jsonl" ]] \
+      && [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready' 2>/dev/null)" == "$expected" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+for requested_mode in host client; do
+  rm -f "$runtime_root/connection-output.jsonl"
+  if [[ "$requested_mode" == client ]]; then
+    jq '. + {locallyManaged:true}' "$data_root/connection.json" >"$data_root/connection-next.json"
+    mv "$data_root/connection-next.json" "$data_root/connection.json"
+  fi
+  open -n -g --env AURELIA_PREFLIGHT_TEST=1 --env AURELIA_PREFLIGHT_CONNECTION_TEST=1 \
+    --env "AURELIA_DATA_DIR=$data_root" --env "AURELIA_LOG_DIR=$host_log_root" \
+    --env "AURELIA_PREFLIGHT_PROFILE=$(jq -c . "$data_root/connection.json")" \
+    --stdout "$runtime_root/connection-output.jsonl" \
+    "$candidate" --args -ApplePersistenceIgnoreState YES \
+    -AureliaOperatingMode "$requested_mode" -AureliaOperatingModeSelectionVersion 1
+  for _ in {1..100}; do
+    application_pid="$(pgrep -f "^$application( |$)" | tail -1 || true)"
+    [[ -n "$application_pid" ]] && break
+    sleep 0.1
+  done
+  wait_for_connection_result true || fail "Saved connection did not finish starting."
+  [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection and (.catalogCount > 0)')" == true ]] \
+    || fail "Saved local connection did not load its existing synthetic catalog."
+  [[ "$(jq -cS 'del(.locallyManaged)' "$data_root/connection.json")" == "$connection_before" ]] \
+    || fail "Recovery changed the saved account, session, address, or TLS identity."
+  helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
+  [[ -n "$helper_pid" ]] || fail "Restored app has no owned helper."
+  if [[ "$requested_mode" == client ]]; then
+    last_phase='single automatic host recovery'
+    previous_helper_pid="$helper_pid"
+    kill -KILL "$helper_pid"
+    for _ in {1..300}; do
+      /usr/bin/log show --last 1m --style compact \
+        --predicate "processIdentifier == $application_pid AND eventMessage BEGINSWITH 'IsolatedHostResult '" \
+        2>/dev/null | sed -n 's/.*IsolatedHostResult \({.*}\).*/\1/p' >"$runtime_root/connection-output.jsonl"
+      [[ "$(wc -l <"$runtime_root/connection-output.jsonl")" -ge 2 ]] && break
+      sleep 0.1
+    done
+    [[ "$(wc -l <"$runtime_root/connection-output.jsonl")" -ge 2 ]] || fail "Unexpected helper exit was not recovered."
+    [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection')" == true ]] \
+      || fail "Automatic recovery did not reconnect the existing account."
+    helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
+    [[ -n "$helper_pid" && "$helper_pid" != "$previous_helper_pid" ]] \
+      || fail "Automatic recovery did not create a fresh owned helper."
+    kill -TERM "$helper_pid"
+    wait_for_connection_result false || fail "Second host failure was not reported."
+    [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready')" == false ]] \
+      || fail "Recovery restarted repeatedly instead of reporting a persistent problem."
+    sleep 2
+    [[ -z "$(pgrep -f "^$helper( |$)" || true)" ]] || fail "Automatic recovery exceeded its one-attempt budget."
+    helper_pid=''
+  fi
+  /usr/bin/swift -e 'import AppKit; guard let pid = Int32(CommandLine.arguments[1]), let app = NSRunningApplication(processIdentifier: pid), app.terminate() else { exit(1) }' "$application_pid"
+  for _ in {1..150}; do
+    kill -0 "$application_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$application_pid" 2>/dev/null && fail "Recovered app did not quit cleanly."
+  application_pid=''
+  for _ in {1..100}; do
+    [[ -z "$helper_pid" ]] || ! kill -0 "$helper_pid" 2>/dev/null && break
+    sleep 0.1
+  done
+  helper_pid=''
+done
+
 if [[ -f "$host_log_root/server.log" ]]; then
   cp "$host_log_root/server.log" "$copied_log"
 fi
@@ -549,6 +639,9 @@ fi
   print -r -- "PASS: occupied HTTPS port rolled back to the reachable previous network"
   print -r -- "PASS: graceful helper/server shutdown"
   print -r -- "PASS: helper stopped when its isolated PID-bound parent app disappeared"
+  print -r -- "PASS: legacy local connection gained verified ownership without changing its session or identity"
+  print -r -- "PASS: stale explicit client preference recovered the same catalog after app relaunch"
+  print -r -- "PASS: unexpected helper exit recovered once; a second failure did not create a restart loop"
   print -r -- "PASS: SQLite quick_check and integrity_check; foreign keys clean"
   print -r -- "PASS: bounded logs contain no tested secrets"
 } >>"$report"
