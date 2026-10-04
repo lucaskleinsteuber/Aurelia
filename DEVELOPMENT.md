@@ -27,6 +27,12 @@ Tests use unique temporary data directories and synthetic media. No live library
 or credentials are needed. `AURELIA_TEST_ROOT` can override the temporary parent.
 CI runs server verification on macOS, including native image processing.
 
+A second physical Mac is not required to work on Aurelia. Synthetic UI tests,
+disposable server state, and fresh CI runners provide useful independent checks.
+They do not prove first launch on another user's desktop, a different physical
+Mac, or every supported hardware configuration. Record those coverage gaps
+instead of presenting build/test success as a cross-device release pass.
+
 For CLI development, `dotnet run --project src/Aurelia.Server -- run` starts
 loopback HTTP on port 43110. Use `--data-dir` to select disposable data. Never use
 production data for mutation tests. Owner creation prompts for a password;

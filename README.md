@@ -29,8 +29,8 @@ to an existing server. On a new host, create an owner account, add your media
 folders, and confirm the import preview. Server settings control network
 access, additional accounts, and optional background hosting.
 
-A public, notarized Mac download is not available yet. Development builds are
-not a substitute for a release tested on another Mac.
+A public Mac download is not available yet. Distribution is planned through
+GitHub, not the App Store.
 
 ## More information
 

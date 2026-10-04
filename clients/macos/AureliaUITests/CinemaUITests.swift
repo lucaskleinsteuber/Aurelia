@@ -13,16 +13,16 @@ final class CinemaUITests: XCTestCase {
     let home = app.descendants(matching: .any)["sidebar-home"]
     XCTAssertTrue(toggle.exists && home.exists)
     XCTAssertLessThanOrEqual(toggle.frame.maxY, home.frame.minY)
-    shot(app, "1.3 - Fullscreen - Sidebar Header and Complete Artwork")
+    shot(app, "Cinema - Fullscreen - Sidebar Header and Hero")
     toggle.click()
     XCTAssertTrue(app.buttons["toggle-sidebar"].exists)
     XCTAssertLessThan(app.buttons["toggle-sidebar"].frame.minX, 30)
-    shot(app, "1.3 - Fullscreen - Sidebar Hidden and Complete Artwork")
+    shot(app, "Cinema - Fullscreen - Sidebar Hidden and Hero")
     app.buttons["toggle-sidebar"].click()
     XCTAssertTrue(home.waitForExistence(timeout: 5))
     home.click()
     XCTAssertTrue(app.buttons["home-hero-action"].waitForExistence(timeout: 5))
-    shot(app, "1.3 - Fullscreen - Home Complete Artwork")
+    shot(app, "Cinema - Fullscreen - Home Hero")
     app.typeKey("f", modifierFlags: [.control, .command])
   }
 
@@ -62,7 +62,56 @@ final class CinemaUITests: XCTestCase {
     XCTAssertTrue(query.waitForNonExistence(timeout: 5))
   }
 
-  @MainActor private func launch(accessibility: Bool = false, minimum: Bool = false)
+  @MainActor func testDetailHeroHasRealImageDetailAtBothVisibleEdges() throws {
+    let app = launch(heroEdges: true)
+    defer { app.terminate() }
+    func checkEdges(_ label: String) throws {
+      let window = app.windows.firstMatch
+      let hero = app.descendants(matching: .any)["media-hero"]
+      XCTAssertTrue(hero.exists)
+      // Background extension exposes a larger AX frame including the sidebar.
+      // Measure only the visible detail area, never the intentionally blurred navigation.
+      let visibleLeft = max(hero.frame.minX, app.buttons["Back"].frame.minX - 32)
+      let visibleRight = min(hero.frame.maxX, window.frame.maxX)
+      let visibleWidth = visibleRight - visibleLeft
+      XCTAssertGreaterThan(visibleWidth, 400)
+      shot(app, "Cinema - Continuous Hero Edges - \(label)")
+      let image = try XCTUnwrap(NSBitmapImageRep(data: window.screenshot().pngRepresentation))
+      let scaleX = CGFloat(image.pixelsWide) / window.frame.width
+      let scaleY = CGFloat(image.pixelsHigh) / window.frame.height
+      let y = Int((hero.frame.minY - window.frame.minY + hero.frame.height * 0.25) * scaleY)
+      for range in [0.04...0.12, 0.88...0.96] {
+        let values = try (0..<64).map { sample -> CGFloat in
+          let fraction =
+            range.lowerBound + (range.upperBound - range.lowerBound)
+            * Double(sample) / 63
+          let x = Int((visibleLeft - window.frame.minX + visibleWidth * fraction) * scaleX)
+          let color = try XCTUnwrap(image.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+          return (color.redComponent + color.greenComponent + color.blueComponent) / 3
+        }
+        XCTAssertGreaterThan(
+          try XCTUnwrap(values.max()) - XCTUnwrap(values.min()), 0.20,
+          "\(label): the actual image must reach the edge, not a blurred side strip")
+      }
+    }
+    // Allow the asynchronous artwork loader to finish, then check rendered pixels.
+    let loading = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Synthetic artwork load")], timeout: 1)
+    XCTAssertEqual(loading, .timedOut)
+    try checkEdges("Window")
+    app.windows.firstMatch.buttons[XCUIIdentifierFullScreenWindow].click()
+    let transition = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Fullscreen transition")], timeout: 2)
+    XCTAssertEqual(transition, .timedOut)
+    try checkEdges("Fullscreen")
+    app.buttons["toggle-sidebar"].click()
+    try checkEdges("Fullscreen Without Sidebar")
+    app.typeKey("f", modifierFlags: [.control, .command])
+  }
+
+  @MainActor private func launch(
+    accessibility: Bool = false, minimum: Bool = false, heroEdges: Bool = false
+  )
     -> XCUIApplication
   {
     continueAfterFailure = false
@@ -70,6 +119,7 @@ final class CinemaUITests: XCTestCase {
     app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
     app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "library-admin"
     app.launchEnvironment["AURELIA_CINEMA_UI_TESTS"] = "1"
+    if heroEdges { app.launchEnvironment["AURELIA_HERO_EDGE_UI_TESTS"] = "1" }
     if accessibility { app.launchEnvironment["AURELIA_CINEMA_ACCESSIBILITY"] = "1" }
     if minimum { app.launchEnvironment["AURELIA_CINEMA_MINIMUM_WINDOW"] = "1" }
     app.launch()
@@ -180,7 +230,6 @@ final class CinemaUITests: XCTestCase {
     XCTAssertTrue(previous.waitForNonExistence(timeout: 5))
     // All detail rail types share the same component, but each owns its offset.
     for name in ["Trailers", "Extras", "Cast & Crew"] {
-      scroll.scroll(byDeltaX: 0, deltaY: -340)
       let visibleCard =
         name == "Cast & Crew"
         ? app.staticTexts["Person 2"]
@@ -188,11 +237,28 @@ final class CinemaUITests: XCTestCase {
           name == "Trailers"
             ? "supplement-50000000-0000-0000-0000-000000000011"
             : "supplement-50000000-0000-0000-0000-000000000001"]
+      // Fixed scroll deltas can leave a lazy row outside the visible window.
+      // Reveal the target before hovering; never send pointer input offscreen.
+      let viewport = app.windows.firstMatch.frame.insetBy(dx: 80, dy: 120)
+      for _ in 0..<10 {
+        if visibleCard.exists
+          && viewport.contains(CGPoint(x: visibleCard.frame.midX, y: visibleCard.frame.midY))
+        {
+          break
+        }
+        let above = visibleCard.exists && visibleCard.frame.midY < viewport.minY
+        scroll.scroll(byDeltaX: 0, deltaY: above ? 180 : -180)
+      }
+      XCTAssertTrue(visibleCard.exists, "\(name) must have a visible card")
+      XCTAssertTrue(
+        viewport.contains(CGPoint(x: visibleCard.frame.midX, y: visibleCard.frame.midY)),
+        "\(name) must be onscreen")
       pointer(visibleCard, in: app).hover()
       let arrow = app.buttons.matching(
         NSPredicate(format: "identifier CONTAINS %@ AND identifier ENDSWITH %@", name, "next")
       ).firstMatch
-      XCTAssertTrue(arrow.waitForExistence(timeout: 5))
+      shot(app, "Cinema - \(name) - Hover Before Arrow")
+      XCTAssertTrue(arrow.waitForExistence(timeout: 5), "Missing \(name) next arrow")
       pointer(arrow, in: app).hover()
       pointer(arrow, in: app).click()
       shot(app, "Cinema - \(name) - Arrow Page")

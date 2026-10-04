@@ -121,6 +121,10 @@ These rules apply to every task in this repository.
 - Preserve bundle IDs, App Groups, Keychain identifiers, and signing identity
   continuity; a cosmetic rename must not lose existing users' connections/data.
 - A local development signature is not a public release. Public Mac packages
-  require Developer ID signing, notarization, stapling, and Gatekeeper checks.
+  must be tested for their actual distribution mode. The intended channel is a
+  free GitHub download, not the App Store. Do not require paid Apple membership
+  or notarization; a non-notarized package needs a documented per-app Gatekeeper
+  exception and verified first launch. Do not assume the current development
+  profile, App Group, or Keychain entitlements work on another user's Mac.
 - Never change repository visibility, publish a release, or rewrite historical
   author information without explicit user authorization.

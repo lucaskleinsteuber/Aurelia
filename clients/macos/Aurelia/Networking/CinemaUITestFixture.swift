@@ -20,6 +20,15 @@
       let context = NSGraphicsContext(bitmapImageRep: bitmap)!
       NSGraphicsContext.saveGraphicsState()
       NSGraphicsContext.current = context
+      if ProcessInfo.processInfo.environment["AURELIA_HERO_EDGE_UI_TESTS"] == "1" {
+        // Narrow stripes distinguish actual image detail from a blurred filler strip.
+        for x in stride(from: 0, to: 1200, by: 12) {
+          (x % 24 == 0 ? NSColor.white : NSColor.systemBlue).setFill()
+          NSRect(x: x, y: 0, width: 12, height: 800).fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return bitmap.representation(using: .png, properties: [:])!
+      }
       for (index, color) in [NSColor.systemTeal, .systemOrange, .systemIndigo, .systemYellow]
         .enumerated()
       {
