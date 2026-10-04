@@ -420,7 +420,7 @@ private struct DetailHero: View {
       AuthenticatedArtwork(
         artwork: detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop,
         symbol: detail.item.kind == .movie ? "film.fill" : "tv.fill",
-        contentMode: .fill,
+        extendsBlurredEdges: true,
         placeholderSymbolSize: 64
       )
       .backgroundExtensionEffect()

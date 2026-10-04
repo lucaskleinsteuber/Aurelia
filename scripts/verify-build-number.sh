@@ -11,3 +11,10 @@ if [ -z "$dotnet_build" ] || [ -z "$apple_build" ] || [ "$dotnet_build" != "$app
 fi
 
 echo "Build number $dotnet_build is synchronized."
+dotnet_version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' "$repository_root/Directory.Build.props")
+apple_version=$(sed -n 's/^MARKETING_VERSION = \(.*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
+if [ -z "$dotnet_version" ] || [ "$dotnet_version" != "$apple_version" ]; then
+    echo "Version mismatch: server=$dotnet_version macOS=$apple_version" >&2
+    exit 1
+fi
+echo "Version $dotnet_version is synchronized."

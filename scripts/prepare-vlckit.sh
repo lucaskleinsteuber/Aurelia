@@ -6,7 +6,7 @@ archive_name=VLCKit-3.7.3-319ed2c0-79128878.tar.xz
 expected_sha256=019afdae4e2e2d0f3ac325fac8f7ba0af25dca70b9d157df7d60db88e0be8e5d
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-other_root=${AURELIA_OTHER_ROOT:-"$(dirname "$repository_root")/Aurelia Other"}
+. "$repository_root/scripts/workspace-paths.sh"
 cache_root="$other_root/Package Cache/VLCKit/$version"
 archive_path="$cache_root/VLCKit-$version.tar.xz"
 package_root="$cache_root/VLCKit - binary package"

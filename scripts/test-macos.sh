@@ -2,8 +2,7 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
-developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
+source "$repository_root/scripts/workspace-paths.sh"
 runtime_parent="$HOME/Library/Caches/Aurelia/TestRuns"
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 runtime_root="$runtime_parent/$run_id"
@@ -54,7 +53,7 @@ stop_test_hosts
 DEVELOPER_DIR="$developer_dir" xcodebuild \
   -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
   -scheme Aurelia \
-  -destination 'platform=macOS,arch=arm64' \
+  -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$derived_data" \
   -enableCodeCoverage NO \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
@@ -63,7 +62,7 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
 DEVELOPER_DIR="$developer_dir" xcodebuild \
   -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
   -scheme Aurelia \
-  -destination 'platform=macOS,arch=arm64' \
+  -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$derived_data" \
   -resultBundlePath "$temporary_unit_result" \
   -enableCodeCoverage NO \
@@ -77,7 +76,7 @@ if [[ "${AURELIA_SKIP_UI_TESTS:-0}" != "1" ]]; then
   DEVELOPER_DIR="$developer_dir" xcodebuild \
     -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
     -scheme Aurelia \
-    -destination 'platform=macOS,arch=arm64' \
+    -destination "platform=macOS,arch=$(uname -m)" \
     -derivedDataPath "$derived_data" \
     -resultBundlePath "$temporary_ui_result" \
     -enableCodeCoverage NO \

@@ -434,7 +434,7 @@ struct AureliaTests {
   @Test
   func bonjourHostnameMatchesServerSanitizingRules() {
     #expect(BonjourBrowser.sanitizeHostLabel("Aurelia") == "Aurelia")
-    #expect(BonjourBrowser.sanitizeHostLabel("  Lucas's   Server  ") == "Lucas-s-Server")
+    #expect(BonjourBrowser.sanitizeHostLabel("  Example's   Server  ") == "Example-s-Server")
     #expect(BonjourBrowser.sanitizeHostLabel("🎬") == "device")
   }
 

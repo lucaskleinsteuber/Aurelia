@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
+source "$repository_root/scripts/workspace-paths.sh"
 source_candidate=${1:?Provide a signed Debug Aurelia.app built with warnings as errors.}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 runtime_root="/private/tmp/Aurelia/$run_id"

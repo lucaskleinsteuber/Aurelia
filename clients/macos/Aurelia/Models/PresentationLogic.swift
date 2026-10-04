@@ -1,4 +1,44 @@
+import Combine
 import Foundation
+
+@MainActor final class MetadataSearchController: ObservableObject {
+  @Published private(set) var candidates: [MetadataCandidateSummary] = []
+  @Published private(set) var isSearching = false
+  @Published private(set) var errorMessage: String?
+  private var generation = UUID()
+
+  func invalidate() {
+    generation = UUID()
+    candidates = []
+    errorMessage = nil
+    isSearching = false
+  }
+
+  func search(
+    query: String,
+    debounce: Duration = .milliseconds(350),
+    operation: (String) async throws -> [MetadataCandidateSummary]
+  ) async {
+    invalidate()
+    let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty else { return }
+    let request = generation
+    isSearching = true
+    defer { if generation == request { isSearching = false } }
+    do {
+      try await Task.sleep(for: debounce)
+      try Task.checkCancellation()
+      let result = try await operation(normalized)
+      try Task.checkCancellation()
+      guard generation == request else { return }
+      candidates = result
+    } catch {
+      guard generation == request, !Task.isCancelled else { return }
+      if error is CancellationError { return }
+      errorMessage = error.localizedDescription
+    }
+  }
+}
 
 struct HomeGenreRow: Identifiable, Equatable, Sendable {
   let title: String

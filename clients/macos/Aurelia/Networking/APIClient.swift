@@ -539,6 +539,19 @@ struct APIClient: Sendable {
   func metadataCandidates(mediaId: UUID, query: String) async throws
     -> [MetadataCandidateSummary]
   {
+    #if DEBUG
+      if await CinemaUITestFixture.enabled {
+        if query == "Slow match" { try? await Task.sleep(for: .seconds(1)) }
+        if query == "Fail match" { throw APIClientError.invalidResponse }
+        return [
+          MetadataCandidateSummary(
+            provider: "Synthetic", providerMediaId: query, mediaType: "tv",
+            title: "Match: \(query)", originalTitle: nil, year: 2026,
+            overview: "In-memory search fixture; no provider request.", posterPath: nil,
+            confidence: 1)
+        ]
+      }
+    #endif
     return try await get(
       "/api/v1/media/\(mediaId.uuidString.lowercased())/metadata/search?\(try Self.query(name: "query", value: query))"
     )

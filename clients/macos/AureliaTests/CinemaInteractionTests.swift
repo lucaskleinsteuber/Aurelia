@@ -4,6 +4,57 @@ import Testing
 @testable import Aurelia
 
 @MainActor struct CinemaInteractionTests {
+  private func candidate(_ title: String) -> MetadataCandidateSummary {
+    MetadataCandidateSummary(
+      provider: "Synthetic", providerMediaId: title, mediaType: "tv", title: title,
+      originalTitle: nil, year: nil, overview: nil, posterPath: nil, confidence: 1)
+  }
+
+  @Test func metadataSearchRejectsLateResponsesAndClearsBlankQueries() async {
+    let controller = MetadataSearchController()
+    var pending: CheckedContinuation<[MetadataCandidateSummary], Never>?
+    let older = Task {
+      await controller.search(query: "old", debounce: .zero) { _ in
+        await withCheckedContinuation { pending = $0 }
+      }
+    }
+    while pending == nil { await Task.yield() }
+    await controller.search(query: "  new  ", debounce: .zero) { query in
+      #expect(query == "new")
+      return [candidate(query)]
+    }
+    pending?.resume(returning: [candidate("old")])
+    await older.value
+    #expect(controller.candidates.map(\.title) == ["new"])
+    #expect(!controller.isSearching)
+    await controller.search(query: " \n ", debounce: .zero) { _ in
+      Issue.record("Blank queries must not contact the provider")
+      return []
+    }
+    #expect(controller.candidates.isEmpty && controller.errorMessage == nil)
+    #expect(!controller.isSearching)
+  }
+
+  @Test func metadataSearchCancellationAndRetryNeverLeaveStaleResults() async {
+    let controller = MetadataSearchController()
+    await controller.search(query: "first", debounce: .zero) { _ in
+      throw APIClientError.invalidResponse
+    }
+    #expect(controller.errorMessage != nil && !controller.isSearching)
+    await controller.search(query: "retry", debounce: .zero) { _ in [candidate("retry")] }
+    #expect(controller.errorMessage == nil && controller.candidates.count == 1)
+    let cancelled = Task {
+      await controller.search(query: "cancelled", debounce: .seconds(1)) { _ in
+        Issue.record("Cancelled debounce must not contact the provider")
+        return []
+      }
+    }
+    cancelled.cancel()
+    await cancelled.value
+    #expect(!controller.isSearching && controller.errorMessage == nil)
+    #expect(controller.candidates.isEmpty)
+  }
+
   @Test func railPagesOnlyCompleteCardsAndClampsAtBothEnds() {
     var metrics = RailNavigationMetrics(offset: 0, maximumOffset: 3000, visibleWidth: 1100)
     #expect(!metrics.canGoBack && metrics.canGoForward)

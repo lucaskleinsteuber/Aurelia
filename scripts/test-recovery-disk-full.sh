@@ -1,8 +1,9 @@
 #!/bin/zsh
 set -euo pipefail
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
-dotnet_bin=${DOTNET_BIN:-"$other_root/Package Cache/dotnet/dotnet"}
+source "$repository_root/scripts/workspace-paths.sh"
+dotnet_bin=$DOTNET_BIN
+mkdir -p "$other_root/Build"
 run_root=$(mktemp -d "$other_root/Build/.recovery-probe.XXXXXX")
 image="$run_root/DisposableRecovery.dmg"
 mount="$run_root/Mount"

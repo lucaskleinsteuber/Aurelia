@@ -2,6 +2,66 @@ import AppKit
 import XCTest
 
 final class CinemaUITests: XCTestCase {
+  @MainActor func testFullscreenSidebarHeaderDoesNotOverlapNavigation() throws {
+    let app = launch()
+    defer { app.terminate() }
+    app.windows.firstMatch.buttons[XCUIIdentifierFullScreenWindow].click()
+    let transition = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Fullscreen transition")], timeout: 2)
+    XCTAssertEqual(transition, .timedOut)
+    let toggle = app.buttons["toggle-sidebar"]
+    let home = app.descendants(matching: .any)["sidebar-home"]
+    XCTAssertTrue(toggle.exists && home.exists)
+    XCTAssertLessThanOrEqual(toggle.frame.maxY, home.frame.minY)
+    shot(app, "1.3 - Fullscreen - Sidebar Header and Complete Artwork")
+    toggle.click()
+    XCTAssertTrue(app.buttons["toggle-sidebar"].exists)
+    XCTAssertLessThan(app.buttons["toggle-sidebar"].frame.minX, 30)
+    shot(app, "1.3 - Fullscreen - Sidebar Hidden and Complete Artwork")
+    app.buttons["toggle-sidebar"].click()
+    XCTAssertTrue(home.waitForExistence(timeout: 5))
+    home.click()
+    XCTAssertTrue(app.buttons["home-hero-action"].waitForExistence(timeout: 5))
+    shot(app, "1.3 - Fullscreen - Home Complete Artwork")
+    app.typeKey("f", modifierFlags: [.control, .command])
+  }
+
+  @MainActor func testMetadataSearchAsYouTypeClearsStaleResultsAndHandlesErrors() throws {
+    let app = launch()
+    defer { app.terminate() }
+    app.descendants(matching: .any)["media-actions"].click()
+    app.menuItems["Find Metadata Match"].click()
+    let query = app.textFields["metadata-match-query"]
+    XCTAssertTrue(query.waitForExistence(timeout: 5), app.debugDescription)
+    XCTAssertTrue(app.staticTexts["Match: Breaking Bad"].waitForExistence(timeout: 5))
+    func type(_ value: String) {
+      query.click()
+      app.typeKey("a", modifierFlags: .command)
+      query.typeText(value.isEmpty ? XCUIKeyboardKey.delete.rawValue : value)
+    }
+    type("Slow match")
+    let debounce = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Older slow request starts")], timeout: 0.5)
+    XCTAssertEqual(debounce, .timedOut)
+    type("New match")
+    XCTAssertTrue(app.staticTexts["Match: New match"].waitForExistence(timeout: 5))
+    let staleWait = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Late older response")], timeout: 1.2)
+    XCTAssertEqual(staleWait, .timedOut)
+    XCTAssertFalse(app.staticTexts["Match: Slow match"].exists)
+    shot(app, "1.3 - Metadata - Live Search Without Search Button")
+    type("")
+    XCTAssertTrue(app.staticTexts["Match: New match"].waitForNonExistence(timeout: 5))
+    type("Fail match")
+    XCTAssertTrue(app.buttons["Try Again"].waitForExistence(timeout: 5))
+    shot(app, "1.3 - Metadata - Search Error Keeps Draft")
+    type("Recovered")
+    XCTAssertTrue(app.staticTexts["Match: Recovered"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["Try Again"].exists)
+    app.buttons["Done"].click()
+    XCTAssertTrue(query.waitForNonExistence(timeout: 5))
+  }
+
   @MainActor private func launch(accessibility: Bool = false, minimum: Bool = false)
     -> XCUIApplication
   {

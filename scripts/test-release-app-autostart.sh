@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
+source "$repository_root/scripts/workspace-paths.sh"
 build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
 source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
@@ -100,7 +100,7 @@ done
 [[ "$(jq -r 'if has("isSetup") then .isSetup else empty end' "$runtime_root/server-info.json" 2>/dev/null)" == false ]] \
   || fail "The fresh loopback server did not become ready for owner setup."
 
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer /usr/bin/swift -e \
+DEVELOPER_DIR="$developer_dir" /usr/bin/swift -e \
   'import AppKit; guard let pid = Int32(CommandLine.arguments[1]), let app = NSRunningApplication(processIdentifier: pid), app.terminate() else { exit(1) }' \
   "$application_pid"
 for _ in {1..150}; do

@@ -8,7 +8,8 @@ struct MetadataMatchSheet: View {
   let providerMediaId: String?
   let onSaved: () async -> Void
   @State private var query: String
-  @State private var candidates: [MetadataCandidateSummary] = []
+  @StateObject private var searchController = MetadataSearchController()
+  @State private var searchRequest = UUID()
   @State private var isWorking = false
   @State private var errorMessage: String?
 
@@ -40,20 +41,22 @@ struct MetadataMatchSheet: View {
       VStack(spacing: 16) {
         HStack {
           TextField("Search title", text: $query).textFieldStyle(.roundedBorder)
-            .onSubmit { Task { await search() } }
-          Button("Search") { Task { await search() } }
-            .buttonStyle(AureliaPrimaryActionButtonStyle()).disabled(
-              query.trimmingCharacters(in: .whitespaces).isEmpty)
+            .accessibilityIdentifier("metadata-match-query")
+            .onSubmit { searchRequest = UUID() }
+            .disabled(isWorking)
+          if searchController.isSearching {
+            ProgressView().controlSize(.small).accessibilityLabel("Searching metadata")
+          }
         }
-        if candidates.isEmpty {
+        if searchController.candidates.isEmpty {
           ContentUnavailableView(
-            "Compare Matches",
+            searchController.isSearching ? "Searching…" : "Compare Matches",
             systemImage: "rectangle.and.text.magnifyingglass",
-            description: Text("Search by title, then choose the result that belongs to this media.")
+            description: Text("Type a title to find matches, then choose the correct result.")
           )
           .frame(maxHeight: .infinity)
         } else {
-          List(candidates) { candidate in
+          List(searchController.candidates) { candidate in
             HStack(alignment: .top, spacing: 14) {
               MediaArtworkPlaceholder(symbol: "film")
                 .frame(width: 72, height: 108)
@@ -72,12 +75,17 @@ struct MetadataMatchSheet: View {
               Spacer()
               Button("Use Match") { Task { await select(candidate) } }
                 .buttonStyle(AureliaPrimaryActionButtonStyle())
+                .disabled(isWorking)
             }
             .padding(.vertical, 6)
           }
           .listStyle(.inset)
         }
         if let errorMessage { Text(errorMessage).foregroundStyle(.orange).font(.callout) }
+        if let message = searchController.errorMessage {
+          Text(message).foregroundStyle(.orange).font(.callout)
+          Button("Try Again") { searchRequest = UUID() }
+        }
       }
       .padding(24)
       Divider()
@@ -91,20 +99,20 @@ struct MetadataMatchSheet: View {
     }
     .frame(width: 720, height: 640)
     .background(AureliaBackdrop())
-    .task { await search() }
+    .onChange(of: query) { searchController.invalidate() }
+    .task(id: query + searchRequest.uuidString) {
+      await searchController.search(query: query) { value in
+        try await model.metadataCandidates(mediaId: mediaId, query: value)
+      }
+    }
+    .onDisappear { searchController.invalidate() }
+    .accessibilityElement(children: .contain)
     .accessibilityIdentifier("metadata-match-editor")
   }
 
-  private func search() async {
+  private func select(_ candidate: MetadataCandidateSummary) async {
     isWorking = true
     defer { isWorking = false }
-    do {
-      candidates = try await model.metadataCandidates(mediaId: mediaId, query: query)
-      errorMessage = nil
-    } catch { errorMessage = error.localizedDescription }
-  }
-
-  private func select(_ candidate: MetadataCandidateSummary) async {
     do {
       _ = try await model.selectMetadataMatch(
         mediaId: mediaId,
@@ -116,6 +124,8 @@ struct MetadataMatchSheet: View {
   }
 
   private func removeMatch() async {
+    isWorking = true
+    defer { isWorking = false }
     do {
       _ = try await model.clearMetadataMatch(mediaId: mediaId)
       await onSaved()

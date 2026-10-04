@@ -1,4 +1,4 @@
-# Aurelia 1.2.1: metadata editing and library maintenance
+# Metadata editing and library maintenance
 
 Changes are stored on the connected server. Owners can manage all libraries;
 administrators can manage only their granted storage locations. Ordinary users
@@ -12,6 +12,11 @@ Right-click a library card for **Add to Favorites / Remove from Favorites**,
 detail page. The gear in the top-right corner of movie and series detail pages
 offers editing, provider matching/refresh, and removal. Favorites remain beside
 Play. Right-click an episode to edit it without changing normal playback.
+
+**Find Metadata Match** searches automatically after a short pause while typing.
+Clear the field to clear results. Enter repeats the current search; connection
+errors show **Try Again** without closing the sheet. Older responses cannot
+replace results for a newer query.
 
 The resizable native editor has four sections:
 
@@ -46,7 +51,7 @@ uploads to 20 MiB / 24 megapixels, handles image orientation, and stores a
 sanitized PNG without embedded metadata. Uploads belong to the authenticated
 session and title and are not published until the draft is saved.
 
-Crop using drag, zoom, and 90-degree rotation. Covers use 2:3, backgrounds 16:9,
+Crop using a draggable frame and handles, zoom, and 90-degree rotation. Covers use 2:3, backgrounds 16:9,
 and person photos 1:1 with a circular preview. A sanitized uncropped original is
 retained for subsequent crops. New image revisions have new asset IDs. Removed
 or superseded owned images and their originals are tracked for durable cleanup;

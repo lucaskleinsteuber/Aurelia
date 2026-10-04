@@ -2,12 +2,24 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
-developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
-dotnet_bin=${DOTNET_BIN:-"$other_root/Package Cache/dotnet/dotnet"}
+source "$repository_root/scripts/workspace-paths.sh"
+dotnet_bin=$DOTNET_BIN
 provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-}
 bundle_identifier=com.lucas.aurelia.media
 team_identifier=B5N7JVK37J
+distribution=${AURELIA_DISTRIBUTION:-development}
+timestamp_option=--timestamp=none
+if [[ "$distribution" != development && "$distribution" != developer-id ]]; then
+  echo "AURELIA_DISTRIBUTION must be development or developer-id." >&2
+  exit 1
+fi
+if [[ "$distribution" == developer-id ]]; then
+  if [[ -z "$provisioning_profile" || -z "${AURELIA_SIGNING_IDENTITY:-}" ]]; then
+    echo "Developer ID distribution requires an explicit matching profile and signing identity." >&2
+    exit 1
+  fi
+  timestamp_option=--timestamp
+fi
 build_parent="$other_root/Build"
 build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
 if [[ -z "$build_number" ]]; then
@@ -16,7 +28,7 @@ if [[ -z "$build_number" ]]; then
 fi
 final_root=${AURELIA_CANDIDATE_OUTPUT:-"$build_parent/Build $build_number"}
 if [[ "$final_root" != "$build_parent/Build $build_number" && "$final_root" != "$build_parent/Preflight-"* ]]; then
-  echo "Candidate output must be the numbered build or a fresh Preflight directory under Aurelia Other/Build." >&2
+  echo "Candidate output must be the numbered build or a fresh Preflight directory under $build_parent." >&2
   exit 1
 fi
 if [[ "$final_root" == "$build_parent/Preflight-"* && -e "$final_root" ]]; then
@@ -123,6 +135,18 @@ if ! /usr/bin/security find-identity -v -p codesigning \
   echo "The provisioning profile's signing identity is not available in the keychain." >&2
   exit 1
 fi
+if [[ "$distribution" == developer-id ]]; then
+  if ! /usr/bin/security find-identity -v -p codesigning \
+    | /usr/bin/awk -v identity="$signing_identity" \
+      '$2 == identity && /Developer ID Application:/ { found = 1 } END { exit !found }'; then
+    echo "Public distribution requires a Developer ID Application identity, not Apple Development." >&2
+    exit 1
+  fi
+  if [[ "$(/usr/libexec/PlistBuddy -c 'Print :ProvisionsAllDevices' "$profile_plist" 2>/dev/null || true)" != true ]]; then
+    echo "Public distribution requires a Developer ID provisioning profile for all devices." >&2
+    exit 1
+  fi
+fi
 
 mkdir -p "$publish_root"
 "$repository_root/scripts/prepare-vlckit.sh"
@@ -164,25 +188,31 @@ for agent in com.lucas.aurelia.media.host.background com.lucas.aurelia.media.hos
 done
 /usr/bin/ditto "$provisioning_profile" "$candidate/Contents/embedded.provisionprofile"
 mkdir -p "$candidate/Contents/Resources/Server"
+mkdir -p "$candidate/Contents/Resources/ThirdPartyNotices"
 for runtime in osx-arm64 osx-x64; do
   /usr/bin/ditto "$publish_root/$runtime" "$candidate/Contents/Resources/Server/$runtime"
+  assets_path=$("$dotnet_bin" msbuild "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
+    -getProperty:ProjectAssetsFile)
+  "$repository_root/scripts/collect-third-party-notices.sh" \
+    "$publish_root/$runtime/Aurelia.Server.deps.json" "$assets_path" \
+    "$candidate/Contents/Resources/ThirdPartyNotices/$runtime"
 done
 
 while IFS= read -r -d '' binary; do
   if file "$binary" | grep -q 'Mach-O'; then
     if [[ "${binary:t}" == 'Aurelia.Server' ]]; then
-      codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
+      codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
         --entitlements "$repository_root/clients/macos/Configuration/ServerRuntime.entitlements" \
         "$binary"
     else
-      codesign --force --sign "$signing_identity" --options runtime --timestamp=none "$binary"
+      codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" "$binary"
     fi
   fi
 done < <(find "$candidate/Contents/Resources/Server" -type f -print0)
 
-codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
+codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   "$candidate/Contents/Frameworks/VLCKit.framework"
-codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
+codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app"
 cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release_entitlements"
@@ -190,7 +220,7 @@ cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release
   "$release_entitlements"
 /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $team_identifier" \
   "$release_entitlements"
-codesign --force --sign "$signing_identity" --options runtime --timestamp=none \
+codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$release_entitlements" \
   "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Execute the signed Intel payload under Rosetta; never use installed/user data.
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
+source "$repository_root/scripts/workspace-paths.sh"
 build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
 candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"

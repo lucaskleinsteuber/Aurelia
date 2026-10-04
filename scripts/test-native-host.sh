@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root=${0:A:h:h}
-other_root=${AURELIA_OTHER_ROOT:-"${repository_root:h}/Aurelia Other"}
+source "$repository_root/scripts/workspace-paths.sh"
 build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
 source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
@@ -14,7 +14,7 @@ report="$result_root/Aurelia-NativeHost-$run_id.txt"
 copied_log="$log_root/Aurelia-NativeHost-$run_id.log"
 helper="$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
 application="$candidate/Contents/MacOS/Aurelia"
-server="$candidate/Contents/Resources/Server/osx-arm64/Aurelia.Server"
+server="$candidate/Contents/Resources/Server/osx-$([[ $(uname -m) == arm64 ]] && print arm64 || print x64)/Aurelia.Server"
 data_root="$runtime_root/Data"
 host_log_root="$runtime_root/Logs"
 secret="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
@@ -124,7 +124,7 @@ mkdir -m 700 "$bootstrap_root"
 /usr/bin/ditto "$source_candidate" "$candidate"
 [[ -x "$application" ]] || fail "The native Aurelia app is missing."
 [[ -x "$helper" ]] || fail "The native server host helper is missing."
-[[ -x "$server" ]] || fail "The embedded arm64 server is missing."
+[[ -x "$server" ]] || fail "The embedded server for this Mac's architecture is missing."
 if lsof -nP -iTCP:43110 -sTCP:LISTEN >/dev/null 2>&1; then
   fail "Loopback port 43110 is already occupied; no existing process was stopped."
 fi

@@ -71,6 +71,7 @@ struct LibraryShellView: View {
             .contentShape(Rectangle())
             .onTapGesture {}  // Obscured cards must never receive navigation clicks.
           sidebar
+            .padding(.top, max(0, 44 - geometry.safeAreaInsets.top))
             .frame(width: sidebarWidth, height: geometry.size.height)
             .clipped()
           Color.clear
@@ -90,7 +91,10 @@ struct LibraryShellView: View {
       }
       .overlay(alignment: .topLeading) {
         sidebarToggle
-          .padding(.leading, sidebarVisible ? sidebarWidth - 44 : 76)
+          .padding(
+            .leading,
+            sidebarVisible ? sidebarWidth - 44 : (geometry.safeAreaInsets.top > 0 ? 76 : 12)
+          )
           .padding(.top, 8 - geometry.safeAreaInsets.top)
       }
       .aureliaRemoveEmptyWindowToolbar()

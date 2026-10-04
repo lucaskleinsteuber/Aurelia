@@ -12,20 +12,20 @@ These rules apply to every task in this repository.
   active documentation. Preserve historic identifiers only when required to
   discover or migrate data and settings from older releases.
 - Keep all user-facing text in English until localization is an explicit task.
-- Preserve the native Apple TV/macOS design direction, but keep infrastructure
+- Preserve the native macOS design direction, but keep infrastructure
   milestones focused and functional.
 - Never copy, convert, remux, transcode, hash, analyse, or cache video content.
   Media remains at its original user-selected path; scans read only filesystem
   metadata and directory structure.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
-- `/Users/lucaskleinsteuber/Documents/Aurelia Classic`, its app, database,
+- Aurelia Classic, its app, database,
   `Library.store`, and Application Support data are read-only references. Never
   edit, migrate, launch for automation, or copy from them.
 
 ## Native client design contract
 
-- Maintain one coherent Apple TV and macOS visual language.
+- Maintain one coherent native macOS visual language.
 - Content extends beneath the transparent sidebar; never introduce a gray or
   black strip above the content.
 - Use native macOS window controls and fullscreen behavior. Never draw fake
@@ -41,11 +41,10 @@ These rules apply to every task in this repository.
   documentation in the repository.
 - Never commit build products, result bundles, logs, caches, runtime data,
   SQLite files, artwork, media, credentials, tokens, or signing material.
-- Generated output remains in the adjacent external workspace
-  `/Users/lucaskleinsteuber/Documents/Aurelia Other`; do not rename or move
-  that directory merely to change the product name. Its standard subdirectories
-  are `Build/`, `Package Cache/`, `Test Results/`, `Logs/`, and
-  `Aurelia Build summarys/`.
+- Generated output belongs outside the checkout. `AURELIA_OTHER_ROOT` may select
+  an existing external workspace; never rename or move that workspace. Otherwise
+  use the per-user cache defaults in `scripts/workspace-paths.sh`. Standard
+  subdirectories are `Build/`, `Package Cache/`, `Test Results/`, and `Logs/`.
 - Runnable Mac test products must be staged under a unique
   `~/Library/Caches/Aurelia/TestRuns/<run-id>` directory. Pre-install smoke
   candidates use a unique `/private/tmp/Aurelia/<run-id>` directory. Launch the
@@ -71,7 +70,7 @@ These rules apply to every task in this repository.
 
 ## Installation and version handling
 
-- After each successful, verified, launchable macOS app build made for Lucas to
+- After each successful, verified, launchable macOS app build made for the user to
   test, install that build on this MacBook as `/Applications/Aurelia.app`; do
   not wait for a separate install request. Never install a failed or incomplete
   candidate. This rule applies only to the server-backed Aurelia app in this
@@ -79,10 +78,10 @@ These rules apply to every task in this repository.
 - Installation replaces only the app bundle. Preserve the existing library
   and all Aurelia setup state across builds and updates, including the server
   database, local server data, accounts, sessions, preferences, connection
-  profiles, and server settings. Do not run
-  `scripts/reset-installed-test-state.sh`, clear Keychain or preferences, or
+  profiles, and server settings. Do not reset installed test state, clear
+  Keychain or preferences, or
   move any Aurelia data to Trash as part of a normal install. Reset or recreate
-  setup only when Lucas explicitly asks for it.
+  setup only when the user explicitly asks for it.
 - Never delete, edit, scan, or move user-selected media folders as part of an
   install. Never touch Aurelia Classic, `Application Support/Aurelia`,
   `Library.store`, or `com.lucas.aurelia` credentials and containers. Preserve
@@ -101,7 +100,7 @@ These rules apply to every task in this repository.
 
 ## Build summary and Git discipline
 
-- Work directly on `main` unless Lucas explicitly requests a branch.
+- Work directly on `main` unless the user explicitly requests a branch.
 - Before committing, inspect the full diff and audit it for secrets, personal or
   unportable paths, generated data, databases, binaries, media, caches, and test
   results.
@@ -110,7 +109,18 @@ These rules apply to every task in this repository.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
 - After verification, create exactly one concise English Markdown summary in
-  `/Users/lucaskleinsteuber/Documents/Aurelia Other/Aurelia Build summarys`.
+  the external workspace's existing summary directory, or `Build Reports/`.
   Include objective, behavior, important files, verification, installation,
   known limitations, and the verified final Git hash. Do not commit that
   external summary.
+
+## Public distribution
+
+- Keep the README concise and user-facing. Put build/test/API details in linked
+  documentation, not the README. Do not add personal names or machine paths.
+- Preserve bundle IDs, App Groups, Keychain identifiers, and signing identity
+  continuity; a cosmetic rename must not lose existing users' connections/data.
+- A local development signature is not a public release. Public Mac packages
+  require Developer ID signing, notarization, stapling, and Gatekeeper checks.
+- Never change repository visibility, publish a release, or rewrite historical
+  author information without explicit user authorization.
