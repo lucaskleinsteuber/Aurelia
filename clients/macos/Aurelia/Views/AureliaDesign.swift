@@ -473,7 +473,6 @@ struct AuthenticatedArtwork: View {
   let artwork: ArtworkSummary?
   let symbol: String
   var contentMode: ContentMode = .fill
-  var extendsBlurredEdges = false
   var placeholderSymbolSize: CGFloat = 36
   @State private var image: NSImage?
 
@@ -485,25 +484,10 @@ struct AuthenticatedArtwork: View {
           .accessibilityLabel("Artwork placeholder")
           .accessibilityIdentifier("artwork-placeholder")
         if let image {
-          if extendsBlurredEdges {
-            Image(nsImage: image)
-              .resizable()
-              .aspectRatio(contentMode: .fill)
-              .frame(width: geometry.size.width, height: geometry.size.height)
-              .clipped()
-              .scaleEffect(1.1)
-              .blur(radius: 48, opaque: true)
-            Image(nsImage: image)
-              .resizable()
-              .aspectRatio(contentMode: .fit)
-              .frame(width: geometry.size.width, height: geometry.size.height)
-              .transition(.opacity)
-          } else {
-            Image(nsImage: image)
-              .resizable()
-              .aspectRatio(contentMode: contentMode)
-              .transition(.opacity)
-          }
+          Image(nsImage: image)
+            .resizable()
+            .aspectRatio(contentMode: contentMode)
+            .transition(.opacity)
         }
       }
       .frame(width: geometry.size.width, height: geometry.size.height)

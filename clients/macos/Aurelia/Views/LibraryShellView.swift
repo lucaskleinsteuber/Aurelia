@@ -356,6 +356,7 @@ private struct HomePage: View {
               CollectionCard(collection: collection)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("collection-\(collection.id.uuidString.lowercased())")
           }
         }
       }
@@ -372,7 +373,7 @@ private struct HomeHero: View {
       AuthenticatedArtwork(
         artwork: item.backdrop ?? item.poster,
         symbol: item.kind == .movie ? "film.fill" : "tv.fill",
-        extendsBlurredEdges: true,
+        contentMode: .fill,
         placeholderSymbolSize: 64
       )
       .backgroundExtensionEffect()
@@ -901,7 +902,7 @@ private struct CollectionDetailView: View {
       AuthenticatedArtwork(
         artwork: collection.items.first?.backdrop ?? collection.poster,
         symbol: "rectangle.stack.fill",
-        extendsBlurredEdges: true
+        contentMode: .fill
       )
       .backgroundExtensionEffect()
       LinearGradient(
@@ -943,6 +944,8 @@ private struct CollectionDetailView: View {
       }
     }
     .frame(height: 420)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("collection-hero")
     .clipShape(
       UnevenRoundedRectangle(
         bottomLeadingRadius: AureliaDesign.heroRadius,

@@ -67,7 +67,11 @@
         recommendation: base.recommendation.map(decorate),
         continueWatching: continuationCards(base) ?? base.continueWatching.map(decorate),
         recentlyAdded: items,
-        favorites: base.favorites.map(decorate), collections: base.collections,
+        favorites: base.favorites.map(decorate),
+        collections: base.collections.map {
+          CollectionSummary(
+            id: $0.id, name: $0.name, poster: artwork, items: $0.items.map(decorate))
+        },
         recommendationChangesAt: base.recommendationChangesAt)
     }
 

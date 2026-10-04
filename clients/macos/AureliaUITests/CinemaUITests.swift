@@ -109,6 +109,104 @@ final class CinemaUITests: XCTestCase {
     app.typeKey("f", modifierFlags: [.control, .command])
   }
 
+  @MainActor func testHomeAndCollectionHeroesHaveContinuousImageDetail() throws {
+    var app = launch(heroEdges: true)
+    defer { app.terminate() }
+    app.descendants(matching: .any)["sidebar-home"].click()
+    XCTAssertTrue(app.buttons["home-hero-action"].waitForExistence(timeout: 5))
+
+    func checkEdges(_ identifier: String, anchor: String, label: String) throws {
+      let window = app.windows.firstMatch
+      let hero = app.descendants(matching: .any)[identifier]
+      XCTAssertTrue(hero.exists)
+      // Resolve AX coordinates after the sidebar/fullscreen layout transition,
+      // not in the caller while the anchor still has its transient infinite frame.
+      let loading = XCTWaiter.wait(
+        for: [XCTestExpectation(description: "Synthetic hero artwork and layout")], timeout: 1)
+      XCTAssertEqual(loading, .timedOut)
+      let visibleLeft = max(window.frame.minX, app.buttons[anchor].frame.minX - 32)
+      let visibleRight = min(hero.frame.maxX, window.frame.maxX)
+      let width = visibleRight - visibleLeft
+      XCTAssertTrue(width.isFinite)
+      XCTAssertGreaterThan(width, 400)
+      shot(app, "Cinema - Continuous \(label) Hero Edges")
+      let image = try XCTUnwrap(NSBitmapImageRep(data: window.screenshot().pngRepresentation))
+      let scaleX = CGFloat(image.pixelsWide) / window.frame.width
+      let scaleY = CGFloat(image.pixelsHigh) / window.frame.height
+      // Both pages open at the top. Sample the upper artwork below the native
+      // header; background-extension AX bounds can include offscreen content.
+      let y = Int(min(150, window.frame.height * 0.25) * scaleY)
+      for range in [0.04...0.16, 0.84...0.96] {
+        let values = try (0..<96).map { sample -> CGFloat in
+          let fraction =
+            range.lowerBound + (range.upperBound - range.lowerBound) * Double(sample) / 95
+          let x = Int((visibleLeft - window.frame.minX + width * fraction) * scaleX)
+          XCTAssertTrue(
+            x >= 0 && x < image.pixelsWide && y >= 0 && y < image.pixelsHigh,
+            "\(label): sample (\(x), \(y)) outside \(image.pixelsWide)x\(image.pixelsHigh); window \(window.frame), hero \(hero.frame), leading edge \(visibleLeft)"
+          )
+          let color = try XCTUnwrap(image.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+          return (color.redComponent + color.greenComponent + color.blueComponent) / 3
+        }
+        // Home/collection gradients intentionally darken the leading edge. Look
+        // for repeated fine detail, not raw brightness or a single boundary.
+        let transitions = zip(values, values.dropFirst()).filter { abs($0 - $1) > 0.025 }.count
+        XCTAssertGreaterThanOrEqual(
+          transitions, 5, "\(label): fine image detail must reach both visible edges")
+      }
+    }
+    func homeEdges(_ label: String) throws {
+      try checkEdges(
+        "home-hero", anchor: "home-hero-action", label: label)
+    }
+    try homeEdges("Home Window")
+    app.windows.firstMatch.buttons[XCUIIdentifierFullScreenWindow].click()
+    let transition = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Fullscreen transition")], timeout: 2)
+    XCTAssertEqual(transition, .timedOut)
+    try homeEdges("Home Fullscreen")
+    app.buttons["toggle-sidebar"].click()
+    try homeEdges("Home Fullscreen Without Sidebar")
+    // Start the collection checks in a fresh native window. A fullscreen
+    // Space transition must not leak state into the independent window case.
+    app.terminate()
+    app = launch(heroEdges: true)
+    app.descendants(matching: .any)["sidebar-home"].click()
+    XCTAssertTrue(app.buttons["home-hero-action"].waitForExistence(timeout: 5))
+    let collection = app.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH 'collection-'")
+    ).firstMatch
+    // The Home collection row sits below other rails. Reveal it without letting
+    // AX scroll a horizontal rail or alter unrelated view state.
+    for _ in 0..<12 {
+      if collection.exists,
+        app.windows.firstMatch.frame.insetBy(dx: 80, dy: 120).contains(
+          CGPoint(x: collection.frame.midX, y: collection.frame.midY))
+      {
+        break
+      }
+      detailScroll(app).scroll(byDeltaX: 0, deltaY: -200)
+    }
+    XCTAssertTrue(collection.exists)
+    pointer(collection, in: app).click()
+    XCTAssertTrue(app.descendants(matching: .any)["collection-hero"].waitForExistence(timeout: 5))
+    try checkEdges(
+      "collection-hero", anchor: "Back",
+      label: "Collection Window")
+    app.windows.firstMatch.buttons[XCUIIdentifierFullScreenWindow].click()
+    let collectionTransition = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Collection fullscreen transition")], timeout: 2)
+    XCTAssertEqual(collectionTransition, .timedOut)
+    try checkEdges(
+      "collection-hero", anchor: "Back",
+      label: "Collection Fullscreen")
+    app.buttons["toggle-sidebar"].click()
+    try checkEdges(
+      "collection-hero", anchor: "Back",
+      label: "Collection Fullscreen Without Sidebar")
+    app.typeKey("f", modifierFlags: [.control, .command])
+  }
+
   @MainActor private func launch(
     accessibility: Bool = false, minimum: Bool = false, heroEdges: Bool = false
   )

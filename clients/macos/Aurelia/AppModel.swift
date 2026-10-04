@@ -155,7 +155,7 @@ final class AppModel: ObservableObject {
         ]
         catalogItems = Self.previewCatalog
         home = CinemaUITestFixture.home(Self.previewHome)
-        collections = Self.previewHome.collections
+        collections = home?.collections ?? Self.previewHome.collections
         isStarting = false
         return
       }
