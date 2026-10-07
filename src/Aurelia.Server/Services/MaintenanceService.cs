@@ -8,6 +8,7 @@ public sealed partial class MaintenanceService(
     IServiceScopeFactory scopeFactory,
     ILogger<MaintenanceService> logger) : BackgroundService
 {
+    private readonly MaintenancePhaseRunner phases = new(logger);
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -20,7 +21,7 @@ public sealed partial class MaintenanceService(
             {
                 return;
             }
-            catch (Exception exception)
+            catch (Exception exception) when (!StorageRecovery.IsCorruptDatabase(exception))
             {
                 LogMaintenanceFailure(logger, exception.GetType().Name);
             }
@@ -34,35 +35,43 @@ public sealed partial class MaintenanceService(
         await using var scope = scopeFactory.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
         var now = DateTimeOffset.UtcNow;
-        await scope.ServiceProvider.GetRequiredService<DatabaseBackupService>()
-            .CreateScheduledBackupIfDueAsync(now, cancellationToken);
-        await scope.ServiceProvider.GetRequiredService<PlaybackService>()
-            .PruneExpiredAsync(now, cancellationToken);
+        await phases.RunAsync("scheduled backup", async () =>
+            await scope.ServiceProvider.GetRequiredService<DatabaseBackupService>()
+                .CreateScheduledBackupIfDueAsync(now, cancellationToken), cancellationToken);
+        await phases.RunAsync("playback ticket cleanup", () => scope.ServiceProvider.GetRequiredService<PlaybackService>()
+            .PruneExpiredAsync(now, cancellationToken), cancellationToken);
 
-        var pairingIds = await database.PairingCodes.AsNoTracking()
-            .Where(code => code.ExpiresAt < now || code.ConsumedAt != null)
-            .OrderBy(code => code.ExpiresAt).Select(code => code.Id).Take(100)
-            .ToListAsync(cancellationToken);
-        await database.PairingCodes.Where(code => pairingIds.Contains(code.Id))
-            .ExecuteDeleteAsync(cancellationToken);
+        await phases.RunAsync("pairing code cleanup", async () =>
+        {
+            var pairingIds = await database.PairingCodes.AsNoTracking()
+                .Where(code => code.ExpiresAt < now || code.ConsumedAt != null)
+                .OrderBy(code => code.ExpiresAt).Select(code => code.Id).Take(100)
+                .ToListAsync(cancellationToken);
+            await database.PairingCodes.Where(code => pairingIds.Contains(code.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+        }, cancellationToken);
 
-        var sessionCutoff = now.AddDays(-30);
-        var sessionIds = await database.DeviceSessions.AsNoTracking()
-            .Where(session => session.ExpiresAt < now
-                || (session.RevokedAt != null && session.RevokedAt < sessionCutoff))
-            .OrderBy(session => session.ExpiresAt).Select(session => session.Id).Take(100)
-            .ToListAsync(cancellationToken);
-        await database.DeviceSessions.Where(session => sessionIds.Contains(session.Id))
-            .ExecuteDeleteAsync(cancellationToken);
+        await phases.RunAsync("device session cleanup", async () =>
+        {
+            var sessionCutoff = now.AddDays(-30);
+            var sessionIds = await database.DeviceSessions.AsNoTracking()
+                .Where(session => session.ExpiresAt < now
+                    || (session.RevokedAt != null && session.RevokedAt < sessionCutoff))
+                .OrderBy(session => session.ExpiresAt).Select(session => session.Id).Take(100)
+                .ToListAsync(cancellationToken);
+            await database.DeviceSessions.Where(session => sessionIds.Contains(session.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+        }, cancellationToken);
 
-        await scope.ServiceProvider.GetRequiredService<ArtworkStore>()
-            .PruneOrphansAsync(database, cancellationToken);
-        await scope.ServiceProvider.GetRequiredService<SyncChangeService>()
-            .PruneAsync(cancellationToken);
+        await phases.RunAsync("artwork cleanup", async () => await scope.ServiceProvider.GetRequiredService<ArtworkStore>()
+            .PruneOrphansAsync(database, cancellationToken), cancellationToken);
+        await phases.RunAsync("change history cleanup", () => scope.ServiceProvider.GetRequiredService<SyncChangeService>()
+            .PruneAsync(cancellationToken), cancellationToken);
 
-        await PruneScanHistoryAsync(database, cancellationToken);
-        await PruneMetadataHistoryAsync(database, cancellationToken);
-        await database.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(PASSIVE);", cancellationToken);
+        await phases.RunAsync("scan history cleanup", () => PruneScanHistoryAsync(database, cancellationToken), cancellationToken);
+        await phases.RunAsync("metadata history cleanup", () => PruneMetadataHistoryAsync(database, cancellationToken), cancellationToken);
+        await phases.RunAsync("database checkpoint", async () =>
+            await database.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(PASSIVE);", cancellationToken), cancellationToken);
     }
 
     private static async Task PruneScanHistoryAsync(

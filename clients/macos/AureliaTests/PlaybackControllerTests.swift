@@ -185,6 +185,7 @@ final class PlaybackControllerTests: XCTestCase {
 
     await controller.start()
     controller.setSleepTimer(.endOfEpisode)
+    engine.currentTimeMilliseconds = engine.durationMilliseconds
     engine.onEnded?()
     for _ in 0..<3 { await Task.yield() }
 
@@ -318,7 +319,7 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
 }
 
 @MainActor
-private final class FakePlaybackRelay: PlaybackRelayProtocol {
+final class FakePlaybackRelay: PlaybackRelayProtocol {
   let localURL = URL(string: "http://127.0.0.1:54321/stream/local-secret")!
   var didStop = false
 
@@ -328,7 +329,7 @@ private final class FakePlaybackRelay: PlaybackRelayProtocol {
 }
 
 @MainActor
-private final class FakePlaybackEngine: PlaybackEngine {
+final class FakePlaybackEngine: PlaybackEngine {
   var onUpdate: (() -> Void)?
   var onEnded: (() -> Void)?
   var onError: ((String) -> Void)?
@@ -353,7 +354,11 @@ private final class FakePlaybackEngine: PlaybackEngine {
   var didStop = false
 
   func attach(to view: NSView) {}
-  func load(url: URL) { loadedURL = url }
+  func load(url: URL) {
+    loadedURL = url
+    currentTimeMilliseconds = 0
+    isPlaying = false
+  }
   func play() {
     isPlaying = true
     onUpdate?()
@@ -362,7 +367,10 @@ private final class FakePlaybackEngine: PlaybackEngine {
     isPlaying = false
     onUpdate?()
   }
-  func stop() { didStop = true }
+  func stop() {
+    didStop = true
+    isPlaying = false
+  }
   func seek(to milliseconds: Int64) {
     currentTimeMilliseconds = milliseconds
     onUpdate?()

@@ -143,6 +143,7 @@ public sealed class DatabaseBackupTests
             new ConfigurationBuilder().Build(),
             ["--data-dir", dataDirectory]);
         string backupPath;
+        SyncChangeService.HistoryState originalHistory;
 
         try
         {
@@ -173,6 +174,7 @@ public sealed class DatabaseBackupTests
                 var verification = await backups.VerifyAsync(backupPath, CancellationToken.None);
                 Assert.True(verification.IsValid, verification.Message);
                 Assert.Equal("wal-snapshot-marker", await ReadUsernameAsync(backupPath));
+                originalHistory = await ReadHistoryAsync(databasePath);
             }
 
             var backupService = new DatabaseBackupService(runtime);
@@ -183,6 +185,7 @@ public sealed class DatabaseBackupTests
             }
 
             Assert.Equal("wal-snapshot-marker", await ReadUsernameAsync(databasePath));
+            var firstRestoreHistory = await AssertHistoryResetAsync(databasePath, originalHistory);
             Assert.Single(Directory.EnumerateFiles(
                 Path.Combine(dataDirectory, "Backups"),
                 "aurelia-database-pre-restore-*.db"));
@@ -202,6 +205,8 @@ public sealed class DatabaseBackupTests
             var restored = await backupService.VerifyAsync(databasePath, CancellationToken.None);
             Assert.True(restored.IsValid, restored.Message);
             Assert.Equal("wal-snapshot-marker", await ReadUsernameAsync(databasePath));
+            var recoveredHistory = await AssertHistoryResetAsync(databasePath, originalHistory);
+            Assert.NotEqual(firstRestoreHistory.Generation, recoveredHistory.Generation);
 
             var invalidBackup = Path.Combine(dataDirectory, "not-a-database.db");
             await File.WriteAllTextAsync(invalidBackup, "not sqlite");
@@ -222,6 +227,27 @@ public sealed class DatabaseBackupTests
                 Directory.Delete(dataDirectory, recursive: true);
             }
         }
+    }
+
+    private static async Task<SyncChangeService.HistoryState> ReadHistoryAsync(string databasePath)
+    {
+        await using var database = new AureliaDbContext(new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False").Options);
+        return await new SyncChangeService(database, new DatabaseChangeSignal()).HistoryAsync(CancellationToken.None);
+    }
+
+    private static async Task<SyncChangeService.HistoryState> AssertHistoryResetAsync(
+        string databasePath, SyncChangeService.HistoryState original)
+    {
+        await using var database = new AureliaDbContext(new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False").Options);
+        var changes = new SyncChangeService(database, new DatabaseChangeSignal());
+        var restored = await changes.HistoryAsync(CancellationToken.None);
+        Assert.NotEqual(original.Generation, restored.Generation);
+        var owner = await database.Users.SingleAsync();
+        Assert.True((await changes.ChangesAsync(owner.Id, true, original.HighWater, 0,
+            original.Generation, CancellationToken.None)).ResetRequired);
+        return restored;
     }
 
     private static async Task<string> ReadUsernameAsync(string databasePath)

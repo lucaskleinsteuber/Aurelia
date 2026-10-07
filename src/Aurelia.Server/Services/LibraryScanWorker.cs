@@ -18,10 +18,11 @@ public sealed partial class LibraryScanWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverAsync(stoppingToken);
+        var recovery = new StorageRecovery(logger, "library scan worker");
+        await recovery.RunAsync(() => RecoverAsync(stoppingToken), stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
-            var request = await ClaimNextAsync(stoppingToken);
+            var request = await recovery.RunAsync(() => ClaimNextAsync(stoppingToken), stoppingToken);
             if (request is null)
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -45,28 +46,34 @@ public sealed partial class LibraryScanWorker(
             }
             catch (OperationCanceledException)
             {
-                await FinishCancellationAsync(request.ScanId, stoppingToken.IsCancellationRequested);
+                await recovery.RunAsync(() => FinishCancellationAsync(request.ScanId, stoppingToken.IsCancellationRequested), stoppingToken);
             }
             catch (LibraryException exception)
             {
                 if (exception.Code == "library_unavailable")
                 {
-                    await MarkWaitingForStorageAsync(request.ScanId, request.LibraryId, exception);
+                    await recovery.RunAsync(() => MarkWaitingForStorageAsync(request.ScanId, request.LibraryId, exception), stoppingToken);
                 }
                 else
                 {
-                    await RetryOrFailAsync(request.ScanId, request.LibraryId, exception);
+                    await recovery.RunAsync(() => RetryOrFailAsync(request.ScanId, request.LibraryId, exception), stoppingToken);
                 }
             }
-            catch (Exception exception)
+            catch (Exception exception) when (StorageRecovery.IsRecoverableDatabase(exception))
+            {
+                await recovery.RunAsync(() => RetryOrFailAsync(request.ScanId, request.LibraryId, exception, storageFailure: true), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+            catch (Exception exception) when (!StorageRecovery.IsCorruptDatabase(exception))
             {
                 LogScanFailed(logger, request.ScanId, exception);
-                await RetryOrFailAsync(request.ScanId, request.LibraryId, exception);
+                await recovery.RunAsync(() => RetryOrFailAsync(request.ScanId, request.LibraryId, exception), stoppingToken);
             }
             finally
             {
                 queue.Unregister(request.ScanId);
-                await ReleaseIfTerminalAsync(request.ScanId, request.LibraryId);
+                if (!stoppingToken.IsCancellationRequested)
+                    await recovery.RunAsync(() => ReleaseIfTerminalAsync(request.ScanId, request.LibraryId), stoppingToken);
             }
         }
     }
@@ -1084,48 +1091,42 @@ public sealed partial class LibraryScanWorker(
         }
     }
 
-    private async Task RetryOrFailAsync(Guid scanId, Guid libraryId, Exception exception)
+    private async Task RetryOrFailAsync(Guid scanId, Guid libraryId, Exception exception, bool storageFailure = false)
     {
-        try
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var scan = await database.LibraryScans.SingleOrDefaultAsync(candidate => candidate.Id == scanId);
+        var library = await database.LibraryRoots.SingleOrDefaultAsync(candidate => candidate.Id == libraryId);
+        var message = exception is LibraryException libraryException
+            ? libraryException.Message
+            : "The library scan failed.";
+        if (scan is not null && scan.State is not (LibraryScanState.Completed or LibraryScanState.Cancelled or LibraryScanState.Interrupted or LibraryScanState.Failed))
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            var scan = await database.LibraryScans.SingleOrDefaultAsync(candidate => candidate.Id == scanId);
-            var library = await database.LibraryRoots.SingleOrDefaultAsync(candidate => candidate.Id == libraryId);
-            var message = exception is LibraryException libraryException
-                ? libraryException.Message
-                : "The library scan failed.";
-            if (scan is not null)
+            if (storageFailure) scan.Attempt = Math.Max(0, scan.Attempt - 1);
+            var retry = (storageFailure || scan.Attempt < 3) && !scan.CancelRequestedAt.HasValue
+                && exception is not LibraryException { Code: "import_source_changed" or "import_preview_required" or "import_preview_conflict" };
+            scan.State = retry ? LibraryScanState.Queued : LibraryScanState.Failed;
+            scan.CompletedAt = retry ? null : DateTimeOffset.UtcNow;
+            scan.Error = message;
+            scan.Phase = retry ? "Queued" : "Failed";
+            scan.LeaseExpiresAt = null;
+            scan.HeartbeatAt = DateTimeOffset.UtcNow;
+            if (retry)
             {
-                var retry = scan.Attempt < 3 && !scan.CancelRequestedAt.HasValue
-                    && exception is not LibraryException { Code: "import_source_changed" or "import_preview_required" or "import_preview_conflict" };
-                scan.State = retry ? LibraryScanState.Queued : LibraryScanState.Failed;
-                scan.CompletedAt = retry ? null : DateTimeOffset.UtcNow;
-                scan.Error = message;
-                scan.Phase = retry ? "Queued" : "Failed";
-                scan.LeaseExpiresAt = null;
-                scan.HeartbeatAt = DateTimeOffset.UtcNow;
-                if (retry)
-                {
-                    queue.Pulse();
-                }
+                queue.Pulse();
             }
-
-            if (library is not null)
-            {
-                library.Availability = exception is LibraryException { Code: "library_unavailable" }
-                    ? LibraryAvailability.Unavailable
-                    : LibraryAvailability.Error;
-                library.LastScanCompletedAt = DateTimeOffset.UtcNow;
-                library.LastError = message;
-            }
-
-            await database.SaveChangesAsync();
         }
-        catch (Exception persistenceException)
+
+        if (library is not null && !storageFailure)
         {
-            LogFailurePersistenceFailed(logger, scanId, persistenceException);
+            library.Availability = exception is LibraryException { Code: "library_unavailable" }
+                ? LibraryAvailability.Unavailable
+                : LibraryAvailability.Error;
+            library.LastScanCompletedAt = DateTimeOffset.UtcNow;
+            library.LastError = message;
         }
+
+        await database.SaveChangesAsync();
     }
 
     private async Task MarkWaitingForStorageAsync(
@@ -1133,109 +1134,77 @@ public sealed partial class LibraryScanWorker(
         Guid libraryId,
         Exception exception)
     {
-        try
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var scan = await database.LibraryScans.SingleOrDefaultAsync(value => value.Id == scanId);
+        var library = await database.LibraryRoots.SingleOrDefaultAsync(value => value.Id == libraryId);
+        if (scan is not null)
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            var scan = await database.LibraryScans.SingleOrDefaultAsync(value => value.Id == scanId);
-            var library = await database.LibraryRoots.SingleOrDefaultAsync(value => value.Id == libraryId);
-            if (scan is not null)
-            {
-                scan.State = LibraryScanState.WaitingForStorage;
-                scan.Phase = "WaitingForStorage";
-                scan.Error = exception.Message;
-                scan.LeaseExpiresAt = null;
-                scan.HeartbeatAt = DateTimeOffset.UtcNow;
-            }
-
-            if (library is not null)
-            {
-                library.Availability = LibraryAvailability.Unavailable;
-                library.LastError = exception.Message;
-                library.LastObservedAt = DateTimeOffset.UtcNow;
-            }
-
-            await database.SaveChangesAsync();
+            scan.State = LibraryScanState.WaitingForStorage;
+            scan.Phase = "WaitingForStorage";
+            scan.Error = exception.Message;
+            scan.LeaseExpiresAt = null;
+            scan.HeartbeatAt = DateTimeOffset.UtcNow;
         }
-        catch (Exception persistenceException)
+
+        if (library is not null)
         {
-            LogInterruptedPersistenceFailed(logger, scanId, persistenceException);
+            library.Availability = LibraryAvailability.Unavailable;
+            library.LastError = exception.Message;
+            library.LastObservedAt = DateTimeOffset.UtcNow;
         }
+
+        await database.SaveChangesAsync();
     }
 
     private async Task FinishCancellationAsync(Guid scanId, bool serverStopping)
     {
-        try
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var scan = await database.LibraryScans.SingleOrDefaultAsync(value => value.Id == scanId);
+        if (scan is null)
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            var scan = await database.LibraryScans.SingleOrDefaultAsync(value => value.Id == scanId);
-            if (scan is null)
-            {
-                return;
-            }
-
-            if (scan.State is LibraryScanState.Completed
-                or LibraryScanState.Failed
-                or LibraryScanState.Interrupted
-                or LibraryScanState.Cancelled)
-            {
-                return;
-            }
-
-            scan.State = serverStopping && !scan.CancelRequestedAt.HasValue
-                ? LibraryScanState.Queued
-                : LibraryScanState.Cancelled;
-            scan.Phase = scan.State == LibraryScanState.Cancelled ? "Cancelled" : "Queued";
-            scan.CompletedAt = scan.State == LibraryScanState.Cancelled
-                ? DateTimeOffset.UtcNow
-                : null;
-            scan.Error = scan.State == LibraryScanState.Cancelled ? null : "The scan will resume after restart.";
-            scan.LeaseExpiresAt = null;
-            scan.HeartbeatAt = DateTimeOffset.UtcNow;
-            await database.SaveChangesAsync();
+            return;
         }
-        catch (Exception exception)
+
+        if (scan.State is LibraryScanState.Completed
+            or LibraryScanState.Failed
+            or LibraryScanState.Interrupted
+            or LibraryScanState.Cancelled)
         {
-            LogInterruptedPersistenceFailed(logger, scanId, exception);
+            return;
         }
+
+        scan.State = serverStopping && !scan.CancelRequestedAt.HasValue
+            ? LibraryScanState.Queued
+            : LibraryScanState.Cancelled;
+        scan.Phase = scan.State == LibraryScanState.Cancelled ? "Cancelled" : "Queued";
+        scan.CompletedAt = scan.State == LibraryScanState.Cancelled
+            ? DateTimeOffset.UtcNow
+            : null;
+        scan.Error = scan.State == LibraryScanState.Cancelled ? null : "The scan will resume after restart.";
+        scan.LeaseExpiresAt = null;
+        scan.HeartbeatAt = DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync();
     }
 
     private async Task ReleaseIfTerminalAsync(Guid scanId, Guid libraryId)
     {
-        try
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var state = await database.LibraryScans.AsNoTracking()
+            .Where(scan => scan.Id == scanId)
+            .Select(scan => (LibraryScanState?)scan.State)
+            .SingleOrDefaultAsync();
+        if (state is not (LibraryScanState.Queued
+            or LibraryScanState.Running
+            or LibraryScanState.WaitingForStorage))
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            var state = await database.LibraryScans.AsNoTracking()
-                .Where(scan => scan.Id == scanId)
-                .Select(scan => (LibraryScanState?)scan.State)
-                .SingleOrDefaultAsync();
-            if (state is not (LibraryScanState.Queued
-                or LibraryScanState.Running
-                or LibraryScanState.WaitingForStorage))
-            {
-                queue.Release(libraryId);
-            }
-        }
-        catch (Exception exception)
-        {
-            LogInterruptedPersistenceFailed(logger, scanId, exception);
+            queue.Release(libraryId);
         }
     }
 
     [LoggerMessage(1, LogLevel.Error, "Library scan {ScanId} failed.")]
     private static partial void LogScanFailed(ILogger logger, Guid scanId, Exception exception);
 
-    [LoggerMessage(2, LogLevel.Error, "Failed to persist scan failure {ScanId}.")]
-    private static partial void LogFailurePersistenceFailed(
-        ILogger logger,
-        Guid scanId,
-        Exception exception);
-
-    [LoggerMessage(3, LogLevel.Error, "Failed to mark scan {ScanId} as interrupted.")]
-    private static partial void LogInterruptedPersistenceFailed(
-        ILogger logger,
-        Guid scanId,
-        Exception exception);
 }

@@ -15,10 +15,11 @@ public sealed partial class MetadataJobWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverAsync(stoppingToken);
+        var recovery = new StorageRecovery(logger, "metadata worker");
+        await recovery.RunAsync(() => RecoverAsync(stoppingToken), stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
-            var jobId = await ClaimNextAsync(stoppingToken);
+            var jobId = await recovery.RunAsync(() => ClaimNextAsync(stoppingToken), stoppingToken);
             if (!jobId.HasValue)
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -42,12 +43,17 @@ public sealed partial class MetadataJobWorker(
             }
             catch (OperationCanceledException)
             {
-                await FinishCancellationAsync(jobId.Value, stoppingToken.IsCancellationRequested);
+                await recovery.RunAsync(() => FinishCancellationAsync(jobId.Value, stoppingToken.IsCancellationRequested), stoppingToken);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (StorageRecovery.IsRecoverableDatabase(exception))
+            {
+                await recovery.RunAsync(() => RetryOrFailAsync(jobId.Value, "The metadata job is waiting for writable storage.", storageFailure: true), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+            catch (Exception exception) when (!StorageRecovery.IsCorruptDatabase(exception))
             {
                 LogJobFailed(logger, jobId.Value, exception.GetType().Name);
-                await RetryOrFailAsync(jobId.Value, "Metadata enrichment failed.");
+                await recovery.RunAsync(() => RetryOrFailAsync(jobId.Value, "Metadata enrichment failed."), stoppingToken);
             }
             finally
             {
@@ -225,85 +231,58 @@ public sealed partial class MetadataJobWorker(
         review.UpdatedAt = now;
     }
 
-    private async Task FinishAsync(Guid id, MetadataJobState state, string error)
+    private async Task RetryOrFailAsync(Guid id, string error, bool storageFailure = false)
     {
-        try
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id);
+        if (job is null || job.State is MetadataJobState.Completed or MetadataJobState.Cancelled or MetadataJobState.Interrupted or MetadataJobState.Failed)
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id);
-            if (job is null) return;
-            job.State = state; job.Error = error; job.CompletedAt = DateTimeOffset.UtcNow;
-            await database.SaveChangesAsync();
+            return;
         }
-        catch (Exception exception) { LogStateFailed(logger, id, exception.GetType().Name); }
-    }
 
-    private async Task RetryOrFailAsync(Guid id, string error)
-    {
-        try
+        if (storageFailure) job.Attempt = Math.Max(0, job.Attempt - 1);
+        job.State = storageFailure || job.Attempt < 3 ? MetadataJobState.Queued : MetadataJobState.Failed;
+        job.Error = error;
+        job.CompletedAt = job.State == MetadataJobState.Failed ? DateTimeOffset.UtcNow : null;
+        job.LeaseExpiresAt = null;
+        job.HeartbeatAt = null;
+        await database.SaveChangesAsync();
+        if (job.State == MetadataJobState.Queued)
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id);
-            if (job is null)
-            {
-                return;
-            }
-
-            job.State = job.Attempt < 3 ? MetadataJobState.Queued : MetadataJobState.Failed;
-            job.Error = error;
-            job.CompletedAt = job.State == MetadataJobState.Failed ? DateTimeOffset.UtcNow : null;
-            job.LeaseExpiresAt = null;
-            job.HeartbeatAt = null;
-            await database.SaveChangesAsync();
-            if (job.State == MetadataJobState.Queued)
-            {
-                scheduler.Pulse();
-            }
-        }
-        catch (Exception exception)
-        {
-            LogStateFailed(logger, id, exception.GetType().Name);
+            scheduler.Pulse();
         }
     }
 
     private async Task FinishCancellationAsync(Guid id, bool serverStopping)
     {
-        try
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id);
+        if (job is null)
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-            var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id);
-            if (job is null)
-            {
-                return;
-            }
-
-            if (job.State is MetadataJobState.Completed
-                or MetadataJobState.Failed
-                or MetadataJobState.Interrupted
-                or MetadataJobState.Cancelled)
-            {
-                return;
-            }
-
-            job.State = serverStopping && !job.CancelRequestedAt.HasValue
-                ? MetadataJobState.Queued
-                : MetadataJobState.Cancelled;
-            job.CompletedAt = job.State == MetadataJobState.Cancelled ? DateTimeOffset.UtcNow : null;
-            job.Error = job.State == MetadataJobState.Cancelled ? "The metadata job was cancelled." : null;
-            job.LeaseExpiresAt = null;
-            job.HeartbeatAt = null;
-            await database.SaveChangesAsync();
-            if (job.State == MetadataJobState.Queued)
-            {
-                scheduler.Pulse();
-            }
+            return;
         }
-        catch (Exception exception)
+
+        if (job.State is MetadataJobState.Completed
+            or MetadataJobState.Failed
+            or MetadataJobState.Interrupted
+            or MetadataJobState.Cancelled)
         {
-            LogStateFailed(logger, id, exception.GetType().Name);
+            return;
+        }
+
+        job.State = serverStopping && !job.CancelRequestedAt.HasValue
+            ? MetadataJobState.Queued
+            : MetadataJobState.Cancelled;
+        job.CompletedAt = job.State == MetadataJobState.Cancelled ? DateTimeOffset.UtcNow : null;
+        job.Error = job.State == MetadataJobState.Cancelled ? "The metadata job was cancelled." : null;
+        job.LeaseExpiresAt = null;
+        job.HeartbeatAt = null;
+        await database.SaveChangesAsync();
+        if (job.State == MetadataJobState.Queued)
+        {
+            scheduler.Pulse();
         }
     }
 
@@ -317,6 +296,4 @@ public sealed partial class MetadataJobWorker(
 
     [LoggerMessage(LogLevel.Error, "Metadata job {JobId} failed with {ErrorType}.")]
     private static partial void LogJobFailed(ILogger logger, Guid jobId, string errorType);
-    [LoggerMessage(LogLevel.Error, "Metadata job {JobId} state update failed with {ErrorType}.")]
-    private static partial void LogStateFailed(ILogger logger, Guid jobId, string errorType);
 }

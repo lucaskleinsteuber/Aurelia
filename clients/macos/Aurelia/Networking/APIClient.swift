@@ -7,6 +7,30 @@ enum APIClientError: LocalizedError, Equatable {
   case invalidResponse
   case serverIdentityMismatch
   case serverRejected(code: String, message: String)
+  case httpFailure(status: Int, retryAfter: TimeInterval?, code: String?, message: String?)
+
+  var httpStatus: Int? {
+    if case .httpFailure(let status, _, _, _) = self { return status }
+    return nil
+  }
+
+  var retryDelay: TimeInterval? {
+    if case .httpFailure(_, let delay, _, _) = self { return delay }
+    return nil
+  }
+
+  var isAuthenticationFailure: Bool { httpStatus == 401 || httpStatus == 403 }
+  var isRetryableTransient: Bool {
+    guard let status = httpStatus else { return self == .invalidResponse }
+    return status == 408 || status == 429 || status >= 500
+  }
+
+  var problemCode: String? {
+    switch self {
+    case .serverRejected(let code, _), .httpFailure(_, _, let code?, _): code
+    default: nil
+    }
+  }
 
   var errorDescription: String? {
     switch self {
@@ -20,6 +44,11 @@ enum APIClientError: LocalizedError, Equatable {
       "The server identity does not match the paired server."
     case .serverRejected(_, let message):
       message
+    case .httpFailure(let status, _, _, let message):
+      message
+        ?? (status == 401
+          ? "The device session has expired or was revoked. Sign in again."
+          : "The server request failed (HTTP \(status)).")
     }
   }
 }
@@ -428,11 +457,13 @@ struct APIClient: Sendable {
       path: "/api/v1/metadata/jobs/\(id.uuidString.lowercased())", method: "DELETE")
   }
 
-  func syncChanges(after cursor: Int64, waitSeconds: Int) async throws
+  func syncChanges(after cursor: Int64, waitSeconds: Int, generation: String? = nil) async throws
     -> SyncChangesResponse
   {
+    let generationQuery =
+      try generation.map { "&" + (try Self.query(name: "generation", value: $0)) } ?? ""
     let data = try await perform(
-      path: "/api/v1/sync/changes?after=\(cursor)&waitSeconds=\(waitSeconds)",
+      path: "/api/v1/sync/changes?after=\(cursor)&waitSeconds=\(waitSeconds)\(generationQuery)",
       method: "GET",
       timeout: TimeInterval(max(waitSeconds + 5, 15)))
     return try Self.decode(SyncChangesResponse.self, from: data)
@@ -729,20 +760,65 @@ struct APIClient: Sendable {
     _ = try await perform(path: "/api/v1/auth/logout", method: "POST")
   }
 
-  private func allPages<Item: Decodable & Sendable>(
+  private func allPages<Item: Decodable & Sendable & Identifiable>(
     path: String,
     query: String? = nil
-  ) async throws -> [Item] {
-    var collected: [Item] = []
-    while true {
+  ) async throws -> [Item] where Item.ID == UUID {
+    try await Self.loadPages { offset, revision in
       let prefix = query.map { "\($0)&" } ?? ""
-      let page: PagedResponse<Item> = try await get(
-        "\(path)?\(prefix)offset=\(collected.count)&limit=100")
-      collected.append(contentsOf: page.items)
-      if collected.count >= page.total || page.items.isEmpty {
-        return collected
+      let revisionQuery =
+        try revision.map { "&" + (try Self.query(name: "revision", value: $0)) } ?? ""
+      return try await get("\(path)?\(prefix)offset=\(offset)&limit=100\(revisionQuery)")
+    }
+  }
+
+  static func loadPages<Item: Decodable & Sendable & Identifiable>(
+    fetch: (Int, String?) async throws -> PagedResponse<Item>
+  ) async throws -> [Item] where Item.ID == UUID {
+    for attempt in 0...2 {
+      var collected: [Item] = []
+      var identities = Set<UUID>()
+      var offset = 0
+      var revision: String?
+      var total: Int?
+      do {
+        while true {
+          try Task.checkCancellation()
+          let page = try await fetch(offset, revision)
+          guard page.offset == offset, page.limit > 0, page.total >= 0,
+            page.items.count <= page.limit
+          else { throw APIClientError.invalidResponse }
+          if offset == 0 {
+            revision = page.revision
+            total = page.total
+          }
+          guard page.revision == revision, page.total == total else {
+            throw APIClientError.serverRejected(
+              code: "catalog_changed", message: "The library changed while loading. Try again.")
+          }
+          for item in page.items where identities.insert(item.id).inserted {
+            collected.append(item)
+          }
+          offset += page.items.count
+          if offset >= page.total {
+            guard collected.count == page.total else {
+              throw APIClientError.serverRejected(
+                code: "catalog_changed", message: "The library changed while loading. Try again.")
+            }
+            return collected
+          }
+          guard !page.items.isEmpty else { throw APIClientError.invalidResponse }
+        }
+      } catch let error as APIClientError
+        where error.problemCode == "catalog_changed" && attempt < 2
+      {
+        continue
       }
     }
+    throw APIClientError.serverRejected(
+      code: "catalog_changed",
+      message: "The library kept changing while loading. Try again after the current scan finishes."
+    )
   }
 
   private func get<Value: Decodable>(_ path: String) async throws -> Value {
@@ -1078,17 +1154,38 @@ struct APIClient: Sendable {
         forHTTPHeaderField: "Content-Type")
     }
 
-    let (data, response) = try await session.data(for: request)
+    let result: (Data, URLResponse)
+    do { result = try await session.data(for: request) } catch {
+      if delegate.didRejectTrust { throw APIClientError.serverIdentityMismatch }
+      throw error
+    }
+    let (data, response) = result
     guard let http = response as? HTTPURLResponse else {
       throw APIClientError.invalidResponse
     }
     guard (200..<300).contains(http.statusCode) else {
-      if let problem = try? JSONDecoder().decode(APIProblem.self, from: data) {
-        throw APIClientError.serverRejected(code: problem.code, message: problem.message)
-      }
-      throw APIClientError.invalidResponse
+      throw Self.responseError(
+        status: http.statusCode, retryAfter: http.value(forHTTPHeaderField: "Retry-After"),
+        data: data)
     }
     return (data, http, delegate)
+  }
+
+  static func responseError(status: Int, retryAfter: String?, data: Data, now: Date = Date())
+    -> APIClientError
+  {
+    let problem = try? JSONDecoder().decode(APIProblem.self, from: data)
+    var delay = retryAfter.flatMap(TimeInterval.init)
+    if delay == nil, let retryAfter {
+      let formatter = DateFormatter()
+      formatter.locale = Locale(identifier: "en_US_POSIX")
+      formatter.timeZone = TimeZone(secondsFromGMT: 0)
+      formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+      delay = formatter.date(from: retryAfter)?.timeIntervalSince(now)
+    }
+    let bounded = delay.flatMap { $0.isFinite ? min(max($0, 0), 300) : nil }
+    return .httpFailure(
+      status: status, retryAfter: bounded, code: problem?.code, message: problem?.message)
   }
 
   private static func decode<Value: Decodable>(_ type: Value.Type, from data: Data) throws -> Value

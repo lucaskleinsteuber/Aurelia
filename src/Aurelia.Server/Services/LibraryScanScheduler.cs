@@ -16,7 +16,7 @@ public sealed class LibraryScanScheduler(ServerConfigurationStore configuration)
         });
     private readonly Lock gate = new();
     private readonly HashSet<Guid> reservedLibraries = [];
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> active = new();
+    private readonly ConcurrentDictionary<Guid, JobCancellationRegistration> active = new();
 
     public bool TryReserve(Guid libraryId)
     {
@@ -52,7 +52,7 @@ public sealed class LibraryScanScheduler(ServerConfigurationStore configuration)
 
     public CancellationToken Register(Guid scanId, CancellationToken stoppingToken)
     {
-        var source = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var source = new JobCancellationRegistration(stoppingToken);
         if (!active.TryAdd(scanId, source))
         {
             source.Dispose();

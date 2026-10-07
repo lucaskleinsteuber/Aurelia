@@ -421,6 +421,126 @@ public sealed class PlaybackStreamingTests
         }
     }
 
+    [Theory]
+    [InlineData(MediaAvailability.Missing, LibraryAvailability.Available)]
+    [InlineData(MediaAvailability.Available, LibraryAvailability.Unavailable)]
+    [InlineData(MediaAvailability.Missing, LibraryAvailability.Unavailable)]
+    public async Task ReconnectedFileCanPlayBeforeCatalogAvailabilityRefresh(
+        MediaAvailability mediaAvailability,
+        LibraryAvailability libraryAvailability)
+    {
+        var root = CreateDirectory("Reconnected Storage");
+        var path = Path.Combine(root, "Recovered.mkv");
+        await File.WriteAllBytesAsync(path, [1, 2, 3, 4]);
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var id = await AddMediaAsync(factory, root, path,
+                availability: mediaAvailability, libraryAvailability: libraryAvailability);
+            var playback = await CreatePlaybackAsync(client, owner.Token, id);
+            await AssertRangeAsync(client, playback.StreamPath, [1, 2, 3, 4], 1, 2, owner.Token);
+
+            using var scope = factory.Services.CreateScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var stored = await database.MediaItems.Include(item => item.LibraryRoot).SingleAsync(item => item.Id == id);
+            Assert.Equal(mediaAvailability, stored.Availability);
+            Assert.Equal(libraryAvailability, stored.LibraryRoot.Availability);
+            Assert.False(await database.LibraryScans.AnyAsync());
+        }
+        finally { DeleteDirectory(root); }
+    }
+
+    [Fact]
+    public async Task MissingStorageHasTypedFailureAndExistingTicketRecoversWithoutScan()
+    {
+        var root = CreateDirectory("Temporarily Missing Storage");
+        var path = Path.Combine(root, "Episode.mkv");
+        byte[] content = [10, 20, 30, 40];
+        await File.WriteAllBytesAsync(path, content);
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var id = await AddMediaAsync(factory, root, path);
+            var playback = await CreatePlaybackAsync(client, owner.Token, id);
+            await CreateUserAsync(client, owner.Token);
+            var viewer = await LoginAsync(client);
+
+            // Synthetic disappearance models an unmounted volume, not a scan.
+            Directory.Delete(root, recursive: true);
+            using (var unavailable = await ApiTestClient.SendAsync(client,
+                       ApiTestClient.Authorized(HttpMethod.Get, playback.StreamPath, owner.Token)))
+            {
+                await AssertProblemAsync(unavailable, HttpStatusCode.ServiceUnavailable, "media_unavailable");
+                Assert.Equal(TimeSpan.FromSeconds(2), unavailable.Headers.RetryAfter?.Delta);
+            }
+            using (var foreign = await ApiTestClient.SendAsync(client,
+                       ApiTestClient.Authorized(HttpMethod.Get, playback.StreamPath, viewer.Token)))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+            }
+            await AssertPlaybackProblemAsync(client, owner.Token, id, "media_unavailable", HttpStatusCode.ServiceUnavailable);
+
+            Directory.CreateDirectory(root);
+            await File.WriteAllBytesAsync(path, content);
+            await AssertRangeAsync(client, playback.StreamPath, content, 1, 3, owner.Token);
+            var restarted = await CreatePlaybackAsync(client, owner.Token, id);
+            Assert.Equal(id, restarted.MediaId);
+            using var scope = factory.Services.CreateScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            Assert.Equal(1, await database.MediaItems.CountAsync());
+            Assert.False(await database.LibraryScans.AnyAsync());
+        }
+        finally { DeleteDirectory(root); }
+    }
+
+    [Fact]
+    public async Task RecoveryDoesNotBypassRemovedLibraryGrantOrUnsafeFileReplacement()
+    {
+        var root = CreateDirectory("Authorized Storage Recovery");
+        var path = Path.Combine(root, "Episode.mkv");
+        var replacement = Path.Combine(root, "Replacement.mkv");
+        await File.WriteAllBytesAsync(path, [1, 2, 3]);
+        await File.WriteAllBytesAsync(replacement, [4, 5, 6]);
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var id = await AddMediaAsync(factory, root, path);
+            var ownerPlayback = await CreatePlaybackAsync(client, owner.Token, id);
+            await CreateUserAsync(client, owner.Token);
+            var viewer = await LoginAsync(client);
+            var viewerPlayback = await CreatePlaybackAsync(client, viewer.Token, id);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                await database.UserLibraryGrants.Where(grant => grant.UserId == viewer.User.Id).ExecuteDeleteAsync();
+            }
+            using (var denied = await ApiTestClient.SendAsync(client,
+                       ApiTestClient.Authorized(HttpMethod.Get, viewerPlayback.StreamPath, viewer.Token)))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+            }
+            using (var denied = await ApiTestClient.SendAsync(client,
+                       ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/media/{id}/playback", viewer.Token)))
+            {
+                await AssertProblemAsync(denied, HttpStatusCode.NotFound, "media_not_found");
+            }
+
+            File.Delete(path);
+            File.CreateSymbolicLink(path, replacement);
+            using var unsafeResponse = await ApiTestClient.SendAsync(client,
+                ApiTestClient.Authorized(HttpMethod.Get, ownerPlayback.StreamPath, owner.Token));
+            await AssertProblemAsync(unsafeResponse, HttpStatusCode.Conflict, "media_file_unavailable");
+            Assert.Null(unsafeResponse.Headers.RetryAfter);
+        }
+        finally { DeleteDirectory(root); }
+    }
+
     [Fact]
     public async Task UnsafeOrUnavailableMediaCannotCreatePlayback()
     {
@@ -458,7 +578,7 @@ public sealed class PlaybackStreamingTests
                 missingRoot,
                 missingPath,
                 availability: MediaAvailability.Missing);
-            await AssertPlaybackProblemAsync(client, owner.Token, missingId, "media_unavailable");
+            await AssertPlaybackProblemAsync(client, owner.Token, missingId, "media_unavailable", HttpStatusCode.ServiceUnavailable);
 
             var offlineRoot = Path.Combine(root, "Offline Library");
             Directory.CreateDirectory(offlineRoot);
@@ -469,7 +589,9 @@ public sealed class PlaybackStreamingTests
                 offlineRoot,
                 offlinePath,
                 libraryAvailability: LibraryAvailability.Unavailable);
-            await AssertPlaybackProblemAsync(client, owner.Token, offlineId, "media_unavailable");
+            // Monitoring may still say unavailable after a drive reconnects.
+            // A fresh secure file open takes precedence for playback only.
+            _ = await CreatePlaybackAsync(client, owner.Token, offlineId);
 
             var outsideRoot = CreateDirectory("Outside Library");
             try
@@ -523,7 +645,7 @@ public sealed class PlaybackStreamingTests
             File.Delete(deletedPath);
             using var deletedResponse = await ApiTestClient.SendAsync(client,
                 ApiTestClient.Authorized(HttpMethod.Get, deletedPlayback.StreamPath, owner.Token));
-            Assert.Equal(HttpStatusCode.NotFound, deletedResponse.StatusCode);
+            await AssertProblemAsync(deletedResponse, HttpStatusCode.ServiceUnavailable, "media_unavailable");
         }
         finally
         {
@@ -779,14 +901,15 @@ public sealed class PlaybackStreamingTests
         HttpClient client,
         string token,
         Guid mediaId,
-        string code)
+        string code,
+        HttpStatusCode status = HttpStatusCode.Conflict)
     {
         using var request = ApiTestClient.Authorized(
             HttpMethod.Post,
             $"/api/v1/media/{mediaId}/playback",
             token);
         using var response = await ApiTestClient.SendAsync(client, request);
-        await AssertProblemAsync(response, HttpStatusCode.Conflict, code);
+        await AssertProblemAsync(response, status, code);
     }
 
     private static async Task AssertProblemAsync(

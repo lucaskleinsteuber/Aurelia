@@ -71,9 +71,17 @@ public static class MediaFileAccess
         {
             var file = new FileInfo(fullSourcePath);
             file.Refresh();
-            if (!file.Exists
-                || file.LinkTarget is not null
-                || (file.Attributes & (FileAttributes.Directory
+            if (file.LinkTarget is not null)
+            {
+                throw Unavailable();
+            }
+
+            if (!file.Exists)
+            {
+                throw StorageUnavailable();
+            }
+
+            if ((file.Attributes & (FileAttributes.Directory
                                        | FileAttributes.Hidden
                                        | FileAttributes.ReparsePoint)) != 0)
             {
@@ -84,9 +92,14 @@ public static class MediaFileAccess
             try
             {
                 file.Refresh();
-                if (!file.Exists || file.LinkTarget is not null)
+                if (file.LinkTarget is not null)
                 {
                     throw Unavailable();
+                }
+
+                if (!file.Exists)
+                {
+                    throw StorageUnavailable();
                 }
 
                 return new OpenMediaFile(
@@ -105,8 +118,15 @@ public static class MediaFileAccess
         {
             throw;
         }
-        catch (Exception exception) when (exception is IOException
-                                           or UnauthorizedAccessException
+        catch (PinnedMediaHandle.UnsafeHandleException)
+        {
+            throw Unavailable();
+        }
+        catch (IOException)
+        {
+            throw StorageUnavailable();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException
                                            or NotSupportedException)
         {
             throw Unavailable();
@@ -128,9 +148,17 @@ public static class MediaFileAccess
         try
         {
             var library = new DirectoryInfo(currentPath);
-            if (!library.Exists
-                || library.LinkTarget is not null
-                || (library.Attributes & FileAttributes.ReparsePoint) != 0)
+            if (library.LinkTarget is not null)
+            {
+                throw Unavailable();
+            }
+
+            if (!library.Exists)
+            {
+                throw StorageUnavailable();
+            }
+
+            if ((library.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 throw Unavailable();
             }
@@ -145,9 +173,17 @@ public static class MediaFileAccess
 
                 currentPath = Path.Combine(currentPath, component);
                 var directory = new DirectoryInfo(currentPath);
-                if (!directory.Exists
-                    || directory.LinkTarget is not null
-                    || (directory.Attributes & (FileAttributes.Hidden | FileAttributes.ReparsePoint)) != 0)
+                if (directory.LinkTarget is not null)
+                {
+                    throw Unavailable();
+                }
+
+                if (!directory.Exists)
+                {
+                    throw StorageUnavailable();
+                }
+
+                if ((directory.Attributes & (FileAttributes.Hidden | FileAttributes.ReparsePoint)) != 0)
                 {
                     throw Unavailable();
                 }
@@ -162,8 +198,11 @@ public static class MediaFileAccess
         {
             throw;
         }
-        catch (Exception exception) when (exception is IOException
-                                           or UnauthorizedAccessException
+        catch (IOException)
+        {
+            throw StorageUnavailable();
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException
                                            or NotSupportedException)
         {
             throw Unavailable();
@@ -176,5 +215,13 @@ public static class MediaFileAccess
             "media_file_unavailable",
             "The media file is not currently available for playback.",
             StatusCodes.Status409Conflict);
+    }
+
+    private static PlaybackException StorageUnavailable()
+    {
+        return new PlaybackException(
+            "media_unavailable",
+            "The media storage is not currently available. Reconnect the drive and try again.",
+            StatusCodes.Status503ServiceUnavailable);
     }
 }

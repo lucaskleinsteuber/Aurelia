@@ -13,6 +13,7 @@ public static class EncryptedBackupContainer
     private static readonly byte[] Magic = "AURBK001"u8.ToArray();
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public const long MaximumBytes = 4L * 1024 * 1024 * 1024;
+    public const int MaximumEntries = 50_000;
     private const int ChunkBytes = 1024 * 1024;
     private const int Iterations = 600_000;
     // Only the database can be large. Configuration, certificates and keys are
@@ -153,7 +154,7 @@ public static class EncryptedBackupContainer
     {
         if (value.Version is not 1 and not 2 || value.ChunkBytes != ChunkBytes || value.Iterations != Iterations
             || value.ServerId == Guid.Empty || value.IncludesMedia || value.Version == 1 && value.IncludesArtwork
-            || value.Files is null || value.Files.Count < 1 || value.Files.Count > (value.Version == 1 ? 256 : 50_000) || value.Files.Any(file => file is null)
+            || value.Files is null || value.Files.Count < 1 || value.Files.Count > (value.Version == 1 ? 256 : MaximumEntries) || value.Files.Any(file => file is null)
             || !value.Files.Any(file => file.Name == "aurelia.db")
             || value.Files.Select(file => file.Name).Distinct(StringComparer.Ordinal).Count() != value.Files.Count
             || value.Files.Any(file => !AllowedName(file.Name) || file.Length < 0 || file.Length > MaximumEntryBytes(file.Name) || file.Sha256 is null || file.Sha256.Length != 64 || !file.Sha256.All(char.IsAsciiHexDigit))

@@ -44,6 +44,7 @@ passwords and device tokens must not appear in arguments or logs. See
 ```sh
 scripts/prepare-vlckit.sh
 scripts/verify-build-number.sh
+sh scripts/verify-product-names.sh
 scripts/test-macos.sh
 ```
 
@@ -76,6 +77,9 @@ separately from cross-compilation. Autostart requires free loopback ports; quit
 the installed app cleanly first. Never stop unknown processes to make tests pass.
 
 ## Releases
+
+See [client protocol guidance](docs/CLIENT_PROTOCOL.md) before adding a client,
+and [real-socket verification](docs/TRANSPORT_TESTING.md) for transport checks.
 
 See [the release checklist](docs/RELEASING.md). Development signatures are not
 public GitHub downloads. Test before incrementing the build number, then verify

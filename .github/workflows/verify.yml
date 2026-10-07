@@ -26,8 +26,11 @@ jobs:
       - name: Verify version, formatting, build, and tests
         run: |
           scripts/verify-build-number.sh
+          sh scripts/verify-product-names.sh
           dotnet tool restore
           dotnet restore Aurelia.slnx
           dotnet format Aurelia.slnx --verify-no-changes --no-restore
           dotnet build Aurelia.slnx --configuration Release --no-restore
           dotnet test Aurelia.slnx --configuration Release --no-build
+      - name: Verify real-socket TLS, sessions, and Direct Play transport
+        run: sh scripts/test-server-transport.sh 30 2

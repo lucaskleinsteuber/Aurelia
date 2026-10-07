@@ -13,7 +13,8 @@ public sealed class DeviceTokenAuthenticationHandler(
     ILoggerFactory logger,
     UrlEncoder encoder,
     AureliaDbContext database,
-    TokenService tokenService)
+    TokenService tokenService,
+    SessionActivityRecorder activity)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "AureliaDeviceToken";
@@ -52,11 +53,7 @@ public sealed class DeviceTokenAuthenticationHandler(
 
         if (session.LastSeenAt <= now.AddMinutes(-1))
         {
-            var cutoff = now.AddMinutes(-1);
-            await database.DeviceSessions.Where(candidate => candidate.Id == session.Id
-                    && candidate.LastSeenAt <= cutoff && candidate.RevokedAt == null)
-                .ExecuteUpdateAsync(update => update.SetProperty(candidate => candidate.LastSeenAt, now),
-                    Context.RequestAborted);
+            await activity.RecordAsync(database, session.Id, now, Context.RequestAborted);
         }
 
         var claims = new[]

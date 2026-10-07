@@ -101,34 +101,83 @@ protocol PlaybackEngine: AnyObject {
 
 @MainActor
 final class VLCPlaybackEngine: PlaybackEngine {
+  static let defaultPlayerOptions = [
+    "--no-video-title-show",
+    "--network-caching=1000",
+    "--no-metadata-network-access",
+    // VLCKit's macOS defaults pause at EOF, suppressing the completion
+    // event that drives progress completion and the next episode.
+    "--no-play-and-pause",
+  ]
+
   var onUpdate: (() -> Void)?
   var onEnded: (() -> Void)?
   var onError: ((String) -> Void)?
 
-  private let player: VLCMediaPlayer
+  private var player: VLCMediaPlayer
+  private let playerFactory: @MainActor () -> VLCMediaPlayer
+  private weak var attachedVideoView: NSView?
   private var timeObserver: NSObjectProtocol?
   private var stateObserver: NSObjectProtocol?
   private var appliedTrackPreferences = false
+  private var playbackGeneration: UInt64 = 0
+  private var acceptsPlayerEvents = false
+  private var deliveredTerminalEvent = false
+  private var lastKnownTimeMilliseconds: Int64 = 0
+  private var lastKnownDurationMilliseconds: Int64 = 0
+  private var requestedVolume: Double = 1
+  private var requestedMuted = false
+  private var requestedRate: Double = 1
 
-  init() {
-    player = VLCMediaPlayer(options: [
-      "--no-video-title-show",
-      "--network-caching=1000",
-      "--no-metadata-network-access",
-    ])
+  init(
+    playerFactory: @escaping @MainActor () -> VLCMediaPlayer = {
+      VLCMediaPlayer(options: VLCPlaybackEngine.defaultPlayerOptions)
+    }
+  ) {
+    self.playerFactory = playerFactory
+    player = playerFactory()
+  }
+
+  private func observeCurrentPlayer() {
+    let generation = playbackGeneration
     timeObserver = NotificationCenter.default.addObserver(
       forName: Notification.Name(rawValue: VLCMediaPlayerTimeChanged),
       object: player,
       queue: .main
     ) { [weak self] _ in
-      Task { @MainActor [weak self] in self?.update() }
+      MainActor.assumeIsolated {
+        guard let self, self.acceptsPlayerEvents, self.playbackGeneration == generation else {
+          return
+        }
+        self.captureProgress()
+        Task { @MainActor [weak self] in
+          guard let self, self.acceptsPlayerEvents, self.playbackGeneration == generation else {
+            return
+          }
+          self.update()
+        }
+      }
     }
     stateObserver = NotificationCenter.default.addObserver(
       forName: Notification.Name(rawValue: VLCMediaPlayerStateChanged),
       object: player,
       queue: .main
     ) { [weak self] _ in
-      Task { @MainActor [weak self] in self?.stateChanged() }
+      MainActor.assumeIsolated {
+        guard let self, self.acceptsPlayerEvents, self.playbackGeneration == generation else {
+          return
+        }
+        // Snapshot before yielding: a following stopped event may replace
+        // VLC's cached ended state before this MainActor task gets a turn.
+        let state = self.player.state
+        self.captureProgress()
+        Task { @MainActor [weak self] in
+          guard let self, self.acceptsPlayerEvents, self.playbackGeneration == generation else {
+            return
+          }
+          self.stateChanged(state)
+        }
+      }
     }
   }
 
@@ -140,26 +189,37 @@ final class VLCPlaybackEngine: PlaybackEngine {
   var isPlaying: Bool { player.isPlaying }
 
   var currentTimeMilliseconds: Int64 {
-    max(0, player.time.value?.int64Value ?? 0)
+    captureProgress()
+    return lastKnownTimeMilliseconds
   }
 
   var durationMilliseconds: Int64 {
-    max(0, player.media?.length.value?.int64Value ?? 0)
+    captureProgress()
+    return lastKnownDurationMilliseconds
   }
 
   var volume: Double {
-    get { Double(player.audio?.volume ?? 100) / 100 }
-    set { player.audio?.volume = Int32((min(max(newValue, 0), 1) * 100).rounded()) }
+    get { requestedVolume }
+    set {
+      requestedVolume = min(max(newValue, 0), 1)
+      player.audio?.volume = Int32((requestedVolume * 100).rounded())
+    }
   }
 
   var isMuted: Bool {
-    get { player.audio?.isMuted ?? false }
-    set { player.audio?.isMuted = newValue }
+    get { requestedMuted }
+    set {
+      requestedMuted = newValue
+      player.audio?.isMuted = newValue
+    }
   }
 
   var playbackRate: Double {
-    get { Double(player.rate) }
-    set { player.rate = Float(newValue) }
+    get { requestedRate }
+    set {
+      requestedRate = newValue
+      player.rate = Float(newValue)
+    }
   }
 
   var audioTracks: [PlaybackTrack] {
@@ -205,17 +265,32 @@ final class VLCPlaybackEngine: PlaybackEngine {
   func attach(to view: NSView) {
     view.wantsLayer = true
     view.layer?.backgroundColor = NSColor.black.cgColor
+    attachedVideoView = view
     player.drawable = view
   }
 
   func load(url: URL) {
+    retireCurrentPlayer()
+    // A separate player prevents delayed terminal events from a previous input
+    // from being interpreted as the end of a retry or the next episode.
+    player = playerFactory()
+    player.drawable = attachedVideoView
     appliedTrackPreferences = false
+    deliveredTerminalEvent = false
+    lastKnownTimeMilliseconds = 0
+    lastKnownDurationMilliseconds = 0
+    acceptsPlayerEvents = true
+    observeCurrentPlayer()
     let media = VLCMedia(url: url)
     media.addOption(":http-reconnect")
     player.media = media
+    volume = requestedVolume
+    isMuted = requestedMuted
+    playbackRate = requestedRate
   }
 
   func play() {
+    guard player.media != nil else { return }
     player.play()
   }
 
@@ -224,6 +299,17 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   func stop() {
+    captureProgress()
+    retireCurrentPlayer()
+  }
+
+  private func retireCurrentPlayer() {
+    acceptsPlayerEvents = false
+    playbackGeneration &+= 1
+    if let timeObserver { NotificationCenter.default.removeObserver(timeObserver) }
+    if let stateObserver { NotificationCenter.default.removeObserver(stateObserver) }
+    timeObserver = nil
+    stateObserver = nil
     player.stop()
     player.drawable = nil
     player.media = nil
@@ -254,13 +340,18 @@ final class VLCPlaybackEngine: PlaybackEngine {
     onUpdate?()
   }
 
-  private func stateChanged() {
-    applyTrackPreferencesIfNeeded()
+  private func stateChanged(_ state: VLCMediaPlayerState) {
+    let generation = playbackGeneration
     update()
-    switch player.state {
+    guard acceptsPlayerEvents, generation == playbackGeneration else { return }
+    switch state {
     case .ended:
+      guard !deliveredTerminalEvent else { return }
+      deliveredTerminalEvent = true
       onEnded?()
     case .error:
+      guard !deliveredTerminalEvent else { return }
+      deliveredTerminalEvent = true
       onError?("The playback engine could not read this media stream.")
     default:
       break
@@ -268,8 +359,29 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   private func update() {
+    captureProgress()
     applyTrackPreferencesIfNeeded()
     onUpdate?()
+  }
+
+  private func captureProgress() {
+    let duration = player.media?.length.value?.int64Value ?? 0
+    if duration > 0 { lastKnownDurationMilliseconds = duration }
+    let time = player.time.value?.int64Value ?? -1
+    // VLC may reset its clock as an input closes. Preserve the last actual
+    // position so the controller can distinguish an early EOF from completion.
+    switch player.state {
+    case .ended, .error:
+      // A positive terminal clock is still useful. Do not infer position from
+      // duration: a disconnected drive can produce EOF far before the end.
+      if time > 0 { lastKnownTimeMilliseconds = max(lastKnownTimeMilliseconds, time) }
+    case .stopped:
+      return
+    default:
+      if time >= 0, time > 0 || lastKnownTimeMilliseconds == 0 || player.state != .buffering {
+        lastKnownTimeMilliseconds = time
+      }
+    }
   }
 
   private func applyTrackPreferencesIfNeeded() {

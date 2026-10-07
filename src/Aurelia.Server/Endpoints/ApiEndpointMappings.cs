@@ -499,12 +499,16 @@ public static class ApiEndpointMappings
         ExecuteNoContentAsync(() => libraries.CancelScanAsync(scanId, cancellationToken));
 
     private static Task<IResult> ListMoviesAsync(
+        HttpContext context,
         int? offset,
         int? limit,
+        string? revision,
         CatalogService catalog,
+        SyncChangeService changes,
         CancellationToken cancellationToken)
     {
-        return ExecuteAsync(() => catalog.ListMoviesAsync(offset ?? 0, limit ?? 100, cancellationToken));
+        return ExecuteAsync(() => changes.PageAsync(context.User.RequireUserId(), revision,
+            () => catalog.ListMoviesAsync(offset ?? 0, limit ?? 100, cancellationToken), cancellationToken));
     }
 
     private static Task<IResult> GetMovieAsync(
@@ -516,12 +520,16 @@ public static class ApiEndpointMappings
     }
 
     private static Task<IResult> ListSeriesAsync(
+        HttpContext context,
         int? offset,
         int? limit,
+        string? revision,
         CatalogService catalog,
+        SyncChangeService changes,
         CancellationToken cancellationToken)
     {
-        return ExecuteAsync(() => catalog.ListSeriesAsync(offset ?? 0, limit ?? 100, cancellationToken));
+        return ExecuteAsync(() => changes.PageAsync(context.User.RequireUserId(), revision,
+            () => catalog.ListSeriesAsync(offset ?? 0, limit ?? 100, cancellationToken), cancellationToken));
     }
 
     private static Task<IResult> GetSeriesAsync(
@@ -535,24 +543,24 @@ public static class ApiEndpointMappings
     private static Task<IResult> SearchCatalogAsync(
         HttpContext context, string? query, string? kind, Guid? libraryId, string? genre,
         string? availability, bool? favorite, string? watchState, int? yearFrom, int? yearTo,
-        string? sort, string? direction, int? offset, int? limit,
+        string? sort, string? direction, int? offset, int? limit, string? revision,
         PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
-        ExecuteRevisionedAsync(context, changes, () => presentation.SearchAsync(
+        ExecuteRevisionedAsync(context, changes, () => changes.PageAsync(context.User.RequireUserId(), revision, () => presentation.SearchAsync(
             context.User.RequireUserId(), query ?? string.Empty,
             ParseCatalogQuery(kind, libraryId, genre, availability, favorite, watchState,
                 yearFrom, yearTo, sort, direction, offset, limit),
-            cancellationToken));
+            cancellationToken), cancellationToken));
 
     private static Task<IResult> ListCatalogItemsAsync(
         HttpContext context, string? kind, Guid? libraryId, string? genre,
         string? availability, bool? favorite, string? watchState, int? yearFrom, int? yearTo,
-        string? sort, string? direction, int? offset, int? limit,
+        string? sort, string? direction, int? offset, int? limit, string? revision,
         PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
-        ExecuteRevisionedAsync(context, changes, () => presentation.CatalogAsync(
+        ExecuteRevisionedAsync(context, changes, () => changes.PageAsync(context.User.RequireUserId(), revision, () => presentation.CatalogAsync(
             context.User.RequireUserId(),
             ParseCatalogQuery(kind, libraryId, genre, availability, favorite, watchState,
                 yearFrom, yearTo, sort, direction, offset, limit),
-            cancellationToken));
+            cancellationToken), cancellationToken));
 
     private static Task<IResult> GetCatalogDetailAsync(HttpContext context, Guid mediaId, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
         ExecuteRevisionedAsync(context, changes, () => presentation.DetailAsync(context.User.RequireUserId(), mediaId, cancellationToken));
@@ -623,6 +631,7 @@ public static class ApiEndpointMappings
         HttpContext context,
         long? after,
         int? waitSeconds,
+        string? generation,
         SyncChangeService changes,
         CancellationToken cancellationToken) =>
         ExecuteAsync(() => changes.ChangesAsync(
@@ -630,6 +639,7 @@ public static class ApiEndpointMappings
             context.User.IsInRole(UserRole.Owner.ToString()) || context.User.IsInRole(UserRole.Admin.ToString()),
             after ?? 0,
             waitSeconds ?? 0,
+            generation,
             cancellationToken));
 
     private static Task<IResult> ListMetadataReviewsAsync(MetadataService metadata, CancellationToken cancellationToken) =>
@@ -775,11 +785,21 @@ public static class ApiEndpointMappings
         CancellationToken cancellationToken)
     {
         using var mutationLease = await mutations.EnterAsync(cancellationToken);
-        var source = await playback.OpenStreamAsync(
-            ticket,
-            context.User.RequireUserId(),
-            context.User.RequireSessionId(),
-            cancellationToken);
+        PlaybackStreamSource? source;
+        try
+        {
+            source = await playback.OpenStreamAsync(
+                ticket,
+                context.User.RequireUserId(),
+                context.User.RequireSessionId(),
+                cancellationToken);
+        }
+        catch (PlaybackException exception)
+        {
+            if (exception.StatusCode == StatusCodes.Status503ServiceUnavailable)
+                context.Response.Headers.RetryAfter = "2";
+            return Problem(exception.Code, exception.Message, exception.StatusCode);
+        }
         if (source is null)
         {
             return Results.NotFound();
@@ -824,20 +844,21 @@ public static class ApiEndpointMappings
         ExecuteResultAsync(async () =>
         {
             var userId = context.User.RequireUserId();
-            var isAdministrator = context.User.IsInRole(UserRole.Owner.ToString())
-                || context.User.IsInRole(UserRole.Admin.ToString());
-            var cursor = await changes.CurrentCursorAsync(
-                userId,
-                isAdministrator,
-                context.RequestAborted);
-            var tag = $"\"revision-{userId:N}-{cursor}\"";
-            context.Response.Headers.ETag = tag;
-            var matches = context.Request.Headers.IfNoneMatch.ToString()
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Any(value => value == "*" || string.Equals(value, tag, StringComparison.Ordinal));
-            return matches
-                ? Results.StatusCode(StatusCodes.Status304NotModified)
-                : Results.Ok(await action());
+            return await changes.SnapshotAsync<IResult>(userId, async revision =>
+            {
+                // Home recommendations rotate without database writes, so their clock
+                // bucket is part of the representation as well as the durable history.
+                var hour = context.Request.Path == "/api/v1/home"
+                    ? context.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow().ToUnixTimeSeconds() / 3600 : 0;
+                var tag = $"\"revision-{revision}-{hour}\"";
+                context.Response.Headers.ETag = tag;
+                var matches = context.Request.Headers.IfNoneMatch.ToString()
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Any(value => value == "*" || string.Equals(value, tag, StringComparison.Ordinal));
+                return matches
+                    ? Results.StatusCode(StatusCodes.Status304NotModified)
+                    : Results.Ok(await action());
+            }, context.RequestAborted);
         });
 
     private static async Task<IResult> ExecuteAsync<T>(Func<Task<T>> action)

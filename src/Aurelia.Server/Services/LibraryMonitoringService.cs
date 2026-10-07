@@ -23,16 +23,17 @@ public sealed partial class LibraryMonitoringService(
     {
         try
         {
+            var recovery = new StorageRecovery(logger, "library monitoring");
             while (!stoppingToken.IsCancellationRequested)
             {
                 var now = DateTimeOffset.UtcNow;
                 if (now >= nextLibraryRefresh)
                 {
-                    await RefreshLibrariesAsync(now, stoppingToken);
+                    await recovery.RunAsync(() => RefreshLibrariesAsync(now, stoppingToken), stoppingToken);
                     nextLibraryRefresh = now.Add(LibraryRefreshInterval);
                 }
 
-                await FlushPendingAsync(now, stoppingToken);
+                await recovery.RunAsync(() => FlushPendingAsync(now, stoppingToken), stoppingToken);
                 await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
             }
         }
@@ -184,8 +185,13 @@ public sealed partial class LibraryMonitoringService(
             return;
         }
 
-        var state = pending.GetOrAdd(library.Id, _ => new PendingChanges(library.Path));
-        state.Record(path, forceFull);
+        while (true)
+        {
+            var state = pending.GetOrAdd(library.Id, _ => new PendingChanges(library.Path));
+            if (state.TryRecord(path, forceFull)) return;
+            // A flush retired this state while the watcher callback held a
+            // reference to it. Retry against the current dictionary entry.
+        }
     }
 
     private async Task FlushPendingAsync(DateTimeOffset now, CancellationToken cancellationToken)
@@ -194,7 +200,7 @@ public sealed partial class LibraryMonitoringService(
         if (!configuration.IsMaintenanceWindow(now)) return;
         foreach (var (libraryId, changes) in pending.ToArray())
         {
-            if (!changes.Ready(now, Debounce, StabilityDelay, out var target))
+            if (!changes.Ready(now, Debounce, StabilityDelay, out var target, out var revision))
             {
                 continue;
             }
@@ -209,7 +215,7 @@ public sealed partial class LibraryMonitoringService(
                 cancellationToken);
             if (started)
             {
-                pending.TryRemove(libraryId, out _);
+                changes.TryAcknowledge(revision, () => pending.TryRemove(new KeyValuePair<Guid, PendingChanges>(libraryId, changes)));
             }
             else
             {
@@ -285,7 +291,7 @@ public sealed partial class LibraryMonitoringService(
     [LoggerMessage(LogLevel.Warning, "Library watcher {LibraryId} could not start ({ErrorType}).")]
     private static partial void LogWatcherFailed(ILogger logger, Guid libraryId, string errorType);
 
-    private sealed class PendingChanges(string root)
+    internal sealed class PendingChanges(string root)
     {
         private readonly Lock gate = new();
         private readonly HashSet<string> directories = new(StringComparer.Ordinal);
@@ -294,13 +300,17 @@ public sealed partial class LibraryMonitoringService(
         private DateTimeOffset lastEvent = DateTimeOffset.UtcNow;
         private DateTimeOffset? lastStabilityCheck;
         private bool forceFull;
+        private long revision;
+        private bool retired;
 
-        public void Record(string path, bool full)
+        public bool TryRecord(string path, bool full, DateTimeOffset? eventTime = null)
         {
             lock (gate)
             {
+                if (retired) return false;
+                revision++;
                 forceFull |= full;
-                lastEvent = DateTimeOffset.UtcNow;
+                lastEvent = eventTime ?? DateTimeOffset.UtcNow;
                 var fullPath = Path.GetFullPath(path);
                 if (MediaLibraryScanner.IsSupportedMediaPath(fullPath))
                 {
@@ -313,6 +323,17 @@ public sealed partial class LibraryMonitoringService(
                         ? fullPath
                         : Path.GetDirectoryName(fullPath) ?? root);
                 }
+                return true;
+            }
+        }
+
+        public bool TryAcknowledge(long expectedRevision, Func<bool> removeCurrent)
+        {
+            lock (gate)
+            {
+                if (retired || revision != expectedRevision || !removeCurrent()) return false;
+                retired = true;
+                return true;
             }
         }
 
@@ -320,11 +341,14 @@ public sealed partial class LibraryMonitoringService(
             DateTimeOffset now,
             TimeSpan debounce,
             TimeSpan stabilityDelay,
-            out string? targetRelativePath)
+            out string? targetRelativePath,
+            out long currentRevision)
         {
             lock (gate)
             {
                 targetRelativePath = null;
+                currentRevision = revision;
+                if (retired) return false;
                 if (now - lastEvent < debounce)
                 {
                     return false;
@@ -367,7 +391,7 @@ public sealed partial class LibraryMonitoringService(
         {
             lock (gate)
             {
-                lastEvent = now;
+                if (now > lastEvent) lastEvent = now;
             }
         }
 

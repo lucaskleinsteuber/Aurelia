@@ -5,6 +5,10 @@ namespace Aurelia.Server.Services;
 
 internal static partial class PinnedMediaHandle
 {
+    // Remains an IOException for existing editor/browser callers, while playback
+    // can distinguish a permanent unsafe handle from transient storage failure.
+    internal sealed class UnsafeHandleException() : IOException("The media handle could not be opened safely.") { }
+
     // openat pins each directory, so replacing a parent with a symlink between
     // validation and open cannot redirect the file descriptor outside the root.
     public static FileStream Open(string libraryPath, string sourcePath)
@@ -64,7 +68,7 @@ internal static partial class PinnedMediaHandle
                 if (!ReferenceEquals(current, first)) current.Dispose();
                 current = next;
             }
-            if (!isDirectory && !UnixFileIdentity.IsRegular(current)) throw new IOException("Media is not a regular file.");
+            if (!isDirectory && !UnixFileIdentity.IsRegular(current)) throw new UnsafeHandleException();
             var result = current;
             current = first;
             return result;
@@ -73,7 +77,15 @@ internal static partial class PinnedMediaHandle
     }
     private static SafeFileHandle Owned(int descriptor)
     {
-        if (descriptor < 0) throw new IOException("The media handle could not be opened safely.");
+        if (descriptor < 0)
+        {
+            // Permission denial and symlink refusal are not transient drive
+            // loss. Preserve that distinction without exposing file paths.
+            var error = Marshal.GetLastPInvokeError();
+            if (error is 1 or 13 || error == (OperatingSystem.IsMacOS() ? 62 : 40))
+                throw new UnsafeHandleException();
+            throw new IOException("The media handle could not be opened safely.");
+        }
         return new SafeFileHandle((IntPtr)descriptor, ownsHandle: true);
     }
     [LibraryImport("libc", EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]

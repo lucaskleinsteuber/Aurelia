@@ -240,7 +240,8 @@ public sealed record PagedResponse<T>(
     IReadOnlyList<T> Items,
     int Offset,
     int Limit,
-    int Total);
+    int Total,
+    string? Revision = null);
 
 public sealed record MovieSummary(
     Guid Id,
@@ -504,7 +505,8 @@ public sealed record SyncChangesResponse(
     long Cursor,
     bool ResetRequired,
     IReadOnlyList<SyncChangeArea> ChangedAreas,
-    IReadOnlyList<Guid> ChangedMediaIds);
+    IReadOnlyList<Guid> ChangedMediaIds,
+    string? Generation = null);
 
 public sealed record SetFavoriteRequest(bool IsFavorite);
 

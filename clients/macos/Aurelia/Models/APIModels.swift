@@ -232,6 +232,7 @@ struct PagedResponse<Item: Decodable & Sendable>: Decodable, Sendable {
   let offset: Int
   let limit: Int
   let total: Int
+  var revision: String? = nil
 }
 
 enum MediaAvailability: String, Codable, Sendable {
@@ -593,6 +594,7 @@ struct SyncChangesResponse: Codable, Equatable, Sendable {
   let resetRequired: Bool
   let changedAreas: [SyncChangeArea]
   let changedMediaIds: [UUID]
+  var generation: String? = nil
 }
 
 struct PlaybackQueueItem: Identifiable, Equatable, Sendable {

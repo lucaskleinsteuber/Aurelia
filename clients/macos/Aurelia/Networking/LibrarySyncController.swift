@@ -1,52 +1,109 @@
 import Foundation
 
 actor LibrarySyncController {
-  typealias ChangeFetcher = @Sendable (StoredServerProfile, Int64, Int) async throws
+  typealias ChangeFetcher =
+    @Sendable (StoredServerProfile, Int64, Int, String?) async throws
     -> SyncChangesResponse
+  typealias Delay = @Sendable (TimeInterval) async throws -> Void
+
+  private struct SessionKey: Hashable {
+    let server: UUID
+    let session: UUID?
+    let user: UUID?
+    init(_ profile: StoredServerProfile) {
+      server = profile.serverId
+      session = profile.sessionId
+      user = profile.user?.id
+    }
+  }
+  private struct Cursor {
+    var value: Int64 = 0
+    var generation: String?
+  }
 
   private let fetchChanges: ChangeFetcher
   private var pollingTask: Task<Void, Never>?
   private var isForeground = true
-  private var activeProfileID: UUID?
-  private var cursors: [UUID: Int64] = [:]
+  private var activeRun: UUID?
+  private var activeSession: SessionKey?
+  private var cursors: [SessionKey: Cursor] = [:]
+  private var cursorSessions: [SessionKey] = []
+  private let delay: Delay
 
   init(
-    fetchChanges: @escaping ChangeFetcher = { profile, cursor, waitSeconds in
+    fetchChanges: @escaping ChangeFetcher = { profile, cursor, waitSeconds, generation in
       try await APIClient(profile: profile).syncChanges(
         after: cursor,
-        waitSeconds: waitSeconds)
-    }
+        waitSeconds: waitSeconds, generation: generation)
+    },
+    delay: @escaping Delay = { seconds in try await Task.sleep(for: .seconds(seconds)) }
   ) {
     self.fetchChanges = fetchChanges
+    self.delay = delay
   }
 
   func start(
     profile: StoredServerProfile,
+    runID: UUID = UUID(),
+    onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
     onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async -> Void
   ) {
+    guard !Task.isCancelled else { return }
     stop()
-    activeProfileID = profile.serverId
+    let run = runID
+    activeRun = run
+    let key = SessionKey(profile)
+    activeSession = key
     guard isForeground else { return }
     pollingTask = Task {
-      var cursor = cursors[profile.serverId] ?? 0
-      while !Task.isCancelled, activeProfileID == profile.serverId, isForeground {
+      var cursor = cursors[key] ?? Cursor()
+      var failures = 0
+      while !Task.isCancelled, activeRun == run, isForeground {
         do {
-          let changes = try await fetchChanges(profile, cursor, 30)
+          let started = Date()
+          let changes = try await fetchChanges(profile, cursor.value, 30, cursor.generation)
           try Task.checkCancellation()
-          cursor = changes.cursor
-          cursors[profile.serverId] = cursor
+          guard activeRun == run, isForeground else { return }
+          if changes.cursor < cursor.value && !changes.resetRequired {
+            throw APIClientError.invalidResponse
+          }
+          cursor = Cursor(value: changes.cursor, generation: changes.generation)
+          if cursors[key] == nil {
+            cursorSessions.append(key)
+            if cursorSessions.count > 16 {
+              cursors.removeValue(forKey: cursorSessions.removeFirst())
+            }
+          }
+          cursors[key] = cursor
+          failures = 0
           if changes.resetRequired || !changes.changedAreas.isEmpty {
             await onChanges(changes)
           }
+          guard !Task.isCancelled, activeRun == run else { return }
+          // Prevent a malformed or older endpoint from driving an unbounded empty poll loop.
+          if Date().timeIntervalSince(started) < 0.25 { try await delay(0.25) }
         } catch is CancellationError {
           return
-        } catch APIClientError.invalidResponse {
-          // Aurelia 1.0.12 does not provide the sync endpoint. Its existing
-          // event and manual refresh behavior remains the compatibility path.
-          return
         } catch {
+          guard !Task.isCancelled, activeRun == run, isForeground else { return }
+          if let failure = error as? APIClientError {
+            // Only a real missing endpoint proves the old-server compatibility path.
+            if failure.httpStatus == 404 { return }
+            if failure.isAuthenticationFailure || failure == .serverIdentityMismatch {
+              await onFailure?(failure)
+              return
+            }
+            if !failure.isRetryableTransient {
+              await onFailure?(failure)
+              return
+            }
+          }
+          failures = min(failures + 1, 4)
+          let retry =
+            (error as? APIClientError)?.retryDelay
+            ?? min(3 * pow(2, Double(failures - 1)), 30)
           do {
-            try await Task.sleep(for: .seconds(3))
+            try await delay(max(retry, 0.25))
           } catch {
             return
           }
@@ -58,11 +115,13 @@ actor LibrarySyncController {
   func setForeground(
     _ foreground: Bool,
     profile: StoredServerProfile?,
+    runID: UUID = UUID(),
+    onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
     onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async -> Void
   ) {
     isForeground = foreground
     if foreground, let profile {
-      start(profile: profile, onChanges: onChanges)
+      start(profile: profile, runID: runID, onFailure: onFailure, onChanges: onChanges)
     } else {
       stop()
     }
@@ -71,6 +130,17 @@ actor LibrarySyncController {
   func stop() {
     pollingTask?.cancel()
     pollingTask = nil
-    activeProfileID = nil
+    activeRun = nil
+    activeSession = nil
+  }
+
+  func stop(profile: StoredServerProfile) {
+    guard activeSession == SessionKey(profile) else { return }
+    stop()
+  }
+
+  func stop(runID: UUID) {
+    guard activeRun == runID else { return }
+    stop()
   }
 }

@@ -430,7 +430,7 @@ struct ServerBackupsEditor: View {
         Divider()
         Text("Encrypted Full Server Backup").font(.headline)
         Text(
-          "Includes the database, configuration, TLS identity and server secrets. Videos and artwork are excluded. Artwork can be downloaded again. Keep the passphrase safely; it cannot be recovered."
+          "Includes the database, configuration, TLS identity, server secrets, and your imported images and crops. Videos and downloadable artwork are excluded. Keep the passphrase safely; it cannot be recovered."
         )
         .font(.caption).foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)

@@ -347,6 +347,12 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerCo
                     command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                     await command.ExecuteNonQueryAsync(cancellationToken);
                 }
+                command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='SyncHistoryState';";
+                if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) > 0)
+                {
+                    command.CommandText = SyncChangeService.RotateGenerationSql;
+                    await command.ExecuteNonQueryAsync(cancellationToken);
+                }
             }
 
             SqliteConnection.ClearAllPools();

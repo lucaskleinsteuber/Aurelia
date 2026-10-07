@@ -57,15 +57,9 @@ public sealed class PlaybackService(
                 StatusCodes.Status409Conflict);
         }
 
-        if (media.Availability != MediaAvailability.Available
-            || media.LibraryRoot.Availability != LibraryAvailability.Available)
-        {
-            throw new PlaybackException(
-                "media_unavailable",
-                "The media item is not currently available for playback.",
-                StatusCodes.Status409Conflict);
-        }
-
+        // Scanner availability is a catalog hint, not a live I/O guarantee. A
+        // reconnected drive must be playable before the next monitoring pass.
+        // The access-filtered lookup above still precedes this secure handle open.
         var file = MediaFileAccess.OpenRead(media);
         using var fileStream = file.Stream;
         var rawToken = tokenService.CreatePlaybackToken();
@@ -148,28 +142,20 @@ public sealed class PlaybackService(
                         || database.UserLibraryGrants.Any(grant => grant.UserId == userId
                             && grant.LibraryRootId == candidate.MediaItem.LibraryRootId)),
                 cancellationToken);
-        if (ticket is null
-            || ticket.MediaItem.Kind == MediaKind.Series
-            || ticket.MediaItem.Availability != MediaAvailability.Available
-            || ticket.MediaItem.LibraryRoot.Availability != LibraryAvailability.Available)
+        if (ticket is null || ticket.MediaItem.Kind == MediaKind.Series)
         {
             return null;
         }
 
-        try
-        {
-            var file = MediaFileAccess.OpenRead(ticket.MediaItem);
-            return new PlaybackStreamSource(
-                file.Stream,
-                file.ContentType,
-                file.Length,
-                file.LastModified,
-                ticket.MediaItemId);
-        }
-        catch (PlaybackException)
-        {
-            return null;
-        }
+        // Only an authorized, valid ticket may distinguish transient storage
+        // loss from an invalid ticket. Do not collapse that failure into 404.
+        var file = MediaFileAccess.OpenRead(ticket.MediaItem);
+        return new PlaybackStreamSource(
+            file.Stream,
+            file.ContentType,
+            file.Length,
+            file.LastModified,
+            ticket.MediaItemId);
     }
 
     public async Task PruneExpiredAsync(

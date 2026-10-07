@@ -527,7 +527,7 @@ struct AureliaTests {
       expiresAt: "2099-01-01T00:00:00Z")
     let fetcher = SyncFetcherProbe()
     let updates = SyncUpdateProbe()
-    let controller = LibrarySyncController { profile, cursor, _ in
+    let controller = LibrarySyncController { profile, cursor, _, _ in
       try await fetcher.fetch(profile: profile, cursor: cursor)
     }
 

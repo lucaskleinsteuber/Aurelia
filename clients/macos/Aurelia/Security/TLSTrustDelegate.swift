@@ -13,6 +13,7 @@ final class TLSTrustDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelega
   private let allowedHost: String
   private let lock = NSLock()
   private var storedFingerprint: String?
+  private var rejectedTrust = false
 
   init(mode: Mode, allowedHost: String) {
     self.mode = mode
@@ -22,6 +23,8 @@ final class TLSTrustDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelega
   var capturedFingerprint: String? {
     lock.withLock { storedFingerprint }
   }
+
+  var didRejectTrust: Bool { lock.withLock { rejectedTrust } }
 
   func urlSession(
     _ session: URLSession,
@@ -34,6 +37,7 @@ final class TLSTrustDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelega
       let trust = challenge.protectionSpace.serverTrust,
       let fingerprint = try? ServerPublicKeyFingerprint.calculate(from: trust)
     else {
+      lock.withLock { rejectedTrust = true }
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
@@ -48,6 +52,7 @@ final class TLSTrustDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelega
     case .pinned(let expected):
       accepted = fingerprint.caseInsensitiveCompare(expected) == .orderedSame
     }
+    if !accepted { lock.withLock { rejectedTrust = true } }
 
     completionHandler(
       accepted ? .useCredential : .cancelAuthenticationChallenge,

@@ -5,6 +5,9 @@ a GitHub release, or creating Apple account credentials. Keep private keys,
 certificates, profiles, tokens, and result bundles outside Git. The intended
 distribution is a free GitHub download, not the App Store. Paid Apple membership
 is not a project requirement.
+See [free distribution feasibility](FREE_DISTRIBUTION.md) for the current
+entitlement boundary and the isolated diagnostic; do not bypass it with a
+different signature and assume the host/credentials will still work.
 
 1. Verify the working tree, server format/build/tests, Mac tests, UI screenshots,
    native host, autostart, recovery, and both server architectures. Use synthetic

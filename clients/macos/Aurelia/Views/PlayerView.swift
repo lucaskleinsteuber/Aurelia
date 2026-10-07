@@ -160,14 +160,21 @@ struct PlayerView: View {
       }
 
       if controller.isPreparing, controller.errorMessage == nil {
-        ProgressView("Preparing playback…")
-          .controlSize(.large)
-          .padding(20)
-          .playerMaterial(
-            reduceTransparency: reduceTransparency,
-            shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
-          )
-          .accessibilityIdentifier("player-preparing")
+        VStack(spacing: 12) {
+          ProgressView(controller.recoveryMessage ?? "Preparing playback…")
+            .controlSize(.large)
+          if controller.recoveryMessage != nil {
+            Button("Stop Retrying") { controller.cancelRecovery() }
+              .buttonStyle(.bordered)
+              .accessibilityIdentifier("player-stop-recovery")
+          }
+        }
+        .padding(20)
+        .playerMaterial(
+          reduceTransparency: reduceTransparency,
+          shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .accessibilityIdentifier("player-preparing")
       }
 
       if let error = controller.errorMessage {

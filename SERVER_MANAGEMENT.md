@@ -4,7 +4,9 @@ Open **Aurelia → Settings → Server** while connected as an owner. Playback
 preferences and metadata tools remain separate. Server settings are read from
 the connected server, not copied over it by the Mac helper. Existing data,
 accounts, session expiries, preferences, and TLS identity survive normal updates.
-Aurelia Classic and Aurelia Home are separate products and are not migrated.
+Aurelia Classic is the separate local-only reference application and is not
+migrated. Historic identifiers of this server-backed product are retained only
+for compatibility; they do not identify another current application.
 
 ## Settings
 
@@ -53,6 +55,8 @@ a reload. Sensitive changes require current-password confirmation for a
 single-use grant bound to the session, action, and exact request bytes, valid
 for at most two minutes. Revocation/account blocking/grant removal also cancel
 active affected streams. Last-used timestamps are written at most once a minute.
+That bookkeeping is best-effort during recoverable storage failures; session
+and access checks still have to succeed before a request is authorized.
 
 ## Network and Mac service boundaries
 
@@ -113,17 +117,27 @@ SQLite/schema compatibility, enabled owner, settings, server identity, and TLS
 key/certificate pairing. A confirmed restore first prepares a verified rollback
 copy, stops the server, and activates state using same-volume renames with a
 recovery journal. Interrupted activation recovers the previous state at startup.
+The complete recovery journal is validated before any active file is moved,
+including originals from the currently running state, not only incoming files.
 Failed validation, cancellation before activation, or inability to prepare the
 rollback copy leaves active state unchanged. Free enough storage before retrying.
 
 Restoration intentionally invalidates every old device session, pairing code,
 and playback ticket, preventing an old backup from reviving previously revoked
 access. Reconnect and pair/sign in again afterward. Normal updates do not revoke
-sessions. Applying full restoration requires the native Mac helper; a standalone
+sessions. A restored database also receives a new synchronization generation,
+so clients cannot reuse cursors from the previously active history. Applying
+full restoration requires the native Mac helper; a standalone
 server can export/validate backups but does not expose arbitrary remote process
 or file-system control.
 
 ## Verification and performance
+
+SQLite uses WAL with private pooled connection caches. Revisioned reads use
+deferred snapshot transactions, allowing concurrent readers and the writer
+without reserving the writer merely to serve a catalog page. Keep shared-cache
+mode disabled; combining it with WAL introduces table locking that defeats
+this concurrency. See [Microsoft's connection-string guidance](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/connection-strings).
 
 Tests use synthetic libraries/credentials and disposable directories only:
 
@@ -134,6 +148,7 @@ scripts/test-macos.sh
 scripts/test-native-host.sh /path/to/signed/Aurelia.app
 scripts/test-release-app-autostart.sh /path/to/signed/Aurelia.app
 scripts/test-recovery-disk-full.sh
+sh scripts/test-server-transport.sh 30 2
 scripts/test-server-settings-render.sh /path/to/signed/Debug/Aurelia.app
 dotnet run --project tools/Aurelia.Server.Benchmark -- \
   /path/to/baseline/Aurelia.Server /path/to/candidate/Aurelia.Server \

@@ -59,6 +59,20 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
   build-for-testing 2>&1 | tee "$temporary_log"
 
+# XCTest searches the standalone build-products framework before the signed
+# copy embedded in the host. XCFramework processing leaves that standalone
+# copy unsigned, so use this run's already signed embedded copy for both paths.
+# Never re-sign or modify the shared vendor framework or the installed app.
+embedded_vlc="$derived_data/Build/Products/Debug/Aurelia.app/Contents/Frameworks/VLCKit.framework"
+test_vlc="$derived_data/Build/Products/Debug/VLCKit.framework"
+if [[ ! -d "$embedded_vlc" || ! -d "$test_vlc" || -L "$test_vlc" ]]; then
+  print -u2 "The test host's isolated VLC framework copies are missing or unsafe."
+  exit 1
+fi
+/usr/bin/codesign --verify --strict "$embedded_vlc"
+/usr/bin/ditto "$embedded_vlc" "$test_vlc"
+/usr/bin/codesign --verify --strict "$test_vlc"
+
 DEVELOPER_DIR="$developer_dir" xcodebuild \
   -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
   -scheme Aurelia \

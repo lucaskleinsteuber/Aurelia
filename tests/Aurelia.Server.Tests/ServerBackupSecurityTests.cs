@@ -22,6 +22,7 @@ public sealed class ServerBackupSecurityTests
         var runtime = ServerRuntimeOptions.Resolve(new ConfigurationBuilder().Build(), ["--data-dir", root]);
         var options = new DbContextOptionsBuilder<AureliaDbContext>().UseSqlite($"Data Source={runtime.DatabasePath};Pooling=False").Options;
         var media = Guid.NewGuid(); var manual = Guid.NewGuid(); var provider = Guid.NewGuid();
+        SyncChangeService.HistoryState originalHistory;
         var png = MediaEditingTests.Png(120, 180);
         var original = MediaEditingTests.Png(180, 180);
         try
@@ -57,6 +58,7 @@ public sealed class ServerBackupSecurityTests
                 metadata.Artwork.Add(new ArtworkAsset { Id = provider, MediaItemId = media, Kind = ArtworkKind.Poster, ProviderPath = "/provider.png", RelativeFilePath = provider.ToString("N") + ".png", ContentType = "image/png", ContentLength = png.Length, CreatedAt = DateTimeOffset.UtcNow });
                 database.MediaItems.Add(new MediaItem { Id = media, LibraryRootId = library.Id, Kind = MediaKind.Movie, SourcePath = video, NormalizedSourcePath = MediaPath.Normalize(video), DetectedTitle = "Synthetic", Metadata = metadata, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
                 await database.SaveChangesAsync();
+                originalHistory = await new SyncChangeService(database, new DatabaseChangeSignal()).HistoryAsync(CancellationToken.None);
             }
             var configuration = new ServerConfigurationStore(runtime); var backups = new DatabaseBackupService(runtime, configuration);
             using var full = new FullServerBackupService(runtime, backups, configuration);
@@ -74,6 +76,12 @@ public sealed class ServerBackupSecurityTests
             await File.WriteAllBytesAsync(Path.Combine(artwork, manual.ToString("N") + ".png"), [0]);
             await FullServerBackupService.ApplyPreparedAsync(runtime, prepared.Id, CancellationToken.None);
             await using var restored = new AureliaDbContext(options);
+            var restoredChanges = new SyncChangeService(restored, new DatabaseChangeSignal());
+            var restoredHistory = await restoredChanges.HistoryAsync(CancellationToken.None);
+            Assert.NotEqual(originalHistory.Generation, restoredHistory.Generation);
+            var restoredOwner = await restored.Users.SingleAsync();
+            Assert.True((await restoredChanges.ChangesAsync(restoredOwner.Id, true, originalHistory.HighWater, 0,
+                originalHistory.Generation, CancellationToken.None)).ResetRequired);
             Assert.Equal("Corrected title", (await restored.MediaMetadata.SingleAsync()).ManualTitle);
             Assert.Contains("\"rotation\":90", (await restored.ArtworkAssets.SingleAsync(asset => asset.Id == manual)).CropJson!, StringComparison.Ordinal);
             Assert.Equal(png, await File.ReadAllBytesAsync(Path.Combine(artwork, manual.ToString("N") + ".png")));

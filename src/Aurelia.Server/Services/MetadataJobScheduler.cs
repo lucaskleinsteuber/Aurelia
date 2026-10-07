@@ -11,7 +11,7 @@ public sealed class MetadataJobScheduler
         SingleReader = true,
         SingleWriter = false,
     });
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> active = new();
+    private readonly ConcurrentDictionary<Guid, JobCancellationRegistration> active = new();
 
     public void Pulse() => wake.Writer.TryWrite(true);
 
@@ -20,7 +20,7 @@ public sealed class MetadataJobScheduler
 
     public CancellationToken Register(Guid jobId, CancellationToken stoppingToken)
     {
-        var source = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var source = new JobCancellationRegistration(stoppingToken);
         if (!active.TryAdd(jobId, source))
         {
             source.Dispose();
@@ -38,8 +38,7 @@ public sealed class MetadataJobScheduler
             return false;
         }
 
-        source.Cancel();
-        return true;
+        return source.Cancel();
     }
 
     public void Unregister(Guid jobId)

@@ -23,19 +23,25 @@ struct KeychainServerStore: ServerProfileStore {
   static let legacyService = "com.lucas.aureliahome.connection.v2"
 
   let service: String
+  let migrationService: String?
 
-  init(service: String = productionService) {
+  init(service: String = productionService, migrationService: String? = nil) {
     self.service = service
+    self.migrationService =
+      migrationService ?? (service == Self.productionService ? Self.legacyService : nil)
   }
 
   func load() throws -> StoredServerProfile? {
     if let profile = try load(service: service) {
       return profile
     }
-    guard service == Self.productionService,
-      let legacyProfile = try load(service: Self.legacyService)
+    guard let migrationService,
+      let legacyProfile = try load(service: migrationService)
     else { return nil }
     try save(legacyProfile)
+    // Retire the migrated credential only after its replacement is safely stored.
+    // Otherwise an explicit disconnect could resurrect the old connection.
+    try delete(service: migrationService)
     return legacyProfile
   }
 
@@ -81,6 +87,13 @@ struct KeychainServerStore: ServerProfileStore {
   }
 
   func delete() throws {
+    // Delete the fallback first: if this fails, keep the current profile so the
+    // caller can accurately report that disconnect did not finish.
+    if let migrationService { try delete(service: migrationService) }
+    try delete(service: service)
+  }
+
+  private func delete(service: String) throws {
     let status = SecItemDelete(baseQuery(service: service) as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else {
       throw StoreError.unexpectedStatus(status)

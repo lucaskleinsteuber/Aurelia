@@ -6,6 +6,7 @@ final class ArtworkLoader {
     @MainActor @Sendable (ArtworkSummary, StoredServerProfile) async throws -> Data
 
   private struct Flight {
+    let id: UUID
     let task: Task<Void, Never>
     var continuations: [UUID: CheckedContinuation<Data, Error>]
   }
@@ -30,7 +31,7 @@ final class ArtworkLoader {
     guard APIClient.isValidArtworkPath(artwork.path) else {
       throw APIClientError.invalidResponse
     }
-    let flightKey = "\(profile.serverId.uuidString):\(artwork.path)"
+    let flightKey = "\(profile.serverId.uuidString):\(profile.sessionId.uuidString):\(artwork.path)"
     let cacheKey = flightKey as NSString
     if let cached = cache.object(forKey: cacheKey) {
       return cached as Data
@@ -81,16 +82,19 @@ final class ArtworkLoader {
     }
 
     let fetcher = self.fetcher
+    let flightID = UUID()
     let task = Task { [weak self] in
       do {
         let data = try await fetcher(artwork, profile)
         guard !Task.isCancelled else { throw CancellationError() }
-        self?.finish(flightKey: flightKey, cacheKey: cacheKey, result: .success(data))
+        self?.finish(
+          flightKey: flightKey, flightID: flightID, cacheKey: cacheKey, result: .success(data))
       } catch {
-        self?.finish(flightKey: flightKey, cacheKey: cacheKey, result: .failure(error))
+        self?.finish(
+          flightKey: flightKey, flightID: flightID, cacheKey: cacheKey, result: .failure(error))
       }
     }
-    flights[flightKey] = Flight(task: task, continuations: [requestID: continuation])
+    flights[flightKey] = Flight(id: flightID, task: task, continuations: [requestID: continuation])
   }
 
   private func cancel(flightKey: String, requestID: UUID) {
@@ -106,8 +110,11 @@ final class ArtworkLoader {
     }
   }
 
-  private func finish(flightKey: String, cacheKey: NSString, result: Result<Data, Error>) {
-    guard let flight = flights.removeValue(forKey: flightKey) else { return }
+  private func finish(
+    flightKey: String, flightID: UUID, cacheKey: NSString, result: Result<Data, Error>
+  ) {
+    guard let flight = flights[flightKey], flight.id == flightID else { return }
+    flights[flightKey] = nil
     if case .success(let data) = result {
       cache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
     }

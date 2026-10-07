@@ -89,7 +89,9 @@ var connectionString = new SqliteConnectionStringBuilder
 {
     DataSource = runtime.DatabasePath,
     Mode = SqliteOpenMode.ReadWriteCreate,
-    Cache = SqliteCacheMode.Shared,
+    // Shared-cache table locks defeat WAL reader/writer concurrency, even when
+    // readers use deferred transactions. Each pooled connection needs a private cache.
+    Cache = SqliteCacheMode.Private,
     ForeignKeys = true,
     Pooling = true,
 }.ToString();
@@ -106,6 +108,7 @@ builder.Services.AddSingleton<DatabaseCommitSignal>();
 builder.Services.AddDbContext<AureliaDbContext>((services, options) =>
     options.UseSqlite(connectionString).AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>()));
 builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton<SessionActivityRecorder>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<FullServerBackupService>();
 builder.Services.AddSingleton(TimeProvider.System);

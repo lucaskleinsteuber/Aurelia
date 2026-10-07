@@ -11,6 +11,7 @@ public sealed record BackupExportResult(Guid Id, long Bytes, bool IncludesMedia 
 public sealed record BackupRestoreRequest(Guid UploadId, string Passphrase, bool RevokeAllSessions, bool AcceptDifferentServerIdentity = false);
 public sealed record PreparedRestore(Guid Id, Guid ServerId, bool RevokesAllSessions);
 internal sealed record RestoreActivationJournal(int Version, Guid Id, string[] Originals, string[] Replacements);
+internal enum RestoreActivationStep { JournalWritten, OriginalMoved, ReplacementMoved, Verified }
 
 public sealed class FullServerBackupService(ServerRuntimeOptions runtime, DatabaseBackupService databaseBackups,
     ServerConfigurationStore configuration, MetadataProviderSettingsStore? metadataSettings = null,
@@ -124,6 +125,12 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
                 command.CommandText = "UPDATE DeviceSessions SET RevokedAt=$now WHERE RevokedAt IS NULL; UPDATE PairingCodes SET ConsumedAt=$now WHERE ConsumedAt IS NULL; DELETE FROM PlaybackTickets;";
                 command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                 await command.ExecuteNonQueryAsync(token);
+                command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='SyncHistoryState';";
+                if (Convert.ToInt64(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture) > 0)
+                {
+                    command.CommandText = SyncChangeService.RotateGenerationSql;
+                    await command.ExecuteNonQueryAsync(token);
+                }
             }
             await using (var receipt = PrivateFilePermissions.OpenNewPrivateFile(Path.Combine(stage, "restore-receipt.json")))
                 await JsonSerializer.SerializeAsync(receipt, new PreparedRestore(id, manifest.ServerId, true), Json, token);
@@ -140,7 +147,11 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         finally { gate.Release(); }
     }
 
-    public static async Task ApplyPreparedAsync(ServerRuntimeOptions runtime, Guid id, CancellationToken token)
+    public static Task ApplyPreparedAsync(ServerRuntimeOptions runtime, Guid id, CancellationToken token) =>
+        ApplyPreparedCoreAsync(runtime, id, token);
+
+    internal static async Task ApplyPreparedCoreAsync(ServerRuntimeOptions runtime, Guid id, CancellationToken token,
+        Action<RestoreActivationStep, int>? afterStep = null)
     {
         var backups = new DatabaseBackupService(runtime);
         var stage = RestoreStage(runtime, id);
@@ -151,6 +162,13 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         if (receipt?.Id != id || !receipt.RevokesAllSessions) throw new InvalidDataException("Invalid restore receipt.");
         await ValidateStageAsync(stage, backups, token);
         if (receipt.ServerId != await ServerIdAsync(Path.Combine(stage, "aurelia.db"), token)) throw new InvalidDataException("The prepared restore identity changed.");
+        // Bound both the incoming state and the existing rollback state before
+        // creating the activation marker or moving any active file.
+        var originals = StateFiles(runtime.DataDirectory).Concat(DatabaseSidecars
+            .Where(name => File.Exists(Path.Combine(runtime.DataDirectory, name)))).ToArray();
+        var replacementNames = StateFiles(stage).ToArray();
+        var journal = new RestoreActivationJournal(1, id, originals, replacementNames);
+        ValidateJournal(journal);
         // Mandatory rollback copy includes database, configuration, keys and managed
         // PNG artwork so failed activation cannot lose a user's imported images.
         // Original video files are never included.
@@ -171,9 +189,12 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
             throw;
         }
         SqliteConnection.ClearAllPools();
-        var originals = StateFiles(runtime.DataDirectory).Concat(DatabaseSidecars
+        // Backup connections can create or retire SQLite sidecars. Capture the
+        // actual closed-connection state, and validate it again before activation.
+        originals = StateFiles(runtime.DataDirectory).Concat(DatabaseSidecars
             .Where(name => File.Exists(Path.Combine(runtime.DataDirectory, name)))).ToArray();
-        var replacementNames = StateFiles(stage).ToArray();
+        journal = new RestoreActivationJournal(1, id, originals, replacementNames);
+        ValidateJournal(journal);
         var undo = UndoDirectory(runtime, id);
         PrivateFilePermissions.CreatePrivateDirectory(undo);
         // Prepare directory entries before activation. Activation and rollback use same-volume
@@ -188,7 +209,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         {
             await using (var file = PrivateFilePermissions.OpenNewPrivateFile(temporaryMarker))
             {
-                await JsonSerializer.SerializeAsync(file, new RestoreActivationJournal(1, id, originals, replacementNames), Json, token);
+                await JsonSerializer.SerializeAsync(file, journal, Json, token);
                 await file.FlushAsync(token);
                 file.Flush(flushToDisk: true);
             }
@@ -198,11 +219,21 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         try
         {
             token.ThrowIfCancellationRequested();
+            afterStep?.Invoke(RestoreActivationStep.JournalWritten, 0);
+            var moved = 0;
             foreach (var name in originals)
+            {
                 File.Move(Path.Combine(runtime.DataDirectory, name), Path.Combine(undo, name));
+                afterStep?.Invoke(RestoreActivationStep.OriginalMoved, ++moved);
+            }
+            moved = 0;
             foreach (var name in replacementNames)
+            {
                 File.Move(Path.Combine(stage, name), Path.Combine(runtime.DataDirectory, name));
+                afterStep?.Invoke(RestoreActivationStep.ReplacementMoved, ++moved);
+            }
             await ValidateStageAsync(runtime.DataDirectory, backups, CancellationToken.None);
+            afterStep?.Invoke(RestoreActivationStep.Verified, 0);
             File.Delete(marker);
         }
         catch
@@ -220,15 +251,11 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
     {
         var marker = Path.Combine(runtime.DataDirectory, ".full-restore.pending");
         if (!File.Exists(marker)) return;
-        if (new FileInfo(marker).LinkTarget is not null) throw new InvalidDataException("Unsafe restore journal.");
+        if (new FileInfo(marker).LinkTarget is not null || new FileInfo(marker).Length > 16 * 1024 * 1024)
+            throw new InvalidDataException("Unsafe or oversized restore journal.");
         var journal = JsonSerializer.Deserialize<RestoreActivationJournal>(await File.ReadAllTextAsync(marker, token), Json);
-        if (journal is null || journal.Version != 1 || journal.Id == Guid.Empty
-            || journal.Originals is null || journal.Replacements is null
-            || journal.Originals.Length > 258 || journal.Replacements.Length > 256
-            || journal.Originals.Any(name => !EncryptedBackupContainer.AllowedName(name) && name is not "aurelia.db-wal" and not "aurelia.db-shm")
-            || journal.Replacements.Any(name => !EncryptedBackupContainer.AllowedName(name)))
-            throw new InvalidDataException("Invalid restore journal.");
-        var undo = UndoDirectory(runtime, journal.Id);
+        ValidateJournal(journal);
+        var undo = UndoDirectory(runtime, journal!.Id);
         if (!Directory.Exists(undo) || new DirectoryInfo(undo).LinkTarget is not null)
             throw new InvalidDataException("The interrupted restore undo state is missing.");
         SqliteConnection.ClearAllPools();
@@ -243,6 +270,19 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
                 throw new InvalidDataException("An original restore entry is missing.");
         }
         File.Delete(marker);
+    }
+
+    private static void ValidateJournal(RestoreActivationJournal? journal)
+    {
+        if (journal is null || journal.Version != 1 || journal.Id == Guid.Empty
+            || journal.Originals is null || journal.Replacements is null
+            || journal.Originals.Length > EncryptedBackupContainer.MaximumEntries + DatabaseSidecars.Length
+            || journal.Replacements.Length > EncryptedBackupContainer.MaximumEntries
+            || journal.Originals.Distinct(StringComparer.Ordinal).Count() != journal.Originals.Length
+            || journal.Replacements.Distinct(StringComparer.Ordinal).Count() != journal.Replacements.Length
+            || journal.Originals.Any(name => !EncryptedBackupContainer.AllowedName(name) && name is not "aurelia.db-wal" and not "aurelia.db-shm")
+            || journal.Replacements.Any(name => !EncryptedBackupContainer.AllowedName(name)))
+            throw new InvalidDataException("Invalid restore journal.");
     }
     private static string UndoDirectory(ServerRuntimeOptions runtime, Guid id) => Path.Combine(runtime.DataDirectory, "Backups", ".restore-undo-" + id.ToString("N"));
     private static async Task ValidateStageAsync(string stage, DatabaseBackupService backups, CancellationToken token)

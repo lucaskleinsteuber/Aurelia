@@ -208,7 +208,8 @@ final class CinemaUITests: XCTestCase {
   }
 
   @MainActor private func launch(
-    accessibility: Bool = false, minimum: Bool = false, heroEdges: Bool = false
+    accessibility: Bool = false, minimum: Bool = false, heroEdges: Bool = false,
+    advancingPlayback: Bool = false
   )
     -> XCUIApplication
   {
@@ -217,6 +218,7 @@ final class CinemaUITests: XCTestCase {
     app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
     app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "library-admin"
     app.launchEnvironment["AURELIA_CINEMA_UI_TESTS"] = "1"
+    if advancingPlayback { app.launchEnvironment["AURELIA_AUTO_HIDE_UI_TESTS"] = "1" }
     if heroEdges { app.launchEnvironment["AURELIA_HERO_EDGE_UI_TESTS"] = "1" }
     if accessibility { app.launchEnvironment["AURELIA_CINEMA_ACCESSIBILITY"] = "1" }
     if minimum { app.launchEnvironment["AURELIA_CINEMA_MINIMUM_WINDOW"] = "1" }
@@ -536,7 +538,9 @@ final class CinemaUITests: XCTestCase {
   }
 
   @MainActor func testPlayerNativeMenusSurviveTheAutoHideDelayAndCleanUpOnEscape() throws {
-    let app = launch()
+    // Menus are tested during healthy playback, not an intentional decoder
+    // stall. Keep the production stall watchdog enabled and advance the fixture.
+    let app = launch(advancingPlayback: true)
     defer { app.terminate() }
     app.buttons["play-media"].click()
     XCTAssertTrue(app.buttons["player-play-pause"].waitForExistence(timeout: 5))

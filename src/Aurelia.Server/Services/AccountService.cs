@@ -161,6 +161,7 @@ public sealed class AccountService(
         }
 
         target.Role = newRole;
+        database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Catalog, UserId = targetId, CreatedAt = DateTimeOffset.UtcNow });
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         streams.RevokeUser(targetId);
