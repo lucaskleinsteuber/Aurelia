@@ -33,3 +33,22 @@ Until that route passes helper/Keychain/background-hosting checks and first laun
 in a clean user or VM with Gatekeeper enabled, do not publish the local development
 bundle as a portable public beta. The optional notarized packaging script remains
 separate; it is not a prerequisite or the chosen release channel.
+
+## Profileless local-development feasibility
+
+Team-prefixed Mac App Groups do not themselves require a provisioning profile,
+provided the signing team's identity matches. Restricted Keychain access-group
+entitlements do require authorization. Aurelia's existing Keychain query does not
+explicitly select an access group or force the Data Protection Keychain.
+
+`AURELIA_SIGNING_IDENTITY=<matching-development-identity> zsh scripts/probe-profileless-macos-signing.sh`
+therefore tests an ordinary synthetic Keychain write/read/delete and an isolated
+team-prefixed App Group in a correctly bundled, sandboxed app with no profile.
+It does not read an existing connection, change the installed app or certify
+credential migration, helper/background hosting or clean-machine distribution.
+
+The local bundled probe passed on 2026-10-07. This is evidence for a possible
+profileless development build, not permanent free distribution: the probe still
+uses an Apple-issued development certificate. Retain this distinction when
+evaluating a longer-lived local build versus a profile- and Apple-certificate-
+independent public package.

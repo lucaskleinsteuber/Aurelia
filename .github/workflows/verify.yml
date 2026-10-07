@@ -23,6 +23,12 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
+      - name: Install verification prerequisites
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            brew install ripgrep
+          fi
+          rg --version
       - name: Verify version, formatting, build, and tests
         run: |
           scripts/verify-build-number.sh
