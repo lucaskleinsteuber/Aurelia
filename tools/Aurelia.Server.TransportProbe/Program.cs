@@ -91,8 +91,19 @@ try
             metrics.Check("pairing_and_self_revocation");
         }
         phase = "restart_and_cancellation";
+        var progressMutation = new UpdatePlaybackProgressRequest(37_000, 600_000, false, Guid.NewGuid(), true, 0);
         using var progress = await SendAsync(secureTwo, HttpMethod.Put, $"/api/v1/media/{seed.FirstMovie}/progress", first.Token,
-            new UpdatePlaybackProgressRequest(37_000, 600_000, false), HttpStatusCode.OK, lifetime.Token);
+            progressMutation, HttpStatusCode.OK, lifetime.Token);
+        var committedProgress = progress.Deserialize<PlaybackProgressResponse>(json)!;
+        using (var replay = await SendAsync(secureTwo, HttpMethod.Put, $"/api/v1/media/{seed.FirstMovie}/progress", first.Token,
+                   progressMutation, HttpStatusCode.OK, lifetime.Token))
+            if (replay.Deserialize<PlaybackProgressResponse>(json) != committedProgress)
+                throw new InvalidDataException("Idempotent progress replay changed the committed snapshot.");
+        using (var conflict = await SendAsync(secureTwo, HttpMethod.Put, $"/api/v1/media/{seed.FirstMovie}/progress", first.Token,
+                   progressMutation with { ClientMutationId = Guid.NewGuid() }, HttpStatusCode.Conflict, lifetime.Token))
+            if (conflict.RootElement.GetProperty("code").GetString() != "playback_progress_conflict")
+                throw new InvalidDataException("A stale progress revision was not rejected.");
+        metrics.Check("guarded_progress_replay_and_conflict");
         var initialId = await ServerIdAsync(secureTwo);
         await CancelPollAsync(secureTwo, first.Token, lifetime.Token);
         await AbortStreamAsync(secureTwo, first.Token, source.StreamPath, lifetime.Token);
@@ -100,6 +111,11 @@ try
         await host.StartAsync(lifetime.Token);
         using var resumed = await SendAsync(secureTwo, HttpMethod.Get, "/api/v1/auth/me", first.Token, null, HttpStatusCode.OK, lifetime.Token);
         if (await ServerIdAsync(secureTwo) != initialId) throw new InvalidDataException("Synthetic server identity changed on restart.");
+        using (var replay = await SendAsync(secureTwo, HttpMethod.Put, $"/api/v1/media/{seed.FirstMovie}/progress", first.Token,
+                   progressMutation, HttpStatusCode.OK, lifetime.Token))
+            if (replay.Deserialize<PlaybackProgressResponse>(json) != committedProgress)
+                throw new InvalidDataException("The progress replay marker was lost on server restart.");
+        metrics.Check("guarded_progress_replay_after_restart");
         using (var saved = await SendAsync(secureTwo, HttpMethod.Get, $"/api/v1/media/{seed.FirstMovie}/progress", first.Token, null, HttpStatusCode.OK, lifetime.Token))
             if (saved.RootElement.GetProperty("positionMilliseconds").GetInt64() != 37_000) throw new InvalidDataException("Progress changed on restart.");
         metrics.Check("restart_preserves_identity_session_progress");

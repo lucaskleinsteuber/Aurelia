@@ -21,4 +21,10 @@ public sealed class PlaybackProgress
     public DateTimeOffset LastPlayedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    public long Revision { get; set; }
+
+    public Guid? LastMutationId { get; set; }
+
+    public string? LastMutationFingerprint { get; set; }
 }

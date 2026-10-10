@@ -1074,6 +1074,13 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<bool>("IsCompleted")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("LastMutationFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LastMutationId")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("LastPlayedAt")
                         .HasColumnType("INTEGER");
 
@@ -1082,6 +1089,11 @@ namespace Aurelia.Server.Data.Migrations
 
                     b.Property<long>("PositionMilliseconds")
                         .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<long>("UpdatedAt")
                         .HasColumnType("INTEGER");

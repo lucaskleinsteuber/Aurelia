@@ -14,10 +14,20 @@ probe_root=$(mktemp -d "$HOME/Library/Caches/Aurelia/TestRuns/Profileless-Probe.
 candidate="$probe_root/ProfilelessProbe.app"
 log="$other_root/Logs/Profileless-Signing-${probe_root:t}.log"
 probe_pid=''
-cleanup() {
+stop_probe() {
   if [[ -n "$probe_pid" ]] && kill -0 "$probe_pid" 2>/dev/null; then
     kill -TERM "$probe_pid" 2>/dev/null || true
+    for _ in {1..20}; do
+      kill -0 "$probe_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -KILL "$probe_pid" 2>/dev/null || true
+    wait "$probe_pid" 2>/dev/null || true
   fi
+  probe_pid=''
+}
+cleanup() {
+  stop_probe
   if [[ "$probe_root" == "$HOME/Library/Caches/Aurelia/TestRuns/Profileless-Probe."* ]]; then
     find "$probe_root" -depth -delete
   fi
@@ -40,12 +50,14 @@ for attempt in {1..100}; do
   sleep 0.1
 done
 if kill -0 "$probe_pid" 2>/dev/null; then
-  kill -TERM "$probe_pid" 2>/dev/null
+  stop_probe
   print "Probe timed out; no protection bypass was attempted." >>"$log"
+  result=124
+else
+  wait "$probe_pid"
+  result=$?
+  probe_pid=''
 fi
-wait "$probe_pid"
-result=$?
-probe_pid=''
 set -e
 print "Probe exit status: $result" >>"$log"
 print "Profileless signing feasibility log: $log"

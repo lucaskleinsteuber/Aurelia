@@ -161,7 +161,10 @@ final class PlaybackControllerTests: XCTestCase {
     engine.currentTimeMilliseconds = engine.durationMilliseconds
     engine.isPlaying = false
     engine.onEnded?()
-    for _ in 0..<5 { await Task.yield() }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while controller.presentation.mediaId != nextID && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
 
     XCTAssertEqual(controller.presentation.mediaId, nextID)
     XCTAssertEqual(client.createdMediaIDs, [source.mediaId, nextID])

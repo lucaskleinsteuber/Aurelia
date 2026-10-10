@@ -545,11 +545,12 @@ jq -cn --slurpfile info "$runtime_root/server-info.json" \
   >"$data_root/connection.json"
 chmod 600 "$data_root/connection.json"
 connection_before="$(jq -cS 'del(.locallyManaged)' "$data_root/connection.json")"
+connection_log_start=''
 
 wait_for_connection_result() {
   local expected=$1
   for _ in {1..300}; do
-    /usr/bin/log show --last 1m --style compact \
+    /usr/bin/log show --start "$connection_log_start" --style compact \
       --predicate "processIdentifier == $application_pid AND eventMessage BEGINSWITH 'IsolatedHostResult '" \
       2>/dev/null | sed -n 's/.*IsolatedHostResult \({.*}\).*/\1/p' >"$runtime_root/connection-output.jsonl"
     [[ -s "$runtime_root/connection-output.jsonl" ]] \
@@ -561,6 +562,9 @@ wait_for_connection_result() {
 
 for requested_mode in host client; do
   rm -f "$runtime_root/connection-output.jsonl"
+  # Count this app instance's results from a fixed boundary. A sliding one-minute
+  # window loses earlier successes during three legitimate delayed recoveries.
+  connection_log_start="$(date '+%Y-%m-%d %H:%M:%S')"
   if [[ "$requested_mode" == client ]]; then
     jq '. + {locallyManaged:true}' "$data_root/connection.json" >"$data_root/connection-next.json"
     mv "$data_root/connection-next.json" "$data_root/connection.json"
@@ -584,28 +588,32 @@ for requested_mode in host client; do
   helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
   [[ -n "$helper_pid" ]] || fail "Restored app has no owned helper."
   if [[ "$requested_mode" == client ]]; then
-    last_phase='single automatic host recovery'
-    previous_helper_pid="$helper_pid"
-    kill -KILL "$helper_pid"
-    for _ in {1..300}; do
-      /usr/bin/log show --last 1m --style compact \
-        --predicate "processIdentifier == $application_pid AND eventMessage BEGINSWITH 'IsolatedHostResult '" \
-        2>/dev/null | sed -n 's/.*IsolatedHostResult \({.*}\).*/\1/p' >"$runtime_root/connection-output.jsonl"
-      [[ "$(wc -l <"$runtime_root/connection-output.jsonl")" -ge 2 ]] && break
-      sleep 0.1
+    last_phase='bounded automatic host recovery'
+    for recovery_attempt in {1..3}; do
+      previous_helper_pid="$helper_pid"
+      previous_result_count="$(wc -l <"$runtime_root/connection-output.jsonl")"
+      kill -KILL "$helper_pid"
+      for _ in {1..300}; do
+        /usr/bin/log show --start "$connection_log_start" --style compact \
+          --predicate "processIdentifier == $application_pid AND eventMessage BEGINSWITH 'IsolatedHostResult '" \
+          2>/dev/null | sed -n 's/.*IsolatedHostResult \({.*}\).*/\1/p' >"$runtime_root/connection-output.jsonl"
+        [[ "$(wc -l <"$runtime_root/connection-output.jsonl")" -gt "$previous_result_count" ]] && break
+        sleep 0.1
+      done
+      [[ "$(wc -l <"$runtime_root/connection-output.jsonl")" -gt "$previous_result_count" ]] \
+        || fail "Unexpected helper exit was not recovered on attempt $recovery_attempt."
+      [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection and (.catalogCount > 0)')" == true ]] \
+        || fail "Automatic recovery did not reconnect the existing account and catalog."
+      helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
+      [[ -n "$helper_pid" && "$helper_pid" != "$previous_helper_pid" ]] \
+        || fail "Automatic recovery did not create a fresh owned helper."
     done
-    [[ "$(wc -l <"$runtime_root/connection-output.jsonl")" -ge 2 ]] || fail "Unexpected helper exit was not recovered."
-    [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection')" == true ]] \
-      || fail "Automatic recovery did not reconnect the existing account."
-    helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
-    [[ -n "$helper_pid" && "$helper_pid" != "$previous_helper_pid" ]] \
-      || fail "Automatic recovery did not create a fresh owned helper."
     kill -TERM "$helper_pid"
-    wait_for_connection_result false || fail "Second host failure was not reported."
+    wait_for_connection_result false || fail "Persistent host failure was not reported after three recoveries."
     [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready')" == false ]] \
       || fail "Recovery restarted repeatedly instead of reporting a persistent problem."
     sleep 2
-    [[ -z "$(pgrep -f "^$helper( |$)" || true)" ]] || fail "Automatic recovery exceeded its one-attempt budget."
+    [[ -z "$(pgrep -f "^$helper( |$)" || true)" ]] || fail "Automatic recovery exceeded its three-attempt budget."
     helper_pid=''
   fi
   /usr/bin/swift -e 'import AppKit; guard let pid = Int32(CommandLine.arguments[1]), let app = NSRunningApplication(processIdentifier: pid), app.terminate() else { exit(1) }' "$application_pid"
@@ -641,7 +649,7 @@ fi
   print -r -- "PASS: helper stopped when its isolated PID-bound parent app disappeared"
   print -r -- "PASS: legacy local connection gained verified ownership without changing its session or identity"
   print -r -- "PASS: stale explicit client preference recovered the same catalog after app relaunch"
-  print -r -- "PASS: unexpected helper exit recovered once; a second failure did not create a restart loop"
+  print -r -- "PASS: three unexpected helper exits recovered the existing account/catalog; a fourth stopped without a restart loop"
   print -r -- "PASS: SQLite quick_check and integrity_check; foreign keys clean"
   print -r -- "PASS: bounded logs contain no tested secrets"
 } >>"$report"

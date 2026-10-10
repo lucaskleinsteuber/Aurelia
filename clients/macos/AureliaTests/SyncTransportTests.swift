@@ -131,9 +131,10 @@ struct SyncTransportTests {
   func oldSessionCursorCacheIsBounded() async throws {
     let probe = SessionProbe()
     let first = profile()
-    let controller = LibrarySyncController(fetchChanges: { profile, cursor, _, _ in
-      try await probe.fetch(profile: profile, cursor: cursor)
-    })
+    let controller = LibrarySyncController(
+      fetchChanges: { profile, cursor, _, _ in
+        try await probe.fetch(profile: profile, cursor: cursor)
+      }, delay: { _ in try await Task.sleep(for: .milliseconds(1)) })
     for index in 0..<17 {
       let current =
         index == 0
@@ -143,13 +144,19 @@ struct SyncTransportTests {
           publicKeyFingerprint: first.publicKeyFingerprint, token: "synthetic-\(index)",
           sessionId: UUID(), expiresAt: first.expiresAt)
       await controller.start(profile: current) { _ in }
-      try await wait { await probe.calls.contains { $0.0 == current.sessionId } }
+      // Seeing the first fetch is not proof its callback/cursor was committed.
+      // A second fetch at the committed cursor is the acknowledgement barrier.
+      try await wait { await probe.calls.contains { $0.0 == current.sessionId && $0.1 == 50 } }
     }
     let previous = await probe.calls.count
     await controller.start(profile: first) { _ in }
-    try await wait { await probe.calls.count > previous }
+    try await wait {
+      await probe.calls.dropFirst(previous).contains { $0.0 == first.sessionId }
+    }
     await controller.stop()
-    #expect(await probe.calls.last?.1 == 0)
+    // A cancelled previous fetch may still enter the probe actor. Assert the
+    // restarted session's first request, not an unrelated global array index.
+    #expect(await probe.calls.dropFirst(previous).first { $0.0 == first.sessionId }?.1 == 0)
   }
 
   @Test

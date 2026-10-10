@@ -73,6 +73,7 @@ fi
 /usr/bin/ditto "$embedded_vlc" "$test_vlc"
 /usr/bin/codesign --verify --strict "$test_vlc"
 
+TEST_RUNNER_AURELIA_PLAYBACK_SOAK_SECONDS="${AURELIA_PLAYBACK_SOAK_SECONDS:-15}" \
 DEVELOPER_DIR="$developer_dir" xcodebuild \
   -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
   -scheme Aurelia \
@@ -81,7 +82,7 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
   -resultBundlePath "$temporary_unit_result" \
   -enableCodeCoverage NO \
   -parallel-testing-enabled NO \
-  -only-testing:AureliaTests \
+  -only-testing:"${AURELIA_UNIT_TEST_FILTER:-AureliaTests}" \
   test-without-building 2>&1 | tee -a "$temporary_log"
 
 stop_test_hosts

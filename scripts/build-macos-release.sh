@@ -9,8 +9,8 @@ bundle_identifier=com.lucas.aurelia.media
 team_identifier=B5N7JVK37J
 distribution=${AURELIA_DISTRIBUTION:-development}
 timestamp_option=--timestamp=none
-if [[ "$distribution" != development && "$distribution" != developer-id ]]; then
-  echo "AURELIA_DISTRIBUTION must be development or developer-id." >&2
+if [[ "$distribution" != development && "$distribution" != profileless-development && "$distribution" != developer-id ]]; then
+  echo "AURELIA_DISTRIBUTION must be development, profileless-development, or developer-id." >&2
   exit 1
 fi
 if [[ "$distribution" == developer-id ]]; then
@@ -48,6 +48,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [[ "$distribution" == profileless-development ]]; then
+  # This is an explicitly selected local mode, never a public package. Its
+  # certificate still expires; the short-lived provisioning profile is absent.
+  signing_identity=${AURELIA_SIGNING_IDENTITY:-}
+  /bin/zsh "$repository_root/scripts/verify-profileless-macos-identity.sh" \
+    "$signing_identity" "$team_identifier" "$stage_root/Identity Verification"
+  if [[ -n "$provisioning_profile" ]]; then
+    echo "Profileless development must not select a provisioning profile." >&2
+    exit 1
+  fi
+else
 if [[ -z "$provisioning_profile" ]]; then
   profile_directory="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
   profile_candidates=()
@@ -147,6 +158,7 @@ if [[ "$distribution" == developer-id ]]; then
     exit 1
   fi
 fi
+fi
 
 mkdir -p "$publish_root"
 "$repository_root/scripts/prepare-vlckit.sh"
@@ -186,7 +198,15 @@ for agent in com.lucas.aurelia.media.host.background com.lucas.aurelia.media.hos
     exit 1
   fi
 done
-/usr/bin/ditto "$provisioning_profile" "$candidate/Contents/embedded.provisionprofile"
+if [[ "$distribution" != profileless-development ]]; then
+  /usr/bin/ditto "$provisioning_profile" "$candidate/Contents/embedded.provisionprofile"
+else
+  # Do not silently inherit an embedded profile from a future build step.
+  if find "$candidate" -name embedded.provisionprofile -print -quit | grep -q .; then
+    echo "A profileless candidate unexpectedly contains a provisioning profile." >&2
+    exit 1
+  fi
+fi
 mkdir -p "$candidate/Contents/Resources/Server"
 mkdir -p "$candidate/Contents/Resources/ThirdPartyNotices"
 for runtime in osx-arm64 osx-x64; do
@@ -216,14 +236,36 @@ codesign --force --sign "$signing_identity" --options runtime "$timestamp_option
   --entitlements "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app"
 cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release_entitlements"
+if [[ "$distribution" == profileless-development ]]; then
+  # Existing Mac queries target the ordinary file-based Keychain, not the
+  # restricted Data Protection access groups. The sandbox, selected-file
+  # permissions, network permissions and team-prefixed App Group stay intact.
+  /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$release_entitlements"
+  /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
+    "$release_entitlements" "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements"
+else
 /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team_identifier.$bundle_identifier" \
   "$release_entitlements"
 /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $team_identifier" \
   "$release_entitlements"
+fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$release_entitlements" \
   "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"
+if [[ "$distribution" == profileless-development ]]; then
+  if find "$candidate" -name embedded.provisionprofile -print -quit | grep -q .; then
+    echo "The signed profileless candidate unexpectedly contains a provisioning profile." >&2
+    exit 1
+  fi
+  /usr/bin/codesign --display --entitlements - --xml "$candidate" \
+    >"$stage_root/SignedApplication.entitlements" 2>/dev/null
+  /usr/bin/codesign --display --entitlements - --xml \
+    "$candidate/Contents/Helpers/Aurelia Server Host.app" \
+    >"$stage_root/SignedHelper.entitlements" 2>/dev/null
+  /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
+    "$stage_root/SignedApplication.entitlements" "$stage_root/SignedHelper.entitlements"
+fi
 
 if [[ -e "$final_root" ]]; then
   if [[ "$final_root" != "$other_root/Build/Build $build_number" ]]; then

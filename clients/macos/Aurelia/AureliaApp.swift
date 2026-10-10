@@ -16,6 +16,16 @@ struct AureliaApp: App {
         .onChange(of: scenePhase) { _, phase in
           Task { await model.setApplicationActive(phase == .active) }
         }
+        .onReceive(
+          NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
+        ) { _ in
+          Task { await model.systemWillSleep() }
+        }
+        .onReceive(
+          NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+        ) { _ in
+          Task { await model.systemDidWake() }
+        }
     }
     .defaultSize(width: 1_470, height: 956)
     .windowStyle(.hiddenTitleBar)

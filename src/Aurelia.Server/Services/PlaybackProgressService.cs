@@ -1,6 +1,8 @@
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Aurelia.Server.Services;
 
@@ -46,10 +48,25 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
     {
         var media = await RequirePlayableMediaAsync(mediaId, cancellationToken);
 
-        var now = DateTimeOffset.UtcNow;
+        // Match the persisted timestamp precision so the initial response and a
+        // replay after a new request/server restart are exactly the same snapshot.
+        var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         var progress = await database.PlaybackProgress.SingleOrDefaultAsync(
             candidate => candidate.UserId == userId && candidate.MediaItemId == mediaId,
             cancellationToken);
+        var fingerprint = request.ClientMutationId.HasValue ? Fingerprint(request) : null;
+        // The response may have been lost after a committed write. Replaying the
+        // same mutation is read-only, including the change feed and timestamps.
+        if (request.ClientMutationId.HasValue && progress?.LastMutationId == request.ClientMutationId)
+        {
+            if (progress.LastMutationFingerprint != fingerprint)
+                throw new PlaybackException("playback_mutation_reused",
+                    "The playback mutation was reused with different values.", StatusCodes.Status409Conflict);
+            return ToResponse(progress);
+        }
+        if (request.EnforceRevision && request.ExpectedRevision != (progress?.Revision ?? 0))
+            throw new PlaybackException("playback_progress_conflict",
+                "Playback progress changed on another device. Reload before saving.", StatusCodes.Status409Conflict);
         if (progress is null)
         {
             var user = await database.Users.SingleOrDefaultAsync(
@@ -87,6 +104,9 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
         progress.IsCompleted = completed;
         progress.LastPlayedAt = now;
         progress.UpdatedAt = now;
+        progress.Revision = checked(progress.Revision + 1);
+        progress.LastMutationId = request.ClientMutationId;
+        progress.LastMutationFingerprint = fingerprint;
         await database.SaveChangesAsync(cancellationToken);
 
         return ToResponse(progress);
@@ -133,7 +153,10 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
     {
         if (request.PositionMilliseconds < 0
             || request.DurationMilliseconds <= 0
-            || request.PositionMilliseconds > request.DurationMilliseconds)
+            || request.PositionMilliseconds > request.DurationMilliseconds
+            || request.ClientMutationId == Guid.Empty
+            || request.ExpectedRevision < 0
+            || (request.EnforceRevision && (request.ExpectedRevision is null || request.ClientMutationId is null)))
         {
             throw new PlaybackException(
                 "invalid_playback_progress",
@@ -141,6 +164,10 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
                 StatusCodes.Status400BadRequest);
         }
     }
+
+    private static string Fingerprint(UpdatePlaybackProgressRequest request) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(FormattableString.Invariant(
+            $"{request.PositionMilliseconds}:{request.DurationMilliseconds}:{request.IsFinished}"))));
 
     private static PlaybackProgressResponse Empty(Guid mediaId) => new(
         mediaId,
@@ -156,5 +183,7 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
         progress.DurationMilliseconds,
         progress.IsCompleted,
         progress.LastPlayedAt,
-        progress.UpdatedAt);
+        progress.UpdatedAt,
+        progress.Revision,
+        progress.LastMutationId);
 }

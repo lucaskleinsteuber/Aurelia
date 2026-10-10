@@ -12,6 +12,9 @@ final class AppModel: ObservableObject {
         oldValue?.serverId != profile?.serverId || oldValue?.sessionId != profile?.sessionId
           || oldValue?.token != profile?.token
       else { return }
+      if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
+        PlaybackProgressOutbox.shared.deactivate()
+      }
       let retiredGeneration = connectionGeneration
       connectionGeneration = UUID()
       cancelConnectionWork()
@@ -31,6 +34,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
   @Published private(set) var libraries: [LibrarySummary] = []
   @Published private(set) var activeScans: [LibraryScanSummary] = []
+  @Published private(set) var scanStatusUnavailable: Set<UUID> = []
   @Published private(set) var recentScans: [LibraryScanSummary] = []
   @Published private(set) var libraryDiscoveries: [LibraryDiscoverySummary] = []
   @Published private(set) var libraryImportReviews: [LibraryImportReviewSummary] = []
@@ -56,7 +60,7 @@ final class AppModel: ObservableObject {
   private var hostPollTask: Task<Void, Never>?
   private var homeRefreshTask: Task<Void, Never>?
   private var scanPollTask: Task<Void, Never>?
-  private var syncRefreshTask: Task<Void, Never>?
+  private var scanPollingRun = UUID()
   private var syncStartTask: Task<Void, Never>?
   private var connectionGeneration = UUID()
   private var inspectionGeneration = UUID()
@@ -95,13 +99,13 @@ final class AppModel: ObservableObject {
     homeRefreshTask = nil
     scanPollTask?.cancel()
     scanPollTask = nil
-    syncRefreshTask?.cancel()
-    syncRefreshTask = nil
+    scanPollingRun = UUID()
+    scanStatusUnavailable = []
     syncStartTask?.cancel()
     syncStartTask = nil
   }
   private var isTerminationProtectionActive = false
-  private var automaticHostRecoveryUsed = false
+  private var hostHealth = HostHealthPolicy()
   private static let hostLogger = Logger(subsystem: "com.lucas.aurelia.media", category: "Hosting")
   private static let operatingModeKey = "AureliaOperatingMode"
   private static let operatingModeSelectionVersionKey = "AureliaOperatingModeSelectionVersion"
@@ -344,7 +348,7 @@ final class AppModel: ObservableObject {
       if operatingMode == .host {
         await startNativeHost()
       } else if profile != nil {
-        try await refresh()
+        try await refresh(requireCompleteSnapshot: true)
         startSync()
       }
     } catch {
@@ -471,6 +475,7 @@ final class AppModel: ObservableObject {
 
   func restartNativeHost() async {
     errorMessage = nil
+    hostHealth = HostHealthPolicy()
     #if DEBUG
       if Self.uiTestMode == "host-failed" {
         hostSnapshot = NativeHostSnapshot(
@@ -568,6 +573,7 @@ final class AppModel: ObservableObject {
       libraries = snapshot.libraries
       sessions = snapshot.sessions
       activeScans = snapshot.scans
+      scanStatusUnavailable.formIntersection(Set(snapshot.scans.map(\.id)))
       recentScans = Self.uniqueScans(snapshot.history).sorted { $0.createdAt > $1.createdAt }
       libraryDiscoveries = snapshot.discoveries
       libraryImportReviews = snapshot.reviews
@@ -712,8 +718,13 @@ final class AppModel: ObservableObject {
       try await APIClient(profile: profile).cancelScan(id: id)
       if let latest = try? await APIClient(profile: profile).scan(id: id) {
         guard isCurrent(generation) else { return }
-        activeScans.removeAll { $0.id == id }
-        recentScans = Self.uniqueScans([latest] + recentScans)
+        if [.queued, .running, .waitingForStorage].contains(latest.state) {
+          activeScans = activeScans.map { $0.id == id ? latest : $0 }
+        } else {
+          activeScans.removeAll { $0.id == id }
+          recentScans = Self.uniqueScans([latest] + recentScans)
+        }
+        scanStatusUnavailable.remove(id)
       }
     } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
   }
@@ -816,7 +827,6 @@ final class AppModel: ObservableObject {
     hostPollTask?.cancel()
     homeRefreshTask?.cancel()
     scanPollTask?.cancel()
-    syncRefreshTask?.cancel()
     await syncController.stop()
     if operatingMode == .host && !serverHost.isBackgroundService { await serverHost.stop() }
     endTerminationProtection()
@@ -925,7 +935,7 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func refresh() async throws {
+  func refresh(requireCompleteSnapshot: Bool = false) async throws {
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" { return }
     #endif
@@ -968,13 +978,19 @@ final class AppModel: ObservableObject {
     )
     guard isCurrent(generation)
     else { return }
+    guard let newHome, homeRefresher.isCurrent(homeRequest) else {
+      if requireCompleteSnapshot { throw APIClientError.invalidResponse }
+      return
+    }
     movies = newMovies
     series = newSeries
     catalogItems = newCatalog
     collections = newCollections
-    if let newHome, homeRefresher.isCurrent(homeRequest) {
-      home = newHome
-      scheduleHomeRefresh()
+    home = newHome
+    scheduleHomeRefresh()
+    if !Self.isTestProcess, !NativePreflightIsolation.isRequested, let current = self.profile {
+      PlaybackProgressOutbox.shared.activate(profile: current)
+      PlaybackProgressOutbox.shared.retryAfterReconnect()
     }
   }
 
@@ -987,6 +1003,9 @@ final class AppModel: ObservableObject {
       }
       if Self.uiTestMode != nil { return }
     #endif
+    // The library view can appear as soon as its saved profile is loaded.
+    // Its task/activation must not supersede the initial coherent snapshot.
+    guard !isStarting, !isRecoveringLocalHost else { return }
     guard let profile else { return }
     let generation = connectionGeneration
     let request = homeRefresher.beginRequest()
@@ -1191,6 +1210,7 @@ final class AppModel: ObservableObject {
       hostSnapshot.state == .failed || hostSnapshot.state == .stopped
     {
       errorMessage = nil
+      hostHealth = HostHealthPolicy()
       _ = await startNativeHost()
       return
     }
@@ -1203,18 +1223,38 @@ final class AppModel: ObservableObject {
   }
 
   func setApplicationActive(_ active: Bool) async {
+    let canObserve = !isStarting && !isRecoveringLocalHost
+    if active, canObserve, operatingMode == .host, hostPollTask == nil { startHostPolling() }
+    if active, canObserve, !activeScans.isEmpty, scanPollTask == nil { startScanPolling() }
     let generation = connectionGeneration
     await syncController.setForeground(
-      active, profile: profile, runID: generation,
+      active, profile: canObserve ? profile : nil, runID: generation,
       onFailure: { [weak self] error in
         guard let self, self.isCurrent(generation) else { return }
         self.errorMessage = error.localizedDescription
       },
       onChanges: { [weak self] changes in
-        guard let self, self.isCurrent(generation) else { return }
-        await self.handleSyncChanges(changes)
+        guard let self, self.isCurrent(generation) else { throw CancellationError() }
+        try await self.handleSyncChanges(changes)
       }
     )
+  }
+
+  func systemWillSleep() async {
+    hostPollTask?.cancel()
+    hostPollTask = nil
+    scanPollTask?.cancel()
+    scanPollTask = nil
+    scanPollingRun = UUID()
+    await syncController.stop(runID: connectionGeneration)
+  }
+
+  func systemDidWake() async {
+    // Waking does not prove a server failure. Resume observation first and
+    // require the normal confirmation policy before attempting recovery.
+    if operatingMode == .host { startHostPolling() }
+    if !activeScans.isEmpty { startScanPolling() }
+    await setApplicationActive(NSApplication.shared.isActive)
   }
 
   func movieDetail(id: UUID) async throws -> MovieDetailResponse {
@@ -1314,8 +1354,6 @@ final class AppModel: ObservableObject {
     inspectionGeneration = UUID()
     profile = nil
     homeRefresher.invalidate()
-    syncRefreshTask?.cancel()
-    syncRefreshTask = nil
     movies = []
     series = []
     catalogItems = []
@@ -1323,6 +1361,7 @@ final class AppModel: ObservableObject {
     collections = []
     libraries = []
     activeScans = []
+    scanStatusUnavailable = []
     recentScans = []
     libraryDiscoveries = []
     libraryImportReviews = []
@@ -1352,8 +1391,6 @@ final class AppModel: ObservableObject {
     isRecoveringLocalHost = true
     defer { isRecoveringLocalHost = false }
     await syncController.stop()
-    syncRefreshTask?.cancel()
-    syncRefreshTask = nil
     errorMessage = nil
     hostSnapshot = NativeHostSnapshot(
       state: .starting,
@@ -1380,7 +1417,9 @@ final class AppModel: ObservableObject {
       }
       if let profile {
         try OperatingModePolicy.validateLocalHost(hostSnapshot, profile: profile)
-        try await refresh()  // Uses the existing pinned TLS identity and device session.
+        // Readiness includes loading the catalog, not merely a live helper.
+        // A superseded/partial snapshot must never be reported as successful.
+        try await refresh(requireCompleteSnapshot: true)
         guard let current = self.profile, current.serverId == profile.serverId,
           current.sessionId == profile.sessionId
         else { return false }
@@ -1393,7 +1432,12 @@ final class AppModel: ObservableObject {
       writeIsolatedHostResult(ready: true)
       Self.hostLogger.info("Local host ready; saved connection retained.")
       return true
+    } catch is CancellationError {
+      // Sleep/shutdown can cancel a recovery while the helper is still alive;
+      // cancellation is not evidence that the server or saved account failed.
+      return false
     } catch {
+      guard !Task.isCancelled else { return false }
       hostSnapshot = NativeHostSnapshot(
         state: .failed,
         message: error.localizedDescription,
@@ -1423,34 +1467,50 @@ final class AppModel: ObservableObject {
     hostPollTask?.cancel()
     hostPollTask = Task { [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(750))
+        do { try await Task.sleep(for: .seconds(2)) } catch { return }
         guard let self, !Task.isCancelled else { return }
+        var confirmedExit = false
         do {
           let snapshot = try await self.serverHost.status()
           guard !Task.isCancelled else { return }
           if snapshot.state == .failed || snapshot.state == .stopped {
+            confirmedExit = true
             throw NativeHostStartupError.failed(snapshot.message ?? "The local server stopped.")
           }
           self.hostSnapshot = snapshot
+          self.hostHealth.healthy(at: ProcessInfo.processInfo.systemUptime)
         } catch {
           guard !Task.isCancelled else { return }
-          self.hostSnapshot = NativeHostSnapshot(
-            state: .failed,
-            message: error.localizedDescription,
-            bootstrapToken: nil,
-            serverInfo: nil)
-          if self.operatingMode == .host, self.profile?.locallyManaged == true,
-            !self.automaticHostRecoveryUsed
-          {
-            self.automaticHostRecoveryUsed = true
-            Self.hostLogger.notice("Local host disconnected; attempting one automatic recovery.")
-            _ = await self.startNativeHost()
-          } else {
+          let action = self.hostHealth.failed(
+            at: ProcessInfo.processInfo.systemUptime, confirmedExit: confirmedExit)
+          switch action {
+          case .wait(let delay):
+            // A transient control-channel timeout must not restart a live host.
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+          case .recover:
+            guard self.operatingMode == .host,
+              self.profile == nil || self.profile?.locallyManaged == true
+            else {
+              self.errorMessage =
+                "The local host could not be reached. Choose Try Again to reconnect."
+              self.hostPollTask = nil
+              return
+            }
+            Self.hostLogger.notice("Local host unavailable; attempting bounded recovery.")
+            do { try await Task.sleep(for: .seconds(self.hostHealth.recoveryDelay)) } catch {
+              return
+            }
+            if await self.startNativeHost() { return }
+          case .stop:
+            self.hostSnapshot = NativeHostSnapshot(
+              state: .failed, message: error.localizedDescription,
+              bootstrapToken: nil, serverInfo: nil)
             self.errorMessage =
               "Local server stopped: \(error.localizedDescription) Choose Try Again to restart it. Your saved account is unchanged."
             self.writeIsolatedHostResult(ready: false)
+            self.hostPollTask = nil
+            return
           }
-          return
         }
       }
     }
@@ -1520,34 +1580,41 @@ final class AppModel: ObservableObject {
   private func startScanPolling() {
     guard !activeScans.isEmpty else { return }
     scanPollTask?.cancel()
+    let run = UUID()
+    scanPollingRun = run
     let generation = connectionGeneration
     scanPollTask = Task { [weak self] in
       guard let self, let profile = self.profile else { return }
       while self.isCurrent(generation) && !self.activeScans.isEmpty {
         do { try await Task.sleep(for: .seconds(1)) } catch { return }
-        var updated: [LibraryScanSummary] = []
-        var completed: [LibraryScanSummary] = []
-        for scan in self.activeScans {
-          if let latest = try? await APIClient(profile: profile).scan(id: scan.id) {
-            if latest.state == .queued || latest.state == .running
-              || latest.state == .waitingForStorage
-            {
-              updated.append(latest)
-            } else {
-              completed.append(latest)
-            }
+        let polledScans = self.activeScans
+        let batch: ScanPollingBatch
+        do {
+          batch = try await ScanPollingBatch.load(scans: polledScans) {
+            try await APIClient(profile: profile).scan(id: $0)
           }
+        } catch { return }
+        guard self.isCurrent(generation), self.scanPollingRun == run else { return }
+        let reconciled = batch.reconciled(
+          polledIDs: Set(polledScans.map(\.id)), current: self.activeScans)
+        self.activeScans = Self.uniqueScans(reconciled.active)
+        self.scanStatusUnavailable = reconciled.unavailable
+        if let failure = batch.definitiveFailure {
+          self.errorMessage = failure.localizedDescription
+          self.scanPollTask = nil
+          return
         }
-        guard self.isCurrent(generation) else { return }
-        self.activeScans = updated
-        if !completed.isEmpty {
-          self.recentScans = Self.uniqueScans(completed + self.recentScans)
+        if !reconciled.completed.isEmpty {
+          self.recentScans = Self.uniqueScans(reconciled.completed + self.recentScans)
             .sorted { $0.createdAt > $1.createdAt }
           try? await self.refresh()
           await self.reloadAdministrationAfterScan()
         }
+        if !reconciled.unavailable.isEmpty {
+          do { try await Task.sleep(for: .seconds(4)) } catch { return }
+        }
       }
-      if self.isCurrent(generation) { self.scanPollTask = nil }
+      if self.isCurrent(generation), self.scanPollingRun == run { self.scanPollTask = nil }
     }
   }
 
@@ -1564,45 +1631,93 @@ final class AppModel: ObservableObject {
           self.errorMessage = error.localizedDescription
         }
       ) { [weak self] changes in
-        guard let self, self.isCurrent(generation) else { return }
-        await self.handleSyncChanges(changes)
+        guard let self, self.isCurrent(generation) else { throw CancellationError() }
+        try await self.handleSyncChanges(changes)
       }
     }
   }
 
-  private func handleSyncChanges(_ changes: SyncChangesResponse) async {
+  private func handleSyncChanges(_ changes: SyncChangesResponse) async throws {
     let generation = connectionGeneration
-    guard changes.resetRequired || !changes.changedAreas.isEmpty else { return }
-    if changes.changedAreas.contains(.libraries), canManageMedia {
-      await reloadAdministrationAfterScan()
-    }
-    guard isCurrent(generation) else { return }
-    guard syncRefreshTask == nil else { return }
-    let task = Task { @MainActor [weak self] in
-      guard let self else { return }
-      do {
-        try await self.refresh()
-      } catch {
-        if self.isCurrent(generation) { self.errorMessage = error.localizedDescription }
+    guard let profile, isCurrent(generation) else { throw CancellationError() }
+    let plan = SyncRefreshPlan(changes)
+    do {
+      if plan.fullCatalog {
+        try await refresh(requireCompleteSnapshot: true)
+      } else if plan.home {
+        let client = APIClient(profile: profile)
+        let request = homeRefresher.beginRequest()
+        // Stage all responses before publishing or acknowledging. A missing
+        // title can indicate a concurrent removal/grant change: retry with an
+        // authorized full snapshot, never retain hidden cached content.
+        let refreshedHome = try await homeRefresher.load(request: request, profile: profile)
+        var replacements: [UUID: CatalogItemSummary] = [:]
+        for id in plan.mediaIDs {
+          do { replacements[id] = try await client.catalogSummary(id: id) } catch let error
+            as APIClientError where error.httpStatus == 404
+          {
+            try await refresh(requireCompleteSnapshot: true)
+            guard isCurrent(generation) else { throw CancellationError() }
+            return
+          }
+        }
+        let refreshedCollections = plan.collections ? try await client.collections() : nil
+        guard isCurrent(generation) else { throw CancellationError() }
+        guard let refreshedHome, homeRefresher.isCurrent(request) else {
+          throw APIClientError.invalidResponse
+        }
+        catalogItems = catalogItems.map { replacements[$0.id] ?? $0 }
+        movies = movies.map { movie in
+          guard let item = replacements[movie.id] else { return movie }
+          return MovieSummary(
+            id: movie.id, title: item.title, year: item.year, availability: item.availability)
+        }
+        series = series.map { show in
+          guard let item = replacements[show.id] else { return show }
+          return SeriesSummary(
+            id: show.id, title: item.title, availability: item.availability,
+            seasonCount: show.seasonCount, episodeCount: show.episodeCount)
+        }
+        collections = (refreshedCollections ?? collections).map { collection in
+          CollectionSummary(
+            id: collection.id, name: collection.name, poster: collection.poster,
+            items: collection.items.map { replacements[$0.id] ?? $0 })
+        }
+        home = refreshedHome
+        scheduleHomeRefresh()
       }
-      if self.isCurrent(generation) { self.syncRefreshTask = nil }
+      guard isCurrent(generation) else { throw CancellationError() }
+      if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
+        PlaybackProgressOutbox.shared.activate(profile: profile)
+      }
+      if changes.resetRequired || changes.changedAreas.contains(.libraries), canManageMedia {
+        try await refreshLibraryAdministration()
+        guard isCurrent(generation) else { throw CancellationError() }
+      }
+    } catch {
+      if isCurrent(generation), !(error is CancellationError) {
+        errorMessage = error.localizedDescription
+      }
+      throw error
     }
-    syncRefreshTask = task
-    await task.value
   }
 
   private func reloadAdministrationAfterScan() async {
-    guard let profile else { return }
+    try? await refreshLibraryAdministration()
+  }
+
+  private func refreshLibraryAdministration() async throws {
+    guard let profile else { throw CancellationError() }
     let generation = connectionGeneration
     let client = APIClient(profile: profile)
-    if let refreshedLibraries = try? await client.libraries() {
-      let discoveries = try? await loadDiscoveries(client: client, libraries: refreshedLibraries)
-      let reviews = try? await loadImportReviews(client: client, libraries: refreshedLibraries)
-      guard isCurrent(generation) else { return }
-      libraries = refreshedLibraries
-      libraryDiscoveries = discoveries ?? libraryDiscoveries
-      libraryImportReviews = reviews ?? libraryImportReviews
-    }
+    let refreshedLibraries = try await client.libraries()
+    async let discoveries = loadDiscoveries(client: client, libraries: refreshedLibraries)
+    async let reviews = loadImportReviews(client: client, libraries: refreshedLibraries)
+    let snapshot = try await (discoveries, reviews)
+    guard isCurrent(generation) else { throw CancellationError() }
+    libraries = refreshedLibraries
+    libraryDiscoveries = snapshot.0
+    libraryImportReviews = snapshot.1
   }
 
   private static func uniqueScans(_ scans: [LibraryScanSummary]) -> [LibraryScanSummary] {

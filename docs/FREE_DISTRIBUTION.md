@@ -4,11 +4,12 @@ The intended download channel is GitHub, without requiring paid Apple membership
 or an App Store release. A per-app Gatekeeper exception is appropriate only for
 a trusted, intact non-notarized download; it cannot repair missing entitlements.
 
-The present development bundle uses a team-scoped App Group for the private
-app/helper channel and restricted Keychain access groups for connection profiles
-and migration. Its existing profile, container and credentials must remain
-unchanged during ordinary updates. Removing those protections or writing tokens
-to plaintext is not a packaging fix.
+The standard development bundle uses a team-scoped App Group for the private
+app/helper channel and declares restricted Keychain access groups. The existing
+connection code uses the ordinary Mac file-based Keychain, not the Data Protection
+Keychain or an explicitly selected access group. Container and credential
+continuity must be verified for any signing-mode change. Removing sandboxing,
+changing the signing team or writing tokens to plaintext is not a packaging fix.
 
 `zsh scripts/probe-free-macos-entitlements.sh` builds a tiny ad-hoc-signed
 diagnostic with an isolated synthetic group and credential. It never re-signs
@@ -21,7 +22,8 @@ as an application launch pass.
 Apple documents that team-prefixed Mac App Groups require the signing team to
 match, and restricted Keychain entitlements require profile authorization:
 [App Group containers](https://developer.apple.com/documentation/xcode/accessing-app-group-containers),
-[provisioning profiles](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles).
+[provisioning profiles](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles),
+[Mac Keychain implementations](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains).
 
 A free packaging implementation may need a separately designed secure local
 app/helper rendezvous and a credential migration policy. That is an architectural
@@ -52,3 +54,58 @@ profileless development build, not permanent free distribution: the probe still
 uses an Apple-issued development certificate. Retain this distinction when
 evaluating a longer-lived local build versus a profile- and Apple-certificate-
 independent public package.
+
+## Explicit profileless local build mode
+
+`build-macos-release.sh` supports an opt-in **local development** mode:
+
+```sh
+AURELIA_DISTRIBUTION=profileless-development \
+AURELIA_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
+zsh scripts/build-macos-release.sh
+```
+
+Find available identities with `security find-identity -v -p codesigning`. The
+identity must belong to the existing signing team; no profile is selected or
+embedded in this mode. The script checks the actual signing team and certificate
+validity before building. It retains the bundle IDs, team-prefixed App Group,
+application sandbox, selected-file permissions, network permissions, helper
+entitlements and hardened runtime. Only the unused restricted Keychain-group
+declarations and profile-dependent application/team entitlement additions are
+omitted from the generated application signature. Existing entitlement sources
+and the default profile-authorized development mode are unchanged.
+
+`zsh scripts/test-profileless-signing-policy.sh` checks the generated permission
+shape and rejects changed groups, removed protections, restricted identifiers,
+and missing or malformed identities without signing or launching an app.
+
+This removes the short provisioning-profile deadline from that candidate, **not
+the Apple certificate's expiry or revocation risk**. The builder prints the
+certificate validity dates. It does not install or re-sign the installed app;
+the normal verified replacement workflow is still required. The notarized
+packaging script deliberately does not accept this local mode as a public release.
+
+Before switching an existing installation, run the synthetic continuity test with
+the same identity and a valid matching baseline profile:
+
+```sh
+AURELIA_SIGNING_IDENTITY=<matching-Apple-Development-SHA-1> \
+zsh scripts/probe-profileless-macos-continuity.sh
+```
+
+It writes one fresh synthetic ordinary-Keychain credential, changes only a
+temporary probe's signature from the profile-authorized shape to the profileless
+shape, and verifies read/update/delete. Two signed probe roles then exchange and
+remove a synthetic file in a separate test App Group. The matching production
+bundle ID is used only to authorize the baseline signature; no existing
+credential, production App Group data or application preference is accessed.
+Temporary processes are bounded and generated probe bundles are removed; macOS
+container shells are retained. Tests emit status metadata, not credentials.
+
+That test does **not** certify the real AppKit helper launch, `SMAppService`
+registration, an existing user's actual connection, or a clean-machine download.
+Verify the complete candidate with `test-native-host.sh` and
+`test-release-app-autostart.sh` on isolated synthetic data before installation.
+These tests require the normal app and host to be stopped; they never stop an
+existing installation themselves. Background-service permissions remain subject
+to macOS approval and must not be changed merely to make a test pass.

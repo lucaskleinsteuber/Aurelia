@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct PlayerView: View {
   @EnvironmentObject private var model: AppModel
@@ -16,6 +17,7 @@ struct PlayerView: View {
   @State private var controlsPolicy = PlayerControlsPolicy()
   @FocusState private var focusedControl: String?
   @State private var cursorHidden = false
+  @State private var confirmProgressReplacement = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
@@ -100,6 +102,17 @@ struct PlayerView: View {
       revealControls()
     }
     .onChange(of: focusedControl) { interaction("keyboard", active: focusedControl != nil) }
+    .onChange(of: confirmProgressReplacement) {
+      interaction("progress-confirmation", active: confirmProgressReplacement)
+    }
+    .alert("Replace the server playback position?", isPresented: $confirmProgressReplacement) {
+      Button("Use Current Position") { Task { await controller.useCurrentProgress() } }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "Another device changed this title's progress. Use the position currently shown in this player instead? Your local draft remains saved if you cancel."
+      )
+    }
   }
 
   private func controls(in viewport: CGSize) -> some View {
@@ -132,6 +145,23 @@ struct PlayerView: View {
         .position(
           x: viewport.width / 2,
           y: viewport.height - bottomInset - 56)
+
+      if let message = controller.progressMessage {
+        HStack(spacing: 10) {
+          Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+          Text(message).font(.caption).lineLimit(2)
+          if controller.hasProgressConflict {
+            Button("Use Current Position…") { confirmProgressReplacement = true }
+              .buttonStyle(.bordered)
+              .accessibilityIdentifier("player-resolve-progress-conflict")
+          }
+        }
+        .padding(10)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+        .frame(maxWidth: controlWidth)
+        .onHover { interaction("progress-hover", active: $0) }
+        .position(x: viewport.width / 2, y: viewport.height - bottomInset - 142)
+      }
 
       if !controller.isPreparing, controller.errorMessage == nil {
         HStack(spacing: 4) {
@@ -237,6 +267,17 @@ struct PlayerView: View {
           Image(systemName: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill")
         }
       }
+
+      Button {
+        exportPlaybackDiagnostics()
+      } label: {
+        PlayerControlLabel { Image(systemName: "doc.text.magnifyingglass") }
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Export Playback Diagnostics")
+      .accessibilityIdentifier("player-export-diagnostics")
+      .focused($focusedControl, equals: "diagnostics")
+      .onHover { interaction("diagnostics-hover", active: $0) }
     }
     .padding(7)
     .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
@@ -426,6 +467,24 @@ struct PlayerView: View {
     .playerMaterial(
       reduceTransparency: reduceTransparency,
       shape: RoundedRectangle(cornerRadius: 22, style: .continuous))
+  }
+
+  private func exportPlaybackDiagnostics() {
+    interaction("diagnostics-export", active: true)
+    defer { interaction("diagnostics-export", active: false) }
+    let panel = NSSavePanel()
+    panel.title = "Export Playback Diagnostics"
+    panel.nameFieldStringValue = "Aurelia Playback Diagnostics.json"
+    panel.allowedContentTypes = [.json]
+    panel.message =
+      "Includes bounded playback events and positions, without media paths, titles, server addresses or credentials."
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do { try controller.diagnostics.export().write(to: url, options: .atomic) } catch {
+      let alert = NSAlert()
+      alert.messageText = "Diagnostics could not be exported"
+      alert.informativeText = "Check the destination and available disk space, then try again."
+      alert.runModal()
+    }
   }
 
   private func seekButton(forward: Bool) -> some View {

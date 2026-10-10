@@ -74,6 +74,7 @@ public static class ApiEndpointMappings
         catalog.MapGet("/series/{seriesId:guid}", GetSeriesAsync);
         catalog.MapGet("/items", ListCatalogItemsAsync);
         catalog.MapGet("/items/{mediaId:guid}", GetCatalogDetailAsync);
+        catalog.MapGet("/items/{mediaId:guid}/summary", GetCatalogSummaryAsync);
         catalog.MapGet("/search", SearchCatalogAsync);
         catalog.MapPost("/search/rebuild", RebuildCatalogSearchAsync)
             .RequireAuthorization("Owner");
@@ -564,6 +565,9 @@ public static class ApiEndpointMappings
 
     private static Task<IResult> GetCatalogDetailAsync(HttpContext context, Guid mediaId, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
         ExecuteRevisionedAsync(context, changes, () => presentation.DetailAsync(context.User.RequireUserId(), mediaId, cancellationToken));
+
+    private static Task<IResult> GetCatalogSummaryAsync(HttpContext context, Guid mediaId, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => presentation.SummaryAsync(context.User.RequireUserId(), mediaId, cancellationToken));
 
     private static async Task<IResult> RebuildCatalogSearchAsync(
         MediaSearchIndexService searchIndex,

@@ -46,7 +46,7 @@ actor LibrarySyncController {
     profile: StoredServerProfile,
     runID: UUID = UUID(),
     onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
-    onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async -> Void
+    onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async throws -> Void
   ) {
     guard !Task.isCancelled else { return }
     stop()
@@ -61,12 +61,33 @@ actor LibrarySyncController {
       while !Task.isCancelled, activeRun == run, isForeground {
         do {
           let started = Date()
-          let changes = try await fetchChanges(profile, cursor.value, 30, cursor.generation)
+          let changes: SyncChangesResponse
+          do {
+            changes = try await fetchChanges(profile, cursor.value, 30, cursor.generation)
+          } catch let failure as APIClientError where failure.httpStatus == 404 {
+            // Only this endpoint's absence enables old-server compatibility;
+            // a failed snapshot read must not silently disable synchronization.
+            return
+          }
           try Task.checkCancellation()
           guard activeRun == run, isForeground else { return }
           if changes.cursor < cursor.value && !changes.resetRequired {
             throw APIClientError.invalidResponse
           }
+          // A fetched notification is not an acknowledgement. Keep the old
+          // cursor if loading/applying its snapshot fails, so the server can
+          // redeliver the change even when no further mutation occurs.
+          if changes.resetRequired || !changes.changedAreas.isEmpty {
+            do {
+              try await onChanges(changes)
+            } catch let failure as APIClientError where failure.httpStatus == 404 {
+              // A library/title can disappear between notification and scoped
+              // reads. Refetch the snapshot from the same cursor after backoff.
+              throw APIClientError.invalidResponse
+            }
+          }
+          try Task.checkCancellation()
+          guard activeRun == run, isForeground else { return }
           cursor = Cursor(value: changes.cursor, generation: changes.generation)
           if cursors[key] == nil {
             cursorSessions.append(key)
@@ -76,9 +97,6 @@ actor LibrarySyncController {
           }
           cursors[key] = cursor
           failures = 0
-          if changes.resetRequired || !changes.changedAreas.isEmpty {
-            await onChanges(changes)
-          }
           guard !Task.isCancelled, activeRun == run else { return }
           // Prevent a malformed or older endpoint from driving an unbounded empty poll loop.
           if Date().timeIntervalSince(started) < 0.25 { try await delay(0.25) }
@@ -87,8 +105,6 @@ actor LibrarySyncController {
         } catch {
           guard !Task.isCancelled, activeRun == run, isForeground else { return }
           if let failure = error as? APIClientError {
-            // Only a real missing endpoint proves the old-server compatibility path.
-            if failure.httpStatus == 404 { return }
             if failure.isAuthenticationFailure || failure == .serverIdentityMismatch {
               await onFailure?(failure)
               return
@@ -117,7 +133,7 @@ actor LibrarySyncController {
     profile: StoredServerProfile?,
     runID: UUID = UUID(),
     onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
-    onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async -> Void
+    onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async throws -> Void
   ) {
     isForeground = foreground
     if foreground, let profile {

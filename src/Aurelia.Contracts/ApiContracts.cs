@@ -302,7 +302,10 @@ public sealed record PlaybackSourceResponse(
 public sealed record UpdatePlaybackProgressRequest(
     long PositionMilliseconds,
     long DurationMilliseconds,
-    bool IsFinished);
+    bool IsFinished,
+    Guid? ClientMutationId = null,
+    bool EnforceRevision = false,
+    long? ExpectedRevision = null);
 
 public sealed record PlaybackProgressResponse(
     Guid MediaId,
@@ -310,7 +313,9 @@ public sealed record PlaybackProgressResponse(
     long DurationMilliseconds,
     bool IsCompleted,
     DateTimeOffset? LastPlayedAt,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    long Revision = 0,
+    Guid? LastMutationId = null);
 
 public enum MetadataJobState
 {

@@ -125,15 +125,24 @@ public sealed class ServerAccessFoundationTests
                 if (route.Contains("search", StringComparison.Ordinal)) Assert.Equal(1, (await ApiTestClient.ReadAsync<PagedResponse<CatalogItemSummary>>(response)).Total);
             }
             foreach (var route in new[] { $"/api/v1/catalog/movies/{forbidden.MediaId}", $"/api/v1/catalog/items/{forbidden.MediaId}",
+                         $"/api/v1/catalog/items/{forbidden.MediaId}/summary",
                          $"/api/v1/media/{forbidden.MediaId}/metadata", $"/api/v1/media/{forbidden.MediaId}/progress", $"/api/v1/artwork/{forbidden.ArtworkId}" })
             {
                 using var request = ApiTestClient.Authorized(HttpMethod.Get, route, account.Token);
                 using var response = await client.SendAsync(request);
                 Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
             }
+            using var summary = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/catalog/items/{permitted.MediaId}/summary", account.Token);
+            using var summaryResponse = await ApiTestClient.SendAsync(client, summary);
+            summaryResponse.EnsureSuccessStatusCode();
+            Assert.Equal(permitted.Title, (await ApiTestClient.ReadAsync<CatalogItemSummary>(summaryResponse)).Title);
             using var favorite = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/media/{forbidden.MediaId}/favorite", account.Token, new SetFavoriteRequest(true));
             using var favoriteResponse = await client.SendAsync(favorite);
             Assert.Equal(HttpStatusCode.NotFound, favoriteResponse.StatusCode);
+            using var progress = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/media/{forbidden.MediaId}/progress", account.Token,
+                new UpdatePlaybackProgressRequest(20_000, 300_000, false, Guid.NewGuid(), true, 0));
+            using var progressResponse = await ApiTestClient.SendAsync(client, progress);
+            Assert.Equal(HttpStatusCode.NotFound, progressResponse.StatusCode);
             using var playback = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/media/{forbidden.MediaId}/playback", account.Token);
             using var playbackResponse = await client.SendAsync(playback);
             Assert.Equal(HttpStatusCode.NotFound, playbackResponse.StatusCode);

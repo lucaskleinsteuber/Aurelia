@@ -525,12 +525,17 @@ struct PlaybackProgressResponse: Codable, Equatable, Sendable {
   let isCompleted: Bool
   let lastPlayedAt: String?
   let updatedAt: String?
+  var revision: Int64? = nil
+  var lastMutationId: UUID? = nil
 }
 
 struct UpdatePlaybackProgressRequest: Encodable, Equatable, Sendable {
   let positionMilliseconds: Int64
   let durationMilliseconds: Int64
   let isFinished: Bool
+  var expectedRevision: Int64? = nil
+  var enforceRevision: Bool? = nil
+  var clientMutationId: UUID? = nil
 }
 
 struct PlaybackSourceResponse: Codable, Equatable, Sendable {

@@ -50,6 +50,13 @@ is unsupported: use bounded/backed-off retries and safe error messages. Preserve
 HTTP status and bounded `Retry-After`; stop and ask for reauthentication on
 `401`/`403`, and stop on a certificate identity mismatch.
 
+Confirm a change cursor only after the corresponding local refresh succeeds.
+For small `userState` or `metadata` batches, load Home and the authorized compact
+`/api/v1/catalog/items/{id}/summary` responses instead of downloading the entire
+catalog. A summary also supports episodes and supplements, does not load credits,
+and applies the same library grants as other catalog routes. A `404` may mean a
+removed or no longer shared item; do not retain it as an authorized card.
+
 ## Direct playback
 
 Create a ticket through `/api/v1/media/{id}/playback`. Use its server-relative
@@ -58,6 +65,20 @@ Support GET/HEAD byte ranges and the returned length/type. Renew the ticket
 before expiry; retry temporary failures only while the current authorization
 remains valid. Stop on definitive access failure and cancel work when the player
 closes. Save the user's progress and use the server's Continue Watching result.
+
+Current progress responses include an integer `revision` (`0` when no state has
+been saved) and optional `lastMutationId`. To replay progress safely, send a fresh
+UUID `clientMutationId`, `enforceRevision: true` and the fetched `expectedRevision`
+with each update. Retry a failed request with exactly the same mutation and values.
+An exact replay of the latest committed mutation returns the original snapshot
+without a new write, timestamp or change event. Reusing the UUID with different
+values returns `409 playback_mutation_reused`; a stale baseline returns
+`409 playback_progress_conflict`. Reload and retain the local draft for deliberate
+resolution rather than silently overwriting another device's newer progress.
+Backwards seeks are valid when based on the latest revision. Old unguarded clients
+remain compatible, but invalidate the replay marker and advance the revision.
+Responses without a revision cannot provide this replay guarantee; do not fall
+back to unguarded background replay against those servers.
 
 Playback authorization securely opens the current file rather than trusting a
 previous scan's offline flag. An authorized missing/unreachable media source

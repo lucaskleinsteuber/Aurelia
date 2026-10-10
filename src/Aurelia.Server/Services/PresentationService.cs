@@ -72,6 +72,14 @@ public sealed class PresentationService(
             ToCatalog(item, userId), MetadataPresentation.ToSummary(item), seasons, supplements);
     }
 
+    public async Task<CatalogItemSummary> SummaryAsync(Guid userId, Guid mediaId, CancellationToken cancellationToken)
+    {
+        var item = await Cards(BaseItems(userId).Where(item => item.Id == mediaId), userId)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new MetadataException("media_not_found", "The media item was not found.", StatusCodes.Status404NotFound);
+        return ToCatalog(item, userId);
+    }
+
     public async Task<PagedResponse<CatalogItemSummary>> SearchAsync(Guid userId, string query, int offset, int limit, CancellationToken cancellationToken) =>
         await SearchAsync(userId, query, new CatalogQuery(Offset: offset, Limit: limit), cancellationToken);
 
@@ -322,6 +330,8 @@ public sealed class PresentationService(
             IsCompleted = progress.IsCompleted,
             LastPlayedAt = progress.LastPlayedAt,
             UpdatedAt = progress.UpdatedAt,
+            Revision = progress.Revision,
+            LastMutationId = progress.LastMutationId,
         }).ToList(),
     });
 
@@ -333,7 +343,7 @@ public sealed class PresentationService(
             item.Id, item.Kind, metadata.Title, metadata.OriginalTitle, metadata.Year, metadata.Overview,
             metadata.Genres, metadata.Poster, metadata.Backdrop ?? metadata.Still, item.Availability,
             item.Favorites.Any(value => value.UserId == userId),
-            progress is null ? null : new PlaybackProgressResponse(item.Id, progress.PositionMilliseconds, progress.DurationMilliseconds, progress.IsCompleted, progress.LastPlayedAt, progress.UpdatedAt),
+            progress is null ? null : new PlaybackProgressResponse(item.Id, progress.PositionMilliseconds, progress.DurationMilliseconds, progress.IsCompleted, progress.LastPlayedAt, progress.UpdatedAt, progress.Revision, progress.LastMutationId),
             item.CreatedAt,
             item.Parent is null ? null : EffectiveTitle(item.Parent),
             item.SeasonNumber,

@@ -6,12 +6,18 @@ namespace Aurelia.Server.Services;
 public sealed record ServerEvent(DateTimeOffset At, string Code, string Severity, Guid? UserId = null, int? Status = null);
 
 // Deliberately accepts codes, not arbitrary log messages, URLs, headers, or request bodies.
-public sealed class ServerDiagnosticsStore(ServerRuntimeOptions runtime, ServerConfigurationStore configuration) : BackgroundService
+public sealed class ServerDiagnosticsStore(
+    ServerRuntimeOptions runtime,
+    ServerConfigurationStore configuration,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly Channel<ServerEvent> pending = Channel.CreateBounded<ServerEvent>(new BoundedChannelOptions(256)
     { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
     private readonly object gate = new();
     private readonly List<ServerEvent> events = [];
+    private readonly SemaphoreSlim flushGate = new(1, 1);
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+    private bool needsPersistence;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private string PathName => Path.Combine(runtime.DataDirectory, "server-events.json");
 
@@ -19,7 +25,7 @@ public sealed class ServerDiagnosticsStore(ServerRuntimeOptions runtime, ServerC
     {
         if (code.Length > 80 || code.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '_'))
             throw new ArgumentException("Use a fixed diagnostic event code.", nameof(code));
-        pending.Writer.TryWrite(new(DateTimeOffset.UtcNow, code, severity, userId, status));
+        pending.Writer.TryWrite(new(clock.GetUtcNow(), code, severity, userId, status));
     }
     public IReadOnlyList<ServerEvent> Read()
     { lock (gate) return events.OrderByDescending(value => value.At).Take(500).ToArray(); }
@@ -47,14 +53,32 @@ public sealed class ServerDiagnosticsStore(ServerRuntimeOptions runtime, ServerC
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally { await FlushAsync(CancellationToken.None); }
     }
-    private async Task FlushAsync(CancellationToken token)
+    internal async Task FlushAsync(CancellationToken token)
     {
+        await flushGate.WaitAsync(token);
+        try { await FlushCoreAsync(token); }
+        finally { flushGate.Release(); }
+    }
+
+    private async Task FlushCoreAsync(CancellationToken token)
+    {
+        var settings = configuration.Current;
+        var oldestAllowed = clock.GetUtcNow().AddDays(-settings.EventRetentionDays);
         ServerEvent[] snapshot;
         lock (gate)
         {
-            while (pending.Reader.TryRead(out var entry)) events.Add(entry);
-            events.RemoveAll(value => value.At < DateTimeOffset.UtcNow.AddDays(-configuration.Current.EventRetentionDays));
-            if (events.Count > configuration.Current.MaximumEvents) events.RemoveRange(0, events.Count - configuration.Current.MaximumEvents);
+            while (pending.Reader.TryRead(out var entry))
+            {
+                events.Add(entry);
+                needsPersistence = true;
+            }
+            needsPersistence |= events.RemoveAll(value => value.At < oldestAllowed) > 0;
+            if (events.Count > settings.MaximumEvents)
+            {
+                events.RemoveRange(0, events.Count - settings.MaximumEvents);
+                needsPersistence = true;
+            }
+            if (!needsPersistence) return;
             snapshot = events.ToArray();
         }
         var temporary = PathName + "." + Guid.NewGuid().ToString("N") + ".pending";
@@ -63,6 +87,8 @@ public sealed class ServerDiagnosticsStore(ServerRuntimeOptions runtime, ServerC
             await using (var file = PrivateFilePermissions.OpenNewPrivateFile(temporary))
                 await JsonSerializer.SerializeAsync(file, snapshot, Json, token);
             File.Move(temporary, PathName, true);
+            // A failed write remains dirty and is retried even if no new event arrives.
+            needsPersistence = false;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* Diagnostics must not stop playback on a full disk. */ }
         finally { try { if (File.Exists(temporary)) File.Delete(temporary); } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { } }

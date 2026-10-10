@@ -407,11 +407,19 @@ private struct ScanStatusRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        Text(scan.state.rawValue.capitalized).font(.caption.weight(.semibold))
+        Text(
+          model.scanStatusUnavailable.contains(scan.id)
+            ? "Status unavailable" : scan.state.rawValue.capitalized
+        )
+        .font(.caption.weight(.semibold))
         if scan.state == .queued || scan.state == .running || scan.state == .waitingForStorage {
           Button("Cancel") { Task { await model.cancelScan(id: scan.id) } }
             .controlSize(.small)
         }
+      }
+      if model.scanStatusUnavailable.contains(scan.id) {
+        Text("Keeping the last known progress. Status will update when the server is reachable.")
+          .font(.caption).foregroundStyle(.orange)
       }
       if scan.state == .queued || scan.state == .running {
         if let phase = scan.phase {

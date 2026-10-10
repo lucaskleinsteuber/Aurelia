@@ -45,6 +45,7 @@ struct ConnectionReliabilityTests {
     let model = AppModel(
       store: InMemoryServerProfileStore(), initialProfile: syntheticProfile(),
       syncController: controller)
+    await model.start()
     await model.setApplicationActive(false)
     await model.setApplicationActive(true)
     for _ in 0..<200 {

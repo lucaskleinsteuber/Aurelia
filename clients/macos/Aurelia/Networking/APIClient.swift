@@ -498,6 +498,10 @@ struct APIClient: Sendable {
     try await get("/api/v1/catalog/items/\(id.uuidString.lowercased())")
   }
 
+  func catalogSummary(id: UUID) async throws -> CatalogItemSummary {
+    try await get("/api/v1/catalog/items/\(id.uuidString.lowercased())/summary")
+  }
+
   func home() async throws -> HomeResponse {
     try await get("/api/v1/home")
   }
@@ -710,7 +714,11 @@ struct APIClient: Sendable {
     let data = try await perform(
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/playback",
       method: "POST")
-    return try Self.decode(PlaybackSourceResponse.self, from: data)
+    let source = try Self.decode(PlaybackSourceResponse.self, from: data)
+    guard source.mediaId == mediaId, source.progress.mediaId == mediaId else {
+      throw APIClientError.invalidResponse
+    }
+    return source
   }
 
   func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
@@ -721,13 +729,18 @@ struct APIClient: Sendable {
     mediaId: UUID,
     positionMilliseconds: Int64,
     durationMilliseconds: Int64,
-    isFinished: Bool
+    isFinished: Bool,
+    expectedRevision: Int64? = nil,
+    clientMutationId: UUID? = nil
   ) async throws -> PlaybackProgressResponse {
     let body = try JSONEncoder().encode(
       UpdatePlaybackProgressRequest(
         positionMilliseconds: positionMilliseconds,
         durationMilliseconds: durationMilliseconds,
-        isFinished: isFinished))
+        isFinished: isFinished,
+        expectedRevision: expectedRevision,
+        enforceRevision: expectedRevision != nil ? true : nil,
+        clientMutationId: clientMutationId))
     let data = try await perform(
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/progress",
       method: "PUT",

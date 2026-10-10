@@ -457,6 +457,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         modelBuilder.Entity<PlaybackProgress>(entity =>
         {
             entity.HasKey(progress => progress.Id);
+            entity.Property(progress => progress.Revision).HasDefaultValue(1L);
+            entity.Property(progress => progress.LastMutationFingerprint).HasMaxLength(64);
             entity.Property(progress => progress.LastPlayedAt)
                 .HasConversion(dateTimeOffsetConverter);
             entity.Property(progress => progress.UpdatedAt)

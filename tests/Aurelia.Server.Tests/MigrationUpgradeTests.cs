@@ -14,6 +14,66 @@ namespace Aurelia.Server.Tests;
 public sealed class MigrationUpgradeTests
 {
     [Fact]
+    public async Task ProgressProtocolUpgradePreservesExistingPositionsAndInstallsRevision()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.MigrateAsync();
+            var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            var user = new ServerUser { Id = Guid.NewGuid(), Username = "synthetic", NormalizedUsername = "SYNTHETIC", PasswordHash = "synthetic", Role = UserRole.User, CreatedAt = now };
+            var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", Path = root, NormalizedPath = MediaPath.Normalize(root), Kind = LibraryKind.Movies, CreatedAt = now };
+            var media = new MediaItem
+            {
+                Id = Guid.NewGuid(),
+                LibraryRoot = library,
+                LibraryRootId = library.Id,
+                Kind = MediaKind.Movie,
+                SourcePath = Path.Combine(root, "Offline.mkv"),
+                NormalizedSourcePath = MediaPath.Normalize(Path.Combine(root, "Offline.mkv")),
+                DetectedTitle = "Synthetic",
+                Category = "",
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            database.PlaybackProgress.Add(new PlaybackProgress
+            {
+                Id = Guid.NewGuid(),
+                User = user,
+                UserId = user.Id,
+                MediaItem = media,
+                MediaItemId = media.Id,
+                PositionMilliseconds = 45_000,
+                DurationMilliseconds = 300_000,
+                LastPlayedAt = now,
+                UpdatedAt = now,
+                Revision = 7,
+                LastMutationId = Guid.NewGuid(),
+                LastMutationFingerprint = "synthetic"
+            });
+            await database.SaveChangesAsync();
+            await database.Database.GetService<IMigrator>().MigrateAsync("20261004150000_DurableSyncHistory");
+            database.ChangeTracker.Clear();
+            await database.Database.MigrateAsync();
+            var progress = await database.PlaybackProgress.SingleAsync();
+            Assert.Equal(45_000, progress.PositionMilliseconds);
+            Assert.Equal(300_000, progress.DurationMilliseconds);
+            Assert.Equal(now, progress.LastPlayedAt);
+            Assert.Equal(now, progress.UpdatedAt);
+            Assert.Equal(user.Id, progress.UserId);
+            Assert.Equal(media.Id, progress.MediaItemId);
+            Assert.Equal(1, progress.Revision);
+            Assert.Null(progress.LastMutationId);
+            Assert.Null(progress.LastMutationFingerprint);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task AccessMigrationGrantsExistingLibrariesOnceWithoutSharingNewLibraries()
     {
         var root = TestPaths.CreateDataDirectory();
@@ -140,7 +200,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(12L, await command.ExecuteScalarAsync());
+            Assert.Equal(13L, await command.ExecuteScalarAsync());
             command.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsLock';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
@@ -193,7 +253,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(12L, await command.ExecuteScalarAsync());
+            Assert.Equal(13L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='SyncChanges';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaSearchIndex';";
@@ -238,7 +298,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(12L, await command.ExecuteScalarAsync());
+            Assert.Equal(13L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaMetadata';";
@@ -294,7 +354,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(12L, await command.ExecuteScalarAsync());
+            Assert.Equal(13L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaItems';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MetadataJobs';";

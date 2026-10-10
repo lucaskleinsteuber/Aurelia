@@ -182,11 +182,11 @@ struct PlaybackEngineReliabilityTests {
             + "state=\(String(describing: players.last?.state)), "
             + "error=\(controller.errorMessage ?? "none"), recovery=\(controller.recoveryMessage ?? "none"), "
             + "created=\(client.createdMediaIDs), updates=\(client.updates)"
-        }
-      ) {
-        controller.presentation.mediaId == nextID && controller.isPlaying
-          && controller.currentTimeMilliseconds >= 1_000
-      }
+        },
+        {
+          controller.presentation.mediaId == nextID && controller.isPlaying
+            && controller.currentTimeMilliseconds >= 1_000
+        })
       #expect(client.createdMediaIDs == [firstID, nextID])
       #expect(client.updates.contains { $0.mediaID == firstID && $0.finished })
       #expect(!client.updates.contains { $0.mediaID == nextID && $0.finished })
@@ -203,11 +203,104 @@ struct PlaybackEngineReliabilityTests {
     }
   }
 
+  @Test
+  func syntheticDecoderRecoverySoakKeepsPositionAndSurface() async throws {
+    // Short mode runs in the ordinary suite; a dedicated test host can opt in
+    // to a 1–2 hour synthetic soak without ever opening personal media.
+    let requested =
+      Double(ProcessInfo.processInfo.environment["AURELIA_PLAYBACK_SOAK_SECONDS"] ?? "15") ?? 15
+    let seconds = min(max(requested, 15), 7_200)
+    let fixture = FileManager.default.temporaryDirectory
+      .appendingPathComponent("Aurelia-Soak-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: fixture) }
+    let url = fixture.appendingPathComponent("synthetic.avi")
+    try Self.syntheticAVI().write(to: url)
+    let initialAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let client = SyntheticPlaybackClient(url: url, nextID: UUID())
+    var latestPlayer: VLCMediaPlayer?
+    let engine = VLCPlaybackEngine(playerFactory: {
+      let player = Self.testPlayer()
+      latestPlayer = player
+      return player
+    })
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    preferences.automaticallyPlayNextEpisode = false
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: UUID(), title: "Synthetic soak", subtitle: nil),
+      engine: engine, preferences: preferences,
+      relayFactory: { sourceURL, _ in SyntheticPlaybackRelay(url: sourceURL) },
+      recoverySleep: { _ in try await Task.sleep(for: .milliseconds(100)) })
+    let surface = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
+    controller.attachVideoView(surface)
+    await controller.start()
+    let diagnostics = {
+      "time=\(controller.currentTimeMilliseconds), playing=\(controller.isPlaying), "
+        + "loads=\(client.createdMediaIDs.count), recovery=\(controller.recoveryMessage ?? "none"), "
+        + "error=\(controller.errorMessage ?? "none")"
+    }
+    do {
+      try await Self.waitUntil("soak first decode", diagnostics: diagnostics) {
+        controller.isPlaying && controller.currentTimeMilliseconds >= 500
+      }
+      let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+      var iterations = 0
+      var recoveries = 0
+      while ContinuousClock.now < deadline {
+        controller.seek(to: 500)
+        try await Self.waitUntil("soak seek", diagnostics: diagnostics) {
+          controller.isPlaying && controller.currentTimeMilliseconds >= 750
+        }
+        if iterations.isMultiple(of: 3) {
+          let loads = client.createdMediaIDs.count
+          engine.onError?("Synthetic arbitrary decoder error containing no real data")
+          try await Self.waitUntil("soak recovery", diagnostics: diagnostics) {
+            client.createdMediaIDs.count > loads && controller.isPlaying
+              && controller.currentTimeMilliseconds >= 750
+          }
+          recoveries += 1
+        }
+        if iterations.isMultiple(of: 5) {
+          controller.togglePlayback()
+          try await Self.waitUntil("soak pause", diagnostics: diagnostics) { !controller.isPlaying }
+          controller.togglePlayback()
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(controller.errorMessage == nil)
+        #expect(latestPlayer?.drawable as? NSView === surface)
+        iterations += 1
+      }
+      #expect(iterations >= 6)
+      #expect(recoveries >= 2)
+      #expect(
+        controller.diagnostics.events.contains {
+          $0.kind == .recoveryStarted && $0.cause == .decoderError
+        })
+      #expect(controller.diagnostics.events.count <= PlaybackDiagnostics.capacity)
+      await controller.shutdown()
+      let finalAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
+      #expect(initialAttributes[.size] as? Int == finalAttributes[.size] as? Int)
+      #expect(
+        initialAttributes[.modificationDate] as? Date == finalAttributes[.modificationDate] as? Date
+      )
+      print(
+        "Synthetic VLC soak evidence: requested=\(seconds)s, iterations=\(iterations), recoveries=\(recoveries)"
+      )
+    } catch {
+      await controller.shutdown(saveProgress: false)
+      throw error
+    }
+  }
+
   private static func testPlayer() -> VLCMediaPlayer {
     // Exercise the real demuxer/decoder without requiring a visible video
     // window or audio hardware. Surface attachment is asserted separately.
     VLCMediaPlayer(
-      options: VLCPlaybackEngine.defaultPlayerOptions + ["--vout=dummy", "--aout=dummy", "--no-osd"])
+      options: VLCPlaybackEngine.defaultPlayerOptions + [
+        "--vout=dummy", "--aout=dummy", "--no-osd",
+      ])
   }
 
   private static func waitUntil(
@@ -253,7 +346,8 @@ struct PlaybackEngineReliabilityTests {
     format.append(little(UInt16(1)))
     format.append(little(UInt16(24)))
     for value: UInt32 in [0, frameBytes, 0, 0, 0, 0] { format.append(little(value)) }
-    let streamList = chunk("LIST", Data("strl".utf8) + chunk("strh", stream) + chunk("strf", format))
+    let streamList = chunk(
+      "LIST", Data("strl".utf8) + chunk("strh", stream) + chunk("strf", format))
     let header = chunk("LIST", Data("hdrl".utf8) + chunk("avih", main) + streamList)
     var movie = Data("movi".utf8)
     var index = Data()
@@ -330,7 +424,8 @@ private final class SyntheticPlaybackClient: PlaybackClientProtocol {
   func revokePlayback(id: UUID) async throws {}
   func streamURL(path: String) throws -> URL { url }
 
-  private func progress(mediaID: UUID, position: Int64, finished: Bool) -> PlaybackProgressResponse {
+  private func progress(mediaID: UUID, position: Int64, finished: Bool) -> PlaybackProgressResponse
+  {
     PlaybackProgressResponse(
       mediaId: mediaID, positionMilliseconds: position, durationMilliseconds: 3_000,
       isCompleted: finished, lastPlayedAt: nil, updatedAt: nil)

@@ -272,7 +272,15 @@ struct PlaybackRecoveryTests {
     #expect(fixture.controller.currentTimeMilliseconds == 30_000)
     fixture.engine.currentTimeMilliseconds = fixture.engine.durationMilliseconds
     fixture.engine.onEnded?()
-    try await fixture.waitUntil { fixture.client.updates.filter(\.isCompleted).count == 2 }
+    // Intermediate unsent progress is intentionally coalesced. Replaying a
+    // completed movie may replace its first pending completion with the new
+    // unfinished position, but both ends must be observed and the latest
+    // durable server snapshot must still be completed at the true duration.
+    try await fixture.waitUntil {
+      fixture.client.updates.last?.isCompleted == true
+        && fixture.client.updates.last?.positionMilliseconds == fixture.engine.durationMilliseconds
+    }
+    #expect(fixture.controller.diagnostics.events.filter { $0.kind == .ended }.count == 2)
     #expect(!fixture.controller.isPlaying)
     await fixture.close()
   }

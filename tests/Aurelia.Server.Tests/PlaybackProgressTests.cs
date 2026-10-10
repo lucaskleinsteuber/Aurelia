@@ -12,6 +12,112 @@ namespace Aurelia.Server.Tests;
 public sealed class PlaybackProgressTests
 {
     [Fact]
+    public async Task GuardedProgressReplaysIdempotentlyAndRejectsStaleOrReusedMutations()
+    {
+        var root = CreateDirectory();
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, Path.Combine(root, "Offline.mkv"));
+            Assert.Equal(0, (await GetAsync(client, owner.Token, mediaId)).Revision);
+            var mutation = new UpdatePlaybackProgressRequest(50_000, 300_000, false, Guid.NewGuid(), true, 0);
+            var stored = await PutAsync(client, owner.Token, mediaId, mutation);
+            Assert.Equal(1, stored.Revision);
+            Assert.Equal(mutation.ClientMutationId, stored.LastMutationId);
+            long changeCount;
+            using (var scope = factory.Services.CreateScope())
+                changeCount = await scope.ServiceProvider.GetRequiredService<AureliaDbContext>().SyncChanges.LongCountAsync();
+
+            var replay = await PutAsync(client, owner.Token, mediaId, mutation);
+            Assert.Equal(stored, replay);
+            using (var scope = factory.Services.CreateScope())
+                Assert.Equal(changeCount, await scope.ServiceProvider.GetRequiredService<AureliaDbContext>().SyncChanges.LongCountAsync());
+
+            await AssertConflictAsync(client, owner.Token, mediaId, mutation with { PositionMilliseconds = 60_000 }, "playback_mutation_reused");
+            await AssertConflictAsync(client, owner.Token, mediaId, mutation with { ClientMutationId = Guid.NewGuid() }, "playback_progress_conflict");
+
+            // Deliberate backwards seek is valid when based on the latest revision.
+            var backwards = await PutAsync(client, owner.Token, mediaId,
+                mutation with { ClientMutationId = Guid.NewGuid(), ExpectedRevision = stored.Revision, PositionMilliseconds = 20_000 });
+            Assert.Equal(20_000, backwards.PositionMilliseconds);
+            Assert.Equal(2, backwards.Revision);
+            await AssertConflictAsync(client, owner.Token, mediaId, mutation, "playback_progress_conflict");
+            Assert.Equal(backwards, await GetAsync(client, owner.Token, mediaId));
+
+            // Old clients remain supported, but invalidate the last idempotency marker.
+            var legacy = await PutAsync(client, owner.Token, mediaId, new(25_000, 300_000, false));
+            Assert.Equal(3, legacy.Revision);
+            Assert.Null(legacy.LastMutationId);
+        }
+        finally { DeleteDirectory(root); }
+    }
+
+    [Fact]
+    public async Task TwoDevicesCannotCommitAgainstTheSameProgressRevision()
+    {
+        var root = CreateDirectory();
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, Path.Combine(root, "Offline.mkv"));
+            using var first = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/media/{mediaId}/progress", owner.Token,
+                new UpdatePlaybackProgressRequest(40_000, 300_000, false, Guid.NewGuid(), true, 0));
+            using var second = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/media/{mediaId}/progress", owner.Token,
+                new UpdatePlaybackProgressRequest(50_000, 300_000, false, Guid.NewGuid(), true, 0));
+            var responses = await Task.WhenAll(ApiTestClient.SendAsync(client, first), ApiTestClient.SendAsync(client, second));
+            try
+            {
+                Assert.Single(responses, value => value.StatusCode == HttpStatusCode.OK);
+                var rejected = Assert.Single(responses, value => value.StatusCode == HttpStatusCode.Conflict);
+                Assert.Equal("playback_progress_conflict", (await ApiTestClient.ReadAsync<ApiProblem>(rejected)).Code);
+                Assert.Equal(1, (await GetAsync(client, owner.Token, mediaId)).Revision);
+            }
+            finally { foreach (var response in responses) response.Dispose(); }
+        }
+        finally { DeleteDirectory(root); }
+    }
+
+    [Fact]
+    public async Task GuardedProgressRejectsIncompleteOrInvalidConcurrencyFields()
+    {
+        var root = CreateDirectory();
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, Path.Combine(root, "Offline.mkv"));
+            foreach (var invalid in new[]
+            {
+                new UpdatePlaybackProgressRequest(20_000, 300_000, false, Guid.NewGuid(), true),
+                new UpdatePlaybackProgressRequest(20_000, 300_000, false, null, true, 0),
+                new UpdatePlaybackProgressRequest(20_000, 300_000, false, Guid.Empty, true, 0),
+                new UpdatePlaybackProgressRequest(20_000, 300_000, false, Guid.NewGuid(), true, -1),
+            })
+            {
+                using var request = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/media/{mediaId}/progress", owner.Token, invalid);
+                using var response = await ApiTestClient.SendAsync(client, request);
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            }
+            Assert.Equal(0, (await GetAsync(client, owner.Token, mediaId)).Revision);
+        }
+        finally { DeleteDirectory(root); }
+    }
+
+    private static async Task AssertConflictAsync(HttpClient client, string token, Guid mediaId,
+        UpdatePlaybackProgressRequest progress, string code)
+    {
+        using var request = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/media/{mediaId}/progress", token, progress);
+        using var response = await ApiTestClient.SendAsync(client, request);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(code, (await ApiTestClient.ReadAsync<ApiProblem>(response)).Code);
+    }
+
+    [Fact]
     public async Task ProgressIsAuthenticatedValidatedAndIncludedWithPlayback()
     {
         var root = CreateDirectory();
@@ -153,16 +259,20 @@ public sealed class PlaybackProgressTests
             var viewer = await CreateViewerAsync(client, owner.Token);
             await ApiTestClient.GrantExistingLibrariesAsync(client, owner.Token, viewer.User.Id);
 
+            // Mutation identities and revisions are scoped to the account/title,
+            // never used to deduplicate another user's independent progress.
+            var sharedMutationId = Guid.NewGuid();
+
             await PutAsync(
                 client,
                 owner.Token,
                 mediaId,
-                new UpdatePlaybackProgressRequest(20_000, 100_000, false));
+                new UpdatePlaybackProgressRequest(20_000, 100_000, false, sharedMutationId, true, 0));
             await PutAsync(
                 client,
                 viewer.Token,
                 mediaId,
-                new UpdatePlaybackProgressRequest(30_000, 100_000, false));
+                new UpdatePlaybackProgressRequest(30_000, 100_000, false, sharedMutationId, true, 0));
 
             Assert.Equal(20_000, (await GetAsync(client, owner.Token, mediaId)).PositionMilliseconds);
             Assert.Equal(30_000, (await GetAsync(client, viewer.Token, mediaId)).PositionMilliseconds);

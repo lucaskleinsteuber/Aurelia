@@ -107,6 +107,13 @@ public sealed class PresentationApiTests
             var detail = await SendAsync<CatalogDetailPresentation>(
                 client, owner.Token, $"/api/v1/catalog/items/{show.Id}");
             var episode = Assert.Single(Assert.Single(detail.Seasons).Episodes).Item;
+            var episodeSummary = await SendAsync<CatalogItemSummary>(
+                client, owner.Token, $"/api/v1/catalog/items/{episode.Id}/summary");
+            Assert.Equal(episode.Id, episodeSummary.Id);
+            Assert.Equal(episode.Title, episodeSummary.Title);
+            Assert.Equal(episode.ParentTitle, episodeSummary.ParentTitle);
+            using (var anonymous = await client.GetAsync($"/api/v1/catalog/items/{episode.Id}/summary"))
+                Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
             Assert.DoesNotContain(catalog.Items, item => item.Id == episode.Id);
             Assert.Empty((await SendAsync<HomeResponse>(client, owner.Token, "/api/v1/home")).ContinueWatching);
             var before = await SendAsync<SyncChangesResponse>(
@@ -123,6 +130,10 @@ public sealed class PresentationApiTests
             Assert.Equal(1, resumed.SeasonNumber);
             Assert.Equal(1, resumed.EpisodeNumber);
             Assert.Equal(20_000, resumed.Progress!.PositionMilliseconds);
+            var savedSummary = await SendAsync<CatalogItemSummary>(
+                client, owner.Token, $"/api/v1/catalog/items/{episode.Id}/summary");
+            Assert.Equal(resumed.Progress, savedSummary.Progress);
+            Assert.Equal(1, savedSummary.Progress!.Revision);
             var changes = await SendAsync<SyncChangesResponse>(
                 client, owner.Token, $"/api/v1/sync/changes?after={before.Cursor}&waitSeconds=0");
             Assert.Contains(SyncChangeArea.UserState, changes.ChangedAreas);

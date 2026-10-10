@@ -4,21 +4,43 @@ import Foundation
 @MainActor
 protocol PlaybackClientProtocol: AnyObject {
   var profile: StoredServerProfile { get }
+  var requiresProgressRevision: Bool { get }
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse
+  func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse
   func updatePlaybackProgress(
     mediaId: UUID,
     positionMilliseconds: Int64,
     durationMilliseconds: Int64,
     isFinished: Bool
   ) async throws -> PlaybackProgressResponse
+  func updatePlaybackProgress(
+    mediaId: UUID, positionMilliseconds: Int64, durationMilliseconds: Int64, isFinished: Bool,
+    expectedRevision: Int64, clientMutationId: UUID
+  ) async throws -> PlaybackProgressResponse
   func revokePlayback(id: UUID) async throws
   func streamURL(path: String) throws -> URL
+}
+
+extension PlaybackClientProtocol {
+  var requiresProgressRevision: Bool { false }
+  func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
+    throw APIClientError.invalidResponse
+  }
+  func updatePlaybackProgress(
+    mediaId: UUID, positionMilliseconds: Int64, durationMilliseconds: Int64, isFinished: Bool,
+    expectedRevision: Int64, clientMutationId: UUID
+  ) async throws -> PlaybackProgressResponse {
+    try await updatePlaybackProgress(
+      mediaId: mediaId, positionMilliseconds: positionMilliseconds,
+      durationMilliseconds: durationMilliseconds, isFinished: isFinished)
+  }
 }
 
 @MainActor
 final class APIPlaybackClient: PlaybackClientProtocol {
   let api: APIClient
   var profile: StoredServerProfile { api.profile }
+  var requiresProgressRevision: Bool { true }
 
   init(profile: StoredServerProfile) {
     api = APIClient(profile: profile)
@@ -26,6 +48,20 @@ final class APIPlaybackClient: PlaybackClientProtocol {
 
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
     try await api.createPlayback(mediaId: mediaId)
+  }
+
+  func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
+    try await api.playbackProgress(mediaId: mediaId)
+  }
+
+  func updatePlaybackProgress(
+    mediaId: UUID, positionMilliseconds: Int64, durationMilliseconds: Int64, isFinished: Bool,
+    expectedRevision: Int64, clientMutationId: UUID
+  ) async throws -> PlaybackProgressResponse {
+    try await api.updatePlaybackProgress(
+      mediaId: mediaId, positionMilliseconds: positionMilliseconds,
+      durationMilliseconds: durationMilliseconds, isFinished: isFinished,
+      expectedRevision: expectedRevision, clientMutationId: clientMutationId)
   }
 
   func updatePlaybackProgress(
@@ -97,6 +133,10 @@ final class PlaybackController: ObservableObject {
   @Published var isMuted = false
   @Published var errorMessage: String?
   @Published private(set) var recoveryMessage: String?
+  @Published private(set) var recoveryCause: PlaybackRecoveryCause?
+  @Published private(set) var progressMessage: String?
+  @Published private(set) var hasProgressConflict = false
+  let diagnostics = PlaybackDiagnostics()
 
   @Published private(set) var presentation: PlaybackPresentation
 
@@ -108,7 +148,9 @@ final class PlaybackController: ObservableObject {
   private var activePlayback: PlaybackSourceResponse?
   private var playbackIDs: Set<UUID> = []
   private var renewalTask: Task<Void, Never>?
-  private var saveTask: Task<Void, Never>?
+  private let progressOutbox: PlaybackProgressOutbox
+  private var progressObserver: UUID?
+  private var lastProgressState: PlaybackProgressSaveState?
   private var started = false
   private var stopped = false
   private var authorizationFailed = false
@@ -147,6 +189,7 @@ final class PlaybackController: ObservableObject {
     preferences: PlaybackPreferences = PlaybackPreferencesStore.shared.preferences
   ) {
     self.client = APIPlaybackClient(profile: profile)
+    self.progressOutbox = .shared
     self.presentation = presentation
     self.engine = engine
     self.preferences = preferences.normalized
@@ -160,6 +203,7 @@ final class PlaybackController: ObservableObject {
         authorizationToken: profile.token)
     }
     connectEngineCallbacks()
+    connectProgressOutbox()
   }
 
   init(
@@ -175,9 +219,11 @@ final class PlaybackController: ObservableObject {
     recoveryClock: @escaping @MainActor () -> Date = { Date() },
     recoverySleep: @escaping @MainActor (TimeInterval) async throws -> Void = { delay in
       try await Task.sleep(for: .seconds(delay))
-    }
+    },
+    progressOutbox: PlaybackProgressOutbox? = nil
   ) {
     self.client = client
+    self.progressOutbox = progressOutbox ?? PlaybackProgressOutbox()
     self.presentation = presentation
     self.engine = engine
     self.preferences = preferences.normalized
@@ -190,6 +236,66 @@ final class PlaybackController: ObservableObject {
     self.recoveryClock = recoveryClock
     self.recoverySleep = recoverySleep
     connectEngineCallbacks()
+    connectProgressOutbox()
+  }
+
+  private func connectProgressOutbox() {
+    progressOutbox.activate(client: client)
+    progressObserver = progressOutbox.observe { [weak self] in self?.progressStateChanged() }
+    progressStateChanged()
+  }
+
+  private func progressStateChanged() {
+    let state = progressOutbox.state(media: presentation.mediaId, profile: client.profile)
+    hasProgressConflict = state == .conflict
+    if progressOutbox.capacityReached {
+      progressMessage =
+        "Too many unsynchronized titles. Reconnect the server before saving more progress."
+    } else if progressOutbox.storageFailed {
+      progressMessage = "Progress could not be saved on this Mac. Check available disk space."
+      if lastProgressState != state { record(.progressStorageFailure) }
+    } else {
+      switch state {
+      case .conflict:
+        progressMessage =
+          "Another device changed this playback position. Your local progress is retained."
+      case .accessDenied:
+        progressMessage = "Progress saving stopped. Sign in again or check library access."
+      case .unsupportedServer:
+        progressMessage = "Update the server to safely synchronize retained playback progress."
+      case .retrying:
+        progressMessage = "Progress is saved on this Mac and will sync when the server reconnects."
+      case .pending, nil: progressMessage = nil
+      }
+      if lastProgressState != state {
+        if state == .conflict {
+          record(.progressConflict)
+        } else if state == .accessDenied {
+          record(.progressAccessDenied)
+        } else if state == .retrying {
+          record(.progressPending)
+        }
+      }
+    }
+    lastProgressState = state
+  }
+
+  func useCurrentProgress() async {
+    guard hasProgressConflict else { return }
+    enqueueProgressSave(isFinished: endHandled)
+    do {
+      try await progressOutbox.resolveConflict(media: presentation.mediaId, profile: client.profile)
+    } catch {
+      progressMessage = "The progress conflict could not be resolved. Check the server connection."
+    }
+  }
+
+  private func record(
+    _ kind: PlaybackDiagnosticEvent.Kind, cause: PlaybackRecoveryCause? = nil, attempt: Int? = nil
+  ) {
+    diagnostics.record(
+      kind, cause: cause, attempt: attempt, position: currentTimeMilliseconds,
+      duration: durationMilliseconds)
   }
 
   private func connectEngineCallbacks() {
@@ -209,6 +315,7 @@ final class PlaybackController: ObservableObject {
     isPreparing = true
     errorMessage = nil
     wantsPlayback = true
+    record(.started)
     let operation = lifecycleID
 
     do {
@@ -221,7 +328,7 @@ final class PlaybackController: ObservableObject {
     } catch {
       guard !stopped, !Task.isCancelled, operation == lifecycleID else { return }
       if PlaybackRecoveryPolicy.isRecoverable(error) {
-        recoverPlayback(message: "Waiting for the media drive or server…")
+        recoverPlayback(cause: PlaybackRecoveryCause.classify(error))
       } else {
         isPreparing = false
         errorMessage = error.localizedDescription
@@ -237,6 +344,7 @@ final class PlaybackController: ObservableObject {
     // Closing the window (or a newer retry) while old tickets are being
     // revoked must not resurrect this player after asynchronous cleanup.
     guard lifecycleID == operation, !Task.isCancelled else { return }
+    if progressObserver == nil { connectProgressOutbox() }
     started = false
     stopped = false
     recoveryAttempt = 0
@@ -256,7 +364,7 @@ final class PlaybackController: ObservableObject {
     } catch {
       guard !stopped, !Task.isCancelled, operation == lifecycleID else { return }
       if PlaybackRecoveryPolicy.isRecoverable(error) {
-        recoverPlayback(message: "Waiting for the media drive or server…")
+        recoverPlayback(cause: PlaybackRecoveryCause.classify(error))
       } else {
         isPreparing = false
         errorMessage = error.localizedDescription
@@ -417,13 +525,13 @@ final class PlaybackController: ObservableObject {
     playbackIDs.removeAll()
 
     if saveProgress {
-      enqueueProgressSave(isFinished: false)
-      await saveTask?.value
+      enqueueProgressSave(isFinished: endHandled)
+      await progressOutbox.flush()
     }
-
-    for id in retiredIDs {
-      try? await client.revokePlayback(id: id)
-    }
+    await revokeTickets(retiredIDs)
+    record(.stopped)
+    if let progressObserver { progressOutbox.removeObserver(progressObserver) }
+    progressObserver = nil
   }
 
   private func begin(
@@ -456,6 +564,7 @@ final class PlaybackController: ObservableObject {
       throw error
     }
     self.relay = relay
+    progressOutbox.noteBaseline(source.progress, profile: client.profile)
     activePlayback = source
     // Only a newly authorized source with a ready local relay can clear a
     // definitive authorization failure. A tentative retry alone cannot.
@@ -470,6 +579,7 @@ final class PlaybackController: ObservableObject {
     wantsPlayback = autoplay
     recovering = false
     recoveryMessage = nil
+    recoveryCause = nil
     errorMessage = nil
     endHandled = false
     lastMovementAt = recoveryClock()
@@ -488,6 +598,7 @@ final class PlaybackController: ObservableObject {
     scheduleRenewal(for: source)
     engine.play()
     scheduleWatchdog()
+    record(.prepared)
   }
 
   private func engineUpdated() {
@@ -541,7 +652,7 @@ final class PlaybackController: ObservableObject {
     let position = max(currentTimeMilliseconds, engine.currentTimeMilliseconds)
     let duration = max(durationMilliseconds, engine.durationMilliseconds)
     guard PlaybackRecoveryPolicy.hasReachedEnd(position: position, duration: duration) else {
-      recoverPlayback(message: "Playback was interrupted. Reconnecting…")
+      recoverPlayback(cause: .prematureEnd)
       return
     }
     endHandled = true
@@ -551,6 +662,7 @@ final class PlaybackController: ObservableObject {
     isPlaying = false
     currentTimeMilliseconds = duration
     durationMilliseconds = duration
+    record(.ended)
     enqueueProgressSave(isFinished: true)
     guard sleepTimer != .endOfEpisode,
       preferences.automaticallyPlayNextEpisode,
@@ -565,24 +677,17 @@ final class PlaybackController: ObservableObject {
 
   private func engineFailed(_ message: String) {
     guard !stopped, !authorizationFailed, !recovering, !endHandled else { return }
-    recoverPlayback(message: "Playback was interrupted. Reconnecting…")
+    // The decoder's arbitrary error text must never enter diagnostic exports.
+    recoverPlayback(cause: .decoderError)
   }
 
   private func enqueueProgressSave(isFinished: Bool) {
     let position = currentTimeMilliseconds
     let duration = durationMilliseconds
     guard duration > 0, position >= 0, position <= duration else { return }
-    let previous = saveTask
-    let client = client
-    let mediaID = presentation.mediaId
-    saveTask = Task {
-      await previous?.value
-      _ = try? await client.updatePlaybackProgress(
-        mediaId: mediaID,
-        positionMilliseconds: position,
-        durationMilliseconds: duration,
-        isFinished: isFinished)
-    }
+    progressOutbox.enqueue(
+      media: presentation.mediaId, profile: client.profile, position: position, duration: duration,
+      finished: isFinished)
   }
 
   private func scheduleRenewal(for source: PlaybackSourceResponse) {
@@ -600,7 +705,7 @@ final class PlaybackController: ObservableObject {
   private func advance(to item: PlaybackQueueItem) async {
     loadID = UUID()
     defer { nextItemTask = nil }
-    await saveTask?.value
+    await progressOutbox.flush()
     guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
     renewalTask?.cancel()
     renewalTask = nil
@@ -608,10 +713,8 @@ final class PlaybackController: ObservableObject {
     relay?.stop()
     relay = nil
     engine.stop()
-    for id in playbackIDs {
-      try? await client.revokePlayback(id: id)
-      guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
-    }
+    await revokeTickets(playbackIDs)
+    guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
     playbackIDs.removeAll()
     activePlayback = nil
     presentation = PlaybackPresentation(
@@ -625,6 +728,8 @@ final class PlaybackController: ObservableObject {
     durationMilliseconds = 0
     appliedResumePosition = false
     errorMessage = nil
+    record(.nextEpisode)
+    progressStateChanged()
     do {
       let source = try await client.createPlayback(mediaId: item.mediaId)
       guard !stopped, !authorizationFailed, !Task.isCancelled else {
@@ -635,7 +740,7 @@ final class PlaybackController: ObservableObject {
     } catch {
       guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
       if PlaybackRecoveryPolicy.isRecoverable(error) {
-        recoverPlayback(message: "Waiting to start the next episode. Reconnect the media drive…")
+        recoverPlayback(cause: PlaybackRecoveryCause.classify(error))
       } else {
         isPreparing = false
         errorMessage = "The next episode could not start. \(error.localizedDescription)"
@@ -704,7 +809,11 @@ final class PlaybackController: ObservableObject {
     }
   }
 
-  private func stopUnauthorizedPlayback(_ message: String) {
+  private func stopUnauthorizedPlayback(
+    _ message: String, cause: PlaybackRecoveryCause = .accessDenied
+  ) {
+    record(.authorizationStopped, cause: cause)
+    recoveryCause = cause
     authorizationFailed = true
     loadID = UUID()
     recoveryTask?.cancel()
@@ -730,21 +839,20 @@ final class PlaybackController: ObservableObject {
   private func streamFailed(_ failure: PlaybackStreamFailure) {
     guard !stopped, !recovering, !endHandled else { return }
     switch failure {
-    case .interrupted, .unavailable:
-      recoverPlayback(message: "Waiting for the media drive or server…")
+    case .interrupted:
+      recoverPlayback(cause: .connectionInterrupted)
+    case .unavailable:
+      // HTTP 404/410/503 alone cannot prove that a physical drive disconnected.
+      recoverPlayback(cause: .mediaSourceUnavailable)
     case .authorizationDenied:
       stopUnauthorizedPlayback("Playback access was denied. Sign in again or check library access.")
     case .untrustedServer:
-      stopUnauthorizedPlayback("The server identity could not be verified. Playback has stopped.")
+      stopUnauthorizedPlayback(
+        "The server identity could not be verified. Playback has stopped.",
+        cause: .serverIdentityMismatch)
     case .invalidResponse:
-      cancelRecovery()
-      loadID = UUID()
-      renewalTask?.cancel()
-      renewalTask = nil
-      relay?.stop()
-      relay = nil
-      engine.stop()
-      errorMessage = "The server returned an invalid media stream."
+      stopUnauthorizedPlayback(
+        "The server returned an invalid media stream.", cause: .invalidStream)
     }
   }
 
@@ -765,7 +873,13 @@ final class PlaybackController: ObservableObject {
     guard !stopped, !authorizationFailed, !recovering, !endHandled, wantsPlayback,
       recoveryClock().timeIntervalSince(lastMovementAt) >= (isPreparing ? 30 : 15)
     else { return }
-    recoverPlayback(message: "Playback is not advancing. Reconnecting…")
+    recoverPlayback(cause: .stalled)
+  }
+
+  private func recoverPlayback(cause: PlaybackRecoveryCause) {
+    recoveryCause = cause
+    record(.recoveryStarted, cause: cause)
+    recoverPlayback(message: cause.message)
   }
 
   private func recoverPlayback(message: String) {
@@ -799,15 +913,14 @@ final class PlaybackController: ObservableObject {
           self.recoveryTask = nil
         }
       }
-      for id in retiredIDs {
-        try? await self.client.revokePlayback(id: id)
-        guard !Task.isCancelled, !self.stopped, self.lifecycleID == operation,
-          self.recoveryID == recovery
-        else { return }
-      }
+      await self.revokeTickets(retiredIDs)
+      guard !Task.isCancelled, !self.stopped, self.lifecycleID == operation,
+        self.recoveryID == recovery
+      else { return }
       while self.recoveryAttempt < PlaybackRecoveryPolicy.delays.count {
         let delay = PlaybackRecoveryPolicy.delays[self.recoveryAttempt]
         self.recoveryAttempt += 1
+        self.record(.recoveryAttempt, cause: self.recoveryCause, attempt: self.recoveryAttempt)
         do { try await self.recoverySleep(delay) } catch { return }
         guard !Task.isCancelled, !self.stopped, self.lifecycleID == operation,
           self.recoveryID == recovery
@@ -821,6 +934,7 @@ final class PlaybackController: ObservableObject {
             return
           }
           try await self.begin(source, resumeOverride: position, autoplay: autoplay)
+          self.record(.recovered)
           return
         } catch {
           guard !Task.isCancelled, !self.stopped, self.lifecycleID == operation,
@@ -831,7 +945,8 @@ final class PlaybackController: ObservableObject {
               || error as? APIClientError == .serverIdentityMismatch
               || (error as? URLError)?.code == .serverCertificateUntrusted
             {
-              self.stopUnauthorizedPlayback(error.localizedDescription)
+              self.stopUnauthorizedPlayback(
+                error.localizedDescription, cause: PlaybackRecoveryCause.classify(error))
               return
             }
             self.recovering = false
@@ -849,10 +964,12 @@ final class PlaybackController: ObservableObject {
       self.errorMessage =
         "Playback could not recover. Reconnect the media drive or check the server, then choose Try Again."
       self.endPlaybackActivity()
+      self.record(.recoveryExhausted, cause: self.recoveryCause)
     }
   }
 
   func cancelRecovery() {
+    record(.recoveryCancelled, cause: recoveryCause)
     recoveryTask?.cancel()
     recoveryID = UUID()
     recoveryTask = nil
@@ -866,6 +983,42 @@ final class PlaybackController: ObservableObject {
 
   private func cancelRecoveryForSleep() {
     if recovering { cancelRecovery() }
+  }
+
+  private func revokeTickets(_ ids: Set<UUID>) async {
+    guard !ids.isEmpty else { return }
+    let client = client
+    await withCheckedContinuation { continuation in
+      let completion = PlaybackCleanupCompletion(continuation)
+      completion.operation = Task {
+        for id in ids {
+          guard !Task.isCancelled else { break }
+          try? await client.revokePlayback(id: id)
+        }
+        completion.finish()
+      }
+      completion.timeout = Task {
+        do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+        completion.finish()
+      }
+    }
+  }
+}
+
+@MainActor
+private final class PlaybackCleanupCompletion {
+  private var continuation: CheckedContinuation<Void, Never>?
+  var operation: Task<Void, Never>?
+  var timeout: Task<Void, Never>?
+  init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+  func finish() {
+    guard let continuation else { return }
+    self.continuation = nil
+    operation?.cancel()
+    timeout?.cancel()
+    operation = nil
+    timeout = nil
+    continuation.resume()
   }
 }
 
@@ -931,5 +1084,6 @@ final class PlaybackShutdownCoordinator {
   func shutdown() async {
     await controller?.shutdown()
     controller = nil
+    await PlaybackProgressOutbox.shared.flush()
   }
 }
