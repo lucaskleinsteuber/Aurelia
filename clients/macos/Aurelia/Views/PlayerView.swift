@@ -68,6 +68,9 @@ struct PlayerView: View {
     .preferredColorScheme(.dark)
     .task {
       PlaybackShutdownCoordinator.shared.register(controller)
+      if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil {
+        SystemMediaPlaybackCoordinator.shared.register(controller)
+      }
       revealControls()
       await controller.start()
     }
@@ -75,6 +78,7 @@ struct PlayerView: View {
       hideTask?.cancel()
       showCursor()
       PlaybackShutdownCoordinator.shared.unregister(controller)
+      SystemMediaPlaybackCoordinator.shared.unregister(controller)
       windowPresentation.restore()
       Task { await controller.shutdown() }
     }

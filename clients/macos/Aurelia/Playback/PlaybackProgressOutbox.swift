@@ -373,6 +373,25 @@ final class PlaybackProgressOutbox {
     kick()
   }
 
+  /// A fresh playback ticket proves this session can reach this title again.
+  /// Release only its transport retry/backoff, never adopt a newer revision or
+  /// replace an uncertain mutation. Other titles and policy stops stay intact.
+  func retryAfterPlaybackAuthorization(media: UUID, profile: StoredServerProfile) {
+    guard scope == PlaybackProgressScope(profile), session == profile.sessionId,
+      let index = entries.firstIndex(where: {
+        $0.scope == scope && $0.media == media && $0.state == .retrying
+      })
+    else { return }
+    entries[index].attempts = 0
+    entries[index].nextAttempt = clock()
+    guard persist() else {
+      notify()
+      return
+    }
+    notify()
+    kick()
+  }
+
   private func notify() { for observer in observers.values { observer() } }
 
   private func valid(_ snapshot: PendingPlaybackProgress) -> Bool {

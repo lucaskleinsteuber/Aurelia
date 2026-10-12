@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import Network
 import XCTest
 
 @testable import Aurelia
@@ -29,7 +30,9 @@ final class LoopbackStreamRelayTests: XCTestCase {
     let (full, fullResponse) = try await URLSession.shared.data(from: localURL)
     XCTAssertEqual((fullResponse as? HTTPURLResponse)?.statusCode, 200)
     XCTAssertEqual(full, RelayURLProtocol.oldPayload)
-    XCTAssertEqual((fullResponse as? HTTPURLResponse)?.value(forHTTPHeaderField: "Cache-Control"), "private, no-store")
+    XCTAssertEqual(
+      (fullResponse as? HTTPURLResponse)?.value(forHTTPHeaderField: "Cache-Control"),
+      "private, no-store")
 
     var headRequest = URLRequest(url: localURL)
     headRequest.httpMethod = "HEAD"
@@ -85,22 +88,67 @@ final class LoopbackStreamRelayTests: XCTestCase {
   }
 
   func testTruncatedAndInterruptedTransfersReportFailureInsteadOfSuccessfulEnd() async throws {
-    for path in ["truncated", "interrupted"] {
-      try await assertFailure(path: path, expected: .interrupted)
-    }
+    try await assertFailure(
+      path: "truncated",
+      expected: .detailed(
+        PlaybackFailureContext(
+          cause: .connectionInterrupted, phase: .streamTransport,
+          bytesTransferred: 7, localReason: "truncatedBody")))
+    try await assertFailure(
+      path: "interrupted",
+      expected: .detailed(
+        PlaybackFailureContext(
+          cause: .connectionInterrupted, phase: .streamTransport,
+          urlErrorCode: NSURLErrorNetworkConnectionLost, bytesTransferred: 0,
+          localReason: "transportFailure")))
   }
 
   func testAuthorizationUnavailableInvalidAndTrustFailuresRemainDistinct() async throws {
     for (path, failure) in [
-      ("denied", PlaybackStreamFailure.authorizationDenied),
-      ("forbidden", .authorizationDenied),
-      ("missing", .unavailable),
+      (
+        "denied",
+        PlaybackStreamFailure.detailed(
+          PlaybackFailureContext(
+            cause: .accessDenied, phase: .streamTransport, httpStatus: 401))
+      ),
+      (
+        "forbidden",
+        .detailed(
+          PlaybackFailureContext(
+            cause: .accessDenied, phase: .streamTransport, httpStatus: 403))
+      ),
+      (
+        "missing",
+        .detailed(
+          PlaybackFailureContext(
+            cause: .mediaSourceUnavailable, phase: .streamTransport, httpStatus: 404))
+      ),
       ("badlength", .invalidResponse),
-      ("tlsfailure", .untrustedServer),
-      ("oversized", .interrupted),
+      (
+        "tlsfailure",
+        .detailed(
+          PlaybackFailureContext(
+            cause: .serverIdentityMismatch, phase: .streamTransport,
+            urlErrorCode: NSURLErrorServerCertificateUntrusted, bytesTransferred: 0))
+      ),
     ] {
       try await assertFailure(path: path, expected: failure)
     }
+  }
+
+  func testLargeValidCallbackUsesBackpressureInsteadOfReportingAnOutage() async throws {
+    let failures = RelayFailureRecorder()
+    let relay = try LoopbackStreamRelay(
+      sourceURL: URL(string: "https://relay.test/oversized")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      sessionFactory: Self.stubSession)
+    relay.setFailureHandler { failures.record($0) }
+    let localURL = try await relay.start()
+    defer { relay.stop() }
+    let (data, response) = try await URLSession.shared.data(from: localURL)
+    XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    XCTAssertEqual(data, Data(repeating: 65, count: 2_097_152))
+    XCTAssertTrue(failures.values.isEmpty)
   }
 
   func testLocalSeekCancellationStopsWaitingUpstreamWithoutReportingOutage() async throws {
@@ -127,6 +175,82 @@ final class LoopbackStreamRelayTests: XCTestCase {
     request.cancel()
     await fulfillment(of: [stopped], timeout: 5)
     XCTAssertTrue(failures.values.isEmpty)
+  }
+
+  func testRelayStopReturnsLargeCallbackAndAllowsFreshStreamWithoutOutage() async throws {
+    try await assertLargeCallbackCancellation(stopRelay: true)
+  }
+
+  func testLocalCancellationReturnsLargeCallbackAndAllowsFreshStreamWithoutOutage() async throws {
+    try await assertLargeCallbackCancellation(stopRelay: false)
+  }
+
+  func testCancellationWakesProducerWaitingAtBoundedWindowCapacity() async throws {
+    let capacity = 1_048_576
+    let window = RelayBufferWindow(maximumBytes: capacity)
+    defer { window.cancel() }
+    XCTAssertTrue(window.reserve(capacity))
+    let returned = expectation(description: "Blocked reservation returns on cancellation")
+    let result = RelayReservationResult()
+    DispatchQueue(label: "relay-test.capacity-waiter").async {
+      result.record(window.reserve(65_536))
+      returned.fulfill()
+    }
+    let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+    while window.waitingProducerCount != 1, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    XCTAssertEqual(window.waitingProducerCount, 1)
+    window.cancel()
+    await fulfillment(of: [returned], timeout: 1)
+    XCTAssertEqual(result.value, false)
+    XCTAssertEqual(window.waitingProducerCount, 0)
+    // A late downstream completion cannot revive a canceled window.
+    window.release(capacity)
+    XCTAssertFalse(window.reserve(65_536))
+  }
+
+  func testInvalidWindowReservationCannotWaitForever() {
+    let window = RelayBufferWindow(maximumBytes: 65_536)
+    XCTAssertFalse(window.reserve(-1))
+    XCTAssertFalse(window.reserve(65_537))
+    XCTAssertTrue(window.reserve(65_536))
+    window.cancel()
+  }
+
+  func testKnownProblemCodesAndRetryAfterArePreservedWithoutRawErrorText() async throws {
+    for (path, context) in [
+      (
+        "offline",
+        PlaybackFailureContext(
+          cause: .mediaUnavailable, phase: .streamTransport, httpStatus: 503,
+          problemCode: "media_unavailable", retryAfter: 2)
+      ),
+      (
+        "unsafe",
+        PlaybackFailureContext(
+          cause: .mediaFileUnavailable, phase: .streamTransport, httpStatus: 409,
+          problemCode: "media_file_unavailable")
+      ),
+      (
+        "busy",
+        PlaybackFailureContext(
+          cause: .rateLimited, phase: .streamTransport, httpStatus: 429,
+          problemCode: "stream_limit", retryAfter: 60)
+      ),
+      (
+        "unlisted",
+        PlaybackFailureContext(
+          cause: .connectionInterrupted, phase: .streamTransport, httpStatus: 503)
+      ),
+      (
+        "hugeproblem",
+        PlaybackFailureContext(
+          cause: .connectionInterrupted, phase: .streamTransport, httpStatus: 503)
+      ),
+    ] {
+      try await assertFailure(path: path, expected: .detailed(context))
+    }
   }
 
   func testStoppingDuringUpstreamSessionCreationCannotStartLateReads() async throws {
@@ -195,6 +319,101 @@ final class LoopbackStreamRelayTests: XCTestCase {
     XCTAssertEqual(failures.values, [expected])
   }
 
+  private func assertLargeCallbackCancellation(stopRelay: Bool) async throws {
+    let failures = RelayFailureRecorder()
+    let probe = RelayBurstProbe(
+      started: expectation(description: "Large Foundation callback entered"),
+      returned: expectation(description: "Large Foundation callback returned after cancellation"),
+      stopped: expectation(description: "Still-open synthetic upstream canceled"))
+    let path = "/burst-\(UUID().uuidString)"
+    RelayBurstURLProtocol.probes.insert(probe, for: path)
+    defer { RelayBurstURLProtocol.probes.remove(for: path) }
+    let sessionFactory: LoopbackStreamRelay.SessionFactory = { delegate in
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.protocolClasses = [RelayBurstURLProtocol.self]
+      return URLSession(
+        configuration: configuration,
+        delegate: RelayBurstObservingDelegate(delegate: delegate, probe: probe),
+        delegateQueue: nil)
+    }
+    let relay = try LoopbackStreamRelay(
+      sourceURL: URL(string: "https://backpressure.relay.test\(path)")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      sessionFactory: sessionFactory)
+    relay.setFailureHandler { failures.record($0) }
+    let localURL = try await relay.start()
+    let port = try XCTUnwrap(localURL.port.flatMap { UInt16(exactly: $0) })
+    let connection = NWConnection(
+      host: "127.0.0.1", port: try XCTUnwrap(NWEndpoint.Port(rawValue: port)), using: .tcp)
+    defer {
+      connection.cancel()
+      relay.stop()
+    }
+    let ready = RelayOnceExpectation(expectation(description: "Non-reading TCP client connected"))
+    connection.stateUpdateHandler = { state in
+      if case .ready = state { ready.fulfill() }
+    }
+    connection.start(queue: DispatchQueue(label: "relay-test.non-reading-client"))
+    await fulfillment(of: [ready.expectation], timeout: 5)
+    guard ready.isFulfilled else { return }
+
+    // Deliberately never call receive on this connection. OS socket buffering
+    // may still absorb this burst; this integration test does not claim that
+    // the application window blocked. The window test proves that separately.
+    let sent = RelayOnceExpectation(expectation(description: "Local GET sent"))
+    let request = "GET \(localURL.path) HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\n\r\n"
+    connection.send(
+      content: Data(request.utf8),
+      completion: .contentProcessed { error in
+        probe.recordLocalSend(error == nil)
+        sent.fulfill()
+      })
+    await fulfillment(of: [sent.expectation, probe.started.expectation], timeout: 5)
+    XCTAssertTrue(probe.localSendSucceeded)
+    guard probe.started.isFulfilled else { return }
+    XCTAssertEqual(probe.callbackBytes, RelayBurstURLProtocol.burstBytes)
+
+    let cancelledAt = ContinuousClock.now
+    if stopRelay {
+      relay.stop()
+    } else {
+      connection.cancel()
+    }
+    await fulfillment(of: [probe.returned.expectation, probe.stopped.expectation], timeout: 5)
+    XCTAssertLessThan(cancelledAt.duration(to: .now), .seconds(5))
+    XCTAssertTrue(probe.returned.isFulfilled)
+    XCTAssertTrue(probe.stopped.isFulfilled)
+    XCTAssertTrue(failures.values.isEmpty)
+
+    // Local cancellation keeps the same listener usable; stopping retires it,
+    // so use a new relay with the same upstream test transport in that case.
+    let freshRelay: LoopbackStreamRelay
+    let freshURL: URL
+    let source = URL(string: "https://backpressure.relay.test/fresh")!
+    if stopRelay {
+      freshRelay = try LoopbackStreamRelay(
+        sourceURL: source,
+        publicKeyFingerprint: String(repeating: "A", count: 64),
+        sessionFactory: sessionFactory)
+      freshRelay.setFailureHandler { failures.record($0) }
+      freshURL = try await freshRelay.start()
+    } else {
+      freshRelay = relay
+      freshRelay.updateSourceURL(source)
+      freshURL = localURL
+    }
+    defer { freshRelay.stop() }
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 5
+    configuration.timeoutIntervalForResource = 5
+    let client = URLSession(configuration: configuration)
+    defer { client.invalidateAndCancel() }
+    let (data, response) = try await client.data(from: freshURL)
+    XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    XCTAssertEqual(data, RelayBurstURLProtocol.freshPayload)
+    XCTAssertTrue(failures.values.isEmpty)
+  }
+
   private static func range(
     _ value: String,
     from url: URL
@@ -215,6 +434,130 @@ final class LoopbackStreamRelayTests: XCTestCase {
 
 private final class RelayConfigurationDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {}
 
+private final class RelayReservationResult: @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: Bool?
+  var value: Bool? { lock.withLock { recorded } }
+  func record(_ value: Bool) { lock.withLock { recorded = value } }
+}
+
+private final class RelayOnceExpectation: @unchecked Sendable {
+  let expectation: XCTestExpectation
+  private let lock = NSLock()
+  private var fulfilled = false
+
+  init(_ expectation: XCTestExpectation) { self.expectation = expectation }
+  var isFulfilled: Bool { lock.withLock { fulfilled } }
+  func fulfill() {
+    let first = lock.withLock {
+      guard !fulfilled else { return false }
+      fulfilled = true
+      return true
+    }
+    if first { expectation.fulfill() }
+  }
+}
+
+private final class RelayBurstProbe: @unchecked Sendable {
+  let started: RelayOnceExpectation
+  let returned: RelayOnceExpectation
+  let stopped: RelayOnceExpectation
+  private let lock = NSLock()
+  private var observedBytes = 0
+  private var sendSucceeded = false
+
+  init(started: XCTestExpectation, returned: XCTestExpectation, stopped: XCTestExpectation) {
+    self.started = RelayOnceExpectation(started)
+    self.returned = RelayOnceExpectation(returned)
+    self.stopped = RelayOnceExpectation(stopped)
+  }
+  var callbackBytes: Int { lock.withLock { observedBytes } }
+  var localSendSucceeded: Bool { lock.withLock { sendSucceeded } }
+  func recordLocalSend(_ succeeded: Bool) { lock.withLock { sendSucceeded = succeeded } }
+  func callbackStarted(bytes: Int) {
+    lock.withLock {
+      if observedBytes == 0 { observedBytes = bytes }
+    }
+    started.fulfill()
+  }
+}
+
+private final class RelayBurstProbeRegistry: @unchecked Sendable {
+  private let lock = NSLock()
+  private var probes: [String: RelayBurstProbe] = [:]
+  func insert(_ probe: RelayBurstProbe, for path: String) {
+    lock.withLock { probes[path] = probe }
+  }
+  func remove(for path: String) { _ = lock.withLock { probes.removeValue(forKey: path) } }
+  func value(for path: String) -> RelayBurstProbe? { lock.withLock { probes[path] } }
+}
+
+// This synthetic-only adapter observes the exact Foundation data callback, not
+// merely URLProtocol delivery. The relay retains its normal serial delegate
+// queue; the adapter is not used for TLS or identity-validation coverage.
+private final class RelayBurstObservingDelegate: NSObject, URLSessionDataDelegate,
+  @unchecked Sendable
+{
+  private let delegate: URLSessionDataDelegate
+  private let probe: RelayBurstProbe
+
+  init(delegate: URLSessionDelegate, probe: RelayBurstProbe) {
+    self.delegate = delegate as! URLSessionDataDelegate
+    self.probe = probe
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    dataTask: URLSessionDataTask,
+    didReceive response: URLResponse,
+    completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+  ) {
+    delegate.urlSession?(
+      session, dataTask: dataTask, didReceive: response, completionHandler: completionHandler)
+  }
+
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    probe.callbackStarted(bytes: data.count)
+    defer { probe.returned.fulfill() }
+    delegate.urlSession?(session, dataTask: dataTask, didReceive: data)
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    delegate.urlSession?(session, task: task, didCompleteWithError: error)
+  }
+}
+
+private final class RelayBurstURLProtocol: URLProtocol, @unchecked Sendable {
+  static let burstBytes = 16 * 1_048_576
+  static let freshPayload = Data("fresh-after-cancellation".utf8)
+  static let probes = RelayBurstProbeRegistry()
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host == "backpressure.relay.test"
+  }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+  override func startLoading() {
+    let fresh = request.url?.path == "/fresh"
+    let payload = fresh ? Self.freshPayload : Data(repeating: 65, count: Self.burstBytes)
+    let response = HTTPURLResponse(
+      url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+      headerFields: [
+        "Content-Length": String(payload.count + (fresh ? 0 : 1)),
+        "Content-Type": "video/x-matroska",
+      ])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: payload)
+    // Keep the burst upstream active even if socket buffers absorb every byte:
+    // cancellation, not a successful EOF, must produce stopLoading.
+    if fresh { client?.urlProtocolDidFinishLoading(self) }
+  }
+
+  override func stopLoading() {
+    if let path = request.url?.path { Self.probes.value(for: path)?.stopped.fulfill() }
+  }
+}
+
 private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
   static let oldPayload = Data("0123456789ABCDEF".utf8)
   static let newPayload = Data("renewed-ticket".utf8)
@@ -232,6 +575,30 @@ private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
     Self.requestRecorder.record(request.url?.path ?? "")
     Self.authorizationRecorder.record(request.value(forHTTPHeaderField: "Authorization"))
     let path = request.url?.path ?? ""
+    if ["/offline", "/unsafe", "/busy", "/unlisted", "/hugeproblem"].contains(path) {
+      let status = path == "/unsafe" ? 409 : path == "/busy" ? 429 : 503
+      let code =
+        path == "/offline"
+        ? "media_unavailable"
+        : path == "/unsafe"
+          ? "media_file_unavailable"
+          : path == "/busy" ? "stream_limit" : "private-unlisted-value"
+      let body =
+        path == "/hugeproblem"
+        ? Data(repeating: 65, count: 32_768)
+        : try! JSONSerialization.data(withJSONObject: [
+          "code": code, "message": "Synthetic private token/path that must never escape",
+        ])
+      var headers = ["Content-Length": String(body.count), "Content-Type": "application/json"]
+      if path == "/offline" { headers["Retry-After"] = "2" }
+      if path == "/busy" { headers["Retry-After"] = "60" }
+      let response = HTTPURLResponse(
+        url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: body)
+      client?.urlProtocolDidFinishLoading(self)
+      return
+    }
     if path == "/tlsfailure" {
       client?.urlProtocol(self, didFailWithError: URLError(.serverCertificateUntrusted))
       return
@@ -246,7 +613,8 @@ private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
       return
     }
     if ["/truncated", "/interrupted", "/badlength", "/oversized", "/waiting"].contains(path) {
-      let payload = path == "/oversized" ? Data(repeating: 65, count: 2_097_152) : Data("partial".utf8)
+      let payload =
+        path == "/oversized" ? Data(repeating: 65, count: 2_097_152) : Data("partial".utf8)
       let length = path == "/badlength" ? "-1" : path == "/oversized" ? String(payload.count) : "16"
       let response = HTTPURLResponse(
         url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
@@ -300,7 +668,8 @@ private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
     guard let start = Int(parts[0]), start < payload.count else {
       return (416, Data(), "bytes */\(payload.count)")
     }
-    let end = parts[1].isEmpty
+    let end =
+      parts[1].isEmpty
       ? payload.count - 1
       : min(Int(parts[1]) ?? payload.count - 1, payload.count - 1)
     return (206, Data(payload[start...end]), "bytes \(start)-\(end)/\(payload.count)")

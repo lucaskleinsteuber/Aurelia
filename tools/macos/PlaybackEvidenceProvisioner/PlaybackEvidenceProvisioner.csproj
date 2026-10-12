@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AureliaRepositoryRoot Condition="'$(AureliaRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)../../..</AureliaRepositoryRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(AureliaRepositoryRoot)/src/Aurelia.Server/Aurelia.Server.csproj" />
+  </ItemGroup>
+</Project>

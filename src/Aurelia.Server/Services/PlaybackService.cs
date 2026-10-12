@@ -14,9 +14,9 @@ public sealed record PlaybackStreamSource(
 public sealed class PlaybackService(
     AureliaDbContext database,
     TokenService tokenService,
-    PlaybackProgressService progressService)
+    PlaybackProgressService progressService,
+    PlaybackTicketPolicy? ticketPolicy = null)
 {
-    private static readonly TimeSpan TicketLifetime = TimeSpan.FromHours(12);
     private const int CleanupBatchSize = 100;
 
     public async Task<PlaybackSourceResponse> CreateAsync(
@@ -63,7 +63,7 @@ public sealed class PlaybackService(
         var file = MediaFileAccess.OpenRead(media);
         using var fileStream = file.Stream;
         var rawToken = tokenService.CreatePlaybackToken();
-        var expiresAt = now.Add(TicketLifetime);
+        var expiresAt = now.Add(ticketPolicy?.Lifetime ?? PlaybackTicketPolicy.ProductionLifetime);
         var ticket = new PlaybackTicket
         {
             Id = Guid.NewGuid(),

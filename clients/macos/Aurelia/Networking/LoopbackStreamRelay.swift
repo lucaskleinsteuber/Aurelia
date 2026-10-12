@@ -31,6 +31,7 @@ enum PlaybackStreamFailure: Equatable, Sendable {
   case authorizationDenied
   case untrustedServer
   case invalidResponse
+  case detailed(PlaybackFailureContext)
 }
 
 final class LoopbackStreamRelay: @unchecked Sendable {
@@ -47,6 +48,7 @@ final class LoopbackStreamRelay: @unchecked Sendable {
   private var startContinuation: CheckedContinuation<URL, Error>?
   private var sessions: [UUID: URLSession] = [:]
   private var connections: [UUID: NWConnection] = [:]
+  private var upstreamDelegates: [UUID: RelayUpstreamDelegate] = [:]
   private var failureHandler: (@MainActor @Sendable (PlaybackStreamFailure) -> Void)?
   private var reportedFailure = false
 
@@ -64,8 +66,21 @@ final class LoopbackStreamRelay: @unchecked Sendable {
   }
 
   func start() async throws -> URL {
-    try await withCheckedThrowingContinuation { continuation in
+    try await withTaskCancellationHandler {
+      try await startListener()
+    } onCancel: {
+      self.stop()
+    }
+  }
+
+  private func startListener() async throws -> URL {
+    try Task.checkCancellation()
+    return try await withCheckedThrowingContinuation { continuation in
       lock.withLock {
+        guard !Task.isCancelled else {
+          continuation.resume(throwing: CancellationError())
+          return
+        }
         guard listener == nil else {
           continuation.resume(throwing: StreamRelayError.couldNotStart)
           return
@@ -108,20 +123,27 @@ final class LoopbackStreamRelay: @unchecked Sendable {
   }
 
   func stop() {
-    let resources = lock.withLock { () -> (NWListener?, [URLSession], [NWConnection]) in
-      let resources = (listener, Array(sessions.values), Array(connections.values))
+    let resources = lock.withLock {
+      () -> (NWListener?, [URLSession], [NWConnection], [RelayUpstreamDelegate]) in
+      let resources = (
+        listener, Array(sessions.values), Array(connections.values), Array(upstreamDelegates.values)
+      )
       listener = nil
       sessions.removeAll()
       connections.removeAll()
+      upstreamDelegates.removeAll()
       if let continuation = startContinuation {
         startContinuation = nil
         continuation.resume(throwing: CancellationError())
       }
       return resources
     }
+    // A delegate may be waiting for downstream capacity. Wake it directly;
+    // invalidation callbacks cannot run until its serial delegate queue returns.
+    for delegate in resources.3 { delegate.cancelForwarding() }
     resources.0?.cancel()
-    resources.1.forEach { $0.invalidateAndCancel() }
-    resources.2.forEach { $0.cancel() }
+    for session in resources.1 { session.invalidateAndCancel() }
+    for connection in resources.2 { connection.cancel() }
   }
 
   static func parseRequest(_ data: Data, secret: String) throws -> RelayRequest {
@@ -190,7 +212,8 @@ final class LoopbackStreamRelay: @unchecked Sendable {
         startContinuation = nil
         return (
           continuation,
-          URL(string: "http://127.0.0.1:\(port.rawValue)/stream/\(secret)"))
+          URL(string: "http://127.0.0.1:\(port.rawValue)/stream/\(secret)")
+        )
       }
       if let continuation = result.0, let url = result.1 {
         continuation.resume(returning: url)
@@ -297,19 +320,22 @@ final class LoopbackStreamRelay: @unchecked Sendable {
       isHead: relayRequest.method == "HEAD",
       failure: { [weak self] failure in
         self?.reportFailure(failure, connectionID: id)
+      },
+      completion: { [weak self] in
+        self?.finishConnection(id)
       }
-    ) { [weak self] in
-      self?.finishConnection(id)
-    }
+    )
     let session = sessionFactory(delegate)
     let task = session.dataTask(with: request)
     delegate.task = task
     let isActive = lock.withLock {
       guard listener != nil, connections[id] != nil else { return false }
       sessions[id] = session
+      upstreamDelegates[id] = delegate
       return true
     }
     guard isActive else {
+      delegate.cancelForwarding()
       session.invalidateAndCancel()
       connection.cancel()
       return
@@ -331,7 +357,8 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     status: Int,
     reason: String
   ) {
-    let response = "HTTP/1.1 \(status) \(reason)\r\nContent-Length: 0\r\nCache-Control: private, no-store\r\nConnection: close\r\n\r\n"
+    let response =
+      "HTTP/1.1 \(status) \(reason)\r\nContent-Length: 0\r\nCache-Control: private, no-store\r\nConnection: close\r\n\r\n"
     connection.send(
       content: Data(response.utf8),
       contentContext: .finalMessage,
@@ -342,9 +369,13 @@ final class LoopbackStreamRelay: @unchecked Sendable {
   }
 
   private func finishConnection(_ id: UUID) {
-    let resources = lock.withLock { () -> (URLSession?, NWConnection?) in
-      (sessions.removeValue(forKey: id), connections.removeValue(forKey: id))
+    let resources = lock.withLock { () -> (URLSession?, NWConnection?, RelayUpstreamDelegate?) in
+      (
+        sessions.removeValue(forKey: id), connections.removeValue(forKey: id),
+        upstreamDelegates.removeValue(forKey: id)
+      )
     }
+    resources.2?.cancelForwarding()
     resources.0?.invalidateAndCancel()
     resources.1?.cancel()
   }
@@ -427,9 +458,8 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
   private let failure: @Sendable (PlaybackStreamFailure) -> Void
   private let completion: @Sendable () -> Void
   private let forwardingQueue = DispatchQueue(label: "com.lucas.aurelia.media.stream-forwarding")
-  private let bufferLock = NSLock()
-  private static let maximumBufferedBytes = 1_048_576
-  private var reservedBytes = 0
+  private let bufferWindow = RelayBufferWindow(maximumBytes: 1_048_576)
+  private static let maximumChunkBytes = 65_536
   private var sentHeaders = false
   private var finished = false
   private var expectedBodyLength: Int64?
@@ -437,6 +467,10 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
   private var chunks: [Data] = []
   private var sendInFlight = false
   private var upstreamCompleted = false
+  private var rejectedStatus: Int?
+  private var rejectedRetryAfter: String?
+  private var problemBody = Data()
+  private static let maximumProblemBytes = 16_384
 
   init(
     connection: NWConnection,
@@ -452,6 +486,12 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
     self.isHead = isHead
     self.failure = failure
     self.completion = completion
+  }
+
+  func cancelForwarding() {
+    bufferWindow.cancel()
+    task?.cancel()
+    forwardingQueue.async { self.closeLocally() }
   }
 
   func urlSession(
@@ -500,13 +540,11 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
         return
       }
       guard [200, 206, 416].contains(response.statusCode) else {
-        completionHandler(.cancel)
-        switch response.statusCode {
-        case 401, 403: self.fail(.authorizationDenied)
-        case 404, 410, 503: self.fail(.unavailable)
-        case 408, 429, 500, 502, 504: self.fail(.interrupted)
-        default: self.fail(.invalidResponse)
-        }
+        // Read only a bounded problem document; never forward error bodies,
+        // URLs or server-provided descriptions to the local decoder/log.
+        self.rejectedStatus = response.statusCode
+        self.rejectedRetryAfter = response.value(forHTTPHeaderField: "Retry-After")
+        completionHandler(.allow)
         return
       }
       if let length = response.value(forHTTPHeaderField: "Content-Length") {
@@ -555,35 +593,56 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
     dataTask: URLSessionDataTask,
     didReceive data: Data
   ) {
-    // Pause before enqueueing: otherwise a fast server can read the whole video
-    // while the local decoder consumes it slowly. Only queued, bounded transfer
-    // chunks are retained; nothing is cached or written to disk.
-    dataTask.suspend()
-    let accepted = bufferLock.withLock {
-      guard data.count <= Self.maximumBufferedBytes - reservedBytes else { return false }
-      reservedBytes += data.count
-      return true
-    }
-    guard accepted else {
-      dataTask.cancel()
-      forwardingQueue.async { self.fail(.interrupted) }
+    let isRejected = forwardingQueue.sync { rejectedStatus != nil }
+    if isRejected {
+      forwardingQueue.async {
+        guard !self.finished else { return }
+        guard data.count <= Self.maximumProblemBytes - self.problemBody.count else {
+          self.finishRejectedResponse()
+          return
+        }
+        self.problemBody.append(data)
+      }
       return
     }
-    forwardingQueue.async {
-      guard !self.finished else {
-        dataTask.cancel()
-        return
-      }
+    // Foundation does not bound callback size, and callbacks already in flight
+    // can arrive while suspending. Admit copied chunks through a bounded window
+    // rather than rejecting valid data. Only this serial URLSession delegate
+    // queue may wait; the forwarding queue and main actor never wait for space.
+    dataTask.suspend()
+    defer { dataTask.resume() }
+    let accepted = forwardingQueue.sync {
+      guard !self.finished else { return false }
       let (received, overflow) = self.receivedBodyLength.addingReportingOverflow(Int64(data.count))
       guard !overflow,
         self.expectedBodyLength.map({ received <= $0 }) ?? true
       else {
         self.fail(.invalidResponse)
-        return
+        return false
       }
       self.receivedBodyLength = received
-      self.chunks.append(data)
-      self.forwardNextChunk()
+      return true
+    }
+    guard accepted else { return }
+    var offset = 0
+    while offset < data.count {
+      let count = min(Self.maximumChunkBytes, data.count - offset)
+      guard bufferWindow.reserve(count) else { return }
+      // An explicit copy prevents a small Data slice from retaining the whole
+      // Foundation callback. The original callback itself is framework-owned;
+      // our queued and in-flight copies together remain at most one MiB.
+      let chunk = data.withUnsafeBytes { bytes in
+        Data(bytes: bytes.baseAddress!.advanced(by: offset), count: count)
+      }
+      forwardingQueue.async {
+        guard !self.finished else {
+          self.bufferWindow.release(chunk.count)
+          return
+        }
+        self.chunks.append(chunk)
+        self.forwardNextChunk()
+      }
+      offset += count
     }
   }
 
@@ -594,17 +653,38 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
   ) {
     forwardingQueue.async {
       guard !self.finished else { return }
+      if self.rejectedStatus != nil {
+        self.finishRejectedResponse()
+        return
+      }
       if let error {
         let error = error as NSError
         if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled {
           self.closeLocally()
-        } else if error.domain == NSURLErrorDomain && [
-          NSURLErrorServerCertificateUntrusted, NSURLErrorServerCertificateHasBadDate,
-          NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid,
-        ].contains(error.code) {
-          self.fail(.untrustedServer)
+        } else if error.domain == NSURLErrorDomain
+          && [
+            NSURLErrorServerCertificateUntrusted, NSURLErrorServerCertificateHasBadDate,
+            NSURLErrorServerCertificateHasUnknownRoot, NSURLErrorServerCertificateNotYetValid,
+          ].contains(error.code)
+        {
+          self.fail(
+            .detailed(
+              PlaybackFailureContext(
+                cause: .serverIdentityMismatch, phase: .streamTransport,
+                urlErrorCode: error.code, bytesTransferred: self.receivedBodyLength)))
         } else {
-          self.fail(.interrupted)
+          let cause: PlaybackRecoveryCause =
+            error.domain == NSURLErrorDomain
+            ? PlaybackFailureContext(
+              error: URLError(URLError.Code(rawValue: error.code)), phase: .streamTransport
+            ).cause
+            : .unknownFailure
+          self.fail(
+            .detailed(
+              PlaybackFailureContext(
+                cause: cause, phase: .streamTransport,
+                urlErrorCode: error.domain == NSURLErrorDomain ? error.code : nil,
+                bytesTransferred: self.receivedBodyLength, localReason: "transportFailure")))
         }
         return
       }
@@ -622,10 +702,15 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
     guard !chunks.isEmpty else {
       guard upstreamCompleted else { return }
       guard expectedBodyLength.map({ $0 == receivedBodyLength }) ?? true else {
-        fail(.interrupted)
+        fail(
+          .detailed(
+            PlaybackFailureContext(
+              cause: .connectionInterrupted, phase: .streamTransport,
+              bytesTransferred: receivedBodyLength, localReason: "truncatedBody")))
         return
       }
       finished = true
+      bufferWindow.cancel()
       connection.send(
         content: nil,
         contentContext: .finalMessage,
@@ -635,26 +720,27 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
     }
     let chunk = chunks.removeFirst()
     sendInFlight = true
-    connection.send(content: chunk, completion: .contentProcessed { error in
-      self.forwardingQueue.async {
-        guard !self.finished else { return }
-        self.sendInFlight = false
-        self.bufferLock.withLock { self.reservedBytes -= chunk.count }
-        guard error == nil else {
-          self.closeLocally()
-          return
+    connection.send(
+      content: chunk,
+      completion: .contentProcessed { error in
+        self.forwardingQueue.async {
+          guard !self.finished else { return }
+          self.sendInFlight = false
+          self.bufferWindow.release(chunk.count)
+          guard error == nil else {
+            self.closeLocally()
+            return
+          }
+          self.forwardNextChunk()
         }
-        self.task?.resume()
-        self.forwardNextChunk()
-      }
-    })
+      })
   }
 
   private func fail(_ reason: PlaybackStreamFailure) {
     guard !finished else { return }
     finished = true
     chunks.removeAll()
-    bufferLock.withLock { reservedBytes = 0 }
+    bufferWindow.cancel()
     failure(reason)
     task?.cancel()
     guard !sentHeaders else {
@@ -662,7 +748,8 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
       completion()
       return
     }
-    let response = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nCache-Control: private, no-store\r\nConnection: close\r\n\r\n"
+    let response =
+      "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nCache-Control: private, no-store\r\nConnection: close\r\n\r\n"
     connection.send(
       content: Data(response.utf8),
       contentContext: .finalMessage,
@@ -670,11 +757,20 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
       completion: .contentProcessed { [completion] _ in completion() })
   }
 
+  private func finishRejectedResponse() {
+    guard let rejectedStatus else { return }
+    let error = APIClient.responseError(
+      status: rejectedStatus, retryAfter: rejectedRetryAfter, data: problemBody)
+    let context = PlaybackFailureContext(error: error, phase: .streamTransport)
+    problemBody.removeAll()
+    fail(.detailed(context))
+  }
+
   private func closeLocally() {
     guard !finished else { return }
     finished = true
     chunks.removeAll()
-    bufferLock.withLock { reservedBytes = 0 }
+    bufferWindow.cancel()
     task?.cancel()
     completion()
   }
@@ -686,5 +782,58 @@ private final class RelayUpstreamDelegate: NSObject, URLSessionDataDelegate,
     case 416: "Range Not Satisfiable"
     default: "Bad Gateway"
     }
+  }
+}
+
+/// Reservations include queued and in-flight copied chunks. Cancellation is
+/// independent of URLSession's delegate queue so teardown can wake a blocked
+/// producer even before Foundation delivers its cancellation callback.
+final class RelayBufferWindow: @unchecked Sendable {
+  private let condition = NSCondition()
+  private let maximumBytes: Int
+  private var reservedBytes = 0
+  private var cancelled = false
+  private var waitingProducers = 0
+
+  // Internal observation lets tests establish an actual blocked producer,
+  // rather than assuming scheduling or a particular OS socket buffer size.
+  var waitingProducerCount: Int {
+    condition.lock()
+    defer { condition.unlock() }
+    return waitingProducers
+  }
+
+  init(maximumBytes: Int) {
+    self.maximumBytes = maximumBytes
+  }
+
+  func reserve(_ count: Int) -> Bool {
+    condition.lock()
+    defer { condition.unlock() }
+    guard count >= 0, count <= maximumBytes else { return false }
+    while !cancelled && count > maximumBytes - reservedBytes {
+      waitingProducers += 1
+      condition.wait()
+      waitingProducers -= 1
+    }
+    guard !cancelled else { return false }
+    reservedBytes += count
+    return true
+  }
+
+  func release(_ count: Int) {
+    condition.lock()
+    defer { condition.unlock() }
+    guard !cancelled else { return }
+    reservedBytes -= count
+    condition.broadcast()
+  }
+
+  func cancel() {
+    condition.lock()
+    cancelled = true
+    reservedBytes = 0
+    condition.broadcast()
+    condition.unlock()
   }
 }

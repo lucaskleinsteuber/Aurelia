@@ -1223,6 +1223,11 @@ final class AppModel: ObservableObject {
   }
 
   func setApplicationActive(_ active: Bool) async {
+    #if DEBUG
+      // Synthetic UI fixtures have no live host or transport to observe.
+      // Keep real lifecycle observation enabled for unit and preflight tests.
+      if Self.uiTestMode != nil { return }
+    #endif
     let canObserve = !isStarting && !isRecoveringLocalHost
     if active, canObserve, operatingMode == .host, hostPollTask == nil { startHostPolling() }
     if active, canObserve, !activeScans.isEmpty, scanPollTask == nil { startScanPolling() }
@@ -1250,6 +1255,9 @@ final class AppModel: ObservableObject {
   }
 
   func systemDidWake() async {
+    #if DEBUG
+      if Self.uiTestMode != nil { return }
+    #endif
     // Waking does not prove a server failure. Resume observation first and
     // require the normal confirmation policy before attempting recovery.
     if operatingMode == .host { startHostPolling() }

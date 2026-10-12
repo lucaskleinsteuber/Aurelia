@@ -99,6 +99,147 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertTrue(client.updates.contains(where: { $0.finished }))
   }
 
+  func testShutdownClearsPublishedPlaybackStateWithoutLosingProgressSnapshot() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    controller.seek(to: 45_000)
+    XCTAssertTrue(engine.isPlaying)
+    XCTAssertTrue(controller.isPlaying)
+    let duration = controller.durationMilliseconds
+
+    await controller.shutdown()
+
+    XCTAssertTrue(engine.didStop)
+    XCTAssertTrue(relay.didStop)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertFalse(controller.isPreparing)
+    XCTAssertEqual(controller.currentTimeMilliseconds, 45_000)
+    XCTAssertEqual(controller.durationMilliseconds, duration)
+    XCTAssertEqual(client.updates.last?.position, 45_000)
+    XCTAssertEqual(client.updates.last?.duration, duration)
+    XCTAssertFalse(client.updates.last?.finished ?? true)
+  }
+
+  func testPauseDuringDecoderOpeningIsAppliedAtStartAndResume() async throws {
+    let source = Self.source(position: 30_000, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    engine.deferPlayStateChange = true
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    XCTAssertEqual(engine.playCalls, 1)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertTrue(controller.pause())
+    XCTAssertTrue(controller.pause())
+    XCTAssertEqual(engine.pauseCalls, 0)
+
+    engine.completeDeferredPlay()
+    XCTAssertEqual(engine.pauseCalls, 1)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertEqual(controller.currentTimeMilliseconds, 30_000)
+
+    XCTAssertTrue(controller.play())
+    XCTAssertEqual(engine.playCalls, 2)
+    XCTAssertTrue(controller.pause())
+    engine.completeDeferredPlay()
+    XCTAssertEqual(engine.pauseCalls, 2)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    await controller.shutdown()
+  }
+
+  func testPendingDecoderPauseIsNotRepeatedOrPublishedAsPlaying() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    engine.deferPauseStateChange = true
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    XCTAssertTrue(controller.isPlaying)
+    XCTAssertTrue(controller.pause())
+    XCTAssertTrue(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    for _ in 0..<3 {
+      engine.onUpdate?()
+      XCTAssertTrue(controller.pause())
+    }
+    XCTAssertEqual(engine.pauseCalls, 1)
+    XCTAssertFalse(controller.isPlaying)
+
+    engine.completeDeferredPause()
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertTrue(controller.play())
+    XCTAssertTrue(controller.isPlaying)
+    XCTAssertTrue(controller.pause())
+    XCTAssertEqual(engine.pauseCalls, 2)
+    XCTAssertFalse(controller.isPlaying)
+    engine.completeDeferredPause()
+    await controller.shutdown()
+  }
+
+  func testPauseDuringRecoveryDecoderOpeningRetainsIntentAndPosition() async throws {
+    let source = Self.source(position: 30_000, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay },
+      recoverySleep: { _ in })
+
+    await controller.start()
+    controller.seek(to: 45_000)
+    engine.deferPlayStateChange = true
+    engine.onError?("Synthetic decoder interruption")
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while engine.playCalls < 2 && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    XCTAssertEqual(engine.playCalls, 2)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertTrue(controller.pause())
+    engine.completeDeferredPlay()
+    XCTAssertEqual(engine.pauseCalls, 1)
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertEqual(controller.currentTimeMilliseconds, 45_000)
+    XCTAssertFalse(controller.diagnostics.events.contains { $0.kind == .recovered })
+
+    XCTAssertTrue(controller.play())
+    engine.completeDeferredPlay()
+    XCTAssertTrue(controller.isPlaying)
+    engine.currentTimeMilliseconds = 46_000
+    engine.onUpdate?()
+    XCTAssertTrue(controller.diagnostics.events.contains { $0.kind == .recovered })
+    XCTAssertEqual(client.createdMediaIDs, [source.mediaId, source.mediaId])
+    await controller.shutdown()
+  }
+
   func testPreferencesControlResumeRateVolumeAndChapters() async throws {
     let source = Self.source(position: 30_000, completed: false)
     let client = FakePlaybackClient(source: source)
@@ -226,6 +367,102 @@ final class PlaybackControllerTests: XCTestCase {
     await controller.shutdown()
   }
 
+  func testImmediateSleepTimerDoesNotRepeatAnUnacknowledgedDecoderPause() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    engine.deferPauseStateChange = true
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    controller.setSleepTimer(.minutes(0))
+    XCTAssertEqual(engine.pauseCalls, 1)
+    XCTAssertTrue(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertEqual(controller.sleepTimer, .off)
+    for _ in 0..<3 { engine.onUpdate?() }
+    XCTAssertEqual(engine.pauseCalls, 1)
+    engine.completeDeferredPause()
+    XCTAssertFalse(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testExpiringSleepTimerDoesNotRepeatAnUnacknowledgedDecoderPause() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    engine.deferPauseStateChange = true
+    let relay = FakePlaybackRelay()
+    let clock = SleepTimerTestClock()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay },
+      sleepTimerSleep: clock.sleep)
+
+    await controller.start()
+    controller.setSleepTimer(.minutes(1))
+    for _ in 0..<1_000 {
+      if clock.pending != nil { break }
+      await Task.yield()
+    }
+    XCTAssertNotNil(clock.pending)
+    XCTAssertEqual(clock.delays, [60])
+    clock.wake()
+    for _ in 0..<1_000 {
+      if controller.sleepTimer == .off { break }
+      await Task.yield()
+    }
+    XCTAssertEqual(controller.sleepTimer, .off)
+    XCTAssertEqual(engine.pauseCalls, 1)
+    XCTAssertTrue(engine.isPlaying)
+    XCTAssertFalse(controller.isPlaying)
+    for _ in 0..<3 { engine.onUpdate?() }
+    XCTAssertEqual(engine.pauseCalls, 1)
+    engine.completeDeferredPause()
+    XCTAssertFalse(engine.isPlaying)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testShutdownQuarantinesAnUncooperativeSleepTimerCompletion() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let clock = SleepTimerTestClock()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay },
+      sleepTimerSleep: clock.sleep)
+
+    await controller.start()
+    controller.setSleepTimer(.minutes(1))
+    for _ in 0..<1_000 {
+      if clock.pending != nil { break }
+      await Task.yield()
+    }
+    XCTAssertNotNil(clock.pending)
+    await controller.shutdown(saveProgress: false)
+    let pauseCalls = engine.pauseCalls
+    let playCalls = engine.playCalls
+    clock.wake()
+    for _ in 0..<20 { await Task.yield() }
+    XCTAssertEqual(engine.pauseCalls, pauseCalls)
+    XCTAssertEqual(engine.playCalls, playCalls)
+    XCTAssertTrue(engine.didStop)
+    XCTAssertFalse(controller.isPlaying)
+    XCTAssertFalse(controller.isPreparing)
+  }
+
   private static func source(
     position: Int64,
     completed: Bool
@@ -245,6 +482,23 @@ final class PlaybackControllerTests: XCTestCase {
         isCompleted: completed,
         lastPlayedAt: nil,
         updatedAt: nil))
+  }
+}
+
+@MainActor
+private final class SleepTimerTestClock {
+  var delays: [TimeInterval] = []
+  var pending: CheckedContinuation<Void, Never>?
+
+  func sleep(_ delay: TimeInterval) async throws {
+    delays.append(delay)
+    await withCheckedContinuation { pending = $0 }
+  }
+
+  func wake() {
+    let continuation = pending
+    pending = nil
+    continuation?.resume()
   }
 }
 
@@ -355,27 +609,57 @@ final class FakePlaybackEngine: PlaybackEngine {
   var selectedSubtitleTrackID: Int32?
   var loadedURL: URL?
   var didStop = false
+  var playCalls = 0
+  var pauseCalls = 0
+  var deferPlayStateChange = false
+  var deferPauseStateChange = false
+  var deferSeekStateChange = false
+  private(set) var pendingSeekTarget: Int64?
 
   func attach(to view: NSView) {}
   func load(url: URL) {
     loadedURL = url
     currentTimeMilliseconds = 0
     isPlaying = false
+    pendingSeekTarget = nil
   }
   func play() {
-    isPlaying = true
+    playCalls += 1
+    if !deferPlayStateChange { isPlaying = true }
     onUpdate?()
   }
   func pause() {
+    pauseCalls += 1
+    if !deferPauseStateChange { isPlaying = false }
+    // Also exercises a synchronous update while an asynchronous pause is still
+    // pending. The controller must not recursively issue additional pauses.
+    onUpdate?()
+  }
+  func completeDeferredPlay() {
+    isPlaying = true
+    onUpdate?()
+  }
+  func completeDeferredPause() {
     isPlaying = false
     onUpdate?()
   }
   func stop() {
     didStop = true
     isPlaying = false
+    pendingSeekTarget = nil
   }
   func seek(to milliseconds: Int64) {
+    if deferSeekStateChange {
+      pendingSeekTarget = milliseconds
+      return
+    }
     currentTimeMilliseconds = milliseconds
+    onUpdate?()
+  }
+  func completeDeferredSeek() {
+    guard let pendingSeekTarget else { return }
+    self.pendingSeekTarget = nil
+    currentTimeMilliseconds = pendingSeekTarget
     onUpdate?()
   }
   func selectAudioTrack(id: Int32) {

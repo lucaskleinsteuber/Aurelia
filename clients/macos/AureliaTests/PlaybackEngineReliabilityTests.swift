@@ -215,7 +215,10 @@ struct PlaybackEngineReliabilityTests {
     try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: fixture) }
     let url = fixture.appendingPathComponent("synthetic.avi")
-    try Self.syntheticAVI().write(to: url)
+    // Each automatic incident must be followed by ten seconds of uninterrupted
+    // real movement before its retry budget can reset. The old three-second
+    // clip/seek loop could never provide that stability window.
+    try Self.syntheticAVI(frameCount: 300).write(to: url)
     let initialAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
     let client = SyntheticPlaybackClient(url: url, nextID: UUID())
     var latestPlayer: VLCMediaPlayer?
@@ -246,26 +249,34 @@ struct PlaybackEngineReliabilityTests {
         controller.isPlaying && controller.currentTimeMilliseconds >= 500
       }
       let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+      var nextRecoveryAt = ContinuousClock.now
       var iterations = 0
       var recoveries = 0
       while ContinuousClock.now < deadline {
-        controller.seek(to: 500)
-        try await Self.waitUntil("soak seek", diagnostics: diagnostics) {
-          controller.isPlaying && controller.currentTimeMilliseconds >= 750
-        }
-        if iterations.isMultiple(of: 3) {
+        if ContinuousClock.now >= nextRecoveryAt {
+          controller.seek(to: 500)
+          try await Self.waitUntil("soak seek", diagnostics: diagnostics) {
+            controller.isPlaying && controller.currentTimeMilliseconds >= 750
+          }
+          if recoveries.isMultiple(of: 2) {
+            #expect(controller.pause())
+            try await Self.waitUntil("soak pause", diagnostics: diagnostics) {
+              !controller.isPlaying && !engine.isPlaying
+            }
+            #expect(controller.play())
+          }
           let loads = client.createdMediaIDs.count
+          let position = controller.currentTimeMilliseconds
           engine.onError?("Synthetic arbitrary decoder error containing no real data")
           try await Self.waitUntil("soak recovery", diagnostics: diagnostics) {
             client.createdMediaIDs.count > loads && controller.isPlaying
-              && controller.currentTimeMilliseconds >= 750
+              && controller.currentTimeMilliseconds >= position + 300
           }
+          #expect(controller.diagnostics.events.last { $0.kind == .recoveryAttempt }?.attempt == 1)
           recoveries += 1
-        }
-        if iterations.isMultiple(of: 5) {
-          controller.togglePlayback()
-          try await Self.waitUntil("soak pause", diagnostics: diagnostics) { !controller.isPlaying }
-          controller.togglePlayback()
+          // Do not seek or pause during the real stability interval. A fault
+          // storm belongs to the bounded-attempt controller regressions.
+          nextRecoveryAt = ContinuousClock.now.advanced(by: .seconds(11))
         }
         try await Task.sleep(for: .milliseconds(100))
         #expect(controller.errorMessage == nil)
@@ -320,10 +331,9 @@ struct PlaybackEngineReliabilityTests {
 
   // Tiny uncompressed AVI generated entirely from test-pattern bytes; no user
   // media, codec tool, network download, or binary fixture is used.
-  private static func syntheticAVI() -> Data {
+  private static func syntheticAVI(frameCount: UInt32 = 30) -> Data {
     let width: UInt32 = 64
     let height: UInt32 = 48
-    let frameCount: UInt32 = 30
     let frameBytes = width * height * 3
     var main = Data()
     for value: UInt32 in [

@@ -41,11 +41,20 @@ AURELIA_BOOTSTRAP_TOKEN="$bootstrap" AURELIA_LAN_ENABLED=false \
   /usr/bin/arch -x86_64 "$server_root/Aurelia.Server" run --data-dir "$data_root" --urls "$base" \
   >"$run_root/server.log" 2>&1 &
 server_pid=$!
-for _ in {1..150}; do
-  if curl --silent --fail --max-time 1 "$base/api/v1/server/info" >"$run_root/info.json"; then break; fi
+server_ready=false
+# A freshly copied, signed Intel runtime took 52 seconds to become ready in
+# a cold Rosetta probe. Allow a bounded 90-second startup observation without
+# weakening setup, authentication, scan, editor, or integrity assertions.
+readiness_deadline=$((SECONDS + 90))
+while (( SECONDS < readiness_deadline )); do
+  if curl --silent --fail --max-time 1 "$base/api/v1/server/info" >"$run_root/info.json"; then
+    server_ready=true
+    break
+  fi
   kill -0 "$server_pid" 2>/dev/null || fail "The Intel server exited before becoming ready."
   sleep 0.2
 done
+[[ "$server_ready" == true ]] || fail "The Intel server did not become ready during the bounded startup observation."
 [[ "$(jq -r '.isSetup' "$run_root/info.json")" == false ]] || fail "The isolated server did not offer first-owner setup."
 curl --silent --show-error --fail-with-body --header "X-Aurelia-Bootstrap-Token: $bootstrap" \
   --header 'Content-Type: application/json' \

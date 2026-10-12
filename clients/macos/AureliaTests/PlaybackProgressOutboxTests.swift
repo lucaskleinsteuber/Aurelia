@@ -86,6 +86,7 @@ struct PlaybackProgressOutboxTests {
     #expect(enqueue(outbox, client, 70_000))
     try await waitUntil { outbox.state(media: client.media, profile: client.profile) == .conflict }
     outbox.retryAfterReconnect()
+    outbox.retryAfterPlaybackAuthorization(media: client.media, profile: client.profile)
     outbox.activate(client: client)
     #expect(enqueue(outbox, client, 75_000))
     for _ in 0..<20 { await Task.yield() }
@@ -146,6 +147,7 @@ struct PlaybackProgressOutboxTests {
     }
     outbox.activate(client: client)
     outbox.retryAfterReconnect()
+    outbox.retryAfterPlaybackAuthorization(media: client.media, profile: client.profile)
     #expect(client.writes.count == 1)
     let other = OutboxTestClient(server: client.profile.serverId)
     outbox.activate(client: other)
@@ -241,6 +243,137 @@ struct PlaybackProgressOutboxTests {
   }
 
   @Test
+  func verifiedPlaybackReleasesExhaustedRetriesWithoutReplacingAnUncertainMutation() async throws {
+    let client = OutboxTestClient()
+    client.loseAcknowledgement = true
+    var time = Date()
+    let outbox = PlaybackProgressOutbox(
+      clock: { time },
+      sleep: { delay in
+        time.addTimeInterval(delay)
+        // The first write was applied before its acknowledgement was lost.
+        // Keep its idempotent retry offline until all six attempts are spent.
+        client.failure = URLError(.networkConnectionLost)
+      })
+    outbox.activate(client: client)
+    outbox.noteBaseline(client.progress, profile: client.profile)
+    #expect(enqueue(outbox, client, 32_000))
+    try await waitUntil { client.writes.count == 6 }
+    for _ in 0..<20 { await Task.yield() }
+    let uncertain = try #require(client.writes.first)
+    #expect(client.revision == 1)
+    #expect(Set(client.writes.map(\.id)) == [uncertain.id])
+
+    // A newer backwards seek must remain separate from the uncertain write.
+    #expect(enqueue(outbox, client, 10_000))
+    outbox.activate(client: client)
+    for _ in 0..<20 { await Task.yield() }
+    #expect(client.writes.count == 6)
+    client.failure = nil
+    outbox.noteBaseline(client.progress, profile: client.profile)
+    outbox.retryAfterPlaybackAuthorization(media: client.media, profile: client.profile)
+    try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
+
+    #expect(client.writes.count == 8)
+    #expect(client.writes[6].id == uncertain.id)
+    #expect(client.writes[6].revision == uncertain.revision)
+    #expect(client.writes[6].position == 32_000)
+    #expect(client.writes[7].id != uncertain.id)
+    #expect(client.writes[7].revision == 1)
+    #expect(client.writes[7].position == 10_000)
+    #expect(client.revision == 2)
+    outbox.deactivate()
+  }
+
+  @Test
+  func playbackAuthorizationCannotReleaseOtherMediaAccountsOrSessions() async throws {
+    let client = OutboxTestClient()
+    client.failure = URLError(.networkConnectionLost)
+    var time = Date()
+    let outbox = PlaybackProgressOutbox(
+      clock: { time }, sleep: { time.addTimeInterval($0) })
+    outbox.activate(client: client)
+    outbox.noteBaseline(client.progress, profile: client.profile)
+    #expect(enqueue(outbox, client, 20_000))
+    try await waitUntil { client.writes.count == 6 }
+    for _ in 0..<20 { await Task.yield() }
+    client.failure = nil
+    let otherAccount = OutboxTestClient(server: client.profile.serverId)
+    let otherSession = StoredServerProfile(
+      serverId: client.profile.serverId, name: client.profile.name,
+      baseURL: client.profile.baseURL, publicKeyFingerprint: client.profile.publicKeyFingerprint,
+      token: client.profile.token, sessionId: UUID(), expiresAt: client.profile.expiresAt,
+      user: client.profile.user)
+    outbox.retryAfterPlaybackAuthorization(media: UUID(), profile: client.profile)
+    outbox.retryAfterPlaybackAuthorization(media: client.media, profile: otherAccount.profile)
+    outbox.retryAfterPlaybackAuthorization(media: client.media, profile: otherSession)
+    for _ in 0..<20 { await Task.yield() }
+    #expect(client.writes.count == 6)
+    #expect(outbox.pendingCount(profile: client.profile) == 1)
+    #expect(outbox.state(media: client.media, profile: client.profile) == .retrying)
+    outbox.deactivate()
+  }
+
+  @Test
+  func playbackAuthorizationDoesNotBypassUnsupportedProgressContracts() async throws {
+    let client = OutboxTestClient()
+    client.omitRevision = true
+    let outbox = PlaybackProgressOutbox()
+    outbox.activate(client: client)
+    let knownBaseline = PlaybackProgressResponse(
+      mediaId: client.media, positionMilliseconds: 0, durationMilliseconds: 120_000,
+      isCompleted: false, lastPlayedAt: nil, updatedAt: nil, revision: 0)
+    outbox.noteBaseline(knownBaseline, profile: client.profile)
+    #expect(enqueue(outbox, client, 20_000))
+    try await waitUntil {
+      outbox.state(media: client.media, profile: client.profile) == .unsupportedServer
+    }
+    client.omitRevision = false
+    outbox.retryAfterPlaybackAuthorization(media: client.media, profile: client.profile)
+    for _ in 0..<20 { await Task.yield() }
+    #expect(client.writes.count == 1)
+    #expect(outbox.pendingCount(profile: client.profile) == 1)
+    #expect(outbox.state(media: client.media, profile: client.profile) == .unsupportedServer)
+    outbox.deactivate()
+  }
+
+  @Test
+  func recoveredPlaybackAuthorizationRestartsItsProgressQueueWithoutAppRefresh() async throws {
+    let client = OutboxTestClient()
+    let engine = OutboxTestEngine()
+    var time = Date()
+    let outbox = PlaybackProgressOutbox(
+      clock: { time }, sleep: { time.addTimeInterval($0) })
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: client.media, title: "Synthetic video", subtitle: nil),
+      engine: engine, relayFactory: { _, _ in OutboxTestRelay() },
+      recoverySleep: { _ in }, progressOutbox: outbox)
+    await controller.start()
+    try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
+    #expect(client.writes.count == 1)
+    client.failure = URLError(.networkConnectionLost)
+    controller.seek(to: 45_000)
+    try await waitUntil { client.writes.count == 7 }
+    for _ in 0..<20 { await Task.yield() }
+    let uncertain = client.writes[1]
+    #expect(outbox.state(media: client.media, profile: client.profile) == .retrying)
+
+    client.failure = nil
+    engine.onError?("Synthetic decoder interruption")
+    try await waitUntil {
+      controller.isPlaying && outbox.pendingCount(profile: client.profile) == 0
+    }
+    #expect(client.writes[7].id == uncertain.id)
+    #expect(client.writes[7].revision == uncertain.revision)
+    #expect(controller.currentTimeMilliseconds == 45_000)
+    #expect(!outbox.storageFailed)
+    await controller.shutdown(saveProgress: false)
+    outbox.deactivate()
+  }
+
+  @Test
   func shutdownDoesNotWaitForAnUnresponsiveProgressWrite() async throws {
     let client = OutboxTestClient()
     client.holdWrites = true
@@ -289,7 +422,10 @@ struct PlaybackProgressOutboxTests {
     engine.currentTimeMilliseconds = engine.durationMilliseconds
     engine.onEnded?()
     let deadline = Date().addingTimeInterval(1.5)
-    while controller.presentation.mediaId != next && Date() < deadline {
+    // The next presentation is published before asynchronous authorization and
+    // relay preparation finish. Wait for the actual playback outcome, not just
+    // the intermediate title change, without extending the cleanup deadline.
+    while (controller.presentation.mediaId != next || !controller.isPlaying) && Date() < deadline {
       try await Task.sleep(for: .milliseconds(5))
     }
     #expect(controller.presentation.mediaId == next)
@@ -373,6 +509,7 @@ private final class OutboxTestClient: PlaybackClientProtocol {
   var holdRevocations = false
   var loseAcknowledgement = false
   var wrongAcknowledgement = false
+  var omitRevision = false
   var failure: Error?
   private var heldWrite: CheckedContinuation<Void, Never>?
   private var heldRevocations: [CheckedContinuation<Void, Never>] = []
@@ -390,7 +527,8 @@ private final class OutboxTestClient: PlaybackClientProtocol {
     PlaybackProgressResponse(
       mediaId: media, positionMilliseconds: writes.last?.position ?? 0,
       durationMilliseconds: 120_000,
-      isCompleted: false, lastPlayedAt: nil, updatedAt: nil, revision: revision,
+      isCompleted: false, lastPlayedAt: nil, updatedAt: nil,
+      revision: omitRevision ? nil : revision,
       lastMutationId: lastMutation)
   }
 

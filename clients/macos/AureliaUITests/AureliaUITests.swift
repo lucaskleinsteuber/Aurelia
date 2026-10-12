@@ -239,6 +239,15 @@ final class AureliaUITests: XCTestCase {
 
     let homeAction = app.buttons["home-add-media"]
     XCTAssertTrue(homeAction.waitForExistence(timeout: 8))
+    // Stay active beyond the real host's two-second polling interval. The
+    // synthetic fixture must not start host recovery or replace its Home view.
+    let unexpectedServerFailure = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in app.staticTexts["Server Unavailable"].exists },
+      object: nil)
+    unexpectedServerFailure.isInverted = true
+    wait(for: [unexpectedServerFailure], timeout: 5)
+    XCTAssertTrue(homeAction.exists)
+    XCTAssertTrue(homeAction.isEnabled)
     homeAction.click()
     XCTAssertTrue(app.staticTexts["Manage Media"].waitForExistence(timeout: 5))
     XCTAssertTrue(

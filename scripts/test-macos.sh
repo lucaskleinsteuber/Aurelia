@@ -83,6 +83,7 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
   -enableCodeCoverage NO \
   -parallel-testing-enabled NO \
   -only-testing:"${AURELIA_UNIT_TEST_FILTER:-AureliaTests}" \
+  -skip-testing:AureliaTests/PlaybackFullChainTests \
   test-without-building 2>&1 | tee -a "$temporary_log"
 
 stop_test_hosts

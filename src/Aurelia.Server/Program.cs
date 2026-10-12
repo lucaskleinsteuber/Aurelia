@@ -112,6 +112,9 @@ builder.Services.AddSingleton<SessionActivityRecorder>();
 builder.Services.AddSingleton<DatabaseBackupService>();
 builder.Services.AddSingleton<FullServerBackupService>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(PlaybackTicketPolicy.Resolve(
+    builder.Environment.IsEnvironment("Testing"),
+    Environment.GetEnvironmentVariable("AURELIA_TEST_TICKET_LIFETIME_SECONDS")));
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<LibraryAccessService>();
 builder.Services.AddSingleton<CatalogMutationGate>();
