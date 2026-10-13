@@ -15,7 +15,8 @@ public sealed class AccountService(
     CredentialAttemptGuard credentialAttempts,
     ActiveStreamRegistry streams,
     ProfileSessionStore profiles,
-    ProfileService profileService)
+    ProfileService profileService,
+    CatalogMutationGate mutations)
 {
     private static readonly TimeSpan PairingCodeLifetime = TimeSpan.FromMinutes(5);
 
@@ -64,7 +65,7 @@ public sealed class AccountService(
     {
         var normalizedUsername = NormalizeUsername(ValidateUsername(request.Username));
         if (request.Password is null || request.Password.Length is < 1 or > 1024)
-            throw new AccountException("invalid_credentials", "Username or password is incorrect.", 401);
+            throw new AccountException("invalid_credentials", "The owner profile name or Server Password is incorrect.", 401);
         var deviceName = ValidateDeviceName(request.DeviceName);
         var user = await database.Users.SingleOrDefaultAsync(
             candidate => candidate.NormalizedUsername == normalizedUsername,
@@ -94,90 +95,21 @@ public sealed class AccountService(
         return ToSummary(await RequireUserAsync(userId, cancellationToken));
     }
 
-    public async Task<UserSummary> CreateUserAsync(
+    public Task<UserSummary> CreateUserAsync(
         Guid actorId,
         CreateUserRequest request,
         CancellationToken cancellationToken)
     {
-        var actor = await RequireUserAsync(actorId, cancellationToken);
-        var username = ValidateUsername(request.Username);
-        if (!ProfileService.IsPin(request.Pin)) throw new AccountException("invalid_pin_format", "Every profile needs a numeric PIN with 4 to 8 digits.", 400);
-        ValidateRole(request.Role);
-
-        if (actor.Role != UserRole.Owner)
-        {
-            throw Forbidden();
-        }
-
-        var normalized = NormalizeUsername(username);
-        if (await database.Users.AnyAsync(
-                user => user.NormalizedUsername == normalized,
-                cancellationToken))
-        {
-            throw new AccountException(
-                "username_in_use",
-                "This username is already in use.",
-                StatusCodes.Status409Conflict);
-        }
-
-        var user = new ServerUser
-        {
-            Id = Guid.NewGuid(),
-            Username = username,
-            NormalizedUsername = normalized,
-            PasswordHash = string.Empty,
-            Role = request.Role,
-            AccessMode = request.Role == UserRole.Owner ? ProfileAccessMode.EntireLibrary : ProfileAccessMode.SelectedTitles,
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-        using (await credentialAttempts.EnterAsync(cancellationToken))
-        {
-            // Profile accounts no longer carry a usable password credential.
-            user.PasswordHash = passwordHasher.HashPassword(user, tokenService.CreateDeviceToken());
-            user.PinHash = passwordHasher.HashPassword(user, request.Pin!);
-        }
-        database.Users.Add(user);
-        await database.SaveChangesAsync(cancellationToken);
-        return ToSummary(user);
+        return profileService.CreateAsync(actorId, request, cancellationToken);
     }
 
-    public async Task<UserSummary> ChangeRoleAsync(
+    public Task<UserSummary> ChangeRoleAsync(
         Guid actorId,
         Guid targetId,
         UserRole newRole,
         CancellationToken cancellationToken)
     {
-        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        var actor = await RequireUserAsync(actorId, cancellationToken);
-        var target = await RequireUserAsync(targetId, cancellationToken);
-        ValidateRole(newRole);
-
-        if (actor.Role != UserRole.Owner)
-        {
-            throw Forbidden();
-        }
-
-        if (target.Role == UserRole.Owner && newRole != UserRole.Owner)
-        {
-            var ownerCount = await database.Users.CountAsync(
-                user => user.Role == UserRole.Owner && user.IsEnabled,
-                cancellationToken);
-            if (target.IsEnabled && ownerCount == 1)
-            {
-                throw new AccountException(
-                    "last_owner_required",
-                    "The final owner cannot be demoted.",
-                    StatusCodes.Status409Conflict);
-            }
-        }
-
-        target.Role = newRole;
-        database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Catalog, UserId = targetId, CreatedAt = DateTimeOffset.UtcNow });
-        await database.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        streams.RevokeUser(targetId);
-        profiles.RevokeUser(targetId);
-        return ToSummary(target);
+        return profileService.ChangeRoleAsync(actorId, targetId, newRole, cancellationToken);
     }
 
     public async Task DeleteUserAsync(
@@ -185,6 +117,7 @@ public sealed class AccountService(
         Guid targetId,
         CancellationToken cancellationToken)
     {
+        using var lease = await mutations.EnterAsync(cancellationToken);
         await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         var actor = await RequireUserAsync(actorId, cancellationToken);
         var target = await RequireUserAsync(targetId, cancellationToken);
@@ -386,7 +319,7 @@ public sealed class AccountService(
     private async Task VerifyPasswordAsync(ServerUser? user, string password, CancellationToken cancellationToken)
     {
         if (password is null || password.Length is < 1 or > 1024)
-            throw new AccountException("invalid_credentials", "Username or password is incorrect.", 401);
+            throw new AccountException("invalid_credentials", "The owner profile name or Server Password is incorrect.", 401);
         var now = DateTimeOffset.UtcNow;
         var key = user?.Id ?? Guid.Empty;
         credentialAttempts.Check(key, now);
@@ -398,7 +331,7 @@ public sealed class AccountService(
         else result = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, password);
         var success = user?.IsEnabled == true && result != PasswordVerificationResult.Failed;
         credentialAttempts.Record(key, success, now);
-        if (!success) throw new AccountException("invalid_credentials", "Username or password is incorrect.", 401);
+        if (!success) throw new AccountException("invalid_credentials", "The owner profile name or Server Password is incorrect.", 401);
         if (result == PasswordVerificationResult.SuccessRehashNeeded)
             user!.PasswordHash = passwordHasher.HashPassword(user, password);
     }
@@ -412,6 +345,7 @@ public sealed class AccountService(
 
     public async Task UpdateAccessAsync(Guid actorId, Guid targetId, UpdateUserAccessRequest request, CancellationToken cancellationToken)
     {
+        using var lease = await mutations.EnterAsync(cancellationToken);
         await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         var actor = await RequireUserAsync(actorId, cancellationToken);
         if (actor.Role != UserRole.Owner) throw Forbidden();
@@ -447,7 +381,7 @@ public sealed class AccountService(
     public async Task ResetPasswordAsync(Guid actorId, Guid targetId, string password, CancellationToken cancellationToken)
     {
         await Task.CompletedTask;
-        throw new AccountException("profile_pin_required", "Viewing profiles use PINs. Reset the profile PIN instead of an account password.", 409);
+        throw new AccountException("profile_pin_required", "Profiles use optional PIN protection, not account passwords. Manage the profile PIN instead.", 409);
     }
 
     public async Task RevokeAllSessionsAsync(Guid actorId, Guid targetId, CancellationToken cancellationToken)
@@ -467,7 +401,7 @@ public sealed class AccountService(
 
     private static UserSummary ToSummary(ServerUser user)
     {
-        return new UserSummary(user.Id, user.Username, user.Role, user.CreatedAt, user.AccessMode);
+        return ProfileService.ToSummary(user);
     }
 
     private static string ValidateUsername(string? value)
@@ -498,7 +432,7 @@ public sealed class AccountService(
         {
             throw new AccountException(
                 "invalid_password",
-                "The password must contain at least 12 characters.",
+                "The Server Password must contain at least 12 characters.",
                 StatusCodes.Status400BadRequest);
         }
     }
@@ -515,17 +449,6 @@ public sealed class AccountService(
         }
 
         return deviceName;
-    }
-
-    private static void ValidateRole(UserRole role)
-    {
-        if (!Enum.IsDefined(role))
-        {
-            throw new AccountException(
-                "invalid_role",
-                "The requested user role is not valid.",
-                StatusCodes.Status400BadRequest);
-        }
     }
 
     private static AccountException InvalidPairingCode()

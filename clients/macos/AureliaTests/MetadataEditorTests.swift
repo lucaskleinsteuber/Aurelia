@@ -80,20 +80,6 @@ import Testing
     #expect(!expired.isActive)
   }
 
-  @Test func resetRequiresPasswordApprovalButEditingAndExclusionReimportDoNot() {
-    #expect(
-      APIClient.requiresAdministrationApproval(path: "/api/v1/libraries/reset", method: "POST"))
-    #expect(
-      !APIClient.requiresAdministrationApproval(
-        path: "/api/v1/libraries/reset/preview", method: "POST"))
-    #expect(
-      !APIClient.requiresAdministrationApproval(
-        path: "/api/v1/media/\(UUID())/editor", method: "PUT"))
-    #expect(
-      !APIClient.requiresAdministrationApproval(
-        path: "/api/v1/libraries/\(UUID())/exclusions/\(UUID())", method: "DELETE"))
-  }
-
   @Test func nativeEditorRendersAllFourSectionsWithSyntheticData() async throws {
     let previous = AppModel.active
     defer { AppModel.active = previous }

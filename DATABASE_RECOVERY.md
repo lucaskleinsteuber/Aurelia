@@ -59,7 +59,7 @@ devices and consumes old pairing codes/playback tickets. Normal updates do not.
 
 ## Encrypted full-server recovery
 
-The Server settings tab also provides a password-confirmed, encrypted export
+The Server settings tab also provides a management-unlocked, encrypted export
 and guided full-server restore. It includes configuration and server identity,
 and manually imported artwork originals/crops (full-server format 2), but excludes
 video files and provider artwork caches. Version 1 backups remain readable.

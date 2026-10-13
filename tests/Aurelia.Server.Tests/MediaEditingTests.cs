@@ -268,7 +268,7 @@ public sealed class MediaEditingTests
     }
 
     [Fact]
-    public async Task ResetRequiresBoundSingleUsePasswordApprovalAndPreservesAccountsAndOtherLibraries()
+    public async Task ResetRequiresBoundSingleUseManagementApprovalAndPreservesAccountsAndOtherLibraries()
     {
         using var fixture = await Fixture.CreateAsync();
         var movie = await fixture.MovieAsync("Reset.mkv"); var privateMovie = await fixture.MovieAsync("Private.mkv");
@@ -284,10 +284,10 @@ public sealed class MediaEditingTests
         using var withoutApproval = await fixture.Client.SendAsync(request); Assert.Equal(HttpStatusCode.Forbidden, withoutApproval.StatusCode);
         var body = JsonSerializer.SerializeToUtf8Bytes(payload, ApiTestClient.JsonOptions);
         using var wrong = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries/reset/approval", session.Token,
-            new AdministrationApprovalRequest("POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash(body), "wrong password"));
+            new AdministrationApprovalRequest("POST /api/v1/users", AdministrationApprovalStore.Hash(body)));
         using var wrongResponse = await fixture.Client.SendAsync(wrong); Assert.False(wrongResponse.IsSuccessStatusCode);
         using var approve = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries/reset/approval", session.Token,
-            new AdministrationApprovalRequest("POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash(body), Fixture.Password));
+            new AdministrationApprovalRequest("POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash(body)));
         using var approvalResponse = await fixture.Client.SendAsync(approve); approvalResponse.EnsureSuccessStatusCode();
         var approval = await ApiTestClient.ReadAsync<AdministrationApprovalResponse>(approvalResponse);
         using var reset = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries/reset", session.Token, payload); reset.Headers.Add("X-Aurelia-Approval", approval.Token);

@@ -19,6 +19,9 @@ struct MediaManagerView: View {
           configuredLibraries
           scanActivity
           importAssignments
+          if model.managementUnlocked, let error = model.administrationErrorMessage {
+            Text(error).foregroundStyle(.orange).textSelection(.enabled)
+          }
         }
         .padding(AureliaDesign.pagePadding)
       }

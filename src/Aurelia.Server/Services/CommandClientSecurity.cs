@@ -28,7 +28,7 @@ public static class CommandClientSecurity
         _ = ValidateAddress(client.BaseAddress?.AbsoluteUri ?? string.Empty);
         var payload = body is null ? [] : JsonSerializer.SerializeToUtf8Bytes(body, Json);
         using var approval = await client.PostAsJsonAsync("/api/v1/server/approval",
-            new AdministrationApprovalRequest(method.Method + " " + path, AdministrationApprovalStore.Hash(payload), password), Json, token);
+            new AdministrationApprovalRequest(method.Method + " " + path, AdministrationApprovalStore.Hash(payload)), Json, token);
         var grant = await PairingCommandClient.ReadSuccessAsync<AdministrationApprovalResponse>(approval, token);
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)

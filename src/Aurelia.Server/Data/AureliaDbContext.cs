@@ -62,6 +62,13 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
     private void AppendSyncChanges()
     {
+        foreach (var entry in ChangeTracker.Entries<ServerUser>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            if (entry.State == EntityState.Added || new[] { nameof(ServerUser.Role), nameof(ServerUser.IsEnabled),
+                    nameof(ServerUser.PinHash), nameof(ServerUser.PinProtectionEnabled), nameof(ServerUser.AccessMode),
+                    nameof(ServerUser.AccessRevision) }.Any(name => entry.Property(name).IsModified))
+                entry.Entity.ProfileRevision = entry.State == EntityState.Added ? 1 : checked(entry.Entity.ProfileRevision + 1);
+        }
         foreach (var entry in ChangeTracker.Entries<MediaMetadata>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
             entry.Entity.EditorRevision++;
         foreach (var entry in ChangeTracker.Entries<SceneNote>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
@@ -282,6 +289,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(user => user.NormalizedUsername).HasMaxLength(64).IsRequired();
             entity.Property(user => user.PasswordHash).HasMaxLength(512).IsRequired();
             entity.Property(user => user.PinHash).HasMaxLength(512);
+            entity.Property(user => user.PinProtectionEnabled);
+            entity.Property(user => user.ProfileRevision).IsConcurrencyToken();
             entity.Property(user => user.AccessMode).HasConversion<string>().HasMaxLength(32);
             entity.Property(user => user.AccessRevision).IsConcurrencyToken();
             entity.Property(user => user.Role).HasConversion<string>().HasMaxLength(16);

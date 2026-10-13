@@ -63,7 +63,7 @@ public sealed record ServerCommandLine(
     public bool HasFlag(string name) => Flags.Contains(name);
 
     public string ReadPassword()
-        => ReadSecret("Password: ");
+        => ReadSecret("Server Password: ");
 
     public string ReadSecret(string prompt)
     {

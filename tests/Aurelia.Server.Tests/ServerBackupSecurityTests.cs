@@ -7,6 +7,8 @@ using Aurelia.Contracts;
 using Aurelia.Server.Data;
 using Aurelia.Server.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
@@ -14,6 +16,161 @@ namespace Aurelia.Server.Tests;
 
 public sealed class ServerBackupSecurityTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EncryptedProfileRestorePreservesPinsAccessNotesAndIdsAcrossOptionalPinMigration(bool previousSchema)
+    {
+        var root = TestPaths.CreateDataDirectory();
+        PrivateFilePermissions.CreatePrivateDirectory(root);
+        var runtime = ServerRuntimeOptions.Resolve(new ConfigurationBuilder().Build(), ["--data-dir", root]);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>().UseSqlite($"Data Source={runtime.DatabasePath};Pooling=False").Options;
+        var serverId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var owner = new ServerUser
+        {
+            Id = Guid.NewGuid(),
+            Username = "owner",
+            NormalizedUsername = "OWNER",
+            PasswordHash = "synthetic-owner-hash",
+            PinHash = "synthetic-owner-pin-hash",
+            Role = UserRole.Owner,
+            AccessMode = ProfileAccessMode.EntireLibrary,
+            CreatedAt = now
+        };
+        var viewer = new ServerUser
+        {
+            Id = Guid.NewGuid(),
+            Username = "viewer",
+            NormalizedUsername = "VIEWER",
+            PasswordHash = "unused-profile-password-hash",
+            PinHash = "synthetic-viewer-pin-hash",
+            Role = UserRole.User,
+            AccessMode = ProfileAccessMode.SelectedTitles,
+            CreatedAt = now
+        };
+        var pending = new ServerUser { Id = Guid.NewGuid(), Username = "pending", NormalizedUsername = "PENDING", PasswordHash = "pending-unused-hash", Role = UserRole.User, CreatedAt = now };
+        var pinless = new ServerUser
+        {
+            Id = Guid.NewGuid(),
+            Username = "pinless",
+            NormalizedUsername = "PINLESS",
+            PasswordHash = "pinless-unused-hash",
+            PinProtectionEnabled = false,
+            Role = UserRole.User,
+            CreatedAt = now
+        };
+        var mediaId = Guid.NewGuid();
+        var noteId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        try
+        {
+            await using (var database = new AureliaDbContext(options))
+            {
+                await database.Database.MigrateAsync();
+                database.ServerIdentities.Add(new ServerIdentity { Id = 1, ServerId = serverId, CreatedAt = now });
+                database.AdministrationCredentials.Add(new ServerAdministrationCredential { PasswordHash = "synthetic-server-password-hash" });
+                database.Users.AddRange(owner, viewer, pending);
+                if (!previousSchema) database.Users.Add(pinless);
+                var library = new LibraryRoot
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Synthetic archive library",
+                    Path = root,
+                    NormalizedPath = MediaPath.Normalize(root),
+                    Kind = LibraryKind.Movies,
+                    CreatedAt = now
+                };
+                var media = new MediaItem
+                {
+                    Id = mediaId,
+                    LibraryRoot = library,
+                    LibraryRootId = library.Id,
+                    Kind = MediaKind.Movie,
+                    SourcePath = Path.Combine(root, "offline.mkv"),
+                    NormalizedSourcePath = MediaPath.Normalize(Path.Combine(root, "offline.mkv")),
+                    DetectedTitle = "Synthetic offline title",
+                    Availability = MediaAvailability.Missing,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                database.MediaItems.Add(media);
+                database.UserTitleGrants.Add(new UserTitleGrant { User = viewer, UserId = viewer.Id, MediaItem = media, MediaItemId = mediaId });
+                database.SceneNotes.Add(new SceneNote
+                {
+                    Id = noteId,
+                    User = viewer,
+                    UserId = viewer.Id,
+                    MediaItem = media,
+                    MediaItemId = mediaId,
+                    StartMilliseconds = 330_000,
+                    EndMilliseconds = 367_000,
+                    Text = "Synthetic private marker"
+                });
+                database.PlaybackProgress.Add(new PlaybackProgress
+                {
+                    Id = Guid.NewGuid(),
+                    User = viewer,
+                    UserId = viewer.Id,
+                    MediaItem = media,
+                    MediaItemId = mediaId,
+                    PositionMilliseconds = 123_000,
+                    DurationMilliseconds = 400_000,
+                    LastPlayedAt = now,
+                    UpdatedAt = now,
+                    Revision = 7
+                });
+                database.DeviceSessions.Add(new DeviceSession
+                {
+                    Id = deviceId,
+                    User = owner,
+                    UserId = owner.Id,
+                    DeviceName = "Synthetic archived device",
+                    TokenHash = "synthetic-device-hash",
+                    CreatedAt = now,
+                    LastSeenAt = now,
+                    ExpiresAt = now.AddDays(90)
+                });
+                await database.SaveChangesAsync();
+                if (previousSchema) await database.Database.GetService<IMigrator>().MigrateAsync("20261013052618_ProfilesAndSceneNotes");
+            }
+            var configuration = new ServerConfigurationStore(runtime);
+            var backups = new DatabaseBackupService(runtime, configuration);
+            using var full = new FullServerBackupService(runtime, backups, configuration);
+            var export = await full.ExportAsync("long synthetic backup passphrase", CancellationToken.None);
+            var prepared = await full.PrepareRestoreAsync(new(export.Id, "long synthetic backup passphrase", true), CancellationToken.None);
+            await FullServerBackupService.ApplyPreparedAsync(runtime, prepared.Id, CancellationToken.None);
+            await using var restored = new AureliaDbContext(options);
+            await restored.Database.MigrateAsync();
+            var users = await restored.Users.AsNoTracking().ToDictionaryAsync(user => user.Id);
+            Assert.Equal(previousSchema ? 3 : 4, users.Count);
+            Assert.Equal(owner.PinHash, users[owner.Id].PinHash);
+            Assert.Equal(viewer.PinHash, users[viewer.Id].PinHash);
+            Assert.True(users[owner.Id].PinProtectionEnabled);
+            Assert.True(users[viewer.Id].PinProtectionEnabled);
+            Assert.True(users[pending.Id].PinProtectionEnabled);
+            Assert.True(ProfileService.ToSummary(users[pending.Id]).NeedsPinSetup);
+            if (!previousSchema) Assert.False(users[pinless.Id].PinProtectionEnabled);
+            Assert.Equal(ProfileAccessMode.SelectedTitles, users[viewer.Id].AccessMode);
+            var grant = await restored.UserTitleGrants.SingleAsync();
+            Assert.Equal(viewer.Id, grant.UserId);
+            Assert.Equal(mediaId, grant.MediaItemId);
+            var note = await restored.SceneNotes.SingleAsync();
+            Assert.Equal(noteId, note.Id);
+            Assert.Equal(viewer.Id, note.UserId);
+            Assert.Equal(mediaId, note.MediaItemId);
+            Assert.Equal("Synthetic private marker", note.Text);
+            Assert.Equal(330_000, note.StartMilliseconds);
+            Assert.Equal(123_000, (await restored.PlaybackProgress.SingleAsync()).PositionMilliseconds);
+            Assert.NotNull((await restored.DeviceSessions.SingleAsync(session => session.Id == deviceId)).RevokedAt);
+            Assert.Equal("synthetic-server-password-hash", (await restored.AdministrationCredentials.SingleAsync()).PasswordHash);
+            Assert.Equal(serverId, (await restored.ServerIdentities.SingleAsync()).ServerId);
+            Assert.Equal(15, (await backups.VerifyAsync(runtime.DatabasePath, CancellationToken.None)).AppliedMigrationCount);
+            Assert.False(File.Exists(Path.Combine(root, "offline.mkv")));
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
     [Fact]
     public async Task FullBackupPreservesImportedArtworkOriginalsAndCropsWithoutVideosOrProviderCache()
     {

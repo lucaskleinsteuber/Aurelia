@@ -13,7 +13,7 @@ final class ProfileAndNotesUITests: XCTestCase {
     XCTAssertTrue(picker.waitForExistence(timeout: 8))
     XCTAssertFalse(app.descendants(matching: .any)["primary-sidebar"].exists)
     XCTAssertFalse(app.buttons["watching-profile-70000000-0000-0000-0000-000000000003"].isEnabled)
-    shot(app, "Who’s Watching - All Profiles Locked")
+    shot(app, "Who’s Watching - Protected and Optional Profiles")
     app.buttons["watching-profile-70000000-0000-0000-0000-000000000002"].click()
     let pin = app.secureTextFields["profile-pin"]
     XCTAssertTrue(pin.waitForExistence(timeout: 5))

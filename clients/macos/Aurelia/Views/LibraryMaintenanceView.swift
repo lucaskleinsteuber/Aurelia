@@ -7,6 +7,7 @@ struct LibraryMaintenanceView: View {
   @State private var exclusions: [ExcludedMediaSummary] = []
   @State private var selectedExclusion: ExcludedMediaSummary?
   @State private var error: String?
+  @State private var reimportTask: Task<Void, Never>?
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
       AureliaSettingsSection(
@@ -42,6 +43,7 @@ struct LibraryMaintenanceView: View {
       }
     }
     .task(id: library) { await load() }
+    .onDisappear { reimportTask?.cancel() }
     .sheet(isPresented: $showingReset) { LibraryResetSheet().environmentObject(model) }
     .confirmationDialog(
       "Reimport this source?",
@@ -51,13 +53,24 @@ struct LibraryMaintenanceView: View {
     ) {
       Button("Reimport with Scan") {
         guard let excluded = selectedExclusion, let profile = model.profile else { return }
-        Task {
+        let generation = model.administrationGeneration
+        reimportTask = Task {
+          defer { reimportTask = nil }
           do {
-            try await APIClient(profile: profile).reinclude(
-              library: excluded.libraryId, excluded: excluded.id)
+            try await model.currentAdministration {
+              try await APIClient(profile: profile).reinclude(
+                library: excluded.libraryId, excluded: excluded.id)
+            }
+            guard model.isCurrentAdministration(generation) else { return }
             await load()
+            guard model.isCurrentAdministration(generation) else { return }
             await model.reloadAdministration()
-          } catch { self.error = error.localizedDescription }
+          } catch is CancellationError {
+          } catch {
+            guard model.isCurrentAdministration(generation) else { return }
+            model.handleAdministrationFailure(error, generation: generation)
+            self.error = error.localizedDescription
+          }
         }
       }
     } message: {
@@ -69,10 +82,20 @@ struct LibraryMaintenanceView: View {
   private func load() async {
     exclusions = []
     guard let library, let profile = model.profile else { return }
+    let generation = model.administrationGeneration
     do {
-      exclusions = try await APIClient(profile: profile).excludedItems(library: library)
+      let loaded = try await model.currentAdministration {
+        try await APIClient(profile: profile).excludedItems(library: library)
+      }
+      guard model.isCurrentAdministration(generation), self.library == library else { return }
+      exclusions = loaded
       error = nil
-    } catch { self.error = error.localizedDescription }
+    } catch is CancellationError {
+    } catch {
+      guard model.isCurrentAdministration(generation), self.library == library else { return }
+      model.handleAdministrationFailure(error, generation: generation)
+      self.error = error.localizedDescription
+    }
   }
 }
 
@@ -85,6 +108,7 @@ private struct LibraryResetSheet: View {
   @State private var working = false
   @State private var result: LibraryMutationResult?
   @State private var error: String?
+  @State private var operationTask: Task<Void, Never>?
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
       Label("Reset Library", systemImage: "exclamationmark.triangle").font(.title2.bold())
@@ -127,48 +151,84 @@ private struct LibraryResetSheet: View {
             preview == nil ? "Review Reset" : "Reset Selected Libraries…",
             role: preview == nil ? nil : .destructive
           ) {
-            if preview != nil { confirmation = true } else { Task { await review() } }
-          }.disabled(selected.isEmpty || working)
+            if preview != nil {
+              confirmation = true
+            } else {
+              operationTask = Task { await review() }
+            }
+          }.disabled(selected.isEmpty || working || !model.canManageStorage)
         }
       }
     }.padding(24).frame(minWidth: 650, minHeight: 530).background(AureliaBackdrop())
       .interactiveDismissDisabled(working)
+      .onDisappear { operationTask?.cancel() }
+      .onChange(of: model.profile?.sessionId) { _, _ in
+        operationTask?.cancel()
+        dismiss()
+      }
       .confirmationDialog(
         "Permanently reset the selected libraries?", isPresented: $confirmation,
         titleVisibility: .visible
       ) {
-        Button("Confirm & Enter Server Password", role: .destructive) { Task { await reset() } }
+        Button("Reset Selected Libraries", role: .destructive) {
+          operationTask = Task { await reset() }
+        }
       } message: {
         Text(
-          "Your current server-account password is required. This cannot be undone without restoring a backup."
+          "The selected libraries will be removed using your current management unlock. Your video files will not be changed. This cannot be undone without restoring a backup."
         )
       }
   }
   private func review() async {
-    guard let profile = model.profile else { return }
+    guard let profile = model.profile, model.canManageStorage else { return }
+    let generation = model.administrationGeneration
+    let libraries = selected.sorted { $0.uuidString < $1.uuidString }
     working = true
     defer { working = false }
     do {
-      preview = try await APIClient(profile: profile).previewReset(
-        libraries: selected.sorted { $0.uuidString < $1.uuidString })
+      let loaded = try await model.currentAdministration {
+        try await APIClient(profile: profile).previewReset(libraries: libraries)
+      }
+      guard model.isCurrentAdministration(generation) else { return }
+      preview = loaded
       error = nil
-    } catch { self.error = error.localizedDescription }
+    } catch is CancellationError {
+    } catch {
+      guard model.isCurrentAdministration(generation) else { return }
+      model.handleAdministrationFailure(error, generation: generation)
+      self.error = error.localizedDescription
+    }
   }
   private func reset() async {
-    guard let profile = model.profile, let preview else { return }
+    guard let profile = model.profile, let preview, model.canManageStorage else { return }
+    let generation = model.administrationGeneration
     working = true
     defer { working = false }
     do {
       let client = APIClient(profile: profile)
-      result = try await client.resetLibrary(preview: preview)
-      while let current = result, current.state != "completed" && !Task.isCancelled {
-        try await Task.sleep(for: .seconds(5))
-        result = try await client.libraryMutation(id: current.id)
+      let accepted = try await model.currentAdministration {
+        try await client.resetLibrary(preview: preview)
       }
+      guard model.isCurrentAdministration(generation) else { return }
+      result = accepted
+      while let current = result, current.state != "completed" {
+        try await Task.sleep(for: .seconds(5))
+        guard model.isCurrentAdministration(generation) else { return }
+        let updated = try await model.currentAdministration {
+          try await client.libraryMutation(id: current.id)
+        }
+        guard model.isCurrentAdministration(generation) else { return }
+        result = updated
+      }
+      guard model.isCurrentAdministration(generation) else { return }
       try await model.refresh()
+      guard model.isCurrentAdministration(generation) else { return }
       await model.reloadAdministration()
+      guard model.isCurrentAdministration(generation) else { return }
       error = nil
     } catch is CancellationError {} catch {
+      guard model.isCurrentAdministration(generation) else { return }
+      model.handleAdministrationFailure(error, generation: generation)
       self.error = error.localizedDescription
       self.preview = nil
     }

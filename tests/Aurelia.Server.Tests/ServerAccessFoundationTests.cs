@@ -210,8 +210,10 @@ public sealed class ServerAccessFoundationTests
     public void ApprovalRejectsExpiryWrongDeviceWrongActionAndChangedPayload()
     {
         var clock = new ApprovalClock();
-        var approvals = new AdministrationApprovalStore(clock, new TokenService());
-        var session = Guid.NewGuid();
+        using var sessions = new ProfileSessionStore(clock, new TokenService(), new ActiveStreamRegistry());
+        var approvals = new AdministrationApprovalStore(clock, new TokenService(), sessions);
+        var session = sessions.Issue(Guid.NewGuid(), Guid.NewGuid()).Session.Id;
+        sessions.UnlockManagement(session);
         var hash = AdministrationApprovalStore.Hash("{\"role\":\"user\"}"u8);
         var expired = approvals.Issue(session, "PUT /api/v1/users/test", hash);
         clock.Advance(TimeSpan.FromMinutes(2));

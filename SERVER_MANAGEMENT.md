@@ -14,7 +14,7 @@ for compatibility; they do not identify another current application.
   database size, storage warnings, reachable addresses, and certificate expiry.
 - **Network:** name, private LAN/VPN HTTPS access, HTTPS port, optional CIDR
   allowlist, Bonjour, and certificate identity. Stored and active settings are
-  shown separately. Changes require password confirmation and a reachable
+  shown separately. Changes require a management unlock and a reachable
   native Mac host. Connect to the new address and confirm within 60 seconds;
   otherwise the host restores the previous configuration. Turning off remote
   access requires explicit additional confirmation.
@@ -23,8 +23,10 @@ for compatibility; they do not identify another current application.
   remain **Awaiting Mac approval** until applied on the server Mac. macOS may
   additionally require permission in Login Items; pending permission is not
   reported as active hosting.
-- **Users & Access:** create/manage accounts, roles, enable/disable accounts,
-  reset passwords, grant libraries, and inspect/revoke devices per user. The
+- **Users & Access:** create/manage profiles, roles, enabled status, optional
+  viewing PINs and whole-library or selected-title access. Owner and Admin PINs
+  are mandatory; no profile account password is used. Devices are managed in
+  their own area. The
   last enabled owner cannot be removed, demoted, or disabled.
 - **Devices & Security:** new pairing, new-session lifetime, and concurrent
   request limits. Defaults are 90-day sessions, five-minute one-use pairing
@@ -51,9 +53,12 @@ legacy endpoints, artwork, counts, collections, and change notifications before
 ordering and pagination.
 
 Settings writes use a revision: concurrent stale edits return `409`, requiring
-a reload. Sensitive changes require current-password confirmation for a
-single-use grant bound to the session, action, and exact request bytes, valid
-for at most two minutes. Revocation/account blocking/grant removal also cancel
+a reload. Unlock management once using the **Server Password** for ten minutes.
+There is no second password prompt within that window. Sensitive changes use
+automatic single-use grants bound to the current unlock generation, session,
+action and exact request bytes, valid for at most two minutes or the remaining
+unlock time. Locking or re-unlocking invalidates old grants. Destructive changes
+still require explicit scope confirmation. Revocation/account blocking/grant removal also cancel
 active affected streams. Last-used timestamps are written at most once a minute.
 That bookkeeping is best-effort during recoverable storage failures; session
 and access checks still have to succeed before a request is authorized.

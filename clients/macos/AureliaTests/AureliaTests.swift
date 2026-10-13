@@ -19,35 +19,6 @@ struct AureliaTests {
   }
 
   @Test
-  func administrationApprovalCoversSensitiveChangesButNotTemporaryTransferCleanup() {
-    #expect(
-      APIClient.requiresAdministrationApproval(path: "/API/V1/SERVER/SETTINGS/", method: "PUT"))
-    #expect(
-      APIClient.requiresAdministrationApproval(path: "/api/v1/users/123/access", method: "PUT"))
-    #expect(
-      APIClient.requiresAdministrationApproval(
-        path: "/api/v1/server/sessions/123", method: "DELETE"))
-    #expect(
-      APIClient.requiresAdministrationApproval(path: "/api/v1/auth/sessions/123", method: "DELETE")
-    )
-    #expect(
-      !APIClient.requiresAdministrationApproval(
-        path: "/api/v1/server/backups/uploads/123", method: "PUT"))
-    #expect(
-      !APIClient.requiresAdministrationApproval(
-        path: "/api/v1/server/backups/transfers/123", method: "DELETE"))
-    #expect(
-      !APIClient.requiresAdministrationApproval(
-        path: "/api/v1/server/operations/123/confirm", method: "POST"))
-    #expect(
-      !APIClient.requiresAdministrationApproval(path: "/api/v1/server/settings", method: "GET"))
-    #expect(APIClient.requiresAdministrationApproval(path: "/api/v1/media/123", method: "DELETE"))
-    #expect(APIClient.requiresAdministrationApproval(path: "/api/v1/auth/pairings", method: "POST"))
-    #expect(
-      !APIClient.requiresAdministrationApproval(
-        path: "/api/v1/media/123/notes/456?revision=1", method: "DELETE"))
-  }
-  @Test
   func seriesInformationUsesYearOneCountryAndActualEpisodes() {
     let detail = informationFixture(kind: .series)
     let fields = MediaInformationPresentation.fields(for: detail)

@@ -391,27 +391,34 @@ final class AureliaUITests: XCTestCase {
 
     let window = app.windows.firstMatch
     XCTAssertTrue(window.waitForExistence(timeout: 8))
-    window.buttons[XCUIIdentifierCloseWindow].click()
-    XCTAssertFalse(window.waitForExistence(timeout: 3))
-
     guard
-      let applicationURL = NSRunningApplication.runningApplications(
+      let stagedApplication = NSRunningApplication.runningApplications(
         withBundleIdentifier: "com.lucas.aurelia.media"
       ).first(where: {
         $0.bundleURL?.deletingLastPathComponent()
           == Bundle.main.bundleURL.deletingLastPathComponent()
-      })?.bundleURL
+      }), let applicationURL = stagedApplication.bundleURL
     else {
       XCTFail("The running Aurelia bundle URL was unavailable")
       return
     }
+    let stagedPID = stagedApplication.processIdentifier
+    window.buttons[XCUIIdentifierCloseWindow].click()
+    XCTAssertFalse(window.waitForExistence(timeout: 3))
 
     let reopened = expectation(description: "Launch Services reopened Aurelia")
+    let configuration = NSWorkspace.OpenConfiguration()
+    // The installed app shares the test host's bundle ID; never substitute it for this exact URL.
+    configuration.allowsRunningApplicationSubstitution = false
     NSWorkspace.shared.openApplication(
       at: applicationURL,
-      configuration: NSWorkspace.OpenConfiguration()
-    ) { _, error in
+      configuration: configuration
+    ) { reopenedApplication, error in
       XCTAssertNil(error)
+      XCTAssertEqual(reopenedApplication?.processIdentifier, stagedPID)
+      XCTAssertEqual(
+        reopenedApplication?.bundleURL?.resolvingSymlinksInPath(),
+        applicationURL.resolvingSymlinksInPath())
       reopened.fulfill()
     }
     wait(for: [reopened], timeout: 8)

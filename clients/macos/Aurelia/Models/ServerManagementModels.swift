@@ -89,7 +89,7 @@ struct ServerStatusSummary: Decodable, Sendable {
   let certificateExpiresAt: String?
   let networkAddresses: [String]
 }
-struct UserAccessSummary: Decodable, Identifiable, Sendable {
+struct UserAccessSummary: Codable, Identifiable, Sendable {
   var id: UUID { user.id }
   let user: UserSummary
   let isEnabled: Bool

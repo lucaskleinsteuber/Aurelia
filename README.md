@@ -10,7 +10,8 @@ connect to your server over your home network or private VPN.
   import preview you can correct before adding anything.
 - Lets you edit titles, descriptions, cast and crew, covers, and backgrounds.
   Your corrections stay in place after later scans.
-- Keeps favorites, watch progress and scene notes separate for PIN-protected profiles.
+- Keeps favorites, watch progress and scene notes separate for each profile,
+  with optional PIN protection. Owner and administrator profiles always use a PIN.
 - Includes subtitle and audio-track selection, fullscreen playback, and
   Continue Watching.
 - Provides server settings, library permissions, device management, and backups.

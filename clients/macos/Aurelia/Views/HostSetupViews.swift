@@ -170,16 +170,16 @@ struct NativeHostSetupView: View {
     VStack(spacing: 18) {
       VStack(spacing: 6) {
         Text("Set Up This Mac").font(.title.bold())
-        Text("Choose a password. Aurelia takes care of the server details.")
+        Text("Choose a Server Password. Aurelia takes care of the server details.")
           .foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
       }
       HStack {
         Group {
           if showsPassword {
-            TextField("At least 12 characters", text: $password)
+            TextField("Server Password (at least 12 characters)", text: $password)
           } else {
-            SecureField("At least 12 characters", text: $password)
+            SecureField("Server Password (at least 12 characters)", text: $password)
           }
         }
         .textFieldStyle(.roundedBorder)
@@ -260,7 +260,7 @@ struct NativeHostSetupView: View {
       Text("Sign in to the Aurelia server already stored on this Mac.")
         .foregroundStyle(.secondary).multilineTextAlignment(.center)
       TextField("Owner name", text: $username).textFieldStyle(.roundedBorder)
-      SecureField("Password", text: $password).textFieldStyle(.roundedBorder)
+      SecureField("Server Password", text: $password).textFieldStyle(.roundedBorder)
       Button("Sign In") {
         Task { _ = await model.loginToLocalServer(username: username, password: password) }
       }

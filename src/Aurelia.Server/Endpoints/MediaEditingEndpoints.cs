@@ -42,15 +42,14 @@ public static class MediaEditingEndpoints
         api.MapDelete("/media/{id:guid}", (Guid id, LibraryMutationService service, HttpContext context) => service.RemoveAsync(context.User.RequireUserId(), id, context.RequestAborted));
         api.MapPost("/libraries/reset/preview", (Guid[] libraryIds, LibraryMutationService service, CancellationToken token) => service.PreviewAsync(libraryIds, token));
         api.MapPost("/libraries/reset", (ResetLibraryRequest request, LibraryMutationService service, HttpContext context) => service.ResetAsync(context.User.RequireUserId(), request, context.RequestAborted));
-        api.MapPost("/libraries/reset/approval", async (AdministrationApprovalRequest request, AccountService accounts, AdministrationApprovalStore approvals, HttpContext context) =>
+        api.MapPost("/libraries/reset/approval", (AdministrationApprovalRequest request, AdministrationApprovalStore approvals, HttpContext context) =>
         {
             if (request.Action != "POST /api/v1/libraries/reset") throw new AccountException("invalid_approval_action", "This approval is only valid for a library reset.", 400);
             if (!context.Request.IsHttps && context.Connection.RemoteIpAddress is { } ip && !System.Net.IPAddress.IsLoopback(ip))
-                throw new AccountException("https_required", "Password confirmation requires HTTPS.", 403);
-            await accounts.ConfirmPasswordAsync(context.User.RequireUserId(), request.Password, context.RequestAborted);
+                throw new AccountException("https_required", "Administrative authorization requires the verified HTTPS connection.", 403);
             var result = approvals.Issue(context.User.RequireProfileSessionId(), request.Action, request.PayloadHash);
             return new AdministrationApprovalResponse(result.Token, result.ExpiresAt);
-        }).RequireRateLimiting("pairing");
+        });
         api.MapGet("/library-operations/{id:guid}", (Guid id, LibraryMutationService service, CancellationToken token) => service.StatusAsync(id, token));
         api.MapGet("/libraries/{id:guid}/exclusions", async (Guid id, AureliaDbContext database, CancellationToken token) =>
         {

@@ -40,29 +40,40 @@ struct ProfilePickerView: View {
           }
         }
         Text(
-          "Each profile’s favorites, progress and scene notes are private.\nA viewing PIN does not unlock server management."
+          "Favorites, progress and scene notes stay separate for each profile.\nProfiles without a PIN can be opened by anyone on a paired device."
         )
         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
       }.padding(40).frame(maxWidth: 740).frame(maxWidth: .infinity)
     }
     .accessibilityIdentifier("profile-picker")
     .task { await model.reloadWatchingProfiles() }
+    .onDisappear {
+      pin = ""
+      password = ""
+      confirmation = ""
+    }
   }
 
   private var profiles: some View {
     LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 180))], spacing: 24) {
       ForEach(model.watchingProfiles) { profile in
         Button {
-          choice = profile
           pin = ""
+          if profile.pinProtectionEnabled {
+            choice = profile
+          } else {
+            Task { _ = await model.selectWatchingProfile(profile, pin: "") }
+          }
         } label: {
           VStack(spacing: 10) {
             Image(systemName: "person.crop.circle.fill").font(.system(size: 66))
               .symbolRenderingMode(.hierarchical)
             Text(profile.name).font(.headline).lineLimit(2)
             Label(
-              profile.needsPinSetup ? "PIN setup required" : "PIN protected",
-              systemImage: "lock.fill"
+              profile.needsPinSetup
+                ? "PIN setup required"
+                : (profile.pinProtectionEnabled ? "PIN protected" : "No PIN"),
+              systemImage: profile.pinProtectionEnabled ? "lock.fill" : "person.crop.circle"
             )
             .font(.caption).foregroundStyle(.secondary)
           }.padding(18).frame(maxWidth: .infinity, minHeight: 156)
@@ -93,14 +104,14 @@ struct ProfilePickerView: View {
   private var firstSetup: some View {
     VStack(alignment: .leading, spacing: 14) {
       Text(
-        "Confirm the existing owner password once. It becomes the shared server management password. Then choose a separate viewing PIN for the owner."
+        "Confirm the existing Server Password once, then choose a separate Profile PIN for the owner. Your PIN opens your profile; the Server Password unlocks management."
       )
       .font(.callout).foregroundStyle(.secondary)
-      SecureField("Existing owner password", text: $password).textFieldStyle(.roundedBorder)
+      SecureField("Server Password", text: $password).textFieldStyle(.roundedBorder)
       SecureField("Owner PIN (4–8 digits)", text: $pin).textFieldStyle(.roundedBorder)
       SecureField("Confirm owner PIN", text: $confirmation).textFieldStyle(.roundedBorder)
       Text(
-        "Other profiles stay locked until the owner sets their PINs in Users & Access. Your library and paired devices stay unchanged."
+        "Other profiles stay locked until the owner sets their PIN protection in Users & Access. Your library and paired devices stay unchanged."
       )
       .font(.caption).foregroundStyle(.secondary)
       Button("Set Up Profiles") {
@@ -125,10 +136,10 @@ struct ProfilePickerView: View {
   private var ownerRecovery: some View {
     VStack(alignment: .leading, spacing: 14) {
       Text(
-        "Recovery is available only on the server Mac when there is one active owner. The server password is required; paired devices and library data are not changed."
+        "Recovery is available only on the server Mac when there is one active owner. The Server Password is required; paired devices and library data are not changed."
       )
       .font(.callout).foregroundStyle(.secondary)
-      SecureField("Server management password", text: $password)
+      SecureField("Server Password", text: $password)
       SecureField("New owner PIN (4–8 digits)", text: $pin)
       SecureField("Confirm new owner PIN", text: $confirmation)
       HStack {
@@ -164,20 +175,51 @@ struct ManagementUnlockView: View {
     GroupBox("Server Management Locked") {
       VStack(alignment: .leading, spacing: 14) {
         Text(
-          "Your viewing PIN unlocks only your profile. Enter the shared server password to manage areas allowed by your role for ten minutes."
+          "Enter the Server Password to manage the areas allowed by your role for ten minutes. Your Profile PIN only opens your profile."
         )
         .foregroundStyle(.secondary)
-        SecureField("Server management password", text: $password).textFieldStyle(.roundedBorder)
+        SecureField("Server Password", text: $password).textFieldStyle(.roundedBorder)
           .accessibilityIdentifier("management-password")
-        Button("Unlock Management") {
-          working = true
-          Task {
-            defer { working = false }
-            if await model.unlockManagement(password: password) { password = "" }
-          }
-        }.disabled(password.isEmpty || working).accessibilityIdentifier("management-unlock")
-        if let error = model.errorMessage { Text(error).foregroundStyle(.orange) }
+          .onSubmit { unlockManagement() }
+        Button("Unlock Management") { unlockManagement() }
+          .disabled(password.isEmpty || working).accessibilityIdentifier("management-unlock")
+        if let error = model.administrationErrorMessage { Text(error).foregroundStyle(.orange) }
       }.padding(12)
+    }
+    .onDisappear { password = "" }
+    .onChange(of: model.administrationGeneration) { _, _ in password = "" }
+  }
+
+  private func unlockManagement() {
+    guard !working, !password.isEmpty else { return }
+    let submittedPassword = password
+    password = ""
+    working = true
+    Task {
+      defer { working = false }
+      _ = await model.unlockManagement(password: submittedPassword)
+    }
+  }
+}
+
+struct ManagementStatusView: View {
+  @EnvironmentObject private var model: AppModel
+
+  var body: some View {
+    TimelineView(.periodic(from: .now, by: 1)) { context in
+      if model.managementUnlocked {
+        HStack(spacing: 12) {
+          Label("Management Unlocked", systemImage: "lock.open")
+          if let expiry = model.managementExpiresAt {
+            let remaining = max(0, Int(ceil(expiry.timeIntervalSince(context.date))))
+            Text(String(format: "%d:%02d remaining", remaining / 60, remaining % 60))
+              .monospacedDigit().foregroundStyle(.secondary)
+          }
+          Spacer()
+          Button("Lock Management") { Task { await model.lockManagement() } }
+            .accessibilityIdentifier("management-lock")
+        }.font(.callout)
+      }
     }
   }
 }
@@ -189,30 +231,60 @@ struct ChangeProfilePINView: View {
   @State private var confirmation = ""
   @State private var error: String?
   @State private var working = false
+  private var protected: Bool { model.profile?.user?.pinProtectionEnabled ?? true }
+  private var mandatory: Bool { model.profile?.user?.role.canManageLibraries == true }
+
   var body: some View {
-    GroupBox("Viewing PIN") {
+    GroupBox("Profile PIN") {
       VStack(alignment: .leading, spacing: 12) {
-        SecureField("Current PIN", text: $current)
+        if protected { SecureField("Current PIN", text: $current) }
         SecureField("New PIN (4–8 digits)", text: $new)
         SecureField("Confirm new PIN", text: $confirmation)
-        Button("Change PIN & Lock Profile") {
-          guard let profile = model.profile else { return }
-          working = true
-          Task {
-            defer { working = false }
-            do {
-              try await APIClient(profile: profile).changeProfilePIN(current: current, new: new)
-              current = ""
-              new = ""
-              confirmation = ""
-              await model.switchWatchingProfile()
-            } catch { self.error = error.localizedDescription }
-          }
+        Button(protected ? "Change PIN & Lock Profile" : "Enable PIN & Lock Profile") {
+          updateProtection(enabled: true)
         }.disabled(
-          working || !ProfilePIN.isValid(current) || !ProfilePIN.isValid(new) || new != confirmation
-        )
+          working || (protected && !ProfilePIN.isValid(current))
+            || !ProfilePIN.isValid(new) || new != confirmation)
+        if mandatory {
+          Text("Owner and administrator profiles always require a PIN.")
+            .font(.caption).foregroundStyle(.secondary)
+        } else if protected {
+          Button("Remove PIN Protection") { updateProtection(enabled: false) }
+            .disabled(working || !ProfilePIN.isValid(current))
+          Text("Without a PIN, anyone on a paired device can open this profile.")
+            .font(.caption).foregroundStyle(.secondary)
+        } else {
+          Text("This profile has no PIN. Add one to protect it on paired devices.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
         if let error { Text(error).foregroundStyle(.orange) }
       }.padding(12).textFieldStyle(.roundedBorder)
     }
+    .onDisappear { clearSecrets() }
+    .onChange(of: model.profile?.sessionId) { _, _ in clearSecrets() }
+  }
+
+  private func updateProtection(enabled: Bool) {
+    guard let profile = model.profile, !working else { return }
+    working = true
+    Task {
+      defer { working = false }
+      do {
+        try await APIClient(profile: profile).setOwnPINProtection(
+          current: protected ? current : nil, new: enabled ? new : nil, enabled: enabled)
+        clearSecrets()
+        guard model.profile?.sessionId == profile.sessionId else { return }
+        await model.switchWatchingProfile()
+      } catch {
+        guard model.profile?.sessionId == profile.sessionId else { return }
+        self.error = error.localizedDescription
+      }
+    }
+  }
+
+  private func clearSecrets() {
+    current = ""
+    new = ""
+    confirmation = ""
   }
 }

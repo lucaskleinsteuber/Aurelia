@@ -95,4 +95,4 @@ measurements do not include provider downloads or imply complete import times.
 
 Normal updates preserve existing data and do not automatically repair or clear
 old catalog entries. A deliberate reset and reimport remains a separate,
-password-confirmed user action. No reset is required to use saved assignments.
+explicitly confirmed user action during a management unlock. No reset is required to use saved assignments.

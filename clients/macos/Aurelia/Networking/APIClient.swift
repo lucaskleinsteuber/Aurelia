@@ -20,7 +20,10 @@ enum APIClientError: LocalizedError, Equatable {
     return nil
   }
 
-  var isAuthenticationFailure: Bool { httpStatus == 401 || httpStatus == 403 }
+  var isManagementLocked: Bool { problemCode == "management_locked" }
+  var isAuthenticationFailure: Bool {
+    !isManagementLocked && (httpStatus == 401 || httpStatus == 403)
+  }
   var isRetryableTransient: Bool {
     guard let status = httpStatus else {
       return self == .invalidResponse || self == .supersededSnapshot
@@ -231,6 +234,34 @@ struct APIClient: Sendable {
     _ = try await perform(
       path: "/api/v1/users/\(id.uuidString)/pin", method: "PUT",
       body: JSONEncoder().encode(Payload(pin: pin)))
+  }
+  func setOwnPINProtection(current: String?, new: String?, enabled: Bool) async throws {
+    struct Payload: Encodable {
+      let currentPin: String?
+      let pin: String?
+      let pinProtectionEnabled: Bool
+    }
+    _ = try await perform(
+      path: "/api/v1/profile/pin-protection", method: "PUT",
+      body: JSONEncoder().encode(
+        Payload(currentPin: current, pin: new, pinProtectionEnabled: enabled)))
+  }
+  func createProfile(request: ProfileCreateRequest) async throws -> UserSummary {
+    try Self.decode(
+      UserSummary.self,
+      from: await perform(
+        path: "/api/v1/users", method: "POST", body: JSONEncoder().encode(request)))
+  }
+  func profileEditor(id: UUID) async throws -> ProfileEditorResponse {
+    try await get("/api/v1/users/\(id.uuidString)/profile")
+  }
+  func updateProfile(id: UUID, request: ProfileUpdateRequest) async throws -> ProfileEditorResponse
+  {
+    try Self.decode(
+      ProfileEditorResponse.self,
+      from: await perform(
+        path: "/api/v1/users/\(id.uuidString)/profile", method: "PUT",
+        body: JSONEncoder().encode(request)))
   }
   func unlockManagement(password: String) async throws -> String {
     struct Payload: Encodable { let password: String }
@@ -952,6 +983,12 @@ struct APIClient: Sendable {
     timeout: TimeInterval = 15
   ) async throws -> Data {
     #if DEBUG
+      if await ProfileEditorUITestFixture.enabled,
+        let fixture = try await ProfileEditorUITestFixture.response(
+          path: path, method: method, body: body)
+      {
+        return fixture
+      }
       if await CinemaUITestFixture.enabled, path.contains("/notes") {
         return try await CinemaUITestFixture.sceneNotes(path: path, method: method, body: body)
       }
@@ -968,6 +1005,7 @@ struct APIClient: Sendable {
           path: path, method: method, body: body)
       }
       if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "server-settings"
+        || ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "profile-management"
         || ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "local-host-recovery"
         || profile.baseURL.host == "server-settings-preview.invalid"
       {
@@ -975,75 +1013,30 @@ struct APIClient: Sendable {
         return try Self.serverSettingsFixture(path: path)
       }
     #endif
-    var headers: [String: String] = [:]
-    if Self.requiresAdministrationApproval(path: path, method: method) {
-      let libraryReset = path == "/api/v1/libraries/reset"
-      let titleRemoval =
-        method == "DELETE" && path.hasPrefix("/api/v1/media/")
-        && path.split(separator: "/").count == 4
-      guard
-        profile.user?.role == .owner
-          || ((libraryReset || titleRemoval) && profile.user?.role.canManageLibraries == true)
-      else {
-        throw APIClientError.serverRejected(
-          code: "owner_required", message: "Only an owner may change global server settings.")
-      }
-      let password = try await AdministrationPasswordPrompt.confirm(serverName: profile.name)
+    return try await AdministrationRequestExecutor.execute { proof in
+      let headers = proof.map { ["X-Aurelia-Approval": $0] } ?? [:]
+      let (data, _, _) = try await Self.request(
+        baseURL: profile.baseURL, path: path, method: method, token: profile.token, body: body,
+        trustMode: .pinned(profile.publicKeyFingerprint), additionalHeaders: headers,
+        timeout: timeout)
+      return data
+    } approve: {
       struct Confirmation: Encodable {
         let action: String
         let payloadHash: String
-        let password: String
       }
       struct Approval: Decodable { let token: String }
       let hash = SHA256.hash(data: body ?? Data()).map { String(format: "%02x", $0) }.joined()
       let confirmation = Confirmation(
-        action: "\(method) \(path)", payloadHash: hash, password: password)
-      let (approvalData, _, _) = try await Self.request(
-        baseURL: profile.baseURL,
-        path: "/api/v1/management/approval",
-        method: "POST", token: profile.token, body: JSONEncoder().encode(confirmation),
+        action: try AdministrationRequestExecutor.action(
+          baseURL: profile.baseURL, path: path, method: method),
+        payloadHash: hash)
+      let (data, _, _) = try await Self.request(
+        baseURL: profile.baseURL, path: "/api/v1/management/approval", method: "POST",
+        token: profile.token, body: JSONEncoder().encode(confirmation),
         trustMode: .pinned(profile.publicKeyFingerprint))
-      headers["X-Aurelia-Approval"] = try Self.decode(Approval.self, from: approvalData).token
+      return try Self.decode(Approval.self, from: data).token
     }
-    let (data, _, _) = try await Self.request(
-      baseURL: profile.baseURL,
-      path: path,
-      method: method,
-      token: profile.token,
-      body: body,
-      trustMode: .pinned(profile.publicKeyFingerprint),
-      additionalHeaders: headers,
-      timeout: timeout)
-    return data
-  }
-
-  static func requiresAdministrationApproval(path: String, method: String) -> Bool {
-    guard method != "GET", method != "HEAD" else { return false }
-    let path = path.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    let normalized = "/" + path
-    if normalized.hasPrefix("/api/v1/server/operations/"), normalized.hasSuffix("/confirm") {
-      return false
-    }
-    if method == "PUT", normalized.hasPrefix("/api/v1/server/backups/uploads/") { return false }
-    if method == "DELETE", normalized.hasPrefix("/api/v1/server/backups/transfers/") {
-      return false
-    }
-    if normalized.contains("/exclusions/") { return false }
-    if normalized == "/api/v1/libraries/reset" { return true }
-    if normalized == "/api/v1/auth/pairings" { return true }
-    if method == "DELETE", normalized.hasPrefix("/api/v1/auth/sessions/") { return true }
-    if method == "DELETE", normalized.hasPrefix("/api/v1/media/"),
-      normalized.split(separator: "/").count == 4
-    {
-      return true
-    }
-    return normalized == "/api/v1/server/settings"
-      || normalized.hasPrefix("/api/v1/server/operations")
-      || normalized.hasPrefix("/api/v1/server/sessions")
-      || normalized.hasPrefix("/api/v1/server/backups") || normalized.hasPrefix("/api/v1/users")
-      || normalized.hasPrefix("/api/v1/metadata/provider")
-      || (normalized.hasPrefix("/api/v1/libraries")
-        && (method == "DELETE" || normalized == "/api/v1/libraries"))
   }
 
   func serverCapabilities() async throws -> ServerCapabilities {
@@ -1147,6 +1140,7 @@ struct APIClient: Sendable {
     defer { session.invalidateAndCancel() }
     let (temporary, response) = try await session.download(for: request)
     defer { try? FileManager.default.removeItem(at: temporary) }
+    try Task.checkCancellation()
     guard (response as? HTTPURLResponse)?.statusCode == 200 else {
       throw APIClientError.invalidResponse
     }
@@ -1185,6 +1179,7 @@ struct APIClient: Sendable {
     let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
     defer { session.invalidateAndCancel() }
     let (_, response) = try await session.upload(for: request, fromFile: file)
+    try Task.checkCancellation()
     guard (response as? HTTPURLResponse)?.statusCode == 204 else {
       throw APIClientError.invalidResponse
     }
@@ -1325,6 +1320,7 @@ struct APIClient: Sendable {
     do {
       return try JSONDecoder().decode(type, from: data)
     } catch {
+      APIResponseDiagnostics.decodingFailure(type, error: error)
       throw APIClientError.invalidResponse
     }
   }

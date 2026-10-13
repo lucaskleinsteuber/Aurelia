@@ -13,7 +13,8 @@ untrusted server reports it. Require HTTPS for remote connections; loopback HTTP
 is for the local host only. Never follow a credential-bearing redirect.
 
 Store only the device token in the platform's protected credential store. Use it
-to load `/api/v1/profiles` and verify the chosen profile's PIN. Keep the resulting
+to load `/api/v1/profiles` and open the chosen profile. Verify its PIN when
+`pinProtectionEnabled` is true; missing fields default to protected. Keep the resulting
 viewing token in memory and send that token for personal and stream requests.
 End it when switching profiles or quitting; never auto-enter the last profile.
 See [profiles and notes](PROFILES_AND_NOTES.md) for the separated management

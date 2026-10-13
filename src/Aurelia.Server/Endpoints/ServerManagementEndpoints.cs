@@ -55,15 +55,14 @@ public static class ServerManagementEndpoints
         server.MapPost("/backups/restore/prepare", (BackupRestoreRequest request, FullServerBackupService backups, CancellationToken token) => backups.PrepareRestoreAsync(request, token));
         server.MapPost("/backups/restore/{id:guid}/apply", (HttpContext context, Guid id, NativeHostOperations operations) => operations.ApplyRestoreAsync(context.User.RequireSessionId(), id, context.RequestAborted));
         server.MapPut("/settings", (ServerHostSettings request, ServerConfigurationStore configuration) => configuration.Update(request));
-        server.MapPost("/approval", async (HttpContext context, AdministrationApprovalRequest request, AccountService accounts,
+        server.MapPost("/approval", (HttpContext context, AdministrationApprovalRequest request,
             AdministrationApprovalStore approvals) =>
         {
             if (!context.Request.IsHttps && context.Connection.RemoteIpAddress is { } ip && !System.Net.IPAddress.IsLoopback(ip))
-                throw new AccountException("https_required", "Password confirmation requires HTTPS.", 403);
-            await accounts.ConfirmPasswordAsync(context.User.RequireUserId(), request.Password, context.RequestAborted);
+                throw new AccountException("https_required", "Administrative authorization requires the verified HTTPS connection.", 403);
             var result = approvals.Issue(context.User.RequireProfileSessionId(), request.Action, request.PayloadHash);
             return new AdministrationApprovalResponse(result.Token, result.ExpiresAt);
-        }).RequireRateLimiting("pairing");
+        });
         server.MapGet("/users", (AccountService accounts, CancellationToken token) => accounts.ListAccessAsync(token));
         server.MapGet("/status", async (ServerRuntimeOptions runtime, ServerTlsIdentity identity, ServerConfigurationStore configuration, ActiveStreamRegistry streams, AureliaDbContext database) => new
         {

@@ -1168,7 +1168,7 @@ private final class FullChainEvidence {
     let allowed: Set<String> = [
       "invalid_library_path", "unreadable_library_path", "invalid_library_name",
       "invalid_library_kind", "overlapping_library_path", "approval_required",
-      "invalid_approval", "owner_required", "owner_session_revoked",
+      "invalid_approval", "owner_required", "owner_session_revoked", "device_session_revoked",
       "invalid_session", "access_denied", "invalid_server_data",
       "server_storage_unavailable", "rate_limited", "request_too_large",
     ]

@@ -4,7 +4,8 @@ namespace Aurelia.Server.Services;
 public sealed class ProfileSessionStore(TimeProvider clock, TokenService tokens, ActiveStreamRegistry streams) : IDisposable
 {
     public sealed record Session(Guid Id, Guid DeviceId, Guid UserId, DateTimeOffset ExpiresAt);
-    private sealed record Entry(Session Session, DateTimeOffset? ManagementExpiresAt);
+    public sealed record ManagementGrant(Guid Generation, DateTimeOffset ExpiresAt);
+    private sealed record Entry(Session Session, Guid ManagementEpoch, ManagementGrant? Management);
     private readonly object gate = new();
     private readonly Dictionary<string, Entry> sessions = [];
     private ITimer? expiryTimer;
@@ -20,7 +21,7 @@ public sealed class ProfileSessionStore(TimeProvider clock, TokenService tokens,
             Retire(entry => entry.Session.DeviceId == deviceId);
             var token = tokens.CreateDeviceToken();
             var session = new Session(Guid.NewGuid(), deviceId, userId, clock.GetUtcNow().AddHours(12));
-            sessions.Add(tokens.Hash(token), new Entry(session, null));
+            sessions.Add(tokens.Hash(token), new Entry(session, Guid.NewGuid(), null));
             ScheduleExpiry();
             return (session, token);
         }
@@ -36,22 +37,51 @@ public sealed class ProfileSessionStore(TimeProvider clock, TokenService tokens,
         lock (gate) { Prune(); return sessions.Values.Any(entry => entry.Session.Id == sessionId && entry.Session.DeviceId == deviceId && entry.Session.UserId == userId); }
     }
 
-    public DateTimeOffset UnlockManagement(Guid id)
+    public Guid ManagementEpoch(Guid id)
+    {
+        lock (gate)
+        {
+            Prune();
+            return sessions.Values.FirstOrDefault(entry => entry.Session.Id == id)?.ManagementEpoch
+                ?? throw new AccountException("profile_session_expired", "Unlock your profile again.", 401);
+        }
+    }
+
+    public DateTimeOffset UnlockManagement(Guid id, Guid? expectedEpoch = null)
     {
         lock (gate)
         {
             Prune();
             var key = sessions.FirstOrDefault(pair => pair.Value.Session.Id == id).Key;
             if (key is null) throw new AccountException("profile_session_expired", "Unlock your profile again.", 401);
+            if (expectedEpoch is { } epoch && sessions[key].ManagementEpoch != epoch)
+                throw new AccountException("management_unlock_superseded", "The management state changed. Unlock management again if needed.", 409);
             var expiry = clock.GetUtcNow().AddMinutes(10);
-            sessions[key] = sessions[key] with { ManagementExpiresAt = expiry };
+            if (expiry > sessions[key].Session.ExpiresAt) expiry = sessions[key].Session.ExpiresAt;
+            var generation = Guid.NewGuid();
+            sessions[key] = sessions[key] with { ManagementEpoch = generation, Management = new(generation, expiry) };
             return expiry;
         }
     }
 
     public bool ManagementUnlocked(Guid id)
     {
-        lock (gate) { Prune(); return sessions.Values.Any(entry => entry.Session.Id == id && entry.ManagementExpiresAt > clock.GetUtcNow()); }
+        return CurrentManagementGrant(id) is not null;
+    }
+
+    public ManagementGrant? CurrentManagementGrant(Guid id)
+    {
+        lock (gate)
+        {
+            Prune();
+            var grant = sessions.Values.FirstOrDefault(entry => entry.Session.Id == id)?.Management;
+            return grant?.ExpiresAt > clock.GetUtcNow() ? grant : null;
+        }
+    }
+
+    public bool ManagementGrantActive(Guid id, Guid generation)
+    {
+        return CurrentManagementGrant(id)?.Generation == generation;
     }
 
     public void LockManagement(Guid id)
@@ -59,7 +89,7 @@ public sealed class ProfileSessionStore(TimeProvider clock, TokenService tokens,
         lock (gate)
         {
             var key = sessions.FirstOrDefault(pair => pair.Value.Session.Id == id).Key;
-            if (key is not null) sessions[key] = sessions[key] with { ManagementExpiresAt = null };
+            if (key is not null) sessions[key] = sessions[key] with { ManagementEpoch = Guid.NewGuid(), Management = null };
         }
     }
 

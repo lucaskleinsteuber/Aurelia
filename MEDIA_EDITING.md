@@ -77,10 +77,12 @@ to remove its exclusion and scan again. Reimport does not recover deleted person
 metadata/history. A series-folder reimport also clears its descendant exclusions.
 
 **Settings → Library → Reset Library…** lets owners select all storage locations
-and administrators select only their grants. Review the preview, confirm, then
-enter the current password of the signed-in server account. Approval is one-use,
-session/action/body-bound, and expires in two minutes. Changed previews must be
-reviewed again. Reset coordinates job cancellation and stream revocation before
+and administrators select only their complete-storage grants. Unlock management
+once with the Server Password, review the preview, then confirm. No second
+password is requested during that ten-minute window. Automatic one-use approval
+is bound to the session, current unlock, action and body, and expires within two
+minutes or at the unlock deadline. Changed previews must be reviewed again.
+Reset coordinates job cancellation and stream revocation before
 transactional catalog deletion. It also removes storage registrations, grants,
 exclusions, and associated jobs, so storage must be explicitly added again.
 

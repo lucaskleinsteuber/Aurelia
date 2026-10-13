@@ -12,6 +12,8 @@ public sealed class ServerUser
 
     public required string PasswordHash { get; set; }
     public string? PinHash { get; set; }
+    public bool PinProtectionEnabled { get; set; } = true;
+    public long ProfileRevision { get; set; }
     public ProfileAccessMode AccessMode { get; set; } = ProfileAccessMode.LegacyLibraries;
     public long AccessRevision { get; set; }
 

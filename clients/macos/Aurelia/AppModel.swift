@@ -28,7 +28,18 @@ final class AppModel: ObservableObject {
   @Published private(set) var profileSelectionError: String?
   @Published private(set) var isSelectingProfile = false
   @Published private(set) var isSwitchingProfile = false
-  @Published private(set) var managementExpiresAt: Date?
+  @Published private(set) var managementExpiresAt: Date? {
+    didSet {
+      if oldValue != managementExpiresAt { invalidateAdministrationWork() }
+    }
+  }
+  @Published private(set) var administrationGeneration = UUID()
+  @Published private(set) var administrationErrorMessage: String?
+  private var administrationCancellations: [UUID: () -> Void] = [:]
+  private var managementAttempt = UUID()
+  private let profileSelectionOverride: Bool?
+  private let managementUnlocker: (@MainActor (StoredServerProfile, String) async throws -> String)?
+  private let managementLocker: (@MainActor (StoredServerProfile) async throws -> Void)?
   private var profileExpiryTask: Task<Void, Never>?
   private var managementExpiryTask: Task<Void, Never>?
   private var profileSelectionGeneration = UUID()
@@ -38,8 +49,9 @@ final class AppModel: ObservableObject {
   }
 
   private var usesProfileSelection: Bool {
+    if let profileSelectionOverride { return profileSelectionOverride }
     #if DEBUG
-      if Self.uiTestMode == "profiles" { return true }
+      if Self.uiTestMode == "profiles" || Self.uiTestMode == "profile-management" { return true }
       if Self.isTestProcess || Self.uiTestMode != nil { return false }
     #endif
     return true
@@ -100,7 +112,7 @@ final class AppModel: ObservableObject {
   private let administrationFetcher:
     (@MainActor (StoredServerProfile) async throws -> AdministrationSnapshot)?
 
-  struct AdministrationSnapshot {
+  struct AdministrationSnapshot: Sendable {
     var libraries: [LibrarySummary] = []
     var sessions: [DeviceSessionSummary] = []
     var scans: [LibraryScanSummary] = []
@@ -115,12 +127,68 @@ final class AppModel: ObservableObject {
   }
 
   private func invalidateLibraryWork() {
+    invalidateAdministrationWork()
     let retired = connectionGeneration
     connectionGeneration = UUID()
     cancelConnectionWork()
     let controller = syncController
     Task { await controller.stop(runID: retired) }
     homeRefresher.invalidate()
+  }
+
+  private func invalidateAdministrationWork() {
+    administrationGeneration = UUID()
+    let cancellations = Array(administrationCancellations.values)
+    administrationCancellations.removeAll()
+    for cancel in cancellations { cancel() }
+  }
+
+  func isCurrentAdministration(_ generation: UUID) -> Bool {
+    administrationGeneration == generation && canManageMedia && !Task.isCancelled
+  }
+
+  func currentAdministration<T: Sendable>(
+    _ operation: @escaping @MainActor () async throws -> T
+  ) async throws -> T {
+    guard canManageMedia else { throw CancellationError() }
+    let run = administrationGeneration
+    let connection = connectionGeneration
+    let id = UUID()
+    let task = Task { try await operation() }
+    administrationCancellations[id] = { task.cancel() }
+    defer { administrationCancellations.removeValue(forKey: id) }
+    do {
+      let result = try await withTaskCancellationHandler {
+        try await task.value
+      } onCancel: {
+        task.cancel()
+      }
+      guard isCurrentAdministration(run), isCurrent(connection) else { throw CancellationError() }
+      return result
+    } catch {
+      guard isCurrentAdministration(run), isCurrent(connection) else { throw CancellationError() }
+      throw error
+    }
+  }
+
+  private func reportAdministrationFailure(_ error: Error) {
+    guard !(error is CancellationError), error as? APIClientError != .supersededSnapshot else {
+      return
+    }
+    if let failure = error as? APIClientError, failure.isManagementLocked {
+      managementExpiresAt = nil
+      clearAdministrationState()
+      administrationErrorMessage = nil
+    } else if error as? APIClientError == .serverIdentityMismatch {
+      errorMessage = error.localizedDescription
+    } else {
+      administrationErrorMessage = error.localizedDescription
+    }
+  }
+
+  func handleAdministrationFailure(_ error: Error, generation: UUID) {
+    guard administrationGeneration == generation, !Task.isCancelled else { return }
+    reportAdministrationFailure(error)
   }
 
   private func currentConnection<T>(_ operation: @MainActor () async throws -> T) async throws -> T
@@ -179,6 +247,10 @@ final class AppModel: ObservableObject {
     serverHost: NativeServerHost = NativeServerHost(),
     initialProfile: StoredServerProfile? = nil,
     syncController: LibrarySyncController = LibrarySyncController(),
+    profileSelectionEnabled: Bool? = nil,
+    initialManagementExpiry: Date? = nil,
+    managementUnlocker: (@MainActor (StoredServerProfile, String) async throws -> String)? = nil,
+    managementLocker: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
     administrationFetcher: (
       @MainActor (StoredServerProfile) async throws -> AdministrationSnapshot
     )? = nil
@@ -186,6 +258,10 @@ final class AppModel: ObservableObject {
     self.store = store ?? Self.defaultStore
     self.serverHost = serverHost
     self.syncController = syncController
+    self.profileSelectionOverride = profileSelectionEnabled
+    self.managementUnlocker = managementUnlocker
+    self.managementLocker = managementLocker
+    self.managementExpiresAt = initialManagementExpiry
     self.administrationFetcher = administrationFetcher
     self.profile = initialProfile
     self.operatingMode = UserDefaults.standard.string(forKey: Self.operatingModeKey)
@@ -210,6 +286,21 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+      if Self.uiTestMode == "profile-management" {
+        operatingMode = .client
+        let device = Self.previewOwnerProfile
+        deviceConnection = device
+        profile = StoredServerProfile(
+          serverId: device.serverId, name: device.name, baseURL: device.baseURL,
+          publicKeyFingerprint: device.publicKeyFingerprint,
+          token: "synthetic-only-management-profile",
+          sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z", user: device.user,
+          locallyManaged: false, viewingSession: true)
+        catalogItems = Self.previewCatalog
+        home = Self.previewHome
+        isStarting = false
+        return
+      }
       if Self.uiTestMode == "profiles" {
         operatingMode = .client
         profile = Self.previewOwnerProfile
@@ -565,32 +656,40 @@ final class AppModel: ObservableObject {
   }
 
   func createStorageLocations(_ locations: [StorageLocationDraft]) async -> Bool {
-    guard let profile else { return false }
+    guard let profile, canManageStorage else { return false }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     isWorking = true
-    errorMessage = nil
+    administrationErrorMessage = nil
     defer { isWorking = false }
     do {
       let client = APIClient(profile: profile)
-      var created: [LibrarySummary] = []
-      for location in locations {
-        let library = try await client.createLibrary(
-          name: location.resolvedName,
-          path: location.path,
-          kind: location.kind,
-          requireImportPreview: true)
-        created.append(library)
+      let (registered, first) = try await currentAdministration { [self] in
+        var created: [LibrarySummary] = []
+        for location in locations {
+          guard isCurrentAdministration(administration) else { throw CancellationError() }
+          let library = try await client.createLibrary(
+            name: location.resolvedName,
+            path: location.path,
+            kind: location.kind,
+            requireImportPreview: true)
+          created.append(library)
+        }
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await (client.libraries(), created.first)
       }
-      let registered = try await client.libraries()
-      guard isCurrent(generation) else { return false }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
       libraries = registered
-      importPreviewLibrary = created.first
+      importPreviewLibrary = first
       return true
     } catch {
-      guard isCurrent(generation) else { return false }
-      errorMessage = error.localizedDescription
-      if let registered = try? await APIClient(profile: profile).libraries() {
-        guard isCurrent(generation) else { return false }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+      reportAdministrationFailure(error)
+      guard isCurrentAdministration(administration) else { return false }
+      if let registered = try? await currentAdministration({
+        try await APIClient(profile: profile).libraries()
+      }) {
+        guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
         libraries = registered
       }
       return false
@@ -604,10 +703,8 @@ final class AppModel: ObservableObject {
     guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
     do {
-      let snapshot: AdministrationSnapshot
-      if let administrationFetcher {
-        snapshot = try await administrationFetcher(profile)
-      } else {
+      let snapshot = try await currentAdministration { [self] in
+        if let administrationFetcher { return try await administrationFetcher(profile) }
         let client = APIClient(profile: profile)
         async let loadedLibraries = client.libraries()
         async let loadedSessions = client.sessions()
@@ -618,7 +715,7 @@ final class AppModel: ObservableObject {
         for library in freshLibraries {
           history.append(contentsOf: try await client.libraryScans(id: library.id))
         }
-        snapshot = try await AdministrationSnapshot(
+        return try await AdministrationSnapshot(
           libraries: freshLibraries, sessions: freshSessions, scans: freshScans, history: history,
           discoveries: loadDiscoveries(client: client, libraries: freshLibraries),
           reviews: loadImportReviews(client: client, libraries: freshLibraries),
@@ -633,41 +730,50 @@ final class AppModel: ObservableObject {
       libraryDiscoveries = snapshot.discoveries
       libraryImportReviews = snapshot.reviews
       metadataProvider = snapshot.metadataProvider
+      administrationErrorMessage = nil
       startScanPolling()
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
   }
 
   func addStorageLocations(
     _ locations: [StorageLocationDraft],
     combineExisting: Bool = false
   ) async -> Bool {
-    guard let profile else { return false }
+    guard let profile, canManageStorage else { return false }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     isWorking = true
-    errorMessage = nil
+    administrationErrorMessage = nil
     defer { isWorking = false }
     do {
       let client = APIClient(profile: profile)
-      var created: [LibrarySummary] = []
-      for location in locations {
-        let library = try await client.createLibrary(
-          name: location.resolvedName,
-          path: location.path,
-          kind: location.kind,
-          combineExisting: combineExisting,
-          requireImportPreview: true)
-        created.append(library)
+      let (registered, first) = try await currentAdministration { [self] in
+        var created: [LibrarySummary] = []
+        for location in locations {
+          guard isCurrentAdministration(administration) else { throw CancellationError() }
+          let library = try await client.createLibrary(
+            name: location.resolvedName,
+            path: location.path,
+            kind: location.kind,
+            combineExisting: combineExisting,
+            requireImportPreview: true)
+          created.append(library)
+        }
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await (client.libraries(), created.first)
       }
-      let registered = try await client.libraries()
-      guard isCurrent(generation) else { return false }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
       libraries = registered
-      importPreviewLibrary = created.first
+      importPreviewLibrary = first
       return true
     } catch {
-      guard isCurrent(generation) else { return false }
-      errorMessage = error.localizedDescription
-      if let registered = try? await APIClient(profile: profile).libraries() {
-        guard isCurrent(generation) else { return false }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
+      reportAdministrationFailure(error)
+      guard isCurrentAdministration(administration) else { return false }
+      if let registered = try? await currentAdministration({
+        try await APIClient(profile: profile).libraries()
+      }) {
+        guard isCurrent(generation), isCurrentAdministration(administration) else { return false }
         libraries = registered
       }
       return false
@@ -675,9 +781,12 @@ final class AppModel: ObservableObject {
   }
 
   func didConfirmImport(scan: LibraryScanSummary) async {
+    guard canManageStorage else { return }
+    let administration = administrationGeneration
     activeScans = Self.uniqueScans(activeScans + [scan])
     startScanPolling()
     await reloadAdministration()
+    guard isCurrentAdministration(administration) else { return }
     if !libraries.contains(where: { $0.importPreviewRequired == true }) {
       needsInitialLibrarySetup = false
     }
@@ -686,28 +795,38 @@ final class AppModel: ObservableObject {
   func classifyDiscovery(_ discovery: LibraryDiscoverySummary, as decision: ClassificationDecision)
     async
   {
-    guard let profile else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      let scan = try await APIClient(profile: profile).updateClassification(
-        libraryId: discovery.libraryId,
-        discoveryId: discovery.id,
-        decision: decision)
-      guard isCurrent(generation) else { return }
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).updateClassification(
+          libraryId: discovery.libraryId,
+          discoveryId: discovery.id,
+          decision: decision)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       activeScans.append(scan)
       libraryDiscoveries.removeAll { $0.id == discovery.id }
       startScanPolling()
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
   }
 
   func reviewIgnoredDiscovery(_ discovery: LibraryDiscoverySummary) async {
-    guard let profile else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      let scan = try await APIClient(profile: profile).resetClassification(
-        libraryId: discovery.libraryId,
-        discoveryId: discovery.id)
-      guard isCurrent(generation) else { return }
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).resetClassification(
+          libraryId: discovery.libraryId,
+          discoveryId: discovery.id)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       activeScans.append(scan)
       if let index = libraryDiscoveries.firstIndex(where: { $0.id == discovery.id }) {
         libraryDiscoveries[index] = LibraryDiscoverySummary(
@@ -720,17 +839,25 @@ final class AppModel: ObservableObject {
           decision: nil)
       }
       startScanPolling()
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
   }
 
   func removeLibrary(id: UUID) async {
-    guard let profile else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
       let client = APIClient(profile: profile)
-      let preview = try await client.previewReset(libraries: [id])
-      let result = try await client.resetLibrary(preview: preview)
-      guard isCurrent(generation) else { return }
+      let result = try await currentAdministration { [self] in
+        let preview = try await client.previewReset(libraries: [id])
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await client.resetLibrary(preview: preview)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       guard result.state == "completed" else {
         throw APIClientError.serverRejected(
           code: "cleanup_pending",
@@ -738,112 +865,156 @@ final class AppModel: ObservableObject {
       }
       libraries.removeAll { $0.id == id }
       try await refresh()
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
   }
 
   func scanLibrary(id: UUID) async {
-    guard let profile else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      let scan = try await APIClient(profile: profile).startLibraryScan(id: id)
-      guard isCurrent(generation) else { return }
+      let scan = try await currentAdministration {
+        try await APIClient(profile: profile).startLibraryScan(id: id)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       activeScans.append(scan)
       startScanPolling()
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
   }
 
   func setMonitoring(libraryID: UUID, enabled: Bool) async {
-    guard let profile else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      let updated = try await APIClient(profile: profile).updateLibraryMonitoring(
-        id: libraryID,
-        enabled: enabled)
-      guard isCurrent(generation) else { return }
+      let updated = try await currentAdministration {
+        try await APIClient(profile: profile).updateLibraryMonitoring(
+          id: libraryID, enabled: enabled)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       if let index = libraries.firstIndex(where: { $0.id == libraryID }) {
         libraries[index] = updated
       }
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
   }
 
   func cancelScan(id: UUID) async {
-    guard let profile else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      try await APIClient(profile: profile).cancelScan(id: id)
-      if let latest = try? await APIClient(profile: profile).scan(id: id) {
-        guard isCurrent(generation) else { return }
-        if [.queued, .running, .waitingForStorage].contains(latest.state) {
-          activeScans = activeScans.map { $0.id == id ? latest : $0 }
-        } else {
-          activeScans.removeAll { $0.id == id }
-          recentScans = Self.uniqueScans([latest] + recentScans)
-        }
-        scanStatusUnavailable.remove(id)
+      let latest = try await currentAdministration { [self] in
+        let client = APIClient(profile: profile)
+        try await client.cancelScan(id: id)
+        guard isCurrentAdministration(administration) else { throw CancellationError() }
+        return try await client.scan(id: id)
       }
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+      if [.queued, .running, .waitingForStorage].contains(latest.state) {
+        activeScans = activeScans.map { $0.id == id ? latest : $0 }
+      } else {
+        activeScans.removeAll { $0.id == id }
+        recentScans = Self.uniqueScans([latest] + recentScans)
+      }
+      scanStatusUnavailable.remove(id)
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
   }
 
   func generatePairingCode() async {
-    guard let profile else { return }
+    guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      let code = try await APIClient(profile: profile).createPairingCode()
-      guard isCurrent(generation) else { return }
+      let code = try await currentAdministration {
+        try await APIClient(profile: profile).createPairingCode()
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       pairingCode = code
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
     }
   }
 
   func revokeSession(id: UUID) async {
-    guard let profile else { return }
+    guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
-      try await APIClient(profile: profile).revokeSession(id: id)
-      guard isCurrent(generation) else { return }
+      try await currentAdministration {
+        try await APIClient(profile: profile).revokeSession(id: id)
+      }
+      guard isCurrent(generation), isCurrentAdministration(administration) else { return }
       sessions.removeAll { $0.id == id }
       await reloadDevices()
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch {
+      if isCurrent(generation), isCurrentAdministration(administration) {
+        reportAdministrationFailure(error)
+      }
+    }
   }
 
   func configureMetadata(token: String) async {
-    guard let profile else { return }
+    guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
     do {
-      let provider = try await APIClient(profile: profile).configureMetadata(
-        token: token, enabled: true)
+      let provider = try await currentAdministration {
+        try await APIClient(profile: profile).configureMetadata(token: token, enabled: true)
+      }
       guard isCurrent(generation) else { return }
       metadataProvider = provider
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
   }
 
   func disableMetadata() async {
-    guard let profile else { return }
+    guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
     do {
-      let provider = try await APIClient(profile: profile).removeMetadataToken()
+      let provider = try await currentAdministration {
+        try await APIClient(profile: profile).removeMetadataToken()
+      }
       guard isCurrent(generation) else { return }
       metadataProvider = provider
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation) { reportAdministrationFailure(error) }
     }
   }
 
   func enrichLibrary() async {
-    guard let profile else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
+    let administration = administrationGeneration
     do {
       let client = APIClient(profile: profile)
       if profile.user?.role == .owner {
-        let job = try await client.startMetadataJob()
+        let job = try await currentAdministration { try await client.startMetadataJob() }
         guard isCurrent(generation) else { return }
         metadataJob = job
       } else {
         // Administrators can request only explicitly shared libraries, never a
         // server-wide metadata refresh or a change to provider credentials.
         for library in libraries {
-          let job = try await client.startMetadataJob(libraryId: library.id)
+          guard isCurrentAdministration(administration) else { return }
+          let job = try await currentAdministration {
+            try await client.startMetadataJob(libraryId: library.id)
+          }
           guard isCurrent(generation) else { return }
           metadataJob = job
         }
@@ -851,28 +1022,33 @@ final class AppModel: ObservableObject {
       guard let jobID = metadataJob?.id else { return }
       while metadataJob?.state == .queued || metadataJob?.state == .running {
         try await Task.sleep(for: .seconds(1))
-        guard isCurrent(generation) else { return }
-        let job = try await APIClient(profile: profile).metadataJob(id: jobID)
+        guard isCurrent(generation), isCurrentAdministration(administration) else { return }
+        let job = try await currentAdministration {
+          try await APIClient(profile: profile).metadataJob(id: jobID)
+        }
         guard isCurrent(generation) else { return }
         metadataJob = job
       }
       if profile.user?.role == .owner {
-        let provider = try await client.metadataProviderStatus()
+        guard isCurrentAdministration(administration) else { return }
+        let provider = try await currentAdministration { try await client.metadataProviderStatus() }
         guard isCurrent(generation) else { return }
         metadataProvider = provider
       }
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
   }
 
   func pruneArtwork() async {
-    guard let profile else { return }
+    guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
     do {
-      try await APIClient(profile: profile).pruneArtwork()
-      let provider = try await APIClient(profile: profile).metadataProviderStatus()
+      let provider = try await currentAdministration {
+        try await APIClient(profile: profile).pruneArtwork()
+        return try await APIClient(profile: profile).metadataProviderStatus()
+      }
       guard isCurrent(generation) else { return }
       metadataProvider = provider
-    } catch { if isCurrent(generation) { errorMessage = error.localizedDescription } }
+    } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
   }
 
   func shutdown() async {
@@ -1049,10 +1225,13 @@ final class AppModel: ObservableObject {
     }
     guard isCurrent(generation)
     else { return }
-    if profile.user == nil {
+    if profile.user == nil || profile.isViewingSession {
       let user = try await client.currentUser()
       guard isCurrent(generation)
       else { return }
+      guard profile.user == nil || user.id == profile.user?.id else {
+        throw APIClientError.invalidResponse
+      }
       let updated = StoredServerProfile(
         serverId: profile.serverId,
         name: info.name,
@@ -1062,8 +1241,8 @@ final class AppModel: ObservableObject {
         sessionId: profile.sessionId,
         expiresAt: profile.expiresAt,
         user: user,
-        locallyManaged: profile.locallyManaged)
-      try store.save(updated)
+        locallyManaged: profile.locallyManaged, viewingSession: profile.viewingSession)
+      if !updated.isViewingSession { try store.save(updated) }
       self.profile = updated
     }
     async let loadedMovies = client.movies()
@@ -1236,11 +1415,13 @@ final class AppModel: ObservableObject {
     guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
     do {
-      let updated = try await APIClient(profile: profile).sessions()
+      let updated = try await currentAdministration {
+        try await APIClient(profile: profile).sessions()
+      }
       guard isCurrent(generation) else { return }
       sessions = updated
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation) { reportAdministrationFailure(error) }
     }
   }
 
@@ -1486,7 +1667,7 @@ final class AppModel: ObservableObject {
           "Update Aurelia Server to 1.5.0 or later to use viewing profiles. Your device connection has been retained."
       )
     }
-    guard response.formatVersion == 1 else { throw APIClientError.invalidResponse }
+    try ProfilePickerProtocol.validate(formatVersion: response.formatVersion)
     guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
     watchingProfiles = response.profiles
     managementSetupRequired = response.managementSetupRequired
@@ -1521,12 +1702,13 @@ final class AppModel: ObservableObject {
 
   func selectWatchingProfile(_ choice: WatchingProfile, pin: String) async -> Bool {
     guard let device = deviceConnection ?? profile, !device.isViewingSession,
-      ProfilePIN.isValid(pin), !isSelectingProfile
+      !choice.needsPinSetup, !choice.pinProtectionEnabled || ProfilePIN.isValid(pin),
+      !isSelectingProfile
     else { return false }
     let expected = profileSelectionGeneration
     #if DEBUG
       if Self.uiTestMode == "profiles" {
-        guard pin == "1234" else {
+        guard !choice.pinProtectionEnabled || pin == "1234" else {
           profileSelectionError = "The PIN is incorrect."
           return false
         }
@@ -1534,7 +1716,9 @@ final class AppModel: ObservableObject {
         let response = ProfileSessionResponse(
           user: UserSummary(
             id: choice.id, username: choice.name, role: choice.role,
-            createdAt: "2026-01-01T00:00:00Z"), sessionId: UUID(), token: "synthetic-only-profile",
+            createdAt: "2026-01-01T00:00:00Z", pinProtectionEnabled: choice.pinProtectionEnabled,
+            needsPinSetup: choice.needsPinSetup), sessionId: UUID(),
+          token: "synthetic-only-profile",
           expiresAt: "2099-01-01T00:00:00Z")
         profile = viewingProfile(response, device: device)
         profileSelectionError = nil
@@ -1565,7 +1749,9 @@ final class AppModel: ObservableObject {
         await self?.switchWatchingProfile()
       }
       try await refresh(requireCompleteSnapshot: true)
-      guard expected == profileSelectionGeneration, profile == active, !Task.isCancelled else {
+      guard expected == profileSelectionGeneration,
+        ProfilePickerProtocol.isSameSession(profile, as: active), !Task.isCancelled
+      else {
         return false
       }
       startSync()
@@ -1619,9 +1805,23 @@ final class AppModel: ObservableObject {
     guard let profile, profile.isViewingSession, profile.user?.role.canManageLibraries == true
     else { return false }
     let generation = connectionGeneration
+    let attempt = UUID()
+    managementAttempt = attempt
     do {
-      let expiry = try await APIClient(profile: profile).unlockManagement(password: password)
-      guard isCurrent(generation), let date = Self.sessionDate(expiry) else { return false }
+      let expiry: String
+      #if DEBUG
+        if Self.uiTestMode == "profiles" {
+          expiry = Date().addingTimeInterval(600).ISO8601Format()
+        } else if let managementUnlocker {
+          expiry = try await managementUnlocker(profile, password)
+        } else {
+          expiry = try await APIClient(profile: profile).unlockManagement(password: password)
+        }
+      #else
+        expiry = try await APIClient(profile: profile).unlockManagement(password: password)
+      #endif
+      guard isCurrent(generation), managementAttempt == attempt, let date = Self.sessionDate(expiry)
+      else { return false }
       managementExpiresAt = date
       managementExpiryTask?.cancel()
       managementExpiryTask = Task { [weak self] in
@@ -1630,21 +1830,29 @@ final class AppModel: ObservableObject {
         self?.managementExpiresAt = nil
         self?.clearAdministrationState()
       }
-      errorMessage = nil
+      administrationErrorMessage = nil
       await reloadAdministration()
       return true
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation), managementAttempt == attempt { reportAdministrationFailure(error) }
       return false
     }
   }
 
   func lockManagement() async {
+    managementAttempt = UUID()
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
     clearAdministrationState()
     if let profile, profile.isViewingSession {
-      try? await APIClient(profile: profile).lockManagement()
+      if let managementLocker {
+        try? await managementLocker(profile)
+      } else {
+        #if DEBUG
+          if Self.uiTestMode == "profiles" { return }
+        #endif
+        try? await APIClient(profile: profile).lockManagement()
+      }
     }
   }
   func recoverOwnerPIN(password: String, pin: String) async -> Bool {
@@ -1691,6 +1899,8 @@ final class AppModel: ObservableObject {
   }
 
   private func clearAdministrationState() {
+    invalidateAdministrationWork()
+    administrationErrorMessage = nil
     libraries = []
     activeScans = []
     recentScans = []
@@ -1723,6 +1933,9 @@ final class AppModel: ObservableObject {
         WatchingProfile(
           id: UUID(uuidString: "70000000-0000-0000-0000-000000000003")!, name: "Needs PIN",
           role: .user, needsPinSetup: true),
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000004")!, name: "Guest",
+          role: .user, needsPinSetup: false, pinProtectionEnabled: false),
       ]
     }
   #endif
@@ -1986,29 +2199,37 @@ final class AppModel: ObservableObject {
   }
 
   private func startScanPolling() {
-    guard !activeScans.isEmpty else { return }
+    guard canManageStorage, !activeScans.isEmpty else { return }
     scanPollTask?.cancel()
     let run = UUID()
     scanPollingRun = run
     let generation = connectionGeneration
+    let administration = administrationGeneration
     scanPollTask = Task { [weak self] in
       guard let self, let profile = self.profile else { return }
-      while self.isCurrent(generation) && !self.activeScans.isEmpty {
+      while self.isCurrent(generation) && self.isCurrentAdministration(administration)
+        && !self.activeScans.isEmpty
+      {
         do { try await Task.sleep(for: .seconds(1)) } catch { return }
         let polledScans = self.activeScans
         let batch: ScanPollingBatch
         do {
           batch = try await ScanPollingBatch.load(scans: polledScans) {
-            try await APIClient(profile: profile).scan(id: $0)
+            let id = $0
+            return try await self.currentAdministration {
+              try await APIClient(profile: profile).scan(id: id)
+            }
           }
         } catch { return }
-        guard self.isCurrent(generation), self.scanPollingRun == run else { return }
+        guard self.isCurrent(generation), self.isCurrentAdministration(administration),
+          self.scanPollingRun == run
+        else { return }
         let reconciled = batch.reconciled(
           polledIDs: Set(polledScans.map(\.id)), current: self.activeScans)
         self.activeScans = Self.uniqueScans(reconciled.active)
         self.scanStatusUnavailable = reconciled.unavailable
         if let failure = batch.definitiveFailure {
-          self.errorMessage = failure.localizedDescription
+          self.reportAdministrationFailure(failure)
           self.scanPollTask = nil
           return
         }
@@ -2123,7 +2344,9 @@ final class AppModel: ObservableObject {
         PlaybackProgressOutbox.shared.activate(profile: profile)
       }
       if changes.resetRequired || changes.changedAreas.contains(.libraries), canManageStorage {
-        try await refreshLibraryAdministration()
+        // A management refresh is not part of acknowledging a personal catalog
+        // snapshot. Its expiry or failure must not stop profile synchronization.
+        do { try await refreshLibraryAdministration() } catch { reportAdministrationFailure(error) }
         guard isCurrent(generation) else { throw CancellationError() }
       }
     } catch {
@@ -2143,15 +2366,19 @@ final class AppModel: ObservableObject {
   private func refreshLibraryAdministration() async throws {
     guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
-    let client = APIClient(profile: profile)
-    let refreshedLibraries = try await client.libraries()
-    async let discoveries = loadDiscoveries(client: client, libraries: refreshedLibraries)
-    async let reviews = loadImportReviews(client: client, libraries: refreshedLibraries)
-    let snapshot = try await (discoveries, reviews)
+    let result = try await currentAdministration { [self] in
+      let client = APIClient(profile: profile)
+      let refreshedLibraries = try await client.libraries()
+      async let discoveries = loadDiscoveries(client: client, libraries: refreshedLibraries)
+      async let reviews = loadImportReviews(client: client, libraries: refreshedLibraries)
+      let snapshot = try await (discoveries, reviews)
+      return AdministrationSnapshot(
+        libraries: refreshedLibraries, discoveries: snapshot.0, reviews: snapshot.1)
+    }
     guard isCurrent(generation) else { throw CancellationError() }
-    libraries = refreshedLibraries
-    libraryDiscoveries = snapshot.0
-    libraryImportReviews = snapshot.1
+    libraries = result.libraries
+    libraryDiscoveries = result.discoveries
+    libraryImportReviews = result.reviews
   }
 
   private static func uniqueScans(_ scans: [LibraryScanSummary]) -> [LibraryScanSummary] {

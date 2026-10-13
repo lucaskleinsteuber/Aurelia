@@ -2,6 +2,35 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+@MainActor private struct ServerAdministrationScope {
+  let model: AppModel
+  let generation: UUID
+
+  func check() throws {
+    guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+  }
+
+  func request<Value: Sendable>(_ work: @MainActor () async throws -> Value) async throws -> Value {
+    try check()
+    let result = try await work()
+    try check()
+    return result
+  }
+
+  func message(for error: Error) -> String? {
+    guard !(error is CancellationError), model.isCurrentAdministration(generation) else {
+      return nil
+    }
+    if let failure = error as? APIClientError,
+      failure.isManagementLocked || failure == .serverIdentityMismatch
+    {
+      model.handleAdministrationFailure(error, generation: generation)
+      return nil
+    }
+    return error.localizedDescription
+  }
+}
+
 struct ServerNetworkEditor: View {
   @EnvironmentObject private var model: AppModel
   let configuration: ServerConfigurationResponse
@@ -14,6 +43,7 @@ struct ServerNetworkEditor: View {
   @State private var operation: HostOperationStatus?
   @State private var trialProfile: StoredServerProfile?
   @State private var working = false
+  @State private var actionTask: Task<Void, Never>?
   @State private var message: String?
 
   init(
@@ -56,20 +86,33 @@ struct ServerNetworkEditor: View {
             "Trial started. Reconnect and confirm before \(operation.confirmBefore ?? "the 60-second deadline"). Otherwise the previous network settings return automatically."
           )
           .font(.caption).foregroundStyle(.orange)
+          Text(
+            "The trial restarts the server and ends its in-memory sessions. Confirm your Profile PIN and Server Password on the new connection to establish a new management window."
+          )
+          .font(.caption).foregroundStyle(.secondary)
           Button("Verify New Connection & Keep Settings") {
-            perform {
+            perform { scope in
+              var abandonedProfile: APIClient?
+              var adopted = false
+              defer {
+                if !adopted, let abandonedProfile {
+                  Task { try? await abandonedProfile.endProfileSession() }
+                }
+              }
               let trial = APIClient(profile: trialProfile)
-              let info = try await trial.serverInfo()
+              let info = try await scope.request { try await trial.serverInfo() }
               guard info.serverId == trialProfile.serverId else {
-                throw APIClientError.invalidResponse
+                throw APIClientError.serverIdentityMismatch
               }
               guard let originalDevice = model.deviceConnection, let user = model.profile?.user
               else { throw APIClientError.invalidResponse }
               let paired = originalDevice.changingAddress(
                 trialProfile.baseURL, name: trialProfile.name)
+              try scope.check()
               let pin = try AdministrationPasswordPrompt.viewingPIN(name: user.username)
-              let authentication = try await APIClient(profile: paired).unlockProfile(
-                id: user.id, pin: pin)
+              let authentication = try await scope.request {
+                try await APIClient(profile: paired).unlockProfile(id: user.id, pin: pin)
+              }
               guard authentication.user.id == user.id else { throw APIClientError.invalidResponse }
               let fresh = StoredServerProfile(
                 serverId: paired.serverId, name: paired.name, baseURL: paired.baseURL,
@@ -77,11 +120,20 @@ struct ServerNetworkEditor: View {
                 sessionId: authentication.sessionId, expiresAt: authentication.expiresAt,
                 user: authentication.user,
                 locallyManaged: paired.locallyManaged, viewingSession: true)
+              abandonedProfile = APIClient(profile: fresh)
+              try scope.check()
               let password = try AdministrationPasswordPrompt.confirm(serverName: paired.name)
-              let expiry = try await APIClient(profile: fresh).unlockManagement(password: password)
-              try await APIClient(profile: fresh).confirmNetwork(id: operation.id)
+              let expiry = try await scope.request {
+                try await APIClient(profile: fresh).unlockManagement(password: password)
+              }
+              try await scope.request {
+                try await APIClient(profile: fresh).confirmNetwork(id: operation.id)
+              }
+              try scope.check()
+              // Adopting the newly confirmed session intentionally retires the old scope.
               try model.acceptConfirmedNetwork(
                 profile: fresh, device: paired, managementExpiry: expiry)
+              adopted = true
               self.operation = nil
               self.trialProfile = nil
               message = "Network settings confirmed."
@@ -90,15 +142,16 @@ struct ServerNetworkEditor: View {
           }.disabled(working)
         } else {
           Button("Try Network Settings (60-second rollback)") {
-            perform {
+            perform { scope in
               guard let profile = model.profile,
                 var parts = URLComponents(url: profile.baseURL, resolvingAgainstBaseURL: false)
               else { throw APIClientError.invalidResponse }
               draft.allowedNetworks = networks.split(whereSeparator: \.isNewline).map {
                 $0.trimmingCharacters(in: .whitespaces)
               }.filter { !$0.isEmpty }
-              let pending = try await client.trialNetwork(
-                draft, confirmDisconnect: confirmedDisconnect)
+              let pending = try await scope.request {
+                try await client.trialNetwork(draft, confirmDisconnect: confirmedDisconnect)
+              }
               parts.scheme = draft.lanAccessEnabled ? "https" : "http"
               parts.port = draft.lanHttpsPort
               if !draft.lanAccessEnabled {
@@ -128,15 +181,24 @@ struct ServerNetworkEditor: View {
         }
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-    }
+    }.onDisappear { actionTask?.cancel() }
   }
-  private func perform(_ action: @escaping @MainActor () async throws -> Void) {
+  private func perform(
+    _ action: @escaping @MainActor (ServerAdministrationScope) async throws -> Void
+  ) {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
     working = true
-    Task {
-      defer { working = false }
-      do { try await action() } catch is CancellationError {} catch {
-        message = error.localizedDescription
+    actionTask = Task {
+      defer {
+        working = false
+        actionTask = nil
       }
+      do {
+        try await model.currentAdministration {
+          try scope.check()
+          try await action(scope)
+        }
+      } catch { if let failure = scope.message(for: error) { message = failure } }
     }
   }
 }
@@ -150,6 +212,7 @@ struct ServerHostingEditor: View {
   @State private var pending: HostServiceRequest?
   @State private var activeHosting: ServerHostingStatus?
   @State private var working = false
+  @State private var actionTask: Task<Void, Never>?
   @State private var message: String?
   var body: some View {
     GroupBox("Hosting") {
@@ -191,10 +254,10 @@ struct ServerHostingEditor: View {
         }
         HStack {
           Button(model.isLocalHost ? "Apply Hosting Mode" : "Request Hosting Mode") {
-            run {
+            run { scope in
               if !settings.backgroundEnabled { settings.startAtLogin = false }
               if model.isLocalHost {
-                try await model.saveHostingSettings(settings)
+                try await scope.request { try await model.saveHostingSettings(settings) }
                 permission = BackgroundHostingController.permissionState
                 pending = try HostServiceRequest.load()
                 message =
@@ -202,46 +265,60 @@ struct ServerHostingEditor: View {
                   ? "Awaiting permission. The server is still tied to this app."
                   : "Hosting mode applied."
               } else {
-                _ = try await client.authorizeHostingChange(settings)
+                _ = try await scope.request { try await client.authorizeHostingChange(settings) }
                 message =
                   "Request saved. Awaiting approval on the host Mac; the active mode has not changed."
               }
-              activeHosting = try await client.serverHosting()
+              activeHosting = try await scope.request { try await client.serverHosting() }
             }
           }
           Button("Restart Server") {
-            run {
-              _ = try await client.restartServer()
+            run { scope in
+              _ = try await scope.request { try await client.restartServer() }
               message = "Restart requested. Reconnect after the host has restarted."
             }
           }
         }.disabled(working || !available)
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-    }.task {
+    }.task(id: model.administrationGeneration) {
+      let scope = ServerAdministrationScope(
+        model: model, generation: model.administrationGeneration)
+      guard model.managementUnlocked else { return }
       if available {
         do {
-          let active = try await client.serverHosting()
+          let active = try await model.currentAdministration {
+            try await scope.request { try await client.serverHosting() }
+          }
           activeHosting = active
           settings.backgroundEnabled = active.backgroundRequested
           settings.startAtLogin = active.startAtLogin
           settings.preventIdleSleep = active.preventIdleSleep
-        } catch { message = error.localizedDescription }
+        } catch { if let failure = scope.message(for: error) { message = failure } }
       }
+      guard model.isCurrentAdministration(scope.generation) else { return }
       if model.isLocalHost {
         settings = (try? HostServiceSettings.load()) ?? HostServiceSettings()
         pending = try? HostServiceRequest.load()
         permission = BackgroundHostingController.permissionState
       }
-    }
+    }.onDisappear { actionTask?.cancel() }
   }
-  private func run(_ action: @escaping @MainActor () async throws -> Void) {
+  private func run(_ action: @escaping @MainActor (ServerAdministrationScope) async throws -> Void)
+  {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
     working = true
-    Task {
-      defer { working = false }
-      do { try await action() } catch is CancellationError {} catch {
-        message = error.localizedDescription
+    actionTask = Task {
+      defer {
+        working = false
+        actionTask = nil
       }
+      do {
+        try await model.currentAdministration {
+          try scope.check()
+          try await action(scope)
+        }
+      } catch { if let failure = scope.message(for: error) { message = failure } }
     }
   }
 }
@@ -255,6 +332,7 @@ struct ServerLibraryJobsEditor: View {
   @State private var libraries: [LibrarySummary] = []
   @State private var jobs: ServerJobHistory?
   @State private var working = false
+  @State private var actionTask: Task<Void, Never>?
   @State private var message: String?
   init(
     configuration: ServerConfigurationResponse, client: APIClient,
@@ -287,24 +365,30 @@ struct ServerLibraryJobsEditor: View {
           "Maintenance hours use the host's local time. Manual scans remain available. Media is read directly; Aurelia does not transcode or copy videos."
         ).font(.caption).foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
-        Button("Save Job Settings") { run { saved(try await client.saveServerSettings(settings)) } }
-          .disabled(working || settings == configuration.stored)
+        Button("Save Job Settings") {
+          run { scope in
+            saved(try await scope.request { try await client.saveServerSettings(settings) })
+          }
+        }
+        .disabled(working || settings == configuration.stored)
         Divider()
         ForEach(libraries) { library in
           HStack {
             Text(library.name)
             Spacer()
             Button(library.monitoringEnabled == true ? "Disable Monitoring" : "Enable Monitoring") {
-              run {
-                _ = try await client.updateLibraryMonitoring(
-                  id: library.id, enabled: library.monitoringEnabled != true)
-                try await refresh()
+              run { scope in
+                _ = try await scope.request {
+                  try await client.updateLibraryMonitoring(
+                    id: library.id, enabled: library.monitoringEnabled != true)
+                }
+                try await refresh(scope)
               }
             }
             Button("Scan") {
-              run {
-                _ = try await client.startLibraryScan(id: library.id)
-                try await refresh()
+              run { scope in
+                _ = try await scope.request { try await client.startLibraryScan(id: library.id) }
+                try await refresh(scope)
               }
             }
           }
@@ -317,16 +401,18 @@ struct ServerLibraryJobsEditor: View {
               Spacer()
               if [.queued, .running, .waitingForStorage].contains(scan.state) {
                 Button("Cancel") {
-                  run {
-                    try await client.cancelScan(id: scan.id)
-                    try await refresh()
+                  run { scope in
+                    try await scope.request { try await client.cancelScan(id: scan.id) }
+                    try await refresh(scope)
                   }
                 }
               } else if [.failed, .interrupted, .cancelled].contains(scan.state) {
                 Button("Retry") {
-                  run {
-                    _ = try await client.startLibraryScan(id: scan.libraryId)
-                    try await refresh()
+                  run { scope in
+                    _ = try await scope.request {
+                      try await client.startLibraryScan(id: scan.libraryId)
+                    }
+                    try await refresh(scope)
                   }
                 }
               }
@@ -339,45 +425,64 @@ struct ServerLibraryJobsEditor: View {
               Spacer()
               if [.queued, .running].contains(job.state) {
                 Button("Cancel") {
-                  run {
-                    try await client.cancelMetadataJob(id: job.id)
-                    try await refresh()
+                  run { scope in
+                    try await scope.request { try await client.cancelMetadataJob(id: job.id) }
+                    try await refresh(scope)
                   }
                 }
               } else if [.failed, .interrupted, .cancelled].contains(job.state) {
                 Button("Retry") {
-                  run {
-                    try await client.retryMetadataJob(id: job.id)
-                    try await refresh()
+                  run { scope in
+                    try await scope.request { try await client.retryMetadataJob(id: job.id) }
+                    try await refresh(scope)
                   }
                 }
               }
             }
           }
         }
-        Button("Refresh Queue") { run { try await refresh() } }.disabled(working)
+        Button("Refresh Queue") { run { scope in try await refresh(scope) } }.disabled(working)
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10).disabled(working)
-    }.task { do { try await refresh() } catch { message = error.localizedDescription } }
+    }.task(id: model.administrationGeneration) {
+      let scope = ServerAdministrationScope(
+        model: model, generation: model.administrationGeneration)
+      guard model.managementUnlocked else { return }
+      do { try await model.currentAdministration { try await refresh(scope) } } catch {
+        if let failure = scope.message(for: error) { message = failure }
+      }
+    }.onDisappear { actionTask?.cancel() }
   }
-  private func refresh() async throws {
+  private func refresh(_ scope: ServerAdministrationScope) async throws {
+    try scope.check()
     async let roots = client.libraries()
     async let history = client.serverJobs()
-    (libraries, jobs) = try await (roots, history)
+    let loaded = try await (roots, history)
+    try scope.check()
+    (libraries, jobs) = loaded
   }
-  private func run(_ action: @escaping @MainActor () async throws -> Void) {
+  private func run(_ action: @escaping @MainActor (ServerAdministrationScope) async throws -> Void)
+  {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
     working = true
-    Task {
-      defer { working = false }
+    actionTask = Task {
+      defer {
+        working = false
+        actionTask = nil
+      }
       do {
-        try await action()
+        try await model.currentAdministration {
+          try scope.check()
+          try await action(scope)
+        }
         message = nil
-      } catch is CancellationError {} catch { message = error.localizedDescription }
+      } catch { if let failure = scope.message(for: error) { message = failure } }
     }
   }
 }
 
 struct ServerBackupsEditor: View {
+  @EnvironmentObject private var model: AppModel
   let configuration: ServerConfigurationResponse
   let client: APIClient
   let nativeHostAvailable: Bool
@@ -390,6 +495,7 @@ struct ServerBackupsEditor: View {
   @State private var restoreConfirmed = false
   @State private var acceptDifferentIdentity = false
   @State private var working = false
+  @State private var actionTask: Task<Void, Never>?
   @State private var message: String?
   init(
     configuration: ServerConfigurationResponse, client: APIClient, nativeHostAvailable: Bool,
@@ -415,17 +521,21 @@ struct ServerBackupsEditor: View {
           "Keep \(settings.weeklyBackupsRetained) weekly backups",
           value: $settings.weeklyBackupsRetained, in: 1...12)
         Button("Save Backup Settings") {
-          run { saved(try await client.saveServerSettings(settings)) }
+          run { scope in
+            saved(try await scope.request { try await client.saveServerSettings(settings) })
+          }
         }.disabled(settings == configuration.stored)
         HStack {
           Button("Backup Now") {
-            run {
-              try await client.createDatabaseBackup()
-              backups = try await client.serverBackups()
+            run { scope in
+              try await scope.request { try await client.createDatabaseBackup() }
+              backups = try await scope.request { try await client.serverBackups() }
               message = "Database backup created and verified."
             }
           }
-          Button("Refresh Backups") { run { backups = try await client.serverBackups() } }
+          Button("Refresh Backups") {
+            run { scope in backups = try await scope.request { try await client.serverBackups() } }
+          }
         }
         if let latest = backups.first {
           Text("Last verified backup: \(latest.createdAt)").font(.caption).foregroundStyle(
@@ -438,8 +548,8 @@ struct ServerBackupsEditor: View {
             ).font(.caption)
             Spacer()
             Button("Verify") {
-              run {
-                try await client.verifyDatabaseBackup(name: backup.name)
+              run { scope in
+                try await scope.request { try await client.verifyDatabaseBackup(name: backup.name) }
                 message = "Backup integrity and schema verified."
               }
             }
@@ -455,12 +565,14 @@ struct ServerBackupsEditor: View {
         SecureField("Backup passphrase (at least 12 characters)", text: $passphrase)
         SecureField("Repeat passphrase for export", text: $confirmation)
         Button("Export Encrypted Backup…") {
-          run {
+          run { scope in
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "Aurelia-Server.aureliabackup"
             panel.canCreateDirectories = true
             guard panel.runModal() == .OK, let file = panel.url else { return }
-            try await client.exportEncryptedServerBackup(passphrase: passphrase, to: file)
+            try await scope.request {
+              try await client.exportEncryptedServerBackup(passphrase: passphrase, to: file)
+            }
             passphrase = ""
             confirmation = ""
             message = "Encrypted backup saved. No media files were copied."
@@ -473,13 +585,16 @@ struct ServerBackupsEditor: View {
           "Allow a backup from another server (changes server identity and trust)",
           isOn: $acceptDifferentIdentity)
         Button("Choose Backup & Verify Restore…") {
-          run {
+          run { scope in
             let panel = NSOpenPanel()
             panel.canChooseDirectories = false
             panel.allowsMultipleSelection = false
             guard panel.runModal() == .OK, let file = panel.url else { return }
-            prepared = try await client.prepareServerRestore(
-              from: file, passphrase: passphrase, acceptDifferentIdentity: acceptDifferentIdentity)
+            prepared = try await scope.request {
+              try await client.prepareServerRestore(
+                from: file, passphrase: passphrase, acceptDifferentIdentity: acceptDifferentIdentity
+              )
+            }
             passphrase = ""
             confirmation = ""
             message = "Backup verified in a private staging area. Active data has not changed."
@@ -487,8 +602,8 @@ struct ServerBackupsEditor: View {
         }.disabled(passphrase.count < 12 || !restoreConfirmed || !nativeHostAvailable)
         if let prepared {
           Button("Restore Verified Backup & Restart", role: .destructive) {
-            run {
-              try await client.applyServerRestore(id: prepared.id)
+            run { scope in
+              try await scope.request { try await client.applyServerRestore(id: prepared.id) }
               self.prepared = nil
               message = "Restore requested. Reconnect and sign in again after the host restarts."
             }
@@ -497,30 +612,56 @@ struct ServerBackupsEditor: View {
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10).disabled(working)
       if working { ProgressView("Working on the server…") }
-    }.task {
-      do { backups = try await client.serverBackups() } catch {
-        message = error.localizedDescription
+    }.task(id: model.administrationGeneration) {
+      let scope = ServerAdministrationScope(
+        model: model, generation: model.administrationGeneration)
+      guard model.managementUnlocked else { return }
+      do {
+        backups = try await model.currentAdministration {
+          try await scope.request { try await client.serverBackups() }
+        }
+      } catch { if let failure = scope.message(for: error) { message = failure } }
+    }.onChange(of: model.administrationGeneration) { _, _ in clearSecrets() }
+      .onDisappear {
+        actionTask?.cancel()
+        clearSecrets()
       }
+  }
+  private func run(_ action: @escaping @MainActor (ServerAdministrationScope) async throws -> Void)
+  {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    working = true
+    actionTask = Task {
+      defer {
+        working = false
+        actionTask = nil
+      }
+      do {
+        try await model.currentAdministration {
+          try scope.check()
+          try await action(scope)
+        }
+      } catch { if let failure = scope.message(for: error) { message = failure } }
     }
   }
-  private func run(_ action: @escaping @MainActor () async throws -> Void) {
-    working = true
-    Task {
-      defer { working = false }
-      do { try await action() } catch is CancellationError {} catch {
-        message = error.localizedDescription
-      }
-    }
+  private func clearSecrets() {
+    passphrase = ""
+    confirmation = ""
+    prepared = nil
+    restoreConfirmed = false
+    acceptDifferentIdentity = false
   }
 }
 
 struct ServerDiagnosticsEditor: View {
+  @EnvironmentObject private var model: AppModel
   let configuration: ServerConfigurationResponse
   let client: APIClient
   let saved: (ServerConfigurationResponse) -> Void
   @State private var settings: ServerPolicySettings
   @State private var events: [ServerDiagnosticEvent] = []
   @State private var working = false
+  @State private var actionTask: Task<Void, Never>?
   @State private var message: String?
   init(
     configuration: ServerConfigurationResponse, client: APIClient,
@@ -541,16 +682,22 @@ struct ServerDiagnosticsEditor: View {
           "Maximum events: \(settings.maximumEvents)", value: $settings.maximumEvents,
           in: 100...10000, step: 100)
         Button("Save Diagnostic Settings") {
-          run { saved(try await client.saveServerSettings(settings)) }
+          run { scope in
+            saved(try await scope.request { try await client.saveServerSettings(settings) })
+          }
         }.disabled(settings == configuration.stored)
         HStack {
-          Button("Refresh Events") { run { events = try await client.serverDiagnostics() } }
+          Button("Refresh Events") {
+            run { scope in events = try await scope.request { try await client.serverDiagnostics() }
+            }
+          }
           Button("Export Sanitized Diagnostics…") {
-            run {
-              let data = try await client.serverDiagnosticsExport()
+            run { scope in
+              let data = try await scope.request { try await client.serverDiagnosticsExport() }
               let panel = NSSavePanel()
               panel.nameFieldStringValue = "Aurelia-Diagnostics.json"
               guard panel.runModal() == .OK, let file = panel.url else { return }
+              try scope.check()
               let access = file.startAccessingSecurityScopedResource()
               defer { if access { file.stopAccessingSecurityScopedResource() } }
               try data.write(to: file, options: .atomic)
@@ -568,19 +715,32 @@ struct ServerDiagnosticsEditor: View {
         }
         if let message { Text(message).font(.caption).textSelection(.enabled) }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10).disabled(working)
-    }.task {
-      do { events = try await client.serverDiagnostics() } catch {
-        message = error.localizedDescription
-      }
-    }
+    }.task(id: model.administrationGeneration) {
+      let scope = ServerAdministrationScope(
+        model: model, generation: model.administrationGeneration)
+      guard model.managementUnlocked else { return }
+      do {
+        events = try await model.currentAdministration {
+          try await scope.request { try await client.serverDiagnostics() }
+        }
+      } catch { if let failure = scope.message(for: error) { message = failure } }
+    }.onDisappear { actionTask?.cancel() }
   }
-  private func run(_ action: @escaping @MainActor () async throws -> Void) {
+  private func run(_ action: @escaping @MainActor (ServerAdministrationScope) async throws -> Void)
+  {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
     working = true
-    Task {
-      defer { working = false }
-      do { try await action() } catch is CancellationError {} catch {
-        message = error.localizedDescription
+    actionTask = Task {
+      defer {
+        working = false
+        actionTask = nil
       }
+      do {
+        try await model.currentAdministration {
+          try scope.check()
+          try await action(scope)
+        }
+      } catch { if let failure = scope.message(for: error) { message = failure } }
     }
   }
 }

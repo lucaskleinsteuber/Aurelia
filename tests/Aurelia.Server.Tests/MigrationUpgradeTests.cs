@@ -14,6 +14,44 @@ namespace Aurelia.Server.Tests;
 public sealed class MigrationUpgradeTests
 {
     [Fact]
+    public async Task OptionalPinMigrationPreservesProtectedAndPendingProfilesWithoutChangingCredentials()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.GetService<IMigrator>().MigrateAsync("20261013052618_ProfilesAndSceneNotes");
+            var protectedId = Guid.NewGuid();
+            var pendingId = Guid.NewGuid();
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Users (Id, Username, NormalizedUsername, PasswordHash, Role, CreatedAt, IsEnabled, AccessMode, AccessRevision, PinHash)
+                VALUES ({protectedId}, 'Protected', 'PROTECTED', 'unchanged-password-hash', 'User', 1, 1, 'LegacyLibraries', 7, 'unchanged-pin-hash');
+                """);
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Users (Id, Username, NormalizedUsername, PasswordHash, Role, CreatedAt, IsEnabled, AccessMode, AccessRevision, PinHash)
+                VALUES ({pendingId}, 'Pending', 'PENDING', 'pending-password-hash', 'User', 1, 1, 'SelectedTitles', 9, NULL);
+                """);
+            await database.Database.MigrateAsync();
+            var users = await database.Users.AsNoTracking().ToDictionaryAsync(user => user.Id);
+            Assert.True(users[protectedId].PinProtectionEnabled);
+            Assert.Equal("unchanged-pin-hash", users[protectedId].PinHash);
+            Assert.Equal("unchanged-password-hash", users[protectedId].PasswordHash);
+            Assert.Equal(7, users[protectedId].AccessRevision);
+            Assert.Equal(ProfileAccessMode.LegacyLibraries, users[protectedId].AccessMode);
+            Assert.True(users[pendingId].PinProtectionEnabled);
+            Assert.Null(users[pendingId].PinHash);
+            Assert.True(ProfileService.ToSummary(users[pendingId]).NeedsPinSetup);
+            Assert.Equal("pending-password-hash", users[pendingId].PasswordHash);
+            Assert.Equal(9, users[pendingId].AccessRevision);
+            Assert.Equal(0, users[pendingId].ProfileRevision);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task ProgressProtocolUpgradePreservesExistingPositionsAndInstallsRevision()
     {
         var root = TestPaths.CreateDataDirectory();
@@ -200,7 +238,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(14L, await command.ExecuteScalarAsync());
+            Assert.Equal(15L, await command.ExecuteScalarAsync());
             command.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsLock';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
@@ -253,7 +291,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(14L, await command.ExecuteScalarAsync());
+            Assert.Equal(15L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='SyncChanges';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaSearchIndex';";
@@ -298,7 +336,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(14L, await command.ExecuteScalarAsync());
+            Assert.Equal(15L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaMetadata';";
@@ -354,7 +392,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(14L, await command.ExecuteScalarAsync());
+            Assert.Equal(15L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaItems';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MetadataJobs';";

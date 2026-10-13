@@ -1263,6 +1263,13 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("PinProtectionEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ProfileRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(16)

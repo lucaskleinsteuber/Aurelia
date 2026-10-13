@@ -43,13 +43,20 @@ public sealed record UserSummary(
     string Username,
     UserRole Role,
     DateTimeOffset CreatedAt,
-    ProfileAccessMode AccessMode = ProfileAccessMode.LegacyLibraries);
+    ProfileAccessMode AccessMode = ProfileAccessMode.LegacyLibraries,
+    bool PinProtectionEnabled = true,
+    bool NeedsPinSetup = false,
+    long ProfileRevision = 0);
 
 public sealed record CreateUserRequest(
     string Username,
-    string Password,
+    string? Password,
     UserRole Role,
-    string? Pin = null);
+    string? Pin = null,
+    bool? PinProtectionEnabled = null,
+    ProfileAccessMode? AccessMode = null,
+    IReadOnlyList<Guid>? TitleIds = null,
+    bool IsEnabled = true);
 
 public sealed record ChangeUserRoleRequest(UserRole Role);
 

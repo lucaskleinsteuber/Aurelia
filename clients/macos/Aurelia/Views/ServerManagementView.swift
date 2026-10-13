@@ -14,130 +14,189 @@ struct ServerManagementView: View {
   private var client: APIClient? { model.profile.map(APIClient.init(profile:)) }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 20) {
-      if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-      if loading { ProgressView("Loading server settings…") }
-      if let status {
-        GroupBox("Overview") {
-          VStack(alignment: .leading, spacing: 10) {
-            LabeledContent("State", value: status.state.capitalized)
-            LabeledContent("Version", value: status.version)
-            LabeledContent(
-              "Uptime",
-              value: Duration.seconds(status.uptimeSeconds).formatted(
-                .time(pattern: .hourMinuteSecond)))
-            LabeledContent("Active stream requests", value: "\(status.activeStreams)")
-            LabeledContent(
-              "Database",
-              value: ByteCountFormatter.string(
-                fromByteCount: status.databaseBytes, countStyle: .file))
-            LabeledContent("Libraries", value: "\(status.libraries)")
-            LabeledContent("Accounts", value: "\(status.users)")
-            if let bytes = status.freeDiskBytes {
-              LabeledContent(
-                "Available storage",
-                value: ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
-              if bytes < 1024 * 1024 * 1024 {
-                Label(
-                  "Low disk space. Backups and library updates may fail.",
-                  systemImage: "exclamationmark.triangle"
-                ).foregroundStyle(.orange)
-              }
+    Group {
+      if model.managementUnlocked {
+        VStack(alignment: .leading, spacing: 20) {
+          ManagementStatusView()
+          if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+          if loading { ProgressView("Loading server settings…") }
+          if let status {
+            GroupBox("Overview") {
+              VStack(alignment: .leading, spacing: 10) {
+                LabeledContent("State", value: status.state.capitalized)
+                LabeledContent("Version", value: status.version)
+                LabeledContent(
+                  "Uptime",
+                  value: Duration.seconds(status.uptimeSeconds).formatted(
+                    .time(pattern: .hourMinuteSecond)))
+                LabeledContent("Active stream requests", value: "\(status.activeStreams)")
+                LabeledContent(
+                  "Database",
+                  value: ByteCountFormatter.string(
+                    fromByteCount: status.databaseBytes, countStyle: .file))
+                LabeledContent("Libraries", value: "\(status.libraries)")
+                LabeledContent("Profiles", value: "\(status.users)")
+                if let bytes = status.freeDiskBytes {
+                  LabeledContent(
+                    "Available storage",
+                    value: ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
+                  if bytes < 1024 * 1024 * 1024 {
+                    Label(
+                      "Low disk space. Backups and library updates may fail.",
+                      systemImage: "exclamationmark.triangle"
+                    ).foregroundStyle(.orange)
+                  }
+                }
+                if let expires = status.certificateExpiresAt {
+                  LabeledContent("TLS certificate expires", value: expires)
+                }
+                LabeledContent(
+                  "Host addresses", value: status.networkAddresses.joined(separator: ", "))
+              }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
             }
-            if let expires = status.certificateExpiresAt {
-              LabeledContent("TLS certificate expires", value: expires)
-            }
-            LabeledContent("Host addresses", value: status.networkAddresses.joined(separator: ", "))
-          }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-        }
-      }
-      if let configuration, let client {
-        ServerNetworkEditor(
-          configuration: configuration, client: client,
-          nativeHostAvailable: capabilities?.nativeHostOperations == true
-        ) { Task { await reload() } }
-        .id("network-\(configuration.stored.revision)")
-        ServerHostingEditor(client: client, available: capabilities?.nativeHostOperations == true)
-        ServerSecurityEditor(configuration: configuration, client: client) { configuration in
-          self.configuration = configuration
-        }.id(configuration.stored.revision)
-      }
-      GroupBox("Users & Access") {
-        VStack(alignment: .leading, spacing: 12) {
-          ForEach(users) { access in
-            HStack {
-              VStack(alignment: .leading, spacing: 4) {
-                Text(access.user.username).font(.headline)
-                Text(
-                  "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled") · PIN protected"
-                )
-                .font(.caption).foregroundStyle(.secondary)
-              }
-              Spacer()
-              Button("Manage…") { editingUser = access }
-            }
-            Divider()
           }
-          Button("Create Profile…") { creatingUser = true }
-          Text(
-            "Choose the entire library or individual films and series for each profile. New profiles start without title access. Owners always have full access."
-          )
-          .font(.caption).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-      }
-      if let configuration, let client {
-        ServerLibraryJobsEditor(configuration: configuration, client: client) {
-          self.configuration = $0
+          if let configuration, let client {
+            ServerNetworkEditor(
+              configuration: configuration, client: client,
+              nativeHostAvailable: capabilities?.nativeHostOperations == true
+            ) { Task { await reload() } }
+            .id("network-\(configuration.stored.revision)")
+            ServerHostingEditor(
+              client: client, available: capabilities?.nativeHostOperations == true)
+            ServerSecurityEditor(configuration: configuration, client: client) { configuration in
+              self.configuration = configuration
+            }.id(configuration.stored.revision)
+          }
+          GroupBox("Users & Access") {
+            VStack(alignment: .leading, spacing: 12) {
+              ForEach(users) { access in
+                HStack(spacing: 12) {
+                  Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 34)).symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+                  VStack(alignment: .leading, spacing: 4) {
+                    Text(access.user.username).font(.headline)
+                    Text(
+                      "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled")"
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                      Label(
+                        pinStatus(access.user),
+                        systemImage: access.user.pinProtectionEnabled
+                          ? "lock" : "person.crop.circle")
+                      Text(contentStatus(access.user))
+                    }.font(.caption).foregroundStyle(.secondary)
+                  }
+                  Spacer()
+                  Button("Edit Profile…") { editingUser = access }
+                    .accessibilityIdentifier("edit-profile-\(access.id.uuidString)")
+                }.padding(.vertical, 5)
+                Divider()
+              }
+              Button("Create Profile…") { creatingUser = true }
+                .accessibilityIdentifier("create-profile")
+              Text(
+                "Choose the entire library or individual films and series for each profile. New profiles start without title access. Owners always have full access."
+              )
+              .font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+          }
+          if let configuration, let client {
+            ServerLibraryJobsEditor(configuration: configuration, client: client) {
+              self.configuration = $0
+            }
+            .id("jobs-\(configuration.stored.revision)")
+            ServerBackupsEditor(
+              configuration: configuration, client: client,
+              nativeHostAvailable: capabilities?.nativeHostOperations == true
+            ) { self.configuration = $0 }
+            .id("backups-\(configuration.stored.revision)")
+            ServerDiagnosticsEditor(configuration: configuration, client: client) {
+              self.configuration = $0
+            }
+            .id("diagnostics-\(configuration.stored.revision)")
+          }
+          Button("Refresh Server Status") { Task { await reload() } }.disabled(loading)
         }
-        .id("jobs-\(configuration.stored.revision)")
-        ServerBackupsEditor(
-          configuration: configuration, client: client,
-          nativeHostAvailable: capabilities?.nativeHostOperations == true
-        ) { self.configuration = $0 }
-        .id("backups-\(configuration.stored.revision)")
-        ServerDiagnosticsEditor(configuration: configuration, client: client) {
-          self.configuration = $0
-        }
-        .id("diagnostics-\(configuration.stored.revision)")
+      } else {
+        ManagementUnlockView()
       }
-      Button("Refresh Server Status") { Task { await reload() } }.disabled(loading)
     }
-    .task { await reload() }
+    .task(id: model.administrationGeneration) {
+      if model.managementUnlocked { await reload() }
+    }
+    .onChange(of: model.administrationGeneration) { _, _ in error = nil }
+    .onChange(of: model.profile?.sessionId) { _, _ in
+      configuration = nil
+      status = nil
+      users = []
+      capabilities = nil
+      editingUser = nil
+      creatingUser = false
+      error = nil
+    }
     .sheet(item: $editingUser) { access in
       if let client {
-        ServerUserEditor(access: access, libraries: model.libraries, client: client) {
+        ServerProfileEditor(existing: access, client: client) {
           Task { await reload() }
         }
       }
     }
     .sheet(isPresented: $creatingUser) {
-      if let client { ServerUserCreator(client: client) { Task { await reload() } } }
+      if let client { ServerProfileEditor(client: client) { Task { await reload() } } }
     }
   }
 
+  private func pinStatus(_ user: UserSummary) -> String {
+    if user.needsPinSetup { return "PIN setup required" }
+    return user.pinProtectionEnabled ? "PIN protected" : "No PIN"
+  }
+
+  private func contentStatus(_ user: UserSummary) -> String {
+    if user.role == .owner || user.accessMode == .entireLibrary { return "Entire Library" }
+    return user.accessMode == .selectedTitles ? "Selected Titles" : "Existing Storage Grants"
+  }
+
   @MainActor private func reload() async {
-    guard let client else { return }
+    guard let client, model.managementUnlocked else { return }
+    let generation = model.administrationGeneration
     loading = true
     defer { loading = false }
     do {
-      async let config = client.serverSettings()
-      async let overview = client.serverStatus()
-      async let accounts = client.serverUsers()
-      async let abilities = client.serverCapabilities()
-      (configuration, status, users, capabilities) = try await (
-        config, overview, accounts, abilities
-      )
+      let loaded = try await model.currentAdministration {
+        guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+        async let config = client.serverSettings()
+        async let overview = client.serverStatus()
+        async let accounts = client.serverUsers()
+        async let abilities = client.serverCapabilities()
+        return try await (config, overview, accounts, abilities)
+      }
+      guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+      (configuration, status, users, capabilities) = loaded
       error = nil
-    } catch { self.error = error.localizedDescription }
+    } catch is CancellationError {
+    } catch {
+      guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+      if let failure = error as? APIClientError,
+        failure.isManagementLocked || failure == .serverIdentityMismatch
+      {
+        model.handleAdministrationFailure(error, generation: generation)
+        return
+      }
+      self.error = error.localizedDescription
+    }
   }
 }
 
 private struct ServerSecurityEditor: View {
+  @EnvironmentObject private var model: AppModel
   let configuration: ServerConfigurationResponse
   let client: APIClient
   let saved: (ServerConfigurationResponse) -> Void
   @State private var settings: ServerPolicySettings
   @State private var saving = false
+  @State private var saveTask: Task<Void, Never>?
   @State private var error: String?
 
   init(
@@ -168,232 +227,34 @@ private struct ServerSecurityEditor: View {
         .font(.caption).foregroundStyle(.secondary)
         if let error { Text(error).foregroundStyle(.red) }
         Button(saving ? "Saving…" : "Save Security Settings") {
+          let generation = model.administrationGeneration
           saving = true
-          Task {
-            defer { saving = false }
+          saveTask = Task {
+            defer {
+              saving = false
+              saveTask = nil
+            }
             do {
-              saved(try await client.saveServerSettings(settings))
+              let updated = try await model.currentAdministration {
+                guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+                return try await client.saveServerSettings(settings)
+              }
+              saved(updated)
               error = nil
-            } catch is CancellationError {} catch { self.error = error.localizedDescription }
+            } catch is CancellationError {
+            } catch {
+              guard model.isCurrentAdministration(generation) else { return }
+              if let failure = error as? APIClientError,
+                failure.isManagementLocked || failure == .serverIdentityMismatch
+              {
+                model.handleAdministrationFailure(error, generation: generation)
+                return
+              }
+              self.error = error.localizedDescription
+            }
           }
         }.disabled(saving || settings == configuration.stored)
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-    }
-  }
-}
-
-private struct ServerUserCreator: View {
-  let client: APIClient
-  let completed: () -> Void
-  @Environment(\.dismiss) private var dismiss
-  @State private var username = ""
-  @State private var password = ""
-  @State private var role: UserRole = .user
-  @State private var saving = false
-  @State private var error: String?
-  var body: some View {
-    Form {
-      Text("Create Profile").font(.title2.bold())
-      TextField("Username", text: $username)
-      SecureField("Viewing PIN (4–8 digits)", text: $password)
-      Picker("Role", selection: $role) {
-        Text("User").tag(UserRole.user)
-        Text("Administrator").tag(UserRole.admin)
-        Text("Owner").tag(UserRole.owner)
-      }
-      Text(
-        "Profiles start without title access. An owner has full access. Viewing PINs never unlock server management."
-      ).font(.caption).foregroundStyle(.secondary)
-      if let error { Text(error).foregroundStyle(.red) }
-      HStack {
-        Button("Cancel") { dismiss() }
-        Spacer()
-        Button("Create Profile") {
-          saving = true
-          Task {
-            defer { saving = false }
-            do {
-              try await client.createUser(username: username, pin: password, role: role)
-              password = ""
-              completed()
-              dismiss()
-            } catch is CancellationError {} catch { self.error = error.localizedDescription }
-          }
-        }.disabled(saving || username.count < 3 || !ProfilePIN.isValid(password))
-      }
-    }.padding(24).frame(width: 500)
-  }
-}
-
-private struct ServerUserEditor: View {
-  @EnvironmentObject private var model: AppModel
-  let access: UserAccessSummary
-  let libraries: [LibrarySummary]
-  let client: APIClient
-  let completed: () -> Void
-  @Environment(\.dismiss) private var dismiss
-  @State private var enabled: Bool
-  @State private var role: UserRole
-  @State private var selected: Set<UUID>
-  @State private var titleAccess: ProfileTitleAccess?
-  @State private var accessMode: ProfileAccessMode = .legacyLibraries
-  @State private var selectedTitles: Set<UUID> = []
-  @State private var titleQuery = ""
-  @State private var sessions: [DeviceSessionSummary] = []
-  @State private var password = ""
-  @State private var working = false
-  @State private var error: String?
-
-  init(
-    access: UserAccessSummary, libraries: [LibrarySummary], client: APIClient,
-    completed: @escaping () -> Void
-  ) {
-    self.access = access
-    self.libraries = libraries
-    self.client = client
-    self.completed = completed
-    _enabled = State(initialValue: access.isEnabled)
-    _role = State(initialValue: access.user.role)
-    _selected = State(initialValue: Set(access.libraryIds))
-  }
-  var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 16) {
-        Text(access.user.username).font(.title2.bold())
-        Toggle("Account enabled", isOn: $enabled)
-        Picker("Role", selection: $role) {
-          Text("User").tag(UserRole.user)
-          Text("Administrator").tag(UserRole.admin)
-          Text("Owner").tag(UserRole.owner)
-        }
-        Text("Content Access").font(.headline)
-        if titleAccess != nil {
-          Picker("Access", selection: $accessMode) {
-            if titleAccess?.mode == .legacyLibraries {
-              Text("Existing Storage Grants").tag(ProfileAccessMode.legacyLibraries)
-            }
-            Text("Entire Library").tag(ProfileAccessMode.entireLibrary)
-            Text("Selected Titles").tag(ProfileAccessMode.selectedTitles)
-          }.disabled(role == .owner)
-          if accessMode == .legacyLibraries {
-            Text(
-              "Your existing storage grants stay unchanged unless you explicitly choose a new access mode."
-            )
-            .font(.caption).foregroundStyle(.secondary)
-          } else if accessMode == .selectedTitles {
-            TextField("Filter films and series", text: $titleQuery).textFieldStyle(.roundedBorder)
-            ForEach(
-              model.catalogItems.filter { item in
-                (item.kind == .movie || item.kind == .series)
-                  && (titleQuery.isEmpty || item.title.localizedCaseInsensitiveContains(titleQuery))
-              }
-            ) { item in
-              Toggle(
-                item.title,
-                isOn: Binding(
-                  get: { selectedTitles.contains(item.id) },
-                  set: { enabled in
-                    if enabled {
-                      selectedTitles.insert(item.id)
-                    } else {
-                      selectedTitles.remove(item.id)
-                    }
-                  }))
-            }
-            Text(
-              "A series grant includes all present and future seasons, episodes, extras and trailers."
-            )
-            .font(.caption).foregroundStyle(.secondary)
-          }
-        } else {
-          ProgressView("Loading content access…")
-        }
-        Text(
-          "Removing a grant or disabling the account stops affected streams. The final active owner is protected."
-        )
-        .font(.caption).foregroundStyle(.secondary)
-        Button("Save Access") {
-          run {
-            if enabled != access.isEnabled {
-              try await client.setProfileEnabled(id: access.id, enabled: enabled)
-            }
-            if accessMode != .legacyLibraries, let current = titleAccess {
-              titleAccess = try await client.setTitleAccess(
-                user: access.id,
-                access: ProfileTitleAccess(
-                  mode: role == .owner ? .entireLibrary : accessMode,
-                  titleIds: Array(selectedTitles).sorted { $0.uuidString < $1.uuidString },
-                  revision: current.revision))
-            }
-            if role != access.user.role {
-              try await client.changeUserRole(id: access.id, role: role)
-            }
-            completed()
-            dismiss()
-          }
-        }.disabled(working || titleAccess == nil)
-        Divider()
-        Text("Devices").font(.headline)
-        ForEach(sessions.filter(\.isActive)) { session in
-          HStack {
-            VStack(alignment: .leading) {
-              Text(session.deviceName)
-              Text("Last used: \(session.lastSeenAt)").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if session.revokedAt != nil {
-              Text("Revoked").foregroundStyle(.secondary)
-            } else {
-              Button("Revoke") {
-                run {
-                  try await client.revokeManagedSession(id: session.id)
-                  sessions = try await client.userSessions(access.id)
-                }
-              }
-            }
-          }
-        }
-        Button("Revoke All Sessions", role: .destructive) {
-          run {
-            try await client.revokeUserSessions(id: access.id)
-            sessions = try await client.userSessions(access.id)
-          }
-        }.disabled(working)
-        SecureField("New viewing PIN (4–8 digits)", text: $password)
-        Button("Reset PIN & Lock Profile") {
-          run {
-            try await client.resetProfilePIN(id: access.id, pin: password)
-            password = ""
-            sessions = try await client.userSessions(access.id)
-          }
-        }.disabled(working || !ProfilePIN.isValid(password))
-        if let error { Text(error).foregroundStyle(.red) }
-        Button("Done") { dismiss() }
-      }.padding(24)
-    }.frame(width: 580, height: 600)
-      .task {
-        do {
-          let current = try await client.titleAccess(user: access.id)
-          titleAccess = current
-          accessMode = access.user.role == .owner ? .entireLibrary : current.mode
-          selectedTitles = Set(current.titleIds)
-        } catch { self.error = error.localizedDescription }
-        while !Task.isCancelled {
-          do { sessions = try await client.userSessions(access.id) } catch {
-            self.error = error.localizedDescription
-          }
-          do { try await Task.sleep(for: .seconds(5)) } catch { break }
-        }
-      }
-  }
-  private func run(_ action: @escaping @MainActor () async throws -> Void) {
-    working = true
-    Task {
-      defer { working = false }
-      do {
-        try await action()
-        error = nil
-      } catch is CancellationError {} catch { self.error = error.localizedDescription }
-    }
+    }.onDisappear { saveTask?.cancel() }
   }
 }

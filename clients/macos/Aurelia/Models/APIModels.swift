@@ -49,16 +49,41 @@ struct UserSummary: Codable, Equatable, Sendable {
   let role: UserRole
   let createdAt: String
   let accessMode: ProfileAccessMode?
+  let pinProtectionEnabled: Bool
+  let needsPinSetup: Bool
+  let profileRevision: Int64
 
   init(
     id: UUID, username: String, role: UserRole, createdAt: String,
-    accessMode: ProfileAccessMode? = nil
+    accessMode: ProfileAccessMode? = nil, pinProtectionEnabled: Bool = true,
+    needsPinSetup: Bool = false, profileRevision: Int64 = 0
   ) {
     self.id = id
     self.username = username
     self.role = role
     self.createdAt = createdAt
     self.accessMode = accessMode
+    self.pinProtectionEnabled = pinProtectionEnabled
+    self.needsPinSetup = needsPinSetup
+    self.profileRevision = profileRevision
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, username, role, createdAt, accessMode, pinProtectionEnabled, needsPinSetup,
+      profileRevision
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decode(UUID.self, forKey: .id)
+    username = try values.decode(String.self, forKey: .username)
+    role = try values.decode(UserRole.self, forKey: .role)
+    createdAt = try values.decode(String.self, forKey: .createdAt)
+    accessMode = try values.decodeIfPresent(ProfileAccessMode.self, forKey: .accessMode)
+    pinProtectionEnabled =
+      try values.decodeIfPresent(Bool.self, forKey: .pinProtectionEnabled) ?? true
+    needsPinSetup = try values.decodeIfPresent(Bool.self, forKey: .needsPinSetup) ?? false
+    profileRevision = try values.decodeIfPresent(Int64.self, forKey: .profileRevision) ?? 0
   }
 }
 

@@ -75,13 +75,12 @@ struct AppSettingsView: View {
 
       settingsPage {
         if let profile = model.profile {
-          if profile.user?.role.canManageLibraries == true, !model.managementUnlocked {
-            ManagementUnlockView()
-          } else if profile.user?.role == .owner {
+          if profile.user?.role == .owner {
             ServerManagementView()
-          }
-          if model.managementUnlocked, profile.isViewingSession {
-            Button("Lock Server Management") { Task { await model.lockManagement() } }
+          } else if profile.user?.role.canManageLibraries == true, !model.managementUnlocked {
+            ManagementUnlockView()
+          } else if model.managementUnlocked, profile.isViewingSession {
+            ManagementStatusView()
           }
           advanced(profile)
         } else {
@@ -164,6 +163,13 @@ struct AppSettingsView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
         content()
+        if selectedPage != .playback, model.managementUnlocked,
+          let error = model.administrationErrorMessage
+        {
+          Text(error)
+            .foregroundStyle(.orange)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
         if let error = model.errorMessage {
           Text(error)
             .foregroundStyle(.orange)

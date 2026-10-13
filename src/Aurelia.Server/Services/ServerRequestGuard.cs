@@ -83,13 +83,19 @@ public sealed class ServerRequestGuard
                     && !path.EndsWith("/favorite", StringComparison.Ordinal) && !path.Contains("/notes", StringComparison.Ordinal))));
     }
 
+    public static string ApprovalAction(HttpRequest request)
+    {
+        var target = request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpRequestFeature>()?.RawTarget;
+        return request.Method + " " + (string.IsNullOrEmpty(target) ? request.Path.Value + request.QueryString.Value : target);
+    }
+
     public static void RequireManagement(HttpContext context, ProfileSessionStore sessions)
     {
         if (!IsManagementRequest(context.Request)) return;
         if (!context.User.IsInRole(UserRole.Owner.ToString()) && !context.User.IsInRole(UserRole.Admin.ToString()))
             throw new AccountException("administration_required", "This profile cannot manage the server.", 403);
         if (!sessions.ManagementUnlocked(context.User.RequireProfileSessionId()))
-            throw new AccountException("management_locked", "Unlock server management with the server password. Access lasts ten minutes.", 403);
+            throw new AccountException("management_locked", "Unlock server management with the Server Password. Access lasts ten minutes.", 403);
         var path = (context.Request.Path.Value ?? "").ToLowerInvariant();
         if (!context.User.IsInRole(UserRole.Owner.ToString()) && context.User.FindFirst("aurelia_access_mode")?.Value == nameof(ProfileAccessMode.SelectedTitles)
             && (path.StartsWith("/api/v1/libraries", StringComparison.Ordinal) || path.StartsWith("/api/v1/scans", StringComparison.Ordinal)
@@ -101,8 +107,7 @@ public sealed class ServerRequestGuard
     {
         var database = context.RequestServices.GetRequiredService<AureliaDbContext>();
         var required = RequiresApproval(context.Request);
-        // Keep self-service sign-out compatible, but do not let the legacy device route
-        // bypass owner reauthentication when revoking another account's device.
+        // Legacy device routes must obey the same exact-action policy as current routes.
         if (!required && HttpMethods.IsDelete(context.Request.Method)
             && context.Request.Path.StartsWithSegments("/api/v1/auth/sessions", StringComparison.OrdinalIgnoreCase, out var remaining)
             && Guid.TryParse(remaining.Value?.Trim('/'), out var targetId)
@@ -129,18 +134,20 @@ public sealed class ServerRequestGuard
         }
         context.Request.Body.Position = 0;
         if (!approvals.Consume(context.Request.Headers["X-Aurelia-Approval"].ToString(), context.User.RequireProfileSessionId(),
-                context.Request.Method + " " + context.Request.Path.Value, AdministrationApprovalStore.Hash(payload.ToArray())))
-            throw new AccountException("approval_required", "Confirm your password for this exact change. Approvals expire after two minutes and can be used once.", 403);
+                ApprovalAction(context.Request), AdministrationApprovalStore.Hash(payload.ToArray()), out var managementGeneration))
+            throw new AccountException("approval_required", "Authorize this exact change using the active management unlock. Approvals expire after two minutes and can be used once.", 403);
         var sessionId = context.User.RequireSessionId();
-        var now = DateTimeOffset.UtcNow;
+        var now = context.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
         if (!await database.DeviceSessions.AnyAsync(session => session.Id == sessionId && session.RevokedAt == null
                 && session.ExpiresAt > now && session.User.IsEnabled, context.RequestAborted))
-            throw new AccountException("owner_session_revoked", "The owner session is no longer authorized.", 403);
+            throw new AccountException("device_session_revoked", "The paired device is no longer authorized.", 403);
         var actorId = context.User.RequireUserId();
         if (!context.RequestServices.GetRequiredService<ProfileSessionStore>().IsActive(context.User.RequireProfileSessionId(), sessionId, actorId)
             || !await database.Users.AnyAsync(user => user.Id == actorId && user.IsEnabled
                 && (user.Role == UserRole.Owner || (reset || removal) && user.Role == UserRole.Admin), context.RequestAborted))
             throw new AccountException("profile_session_revoked", "The viewing profile is no longer authorized for this action.", 403);
+        if (!context.RequestServices.GetRequiredService<ProfileSessionStore>().ManagementGrantActive(context.User.RequireProfileSessionId(), managementGeneration))
+            throw new AccountException("management_locked", "Unlock server management with the Server Password. Access lasts ten minutes.", 403);
         context.Items["Aurelia.AdministrationApproved"] = true;
     }
 }

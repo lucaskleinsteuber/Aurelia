@@ -254,7 +254,7 @@ app.Use(async (context, next) =>
         return;
     }
     await next(context);
-    if (context.Response.StatusCode >= 400)
+    if (context.Response.StatusCode >= 400 && context.Items["Aurelia.FailureRecorded"] is not true)
     {
         var status = context.Response.StatusCode;
         var code = status switch { 401 => "authentication_rejected", 403 => "access_rejected", 429 => "request_rate_limited", >= 500 => "request_failed", _ => "request_rejected" };
@@ -287,7 +287,12 @@ app.Use(async (context, next) =>
     }
     catch (AccountException exception) when (!context.Response.HasStarted)
     {
-        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(exception.Code, "warning", context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
+        // Expected proof handshakes and a closed administrative window are state
+        // transitions, not authentication attacks. Record the precise code once.
+        var severity = exception.Code is "approval_required" or "management_locked" or "management_unlock_superseded"
+            ? "information" : exception.StatusCode >= 500 ? "error" : "warning";
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(exception.Code, severity, context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
+        context.Items["Aurelia.FailureRecorded"] = true;
         context.Response.StatusCode = exception.StatusCode;
         if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = "60";
         await context.Response.WriteAsJsonAsync(new ApiProblem(exception.Code, exception.Message));
@@ -295,13 +300,18 @@ app.Use(async (context, next) =>
     catch (InvalidDataException) when (!context.Response.HasStarted)
     {
         context.Response.StatusCode = 400;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("invalid_server_data", "warning",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, 400);
+        context.Items["Aurelia.FailureRecorded"] = true;
         await context.Response.WriteAsJsonAsync(new ApiProblem("invalid_server_data", "The operation data could not be validated. Active server data was not replaced."));
     }
     catch (IOException) when (!context.Response.HasStarted && (context.Request.Path.StartsWithSegments("/api/v1/server")
         || context.Request.Path.StartsWithSegments("/api/v1/media") || context.Request.Path.StartsWithSegments("/api/v1/libraries")))
     {
         context.Response.StatusCode = 507;
-        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("server_storage_operation_failed", "error");
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("server_storage_operation_failed", "error",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, 507);
+        context.Items["Aurelia.FailureRecorded"] = true;
         await context.Response.WriteAsJsonAsync(new ApiProblem("server_storage_unavailable", "The storage operation failed. Check available disk space and permissions."));
     }
 });
