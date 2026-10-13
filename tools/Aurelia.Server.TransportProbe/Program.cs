@@ -86,7 +86,7 @@ try
             using var redeem = await SendAsync(secureTwo, HttpMethod.Post, "/api/v1/auth/pair", null,
                 new RedeemPairingCodeRequest(code, "Synthetic paired device"), HttpStatusCode.OK, lifetime.Token);
             var paired = redeem.Deserialize<AuthenticationResponse>(json)!;
-            using var removed = await SendAsync(secureTwo, HttpMethod.Delete, $"/api/v1/auth/sessions/{paired.SessionId}", paired.Token, null, HttpStatusCode.NoContent, lifetime.Token);
+            using var removed = await SendAsync(secureTwo, HttpMethod.Delete, "/api/v1/device", paired.Token, null, HttpStatusCode.NoContent, lifetime.Token);
             using var rejected = await SendAsync(secureTwo, HttpMethod.Get, "/api/v1/auth/me", paired.Token, null, HttpStatusCode.Unauthorized, lifetime.Token);
             metrics.Check("pairing_and_self_revocation");
         }
@@ -109,6 +109,9 @@ try
         await AbortStreamAsync(secureTwo, first.Token, source.StreamPath, lifetime.Token);
         await host.StopAsync();
         await host.StartAsync(lifetime.Token);
+        using var expiredProfile = await SendAsync(secureTwo, HttpMethod.Get, "/api/v1/auth/me", first.Token, null, HttpStatusCode.Unauthorized, lifetime.Token);
+        first = await LoginAsync(secureOne, "probe-first");
+        second = await LoginAsync(secureTwo, "probe-second");
         using var resumed = await SendAsync(secureTwo, HttpMethod.Get, "/api/v1/auth/me", first.Token, null, HttpStatusCode.OK, lifetime.Token);
         if (await ServerIdAsync(secureTwo) != initialId) throw new InvalidDataException("Synthetic server identity changed on restart.");
         using (var replay = await SendAsync(secureTwo, HttpMethod.Put, $"/api/v1/media/{seed.FirstMovie}/progress", first.Token,
@@ -243,6 +246,13 @@ async Task<JsonDocument> SendAsync(HttpClient client, HttpMethod method, string 
 {
     using var request = NewRequest(client, method, path, token);
     if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body, json), System.Text.Encoding.UTF8, "application/json");
+    if (method == HttpMethod.Post && path == "/api/v1/auth/pairings")
+    {
+        var payload = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellation);
+        using var approval = await SendAsync(client, HttpMethod.Post, "/api/v1/management/approval", token,
+            new AdministrationApprovalRequest(method.Method + " " + path, AdministrationApprovalStore.Hash(payload), ProbeSeed.Password), HttpStatusCode.OK, cancellation);
+        request.Headers.Add("X-Aurelia-Approval", approval.Deserialize<AdministrationApprovalResponse>(json)!.Token);
+    }
     var watch = Stopwatch.StartNew();
     using var response = await client.SendAsync(request, cancellation);
     metrics.Response(response.StatusCode, watch.Elapsed.TotalMilliseconds, response.Version);
@@ -262,8 +272,19 @@ static HttpRequestMessage NewRequest(HttpClient client, HttpMethod method, strin
 async Task<AuthenticationResponse> LoginAsync(HttpClient client, string username)
 {
     using var response = await SendAsync(client, HttpMethod.Post, "/api/v1/auth/login", null,
-        new LoginRequest(username, ProbeSeed.Password, "Synthetic transport client"), HttpStatusCode.OK, lifetime.Token);
-    return response.Deserialize<AuthenticationResponse>(json)!;
+        new LoginRequest("probe-owner", ProbeSeed.Password, "Synthetic transport client"), HttpStatusCode.OK, lifetime.Token);
+    var device = response.Deserialize<AuthenticationResponse>(json)!;
+    using var picker = await SendAsync(client, HttpMethod.Get, "/api/v1/profiles", device.Token, null, HttpStatusCode.OK, lifetime.Token);
+    var selected = picker.Deserialize<ProfilePickerResponse>(json)!.Profiles.Single(profile => profile.Name == username);
+    using var unlock = await SendAsync(client, HttpMethod.Post, $"/api/v1/profiles/{selected.Id}/unlock", device.Token,
+        new UnlockProfileRequest("5682"), HttpStatusCode.OK, lifetime.Token);
+    var session = unlock.Deserialize<ProfileSessionResponse>(json)!;
+    if (session.User.Role == UserRole.Owner)
+    {
+        using var management = await SendAsync(client, HttpMethod.Post, "/api/v1/management/unlock", session.Token,
+            new UnlockManagementRequest(ProbeSeed.Password), HttpStatusCode.OK, lifetime.Token);
+    }
+    return new(session.User, device.SessionId, session.Token, session.ExpiresAt);
 }
 
 async Task RejectWrongPinAsync()
@@ -433,9 +454,11 @@ static async Task<ProbeSeed> SeedAsync(string root)
     {
         var user = new ServerUser { Id = Guid.NewGuid(), Username = name, NormalizedUsername = name.ToUpperInvariant(), PasswordHash = "", Role = name == "probe-owner" ? UserRole.Owner : UserRole.User, CreatedAt = now };
         user.PasswordHash = new PasswordHasher<ServerUser>().HashPassword(user, ProbeSeed.Password);
+        user.PinHash = new PasswordHasher<ServerUser>().HashPassword(user, "5682");
         return user;
     }).ToArray();
     database.Users.AddRange(users);
+    database.AdministrationCredentials.Add(new ServerAdministrationCredential { PasswordHash = users.Single(user => user.Role == UserRole.Owner).PasswordHash });
     var movies = new List<Guid>();
     for (var index = 0; index < 2; index++)
     {

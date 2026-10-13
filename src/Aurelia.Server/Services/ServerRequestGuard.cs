@@ -55,12 +55,46 @@ public sealed class ServerRequestGuard
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/server/backups/transfers/", StringComparison.Ordinal)) return false;
         if (path.Contains("/exclusions/", StringComparison.Ordinal)) return false;
         if (path == "/api/v1/libraries/reset") return true;
+        if (path == "/api/v1/auth/pairings") return true;
+        if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/auth/sessions/", StringComparison.Ordinal)) return true;
+        if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/media/", StringComparison.Ordinal)
+            && path.Split('/').Length == 5) return true;
         return path == "/api/v1/server/settings" || path.StartsWith("/api/v1/server/operations", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/server/backups", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/server/sessions", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/users", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/metadata/provider", StringComparison.Ordinal)
             || (path.StartsWith("/api/v1/libraries", StringComparison.Ordinal) && (HttpMethods.IsDelete(request.Method) || path == "/api/v1/libraries"));
+    }
+
+    public static bool IsManagementRequest(HttpRequest request)
+    {
+        var path = (request.Path.Value ?? "").TrimEnd('/').ToLowerInvariant();
+        if (path == "/api/v1/server/info" || path == "/api/v1/management/unlock" || path == "/api/v1/management/lock") return false;
+        return path.StartsWith("/api/v1/server/", StringComparison.Ordinal) || path.StartsWith("/api/v1/users", StringComparison.Ordinal)
+            || path.StartsWith("/api/v1/libraries", StringComparison.Ordinal) || path.StartsWith("/api/v1/scans", StringComparison.Ordinal)
+            || path.StartsWith("/api/v1/library-operations", StringComparison.Ordinal) || path.StartsWith("/api/v1/metadata", StringComparison.Ordinal)
+            || path.StartsWith("/api/v1/management/", StringComparison.Ordinal) || path.StartsWith("/api/v1/auth/sessions", StringComparison.Ordinal)
+            || path == "/api/v1/auth/pairings" || path == "/api/v1/catalog/search/rebuild"
+            || path.StartsWith("/api/v1/collections", StringComparison.Ordinal)
+            || (path.StartsWith("/api/v1/media/", StringComparison.Ordinal) && (path.Contains("/editor", StringComparison.Ordinal)
+                || path.Contains("/metadata/search", StringComparison.Ordinal) || (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)
+                    && !path.EndsWith("/playback", StringComparison.Ordinal) && !path.EndsWith("/progress", StringComparison.Ordinal)
+                    && !path.EndsWith("/favorite", StringComparison.Ordinal) && !path.Contains("/notes", StringComparison.Ordinal))));
+    }
+
+    public static void RequireManagement(HttpContext context, ProfileSessionStore sessions)
+    {
+        if (!IsManagementRequest(context.Request)) return;
+        if (!context.User.IsInRole(UserRole.Owner.ToString()) && !context.User.IsInRole(UserRole.Admin.ToString()))
+            throw new AccountException("administration_required", "This profile cannot manage the server.", 403);
+        if (!sessions.ManagementUnlocked(context.User.RequireProfileSessionId()))
+            throw new AccountException("management_locked", "Unlock server management with the server password. Access lasts ten minutes.", 403);
+        var path = (context.Request.Path.Value ?? "").ToLowerInvariant();
+        if (!context.User.IsInRole(UserRole.Owner.ToString()) && context.User.FindFirst("aurelia_access_mode")?.Value == nameof(ProfileAccessMode.SelectedTitles)
+            && (path.StartsWith("/api/v1/libraries", StringComparison.Ordinal) || path.StartsWith("/api/v1/scans", StringComparison.Ordinal)
+                || path.StartsWith("/api/v1/library-operations", StringComparison.Ordinal) || path.EndsWith("/editor/files", StringComparison.Ordinal)))
+            throw new AccountException("full_library_access_required", "Storage management and file browsing require full library access, not individual title grants.", 403);
     }
 
     public static async Task RequireApprovalAsync(HttpContext context, AdministrationApprovalStore approvals)
@@ -74,12 +108,13 @@ public sealed class ServerRequestGuard
             && Guid.TryParse(remaining.Value?.Trim('/'), out var targetId)
             && context.User.Identity?.IsAuthenticated == true)
         {
-            var actorId = context.User.RequireUserId();
-            required = await database.DeviceSessions.AnyAsync(session => session.Id == targetId && session.UserId != actorId, context.RequestAborted);
+            var currentDeviceId = context.User.RequireSessionId();
+            required = await database.DeviceSessions.AnyAsync(session => session.Id == targetId && session.Id != currentDeviceId, context.RequestAborted);
         }
         if (!required) return;
         var reset = context.Request.Path.Equals(new PathString("/api/v1/libraries/reset"));
-        if (!context.User.IsInRole(UserRole.Owner.ToString()) && !(reset && context.User.IsInRole(UserRole.Admin.ToString())))
+        var removal = HttpMethods.IsDelete(context.Request.Method) && context.Request.Path.StartsWithSegments("/api/v1/media") && (context.Request.Path.Value ?? "").Split('/').Length == 5;
+        if (!context.User.IsInRole(UserRole.Owner.ToString()) && !((reset || removal) && context.User.IsInRole(UserRole.Admin.ToString())))
             throw new AccountException("owner_required", "Only an owner may change global server settings.", 403);
         context.Request.EnableBuffering(bufferThreshold: 65_536, bufferLimit: MaximumJsonBytes + 1);
         using var payload = new MemoryStream();
@@ -93,14 +128,19 @@ public sealed class ServerRequestGuard
                 throw new AccountException("request_too_large", "The JSON request is too large.", 413);
         }
         context.Request.Body.Position = 0;
-        if (!approvals.Consume(context.Request.Headers["X-Aurelia-Approval"].ToString(), context.User.RequireSessionId(),
+        if (!approvals.Consume(context.Request.Headers["X-Aurelia-Approval"].ToString(), context.User.RequireProfileSessionId(),
                 context.Request.Method + " " + context.Request.Path.Value, AdministrationApprovalStore.Hash(payload.ToArray())))
             throw new AccountException("approval_required", "Confirm your password for this exact change. Approvals expire after two minutes and can be used once.", 403);
         var sessionId = context.User.RequireSessionId();
         var now = DateTimeOffset.UtcNow;
         if (!await database.DeviceSessions.AnyAsync(session => session.Id == sessionId && session.RevokedAt == null
-                && session.ExpiresAt > now && session.User.IsEnabled && (session.User.Role == UserRole.Owner || reset && session.User.Role == UserRole.Admin), context.RequestAborted))
+                && session.ExpiresAt > now && session.User.IsEnabled, context.RequestAborted))
             throw new AccountException("owner_session_revoked", "The owner session is no longer authorized.", 403);
+        var actorId = context.User.RequireUserId();
+        if (!context.RequestServices.GetRequiredService<ProfileSessionStore>().IsActive(context.User.RequireProfileSessionId(), sessionId, actorId)
+            || !await database.Users.AnyAsync(user => user.Id == actorId && user.IsEnabled
+                && (user.Role == UserRole.Owner || (reset || removal) && user.Role == UserRole.Admin), context.RequestAborted))
+            throw new AccountException("profile_session_revoked", "The viewing profile is no longer authorized for this action.", 403);
         context.Items["Aurelia.AdministrationApproved"] = true;
     }
 }

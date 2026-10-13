@@ -48,7 +48,7 @@ public static class MediaEditingEndpoints
             if (!context.Request.IsHttps && context.Connection.RemoteIpAddress is { } ip && !System.Net.IPAddress.IsLoopback(ip))
                 throw new AccountException("https_required", "Password confirmation requires HTTPS.", 403);
             await accounts.ConfirmPasswordAsync(context.User.RequireUserId(), request.Password, context.RequestAborted);
-            var result = approvals.Issue(context.User.RequireSessionId(), request.Action, request.PayloadHash);
+            var result = approvals.Issue(context.User.RequireProfileSessionId(), request.Action, request.PayloadHash);
             return new AdministrationApprovalResponse(result.Token, result.ExpiresAt);
         }).RequireRateLimiting("pairing");
         api.MapGet("/library-operations/{id:guid}", (Guid id, LibraryMutationService service, CancellationToken token) => service.StatusAsync(id, token));

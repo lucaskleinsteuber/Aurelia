@@ -203,6 +203,8 @@ curl --silent --show-error --fail-with-body \
 
 token="$(jq -r '.token // empty' "$runtime_root/authentication.json")"
 [[ ${#token} -ge 43 ]] || fail "Owner setup did not return a device token."
+device_token="$token"
+owner_id="$(jq -er '.user.id' "$runtime_root/authentication.json")"
 last_phase='LAN restart'
 curl --silent --show-error --fail-with-body --request POST \
   "$control_base/restart" >/dev/null
@@ -229,6 +231,45 @@ expected_fingerprint="$(openssl x509 -in "$data_root/server-certificate.pem" -pu
 [[ "$reported_fingerprint" == "$expected_fingerprint" ]] || fail "The live certificate differs from the private synthetic server identity."
 curl_pin="sha256//$(openssl x509 -in "$data_root/server-certificate.pem" -pubkey -noout \
   | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64)"
+
+unlock_viewing_and_management() {
+  local unlock_body management_body
+  unlock_body='{"pin":"1234"}'
+  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+    --header "Authorization: Bearer $device_token" --header 'Content-Type: application/json' \
+    --data "$unlock_body" "$https_base/api/v1/profiles/$owner_id/unlock" >"$runtime_root/viewing.json"
+  token="$(jq -er '.token' "$runtime_root/viewing.json")"
+  management_body="$(jq -cn --arg password "$owner_password" '{password:$password}')"
+  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+    --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+    --data "$management_body" "$https_base/api/v1/management/unlock" >/dev/null
+}
+
+approved_post() {
+  local action_path=$1 request_body=$2 approval_payload approval_token
+  last_phase="password confirmation: $action_path"
+  approval_payload="$(jq -cn --arg password "$owner_password" --arg action "POST $action_path" \
+    --arg payloadHash "$(print -rn -- "$request_body" | shasum -a 256 | awk '{print toupper($1)}')" \
+    '{password:$password,action:$action,payloadHash:$payloadHash}')"
+  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+    --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+    --data "$approval_payload" "$https_base/api/v1/server/approval" >"$runtime_root/operation-approval.json"
+  approval_token="$(jq -r '.token' "$runtime_root/operation-approval.json")"
+  last_phase="operation: $action_path"
+  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+    --header "Authorization: Bearer $token" --header "X-Aurelia-Approval: $approval_token" \
+    --header 'Content-Type: application/json' --data "$request_body" "$https_base$action_path"
+}
+
+last_phase='separate device, PIN and management authorities'
+locked_status="$(curl --silent --insecure --pinnedpubkey "$curl_pin" --output /dev/null --write-out '%{http_code}' \
+  --header "Authorization: Bearer $device_token" "$https_base/api/v1/catalog/items")"
+[[ "$locked_status" == 403 ]] || fail "A device credential exposed the catalog before PIN unlock."
+initialize_body="$(jq -cn --arg password "$owner_password" '{password:$password,pin:"1234"}')"
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $device_token" --header 'Content-Type: application/json' \
+  --data "$initialize_body" "$https_base/api/v1/profiles/initialize" >/dev/null
+unlock_viewing_and_management
 
 curl --silent --show-error --fail-with-body --insecure \
   --pinnedpubkey "$curl_pin" \
@@ -343,10 +384,7 @@ stale_status="$(curl --silent --insecure --pinnedpubkey "$curl_pin" --request PU
   "$https_base/api/v1/media/$media_id/editor")"
 [[ "$stale_status" == 409 ]] || fail "The packaged editor accepted a stale revision."
 
-curl --silent --show-error --fail-with-body --insecure --request POST \
-  --pinnedpubkey "$curl_pin" \
-  --header "Authorization: Bearer $token" \
-  "$https_base/api/v1/auth/pairings" >"$runtime_root/pairing.json"
+approved_post /api/v1/auth/pairings '' >"$runtime_root/pairing.json"
 [[ "$(jq -r '.code // empty | length' "$runtime_root/pairing.json")" == 8 ]] \
   || fail "The server did not create an eight-digit pairing code."
 curl --silent --show-error --fail-with-body --insecure \
@@ -355,22 +393,6 @@ curl --silent --show-error --fail-with-body --insecure \
   "$https_base/api/v1/auth/sessions" >"$runtime_root/sessions.json"
 [[ "$(jq 'length' "$runtime_root/sessions.json")" -ge 1 ]] \
   || fail "The owner session was not listed."
-
-approved_post() {
-  local action_path=$1 request_body=$2 approval_payload approval_token
-  last_phase="password confirmation: $action_path"
-  approval_payload="$(jq -cn --arg password "$owner_password" --arg action "POST $action_path" \
-    --arg payloadHash "$(print -rn -- "$request_body" | shasum -a 256 | awk '{print toupper($1)}')" \
-    '{password:$password,action:$action,payloadHash:$payloadHash}')"
-  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
-    --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
-    --data "$approval_payload" "$https_base/api/v1/server/approval" >"$runtime_root/operation-approval.json"
-  approval_token="$(jq -r '.token' "$runtime_root/operation-approval.json")"
-  last_phase="operation: $action_path"
-  curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
-    --header "Authorization: Bearer $token" --header "X-Aurelia-Approval: $approval_token" \
-    --header 'Content-Type: application/json' --data "$request_body" "$https_base$action_path"
-}
 
 wait_for_network() {
   local expected_name=$1
@@ -395,6 +417,7 @@ approved_post /api/v1/server/operations/network "$trial_body" >"$runtime_root/tr
 trial_id="$(jq -r '.id' "$runtime_root/trial.json")"
 https_base="https://127.0.0.1:$trial_port"
 wait_for_network 'Confirmed Host Trial' || fail "The new network configuration did not become reachable."
+unlock_viewing_and_management
 curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" --request POST \
   --header "Authorization: Bearer $token" "$https_base/api/v1/server/operations/$trial_id/confirm" >/dev/null
 [[ "$(jq -r '.state' "$data_root/host-operation.json")" == completed ]] || fail "The network trial was not confirmed."
@@ -412,6 +435,14 @@ for _ in {1..140}; do
 done
 [[ "$(jq -r '.state' "$data_root/host-operation.json")" == rolledBack ]] || fail "The unconfirmed network did not roll back after 60 seconds."
 wait_for_network 'Confirmed Host Trial' || fail "The previous network did not return after rollback."
+unlock_viewing_and_management
+
+note_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" --request PUT \
+  --header "Authorization: Bearer $token" --header 'Content-Type: application/json' \
+  --data '{"startMilliseconds":15000,"endMilliseconds":19000,"text":"Synthetic private scene note","revision":0}' \
+  "$https_base/api/v1/media/$media_id/notes/$note_id" >"$runtime_root/scene-note.json"
+[[ "$(jq -r '.revision' "$runtime_root/scene-note.json")" == 1 ]] || fail "A private note was not saved before backup."
 
 approved_post /api/v1/server/backups/export '{"passphrase":"isolated full backup passphrase"}' >"$runtime_root/export.json"
 export_id="$(jq -r '.id' "$runtime_root/export.json")"
@@ -432,10 +463,19 @@ wait_for_network 'Confirmed Host Trial' || fail "The restored server was not rea
 revoked_status="$(curl --silent --insecure --pinnedpubkey "$curl_pin" --output /dev/null --write-out '%{http_code}' \
   --header "Authorization: Bearer $token" "$https_base/api/v1/auth/me")"
 [[ "$revoked_status" == 401 ]] || fail "Restore made the old device token valid again."
+revoked_device_status="$(curl --silent --insecure --pinnedpubkey "$curl_pin" --output /dev/null --write-out '%{http_code}' \
+  --header "Authorization: Bearer $device_token" "$https_base/api/v1/profiles")"
+[[ "$revoked_device_status" == 401 ]] || fail "Restore reactivated the old paired device."
 curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" --header 'Content-Type: application/json' \
   --data "$setup_body" "$https_base/api/v1/auth/login" >"$runtime_root/restored-authentication.json"
 token="$(jq -r '.token' "$runtime_root/restored-authentication.json")"
 [[ ${#token} -ge 43 ]] || fail "The owner could not sign in after restore."
+device_token="$token"
+unlock_viewing_and_management
+curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
+  --header "Authorization: Bearer $token" "$https_base/api/v1/media/$media_id/notes" >"$runtime_root/restored-notes.json"
+jq -e --arg id "$note_id" 'length == 1 and .[0].id == $id and .[0].revision == 1 and .[0].text == "Synthetic private scene note"' \
+  "$runtime_root/restored-notes.json" >/dev/null || fail "Restore lost private scene note identity, revision or text."
 [[ "$(jq -r '.publicKeyFingerprint' "$runtime_root/server-info.json")" == "$reported_fingerprint" ]] || fail "Restore lost the existing TLS identity."
 [[ "$(sqlite3 "$data_root/aurelia.db" 'SELECT count(*) FROM LibraryRoots;')" == 1 ]] || fail "The isolated library was not restored."
 curl --silent --show-error --fail-with-body --insecure --pinnedpubkey "$curl_pin" \
@@ -581,8 +621,8 @@ for requested_mode in host client; do
     sleep 0.1
   done
   wait_for_connection_result true || fail "Saved connection did not finish starting."
-  [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection and (.catalogCount > 0)')" == true ]] \
-    || fail "Saved local connection did not load its existing synthetic catalog."
+  [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection and .viewingLocked and (.profilesCount > 0) and (.catalogCount == 0)')" == true ]] \
+    || fail "Saved local device did not show profiles without exposing private catalog data."
   [[ "$(jq -cS 'del(.locallyManaged)' "$data_root/connection.json")" == "$connection_before" ]] \
     || fail "Recovery changed the saved account, session, address, or TLS identity."
   helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
@@ -602,8 +642,8 @@ for requested_mode in host client; do
       done
       [[ "$(wc -l <"$runtime_root/connection-output.jsonl")" -gt "$previous_result_count" ]] \
         || fail "Unexpected helper exit was not recovered on attempt $recovery_attempt."
-      [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection and (.catalogCount > 0)')" == true ]] \
-        || fail "Automatic recovery did not reconnect the existing account and catalog."
+      [[ "$(tail -1 "$runtime_root/connection-output.jsonl" | jq -r '.ready and .owned and .unchangedConnection and .viewingLocked and (.profilesCount > 0) and (.catalogCount == 0)')" == true ]] \
+        || fail "Automatic recovery lost the paired device or bypassed profile PIN selection."
       helper_pid="$(pgrep -f "^$helper( |$)" | tail -1 || true)"
       [[ -n "$helper_pid" && "$helper_pid" != "$previous_helper_pid" ]] \
         || fail "Automatic recovery did not create a fresh owned helper."
@@ -638,18 +678,20 @@ fi
   print -r -- "PASS: one-time owner bootstrap and LAN HTTPS restart"
   print -r -- "PASS: live TLS public-key fingerprint matched server identity"
   print -r -- "PASS: /auth/me, library creation, bounded scan, pairing, and sessions"
+  print -r -- "PASS: paired device could not read catalog; explicit PIN and separate management unlock required"
   print -r -- "PASS: authenticated Direct Play returned the requested 64-byte original-file range"
   print -r -- "PASS: packaged metadata editor imported/cropped an image, saved credits/manual blanks, and rejected stale revisions"
   print -r -- "PASS: confirmed network change retained TLS identity and device sessions"
   print -r -- "PASS: unconfirmed network change rolled back after 60 seconds"
   print -r -- "PASS: native encrypted restore retained library/TLS identity and revoked old tokens"
   print -r -- "PASS: encrypted full restore retained manual metadata and imported image identity/bytes"
+  print -r -- "PASS: encrypted full restore retained profile PIN and private scene note identity/revision/text"
   print -r -- "PASS: occupied HTTPS port rolled back to the reachable previous network"
   print -r -- "PASS: graceful helper/server shutdown"
   print -r -- "PASS: helper stopped when its isolated PID-bound parent app disappeared"
   print -r -- "PASS: legacy local connection gained verified ownership without changing its session or identity"
-  print -r -- "PASS: stale explicit client preference recovered the same catalog after app relaunch"
-  print -r -- "PASS: three unexpected helper exits recovered the existing account/catalog; a fourth stopped without a restart loop"
+  print -r -- "PASS: stale explicit client preference retained device and required PIN at app relaunch"
+  print -r -- "PASS: three unexpected helper exits retained paired device and PIN-gated profile selection; a fourth stopped without a restart loop"
   print -r -- "PASS: SQLite quick_check and integrity_check; foreign keys clean"
   print -r -- "PASS: bounded logs contain no tested secrets"
 } >>"$report"

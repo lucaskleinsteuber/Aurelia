@@ -400,16 +400,13 @@ public sealed class PlaybackProgressTests
                    HttpMethod.Post,
                    "/api/v1/users",
                    ownerToken,
-                   new CreateUserRequest("viewer", "a secure viewer password", UserRole.User)))
+                   new CreateUserRequest("viewer", "a secure viewer password", UserRole.User, ApiTestClient.TestPin)))
         using (var response = await ApiTestClient.SendAsync(client, create))
         {
             response.EnsureSuccessStatusCode();
         }
 
-        using var login = await client.PostAsJsonAsync(
-            "/api/v1/auth/login",
-            new LoginRequest("viewer", "a secure viewer password", "Viewer Mac"),
-            ApiTestClient.JsonOptions);
+        using var login = await ApiTestClient.LoginAsync(client, new LoginRequest("viewer", "a secure viewer password", "Viewer Mac"));
         login.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
     }

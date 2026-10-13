@@ -61,6 +61,7 @@ struct KeychainServerStore: ServerProfileStore {
   }
 
   func save(_ profile: StoredServerProfile) throws {
+    guard !profile.isViewingSession else { throw StoreError.unexpectedStatus(errSecParam) }
     let data = try JSONEncoder().encode(profile)
     let attributes: [String: Any] = [
       kSecValueData as String: data,

@@ -1129,6 +1129,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<Guid>("MediaItemId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ProfileSessionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("RevokedAt")
                         .HasColumnType("INTEGER");
 
@@ -1152,6 +1155,58 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("UserId", "ExpiresAt");
 
                     b.ToTable("PlaybackTickets");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.SceneNote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("EndMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StartMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.HasIndex("UserId", "MediaItemId", "StartMilliseconds");
+
+                    b.ToTable("SceneNotes");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.ServerAdministrationCredential", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AdministrationCredentials");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.ServerIdentity", b =>
@@ -1179,6 +1234,15 @@ namespace Aurelia.Server.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AccessMode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AccessRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER");
 
@@ -1192,6 +1256,10 @@ namespace Aurelia.Server.Data.Migrations
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PinHash")
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
@@ -1280,6 +1348,21 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("LibraryRootId");
 
                     b.ToTable("UserLibraryGrants");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.UserTitleGrant", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId", "MediaItemId");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.ToTable("UserTitleGrants");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.ArtworkAsset", b =>
@@ -1515,6 +1598,25 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.SceneNote", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.UserFavorite", b =>
                 {
                     b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
@@ -1549,6 +1651,25 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("LibraryRoot");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.UserTitleGrant", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
+                        .WithMany()
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
 
                     b.Navigation("User");
                 });

@@ -6,14 +6,18 @@ stabilization does not add Windows/Linux clients or certify either OS runtime.
 
 ## Connection and authorization
 
-Use `/api/v1/server/info` to identify a server, then login or redeem a pairing
+Use `/api/v1/server/info` to identify a server, then redeem an owner-authorized pairing
 code. Discovery is a hint, not a trust decision: verify the server identity with
 the owner and persist its SPKI pin. Do not trust a fingerprint just because an
 untrusted server reports it. Require HTTPS for remote connections; loopback HTTP
 is for the local host only. Never follow a credential-bearing redirect.
 
-Store the device token in the platform's protected credential store. Send it as
-a Bearer token, including for stream requests. Keep accounts/sessions isolated
+Store only the device token in the platform's protected credential store. Use it
+to load `/api/v1/profiles` and verify the chosen profile's PIN. Keep the resulting
+viewing token in memory and send that token for personal and stream requests.
+End it when switching profiles or quitting; never auto-enter the last profile.
+See [profiles and notes](PROFILES_AND_NOTES.md) for the separated management
+unlock, title permissions and version requirements. Keep accounts/sessions isolated
 when caching artwork, catalog, progress or synchronization state. A revoked or
 expired session must stop authenticated work, not be treated as a network outage.
 

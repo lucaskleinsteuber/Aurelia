@@ -15,22 +15,50 @@ final class AppModel: ObservableObject {
       if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
         PlaybackProgressOutbox.shared.deactivate()
       }
-      let retiredGeneration = connectionGeneration
-      connectionGeneration = UUID()
-      cancelConnectionWork()
-      let controller = syncController
-      Task { await controller.stop(runID: retiredGeneration) }
-      homeRefresher.invalidate()
+      synchronizationErrorMessage = nil
+      homeErrorMessage = nil
+      invalidateLibraryWork()
       artworkLoader.removeAll()
     }
   }
   @Published private(set) var inspectedServer: InspectedServer?
+  @Published private(set) var deviceConnection: StoredServerProfile?
+  @Published private(set) var watchingProfiles: [WatchingProfile] = []
+  @Published private(set) var managementSetupRequired = false
+  @Published private(set) var profileSelectionError: String?
+  @Published private(set) var isSelectingProfile = false
+  @Published private(set) var isSwitchingProfile = false
+  @Published private(set) var managementExpiresAt: Date?
+  private var profileExpiryTask: Task<Void, Never>?
+  private var managementExpiryTask: Task<Void, Never>?
+  private var profileSelectionGeneration = UUID()
+  private var networkConfirmationDeadline: Date?
+  private var hasPendingNetworkConfirmation: Bool {
+    (networkConfirmationDeadline ?? .distantPast) > Date()
+  }
+
+  private var usesProfileSelection: Bool {
+    #if DEBUG
+      if Self.uiTestMode == "profiles" { return true }
+      if Self.isTestProcess || Self.uiTestMode != nil { return false }
+    #endif
+    return true
+  }
+  var requiresProfileSelection: Bool {
+    usesProfileSelection && profile != nil && profile?.isViewingSession != true
+  }
+  var managementUnlocked: Bool {
+    !usesProfileSelection
+      || (profile?.isViewingSession == true && (managementExpiresAt ?? .distantPast) > Date())
+  }
   @Published private(set) var movies: [MovieSummary] = []
   @Published private(set) var series: [SeriesSummary] = []
   @Published private(set) var catalogItems: [CatalogItemSummary] = []
   @Published private(set) var home: HomeResponse?
   @Published private(set) var collections: [CollectionSummary] = []
   @Published private(set) var playback: PlaybackPresentation?
+  @Published private(set) var sceneNotesVersion: UInt64 = 0
+  @Published private(set) var catalogVisibilityRevision: UInt64 = 0
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
   @Published private(set) var libraries: [LibrarySummary] = []
   @Published private(set) var activeScans: [LibraryScanSummary] = []
@@ -47,6 +75,11 @@ final class AppModel: ObservableObject {
   @Published private(set) var isWorking = false
   @Published private(set) var isRecoveringLocalHost = false
   @Published var errorMessage: String?
+  @Published private(set) var synchronizationErrorMessage: String?
+  @Published private(set) var homeErrorMessage: String?
+  var visibleErrorMessage: String? {
+    errorMessage ?? synchronizationErrorMessage ?? homeErrorMessage
+  }
   @Published var isMediaManagerPresented = false
   @Published var importPreviewLibrary: LibrarySummary?
 
@@ -78,7 +111,16 @@ final class AppModel: ObservableObject {
   }
 
   private func isCurrent(_ generation: UUID) -> Bool {
-    connectionGeneration == generation && profile != nil && !Task.isCancelled
+    connectionGeneration == generation && profile != nil && !isSwitchingProfile && !Task.isCancelled
+  }
+
+  private func invalidateLibraryWork() {
+    let retired = connectionGeneration
+    connectionGeneration = UUID()
+    cancelConnectionWork()
+    let controller = syncController
+    Task { await controller.stop(runID: retired) }
+    homeRefresher.invalidate()
   }
 
   private func currentConnection<T>(_ operation: @MainActor () async throws -> T) async throws -> T
@@ -110,7 +152,11 @@ final class AppModel: ObservableObject {
   private static let operatingModeKey = "AureliaOperatingMode"
   private static let operatingModeSelectionVersionKey = "AureliaOperatingModeSelectionVersion"
 
-  var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true }
+  var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true && managementUnlocked }
+  var canManageStorage: Bool {
+    canManageMedia
+      && (profile?.user?.role == .owner || profile?.user?.accessMode != .selectedTitles)
+  }
   var isLocalHost: Bool { operatingMode == .host }
   var canRestoreLocalHosting: Bool {
     guard let profile else { return false }
@@ -164,6 +210,14 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+      if Self.uiTestMode == "profiles" {
+        operatingMode = .client
+        profile = Self.previewOwnerProfile
+        deviceConnection = profile
+        watchingProfiles = Self.watchingProfileFixture
+        isStarting = false
+        return
+      }
       if Self.uiTestMode == "local-host-recovery" {
         operatingMode = .client
         profile = Self.previewOwnerProfile
@@ -336,6 +390,7 @@ final class AppModel: ObservableObject {
 
     do {
       profile = try store.load()
+      deviceConnection = profile
       operatingMode = OperatingModePolicy.resolve(
         storedMode: operatingMode,
         storedSelectionVersion: UserDefaults.standard.integer(
@@ -546,7 +601,7 @@ final class AppModel: ObservableObject {
     #if DEBUG
       if Self.uiTestMode == "local-host-recovery" { return }
     #endif
-    guard let profile, profile.user?.role.canManageLibraries == true else { return }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
     do {
       let snapshot: AdministrationSnapshot
@@ -821,9 +876,16 @@ final class AppModel: ObservableObject {
   }
 
   func shutdown() async {
+    profileSelectionGeneration = UUID()
+    isSelectingProfile = true
     connectionGeneration = UUID()
     cancelConnectionWork()
     await PlaybackShutdownCoordinator.shared.shutdown()
+    if let profile, profile.isViewingSession {
+      try? await APIClient(profile: profile).endProfileSession()
+    }
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
     hostPollTask?.cancel()
     homeRefreshTask?.cancel()
     scanPollTask?.cancel()
@@ -861,13 +923,44 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func acceptConfirmedNetwork(profile updated: StoredServerProfile) throws {
-    guard profile?.serverId == updated.serverId, profile?.sessionId == updated.sessionId,
+  func acceptConfirmedNetwork(
+    profile updated: StoredServerProfile, device: StoredServerProfile? = nil,
+    managementExpiry: String? = nil
+  ) throws {
+    guard profile?.serverId == updated.serverId, profile?.user?.id == updated.user?.id,
       profile?.publicKeyFingerprint == updated.publicKeyFingerprint
     else { throw APIClientError.invalidResponse }
-    try store.save(updated)
+    let paired =
+      device ?? (deviceConnection ?? updated).changingAddress(updated.baseURL, name: updated.name)
+    guard !paired.isViewingSession, paired.serverId == updated.serverId,
+      paired.publicKeyFingerprint == updated.publicKeyFingerprint
+    else { throw APIClientError.invalidResponse }
+    try store.save(paired)
+    deviceConnection = paired
     profile = updated
+    managementExpiresAt = managementExpiry.flatMap(Self.sessionDate)
+    networkConfirmationDeadline = nil
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    if let date = Self.sessionDate(updated.expiresAt), updated.isViewingSession {
+      profileExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.profile?.sessionId == updated.sessionId else { return }
+        await self?.switchWatchingProfile()
+      }
+    }
+    if let date = managementExpiresAt {
+      managementExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.profile?.sessionId == updated.sessionId else { return }
+        self?.managementExpiresAt = nil
+        self?.clearAdministrationState()
+      }
+    }
     startSync()
+  }
+  func beginNetworkConfirmation(until value: String?) {
+    networkConfirmationDeadline = value.flatMap(Self.sessionDate) ?? Date().addingTimeInterval(60)
   }
 
   func inspect(address: String) async {
@@ -921,6 +1014,7 @@ final class AppModel: ObservableObject {
         !Task.isCancelled
       else { return false }
       try store.save(paired)
+      deviceConnection = paired
       profile = paired
       generation = connectionGeneration
       self.inspectedServer = nil
@@ -939,7 +1033,11 @@ final class AppModel: ObservableObject {
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" { return }
     #endif
-    guard let profile else { return }
+    guard let profile, !isSwitchingProfile else { return }
+    if requiresProfileSelection {
+      try await loadWatchingProfiles()
+      return
+    }
     let generation = connectionGeneration
     isWorking = true
     defer { isWorking = false }
@@ -979,7 +1077,8 @@ final class AppModel: ObservableObject {
     guard isCurrent(generation)
     else { return }
     guard let newHome, homeRefresher.isCurrent(homeRequest) else {
-      if requireCompleteSnapshot { throw APIClientError.invalidResponse }
+      if Task.isCancelled { throw CancellationError() }
+      if requireCompleteSnapshot { throw APIClientError.supersededSnapshot }
       return
     }
     movies = newMovies
@@ -1006,6 +1105,7 @@ final class AppModel: ObservableObject {
     // The library view can appear as soon as its saved profile is loaded.
     // Its task/activation must not supersede the initial coherent snapshot.
     guard !isStarting, !isRecoveringLocalHost else { return }
+    guard !requiresProfileSelection else { return }
     guard let profile else { return }
     let generation = connectionGeneration
     let request = homeRefresher.beginRequest()
@@ -1014,9 +1114,12 @@ final class AppModel: ObservableObject {
         isCurrent(generation)
       else { return }
       home = refreshed
+      homeErrorMessage = nil
       scheduleHomeRefresh()
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation), !(error is CancellationError) {
+        homeErrorMessage = error.localizedDescription
+      }
     }
   }
 
@@ -1130,7 +1233,7 @@ final class AppModel: ObservableObject {
     #if DEBUG
       if Self.uiTestMode == "local-host-recovery" { return }
     #endif
-    guard let profile else { return }
+    guard let profile, canManageMedia else { return }
     let generation = connectionGeneration
     do {
       let updated = try await APIClient(profile: profile).sessions()
@@ -1228,7 +1331,7 @@ final class AppModel: ObservableObject {
       // Keep real lifecycle observation enabled for unit and preflight tests.
       if Self.uiTestMode != nil { return }
     #endif
-    let canObserve = !isStarting && !isRecoveringLocalHost
+    let canObserve = !isStarting && !isRecoveringLocalHost && !requiresProfileSelection
     if active, canObserve, operatingMode == .host, hostPollTask == nil { startHostPolling() }
     if active, canObserve, !activeScans.isEmpty, scanPollTask == nil { startScanPolling() }
     let generation = connectionGeneration
@@ -1236,7 +1339,16 @@ final class AppModel: ObservableObject {
       active, profile: canObserve ? profile : nil, runID: generation,
       onFailure: { [weak self] error in
         guard let self, self.isCurrent(generation) else { return }
-        self.errorMessage = error.localizedDescription
+        self.synchronizationErrorMessage = error.localizedDescription
+        if error.httpStatus == 401, self.profile?.isViewingSession == true,
+          !self.hasPendingNetworkConfirmation
+        {
+          Task { await self.switchWatchingProfile() }
+        }
+      },
+      onSuccess: { [weak self] in
+        guard let self, self.isCurrent(generation) else { return }
+        self.synchronizationErrorMessage = nil
       },
       onChanges: { [weak self] changes in
         guard let self, self.isCurrent(generation) else { throw CancellationError() }
@@ -1350,6 +1462,271 @@ final class AppModel: ObservableObject {
     await refreshHome()
   }
 
+  func dismissPlayback() { playback = nil }
+
+  func loadWatchingProfiles() async throws {
+    #if DEBUG
+      if Self.uiTestMode == "profiles" {
+        watchingProfiles = Self.watchingProfileFixture
+        return
+      }
+    #endif
+    guard let device = deviceConnection ?? profile, !device.isViewingSession else { return }
+    let generation = connectionGeneration
+    let client = APIClient(profile: device)
+    let info = try await client.serverInfo()
+    guard info.serverId == device.serverId else { throw APIClientError.serverIdentityMismatch }
+    let response: ProfilePickerResponse
+    do { response = try await client.watchingProfiles() } catch let error as APIClientError
+      where error.httpStatus == 404
+    {
+      throw APIClientError.serverRejected(
+        code: "server_update_required",
+        message:
+          "Update Aurelia Server to 1.5.0 or later to use viewing profiles. Your device connection has been retained."
+      )
+    }
+    guard response.formatVersion == 1 else { throw APIClientError.invalidResponse }
+    guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
+    watchingProfiles = response.profiles
+    managementSetupRequired = response.managementSetupRequired
+    profileSelectionError = nil
+  }
+
+  func reloadWatchingProfiles() async {
+    do { try await loadWatchingProfiles() } catch is CancellationError {} catch {
+      profileSelectionError = error.localizedDescription
+    }
+  }
+
+  func initializeWatchingProfiles(password: String, pin: String) async -> Bool {
+    guard let device = deviceConnection ?? profile, !device.isViewingSession,
+      ProfilePIN.isValid(pin), !isSelectingProfile
+    else { return false }
+    let expected = profileSelectionGeneration
+    isSelectingProfile = true
+    defer { if profileSelectionGeneration == expected { isSelectingProfile = false } }
+    do {
+      try await APIClient(profile: device).initializeProfiles(password: password, pin: pin)
+      guard expected == profileSelectionGeneration else { return false }
+      try await loadWatchingProfiles()
+      return true
+    } catch {
+      if expected == profileSelectionGeneration {
+        profileSelectionError = error.localizedDescription
+      }
+      return false
+    }
+  }
+
+  func selectWatchingProfile(_ choice: WatchingProfile, pin: String) async -> Bool {
+    guard let device = deviceConnection ?? profile, !device.isViewingSession,
+      ProfilePIN.isValid(pin), !isSelectingProfile
+    else { return false }
+    let expected = profileSelectionGeneration
+    #if DEBUG
+      if Self.uiTestMode == "profiles" {
+        guard pin == "1234" else {
+          profileSelectionError = "The PIN is incorrect."
+          return false
+        }
+        clearPersonalViewState()
+        let response = ProfileSessionResponse(
+          user: UserSummary(
+            id: choice.id, username: choice.name, role: choice.role,
+            createdAt: "2026-01-01T00:00:00Z"), sessionId: UUID(), token: "synthetic-only-profile",
+          expiresAt: "2099-01-01T00:00:00Z")
+        profile = viewingProfile(response, device: device)
+        profileSelectionError = nil
+        home = Self.previewHome
+        return true
+      }
+    #endif
+    isSelectingProfile = true
+    defer { if profileSelectionGeneration == expected { isSelectingProfile = false } }
+    do {
+      let response = try await APIClient(profile: device).unlockProfile(id: choice.id, pin: pin)
+      guard response.user.id == choice.id else { throw APIClientError.invalidResponse }
+      guard expected == profileSelectionGeneration, profile == device, !Task.isCancelled else {
+        let abandoned = viewingProfile(response, device: device)
+        try? await APIClient(profile: abandoned).endProfileSession()
+        return false
+      }
+      clearPersonalViewState()
+      let active = viewingProfile(response, device: device)
+      profile = active
+      profileSelectionError = nil
+      errorMessage = nil
+      let expires = Self.sessionDate(response.expiresAt) ?? Date().addingTimeInterval(43200)
+      profileExpiryTask?.cancel()
+      profileExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, expires.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.profile?.sessionId == active.sessionId else { return }
+        await self?.switchWatchingProfile()
+      }
+      try await refresh(requireCompleteSnapshot: true)
+      guard expected == profileSelectionGeneration, profile == active, !Task.isCancelled else {
+        return false
+      }
+      startSync()
+      return true
+    } catch {
+      if expected == profileSelectionGeneration {
+        profileSelectionError = error.localizedDescription
+        errorMessage = error.localizedDescription
+      }
+      return false
+    }
+  }
+
+  func switchWatchingProfile() async {
+    guard let device = deviceConnection, !isSelectingProfile else { return }
+    let expected = UUID()
+    isSelectingProfile = true
+    isSwitchingProfile = true
+    profileSelectionGeneration = expected
+    defer {
+      if profileSelectionGeneration == expected {
+        isSelectingProfile = false
+        isSwitchingProfile = false
+      }
+    }
+    let current = profile
+    invalidateLibraryWork()
+    managementExpiresAt = nil
+    clearPersonalViewState()
+    // The old controller keeps its old credential until its progress is saved.
+    playback = nil
+    await PlaybackShutdownCoordinator.shared.shutdown()
+    guard expected == profileSelectionGeneration, deviceConnection == device, !Task.isCancelled
+    else { return }
+    if let current, current.isViewingSession {
+      try? await APIClient(profile: current).endProfileSession()
+    }
+    guard expected == profileSelectionGeneration, deviceConnection == device, !Task.isCancelled
+    else { return }
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    managementExpiresAt = nil
+    clearPersonalViewState()
+    profile = device
+    isSelectingProfile = false
+    isSwitchingProfile = false
+    await reloadWatchingProfiles()
+  }
+
+  func unlockManagement(password: String) async -> Bool {
+    guard let profile, profile.isViewingSession, profile.user?.role.canManageLibraries == true
+    else { return false }
+    let generation = connectionGeneration
+    do {
+      let expiry = try await APIClient(profile: profile).unlockManagement(password: password)
+      guard isCurrent(generation), let date = Self.sessionDate(expiry) else { return false }
+      managementExpiresAt = date
+      managementExpiryTask?.cancel()
+      managementExpiryTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(max(0, date.timeIntervalSinceNow)))
+        guard !Task.isCancelled, self?.isCurrent(generation) == true else { return }
+        self?.managementExpiresAt = nil
+        self?.clearAdministrationState()
+      }
+      errorMessage = nil
+      await reloadAdministration()
+      return true
+    } catch {
+      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      return false
+    }
+  }
+
+  func lockManagement() async {
+    managementExpiryTask?.cancel()
+    managementExpiresAt = nil
+    clearAdministrationState()
+    if let profile, profile.isViewingSession {
+      try? await APIClient(profile: profile).lockManagement()
+    }
+  }
+  func recoverOwnerPIN(password: String, pin: String) async -> Bool {
+    guard operatingMode == .host, deviceConnection?.locallyManaged == true, ProfilePIN.isValid(pin),
+      !isSelectingProfile
+    else { return false }
+    isSelectingProfile = true
+    defer { isSelectingProfile = false }
+    do {
+      try await serverHost.recoverOwnerPIN(password: password, pin: pin)
+      try await loadWatchingProfiles()
+      return true
+    } catch {
+      profileSelectionError =
+        "Owner PIN recovery failed. Check the server password and that the local host is running."
+      return false
+    }
+  }
+
+  private func viewingProfile(_ response: ProfileSessionResponse, device: StoredServerProfile)
+    -> StoredServerProfile
+  {
+    StoredServerProfile(
+      serverId: device.serverId, name: device.name, baseURL: device.baseURL,
+      publicKeyFingerprint: device.publicKeyFingerprint, token: response.token,
+      sessionId: response.sessionId,
+      expiresAt: response.expiresAt, user: response.user, locallyManaged: device.locallyManaged,
+      viewingSession: true)
+  }
+
+  private func clearPersonalViewState() {
+    movies = []
+    series = []
+    catalogItems = []
+    home = nil
+    collections = []
+    clearAdministrationState()
+    artworkLoader.removeAll()
+    isMediaManagerPresented = false
+    importPreviewLibrary = nil
+    sceneNotesVersion &+= 1
+    catalogVisibilityRevision &+= 1
+    errorMessage = nil
+  }
+
+  private func clearAdministrationState() {
+    libraries = []
+    activeScans = []
+    recentScans = []
+    libraryDiscoveries = []
+    libraryImportReviews = []
+    sessions = []
+    pairingCode = nil
+    metadataProvider = nil
+    metadataJob = nil
+    scanStatusUnavailable = []
+    scanPollTask?.cancel()
+    scanPollTask = nil
+    isMediaManagerPresented = false
+  }
+
+  private static func sessionDate(_ value: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+  }
+  #if DEBUG
+    private static var watchingProfileFixture: [WatchingProfile] {
+      [
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000001")!, name: "Owner",
+          role: .owner, needsPinSetup: false),
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000002")!, name: "Viewer",
+          role: .user, needsPinSetup: false),
+        WatchingProfile(
+          id: UUID(uuidString: "70000000-0000-0000-0000-000000000003")!, name: "Needs PIN",
+          role: .user, needsPinSetup: true),
+      ]
+    }
+  #endif
+
   func disconnect() async {
     do {
       try store.delete()
@@ -1358,9 +1735,18 @@ final class AppModel: ObservableObject {
       return
     }
     let current = profile
+    let paired = deviceConnection
     let retiredGeneration = connectionGeneration
     inspectionGeneration = UUID()
     profile = nil
+    deviceConnection = nil
+    isSwitchingProfile = false
+    isSelectingProfile = false
+    watchingProfiles = []
+    managementExpiresAt = nil
+    profileSelectionGeneration = UUID()
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
     homeRefresher.invalidate()
     movies = []
     series = []
@@ -1390,6 +1776,7 @@ final class AppModel: ObservableObject {
       if let current {
         try? await APIClient(profile: current).logout()
       }
+      if let paired { try? await APIClient(profile: paired).disconnectPairedDevice() }
     }
   }
 
@@ -1425,14 +1812,26 @@ final class AppModel: ObservableObject {
       }
       if let profile {
         try OperatingModePolicy.validateLocalHost(hostSnapshot, profile: profile)
+        if profile.isViewingSession, let deviceConnection, !hasPendingNetworkConfirmation {
+          do { _ = try await APIClient(profile: profile).currentUser() } catch let error
+            as APIClientError where error.httpStatus == 401
+          {
+            await PlaybackShutdownCoordinator.shared.shutdown()
+            playback = nil
+            managementExpiresAt = nil
+            clearPersonalViewState()
+            self.profile = deviceConnection
+          }
+        }
         // Readiness includes loading the catalog, not merely a live helper.
         // A superseded/partial snapshot must never be reported as successful.
         try await refresh(requireCompleteSnapshot: true)
-        guard let current = self.profile, current.serverId == profile.serverId,
-          current.sessionId == profile.sessionId
+        guard let current = self.profile, current.serverId == profile.serverId
         else { return false }
         let managed = current.retainingLocalHosting()
-        try store.save(managed)
+        let savedDevice = (deviceConnection ?? current).retainingLocalHosting()
+        try store.save(savedDevice)
+        deviceConnection = savedDevice
         self.profile = managed
         startSync()
       }
@@ -1577,6 +1976,7 @@ final class AppModel: ObservableObject {
     guard connectionGeneration == generation, !Task.isCancelled else { throw CancellationError() }
     let localProfile = connected.retainingLocalHosting()
     try store.save(localProfile)
+    deviceConnection = localProfile
     profile = localProfile
     let authenticatedGeneration = connectionGeneration
     try await refresh()
@@ -1627,6 +2027,7 @@ final class AppModel: ObservableObject {
   }
 
   private func startSync() {
+    guard !requiresProfileSelection else { return }
     guard let profile else { return }
     let generation = connectionGeneration
     syncStartTask?.cancel()
@@ -1636,7 +2037,16 @@ final class AppModel: ObservableObject {
         profile: profile, runID: generation,
         onFailure: { [weak self] error in
           guard let self, self.isCurrent(generation) else { return }
-          self.errorMessage = error.localizedDescription
+          self.synchronizationErrorMessage = error.localizedDescription
+          if error.httpStatus == 401, self.profile?.isViewingSession == true,
+            !self.hasPendingNetworkConfirmation
+          {
+            Task { await self.switchWatchingProfile() }
+          }
+        },
+        onSuccess: { [weak self] in
+          guard let self, self.isCurrent(generation) else { return }
+          self.synchronizationErrorMessage = nil
         }
       ) { [weak self] changes in
         guard let self, self.isCurrent(generation) else { throw CancellationError() }
@@ -1652,6 +2062,18 @@ final class AppModel: ObservableObject {
     do {
       if plan.fullCatalog {
         try await refresh(requireCompleteSnapshot: true)
+        if let playing = playback {
+          do {
+            _ = try await APIClient(profile: profile).catalogSummary(id: playing.mediaId)
+          } catch let denied as APIClientError
+            where denied.httpStatus == 404 || denied.httpStatus == 403
+          {
+            playback = nil
+            await PlaybackShutdownCoordinator.shared.shutdown()
+          }
+        }
+        artworkLoader.removeAll()
+        catalogVisibilityRevision &+= 1
       } else if plan.home {
         let client = APIClient(profile: profile)
         let request = homeRefresher.beginRequest()
@@ -1672,7 +2094,8 @@ final class AppModel: ObservableObject {
         let refreshedCollections = plan.collections ? try await client.collections() : nil
         guard isCurrent(generation) else { throw CancellationError() }
         guard let refreshedHome, homeRefresher.isCurrent(request) else {
-          throw APIClientError.invalidResponse
+          if Task.isCancelled { throw CancellationError() }
+          throw APIClientError.supersededSnapshot
         }
         catalogItems = catalogItems.map { replacements[$0.id] ?? $0 }
         movies = movies.map { movie in
@@ -1695,16 +2118,19 @@ final class AppModel: ObservableObject {
         scheduleHomeRefresh()
       }
       guard isCurrent(generation) else { throw CancellationError() }
+      if changes.changedAreas.contains(.userState) { sceneNotesVersion &+= 1 }
       if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
         PlaybackProgressOutbox.shared.activate(profile: profile)
       }
-      if changes.resetRequired || changes.changedAreas.contains(.libraries), canManageMedia {
+      if changes.resetRequired || changes.changedAreas.contains(.libraries), canManageStorage {
         try await refreshLibraryAdministration()
         guard isCurrent(generation) else { throw CancellationError() }
       }
     } catch {
-      if isCurrent(generation), !(error is CancellationError) {
-        errorMessage = error.localizedDescription
+      if isCurrent(generation), !(error is CancellationError),
+        error as? APIClientError != .supersededSnapshot
+      {
+        synchronizationErrorMessage = error.localizedDescription
       }
       throw error
     }
@@ -1715,7 +2141,7 @@ final class AppModel: ObservableObject {
   }
 
   private func refreshLibraryAdministration() async throws {
-    guard let profile else { throw CancellationError() }
+    guard let profile, canManageStorage else { return }
     let generation = connectionGeneration
     let client = APIClient(profile: profile)
     let refreshedLibraries = try await client.libraries()
@@ -2017,6 +2443,8 @@ final class AppModel: ObservableObject {
       let ready: Bool
       let owned: Bool
       let catalogCount: Int
+      let profilesCount: Int
+      let viewingLocked: Bool
       let unchangedConnection: Bool
       let failureMessage: String?
     }
@@ -2025,7 +2453,8 @@ final class AppModel: ObservableObject {
     if var data = try? JSONEncoder().encode(
       Result(
         ready: ready, owned: profile?.locallyManaged == true,
-        catalogCount: catalogItems.count, unchangedConnection: unchanged,
+        catalogCount: catalogItems.count, profilesCount: watchingProfiles.count,
+        viewingLocked: profile?.isViewingSession != true, unchangedConnection: unchanged,
         failureMessage: ready
           ? nil
           : hostSnapshot.message.map {

@@ -51,6 +51,21 @@ struct RefreshReliabilityTests {
     await controller.stop()
   }
 
+  @Test func supersededSnapshotIsRedeliveredWithoutPublishingServerFailure() async throws {
+    let probe = AcknowledgementProbe(superseded: true)
+    let controller = LibrarySyncController(
+      fetchChanges: { _, cursor, _, _ in try await probe.fetch(after: cursor) },
+      delay: { _ in try await Task.sleep(for: .milliseconds(1)) })
+    await controller.start(
+      profile: syntheticProfile(), onFailure: { _ in await probe.reportFailure() },
+      onChanges: { _ in try await probe.apply() })
+    try await wait { await probe.cursors.contains(7) }
+    await controller.stop()
+    #expect(await probe.cursors.prefix(2) == [0, 0])
+    #expect(await probe.applications == 2)
+    #expect(await probe.failures == 0)
+  }
+
   @Test func disappearingSnapshotIsRedeliveredRatherThanDisablingSync() async throws {
     let probe = AcknowledgementProbe(missingSnapshot: true)
     let controller = LibrarySyncController(
@@ -205,13 +220,18 @@ private actor AcknowledgementProbe {
   let reset: Bool
   let denied: Bool
   let missingSnapshot: Bool
+  let superseded: Bool
   private(set) var cursors: [Int64] = []
   private(set) var applications = 0
   private(set) var failures = 0
-  init(reset: Bool = false, denied: Bool = false, missingSnapshot: Bool = false) {
+  init(
+    reset: Bool = false, denied: Bool = false, missingSnapshot: Bool = false,
+    superseded: Bool = false
+  ) {
     self.reset = reset
     self.denied = denied
     self.missingSnapshot = missingSnapshot
+    self.superseded = superseded
   }
   func fetch(after: Int64) async throws -> SyncChangesResponse {
     cursors.append(after)
@@ -225,6 +245,7 @@ private actor AcknowledgementProbe {
       throw APIClientError.httpFailure(status: 401, retryAfter: nil, code: nil, message: nil)
     }
     if applications == 1 {
+      if superseded { throw APIClientError.supersededSnapshot }
       if missingSnapshot {
         throw APIClientError.httpFailure(status: 404, retryAfter: nil, code: nil, message: nil)
       }

@@ -14,11 +14,13 @@ public sealed class DeviceTokenAuthenticationHandler(
     UrlEncoder encoder,
     AureliaDbContext database,
     TokenService tokenService,
-    SessionActivityRecorder activity)
+    SessionActivityRecorder activity,
+    ProfileSessionStore profiles)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "AureliaDeviceToken";
     public const string SessionIdClaim = "aurelia_session_id";
+    public const string ProfileSessionIdClaim = "aurelia_profile_session_id";
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -36,11 +38,12 @@ public sealed class DeviceTokenAuthenticationHandler(
 
         var tokenHash = tokenService.Hash(rawToken);
         var now = DateTimeOffset.UtcNow;
+        var viewing = profiles.Find(tokenHash);
         var session = await database.DeviceSessions
             .AsNoTracking()
             .Include(candidate => candidate.User)
             .SingleOrDefaultAsync(
-                candidate => candidate.TokenHash == tokenHash
+                candidate => (viewing != null ? candidate.Id == viewing.DeviceId : candidate.TokenHash == tokenHash)
                     && candidate.RevokedAt == null
                     && candidate.ExpiresAt > now
                     && candidate.User.IsEnabled,
@@ -50,19 +53,28 @@ public sealed class DeviceTokenAuthenticationHandler(
         {
             return AuthenticateResult.Fail("Invalid or expired device token.");
         }
+        var user = viewing is null ? session.User : await database.Users.AsNoTracking()
+            .SingleOrDefaultAsync(user => user.Id == viewing.UserId && user.IsEnabled, Context.RequestAborted);
+        if (user is null) return AuthenticateResult.Fail("The profile is no longer available.");
 
         if (session.LastSeenAt <= now.AddMinutes(-1))
         {
             await activity.RecordAsync(database, session.Id, now, Context.RequestAborted);
         }
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.NameIdentifier, session.UserId.ToString()),
-            new Claim(ClaimTypes.Name, session.User.Username),
-            new Claim(ClaimTypes.Role, session.User.Role.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Name, user.Username),
             new Claim(SessionIdClaim, session.Id.ToString()),
+            new Claim("aurelia_credential_kind", viewing is null ? "device" : "profile"),
         };
+        if (viewing is not null)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, user.Role.ToString()));
+            claims.Add(new Claim(ProfileSessionIdClaim, viewing.Id.ToString()));
+            claims.Add(new Claim("aurelia_access_mode", user.AccessMode.ToString()));
+        }
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);
         return AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName));

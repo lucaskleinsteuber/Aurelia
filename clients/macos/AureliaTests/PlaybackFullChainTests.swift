@@ -67,9 +67,11 @@ final class PlaybackFullChainTests: XCTestCase {
         inspected.info.version == configuration.serverVersion, "wrong_packaged_server_version")
       evidence.serverVersion = inspected.info.version
       evidence.check("owned_certificate_pin_verified")
-      let profile = APIClient.profile(
+      let deviceProfile = APIClient.profile(
         authentication: configuration.authentication, inspected: inspected)
-      let api = APIClient(profile: profile)
+      var profile = try await unlockViewingProfile(
+        device: deviceProfile, configuration: configuration, evidence: evidence)
+      var api = APIClient(profile: profile)
       let setup = FullChainPinnedRequests(profile: profile, evidence: evidence)
       evidence.phase = "synthetic_library_provisioning"
       let body = try JSONEncoder().encode(
@@ -144,8 +146,9 @@ final class PlaybackFullChainTests: XCTestCase {
         let outboxStorage = root.appendingPathComponent("progress-\(index).json")
         let outbox = PlaybackProgressOutbox(storageURL: outboxStorage)
         try Self.require(!outbox.storageFailed, "isolated_progress_storage_unavailable")
-        let observedClient = FullChainObservedClient(profile: profile, evidence: evidence)
-        let playback = PlaybackController(
+        var observedClient = FullChainObservedClient(profile: profile, evidence: evidence)
+        let playbackProfile = profile
+        var playback = PlaybackController(
           client: observedClient,
           presentation: PlaybackPresentation(
             mediaId: movie.id, title: "Synthetic \(fixture.name)", subtitle: nil),
@@ -153,7 +156,7 @@ final class PlaybackFullChainTests: XCTestCase {
           relayFactory: { url, fingerprint in
             try LoopbackStreamRelay(
               sourceURL: url, publicKeyFingerprint: fingerprint,
-              authorizationToken: profile.token)
+              authorizationToken: playbackProfile.token)
           }, progressOutbox: outbox)
         controller = playback
         playback.attachVideoView(view)
@@ -289,9 +292,16 @@ final class PlaybackFullChainTests: XCTestCase {
           }
         }
         if fixture.name == "MP4" {
-          try await verifyServerInterruptions(
+          let resumed = try await verifyServerInterruptions(
             playback, client: observedClient, api: api, configuration: configuration,
+            device: deviceProfile, view: view, engine: engine, preferences: preferences,
+            outbox: outbox,
             player: { latestPlayer }, evidence: evidence)
+          playback = resumed.playback
+          observedClient = resumed.client
+          api = resumed.api
+          profile = resumed.profile
+          controller = playback
         }
         if fixture.name == "MKV" {
           try await verifyOwnedSourceInterruption(
@@ -403,6 +413,9 @@ final class PlaybackFullChainTests: XCTestCase {
           "Full Chain Episodes - S01E0\(number) - Synthetic Episode \(number).mp4"))
     }
     let setup = FullChainPinnedRequests(profile: profile, evidence: evidence)
+    // The mandatory soak outlasts the ten-minute administration unlock.
+    // Request a fresh unlock instead of granting a permanent test exemption.
+    _ = try await api.unlockManagement(password: configuration.password)
     let body = try JSONEncoder().encode(
       CreateLibraryRequest(
         name: "Full chain synthetic episodes", path: seriesRoot.path, kind: .tvShows,
@@ -649,12 +662,64 @@ final class PlaybackFullChainTests: XCTestCase {
     }
   }
 
+  private func unlockViewingProfile(
+    device: StoredServerProfile, configuration: FullChainConfiguration, evidence: FullChainEvidence
+  ) async throws -> StoredServerProfile {
+    let paired = APIClient(profile: device)
+    guard let owner = device.user else {
+      throw FullChainFailure.failed("owned_device_has_no_owner_identity")
+    }
+    let picker = try await paired.watchingProfiles()
+    if picker.managementSetupRequired {
+      try await paired.initializeProfiles(password: configuration.password, pin: "1234")
+    }
+    let unlocked = try await paired.unlockProfile(id: owner.id, pin: "1234")
+    try Self.require(unlocked.user.id == owner.id, "unlocked_wrong_viewing_profile")
+    let viewing = StoredServerProfile(
+      serverId: device.serverId, name: device.name, baseURL: device.baseURL,
+      publicKeyFingerprint: device.publicKeyFingerprint, token: unlocked.token,
+      sessionId: unlocked.sessionId, expiresAt: unlocked.expiresAt, user: unlocked.user,
+      viewingSession: true)
+    _ = try await APIClient(profile: viewing).unlockManagement(password: configuration.password)
+    evidence.check("real_pin_unlock_and_separate_management_authority")
+    return viewing
+  }
+
   private func verifyServerInterruptions(
-    _ playback: PlaybackController, client: FullChainObservedClient, api: APIClient,
-    configuration: FullChainConfiguration, player: () -> VLCMediaPlayer?,
+    _ initialPlayback: PlaybackController, client initialClient: FullChainObservedClient,
+    api initialAPI: APIClient, configuration: FullChainConfiguration, device: StoredServerProfile,
+    view: NSView, engine: VLCPlaybackEngine, preferences: PlaybackPreferences,
+    outbox: PlaybackProgressOutbox, player: () -> VLCMediaPlayer?,
     evidence: FullChainEvidence
-  ) async throws {
+  ) async throws -> (
+    playback: PlaybackController, client: FullChainObservedClient, api: APIClient,
+    profile: StoredServerProfile
+  ) {
     let control = FullChainServerControl(url: configuration.controlURL, evidence: evidence)
+    var playback = initialPlayback
+    var client = initialClient
+    var api = initialAPI
+    var profile = initialAPI.profile
+    let presentation = initialPlayback.presentation
+
+    func unlockAndResume() async throws {
+      await playback.shutdown(saveProgress: false)
+      let unlocked = try await unlockViewingProfile(
+        device: device, configuration: configuration, evidence: evidence)
+      profile = unlocked
+      api = APIClient(profile: unlocked)
+      client = FullChainObservedClient(profile: unlocked, evidence: evidence)
+      var resumedPreferences = preferences
+      resumedPreferences.automaticResume = true
+      playback = PlaybackController(
+        client: client, presentation: presentation, engine: engine, preferences: resumedPreferences,
+        relayFactory: { url, fingerprint in
+          try LoopbackStreamRelay(
+            sourceURL: url, publicKeyFingerprint: fingerprint, authorizationToken: unlocked.token)
+        }, progressOutbox: outbox)
+      playback.attachVideoView(view)
+      await playback.start()
+    }
     do {
       evidence.phase = "MP4_owned_server_restart"
       playback.seek(to: 20_000)
@@ -662,6 +727,13 @@ final class PlaybackFullChainTests: XCTestCase {
         playback.isPlaying && (20_500...24_000).contains(playback.currentTimeMilliseconds)
       }
       let resumePosition = playback.currentTimeMilliseconds
+      playback.pause()
+      await outbox.flush()
+      try Self.require(
+        (10_001...29_999).contains(
+          try await api.playbackProgress(mediaId: presentation.mediaId).positionMilliseconds),
+        "pre_outage_actual_progress_not_saved")
+      playback.play()
       let priorFailures = client.failedAuthorizations
       try await control.command("stop", expectRunning: false)
       // A short fixture may already be buffered. A real explicit retry forces
@@ -676,17 +748,25 @@ final class PlaybackFullChainTests: XCTestCase {
       evidence.capture(controller: playback, label: "server_down_repeated_real_failures")
       try await control.command("restart", expectRunning: true)
       try await waitForSamePinnedServer(api: api, evidence: evidence)
-      try await waitUntil(playback, evidence: evidence, seconds: 45) {
-        playback.isPlaying && playback.recoveryMessage == nil
-          && playback.currentTimeMilliseconds >= resumePosition + 400
-          && playback.currentTimeMilliseconds <= resumePosition + 12_000
+      try await waitUntil(playback, evidence: evidence, seconds: 45, allowTerminalFailure: true) {
+        playback.errorMessage != nil && !playback.isPreparing && playback.recoveryMessage == nil
       }
+      try Self.require(
+        client.lastFailure?.httpStatus == 401,
+        "server_restart_did_not_end_volatile_viewing_session")
+      let expiredAttempts = client.authorizationAttempts
+      try await Task.sleep(for: .seconds(3))
+      try Self.require(
+        client.authorizationAttempts == expiredAttempts && !playback.isPlaying,
+        "expired_profile_kept_retrying_without_pin")
+      evidence.capture(controller: playback, label: "server_restart_requires_fresh_pin")
+      try await unlockAndResume()
       try await waitForOutput(playback, player: player, evidence: evidence)
       try Self.require(
-        playback.diagnostics.events.contains(where: { $0.kind == .recovered }),
-        "server_restart_recovery_not_recorded_after_movement")
-      evidence.capture(controller: playback, label: "same_pin_server_restart_recovered")
-      evidence.check("owned_server_restart_same_pin_real_retries_and_resume")
+        (resumePosition - 2_000...resumePosition + 12_000).contains(
+          playback.currentTimeMilliseconds),
+        "fresh_pin_resume_lost_actual_progress")
+      evidence.check("owned_server_restart_same_pin_requires_pin_then_resumes_real_output")
 
       evidence.phase = "MP4_persistent_server_outage_retry_budget"
       let attemptsBeforeOutage = client.authorizationAttempts
@@ -710,21 +790,22 @@ final class PlaybackFullChainTests: XCTestCase {
         "persistent_outage_kept_reconnecting_after_terminal_state")
       evidence.capture(controller: playback, label: "persistent_outage_terminal_no_more_requests")
       evidence.check("persistent_real_outage_stops_with_no_infinite_reconnect")
-      let terminalPosition = playback.currentTimeMilliseconds
       try await control.command("restart", expectRunning: true)
       try await waitForSamePinnedServer(api: api, evidence: evidence)
+      try await unlockAndResume()
       let progress = try await api.playbackProgress(mediaId: playback.presentation.mediaId)
       try Self.require(!progress.isCompleted, "server_outage_marked_media_finished")
-      evidence.phase = "MP4_user_retry_after_terminal_outage"
-      await playback.retry()
+      evidence.phase = "MP4_fresh_pin_after_terminal_outage"
       try await waitUntil(playback, evidence: evidence, seconds: 30) {
-        playback.isPlaying && playback.currentTimeMilliseconds >= terminalPosition + 400
-          && playback.currentTimeMilliseconds <= terminalPosition + 12_000
+        playback.isPlaying && playback.currentTimeMilliseconds >= progress.positionMilliseconds
+          && playback.currentTimeMilliseconds <= progress.positionMilliseconds + 12_000
       }
       try await waitForOutput(playback, player: player, evidence: evidence)
-      evidence.check("user_retry_after_real_terminal_outage_resumes_unfinished_media")
+      evidence.check("fresh_pin_after_real_terminal_outage_resumes_unfinished_media")
+      return (playback, client, api, profile)
     } catch {
       evidence.capture(controller: playback, label: "server_interruption_failure_before_restore")
+      await playback.shutdown(saveProgress: false)
       try? await control.command("restart", expectRunning: true)
       throw error
     }

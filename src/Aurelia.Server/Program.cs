@@ -116,6 +116,10 @@ builder.Services.AddSingleton(PlaybackTicketPolicy.Resolve(
     builder.Environment.IsEnvironment("Testing"),
     Environment.GetEnvironmentVariable("AURELIA_TEST_TICKET_LIFETIME_SECONDS")));
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<ProfileService>();
+builder.Services.AddSingleton<ProfileSessionStore>();
+builder.Services.AddSingleton<ProfilePinAttemptGuard>();
+builder.Services.AddSingleton<LocalOwnerPinRecovery>();
 builder.Services.AddScoped<LibraryAccessService>();
 builder.Services.AddSingleton<CatalogMutationGate>();
 builder.Services.AddSingleton<EditorArtworkStore>();
@@ -135,6 +139,7 @@ builder.Services.AddScoped<ImportPlanningService>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<PlaybackService>();
 builder.Services.AddScoped<PlaybackProgressService>();
+builder.Services.AddScoped<SceneNoteService>();
 builder.Services.AddScoped<MetadataService>();
 builder.Services.AddScoped<PresentationService>();
 builder.Services.AddScoped<SyncChangeService>();
@@ -168,8 +173,11 @@ builder.Services
         DeviceTokenAuthenticationHandler.SchemeName,
         _ => { });
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy("Owner", policy => policy.RequireRole(UserRole.Owner.ToString()))
-    .AddPolicy("Administrator", policy => policy.RequireRole(
+    .SetDefaultPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser().RequireClaim("aurelia_credential_kind", "profile").Build())
+    .AddPolicy("TrustedDevice", policy => policy.RequireAuthenticatedUser().RequireClaim("aurelia_credential_kind", "device"))
+    .AddPolicy("Owner", policy => policy.RequireClaim("aurelia_credential_kind", "profile").RequireRole(UserRole.Owner.ToString()))
+    .AddPolicy("Administrator", policy => policy.RequireClaim("aurelia_credential_kind", "profile").RequireRole(
         UserRole.Owner.ToString(),
         UserRole.Admin.ToString()));
 
@@ -262,12 +270,13 @@ app.Use(async (context, next) =>
     context.RequestServices.GetRequiredService<LibraryAccessService>().Bind(context);
     try
     {
+        ServerRequestGuard.RequireManagement(context, context.RequestServices.GetRequiredService<ProfileSessionStore>());
         await ServerRequestGuard.RequireApprovalAsync(context, context.RequestServices.GetRequiredService<AdministrationApprovalStore>());
         if (context.User.Identity?.IsAuthenticated == true && context.Request.Path.StartsWithSegments("/api/v1/streams"))
         {
             var limits = context.RequestServices.GetRequiredService<ServerConfigurationStore>().Current;
             using var lease = context.RequestServices.GetRequiredService<ActiveStreamRegistry>().Enter(
-                context.User.RequireUserId(), context.User.RequireSessionId(), limits.GlobalStreamLimit, limits.UserStreamLimit, context.RequestAborted);
+                context.User.RequireUserId(), context.User.RequireProfileSessionId(), limits.GlobalStreamLimit, limits.UserStreamLimit, context.RequestAborted);
             context.RequestAborted = lease.Token;
             context.Items["Aurelia.StreamLease"] = lease;
             await next(context);
@@ -300,6 +309,8 @@ app.MapAureliaApi();
 app.MapServerManagement();
 app.MapMediaEditing();
 app.MapImportPlanning();
+app.MapSceneNotes();
+app.MapProfiles();
 
 try
 {

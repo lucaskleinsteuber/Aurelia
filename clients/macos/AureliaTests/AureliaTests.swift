@@ -28,7 +28,7 @@ struct AureliaTests {
       APIClient.requiresAdministrationApproval(
         path: "/api/v1/server/sessions/123", method: "DELETE"))
     #expect(
-      !APIClient.requiresAdministrationApproval(path: "/api/v1/auth/sessions/123", method: "DELETE")
+      APIClient.requiresAdministrationApproval(path: "/api/v1/auth/sessions/123", method: "DELETE")
     )
     #expect(
       !APIClient.requiresAdministrationApproval(
@@ -41,6 +41,11 @@ struct AureliaTests {
         path: "/api/v1/server/operations/123/confirm", method: "POST"))
     #expect(
       !APIClient.requiresAdministrationApproval(path: "/api/v1/server/settings", method: "GET"))
+    #expect(APIClient.requiresAdministrationApproval(path: "/api/v1/media/123", method: "DELETE"))
+    #expect(APIClient.requiresAdministrationApproval(path: "/api/v1/auth/pairings", method: "POST"))
+    #expect(
+      !APIClient.requiresAdministrationApproval(
+        path: "/api/v1/media/123/notes/456?revision=1", method: "DELETE"))
   }
   @Test
   func seriesInformationUsesYearOneCountryAndActualEpisodes() {

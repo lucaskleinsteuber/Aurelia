@@ -156,9 +156,8 @@ public sealed class PresentationApiTests
             Assert.Equal(2, (await SendAsync<HomeResponse>(client, owner.Token, "/api/v1/home")).ContinueWatching.Count);
 
             await SendAsync<UserSummary>(client, owner.Token, "/api/v1/users", HttpMethod.Post,
-                new CreateUserRequest("viewer", "a secure viewer password", UserRole.User));
-            using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
-                new LoginRequest("viewer", "a secure viewer password", "Viewer Mac"), ApiTestClient.JsonOptions);
+                new CreateUserRequest("viewer", "a secure viewer password", UserRole.User, ApiTestClient.TestPin));
+            using var login = await ApiTestClient.LoginAsync(client, new LoginRequest("viewer", "a secure viewer password", "Viewer Mac"));
             login.EnsureSuccessStatusCode();
             var viewer = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
             Assert.Empty((await SendAsync<HomeResponse>(client, viewer.Token, "/api/v1/home")).ContinueWatching);

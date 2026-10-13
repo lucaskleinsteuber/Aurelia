@@ -8,9 +8,10 @@ final class AureliaIntegrationTests: XCTestCase {
     let environment = ProcessInfo.processInfo.environment
     guard let address = environment["AURELIA_TEST_SERVER_URL"],
       let pairingCode = environment["AURELIA_TEST_PAIRING_CODE"],
-      let expectedFingerprint = environment["AURELIA_TEST_SERVER_FINGERPRINT"]
+      let expectedFingerprint = environment["AURELIA_TEST_SERVER_FINGERPRINT"],
+      let pin = environment["AURELIA_TEST_PROFILE_PIN"], ProfilePIN.isValid(pin)
     else {
-      throw XCTSkip("Live server variables were not supplied.")
+      throw XCTSkip("Isolated live-server variables and a valid profile PIN were not supplied.")
     }
 
     let baseURL = try APIClient.normalizedServerURL(address)
@@ -32,11 +33,52 @@ final class AureliaIntegrationTests: XCTestCase {
       // Expected: URLSession cancels the TLS challenge before any API data is accepted.
     }
 
-    let profile = try await APIClient.pair(
+    let device = try await APIClient.pair(
       inspected: inspected,
       code: pairingCode,
-      deviceName: "Build 5 Integration Test")
-    let client = APIClient(profile: profile)
+      deviceName: "Synthetic Integration Test")
+    let paired = APIClient(profile: device)
+    var viewing: StoredServerProfile?
+    do {
+      do {
+        _ = try await paired.movies()
+        XCTFail("A paired device must not read the catalog before PIN unlock.")
+      } catch let error as APIClientError {
+        XCTAssertEqual(error.httpStatus, 403)
+      }
+      let profileID =
+        environment["AURELIA_TEST_PROFILE_ID"].flatMap(UUID.init(uuidString:))
+        ?? device.user?.id
+      let selectedID = try XCTUnwrap(profileID, "The isolated profile identity is required.")
+      let unlocked = try await paired.unlockProfile(id: selectedID, pin: pin)
+      XCTAssertEqual(unlocked.user.id, selectedID)
+      let profile = StoredServerProfile(
+        serverId: device.serverId, name: device.name, baseURL: device.baseURL,
+        publicKeyFingerprint: device.publicKeyFingerprint, token: unlocked.token,
+        sessionId: unlocked.sessionId, expiresAt: unlocked.expiresAt, user: unlocked.user,
+        viewingSession: true)
+      viewing = profile
+      let client = APIClient(profile: profile)
+      try await verifyCatalogAndPlayback(client: client, profile: profile)
+      try await client.logout()
+      do {
+        _ = try await client.currentUser()
+        XCTFail("Ending a viewing session must retire its token.")
+      } catch let error as APIClientError {
+        XCTAssertEqual(error.httpStatus, 401)
+      }
+      _ = try await paired.watchingProfiles()
+      try await paired.disconnectPairedDevice()
+    } catch {
+      if let viewing { try? await APIClient(profile: viewing).endProfileSession() }
+      try? await paired.disconnectPairedDevice()
+      throw error
+    }
+  }
+
+  private func verifyCatalogAndPlayback(client: APIClient, profile: StoredServerProfile)
+    async throws
+  {
     async let moviesRequest = client.movies()
     async let seriesRequest = client.series()
     let (movies, _) = try await (moviesRequest, seriesRequest)
@@ -65,6 +107,5 @@ final class AureliaIntegrationTests: XCTestCase {
       XCTAssertEqual(loadedProgress, stored)
       try await client.revokePlayback(id: playback.id)
     }
-    try await client.logout()
   }
 }

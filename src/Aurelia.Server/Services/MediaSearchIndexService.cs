@@ -47,8 +47,13 @@ public sealed class MediaSearchIndexService(AureliaDbContext database)
         await using var count = connection.CreateCommand();
         const string visibility = """
             AND ($unrestricted = 1 OR EXISTS (
-                SELECT 1 FROM MediaItems m JOIN UserLibraryGrants g ON g.LibraryRootId = m.LibraryRootId
-                WHERE lower(replace(m.Id, '-', '')) = MediaSearchIndex.MediaId AND g.UserId = $user))
+                SELECT 1 FROM MediaItems m
+                LEFT JOIN MediaItems p ON p.Id = m.ParentId
+                LEFT JOIN MediaItems gp ON gp.Id = p.ParentId
+                WHERE lower(replace(m.Id, '-', '')) = MediaSearchIndex.MediaId AND (
+                    ($mode = 'LegacyLibraries' AND EXISTS (SELECT 1 FROM UserLibraryGrants g WHERE g.LibraryRootId = m.LibraryRootId AND g.UserId = $user))
+                    OR ($mode = 'SelectedTitles' AND EXISTS (SELECT 1 FROM UserTitleGrants g WHERE g.UserId = $user
+                        AND g.MediaItemId IN (m.Id, m.ParentId, p.ParentId, gp.ParentId))))))
             """;
         count.CommandText = "SELECT count(*) FROM MediaSearchIndex WHERE MediaSearchIndex MATCH $query " + visibility;
         AddAccessParameters(count);
@@ -89,7 +94,8 @@ public sealed class MediaSearchIndexService(AureliaDbContext database)
     {
         foreach (var (name, value) in new[]
                  {
-                     ("$unrestricted", (object)(database.AccessUserId == null || database.AccessIsOwner ? 1 : 0)),
+                     ("$unrestricted", (object)(database.AccessUserId == null || database.AccessWholeCatalog ? 1 : 0)),
+                     ("$mode", (object)database.AccessMode.ToString()),
                      ("$user", (object)(database.AccessUserId?.ToString().ToUpperInvariant() ?? string.Empty)),
                  })
         {

@@ -42,12 +42,14 @@ public sealed record UserSummary(
     Guid Id,
     string Username,
     UserRole Role,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    ProfileAccessMode AccessMode = ProfileAccessMode.LegacyLibraries);
 
 public sealed record CreateUserRequest(
     string Username,
     string Password,
-    UserRole Role);
+    UserRole Role,
+    string? Pin = null);
 
 public sealed record ChangeUserRoleRequest(UserRole Role);
 

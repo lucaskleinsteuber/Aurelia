@@ -15,7 +15,8 @@ public sealed class PlaybackService(
     AureliaDbContext database,
     TokenService tokenService,
     PlaybackProgressService progressService,
-    PlaybackTicketPolicy? ticketPolicy = null)
+    PlaybackTicketPolicy? ticketPolicy = null,
+    ProfileSessionStore? profiles = null)
 {
     private const int CleanupBatchSize = 100;
 
@@ -23,7 +24,8 @@ public sealed class PlaybackService(
         Guid userId,
         Guid deviceSessionId,
         Guid mediaId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? profileSessionId = null)
     {
         var now = DateTimeOffset.UtcNow;
         await PruneExpiredAsync(now, cancellationToken);
@@ -32,7 +34,7 @@ public sealed class PlaybackService(
             .Include(candidate => candidate.User)
             .SingleOrDefaultAsync(
                 candidate => candidate.Id == deviceSessionId
-                    && candidate.UserId == userId
+                    && (profileSessionId != null || candidate.UserId == userId)
                     && candidate.RevokedAt == null
                     && candidate.ExpiresAt > now,
                 cancellationToken)
@@ -40,6 +42,9 @@ public sealed class PlaybackService(
                 "invalid_session",
                 "The device session is no longer valid.",
                 StatusCodes.Status401Unauthorized);
+        if (profileSessionId is { } profileId && profiles?.IsActive(profileId, deviceSessionId, userId) != true)
+            throw new PlaybackException("invalid_profile_session", "Unlock your profile again.", 401);
+        var activeUser = await database.Users.SingleAsync(user => user.Id == userId && user.IsEnabled, cancellationToken);
 
         var media = await database.MediaItems
             .Include(candidate => candidate.LibraryRoot)
@@ -69,10 +74,11 @@ public sealed class PlaybackService(
             Id = Guid.NewGuid(),
             MediaItem = media,
             MediaItemId = media.Id,
-            User = session.User,
-            UserId = session.UserId,
+            User = activeUser,
+            UserId = userId,
             DeviceSession = session,
             DeviceSessionId = session.Id,
+            ProfileSessionId = profileSessionId,
             TokenHash = tokenService.Hash(rawToken),
             CreatedAt = now,
             ExpiresAt = expiresAt,
@@ -114,7 +120,8 @@ public sealed class PlaybackService(
         string rawToken,
         Guid userId,
         Guid deviceSessionId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? profileSessionId = null)
     {
         if (!IsValidToken(rawToken))
         {
@@ -122,6 +129,7 @@ public sealed class PlaybackService(
         }
 
         var now = DateTimeOffset.UtcNow;
+        if (profileSessionId is { } profileId && profiles?.IsActive(profileId, deviceSessionId, userId) != true) return null;
         var tokenHash = tokenService.Hash(rawToken);
         var ticket = await database.PlaybackTickets
             .AsNoTracking()
@@ -132,15 +140,14 @@ public sealed class PlaybackService(
                 candidate => candidate.TokenHash == tokenHash
                     && candidate.UserId == userId
                     && candidate.DeviceSessionId == deviceSessionId
+                    && candidate.ProfileSessionId == profileSessionId
                     && candidate.RevokedAt == null
                     && candidate.ExpiresAt > now
                     && candidate.DeviceSession.RevokedAt == null
                     && candidate.DeviceSession.ExpiresAt > now
-                    && candidate.DeviceSession.UserId == candidate.UserId
                     && candidate.DeviceSession.User.IsEnabled
-                    && (candidate.DeviceSession.User.Role == UserRole.Owner
-                        || database.UserLibraryGrants.Any(grant => grant.UserId == userId
-                            && grant.LibraryRootId == candidate.MediaItem.LibraryRootId)),
+                    && candidate.User.IsEnabled
+                    && database.MediaItems.Any(item => item.Id == candidate.MediaItemId),
                 cancellationToken);
         if (ticket is null || ticket.MediaItem.Kind == MediaKind.Series)
         {

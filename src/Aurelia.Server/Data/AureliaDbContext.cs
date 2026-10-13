@@ -9,7 +9,11 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 {
     public Guid? AccessUserId { get; set; }
     public bool AccessIsOwner { get; set; }
+    public ProfileAccessMode AccessMode { get; set; }
+    public bool AccessWholeCatalog => AccessIsOwner || AccessMode == ProfileAccessMode.EntireLibrary;
     public DbSet<UserLibraryGrant> UserLibraryGrants => Set<UserLibraryGrant>();
+    public DbSet<UserTitleGrant> UserTitleGrants => Set<UserTitleGrant>();
+    public DbSet<ServerAdministrationCredential> AdministrationCredentials => Set<ServerAdministrationCredential>();
     public DbSet<ServerUser> Users => Set<ServerUser>();
 
     public DbSet<DeviceSession> DeviceSessions => Set<DeviceSession>();
@@ -35,6 +39,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
 
     public DbSet<PlaybackProgress> PlaybackProgress => Set<PlaybackProgress>();
+    public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
 
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
     public DbSet<MediaCredit> MediaCredits => Set<MediaCredit>();
@@ -59,6 +64,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     {
         foreach (var entry in ChangeTracker.Entries<MediaMetadata>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
             entry.Entity.EditorRevision++;
+        foreach (var entry in ChangeTracker.Entries<SceneNote>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+            entry.Entity.Revision = entry.State == EntityState.Added ? 1 : checked(entry.Entity.Revision + 1);
         var changes = new HashSet<(SyncChangeArea Area, Guid? UserId, Guid? MediaId)>();
         var affectedLibraries = new HashSet<Guid>();
         var changedCollections = new HashSet<Guid>();
@@ -108,6 +115,9 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 case PlaybackProgress progress:
                     changes.Add((SyncChangeArea.UserState, progress.UserId, progress.MediaItemId));
                     break;
+                case SceneNote note:
+                    changes.Add((SyncChangeArea.UserState, note.UserId, note.MediaItemId));
+                    break;
             }
         }
 
@@ -115,17 +125,21 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         // media row. Target resets to the users who had access before the commit;
         // do not broadcast hidden libraries or collection names/counts globally.
         if (affectedLibraries.Count > 0)
-            foreach (var userId in UserLibraryGrants.Where(grant => affectedLibraries.Contains(grant.LibraryRootId))
-                .Select(grant => grant.UserId).Distinct().ToList())
+            foreach (var userId in Users.Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+                || user.LibraryGrants.Any(grant => affectedLibraries.Contains(grant.LibraryRootId))
+                || UserTitleGrants.Any(grant => grant.UserId == user.Id && affectedLibraries.Contains(grant.MediaItem.LibraryRootId)))
+                .Select(user => user.Id).ToList())
             {
                 changes.Add((SyncChangeArea.Libraries, userId, null));
                 changes.Add((SyncChangeArea.Catalog, userId, null));
             }
         if (changedCollections.Count > 0)
-            foreach (var userId in UserLibraryGrants.Where(grant => MediaCollectionMembers.IgnoreQueryFilters()
-                    .Any(member => changedCollections.Contains(member.CollectionId)
-                        && member.MediaItem.LibraryRootId == grant.LibraryRootId))
-                .Select(grant => grant.UserId).Distinct().ToList())
+            foreach (var userId in Users.Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+                || user.LibraryGrants.Any(grant => MediaCollectionMembers.IgnoreQueryFilters().Any(member => changedCollections.Contains(member.CollectionId)
+                    && member.MediaItem.LibraryRootId == grant.LibraryRootId))
+                || UserTitleGrants.Any(grant => grant.UserId == user.Id && MediaCollectionMembers.IgnoreQueryFilters().Any(member =>
+                    changedCollections.Contains(member.CollectionId) && member.MediaItemId == grant.MediaItemId)))
+                .Select(user => user.Id).Distinct().ToList())
                 changes.Add((SyncChangeArea.Collections, userId, null));
 
         var now = DateTimeOffset.UtcNow;
@@ -143,10 +157,22 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<LibraryImportAssignment>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
-        modelBuilder.Entity<LibraryImportPreview>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<ServerAdministrationCredential>(entity =>
+        {
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.PasswordHash).HasMaxLength(512).IsRequired();
+        });
+        modelBuilder.Entity<UserTitleGrant>(entity =>
+        {
+            entity.HasKey(grant => new { grant.UserId, grant.MediaItemId });
+            entity.HasOne(grant => grant.User).WithMany().HasForeignKey(grant => grant.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(grant => grant.MediaItem).WithMany().HasForeignKey(grant => grant.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<UserTitleGrant>().HasQueryFilter(grant => AccessUserId == null || AccessIsOwner || grant.UserId == AccessUserId);
+        modelBuilder.Entity<LibraryImportAssignment>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportPreview>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
         modelBuilder.Entity<LibraryImportAssignment>(entity =>
         {
             entity.HasKey(item => item.Id);
@@ -175,8 +201,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 .HasForeignKey(grant => grant.LibraryRootId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<UserLibraryGrant>().HasQueryFilter(grant => AccessUserId == null || AccessIsOwner || grant.UserId == AccessUserId);
-        modelBuilder.Entity<MediaExclusion>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<MediaExclusion>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
         modelBuilder.Entity<LibraryMutation>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner || item.UserId == AccessUserId);
         modelBuilder.Entity<MediaExclusion>(entity =>
         {
@@ -192,16 +218,21 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(item => item.State).HasMaxLength(32);
             entity.Property(item => item.Error).HasMaxLength(512);
         });
-        modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == library.Id));
-        modelBuilder.Entity<MediaItem>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
-        modelBuilder.Entity<LibraryScan>().HasQueryFilter(scan => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == scan.LibraryRootId));
-        modelBuilder.Entity<LibraryDiscovery>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
-        modelBuilder.Entity<LibraryImportReview>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
-            || UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId));
+        modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessWholeCatalog
+            || (AccessMode == ProfileAccessMode.LegacyLibraries && UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == library.Id))
+            || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId && grant.MediaItem.LibraryRootId == library.Id)));
+        modelBuilder.Entity<MediaItem>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || (AccessMode == ProfileAccessMode.LegacyLibraries && UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId))
+            || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId
+                && (grant.MediaItemId == item.Id || grant.MediaItemId == item.ParentId
+                    || MediaItems.IgnoreQueryFilters().Any(parent => parent.Id == item.ParentId
+                        && (parent.ParentId == grant.MediaItemId || MediaItems.IgnoreQueryFilters().Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId)))))));
+        modelBuilder.Entity<LibraryScan>().HasQueryFilter(scan => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == scan.LibraryRootId));
+        modelBuilder.Entity<LibraryDiscovery>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
+        modelBuilder.Entity<LibraryImportReview>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
+            || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
         modelBuilder.Entity<LibraryScanIssue>().HasQueryFilter(issue => AccessUserId == null || AccessIsOwner
             || LibraryScans.Any(scan => scan.Id == issue.LibraryScanId));
         modelBuilder.Entity<MediaMetadata>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
@@ -213,7 +244,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         modelBuilder.Entity<MetadataReview>().HasQueryFilter(item => AccessUserId == null || AccessIsOwner
             || MediaItems.Any(media => media.Id == item.MediaItemId));
         modelBuilder.Entity<MetadataJob>().HasQueryFilter(job => AccessUserId == null || AccessIsOwner
-            || (job.LibraryRootId != null && LibraryRoots.Any(root => root.Id == job.LibraryRootId))
+            || (AccessMode != ProfileAccessMode.SelectedTitles && job.LibraryRootId != null && LibraryRoots.Any(root => root.Id == job.LibraryRootId))
             || (job.MediaItemId != null && MediaItems.Any(media => media.Id == job.MediaItemId)));
         modelBuilder.Entity<MediaCollectionMember>().HasQueryFilter(member => AccessUserId == null || AccessIsOwner
             || MediaItems.Any(media => media.Id == member.MediaItemId));
@@ -221,9 +252,20 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             || (ticket.UserId == AccessUserId && MediaItems.Any(media => media.Id == ticket.MediaItemId)));
         modelBuilder.Entity<PlaybackProgress>().HasQueryFilter(progress => AccessUserId == null
             || (progress.UserId == AccessUserId && MediaItems.Any(media => media.Id == progress.MediaItemId)));
+        modelBuilder.Entity<SceneNote>().HasQueryFilter(note => AccessUserId == null
+            || (note.UserId == AccessUserId && MediaItems.Any(media => media.Id == note.MediaItemId)));
+        modelBuilder.Entity<SceneNote>(entity =>
+        {
+            entity.HasKey(note => note.Id);
+            entity.Property(note => note.Text).HasMaxLength(2000).IsRequired();
+            entity.Property(note => note.Revision).IsConcurrencyToken();
+            entity.HasIndex(note => new { note.UserId, note.MediaItemId, note.StartMilliseconds });
+            entity.HasOne(note => note.User).WithMany().HasForeignKey(note => note.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(note => note.MediaItem).WithMany().HasForeignKey(note => note.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<UserFavorite>().HasQueryFilter(favorite => AccessUserId == null
             || (favorite.UserId == AccessUserId && MediaItems.Any(media => media.Id == favorite.MediaItemId)));
-        modelBuilder.Entity<SyncChange>().HasQueryFilter(change => AccessUserId == null || AccessIsOwner
+        modelBuilder.Entity<SyncChange>().HasQueryFilter(change => AccessUserId == null || AccessWholeCatalog
             || (change.UserId == AccessUserId && change.MediaItemId == null)
             || (change.MediaItemId != null && MediaItems.Any(media => media.Id == change.MediaItemId)));
         var dateTimeOffsetConverter = new ValueConverter<DateTimeOffset, long>(
@@ -239,6 +281,9 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(user => user.Username).HasMaxLength(64).IsRequired();
             entity.Property(user => user.NormalizedUsername).HasMaxLength(64).IsRequired();
             entity.Property(user => user.PasswordHash).HasMaxLength(512).IsRequired();
+            entity.Property(user => user.PinHash).HasMaxLength(512);
+            entity.Property(user => user.AccessMode).HasConversion<string>().HasMaxLength(32);
+            entity.Property(user => user.AccessRevision).IsConcurrencyToken();
             entity.Property(user => user.Role).HasConversion<string>().HasMaxLength(16);
             entity.Property(user => user.CreatedAt).HasConversion(dateTimeOffsetConverter);
             entity.HasIndex(user => user.NormalizedUsername).IsUnique();

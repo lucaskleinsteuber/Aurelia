@@ -19,12 +19,11 @@ public sealed class SyncHistoryTests
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
         using var create = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
-            new CreateUserRequest("second-owner", "correct horse battery staple", UserRole.Owner));
+            new CreateUserRequest("second-owner", "correct horse battery staple", UserRole.Owner, ApiTestClient.TestPin));
         using var created = await ApiTestClient.SendAsync(client, create);
         created.EnsureSuccessStatusCode();
         var target = await ApiTestClient.ReadAsync<UserSummary>(created);
-        using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
-            new LoginRequest("second-owner", "correct horse battery staple", "Synthetic"), ApiTestClient.JsonOptions);
+        using var login = await ApiTestClient.LoginAsync(client, new LoginRequest("second-owner", "correct horse battery staple", "Synthetic"));
         login.EnsureSuccessStatusCode();
         var session = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
         await using var scope = factory.Services.CreateAsyncScope();
@@ -40,6 +39,8 @@ public sealed class SyncHistoryTests
         demoted.EnsureSuccessStatusCode();
         var after = await changes.ChangesAsync(target.Id, false, before.Cursor, 0, before.Generation, CancellationToken.None);
         Assert.Contains(SyncChangeArea.Catalog, after.ChangedAreas);
+        using var reauthentication = await ApiTestClient.LoginAsync(client, new LoginRequest("second-owner", "correct horse battery staple", "Synthetic updated role"));
+        session = await ApiTestClient.ReadAsync<AuthenticationResponse>(reauthentication);
         using var conditional = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/home", session.Token);
         conditional.Headers.TryAddWithoutValidation("If-None-Match", tag);
         using var changed = await client.SendAsync(conditional);

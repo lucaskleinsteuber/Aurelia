@@ -55,6 +55,7 @@ public static class LibraryCommandClient
 
             try
             {
+                await CommandClientSecurity.UnlockViewingAndManagementAsync(client, authentication, commandLine, password, cancellationToken);
                 return commandLine.Action switch
                 {
                     "add" => await AddAsync(client, commandLine, password, cancellationToken),
@@ -67,10 +68,7 @@ public static class LibraryCommandClient
             }
             finally
             {
-                using var logout = await client.PostAsync(
-                    "/api/v1/auth/logout",
-                    content: null,
-                    CancellationToken.None);
+                await CommandClientSecurity.EndCommandSessionAsync(client, authentication);
             }
         }
         catch (Exception exception) when (exception is HttpRequestException

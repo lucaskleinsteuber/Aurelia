@@ -5,6 +5,7 @@ enum APIClientError: LocalizedError, Equatable {
   case invalidAddress
   case insecureAddress
   case invalidResponse
+  case supersededSnapshot
   case serverIdentityMismatch
   case serverRejected(code: String, message: String)
   case httpFailure(status: Int, retryAfter: TimeInterval?, code: String?, message: String?)
@@ -21,7 +22,9 @@ enum APIClientError: LocalizedError, Equatable {
 
   var isAuthenticationFailure: Bool { httpStatus == 401 || httpStatus == 403 }
   var isRetryableTransient: Bool {
-    guard let status = httpStatus else { return self == .invalidResponse }
+    guard let status = httpStatus else {
+      return self == .invalidResponse || self == .supersededSnapshot
+    }
     return status == 408 || status == 429 || status >= 500
   }
 
@@ -40,6 +43,8 @@ enum APIClientError: LocalizedError, Equatable {
       "Aurelia requires an HTTPS server address."
     case .invalidResponse:
       "The server returned an invalid response."
+    case .supersededSnapshot:
+      "A newer library update replaced this request."
     case .serverIdentityMismatch:
       "The server identity does not match the paired server."
     case .serverRejected(_, let message):
@@ -186,6 +191,100 @@ struct APIClient: Sendable {
     try await get("/api/v1/server/info")
   }
 
+  func watchingProfiles() async throws -> ProfilePickerResponse {
+    try await get("/api/v1/profiles")
+  }
+  func initializeProfiles(password: String, pin: String) async throws {
+    struct Payload: Encodable {
+      let password: String
+      let pin: String
+    }
+    _ = try await perform(
+      path: "/api/v1/profiles/initialize", method: "POST",
+      body: JSONEncoder().encode(Payload(password: password, pin: pin)))
+  }
+  func unlockProfile(id: UUID, pin: String) async throws -> ProfileSessionResponse {
+    struct Payload: Encodable { let pin: String }
+    return try Self.decode(
+      ProfileSessionResponse.self,
+      from: await perform(
+        path: "/api/v1/profiles/\(id.uuidString)/unlock", method: "POST",
+        body: JSONEncoder().encode(Payload(pin: pin))))
+  }
+  func endProfileSession() async throws {
+    _ = try await perform(path: "/api/v1/profile/end", method: "POST")
+  }
+  func disconnectPairedDevice() async throws {
+    _ = try await perform(path: "/api/v1/device", method: "DELETE")
+  }
+  func changeProfilePIN(current: String, new: String) async throws {
+    struct Payload: Encodable {
+      let currentPin: String
+      let newPin: String
+    }
+    _ = try await perform(
+      path: "/api/v1/profile/pin", method: "PUT",
+      body: JSONEncoder().encode(Payload(currentPin: current, newPin: new)))
+  }
+  func resetProfilePIN(id: UUID, pin: String) async throws {
+    struct Payload: Encodable { let pin: String }
+    _ = try await perform(
+      path: "/api/v1/users/\(id.uuidString)/pin", method: "PUT",
+      body: JSONEncoder().encode(Payload(pin: pin)))
+  }
+  func unlockManagement(password: String) async throws -> String {
+    struct Payload: Encodable { let password: String }
+    struct Response: Decodable { let expiresAt: String }
+    return try Self.decode(
+      Response.self,
+      from: await perform(
+        path: "/api/v1/management/unlock", method: "POST",
+        body: JSONEncoder().encode(Payload(password: password)))
+    ).expiresAt
+  }
+  func lockManagement() async throws {
+    _ = try await perform(path: "/api/v1/management/lock", method: "POST")
+  }
+  func titleAccess(user: UUID) async throws -> ProfileTitleAccess {
+    try await get("/api/v1/users/\(user.uuidString)/titles")
+  }
+  func setTitleAccess(user: UUID, access: ProfileTitleAccess) async throws -> ProfileTitleAccess {
+    try Self.decode(
+      ProfileTitleAccess.self,
+      from: await perform(
+        path: "/api/v1/users/\(user.uuidString)/titles", method: "PUT",
+        body: JSONEncoder().encode(access)))
+  }
+
+  func sceneNotes(mediaId: UUID) async throws -> [SceneNote] {
+    try await get("/api/v1/media/\(mediaId.uuidString)/notes")
+  }
+
+  func saveSceneNote(
+    mediaId: UUID, id: UUID, start: Int64, end: Int64?, text: String, revision: Int64
+  ) async throws -> SceneNote {
+    struct Payload: Encodable {
+      let startMilliseconds: Int64
+      let endMilliseconds: Int64?
+      let text: String
+      let revision: Int64
+    }
+    return try Self.decode(
+      SceneNote.self,
+      from: await perform(
+        path: "/api/v1/media/\(mediaId.uuidString)/notes/\(id.uuidString)",
+        method: "PUT",
+        body: JSONEncoder().encode(
+          Payload(startMilliseconds: start, endMilliseconds: end, text: text, revision: revision))))
+  }
+
+  func removeSceneNote(mediaId: UUID, note: SceneNote) async throws {
+    _ = try await perform(
+      path:
+        "/api/v1/media/\(mediaId.uuidString)/notes/\(note.id.uuidString)?revision=\(note.revision)",
+      method: "DELETE")
+  }
+
   func serverSettings() async throws -> ServerConfigurationResponse {
     try await get("/api/v1/server/settings")
   }
@@ -207,15 +306,22 @@ struct APIClient: Sendable {
     _ = try await perform(path: "/api/v1/server/sessions/\(id.uuidString)", method: "DELETE")
   }
 
-  func createUser(username: String, password: String, role: UserRole) async throws {
+  func createUser(username: String, pin: String, role: UserRole) async throws {
     struct Payload: Encodable {
       let username: String
       let password: String
       let role: UserRole
+      let pin: String
     }
     _ = try await perform(
       path: "/api/v1/users", method: "POST",
-      body: JSONEncoder().encode(Payload(username: username, password: password, role: role)))
+      body: JSONEncoder().encode(Payload(username: username, password: "", role: role, pin: pin)))
+  }
+  func setProfileEnabled(id: UUID, enabled: Bool) async throws {
+    struct Payload: Encodable { let isEnabled: Bool }
+    _ = try await perform(
+      path: "/api/v1/users/\(id.uuidString)/enabled", method: "PUT",
+      body: JSONEncoder().encode(Payload(isEnabled: enabled)))
   }
   func updateUserAccess(id: UUID, enabled: Bool, libraries: [UUID]) async throws {
     struct Payload: Encodable {
@@ -846,6 +952,9 @@ struct APIClient: Sendable {
     timeout: TimeInterval = 15
   ) async throws -> Data {
     #if DEBUG
+      if await CinemaUITestFixture.enabled, path.contains("/notes") {
+        return try await CinemaUITestFixture.sceneNotes(path: path, method: method, body: body)
+      }
       if await CinemaUITestFixture.enabled, method == "GET",
         path.hasPrefix("/api/v1/artwork/") || path.contains("/editor/artwork/")
       {
@@ -869,9 +978,12 @@ struct APIClient: Sendable {
     var headers: [String: String] = [:]
     if Self.requiresAdministrationApproval(path: path, method: method) {
       let libraryReset = path == "/api/v1/libraries/reset"
+      let titleRemoval =
+        method == "DELETE" && path.hasPrefix("/api/v1/media/")
+        && path.split(separator: "/").count == 4
       guard
         profile.user?.role == .owner
-          || (libraryReset && profile.user?.role.canManageLibraries == true)
+          || ((libraryReset || titleRemoval) && profile.user?.role.canManageLibraries == true)
       else {
         throw APIClientError.serverRejected(
           code: "owner_required", message: "Only an owner may change global server settings.")
@@ -888,7 +1000,7 @@ struct APIClient: Sendable {
         action: "\(method) \(path)", payloadHash: hash, password: password)
       let (approvalData, _, _) = try await Self.request(
         baseURL: profile.baseURL,
-        path: libraryReset ? "/api/v1/libraries/reset/approval" : "/api/v1/server/approval",
+        path: "/api/v1/management/approval",
         method: "POST", token: profile.token, body: JSONEncoder().encode(confirmation),
         trustMode: .pinned(profile.publicKeyFingerprint))
       headers["X-Aurelia-Approval"] = try Self.decode(Approval.self, from: approvalData).token
@@ -918,6 +1030,13 @@ struct APIClient: Sendable {
     }
     if normalized.contains("/exclusions/") { return false }
     if normalized == "/api/v1/libraries/reset" { return true }
+    if normalized == "/api/v1/auth/pairings" { return true }
+    if method == "DELETE", normalized.hasPrefix("/api/v1/auth/sessions/") { return true }
+    if method == "DELETE", normalized.hasPrefix("/api/v1/media/"),
+      normalized.split(separator: "/").count == 4
+    {
+      return true
+    }
     return normalized == "/api/v1/server/settings"
       || normalized.hasPrefix("/api/v1/server/operations")
       || normalized.hasPrefix("/api/v1/server/sessions")

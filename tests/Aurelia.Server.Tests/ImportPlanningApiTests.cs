@@ -331,17 +331,17 @@ public sealed class ImportPlanningApiTests
         using var fixture = await Fixture.CreateAsync();
         fixture.Touch("Film.mkv");
         var root = await fixture.LibraryAsync(); var preview = await fixture.AnalyzeAsync(root.Id);
-        var admin = await fixture.RequestAsync<UserSummary>(HttpMethod.Post, "/api/v1/users", new CreateUserRequest("restricted-admin", "long isolated test password", UserRole.Admin));
+        var admin = await fixture.RequestAsync<UserSummary>(HttpMethod.Post, "/api/v1/users", new CreateUserRequest("restricted-admin", "long isolated test password", UserRole.Admin, ApiTestClient.TestPin));
         var login = await fixture.RequestAsync<AuthenticationResponse>(HttpMethod.Post, "/api/v1/auth/login", new LoginRequest(admin.Username, "long isolated test password", "Restricted Mac"));
         foreach (var route in new[] { $"/api/v1/libraries/{root.Id}/import-assignments", $"{Fixture.PreviewPath(root.Id, preview)}/items" })
         {
             using var request = ApiTestClient.Authorized(HttpMethod.Get, route, login.Token);
-            using var response = await fixture.Client.SendAsync(request); Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            using var response = await fixture.Client.SendAsync(request); Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
         using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/libraries/{root.Id}/import-preview", login.Token))
-        using (var response = await fixture.Client.SendAsync(request)) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using (var response = await fixture.Client.SendAsync(request)) Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"{Fixture.PreviewPath(root.Id, preview)}/confirm", login.Token, new ConfirmImportPreviewRequest(preview.Revision)))
-        using (var response = await fixture.Client.SendAsync(request)) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using (var response = await fixture.Client.SendAsync(request)) Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

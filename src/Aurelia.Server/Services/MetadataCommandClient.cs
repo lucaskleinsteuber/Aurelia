@@ -37,6 +37,7 @@ public static class MetadataCommandClient
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authentication.Token);
             try
             {
+                await CommandClientSecurity.UnlockViewingAndManagementAsync(client, authentication, commandLine, password, cancellationToken);
                 return commandLine.Action switch
                 {
                     "status" => await StatusAsync(client, cancellationToken),
@@ -49,7 +50,7 @@ public static class MetadataCommandClient
             }
             finally
             {
-                using var logout = await client.PostAsync("/api/v1/auth/logout", null, CancellationToken.None);
+                await CommandClientSecurity.EndCommandSessionAsync(client, authentication);
             }
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidOperationException or JsonException or IOException)

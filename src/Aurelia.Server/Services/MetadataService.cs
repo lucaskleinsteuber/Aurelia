@@ -60,6 +60,8 @@ public sealed class MetadataService(
         RequireEnabled();
         var libraryId = request.LibraryId;
         var mediaId = request.MediaId;
+        if (database.AccessUserId != null && !database.AccessIsOwner && database.AccessMode == ProfileAccessMode.SelectedTitles && !mediaId.HasValue)
+            throw new MetadataException("full_library_access_required", "Select one shared title. Library-wide jobs require full library access.", 403);
         if (database.AccessUserId != null && !database.AccessIsOwner && libraryId == null && mediaId == null)
             throw new MetadataException("owner_required", "Select one of your shared libraries. Only an owner may refresh the entire server.", 403);
         if (libraryId.HasValue && !await database.LibraryRoots.AnyAsync(item => item.Id == libraryId, cancellationToken))

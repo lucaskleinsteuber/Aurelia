@@ -101,7 +101,7 @@ struct LibraryShellView: View {
     }
     .background(AureliaDesign.canvas)
     .overlay(alignment: .bottom) {
-      if let error = model.errorMessage {
+      if let error = model.visibleErrorMessage {
         ErrorBanner(
           message: error,
           retry: {
@@ -120,6 +120,14 @@ struct LibraryShellView: View {
     .onChange(of: scenePhase) {
       if scenePhase == .active { Task { await model.refreshHome() } }
     }
+    .onChange(of: model.catalogVisibilityRevision) {
+      if case .media(let id) = selection, !model.catalogItems.contains(where: { $0.id == id }) {
+        selection = nil
+      }
+      if case .collection(let id) = selection, !model.collections.contains(where: { $0.id == id }) {
+        selection = nil
+      }
+    }
   }
 
   private var sidebar: some View {
@@ -132,6 +140,16 @@ struct LibraryShellView: View {
         sidebarButton(.recentlyAdded)
         sidebarButton(.tvShows)
         sidebarButton(.movies)
+      }
+      if model.profile?.isViewingSession == true {
+        Section {
+          Button {
+            Task { await model.switchWatchingProfile() }
+          } label: {
+            Label(
+              model.profile?.user?.username ?? "Switch Profile", systemImage: "person.crop.circle")
+          }.disabled(model.isSelectingProfile).accessibilityIdentifier("switch-watching-profile")
+        }
       }
     }
     .listStyle(.sidebar)
@@ -234,7 +252,7 @@ private struct HomePage: View {
       model.home?.continueWatching.isEmpty != false
     {
       Group {
-        if model.errorMessage != nil || model.isRecoveringLocalHost {
+        if model.visibleErrorMessage != nil || model.isRecoveringLocalHost {
           ContentUnavailableView(
             model.isRecoveringLocalHost ? "Starting Local Server" : "Server Unavailable",
             systemImage: "server.rack",
@@ -505,14 +523,18 @@ private struct LibraryPage: View {
       .padding(AureliaDesign.pagePadding)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .task(id: query) {
+    .task(id: "\(query):\(model.catalogVisibilityRevision)") {
+      searchResults = nil
       guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         searchResults = nil
         return
       }
       try? await Task.sleep(for: .milliseconds(220))
       guard !Task.isCancelled else { return }
-      searchResults = try? await model.searchCatalog(query)
+      let revision = model.catalogVisibilityRevision
+      let result = try? await model.searchCatalog(query)
+      guard !Task.isCancelled, revision == model.catalogVisibilityRevision else { return }
+      searchResults = result
     }
     .sheet(isPresented: $showingCollectionEditor) {
       CollectionEditorSheet(collection: nil)

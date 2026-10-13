@@ -168,17 +168,14 @@ public sealed class BackendSecurityTests
             HttpMethod.Post,
             "/api/v1/users",
             ownerToken,
-            new CreateUserRequest("privacy-viewer", "secure privacy viewer password", UserRole.User));
+            new CreateUserRequest("privacy-viewer", "secure privacy viewer password", UserRole.User, ApiTestClient.TestPin));
         using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
     }
 
     private static async Task<AuthenticationResponse> LoginViewerAsync(HttpClient client)
     {
-        using var response = await client.PostAsJsonAsync(
-            "/api/v1/auth/login",
-            new LoginRequest("privacy-viewer", "secure privacy viewer password", "Privacy Test Client"),
-            ApiTestClient.JsonOptions);
+        using var response = await ApiTestClient.LoginAsync(client, new LoginRequest("privacy-viewer", "secure privacy viewer password", "Privacy Test Client"));
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<AuthenticationResponse>(response);
     }

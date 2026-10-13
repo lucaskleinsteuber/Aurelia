@@ -40,6 +40,32 @@ public static class CommandClientSecurity
         return await client.SendAsync(request, token);
     }
 
+    public static async Task UnlockViewingAndManagementAsync(HttpClient client, AuthenticationResponse device,
+        ServerCommandLine commandLine, string password, CancellationToken token)
+    {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", device.Token);
+        using var response = await client.GetAsync("/api/v1/profiles", token);
+        var picker = await PairingCommandClient.ReadSuccessAsync<ProfilePickerResponse>(response, token);
+        var pin = commandLine.ReadSecret(picker.ManagementSetupRequired ? "New owner viewing PIN (4–8 digits): " : "Viewing PIN: ");
+        if (picker.ManagementSetupRequired)
+        {
+            using var setup = await client.PostAsJsonAsync("/api/v1/profiles/initialize", new InitializeProfilesRequest(password, pin), Json, token);
+            setup.EnsureSuccessStatusCode();
+        }
+        using var unlocked = await client.PostAsJsonAsync($"/api/v1/profiles/{device.User.Id}/unlock", new UnlockProfileRequest(pin), Json, token);
+        var profile = await PairingCommandClient.ReadSuccessAsync<ProfileSessionResponse>(unlocked, token);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", profile.Token);
+        using var management = await client.PostAsJsonAsync("/api/v1/management/unlock", new UnlockManagementRequest(password), Json, token);
+        management.EnsureSuccessStatusCode();
+    }
+
+    public static async Task EndCommandSessionAsync(HttpClient client, AuthenticationResponse device)
+    {
+        using var ended = await client.PostAsync("/api/v1/profile/end", null, CancellationToken.None);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", device.Token);
+        using var removed = await client.DeleteAsync("/api/v1/device", CancellationToken.None);
+    }
+
     private static JsonSerializerOptions CreateJson()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);

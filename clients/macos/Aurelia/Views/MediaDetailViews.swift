@@ -28,11 +28,11 @@ struct MediaDetailView: View {
                 }
               }
             },
-            onEdit: model.profile?.user?.role.canManageLibraries == true
+            onEdit: model.canManageMedia
               ? { showingMetadataEditor = true } : nil,
-            onMatch: model.profile?.user?.role.canManageLibraries == true
+            onMatch: model.canManageMedia
               ? { showingMatchEditor = true } : nil,
-            onRemove: model.profile?.user?.role.canManageLibraries == true
+            onRemove: model.canManageMedia
               ? { showingRemoveConfirmation = true } : nil
           )
 

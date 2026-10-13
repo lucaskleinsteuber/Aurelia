@@ -34,6 +34,23 @@ struct ConnectionReliabilityTests {
     #expect(model.errorMessage?.contains("could not be removed securely") == true)
   }
 
+  @Test func viewingCredentialCannotReplacePersistedDeviceCredential() throws {
+    let store = KeychainServerStore(service: "Aurelia.tests.device-only.\(UUID().uuidString)")
+    defer { try? store.delete() }
+    let device = syntheticProfile()
+    try store.save(device)
+    let viewing = StoredServerProfile(
+      serverId: device.serverId, name: device.name, baseURL: device.baseURL,
+      publicKeyFingerprint: device.publicKeyFingerprint, token: "synthetic-viewing-token",
+      sessionId: UUID(),
+      expiresAt: device.expiresAt, user: device.user, locallyManaged: device.locallyManaged,
+      viewingSession: true)
+    #expect(throws: KeychainServerStore.StoreError.self) { try store.save(viewing) }
+    #expect(try store.load() == device)
+    #expect(viewing.changingAddress(URL(string: "https://other.fixture.invalid")!).isViewingSession)
+    #expect(viewing.retainingLocalHosting().isViewingSession)
+  }
+
   @Test(arguments: [
     APIClientError.serverIdentityMismatch,
     APIClientError.httpFailure(status: 401, retryAfter: nil, code: nil, message: nil),
@@ -49,12 +66,13 @@ struct ConnectionReliabilityTests {
     await model.setApplicationActive(false)
     await model.setApplicationActive(true)
     for _ in 0..<200 {
-      if model.errorMessage != nil { break }
+      if model.synchronizationErrorMessage != nil { break }
       try await Task.sleep(for: .milliseconds(5))
     }
-    #expect(model.errorMessage == error.localizedDescription)
+    #expect(model.synchronizationErrorMessage == error.localizedDescription)
     await model.disconnect()
     #expect(model.errorMessage == nil)
+    #expect(model.synchronizationErrorMessage == nil)
   }
 
   @Test

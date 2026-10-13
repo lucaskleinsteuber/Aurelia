@@ -69,7 +69,7 @@ struct ServerManagementView: View {
               VStack(alignment: .leading, spacing: 4) {
                 Text(access.user.username).font(.headline)
                 Text(
-                  "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled") · \(access.user.role == .owner ? "All libraries" : "\(access.libraryIds.count) shared libraries")"
+                  "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled") · PIN protected"
                 )
                 .font(.caption).foregroundStyle(.secondary)
               }
@@ -78,9 +78,9 @@ struct ServerManagementView: View {
             }
             Divider()
           }
-          Button("Create User…") { creatingUser = true }
+          Button("Create Profile…") { creatingUser = true }
           Text(
-            "New users have no library access until you explicitly share a library. Owners always have full access."
+            "Choose the entire library or individual films and series for each profile. New profiles start without title access. Owners always have full access."
           )
           .font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
@@ -193,39 +193,40 @@ private struct ServerUserCreator: View {
   @State private var error: String?
   var body: some View {
     Form {
-      Text("Create User").font(.title2.bold())
+      Text("Create Profile").font(.title2.bold())
       TextField("Username", text: $username)
-      SecureField("New password (at least 12 characters)", text: $password)
+      SecureField("Viewing PIN (4–8 digits)", text: $password)
       Picker("Role", selection: $role) {
         Text("User").tag(UserRole.user)
         Text("Administrator").tag(UserRole.admin)
         Text("Owner").tag(UserRole.owner)
       }
       Text(
-        "Users and administrators start without library grants. A new owner has full server access."
+        "Profiles start without title access. An owner has full access. Viewing PINs never unlock server management."
       ).font(.caption).foregroundStyle(.secondary)
       if let error { Text(error).foregroundStyle(.red) }
       HStack {
         Button("Cancel") { dismiss() }
         Spacer()
-        Button("Create User") {
+        Button("Create Profile") {
           saving = true
           Task {
             defer { saving = false }
             do {
-              try await client.createUser(username: username, password: password, role: role)
+              try await client.createUser(username: username, pin: password, role: role)
               password = ""
               completed()
               dismiss()
             } catch is CancellationError {} catch { self.error = error.localizedDescription }
           }
-        }.disabled(saving || username.count < 3 || password.count < 12)
+        }.disabled(saving || username.count < 3 || !ProfilePIN.isValid(password))
       }
     }.padding(24).frame(width: 500)
   }
 }
 
 private struct ServerUserEditor: View {
+  @EnvironmentObject private var model: AppModel
   let access: UserAccessSummary
   let libraries: [LibrarySummary]
   let client: APIClient
@@ -234,6 +235,10 @@ private struct ServerUserEditor: View {
   @State private var enabled: Bool
   @State private var role: UserRole
   @State private var selected: Set<UUID>
+  @State private var titleAccess: ProfileTitleAccess?
+  @State private var accessMode: ProfileAccessMode = .legacyLibraries
+  @State private var selectedTitles: Set<UUID> = []
+  @State private var titleQuery = ""
   @State private var sessions: [DeviceSessionSummary] = []
   @State private var password = ""
   @State private var working = false
@@ -261,16 +266,47 @@ private struct ServerUserEditor: View {
           Text("Administrator").tag(UserRole.admin)
           Text("Owner").tag(UserRole.owner)
         }
-        Text("Shared Libraries").font(.headline)
-        ForEach(libraries) { library in
-          Toggle(
-            library.name,
-            isOn: Binding(
-              get: { selected.contains(library.id) },
-              set: { value in
-                if value { selected.insert(library.id) } else { selected.remove(library.id) }
-              })
-          ).disabled(role == .owner)
+        Text("Content Access").font(.headline)
+        if titleAccess != nil {
+          Picker("Access", selection: $accessMode) {
+            if titleAccess?.mode == .legacyLibraries {
+              Text("Existing Storage Grants").tag(ProfileAccessMode.legacyLibraries)
+            }
+            Text("Entire Library").tag(ProfileAccessMode.entireLibrary)
+            Text("Selected Titles").tag(ProfileAccessMode.selectedTitles)
+          }.disabled(role == .owner)
+          if accessMode == .legacyLibraries {
+            Text(
+              "Your existing storage grants stay unchanged unless you explicitly choose a new access mode."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          } else if accessMode == .selectedTitles {
+            TextField("Filter films and series", text: $titleQuery).textFieldStyle(.roundedBorder)
+            ForEach(
+              model.catalogItems.filter { item in
+                (item.kind == .movie || item.kind == .series)
+                  && (titleQuery.isEmpty || item.title.localizedCaseInsensitiveContains(titleQuery))
+              }
+            ) { item in
+              Toggle(
+                item.title,
+                isOn: Binding(
+                  get: { selectedTitles.contains(item.id) },
+                  set: { enabled in
+                    if enabled {
+                      selectedTitles.insert(item.id)
+                    } else {
+                      selectedTitles.remove(item.id)
+                    }
+                  }))
+            }
+            Text(
+              "A series grant includes all present and future seasons, episodes, extras and trailers."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          }
+        } else {
+          ProgressView("Loading content access…")
         }
         Text(
           "Removing a grant or disabling the account stops affected streams. The final active owner is protected."
@@ -278,16 +314,24 @@ private struct ServerUserEditor: View {
         .font(.caption).foregroundStyle(.secondary)
         Button("Save Access") {
           run {
-            try await client.updateUserAccess(
-              id: access.id, enabled: enabled,
-              libraries: Array(selected).sorted { $0.uuidString < $1.uuidString })
+            if enabled != access.isEnabled {
+              try await client.setProfileEnabled(id: access.id, enabled: enabled)
+            }
+            if accessMode != .legacyLibraries, let current = titleAccess {
+              titleAccess = try await client.setTitleAccess(
+                user: access.id,
+                access: ProfileTitleAccess(
+                  mode: role == .owner ? .entireLibrary : accessMode,
+                  titleIds: Array(selectedTitles).sorted { $0.uuidString < $1.uuidString },
+                  revision: current.revision))
+            }
             if role != access.user.role {
               try await client.changeUserRole(id: access.id, role: role)
             }
             completed()
             dismiss()
           }
-        }.disabled(working)
+        }.disabled(working || titleAccess == nil)
         Divider()
         Text("Devices").font(.headline)
         ForEach(sessions.filter(\.isActive)) { session in
@@ -315,19 +359,25 @@ private struct ServerUserEditor: View {
             sessions = try await client.userSessions(access.id)
           }
         }.disabled(working)
-        SecureField("New password (at least 12 characters)", text: $password)
-        Button("Reset Password & Revoke Sessions") {
+        SecureField("New viewing PIN (4–8 digits)", text: $password)
+        Button("Reset PIN & Lock Profile") {
           run {
-            try await client.resetUserPassword(id: access.id, password: password)
+            try await client.resetProfilePIN(id: access.id, pin: password)
             password = ""
             sessions = try await client.userSessions(access.id)
           }
-        }.disabled(working || password.count < 12)
+        }.disabled(working || !ProfilePIN.isValid(password))
         if let error { Text(error).foregroundStyle(.red) }
         Button("Done") { dismiss() }
       }.padding(24)
     }.frame(width: 580, height: 600)
       .task {
+        do {
+          let current = try await client.titleAccess(user: access.id)
+          titleAccess = current
+          accessMode = access.user.role == .owner ? .entireLibrary : current.mode
+          selectedTitles = Set(current.titleIds)
+        } catch { self.error = error.localizedDescription }
         while !Task.isCancelled {
           do { sessions = try await client.userSessions(access.id) } catch {
             self.error = error.localizedDescription

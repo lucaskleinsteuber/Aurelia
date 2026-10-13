@@ -11,6 +11,9 @@ public sealed class ServerUser
     public required string NormalizedUsername { get; set; }
 
     public required string PasswordHash { get; set; }
+    public string? PinHash { get; set; }
+    public ProfileAccessMode AccessMode { get; set; } = ProfileAccessMode.LegacyLibraries;
+    public long AccessRevision { get; set; }
 
     public UserRole Role { get; set; }
 

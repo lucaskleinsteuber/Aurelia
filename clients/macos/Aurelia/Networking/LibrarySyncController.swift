@@ -46,6 +46,7 @@ actor LibrarySyncController {
     profile: StoredServerProfile,
     runID: UUID = UUID(),
     onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
+    onSuccess: (@MainActor @Sendable () async -> Void)? = nil,
     onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async throws -> Void
   ) {
     guard !Task.isCancelled else { return }
@@ -98,12 +99,19 @@ actor LibrarySyncController {
           cursors[key] = cursor
           failures = 0
           guard !Task.isCancelled, activeRun == run else { return }
+          await onSuccess?()
           // Prevent a malformed or older endpoint from driving an unbounded empty poll loop.
           if Date().timeIntervalSince(started) < 0.25 { try await delay(0.25) }
         } catch is CancellationError {
           return
         } catch {
           guard !Task.isCancelled, activeRun == run, isForeground else { return }
+          if error as? APIClientError == .supersededSnapshot {
+            // The source cursor has not been acknowledged. Refetch after a
+            // bounded delay, without reporting a malformed server response.
+            do { try await delay(0.25) } catch { return }
+            continue
+          }
           if let failure = error as? APIClientError {
             if failure.isAuthenticationFailure || failure == .serverIdentityMismatch {
               await onFailure?(failure)
@@ -133,11 +141,14 @@ actor LibrarySyncController {
     profile: StoredServerProfile?,
     runID: UUID = UUID(),
     onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
+    onSuccess: (@MainActor @Sendable () async -> Void)? = nil,
     onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async throws -> Void
   ) {
     isForeground = foreground
     if foreground, let profile {
-      start(profile: profile, runID: runID, onFailure: onFailure, onChanges: onChanges)
+      start(
+        profile: profile, runID: runID, onFailure: onFailure, onSuccess: onSuccess,
+        onChanges: onChanges)
     } else {
       stop()
     }

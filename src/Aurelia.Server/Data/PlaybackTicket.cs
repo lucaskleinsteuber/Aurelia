@@ -13,6 +13,7 @@ public sealed class PlaybackTicket
     public required ServerUser User { get; set; }
 
     public Guid DeviceSessionId { get; set; }
+    public Guid? ProfileSessionId { get; set; }
 
     public required DeviceSession DeviceSession { get; set; }
 

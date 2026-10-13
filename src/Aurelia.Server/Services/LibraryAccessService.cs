@@ -14,6 +14,8 @@ public sealed class LibraryAccessService(AureliaDbContext database)
         if (context.User.Identity?.IsAuthenticated != true) return;
         database.AccessUserId = context.User.RequireUserId();
         database.AccessIsOwner = context.User.IsInRole(UserRole.Owner.ToString());
+        database.AccessMode = Enum.TryParse<ProfileAccessMode>(context.User.FindFirst("aurelia_access_mode")?.Value, out var mode)
+            ? mode : ProfileAccessMode.LegacyLibraries;
     }
 
     public async Task RequireMediaAsync(Guid id, CancellationToken cancellationToken)

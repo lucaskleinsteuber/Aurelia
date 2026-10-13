@@ -171,10 +171,10 @@ public sealed class ServerAccessFoundationTests
         using var factory = new AureliaServerFactory();
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
-        using var missing = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("blocked", "secure viewer password", UserRole.User));
+        using var missing = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("blocked", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
         using var denied = await client.SendAsync(missing);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        using var change = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("approved", "secure viewer password", UserRole.User));
+        using var change = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("approved", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
         var payload = await change.Content!.ReadAsByteArrayAsync();
         using var approve = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/server/approval", owner.Token,
             new AdministrationApprovalRequest("POST /api/v1/users", AdministrationApprovalStore.Hash(payload), "correct horse battery staple"));
@@ -185,7 +185,7 @@ public sealed class ServerAccessFoundationTests
         change.Headers.Add("X-Aurelia-Approval", grant.Token);
         using var success = await client.SendAsync(change);
         success.EnsureSuccessStatusCode();
-        using var replay = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("replayed", "secure viewer password", UserRole.User));
+        using var replay = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("replayed", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
         replay.Headers.Add("X-Aurelia-Approval", grant.Token);
         using var replayed = await client.SendAsync(replay);
         Assert.Equal(HttpStatusCode.Forbidden, replayed.StatusCode);
@@ -232,7 +232,7 @@ public sealed class ServerAccessFoundationTests
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
         using var uppercase = ApiTestClient.Authorized(HttpMethod.Post, "/API/v1/Users/", owner.Token,
-            new CreateUserRequest("not-approved", "secure viewer password", UserRole.User));
+            new CreateUserRequest("not-approved", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
         using var denied = await client.SendAsync(uppercase);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using var tooLarge = ApiTestClient.Authorized(HttpMethod.Put, "/api/v1/server/settings", owner.Token);
@@ -312,10 +312,10 @@ public sealed class ServerAccessFoundationTests
 
     private static async Task<AuthenticationResponse> CreateViewerAsync(HttpClient client, AuthenticationResponse owner, string name)
     {
-        using var create = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest(name, "secure viewer password", UserRole.User));
+        using var create = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest(name, "secure viewer password", UserRole.User, ApiTestClient.TestPin));
         using var created = await ApiTestClient.SendAsync(client, create);
         created.EnsureSuccessStatusCode();
-        using var login = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest(name, "secure viewer password", "Viewer"), ApiTestClient.JsonOptions);
+        using var login = await ApiTestClient.LoginAsync(client, new LoginRequest(name, "secure viewer password", "Viewer"));
         login.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
     }

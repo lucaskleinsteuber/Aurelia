@@ -27,8 +27,7 @@ public sealed class PlaybackStreamingTests
             using var factory = new AureliaServerFactory();
             using var client = factory.CreateClient();
             var owner = await ApiTestClient.SetupOwnerAsync(client);
-            using var login = await client.PostAsJsonAsync("/api/v1/auth/login",
-                new LoginRequest("lucas", "correct horse battery staple", "Revoking device"), ApiTestClient.JsonOptions);
+            using var login = await ApiTestClient.LoginAsync(client, new LoginRequest("lucas", "correct horse battery staple", "Revoking device"));
             var second = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
             var mediaId = await AddMediaAsync(factory, root, path);
             var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
@@ -40,7 +39,7 @@ public sealed class PlaybackStreamingTests
             Assert.True(await stream.ReadAsync(buffer) > 0);
             Assert.True(factory.Services.GetRequiredService<ActiveStreamRegistry>().Count > 0);
             using var revoke = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/auth/sessions/{owner.SessionId}", second.Token);
-            using var revoked = await client.SendAsync(revoke);
+            using var revoked = await ApiTestClient.SendAsync(client, revoke);
             revoked.EnsureSuccessStatusCode();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             var received = 4096L;
@@ -72,10 +71,7 @@ public sealed class PlaybackStreamingTests
             using var secondClient = factory.CreateClient();
             var firstSession = await ApiTestClient.SetupOwnerAsync(firstClient);
             var mediaId = await AddMediaAsync(factory, root, path);
-            using var loginResponse = await secondClient.PostAsJsonAsync(
-                "/api/v1/auth/login",
-                new LoginRequest("lucas", "correct horse battery staple", "Second Test Client"),
-                ApiTestClient.JsonOptions);
+            using var loginResponse = await ApiTestClient.LoginAsync(secondClient, new LoginRequest("lucas", "correct horse battery staple", "Second Test Client"));
             loginResponse.EnsureSuccessStatusCode();
             var secondSession = await ApiTestClient.ReadAsync<AuthenticationResponse>(loginResponse);
 
@@ -111,7 +107,7 @@ public sealed class PlaybackStreamingTests
                        HttpMethod.Delete,
                        $"/api/v1/auth/sessions/{firstSession.SessionId}",
                        secondSession.Token))
-            using (var revokeResponse = await secondClient.SendAsync(revokeFirstSession))
+            using (var revokeResponse = await ApiTestClient.SendAsync(secondClient, revokeFirstSession))
             {
                 Assert.Equal(HttpStatusCode.NoContent, revokeResponse.StatusCode);
             }
@@ -820,7 +816,7 @@ public sealed class PlaybackStreamingTests
             new CreateUserRequest(
                 "viewer",
                 "a secure viewer password",
-                UserRole.User));
+                UserRole.User, ApiTestClient.TestPin));
         using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         await ApiTestClient.GrantExistingLibrariesAsync(client, ownerToken, (await ApiTestClient.ReadAsync<UserSummary>(response)).Id);
@@ -828,10 +824,7 @@ public sealed class PlaybackStreamingTests
 
     private static async Task<AuthenticationResponse> LoginAsync(HttpClient client)
     {
-        using var response = await client.PostAsJsonAsync(
-            "/api/v1/auth/login",
-            new LoginRequest("viewer", "a secure viewer password", "Viewer Mac"),
-            ApiTestClient.JsonOptions);
+        using var response = await ApiTestClient.LoginAsync(client, new LoginRequest("viewer", "a secure viewer password", "Viewer Mac"));
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<AuthenticationResponse>(response);
     }

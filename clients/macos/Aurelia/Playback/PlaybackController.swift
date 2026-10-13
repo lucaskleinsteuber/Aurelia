@@ -120,6 +120,7 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var isPreparing = true
   @Published private(set) var isPlaying = false
   @Published private(set) var currentTimeMilliseconds: Int64 = 0
+  @Published private(set) var navigationRevision: UInt64 = 0
   @Published private(set) var durationMilliseconds: Int64 = 0
   @Published private(set) var audioTracks: [PlaybackTrack] = []
   @Published private(set) var subtitleTracks: [PlaybackTrack] = []
@@ -509,6 +510,7 @@ final class PlaybackController: ObservableObject {
 
   func seek(to milliseconds: Int64) {
     guard !stopped, !authorizationFailed, !terminalFailure, !recovering else { return }
+    navigationRevision &+= 1
     let upper = durationMilliseconds > 0 ? durationMilliseconds : Int64.max
     let target = min(max(milliseconds, 0), upper)
     if endHandled {
@@ -550,6 +552,7 @@ final class PlaybackController: ObservableObject {
       seek(to: chapter.timeOffsetMilliseconds)
       return
     }
+    navigationRevision &+= 1
     currentTimeMilliseconds = chapter.timeOffsetMilliseconds
     observedPosition = currentTimeMilliseconds
     stableMovementStartedAt = nil

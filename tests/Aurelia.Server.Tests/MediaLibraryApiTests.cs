@@ -718,6 +718,8 @@ public sealed class MediaLibraryApiTests
 
             using var secondFactory = new AureliaServerFactory(dataDirectory);
             using var secondClient = secondFactory.CreateClient();
+            using var signIn = await ApiTestClient.LoginAsync(secondClient, new LoginRequest("lucas", "correct horse battery staple", "Restarted Mac"));
+            ownerToken = (await ApiTestClient.ReadAsync<AuthenticationResponse>(signIn)).Token;
             using var request = ApiTestClient.Authorized(
                 HttpMethod.Get,
                 $"/api/v1/scans/{scanId}",
@@ -1090,7 +1092,7 @@ public sealed class MediaLibraryApiTests
             HttpMethod.Post,
             "/api/v1/users",
             token,
-            new CreateUserRequest("viewer", "a secure viewer password", UserRole.User));
+            new CreateUserRequest("viewer", "a secure viewer password", UserRole.User, ApiTestClient.TestPin));
         using var response = await ApiTestClient.SendAsync(client, request);
         response.EnsureSuccessStatusCode();
         var user = await ApiTestClient.ReadAsync<UserSummary>(response);
@@ -1103,10 +1105,7 @@ public sealed class MediaLibraryApiTests
         string username,
         string password)
     {
-        using var response = await client.PostAsJsonAsync(
-            "/api/v1/auth/login",
-            new LoginRequest(username, password, "Viewer Mac"),
-            ApiTestClient.JsonOptions);
+        using var response = await ApiTestClient.LoginAsync(client, new LoginRequest(username, password, "Viewer Mac"));
         response.EnsureSuccessStatusCode();
         return await ApiTestClient.ReadAsync<AuthenticationResponse>(response);
     }

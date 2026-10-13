@@ -60,8 +60,22 @@ curl --silent --show-error --fail-with-body --header "X-Aurelia-Bootstrap-Token:
   --header 'Content-Type: application/json' \
   --data '{"username":"intel-test-owner","password":"isolated-intel-password-123!","deviceName":"Intel Payload Test"}' \
   "$base/api/v1/setup/owner" >"$run_root/auth.json"
-token=$(jq -r '.token' "$run_root/auth.json")
-[[ ${#token} -ge 43 ]] || fail "The isolated owner was not authenticated."
+device_token=$(jq -r '.token' "$run_root/auth.json")
+owner_id=$(jq -r '.user.id' "$run_root/auth.json")
+[[ ${#device_token} -ge 43 ]] || fail "The isolated owner was not paired."
+# The isolated loopback transport is not a remote PIN connection. Production
+# clients unlock over pinned HTTPS; the separate native-host smoke checks that.
+curl --silent --show-error --fail-with-body --header "Authorization: Bearer $device_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"password":"isolated-intel-password-123!","pin":"1234"}' \
+  "$base/api/v1/profiles/initialize" >/dev/null
+curl --silent --show-error --fail-with-body --header "Authorization: Bearer $device_token" \
+  --header 'Content-Type: application/json' --data '{"pin":"1234"}' \
+  "$base/api/v1/profiles/$owner_id/unlock" >"$run_root/viewing.json"
+token=$(jq -er '.token' "$run_root/viewing.json")
+curl --silent --show-error --fail-with-body --header "Authorization: Bearer $token" \
+  --header 'Content-Type: application/json' --data '{"password":"isolated-intel-password-123!"}' \
+  "$base/api/v1/management/unlock" >/dev/null
 fixture="$run_root/Fixture"
 mkdir -p "$fixture"
 dd if=/dev/zero of="$fixture/Intel Movie 2026.mkv" bs=1024 count=1 status=none

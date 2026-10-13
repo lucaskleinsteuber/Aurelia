@@ -17,7 +17,7 @@ struct MediaActionsModifier: ViewModifier {
           Task { _ = await model.setFavorite(mediaId: item.id, isFavorite: !item.isFavorite) }
         }
       }
-      if model.profile?.user?.role.canManageLibraries == true {
+      if model.canManageMedia {
         Button("Edit Metadata…", systemImage: "pencil") {
           Task {
             guard let profile = model.profile else { return }

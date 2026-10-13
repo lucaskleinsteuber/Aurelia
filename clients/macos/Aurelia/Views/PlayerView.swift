@@ -5,6 +5,9 @@ import UniformTypeIdentifiers
 struct PlayerView: View {
   @EnvironmentObject private var model: AppModel
   @StateObject private var controller: PlaybackController
+  @StateObject private var sceneNotes: SceneNotesController
+  @State private var notesPresented = false
+  @State private var notesNavigationRevision: UInt64 = 0
   @ObservedObject private var preferencesStore = PlaybackPreferencesStore.shared
   @State private var controlsVisible = true
   @State private var isScrubbing = false
@@ -16,12 +19,14 @@ struct PlayerView: View {
   @State private var isAdjustingVolume = false
   @State private var controlsPolicy = PlayerControlsPolicy()
   @FocusState private var focusedControl: String?
-  @State private var cursorHidden = false
+  @StateObject private var cursor = PlayerCursorCoordinator()
   @State private var confirmProgressReplacement = false
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
   init(profile: StoredServerProfile, presentation: PlaybackPresentation) {
+    _sceneNotes = StateObject(
+      wrappedValue: SceneNotesController(profile: profile, mediaId: presentation.mediaId))
     #if DEBUG
       if CinemaUITestFixture.enabled {
         _controller = StateObject(
@@ -44,6 +49,10 @@ struct PlayerView: View {
         PlayerVideoSurface(
           controller: controller,
           onInteraction: { revealControls() },
+          onPointer: { inside, moved in
+            updateCursorEnvironment()
+            cursor.pointer(inside: inside, physicallyMoved: moved)
+          },
           onKeyDown: handleKey
         )
         .frame(width: viewport.width, height: viewport.height)
@@ -52,6 +61,24 @@ struct PlayerView: View {
           controls(in: viewport)
             .frame(width: viewport.width, height: viewport.height)
             .transition(.opacity)
+        }
+
+        if let note = sceneNotes.cueText {
+          VStack {
+            HStack {
+              Spacer()
+              Text(note).font(.callout).lineLimit(6).padding(12).frame(
+                maxWidth: 320, alignment: .leading
+              )
+              .playerMaterial(
+                reduceTransparency: reduceTransparency, shape: RoundedRectangle(cornerRadius: 14)
+              )
+              .accessibilityIdentifier("scene-note-hint")
+            }
+            Spacer()
+          }
+          .padding(.trailing, 26).padding(.top, controlsVisible ? 96 : 32)
+          .allowsHitTesting(false)
         }
 
         Color.clear
@@ -64,19 +91,31 @@ struct PlayerView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .ignoresSafeArea()
-    .background(PlayerWindowAccessor { window in windowPresentation.apply(to: window) })
+    .background(
+      PlayerWindowAccessor { window in
+        guard !cursor.isRetired else { return }
+        windowPresentation.apply(to: window)
+        updateCursorEnvironment()
+      }
+    )
     .preferredColorScheme(.dark)
+    .contextMenu {
+      Button("Export Playback Diagnostics…") { exportPlaybackDiagnostics() }
+        .accessibilityIdentifier("player-export-diagnostics")
+    }
     .task {
       PlaybackShutdownCoordinator.shared.register(controller)
       if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil {
         SystemMediaPlaybackCoordinator.shared.register(controller)
       }
       revealControls()
+      sceneNotes.reload()
       await controller.start()
     }
     .onDisappear {
       hideTask?.cancel()
-      showCursor()
+      sceneNotes.stop()
+      cursor.retire()
       PlaybackShutdownCoordinator.shared.unregister(controller)
       SystemMediaPlaybackCoordinator.shared.unregister(controller)
       windowPresentation.restore()
@@ -102,6 +141,34 @@ struct PlayerView: View {
     .onChange(of: controller.errorMessage) {
       revealControls(scheduleHide: controller.errorMessage == nil)
     }
+    .onChange(of: controller.isPlaying) {
+      if !controller.isPlaying { cursor.show() }
+      advanceSceneNotes()
+    }
+    .onChange(of: controller.currentTimeMilliseconds) { advanceSceneNotes() }
+    .onChange(of: controller.navigationRevision) { advanceSceneNotes() }
+    .onChange(of: controller.presentation.mediaId) {
+      sceneNotes.changeMedia(controller.presentation.mediaId)
+    }
+    .onReceive(model.$sceneNotesVersion.dropFirst()) { _ in sceneNotes.reload() }
+    .onChange(of: model.catalogVisibilityRevision) { sceneNotes.reload() }
+    .onChange(of: notesPresented) { interaction("scene-notes", active: notesPresented) }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification))
+    { _ in
+      suspendCursorHiding()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
+    { _ in
+      updateCursorEnvironment()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) {
+      notification in
+      if notification.object as? NSWindow === windowPresentation.window { suspendCursorHiding() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) {
+      notification in
+      if notification.object as? NSWindow === windowPresentation.window { cursor.retire() }
+    }
     .onChange(of: preferencesStore.preferences.controlsAutoHideDelay) {
       revealControls()
     }
@@ -120,7 +187,7 @@ struct PlayerView: View {
   }
 
   private func controls(in viewport: CGSize) -> some View {
-    let controlWidth = min(max(viewport.width - 64, 0), 1_180)
+    let controlWidth = max(viewport.width - 96, 0)
     let topInset: CGFloat = isNativeFullScreen ? 16 : 42
     let bottomInset: CGFloat = isNativeFullScreen ? 34 : 24
 
@@ -234,9 +301,9 @@ struct PlayerView: View {
             }
           }
       ) {
-        PlayerControlLabel(height: 42, minWidth: 50) {
+        PlayerControlLabel(height: 30, minWidth: 38) {
           Text(rateLabel(controller.playbackRate))
-            .font(.callout.weight(.bold).monospacedDigit())
+            .font(.system(size: 14, weight: .bold).monospacedDigit())
         }
       }
       .accessibilityValue(rateLabel(controller.playbackRate))
@@ -273,17 +340,22 @@ struct PlayerView: View {
       }
 
       Button {
-        exportPlaybackDiagnostics()
+        if !notesPresented { sceneNotes.create(at: controller.currentTimeMilliseconds) }
+        notesPresented.toggle()
       } label: {
-        PlayerControlLabel { Image(systemName: "doc.text.magnifyingglass") }
+        PlayerControlLabel { Image(systemName: "bookmark") }
       }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Export Playback Diagnostics")
-      .accessibilityIdentifier("player-export-diagnostics")
-      .focused($focusedControl, equals: "diagnostics")
-      .onHover { interaction("diagnostics-hover", active: $0) }
+      .buttonStyle(.plain).accessibilityLabel("Scene Notes")
+      .accessibilityIdentifier("player-notes")
+      .focused($focusedControl, equals: "notes")
+      .popover(isPresented: $notesPresented, arrowEdge: .bottom) {
+        SceneNotesPopover(
+          notes: sceneNotes, currentPosition: { controller.currentTimeMilliseconds },
+          seek: { controller.seek(to: $0) })
+      }
+
     }
-    .padding(7)
+    .padding(4)
     .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
     .onHover { interaction("menus-hover", active: $0) }
   }
@@ -367,13 +439,14 @@ struct PlayerView: View {
             set: { scrubPosition = $0 }),
           duration: max(Double(controller.durationMilliseconds), 1),
           chapters: controller.chapters,
+          notes: sceneNotes.notes,
           onEditingChanged: timelineEditingChanged)
         Text(formatTime(Double(controller.durationMilliseconds)))
           .monospacedDigit().frame(minWidth: 44, alignment: .leading)
       }
       .font(.caption)
     }
-    .frame(maxWidth: 1_180)
+    .frame(maxWidth: .infinity)
     .onHover { interaction("bottom-hover", active: $0) }
   }
 
@@ -416,6 +489,7 @@ struct PlayerView: View {
         }
       )
       .frame(width: 96)
+      .tint(.white)
       .frame(minHeight: 42)
       .accessibilityLabel("Volume")
       .accessibilityValue("\(Int(controller.volume * 100)) percent")
@@ -465,6 +539,8 @@ struct PlayerView: View {
         Button("Try Again") { Task { await controller.retry() } }
           .buttonStyle(AureliaPrimaryActionButtonStyle())
       }
+      Button("Export Playback Diagnostics…") { exportPlaybackDiagnostics() }
+        .font(.caption).accessibilityIdentifier("player-error-diagnostics")
     }
     .padding(26)
     .frame(maxWidth: 440)
@@ -524,6 +600,16 @@ struct PlayerView: View {
     isScrubbing ? scrubPosition : Double(controller.currentTimeMilliseconds)
   }
 
+  private func advanceSceneNotes() {
+    if notesNavigationRevision != controller.navigationRevision {
+      notesNavigationRevision = controller.navigationRevision
+      sceneNotes.seek()
+    }
+    sceneNotes.advance(
+      position: controller.currentTimeMilliseconds, playing: controller.isPlaying,
+      preparing: controller.isPreparing)
+  }
+
   private func timelineEditingChanged(_ editing: Bool) {
     isScrubbing = editing
     controlsPolicy.hold("scrubbing", active: editing)
@@ -555,7 +641,7 @@ struct PlayerView: View {
       } else if isNativeFullScreen {
         toggleFullScreen()
       } else {
-        return false
+        closePlayer()
       }
     default:
       return false
@@ -580,6 +666,7 @@ struct PlayerView: View {
   }
 
   private func revealControls(scheduleHide: Bool = true) {
+    guard !cursor.isRetired else { return }
     hideTask?.cancel()
     let generation = controlsPolicy.invalidate()
     showCursor()
@@ -596,12 +683,13 @@ struct PlayerView: View {
           generation, preparing: controller.isPreparing, error: controller.errorMessage != nil)
       else { return }
       withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { controlsVisible = false }
-      hideCursor()
+      updateCursorEnvironment()
+      cursor.hideIfPermitted(playing: controller.isPlaying, blocked: !canAutoHide)
     }
   }
 
   private var canAutoHide: Bool {
-    !controller.isPreparing && controller.errorMessage == nil && !isScrubbing
+    !cursor.isRetired && !controller.isPreparing && controller.errorMessage == nil && !isScrubbing
       && !isAdjustingVolume
       && controlsPolicy.holds.isEmpty
   }
@@ -613,24 +701,32 @@ struct PlayerView: View {
     revealControls(scheduleHide: !active)
   }
 
-  private func hideCursor() {
-    guard !cursorHidden else { return }
-    NSCursor.hide()
-    cursorHidden = true
+  private func updateCursorEnvironment() {
+    cursor.environment(
+      active: NSApplication.shared.isActive,
+      keyWindow: windowPresentation.window?.isKeyWindow == true)
+  }
+
+  private func suspendCursorHiding() {
+    hideTask?.cancel()
+    controlsPolicy.invalidate()
+    cursor.environment(active: false, keyWindow: false)
   }
 
   private func showCursor() {
-    guard cursorHidden else { return }
-    NSCursor.unhide()
-    cursorHidden = false
+    cursor.show()
   }
 
   private func closePlayer() {
+    guard !cursor.isRetired else { return }
     hideTask?.cancel()
-    showCursor()
+    controlsPolicy.invalidate()
+    cursor.retire()
+    let retiringProfile = model.profile
+    model.dismissPlayback()
     Task {
       await controller.shutdown()
-      await model.closePlayback()
+      if model.profile?.sessionId == retiringProfile?.sessionId { await model.refreshHome() }
     }
   }
 
@@ -655,6 +751,7 @@ private struct PlayerTimeline: View {
   @Binding var position: Double
   let duration: Double
   let chapters: [PlaybackChapter]
+  let notes: [SceneNote]
   let onEditingChanged: (Bool) -> Void
 
   var body: some View {
@@ -670,6 +767,16 @@ private struct PlayerTimeline: View {
               y: proxy.size.height / 2)
         }
         Slider(value: $position, in: 0...duration, onEditingChanged: onEditingChanged)
+          .tint(.white)
+        ForEach(notes) { note in
+          let start = min(max(Double(note.startMilliseconds) / duration, 0), 1) * proxy.size.width
+          let end =
+            min(max(Double(note.endMilliseconds ?? note.startMilliseconds) / duration, 0), 1)
+            * proxy.size.width
+          Capsule().fill(.white.opacity(0.65)).frame(width: max(3, end - start), height: 3)
+            .position(x: (start + end) / 2, y: proxy.size.height / 2 + 9)
+            .allowsHitTesting(false).accessibilityHidden(true)
+        }
       }
     }
     .frame(minHeight: 44)
@@ -700,8 +807,8 @@ private struct PlayerControlLabel<Content: View>: View {
   private let content: Content
 
   init(
-    height: CGFloat = 42,
-    minWidth: CGFloat = 42,
+    height: CGFloat = 30,
+    minWidth: CGFloat = 30,
     @ViewBuilder content: () -> Content
   ) {
     self.height = height
@@ -711,7 +818,7 @@ private struct PlayerControlLabel<Content: View>: View {
 
   var body: some View {
     content
-      .font(.system(size: 17, weight: .semibold))
+      .font(.system(size: 14, weight: .semibold))
       .frame(minWidth: minWidth, minHeight: height)
       .background(.white.opacity(isHovering ? 0.12 : 0), in: Capsule())
       .contentShape(Capsule())
@@ -736,11 +843,13 @@ extension View {
 private struct PlayerVideoSurface: NSViewRepresentable {
   let controller: PlaybackController
   let onInteraction: () -> Void
+  let onPointer: (Bool, Bool) -> Void
   let onKeyDown: (NSEvent) -> Bool
 
   func makeNSView(context: Context) -> PlayerTrackingView {
     let view = PlayerTrackingView()
     view.onInteraction = onInteraction
+    view.onPointer = onPointer
     view.onKeyDown = onKeyDown
     controller.attachVideoView(view)
     return view
@@ -748,12 +857,14 @@ private struct PlayerVideoSurface: NSViewRepresentable {
 
   func updateNSView(_ nsView: PlayerTrackingView, context: Context) {
     nsView.onInteraction = onInteraction
+    nsView.onPointer = onPointer
     nsView.onKeyDown = onKeyDown
   }
 }
 
 private final class PlayerTrackingView: NSView {
   var onInteraction: (() -> Void)?
+  var onPointer: ((Bool, Bool) -> Void)?
   var onKeyDown: ((NSEvent) -> Bool)?
   private var trackingArea: NSTrackingArea?
   private var pointerActivity = PlayerPointerActivity(position: NSEvent.mouseLocation)
@@ -772,7 +883,9 @@ private final class PlayerTrackingView: NSView {
     // inVisibleRect follows the viewport; keep the area across overlay/layout changes.
     if trackingArea == nil {
       let trackingArea = NSTrackingArea(
-        rect: .zero, options: [.activeAlways, .mouseMoved, .inVisibleRect], owner: self)
+        rect: .zero,
+        options: [.activeInKeyWindow, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect],
+        owner: self)
       addTrackingArea(trackingArea)
       self.trackingArea = trackingArea
     }
@@ -781,8 +894,11 @@ private final class PlayerTrackingView: NSView {
 
   override func mouseMoved(with event: NSEvent) {
     guard pointerActivity.moved(to: NSEvent.mouseLocation) else { return }
+    onPointer?(bounds.contains(convert(event.locationInWindow, from: nil)), true)
     onInteraction?()
   }
+  override func mouseEntered(with event: NSEvent) { onPointer?(true, false) }
+  override func mouseExited(with event: NSEvent) { onPointer?(false, false) }
   override func mouseDown(with event: NSEvent) {
     window?.makeFirstResponder(self)
     onInteraction?()

@@ -34,7 +34,12 @@ struct RootView: View {
           OperatingModeView()
         } else if model.operatingMode == .host && model.profile == nil {
           NativeHostSetupView()
-        } else if model.needsInitialLibrarySetup {
+        } else if model.isSwitchingProfile {
+          ProgressView("Switching Profile…")
+            .accessibilityIdentifier("profile-switch-progress")
+        } else if model.requiresProfileSelection {
+          ProfilePickerView()
+        } else if model.needsInitialLibrarySetup, model.managementUnlocked {
           InitialLibrarySetupView()
         } else if model.profile == nil {
           ConnectionView()

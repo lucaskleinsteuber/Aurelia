@@ -40,11 +40,12 @@ public static class PairingCommandClient
                 username = Console.ReadLine();
             }
 
+            var password = commandLine.ReadPassword();
             using var loginResponse = await client.PostAsJsonAsync(
                 "/api/v1/auth/login",
                 new LoginRequest(
                     username ?? string.Empty,
-                    commandLine.ReadPassword(),
+                    password,
                     $"Aurelia CLI on {Environment.MachineName}"),
                 JsonOptions,
                 cancellationToken);
@@ -57,11 +58,8 @@ public static class PairingCommandClient
 
             try
             {
-                using var codeResponse = await client.PostAsJsonAsync(
-                    "/api/v1/auth/pairings",
-                    new CreatePairingCodeRequest(),
-                    JsonOptions,
-                    cancellationToken);
+                await CommandClientSecurity.UnlockViewingAndManagementAsync(client, authentication, commandLine, password, cancellationToken);
+                using var codeResponse = await CommandClientSecurity.SendConfirmedAsync(client, HttpMethod.Post, "/api/v1/auth/pairings", new CreatePairingCodeRequest(), password, cancellationToken);
                 var pairing = await ReadSuccessAsync<PairingCodeResponse>(
                     codeResponse,
                     cancellationToken);
@@ -90,10 +88,7 @@ public static class PairingCommandClient
             }
             finally
             {
-                using var logout = await client.PostAsync(
-                    "/api/v1/auth/logout",
-                    content: null,
-                    CancellationToken.None);
+                await CommandClientSecurity.EndCommandSessionAsync(client, authentication);
             }
         }
         catch (Exception exception) when (exception is HttpRequestException

@@ -63,8 +63,25 @@ struct ServerNetworkEditor: View {
               guard info.serverId == trialProfile.serverId else {
                 throw APIClientError.invalidResponse
               }
-              try await trial.confirmNetwork(id: operation.id)
-              try model.acceptConfirmedNetwork(profile: trialProfile)
+              guard let originalDevice = model.deviceConnection, let user = model.profile?.user
+              else { throw APIClientError.invalidResponse }
+              let paired = originalDevice.changingAddress(
+                trialProfile.baseURL, name: trialProfile.name)
+              let pin = try AdministrationPasswordPrompt.viewingPIN(name: user.username)
+              let authentication = try await APIClient(profile: paired).unlockProfile(
+                id: user.id, pin: pin)
+              guard authentication.user.id == user.id else { throw APIClientError.invalidResponse }
+              let fresh = StoredServerProfile(
+                serverId: paired.serverId, name: paired.name, baseURL: paired.baseURL,
+                publicKeyFingerprint: paired.publicKeyFingerprint, token: authentication.token,
+                sessionId: authentication.sessionId, expiresAt: authentication.expiresAt,
+                user: authentication.user,
+                locallyManaged: paired.locallyManaged, viewingSession: true)
+              let password = try AdministrationPasswordPrompt.confirm(serverName: paired.name)
+              let expiry = try await APIClient(profile: fresh).unlockManagement(password: password)
+              try await APIClient(profile: fresh).confirmNetwork(id: operation.id)
+              try model.acceptConfirmedNetwork(
+                profile: fresh, device: paired, managementExpiry: expiry)
               self.operation = nil
               self.trialProfile = nil
               message = "Network settings confirmed."
@@ -93,8 +110,9 @@ struct ServerNetworkEditor: View {
                 serverId: profile.serverId, name: draft.serverName, baseURL: address,
                 publicKeyFingerprint: profile.publicKeyFingerprint, token: profile.token,
                 sessionId: profile.sessionId, expiresAt: profile.expiresAt, user: profile.user,
-                locallyManaged: profile.locallyManaged)
+                locallyManaged: profile.locallyManaged, viewingSession: profile.viewingSession)
               operation = pending
+              model.beginNetworkConfirmation(until: pending.confirmBefore)
               message = nil
             }
           }.disabled(

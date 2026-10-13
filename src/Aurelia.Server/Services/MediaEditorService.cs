@@ -62,6 +62,9 @@ public sealed class MediaEditorService(AureliaDbContext database, CatalogMutatio
     {
         using var lease = await mutations.EnterAsync(token);
         var item = await ItemAsync(id, token);
+        if (database.AccessUserId != null && !database.AccessIsOwner && database.AccessMode == ProfileAccessMode.SelectedTitles
+            && request.RelativeSourcePath is not null && request.RelativeSourcePath != Path.GetRelativePath(item.LibraryRoot.Path, item.SourcePath))
+            throw new AccountException("full_library_access_required", "Changing file associations requires full library access.", 403);
         var fields = (request.OverrideFields ?? []).ToHashSet(StringComparer.Ordinal);
         if (fields.Any(field => !Fields.Contains(field))) throw Invalid("An unknown manual field was supplied.");
         if ((item.Metadata?.EditorRevision ?? 0) != request.Revision)

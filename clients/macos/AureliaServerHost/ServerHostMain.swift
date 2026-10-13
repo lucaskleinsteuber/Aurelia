@@ -620,6 +620,29 @@ private final class ServerHostRuntime: @unchecked Sendable {
       return
     }
     switch (request.method, request.action) {
+    case ("POST", "owner-pin-recovery"):
+      guard status.state == .running, request.body.count <= 4096 else {
+        respond(connection, status: 409, body: Data())
+        return
+      }
+      var forwarded = URLRequest(url: URL(string: "http://127.0.0.1:43110/api/v1/local/owner-pin")!)
+      forwarded.httpMethod = "POST"
+      forwarded.httpBody = request.body
+      forwarded.timeoutInterval = 10
+      forwarded.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      forwarded.setValue(secret, forHTTPHeaderField: "X-Aurelia-Host-Recovery")
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.urlCache = nil
+      let session = URLSession(configuration: configuration)
+      session.dataTask(with: forwarded) { [weak self] data, response, _ in
+        session.invalidateAndCancel()
+        self?.queue.async { [weak self] in
+          guard let self else { return }
+          let status = (response as? HTTPURLResponse)?.statusCode ?? 503
+          self.respond(
+            connection, status: status, body: data.map { Data($0.prefix(4096)) } ?? Data())
+        }
+      }.resume()
     case ("POST", "hosting-authorized"):
       do {
         let settings = try JSONDecoder().decode(HostServiceRequest.self, from: request.body)

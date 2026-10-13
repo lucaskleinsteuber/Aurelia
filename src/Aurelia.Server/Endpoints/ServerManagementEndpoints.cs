@@ -61,7 +61,7 @@ public static class ServerManagementEndpoints
             if (!context.Request.IsHttps && context.Connection.RemoteIpAddress is { } ip && !System.Net.IPAddress.IsLoopback(ip))
                 throw new AccountException("https_required", "Password confirmation requires HTTPS.", 403);
             await accounts.ConfirmPasswordAsync(context.User.RequireUserId(), request.Password, context.RequestAborted);
-            var result = approvals.Issue(context.User.RequireSessionId(), request.Action, request.PayloadHash);
+            var result = approvals.Issue(context.User.RequireProfileSessionId(), request.Action, request.PayloadHash);
             return new AdministrationApprovalResponse(result.Token, result.ExpiresAt);
         }).RequireRateLimiting("pairing");
         server.MapGet("/users", (AccountService accounts, CancellationToken token) => accounts.ListAccessAsync(token));

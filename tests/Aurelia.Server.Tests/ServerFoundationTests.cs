@@ -93,10 +93,7 @@ public sealed class ServerFoundationTests
             ApiTestClient.JsonOptions);
         Assert.Equal(HttpStatusCode.Forbidden, duplicate.StatusCode);
 
-        using var login = await client.PostAsJsonAsync(
-            "/api/v1/auth/login",
-            new LoginRequest("LUCAS", "correct horse battery staple", "Second Mac"),
-            ApiTestClient.JsonOptions);
+        using var login = await ApiTestClient.LoginAsync(client, new LoginRequest("LUCAS", "correct horse battery staple", "Second Mac"));
         login.EnsureSuccessStatusCode();
         var secondSession = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
 
@@ -149,16 +146,13 @@ public sealed class ServerFoundationTests
             HttpMethod.Post,
             "/api/v1/users",
             owner.Token,
-            new CreateUserRequest("second-admin", "secure admin password", UserRole.Admin));
+            new CreateUserRequest("second-admin", "secure admin password", UserRole.Admin, ApiTestClient.TestPin));
         using var createAdminResponse = await ApiTestClient.SendAsync(client, createAdminRequest);
         createAdminResponse.EnsureSuccessStatusCode();
         var admin = await ApiTestClient.ReadAsync<UserSummary>(createAdminResponse);
         Assert.Equal(UserRole.Admin, admin.Role);
 
-        using var adminLoginResponse = await client.PostAsJsonAsync(
-            "/api/v1/auth/login",
-            new LoginRequest("second-admin", "secure admin password", "Admin Mac"),
-            ApiTestClient.JsonOptions);
+        using var adminLoginResponse = await ApiTestClient.LoginAsync(client, new LoginRequest("second-admin", "secure admin password", "Admin Mac"));
         adminLoginResponse.EnsureSuccessStatusCode();
         var adminLogin = await ApiTestClient.ReadAsync<AuthenticationResponse>(adminLoginResponse);
 
@@ -166,7 +160,7 @@ public sealed class ServerFoundationTests
             HttpMethod.Post,
             "/api/v1/users",
             adminLogin.Token,
-            new CreateUserRequest("third-admin", "another secure password", UserRole.Admin));
+            new CreateUserRequest("third-admin", "another secure password", UserRole.Admin, ApiTestClient.TestPin));
         using var createAnotherAdminResponse = await ApiTestClient.SendAsync(client, createAnotherAdminRequest);
         Assert.Equal(HttpStatusCode.Forbidden, createAnotherAdminResponse.StatusCode);
 
@@ -174,7 +168,7 @@ public sealed class ServerFoundationTests
             HttpMethod.Post,
             "/api/v1/users",
             adminLogin.Token,
-            new CreateUserRequest("forbidden-owner", "another secure password", UserRole.Owner));
+            new CreateUserRequest("forbidden-owner", "another secure password", UserRole.Owner, ApiTestClient.TestPin));
         using var createOwnerResponse = await ApiTestClient.SendAsync(client, createOwnerRequest);
         Assert.Equal(HttpStatusCode.Forbidden, createOwnerResponse.StatusCode);
 

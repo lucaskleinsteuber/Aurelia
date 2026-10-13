@@ -20,10 +20,12 @@ Verification uses real Kestrel sockets, not an in-memory test transport:
   certificate's SPKI pin, validity dates and hostname checks.
 - A wrong SPKI pin is rejected. A local redirect test confirms credentials are
   not forwarded through automatic redirects.
-- Login, pairing and self-session revocation; two users with separate library
-  grants; unauthorized catalog/playback attempts.
+- Owner-authorized device pairing, explicit PIN unlock and device revocation;
+  two viewing profiles with separate content grants; unauthorized catalog and
+  playback attempts.
 - Byte ranges and HEAD, progress, interrupted streams and cancelled long polls.
-- Restart with the same identity, session and playback progress, followed by
+- Restart with the same identity, paired devices and playback progress; expired
+  volatile viewing sessions must be rejected and explicitly PIN-unlocked again, followed by
   simultaneous clients and connection churn. Playback tickets are renewed
   every fifteen minutes and before reported expiry, not reused indefinitely.
 
@@ -115,7 +117,19 @@ result bundle into the configured external artifact directory.
 
 The server-outage case deliberately makes a fresh playback request because a
 small source can already be buffered. It proves bounded authorization recovery,
-not a physical cable pull during an active transfer. The source-outage case
+not a physical cable pull during an active transfer. A server restart retires
+volatile viewing sessions: the gate must observe the terminal authentication
+failure, explicitly unlock the profile again with its PIN, and prove unfinished
+progress resumes with real output. A device credential never replaces that PIN.
+The source-outage case
 renames only a generated test folder. Hardware media-key and AirPods behavior,
 installed-host startup, and any explicitly approved personal-source check are
 recorded separately; none is implied by a full-chain pass.
+
+The optional `AureliaIntegrationTests` pairing/catalog test requires an isolated
+synthetic server, `AURELIA_TEST_SERVER_URL`, `AURELIA_TEST_PAIRING_CODE`,
+`AURELIA_TEST_SERVER_FINGERPRINT` and `AURELIA_TEST_PROFILE_PIN`. An optional
+`AURELIA_TEST_PROFILE_ID` selects another initialized test profile; otherwise the
+paired owner's profile is used. It verifies that the device cannot read the
+catalog before PIN unlock and revokes its newly paired test device on completion
+or failure. Never point it at personal library state.

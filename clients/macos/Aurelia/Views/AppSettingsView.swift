@@ -27,7 +27,8 @@ struct AppSettingsView: View {
     TabView(selection: $selectedPage) {
       settingsPage {
         interface
-        if model.profile != nil { devices }
+        if model.profile?.isViewingSession == true { ChangeProfilePINView() }
+        if model.profile != nil, model.managementUnlocked { devices }
         disconnectedState
       }
       .tabItem { Label("General", systemImage: "gearshape") }
@@ -38,7 +39,9 @@ struct AppSettingsView: View {
         .tag(SettingsPage.playback)
 
       settingsPage {
-        if model.profile?.user?.role.canManageLibraries == true {
+        if model.profile?.user?.role.canManageLibraries == true, !model.managementUnlocked {
+          ManagementUnlockView()
+        } else if model.canManageStorage {
           storage
           LibraryMaintenanceView()
         } else if model.profile != nil {
@@ -54,7 +57,9 @@ struct AppSettingsView: View {
       .tag(SettingsPage.library)
 
       settingsPage {
-        if model.profile?.user?.role.canManageLibraries == true {
+        if model.profile?.user?.role.canManageLibraries == true, !model.managementUnlocked {
+          ManagementUnlockView()
+        } else if model.canManageMedia {
           metadata
         } else if model.profile != nil {
           ContentUnavailableView(
@@ -70,7 +75,14 @@ struct AppSettingsView: View {
 
       settingsPage {
         if let profile = model.profile {
-          if profile.user?.role == .owner { ServerManagementView() }
+          if profile.user?.role.canManageLibraries == true, !model.managementUnlocked {
+            ManagementUnlockView()
+          } else if profile.user?.role == .owner {
+            ServerManagementView()
+          }
+          if model.managementUnlocked, profile.isViewingSession {
+            Button("Lock Server Management") { Task { await model.lockManagement() } }
+          }
           advanced(profile)
         } else {
           disconnectedState
@@ -483,7 +495,8 @@ struct AppSettingsView: View {
           "Fingerprint", value: FingerprintFormatter.display(profile.publicKeyFingerprint))
         if let user = profile.user {
           LabeledContent(
-            "Signed In", value: "\(user.username) · \(user.role.rawValue.capitalized)")
+            model.requiresProfileSelection ? "Paired Device" : "Signed In",
+            value: "\(user.username) · \(user.role.rawValue.capitalized)")
         }
         Divider()
         if model.operatingMode == .host {

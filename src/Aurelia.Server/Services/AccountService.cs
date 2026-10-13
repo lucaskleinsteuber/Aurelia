@@ -13,7 +13,9 @@ public sealed class AccountService(
     TokenService tokenService,
     ServerConfigurationStore configuration,
     CredentialAttemptGuard credentialAttempts,
-    ActiveStreamRegistry streams)
+    ActiveStreamRegistry streams,
+    ProfileSessionStore profiles,
+    ProfileService profileService)
 {
     private static readonly TimeSpan PairingCodeLifetime = TimeSpan.FromMinutes(5);
 
@@ -68,7 +70,10 @@ public sealed class AccountService(
             candidate => candidate.NormalizedUsername == normalizedUsername,
             cancellationToken);
 
-        await VerifyPasswordAsync(user, request.Password, cancellationToken);
+        if (user?.Role != UserRole.Owner) await VerifyPasswordAsync(null, request.Password, cancellationToken);
+        if (await database.AdministrationCredentials.AnyAsync(cancellationToken))
+            await profileService.VerifyManagementAsync(user!.Id, request.Password, cancellationToken);
+        else await VerifyPasswordAsync(user, request.Password, cancellationToken);
 
         var response = CreateSession(user!, deviceName, DateTimeOffset.UtcNow);
         await database.SaveChangesAsync(cancellationToken);
@@ -96,7 +101,7 @@ public sealed class AccountService(
     {
         var actor = await RequireUserAsync(actorId, cancellationToken);
         var username = ValidateUsername(request.Username);
-        ValidatePassword(request.Password);
+        if (!ProfileService.IsPin(request.Pin)) throw new AccountException("invalid_pin_format", "Every profile needs a numeric PIN with 4 to 8 digits.", 400);
         ValidateRole(request.Role);
 
         if (actor.Role != UserRole.Owner)
@@ -122,9 +127,15 @@ public sealed class AccountService(
             NormalizedUsername = normalized,
             PasswordHash = string.Empty,
             Role = request.Role,
+            AccessMode = request.Role == UserRole.Owner ? ProfileAccessMode.EntireLibrary : ProfileAccessMode.SelectedTitles,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        using (await credentialAttempts.EnterAsync(cancellationToken)) user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
+        using (await credentialAttempts.EnterAsync(cancellationToken))
+        {
+            // Profile accounts no longer carry a usable password credential.
+            user.PasswordHash = passwordHasher.HashPassword(user, tokenService.CreateDeviceToken());
+            user.PinHash = passwordHasher.HashPassword(user, request.Pin!);
+        }
         database.Users.Add(user);
         await database.SaveChangesAsync(cancellationToken);
         return ToSummary(user);
@@ -165,6 +176,7 @@ public sealed class AccountService(
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         streams.RevokeUser(targetId);
+        profiles.RevokeUser(targetId);
         return ToSummary(target);
     }
 
@@ -208,6 +220,7 @@ public sealed class AccountService(
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         streams.RevokeUser(targetId);
+        profiles.RevokeUser(targetId);
     }
 
     public async Task<PairingCodeResponse> CreatePairingCodeAsync(
@@ -215,7 +228,7 @@ public sealed class AccountService(
         CancellationToken cancellationToken)
     {
         var user = await RequireUserAsync(userId, cancellationToken);
-        if (!configuration.Current.PairingEnabled || !user.IsEnabled) throw Forbidden();
+        if (!configuration.Current.PairingEnabled || !user.IsEnabled || user.Role != UserRole.Owner) throw Forbidden();
         var now = DateTimeOffset.UtcNow;
 
         var activeCodes = await database.PairingCodes
@@ -262,7 +275,7 @@ public sealed class AccountService(
             .Include(candidate => candidate.User)
             .SingleOrDefaultAsync(candidate => candidate.CodeHash == codeHash, cancellationToken);
 
-        if (code is null || code.ConsumedAt is not null || code.ExpiresAt <= now || !code.User.IsEnabled)
+        if (code is null || code.ConsumedAt is not null || code.ExpiresAt <= now || !code.User.IsEnabled || code.User.Role != UserRole.Owner)
         {
             throw InvalidPairingCode();
         }
@@ -320,6 +333,7 @@ public sealed class AccountService(
         target.RevokedAt ??= DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
         streams.RevokeSession(targetSessionId);
+        profiles.RevokeDevice(targetSessionId);
     }
 
     private AuthenticationResponse CreateSession(
@@ -347,6 +361,15 @@ public sealed class AccountService(
             session.ExpiresAt);
     }
 
+    public async Task RevokeOwnDeviceAsync(Guid deviceId, CancellationToken token)
+    {
+        var device = await database.DeviceSessions.SingleOrDefaultAsync(device => device.Id == deviceId, token)
+            ?? throw NotFound("session_not_found", "The paired device was not found.");
+        device.RevokedAt ??= DateTimeOffset.UtcNow;
+        await database.SaveChangesAsync(token);
+        profiles.RevokeDevice(deviceId);
+    }
+
     private async Task<ServerUser> RequireUserAsync(
         Guid id,
         CancellationToken cancellationToken)
@@ -357,8 +380,7 @@ public sealed class AccountService(
 
     public async Task ConfirmPasswordAsync(Guid userId, string password, CancellationToken cancellationToken)
     {
-        await VerifyPasswordAsync(await RequireUserAsync(userId, cancellationToken), password, cancellationToken);
-        await database.SaveChangesAsync(cancellationToken);
+        await profileService.VerifyManagementAsync(userId, password, cancellationToken);
     }
 
     private async Task VerifyPasswordAsync(ServerUser? user, string password, CancellationToken cancellationToken)
@@ -406,6 +428,8 @@ public sealed class AccountService(
         var old = target.LibraryGrants.Select(grant => grant.LibraryRootId).ToHashSet();
         database.UserLibraryGrants.AddRange(ids.Where(id => !old.Contains(id)).Select(id => new UserLibraryGrant { UserId = targetId, LibraryRootId = id }));
         target.IsEnabled = request.IsEnabled;
+        target.AccessMode = ProfileAccessMode.LegacyLibraries;
+        target.AccessRevision++;
         database.SyncChanges.Add(new SyncChange { Area = SyncChangeArea.Catalog, UserId = targetId, CreatedAt = DateTimeOffset.UtcNow });
         if (!target.IsEnabled)
         {
@@ -417,22 +441,13 @@ public sealed class AccountService(
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         streams.RevokeUser(targetId);
+        if (!target.IsEnabled) profiles.RevokeUser(targetId);
     }
 
     public async Task ResetPasswordAsync(Guid actorId, Guid targetId, string password, CancellationToken cancellationToken)
     {
-        await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        if ((await RequireUserAsync(actorId, cancellationToken)).Role != UserRole.Owner) throw Forbidden();
-        ValidatePassword(password);
-        var target = await RequireUserAsync(targetId, cancellationToken);
-        using (await credentialAttempts.EnterAsync(cancellationToken)) target.PasswordHash = passwordHasher.HashPassword(target, password);
-        var sessions = await database.DeviceSessions.Where(session => session.UserId == targetId && session.RevokedAt == null).ToListAsync(cancellationToken);
-        foreach (var session in sessions) session.RevokedAt = DateTimeOffset.UtcNow;
-        var codes = await database.PairingCodes.Where(code => code.UserId == targetId && code.ConsumedAt == null).ToListAsync(cancellationToken);
-        foreach (var code in codes) code.ConsumedAt = DateTimeOffset.UtcNow;
-        await database.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        streams.RevokeUser(targetId);
+        await Task.CompletedTask;
+        throw new AccountException("profile_pin_required", "Viewing profiles use PINs. Reset the profile PIN instead of an account password.", 409);
     }
 
     public async Task RevokeAllSessionsAsync(Guid actorId, Guid targetId, CancellationToken cancellationToken)
@@ -446,11 +461,13 @@ public sealed class AccountService(
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         streams.RevokeUser(targetId);
+        profiles.RevokeUser(targetId);
+        foreach (var session in sessions) profiles.RevokeDevice(session.Id);
     }
 
     private static UserSummary ToSummary(ServerUser user)
     {
-        return new UserSummary(user.Id, user.Username, user.Role, user.CreatedAt);
+        return new UserSummary(user.Id, user.Username, user.Role, user.CreatedAt, user.AccessMode);
     }
 
     private static string ValidateUsername(string? value)

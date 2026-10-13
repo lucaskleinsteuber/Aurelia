@@ -48,6 +48,18 @@ struct UserSummary: Codable, Equatable, Sendable {
   let username: String
   let role: UserRole
   let createdAt: String
+  let accessMode: ProfileAccessMode?
+
+  init(
+    id: UUID, username: String, role: UserRole, createdAt: String,
+    accessMode: ProfileAccessMode? = nil
+  ) {
+    self.id = id
+    self.username = username
+    self.role = role
+    self.createdAt = createdAt
+    self.accessMode = accessMode
+  }
 }
 
 enum LibraryKind: String, Codable, CaseIterable, Sendable {
@@ -642,6 +654,9 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
   let user: UserSummary?
   /// Set only after the bundled host and the pinned connection identify the same server.
   let locallyManaged: Bool?
+  /// Present only in memory; Keychain rejects viewing credentials.
+  let viewingSession: Bool?
+  var isViewingSession: Bool { viewingSession == true }
 
   init(
     serverId: UUID,
@@ -652,7 +667,8 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
     sessionId: UUID,
     expiresAt: String,
     user: UserSummary? = nil,
-    locallyManaged: Bool? = nil
+    locallyManaged: Bool? = nil,
+    viewingSession: Bool? = nil
   ) {
     self.serverId = serverId
     self.name = name
@@ -663,13 +679,23 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
     self.expiresAt = expiresAt
     self.user = user
     self.locallyManaged = locallyManaged
+    self.viewingSession = viewingSession
   }
 
   func retainingLocalHosting() -> StoredServerProfile {
     StoredServerProfile(
       serverId: serverId, name: name, baseURL: baseURL,
       publicKeyFingerprint: publicKeyFingerprint, token: token,
-      sessionId: sessionId, expiresAt: expiresAt, user: user, locallyManaged: true)
+      sessionId: sessionId, expiresAt: expiresAt, user: user, locallyManaged: true,
+      viewingSession: viewingSession)
+  }
+
+  func changingAddress(_ address: URL, name: String? = nil) -> StoredServerProfile {
+    StoredServerProfile(
+      serverId: serverId, name: name ?? self.name, baseURL: address,
+      publicKeyFingerprint: publicKeyFingerprint, token: token, sessionId: sessionId,
+      expiresAt: expiresAt, user: user, locallyManaged: locallyManaged,
+      viewingSession: viewingSession)
   }
 }
 

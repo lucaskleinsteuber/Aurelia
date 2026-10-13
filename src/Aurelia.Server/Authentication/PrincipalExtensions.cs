@@ -14,6 +14,9 @@ public static class PrincipalExtensions
         return ParseRequiredGuidClaim(principal, DeviceTokenAuthenticationHandler.SessionIdClaim);
     }
 
+    public static Guid RequireProfileSessionId(this ClaimsPrincipal principal) =>
+        ParseRequiredGuidClaim(principal, DeviceTokenAuthenticationHandler.ProfileSessionIdClaim);
+
     private static Guid ParseRequiredGuidClaim(ClaimsPrincipal principal, string claimType)
     {
         var value = principal.FindFirstValue(claimType);

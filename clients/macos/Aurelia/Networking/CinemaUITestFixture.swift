@@ -9,6 +9,43 @@
         && ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "library-admin"
     }
     static let assetID = UUID(uuidString: "40000000-0000-0000-0000-000000000001")!
+    private static var notesByMedia: [UUID: [SceneNote]] = [:]
+    static func sceneNotes(path: String, method: String, body: Data?) throws -> Data {
+      let parts = path.split(separator: "?")[0].split(separator: "/")
+      guard parts.count >= 5, let media = UUID(uuidString: String(parts[3])) else {
+        throw APIClientError.invalidResponse
+      }
+      if method == "GET" { return try JSONEncoder().encode(notesByMedia[media] ?? []) }
+      guard parts.count == 6, let id = UUID(uuidString: String(parts[5])) else {
+        throw APIClientError.invalidResponse
+      }
+      if method == "DELETE" {
+        notesByMedia[media]?.removeAll { $0.id == id }
+        return Data()
+      }
+      struct Payload: Decodable {
+        let startMilliseconds: Int64
+        let endMilliseconds: Int64?
+        let text: String
+        let revision: Int64
+      }
+      guard let body else { throw APIClientError.invalidResponse }
+      let request = try JSONDecoder().decode(Payload.self, from: body)
+      let existing = notesByMedia[media]?.first { $0.id == id }
+      guard (existing?.revision ?? 0) == request.revision else {
+        throw APIClientError.serverRejected(
+          code: "scene_note_conflict", message: "The scene note changed on another device.")
+      }
+      let note = SceneNote(
+        id: id, mediaId: media, startMilliseconds: request.startMilliseconds,
+        endMilliseconds: request.endMilliseconds, text: request.text, revision: request.revision + 1
+      )
+      var items = notesByMedia[media] ?? []
+      items.removeAll { $0.id == id }
+      items.append(note)
+      notesByMedia[media] = items.sorted { $0.startMilliseconds < $1.startMilliseconds }
+      return try JSONEncoder().encode(note)
+    }
     static let artwork = ArtworkSummary(
       id: assetID, kind: .backdrop, path: "/api/v1/artwork/\(assetID)",
       contentType: "image/png", contentLength: 1)

@@ -160,7 +160,7 @@ public sealed class MediaEditingTests
         var upload = await ApiTestClient.ReadAsync<EditorUploadSummary>(uploaded);
         using var anonymous = await fixture.Client.GetAsync(upload.Path);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
-        using var otherSessionResponse = await fixture.Client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest("lucas", Fixture.Password, "Other editor"), ApiTestClient.JsonOptions);
+        using var otherSessionResponse = await ApiTestClient.LoginAsync(fixture.Client, new LoginRequest("lucas", Fixture.Password, "Other editor"));
         var otherSession = await ApiTestClient.ReadAsync<AuthenticationResponse>(otherSessionResponse);
         using var otherRequest = ApiTestClient.Authorized(HttpMethod.Get, upload.Path, otherSession.Token);
         using var otherRead = await fixture.Client.SendAsync(otherRequest);
@@ -272,9 +272,9 @@ public sealed class MediaEditingTests
     {
         using var fixture = await Fixture.CreateAsync();
         var movie = await fixture.MovieAsync("Reset.mkv"); var privateMovie = await fixture.MovieAsync("Private.mkv");
-        var administrator = await fixture.RequestAsync<UserSummary>(HttpMethod.Post, "/api/v1/users", new CreateUserRequest("admin", Fixture.Password, UserRole.Admin));
+        var administrator = await fixture.RequestAsync<UserSummary>(HttpMethod.Post, "/api/v1/users", new CreateUserRequest("admin", Fixture.Password, UserRole.Admin, ApiTestClient.TestPin));
         using (var grant = await fixture.SendAsync(HttpMethod.Put, $"/api/v1/users/{administrator.Id}/access", new UpdateUserAccessRequest(true, [movie.LibraryRootId]))) grant.EnsureSuccessStatusCode();
-        using var login = await fixture.Client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest("admin", Fixture.Password, "Admin Mac"), ApiTestClient.JsonOptions);
+        using var login = await ApiTestClient.LoginAsync(fixture.Client, new LoginRequest("admin", Fixture.Password, "Admin Mac"));
         var session = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
         using var denied = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/media/{privateMovie.Id}/editor", session.Token);
         using var deniedResponse = await fixture.Client.SendAsync(denied); Assert.Equal(HttpStatusCode.NotFound, deniedResponse.StatusCode);

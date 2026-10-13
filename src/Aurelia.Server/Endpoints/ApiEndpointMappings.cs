@@ -26,14 +26,15 @@ public static class ApiEndpointMappings
             .RequireAuthorization();
         authentication.MapPost("/pair", RedeemPairingCodeAsync)
             .RequireRateLimiting("authentication");
-        authentication.MapPost("/logout", LogoutAsync)
+        authentication.MapPost("/logout", (HttpContext context, ProfileSessionStore sessions) =>
+            { sessions.End(context.User.RequireProfileSessionId()); return Results.NoContent(); })
             .RequireAuthorization();
         authentication.MapGet("/sessions", ListSessionsAsync)
             .RequireAuthorization();
         authentication.MapDelete("/sessions/{sessionId:guid}", RevokeSessionAsync)
             .RequireAuthorization();
         authentication.MapPost("/pairings", CreatePairingCodeAsync)
-            .RequireAuthorization()
+            .RequireAuthorization("Owner")
             .RequireRateLimiting("pairing");
 
         var users = api.MapGroup("/users").RequireAuthorization("Owner");
@@ -88,7 +89,7 @@ public static class ApiEndpointMappings
         api.MapGet("/home", GetHomeAsync).RequireAuthorization();
 
         var metadata = api.MapGroup("/metadata").RequireAuthorization("Administrator");
-        metadata.MapGet("/provider", GetMetadataProviderAsync);
+        metadata.MapGet("/provider", GetMetadataProviderAsync).RequireAuthorization("Owner");
         metadata.MapPut("/provider", UpdateMetadataProviderAsync);
         metadata.MapDelete("/provider/token", RemoveMetadataProviderTokenAsync);
         metadata.MapPost("/jobs", StartMetadataJobAsync);
@@ -224,7 +225,7 @@ public static class ApiEndpointMappings
         AccountService accounts,
         CancellationToken cancellationToken)
     {
-        if (!IsLoopback(context, environment) && !context.Request.IsHttps)
+        if (!IsLoopback(context, environment))
         {
             return Task.FromResult(Problem(
                 "local_login_required",
@@ -740,7 +741,7 @@ public static class ApiEndpointMappings
             context.User.RequireUserId(),
             context.User.RequireSessionId(),
             mediaId,
-            cancellationToken));
+            cancellationToken, context.User.RequireProfileSessionId()));
     }
 
     private static Task<IResult> RevokePlaybackAsync(
@@ -796,7 +797,7 @@ public static class ApiEndpointMappings
                 ticket,
                 context.User.RequireUserId(),
                 context.User.RequireSessionId(),
-                cancellationToken);
+                cancellationToken, context.User.RequireProfileSessionId());
         }
         catch (PlaybackException exception)
         {

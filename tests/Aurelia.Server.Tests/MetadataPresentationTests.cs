@@ -164,7 +164,7 @@ public sealed class MetadataPresentationTests
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
         var user = await SendAsync<UserSummary>(client, owner.Token, HttpMethod.Post, "/api/v1/users",
-            new CreateUserRequest("viewer", "another correct horse password", UserRole.User));
+            new CreateUserRequest("viewer", "another correct horse password", UserRole.User, ApiTestClient.TestPin));
         Assert.Equal(UserRole.User, user.Role);
         using var login = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/auth/login", owner.Token,
             new LoginRequest("viewer", "another correct horse password", "Viewer Mac"));
@@ -206,7 +206,7 @@ public sealed class MetadataPresentationTests
             Assert.Equal(movies[1].Id, updated.Items[0].Id);
 
             var user = await SendAsync<UserSummary>(client, owner.Token, HttpMethod.Post, "/api/v1/users",
-                new CreateUserRequest("viewer", "another correct horse password", UserRole.User));
+                new CreateUserRequest("viewer", "another correct horse password", UserRole.User, ApiTestClient.TestPin));
             Assert.Equal(UserRole.User, user.Role);
             using var login = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/auth/login", owner.Token,
                 new LoginRequest("viewer", "another correct horse password", "Viewer Mac"));

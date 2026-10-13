@@ -10,7 +10,7 @@ connect to your server over your home network or private VPN.
   import preview you can correct before adding anything.
 - Lets you edit titles, descriptions, cast and crew, covers, and backgrounds.
   Your corrections stay in place after later scans.
-- Remembers favorites and where you stopped watching for each account.
+- Keeps favorites, watch progress and scene notes separate for PIN-protected profiles.
 - Includes subtitle and audio-track selection, fullscreen playback, and
   Continue Watching.
 - Provides server settings, library permissions, device management, and backups.
@@ -36,6 +36,7 @@ GitHub, not the App Store.
 
 - [Editing metadata and managing your library](MEDIA_EDITING.md)
 - [Server settings and access](SERVER_MANAGEMENT.md)
+- [Profiles and scene notes](docs/PROFILES_AND_NOTES.md)
 - [Backups and recovery](DATABASE_RECOVERY.md)
 - [Building and testing](DEVELOPMENT.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)

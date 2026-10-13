@@ -229,6 +229,11 @@ final class NativeServerHost {
   func restart() async throws {
     _ = try await request(action: "restart", method: "POST")
   }
+  func recoverOwnerPIN(password: String, pin: String) async throws {
+    _ = try await request(
+      action: "owner-pin-recovery", method: "POST",
+      body: JSONEncoder().encode(["password": password, "pin": pin]))
+  }
   func hostingSettingsApplied(operationID: UUID, permitted: Bool) async throws {
     _ = try await request(
       action: "hosting-applied", method: "POST",
