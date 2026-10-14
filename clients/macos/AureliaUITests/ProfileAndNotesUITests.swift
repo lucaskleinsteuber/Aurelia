@@ -17,20 +17,171 @@ final class ProfileAndNotesUITests: XCTestCase {
     app.buttons["watching-profile-70000000-0000-0000-0000-000000000002"].click()
     let pin = app.secureTextFields["profile-pin"]
     XCTAssertTrue(pin.waitForExistence(timeout: 5))
-    pin.click()
-    pin.typeText("0000")
-    app.buttons["profile-unlock"].click()
+    assertReducedPINScreen(app)
+    pin.typeText("0000\r")
     XCTAssertTrue(app.staticTexts["The PIN is incorrect."].waitForExistence(timeout: 5))
     XCTAssertTrue(picker.exists)
-    pin.click()
-    pin.typeKey("a", modifierFlags: .command)
-    pin.typeText("1234")
-    app.buttons["profile-unlock"].click()
+    XCTAssertEqual(pin.value as? String, "")
+    pin.typeText("1234\r")
     XCTAssertTrue(app.buttons["switch-watching-profile"].waitForExistence(timeout: 5))
     app.buttons["switch-watching-profile"].click()
     XCTAssertTrue(picker.waitForExistence(timeout: 20))
     XCTAssertFalse(pin.exists)
     shot(app, "Profile Switch - PIN Required Again")
+  }
+
+  @MainActor
+  func testProfilePINValidationEscapeAndAvatarBack() {
+    continueAfterFailure = false
+    let app = profileApp(localRecovery: true)
+    app.launch()
+    defer { app.terminate() }
+    let viewer = app.buttons["watching-profile-70000000-0000-0000-0000-000000000002"]
+    XCTAssertTrue(viewer.waitForExistence(timeout: 8))
+    XCTAssertTrue(app.buttons["recover-owner-pin"].exists)
+    assertReducedSelection(app)
+    viewer.click()
+    let pin = app.secureTextFields["profile-pin"]
+    XCTAssertTrue(pin.waitForExistence(timeout: 5))
+    assertReducedPINScreen(app)
+    let fieldContainer = app.descendants(matching: .any)["profile-pin-container"]
+    XCTAssertTrue(fieldContainer.exists)
+    XCTAssertEqual(fieldContainer.frame.width, 280, accuracy: 3)
+    XCTAssertEqual(fieldContainer.frame.height, 52, accuracy: 3)
+    pin.typeText("12\r")
+    XCTAssertTrue(app.staticTexts["Enter 4–8 digits."].waitForExistence(timeout: 5))
+    app.typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(viewer.waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["Enter 4–8 digits."].exists)
+    XCTAssertTrue(app.buttons["recover-owner-pin"].exists)
+    viewer.click()
+    XCTAssertTrue(pin.waitForExistence(timeout: 5))
+    pin.typeText("123")
+    app.buttons["profile-back"].click()
+    XCTAssertTrue(viewer.waitForExistence(timeout: 5))
+    viewer.click()
+    XCTAssertTrue(pin.waitForExistence(timeout: 5))
+    XCTAssertEqual(pin.value as? String, "")
+    shot(app, "Profile PIN - Avatar and Field Only")
+    pin.typeText("12345678\r")
+    XCTAssertTrue(app.buttons["switch-watching-profile"].waitForExistence(timeout: 8))
+  }
+
+  @MainActor
+  func testProfileUnlockCanBeCancelledWhileWaiting() {
+    continueAfterFailure = false
+    let app = profileApp()
+    app.launchEnvironment["AURELIA_PROFILE_UNLOCK_DELAY_UI_TESTS"] = "1"
+    app.launch()
+    defer { app.terminate() }
+    let viewer = app.buttons["watching-profile-70000000-0000-0000-0000-000000000002"]
+    XCTAssertTrue(viewer.waitForExistence(timeout: 12))
+    viewer.click()
+    let pin = app.secureTextFields["profile-pin"]
+    XCTAssertTrue(pin.waitForExistence(timeout: 5))
+    pin.typeText("1234\r")
+    let loading = app.descendants(matching: .any)["profile-unlock-progress"]
+    XCTAssertTrue(loading.waitForExistence(timeout: 5))
+    XCTAssertFalse(pin.isEnabled)
+    app.typeKey(.return, modifierFlags: [])
+    app.typeKey(.return, modifierFlags: [])
+    XCTAssertTrue(loading.exists)
+    XCTAssertFalse(app.buttons["switch-watching-profile"].exists)
+    shot(app, "Profile PIN - Loading - Repeated Enter Ignored")
+    app.buttons["profile-back"].click()
+    XCTAssertTrue(viewer.waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["switch-watching-profile"].waitForExistence(timeout: 9))
+    XCTAssertFalse(app.staticTexts["profile-pin-error"].exists)
+    viewer.click()
+    XCTAssertTrue(pin.waitForExistence(timeout: 5))
+    XCTAssertEqual(pin.value as? String, "")
+    pin.typeText("1234\r")
+    XCTAssertTrue(app.buttons["switch-watching-profile"].waitForExistence(timeout: 12))
+  }
+
+  @MainActor
+  func testCenteredProfileRowsForSinglePairAndWrappedProfiles() {
+    continueAfterFailure = false
+    for fixture in ["single", "pair", "many"] {
+      let app = profileApp()
+      app.launchEnvironment["AURELIA_PROFILE_LAYOUT_UI_TESTS"] = fixture
+      app.launch()
+      let owner = app.buttons["watching-profile-70000000-0000-0000-0000-000000000001"]
+      XCTAssertTrue(owner.waitForExistence(timeout: 8))
+      assertCenteredProfileRows(app)
+      shot(app, "Profiles - \(fixture.capitalized) - Centered Rows")
+      if fixture == "many" {
+        let window = app.windows.firstMatch
+        let original = window.frame
+        XCTAssertGreaterThan(original.width, 1_000)
+        let origin = window.coordinate(withNormalizedOffset: .zero)
+        // Straight native edges avoid the transparent rounded corner and shadow.
+        let rightEdge = origin.withOffset(
+          CGVector(dx: original.width - 2, dy: original.height * 0.7))
+        rightEdge.click(
+          forDuration: 0.2,
+          thenDragTo: origin.withOffset(CGVector(dx: 818, dy: original.height * 0.7)))
+        XCTAssertEqual(window.frame.width, 820, accuracy: 8)
+        XCTAssertLessThan(window.frame.width, original.width - 200)
+        let bottomEdge = origin.withOffset(
+          CGVector(dx: window.frame.width / 2, dy: original.height - 2))
+        bottomEdge.click(
+          forDuration: 0.2,
+          thenDragTo: origin.withOffset(CGVector(dx: window.frame.width / 2, dy: 598)))
+        XCTAssertEqual(window.frame.height, 600, accuracy: 8)
+        assertCenteredProfileRows(app)
+        shot(app, "Profiles - Long Names - Smaller Window")
+      }
+      app.terminate()
+    }
+  }
+
+  @MainActor
+  private func profileApp(localRecovery: Bool = false) -> XCUIApplication {
+    let app = XCUIApplication()
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "profiles"
+    if localRecovery { app.launchEnvironment["AURELIA_PROFILE_LOCAL_RECOVERY_UI_TESTS"] = "1" }
+    app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+    return app
+  }
+
+  @MainActor
+  private func assertReducedSelection(_ app: XCUIApplication) {
+    XCTAssertFalse(app.buttons["Refresh Profiles"].exists)
+    XCTAssertFalse(
+      app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Favorites, progress"))
+        .firstMatch.exists)
+  }
+
+  @MainActor
+  private func assertReducedPINScreen(_ app: XCUIApplication) {
+    assertReducedSelection(app)
+    XCTAssertFalse(app.staticTexts["Who’s watching?"].exists)
+    XCTAssertFalse(app.buttons["Choose Another Profile"].exists)
+    XCTAssertFalse(app.buttons["Watch"].exists)
+    XCTAssertFalse(app.buttons["profile-unlock"].exists)
+    XCTAssertFalse(app.buttons["recover-owner-pin"].exists)
+    XCTAssertTrue(app.buttons["profile-back"].exists)
+  }
+
+  @MainActor
+  private func assertCenteredProfileRows(_ app: XCUIApplication) {
+    let profiles = app.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH 'watching-profile-'")
+    )
+    .allElementsBoundByIndex
+    XCTAssertFalse(profiles.isEmpty)
+    let rows = Dictionary(grouping: profiles) { Int($0.frame.minY.rounded()) }
+    for row in rows.values {
+      let sorted = row.sorted { $0.frame.minX < $1.frame.minX }
+      guard let first = sorted.first, let last = sorted.last else { continue }
+      XCTAssertEqual(
+        (first.frame.minX + last.frame.maxX) / 2, app.windows.firstMatch.frame.midX, accuracy: 3)
+      for item in sorted { XCTAssertEqual(item.frame.width, 140, accuracy: 3) }
+      for index in 1..<sorted.count {
+        XCTAssertEqual(sorted[index].frame.minX - sorted[index - 1].frame.maxX, 24, accuracy: 3)
+      }
+    }
   }
 
   @MainActor

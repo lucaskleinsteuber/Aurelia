@@ -38,6 +38,10 @@ final class AppModel: ObservableObject {
   private var administrationCancellations: [UUID: () -> Void] = [:]
   private var managementAttempt = UUID()
   private let profileSelectionOverride: Bool?
+  private let profileUnlocker:
+    (@MainActor (StoredServerProfile, UUID, String) async throws -> ProfileSessionResponse)?
+  private let profileSessionEnder: (@MainActor (StoredServerProfile) async throws -> Void)?
+  private let profileSnapshotRefresher: (@MainActor (StoredServerProfile) async throws -> Void)?
   private let managementUnlocker: (@MainActor (StoredServerProfile, String) async throws -> String)?
   private let managementLocker: (@MainActor (StoredServerProfile) async throws -> Void)?
   private var profileExpiryTask: Task<Void, Never>?
@@ -248,6 +252,11 @@ final class AppModel: ObservableObject {
     initialProfile: StoredServerProfile? = nil,
     syncController: LibrarySyncController = LibrarySyncController(),
     profileSelectionEnabled: Bool? = nil,
+    profileUnlocker: (
+      @MainActor (StoredServerProfile, UUID, String) async throws -> ProfileSessionResponse
+    )? = nil,
+    profileSessionEnder: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
+    profileSnapshotRefresher: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
     initialManagementExpiry: Date? = nil,
     managementUnlocker: (@MainActor (StoredServerProfile, String) async throws -> String)? = nil,
     managementLocker: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
@@ -259,6 +268,9 @@ final class AppModel: ObservableObject {
     self.serverHost = serverHost
     self.syncController = syncController
     self.profileSelectionOverride = profileSelectionEnabled
+    self.profileUnlocker = profileUnlocker
+    self.profileSessionEnder = profileSessionEnder
+    self.profileSnapshotRefresher = profileSnapshotRefresher
     self.managementUnlocker = managementUnlocker
     self.managementLocker = managementLocker
     self.managementExpiresAt = initialManagementExpiry
@@ -302,8 +314,12 @@ final class AppModel: ObservableObject {
         return
       }
       if Self.uiTestMode == "profiles" {
-        operatingMode = .client
-        profile = Self.previewOwnerProfile
+        let localRecovery =
+          ProcessInfo.processInfo.environment["AURELIA_PROFILE_LOCAL_RECOVERY_UI_TESTS"] == "1"
+        operatingMode = localRecovery ? .host : .client
+        profile =
+          localRecovery
+          ? Self.previewOwnerProfile.retainingLocalHosting() : Self.previewOwnerProfile
         deviceConnection = profile
         watchingProfiles = Self.watchingProfileFixture
         isStarting = false
@@ -1214,6 +1230,10 @@ final class AppModel: ObservableObject {
       try await loadWatchingProfiles()
       return
     }
+    if profile.isViewingSession, let profileSnapshotRefresher {
+      try await profileSnapshotRefresher(profile)
+      return
+    }
     let generation = connectionGeneration
     isWorking = true
     defer { isWorking = false }
@@ -1489,6 +1509,8 @@ final class AppModel: ObservableObject {
 
   func refreshFromUI() async {
     let generation = connectionGeneration
+    let selection = profileSelectionGeneration
+    let viewingSession = profile?.isViewingSession == true ? profile : nil
     guard !isRecoveringLocalHost else { return }
     if operatingMode == .host,
       hostSnapshot.state == .failed || hostSnapshot.state == .stopped
@@ -1500,9 +1522,17 @@ final class AppModel: ObservableObject {
     }
     errorMessage = nil
     do {
-      try await refresh()
+      try await refresh(requireCompleteSnapshot: true)
+      guard isCurrent(generation), selection == profileSelectionGeneration,
+        viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
+      else { return }
+      startSync()
+    } catch is CancellationError {
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      guard isCurrent(generation), selection == profileSelectionGeneration,
+        viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
+      else { return }
+      errorMessage = error.localizedDescription
     }
   }
 
@@ -1654,6 +1684,7 @@ final class AppModel: ObservableObject {
     #endif
     guard let device = deviceConnection ?? profile, !device.isViewingSession else { return }
     let generation = connectionGeneration
+    let selection = profileSelectionGeneration
     let client = APIClient(profile: device)
     let info = try await client.serverInfo()
     guard info.serverId == device.serverId else { throw APIClientError.serverIdentityMismatch }
@@ -1668,16 +1699,34 @@ final class AppModel: ObservableObject {
       )
     }
     try ProfilePickerProtocol.validate(formatVersion: response.formatVersion)
-    guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
+    guard isCurrent(generation), profileSelectionGeneration == selection,
+      profile?.isViewingSession != true, !Task.isCancelled
+    else { throw CancellationError() }
     watchingProfiles = response.profiles
     managementSetupRequired = response.managementSetupRequired
     profileSelectionError = nil
   }
 
   func reloadWatchingProfiles() async {
+    let selection = profileSelectionGeneration
     do { try await loadWatchingProfiles() } catch is CancellationError {} catch {
+      guard selection == profileSelectionGeneration, profile?.isViewingSession != true else {
+        return
+      }
       profileSelectionError = error.localizedDescription
     }
+  }
+
+  func clearProfileSelectionError() {
+    profileSelectionError = nil
+  }
+
+  /// Invalidates an unlock even when the underlying request does not cooperate with cancellation.
+  func cancelWatchingProfileSelection() {
+    guard requiresProfileSelection, !isSwitchingProfile else { return }
+    profileSelectionGeneration = UUID()
+    isSelectingProfile = false
+    profileSelectionError = nil
   }
 
   func initializeWatchingProfiles(password: String, pin: String) async -> Bool {
@@ -1705,10 +1754,18 @@ final class AppModel: ObservableObject {
       !choice.needsPinSetup, !choice.pinProtectionEnabled || ProfilePIN.isValid(pin),
       !isSelectingProfile
     else { return false }
-    let expected = profileSelectionGeneration
+    let expected = UUID()
+    profileSelectionGeneration = expected
+    profileSelectionError = nil
+    isSelectingProfile = true
+    defer { if profileSelectionGeneration == expected { isSelectingProfile = false } }
     #if DEBUG
       if Self.uiTestMode == "profiles" {
-        guard !choice.pinProtectionEnabled || pin == "1234" else {
+        if ProcessInfo.processInfo.environment["AURELIA_PROFILE_UNLOCK_DELAY_UI_TESTS"] == "1" {
+          do { try await Task.sleep(for: .seconds(8)) } catch { return false }
+          guard expected == profileSelectionGeneration, !Task.isCancelled else { return false }
+        }
+        guard !choice.pinProtectionEnabled || pin == "1234" || pin == "12345678" else {
           profileSelectionError = "The PIN is incorrect."
           return false
         }
@@ -1726,18 +1783,31 @@ final class AppModel: ObservableObject {
         return true
       }
     #endif
-    isSelectingProfile = true
-    defer { if profileSelectionGeneration == expected { isSelectingProfile = false } }
+    var acceptedProfile: StoredServerProfile?
     do {
-      let response = try await APIClient(profile: device).unlockProfile(id: choice.id, pin: pin)
+      let response: ProfileSessionResponse
+      if let profileUnlocker {
+        response = try await profileUnlocker(device, choice.id, pin)
+      } else {
+        response = try await APIClient(profile: device).unlockProfile(id: choice.id, pin: pin)
+      }
       guard response.user.id == choice.id else { throw APIClientError.invalidResponse }
       guard expected == profileSelectionGeneration, profile == device, !Task.isCancelled else {
         let abandoned = viewingProfile(response, device: device)
-        try? await APIClient(profile: abandoned).endProfileSession()
+        let sessionEnder = profileSessionEnder
+        // A new task keeps cleanup usable after the caller's URLSession work was cancelled.
+        await Task { @MainActor in
+          if let sessionEnder {
+            try? await sessionEnder(abandoned)
+          } else {
+            try? await APIClient(profile: abandoned).endProfileSession()
+          }
+        }.value
         return false
       }
       clearPersonalViewState()
       let active = viewingProfile(response, device: device)
+      acceptedProfile = active
       profile = active
       profileSelectionError = nil
       errorMessage = nil
@@ -1756,10 +1826,17 @@ final class AppModel: ObservableObject {
       }
       startSync()
       return true
+    } catch is CancellationError {
+      return false
     } catch {
-      if expected == profileSelectionGeneration {
-        profileSelectionError = error.localizedDescription
+      guard expected == profileSelectionGeneration, !Task.isCancelled else { return false }
+      if let acceptedProfile {
+        guard ProfilePickerProtocol.isSameSession(profile, as: acceptedProfile) else {
+          return false
+        }
         errorMessage = error.localizedDescription
+      } else if profile == device {
+        profileSelectionError = error.localizedDescription
       }
       return false
     }
@@ -1923,7 +2000,7 @@ final class AppModel: ObservableObject {
   }
   #if DEBUG
     private static var watchingProfileFixture: [WatchingProfile] {
-      [
+      let profiles = [
         WatchingProfile(
           id: UUID(uuidString: "70000000-0000-0000-0000-000000000001")!, name: "Owner",
           role: .owner, needsPinSetup: false),
@@ -1937,6 +2014,23 @@ final class AppModel: ObservableObject {
           id: UUID(uuidString: "70000000-0000-0000-0000-000000000004")!, name: "Guest",
           role: .user, needsPinSetup: false, pinProtectionEnabled: false),
       ]
+      switch ProcessInfo.processInfo.environment["AURELIA_PROFILE_LAYOUT_UI_TESTS"] {
+      case "single": return Array(profiles.prefix(1))
+      case "pair": return Array(profiles.prefix(2))
+      case "many":
+        return profiles + [
+          WatchingProfile(
+            id: UUID(uuidString: "70000000-0000-0000-0000-000000000005")!,
+            name: "A Longer Synthetic Profile Name", role: .user, needsPinSetup: false),
+          WatchingProfile(
+            id: UUID(uuidString: "70000000-0000-0000-0000-000000000006")!, name: "Weekend Viewer",
+            role: .user, needsPinSetup: false),
+          WatchingProfile(
+            id: UUID(uuidString: "70000000-0000-0000-0000-000000000007")!, name: "Another Viewer",
+            role: .user, needsPinSetup: false),
+        ]
+      default: return profiles
+      }
     }
   #endif
 

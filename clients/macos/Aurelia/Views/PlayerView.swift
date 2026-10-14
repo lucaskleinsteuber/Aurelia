@@ -14,6 +14,7 @@ struct PlayerView: View {
   @State private var scrubPosition: Double = 0
   @State private var hideTask: Task<Void, Never>?
   @State private var windowPresentation = PlayerWindowPresentation()
+  @State private var fullScreenKeyboard = PlayerFullScreenKeyboard()
   @State private var isNativeFullScreen = false
   @State private var isPictureInPicture = false
   @State private var isAdjustingVolume = false
@@ -95,6 +96,13 @@ struct PlayerView: View {
       PlayerWindowAccessor { window in
         guard !cursor.isRetired else { return }
         windowPresentation.apply(to: window)
+        fullScreenKeyboard.install(
+          on: window,
+          isBlocked: {
+            notesPresented || confirmProgressReplacement
+              || controlsPolicy.holds.contains("diagnostics-export")
+              || controlsPolicy.holds.contains { $0.hasPrefix("menu-") }
+          }, onToggle: toggleFullScreen)
         updateCursorEnvironment()
       }
     )
@@ -116,6 +124,7 @@ struct PlayerView: View {
       hideTask?.cancel()
       sceneNotes.stop()
       cursor.retire()
+      fullScreenKeyboard.retire()
       PlaybackShutdownCoordinator.shared.unregister(controller)
       SystemMediaPlaybackCoordinator.shared.unregister(controller)
       windowPresentation.restore()
@@ -631,8 +640,6 @@ struct PlayerView: View {
       controller.skip(seconds: -Int64(preferencesStore.preferences.seekInterval))
     case 124:
       controller.skip(seconds: Int64(preferencesStore.preferences.seekInterval))
-    case 3:
-      toggleFullScreen()
     case 46:
       controller.toggleMute()
     case 53:
@@ -651,7 +658,8 @@ struct PlayerView: View {
   }
 
   private func toggleFullScreen() {
-    guard let window = windowPresentation.window else { return }
+    guard let window = windowPresentation.window, fullScreenKeyboard.beginToggle(on: window)
+    else { return }
     if isPictureInPicture {
       _ = windowPresentation.togglePictureInPicture()
       isPictureInPicture = false
@@ -722,6 +730,7 @@ struct PlayerView: View {
     hideTask?.cancel()
     controlsPolicy.invalidate()
     cursor.retire()
+    fullScreenKeyboard.retire()
     let retiringProfile = model.profile
     model.dismissPlayback()
     Task {

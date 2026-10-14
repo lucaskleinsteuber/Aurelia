@@ -2,52 +2,70 @@ import SwiftUI
 
 struct ProfilePickerView: View {
   @EnvironmentObject private var model: AppModel
+  @Environment(\.scenePhase) private var scenePhase
   @State private var choice: WatchingProfile?
   @State private var pin = ""
   @State private var password = ""
   @State private var confirmation = ""
   @State private var recoveringOwner = false
+  @State private var validationError: String?
+  @State private var unlockTask: Task<Void, Never>?
+  @State private var unlockAttempt = UUID()
+  @FocusState private var pinFocused: Bool
+
+  private var isSubmitting: Bool { unlockTask != nil || model.isSelectingProfile }
 
   var body: some View {
-    ScrollView {
-      VStack(spacing: 24) {
-        Image(systemName: "person.crop.circle.badge.checkmark").font(.system(size: 44))
-          .foregroundStyle(.secondary)
-        Text(model.managementSetupRequired ? "Set Up Viewing Profiles" : "Who’s watching?")
-          .font(.largeTitle.weight(.semibold))
-        if model.managementSetupRequired {
-          firstSetup
-        } else if recoveringOwner {
-          ownerRecovery
-        } else if let choice {
-          unlock(choice)
-        } else {
-          profiles
-        }
-        if let error = model.profileSelectionError {
-          Text(error).foregroundStyle(.orange).frame(maxWidth: 480).multilineTextAlignment(.center)
-        }
-        if model.isSelectingProfile { ProgressView().controlSize(.small) }
-        Button("Refresh Profiles") { Task { await model.reloadWatchingProfiles() } }.disabled(
-          model.isSelectingProfile)
-        if !model.managementSetupRequired, model.operatingMode == .host,
-          model.deviceConnection?.locallyManaged == true
-        {
-          Button("Recover Owner PIN on This Mac…") {
-            recoveringOwner = true
-            pin = ""
-            password = ""
+    GeometryReader { geometry in
+      ScrollView {
+        VStack(spacing: 28) {
+          if model.managementSetupRequired {
+            Text("Set Up Viewing Profiles").font(.largeTitle.weight(.semibold))
+            firstSetup
+            selectionFeedback
+          } else if recoveringOwner {
+            Text("Recover Owner PIN").font(.largeTitle.weight(.semibold))
+            ownerRecovery
+            selectionFeedback
+          } else if let choice {
+            unlock(choice)
+          } else {
+            Text("Who’s watching?").font(.largeTitle.weight(.semibold))
+            profiles
+            selectionFeedback
+            if model.operatingMode == .host, model.deviceConnection?.locallyManaged == true {
+              Button("Recover Owner PIN on This Mac…") {
+                model.cancelWatchingProfileSelection()
+                validationError = nil
+                recoveringOwner = true
+                pin = ""
+                password = ""
+                confirmation = ""
+              }
+              .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
+              .disabled(model.isSelectingProfile)
+              .accessibilityIdentifier("recover-owner-pin")
+            }
           }
         }
-        Text(
-          "Favorites, progress and scene notes stay separate for each profile.\nProfiles without a PIN can be opened by anyone on a paired device."
-        )
-        .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-      }.padding(40).frame(maxWidth: 740).frame(maxWidth: .infinity)
+        .padding(40)
+        .frame(maxWidth: 980)
+        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+      }
     }
     .accessibilityIdentifier("profile-picker")
-    .task { await model.reloadWatchingProfiles() }
+    .task { await reloadProfilesIfSafe() }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active { Task { await reloadProfilesIfSafe() } }
+    }
+    .onExitCommand {
+      if choice != nil { returnToProfiles() }
+    }
     .onDisappear {
+      if model.requiresProfileSelection {
+        unlockTask?.cancel()
+        model.cancelWatchingProfileSelection()
+      }
       pin = ""
       password = ""
       confirmation = ""
@@ -55,50 +73,95 @@ struct ProfilePickerView: View {
   }
 
   private var profiles: some View {
-    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 180))], spacing: 24) {
+    CenteredProfileLayout {
       ForEach(model.watchingProfiles) { profile in
         Button {
+          model.cancelWatchingProfileSelection()
+          validationError = nil
           pin = ""
           if profile.pinProtectionEnabled {
             choice = profile
           } else {
-            Task { _ = await model.selectWatchingProfile(profile, pin: "") }
+            startUnlock(profile, submittedPIN: "")
           }
         } label: {
           VStack(spacing: 10) {
-            Image(systemName: "person.crop.circle.fill").font(.system(size: 66))
-              .symbolRenderingMode(.hierarchical)
+            ProfileAvatar(profile: profile)
             Text(profile.name).font(.headline).lineLimit(2)
-            Label(
-              profile.needsPinSetup
-                ? "PIN setup required"
-                : (profile.pinProtectionEnabled ? "PIN protected" : "No PIN"),
-              systemImage: profile.pinProtectionEnabled ? "lock.fill" : "person.crop.circle"
-            )
-            .font(.caption).foregroundStyle(.secondary)
-          }.padding(18).frame(maxWidth: .infinity, minHeight: 156)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
-        }.buttonStyle(.plain).disabled(profile.needsPinSetup || model.isSelectingProfile)
-          .accessibilityIdentifier("watching-profile-\(profile.id.uuidString)")
+              .multilineTextAlignment(.center).frame(height: 44, alignment: .top)
+            if profile.needsPinSetup {
+              Text("Set up PIN").font(.caption).foregroundStyle(.secondary)
+            }
+          }
+          .frame(width: CenteredProfileLayout.entryWidth)
+          .frame(maxHeight: .infinity, alignment: .top)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(ProfileAvatarButtonStyle())
+        .disabled(profile.needsPinSetup || isSubmitting)
+        .accessibilityLabel(profile.name)
+        .accessibilityValue(
+          profile.needsPinSetup
+            ? "PIN setup required" : (profile.pinProtectionEnabled ? "PIN protected" : "No PIN")
+        )
+        .accessibilityIdentifier("watching-profile-\(profile.id.uuidString)")
       }
     }
   }
 
-  private func unlock(_ choice: WatchingProfile) -> some View {
-    VStack(spacing: 14) {
-      Text(choice.name).font(.title2.weight(.medium))
-      SecureField("4–8 digit PIN", text: $pin).textFieldStyle(.roundedBorder)
-        .accessibilityIdentifier("profile-pin").onSubmit { submit(choice) }
-      HStack {
-        Button("Choose Another Profile") {
-          self.choice = nil
-          pin = ""
-        }
-        Button("Watch") { submit(choice) }.buttonStyle(.borderedProminent)
-          .disabled(!ProfilePIN.isValid(pin) || model.isSelectingProfile).accessibilityIdentifier(
-            "profile-unlock")
+  private var selectionFeedback: some View {
+    Group {
+      if let error = model.profileSelectionError {
+        Text(error).foregroundStyle(.orange).frame(maxWidth: 480)
+          .multilineTextAlignment(.center)
       }
-    }.frame(width: 340).disabled(model.isSelectingProfile)
+      if model.isSelectingProfile { ProgressView().controlSize(.small) }
+    }
+  }
+
+  private func unlock(_ choice: WatchingProfile) -> some View {
+    VStack(spacing: 18) {
+      Button {
+        returnToProfiles()
+      } label: {
+        ProfileAvatar(profile: choice)
+      }
+      .buttonStyle(ProfileAvatarButtonStyle())
+      .accessibilityLabel("Choose another profile")
+      .accessibilityIdentifier("profile-back")
+      Text(choice.name).font(.title2.weight(.medium)).multilineTextAlignment(.center)
+        .frame(maxWidth: 360)
+      ZStack {
+        RoundedRectangle(cornerRadius: 12)
+          .fill(Color(red: 0.07, green: 0.08, blue: 0.09))
+        SecureField("PIN", text: $pin)
+          .textFieldStyle(.plain).font(.system(size: 22, weight: .medium, design: .rounded))
+          .multilineTextAlignment(.center).padding(.horizontal, 16)
+          .focused($pinFocused).disabled(isSubmitting)
+          .accessibilityLabel("Profile PIN").accessibilityIdentifier("profile-pin")
+          .onSubmit { submit(choice) }
+      }
+      .frame(width: 280, height: 52)
+      .overlay {
+        RoundedRectangle(cornerRadius: 12).strokeBorder(
+          pinFocused ? Color.accentColor : Color.white.opacity(0.16),
+          lineWidth: pinFocused ? 2 : 1)
+      }
+      .accessibilityElement(children: .contain)
+      .accessibilityIdentifier("profile-pin-container")
+      if isSubmitting {
+        ProgressView().controlSize(.small).accessibilityLabel("Opening profile")
+          .accessibilityIdentifier("profile-unlock-progress")
+      }
+      if let error = validationError ?? model.profileSelectionError {
+        Text(error).font(.callout).foregroundStyle(.orange).multilineTextAlignment(.center)
+          .frame(maxWidth: 360).accessibilityIdentifier("profile-pin-error")
+      }
+    }
+    .task(id: choice.id) {
+      await Task.yield()
+      pinFocused = true
+    }
   }
 
   private var firstSetup: some View {
@@ -129,8 +192,50 @@ struct ProfilePickerView: View {
   }
 
   private func submit(_ choice: WatchingProfile) {
-    guard ProfilePIN.isValid(pin), !model.isSelectingProfile else { return }
-    Task { if await model.selectWatchingProfile(choice, pin: pin) { pin = "" } }
+    guard !isSubmitting else { return }
+    model.clearProfileSelectionError()
+    guard ProfilePIN.isValid(pin) else {
+      validationError = "Enter 4–8 digits."
+      pinFocused = true
+      return
+    }
+    validationError = nil
+    startUnlock(choice, submittedPIN: pin)
+  }
+
+  private func startUnlock(_ profile: WatchingProfile, submittedPIN: String) {
+    guard !isSubmitting else { return }
+    pinFocused = false
+    let attempt = UUID()
+    unlockAttempt = attempt
+    unlockTask = Task {
+      let selected = await model.selectWatchingProfile(profile, pin: submittedPIN)
+      guard unlockAttempt == attempt, !Task.isCancelled else { return }
+      unlockTask = nil
+      pin = ""
+      if !selected, choice?.id == profile.id {
+        await Task.yield()
+        pinFocused = true
+      }
+    }
+  }
+
+  private func returnToProfiles() {
+    unlockAttempt = UUID()
+    unlockTask?.cancel()
+    unlockTask = nil
+    model.cancelWatchingProfileSelection()
+    choice = nil
+    pin = ""
+    validationError = nil
+    pinFocused = false
+  }
+
+  private func reloadProfilesIfSafe() async {
+    guard choice == nil, !recoveringOwner, !model.managementSetupRequired, !isSubmitting else {
+      return
+    }
+    await model.reloadWatchingProfiles()
   }
 
   private var ownerRecovery: some View {
@@ -145,10 +250,11 @@ struct ProfilePickerView: View {
       HStack {
         Button("Cancel") {
           recoveringOwner = false
+          model.clearProfileSelectionError()
           password = ""
           pin = ""
           confirmation = ""
-        }
+        }.disabled(model.isSelectingProfile)
         Button("Recover PIN") {
           Task {
             if await model.recoverOwnerPIN(password: password, pin: pin) {
@@ -164,6 +270,89 @@ struct ProfilePickerView: View {
             || model.isSelectingProfile)
       }
     }.frame(maxWidth: 440).textFieldStyle(.roundedBorder)
+  }
+}
+
+private struct ProfileAvatar: View {
+  let profile: WatchingProfile
+
+  var body: some View {
+    Image(systemName: "person.crop.circle.fill")
+      .font(.system(size: 88)).symbolRenderingMode(.hierarchical)
+      .foregroundStyle(.white.opacity(0.9)).frame(width: 88, height: 88)
+      .overlay(alignment: .bottomTrailing) {
+        if profile.pinProtectionEnabled || profile.needsPinSetup {
+          Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.85)).frame(width: 24, height: 24)
+            .background(Color(red: 32 / 255, green: 35 / 255, blue: 38 / 255), in: Circle())
+        }
+      }
+      .accessibilityHidden(true)
+  }
+}
+
+private struct ProfileAvatarButtonStyle: ButtonStyle {
+  @State private var hovering = false
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .opacity(configuration.isPressed ? 0.65 : (hovering ? 1 : 0.85))
+      .onHover { hovering = $0 }
+  }
+}
+
+/// Fixed-width entries keep every row centered, including an incomplete last row.
+struct CenteredProfileLayout: Layout {
+  static let entryWidth: CGFloat = 140
+  static let spacing: CGFloat = 24
+
+  static func columns(availableWidth: CGFloat, count: Int) -> Int {
+    guard count > 0 else { return 1 }
+    guard availableWidth.isFinite else { return count }
+    let possible = ((max(0, availableWidth) + spacing) / (entryWidth + spacing)).rounded(.down)
+    return possible >= CGFloat(count) ? count : max(1, Int(possible))
+  }
+
+  static func rowWidth(count: Int) -> CGFloat {
+    guard count > 0 else { return 0 }
+    return CGFloat(count) * entryWidth + CGFloat(count - 1) * spacing
+  }
+
+  static func measuredWidth(proposed: CGFloat?, count: Int) -> CGFloat {
+    guard let proposed, proposed.isFinite else { return rowWidth(count: count) }
+    return max(entryWidth, proposed)
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    guard !subviews.isEmpty else { return .zero }
+    let width = Self.measuredWidth(proposed: proposal.width, count: subviews.count)
+    let columns = Self.columns(availableWidth: width, count: subviews.count)
+    let height =
+      subviews.map { $0.sizeThatFits(ProposedViewSize(width: Self.entryWidth, height: nil)).height }
+      .max() ?? 0
+    let rows = (subviews.count + columns - 1) / columns
+    return CGSize(width: width, height: CGFloat(rows) * height + CGFloat(rows - 1) * Self.spacing)
+  }
+
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    let columns = Self.columns(availableWidth: bounds.width, count: subviews.count)
+    let height =
+      subviews.map { $0.sizeThatFits(ProposedViewSize(width: Self.entryWidth, height: nil)).height }
+      .max() ?? 0
+    for index in subviews.indices {
+      let row = index / columns
+      let column = index % columns
+      let rowCount = min(columns, subviews.count - row * columns)
+      let x =
+        bounds.midX - Self.rowWidth(count: rowCount) / 2 + CGFloat(column)
+        * (Self.entryWidth + Self.spacing)
+      let y = bounds.minY + CGFloat(row) * (height + Self.spacing)
+      subviews[index].place(
+        at: CGPoint(x: x, y: y), anchor: .topLeading,
+        proposal: ProposedViewSize(width: Self.entryWidth, height: height))
+    }
   }
 }
 

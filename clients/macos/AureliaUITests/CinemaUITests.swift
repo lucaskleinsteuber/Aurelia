@@ -2,6 +2,50 @@ import AppKit
 import XCTest
 
 final class CinemaUITests: XCTestCase {
+  @MainActor func testSidebarRemainsSolidAcrossArtworkAndWindowStates() throws {
+    let app = launch(heroEdges: true)
+    defer { app.terminate() }
+
+    func checkCanvas(_ state: String) throws {
+      let window = app.windows.firstMatch
+      let sidebar = app.descendants(matching: .any)["primary-sidebar"]
+      XCTAssertTrue(sidebar.exists)
+      let captured = try XCTUnwrap(NSBitmapImageRep(data: window.screenshot().pngRepresentation))
+      // Screenshot pixels use the display profile. Convert the bitmap before
+      // comparing its stored components with the design's sRGB canvas values.
+      let image = try XCTUnwrap(captured.converting(to: .sRGB, renderingIntent: .default))
+      let scaleX = CGFloat(image.pixelsWide) / window.frame.width
+      let scaleY = CGFloat(image.pixelsHigh) / window.frame.height
+      for fraction in [0.70, 0.82, 0.94] {
+        let x = Int((sidebar.frame.minX - window.frame.minX + 18) * scaleX)
+        let y = Int(
+          (sidebar.frame.minY - window.frame.minY + sidebar.frame.height * fraction) * scaleY)
+        let color = try XCTUnwrap(image.colorAt(x: x, y: y))
+        XCTAssertEqual(color.redComponent, 32 / 255.0, accuracy: 0.02, state)
+        XCTAssertEqual(color.greenComponent, 35 / 255.0, accuracy: 0.02, state)
+        XCTAssertEqual(color.blueComponent, 38 / 255.0, accuracy: 0.02, state)
+      }
+      shot(app, "Solid Sidebar - \(state)")
+    }
+
+    try checkCanvas("Series Artwork")
+    app.descendants(matching: .any)["sidebar-home"].click()
+    XCTAssertTrue(app.buttons["home-hero-action"].waitForExistence(timeout: 5))
+    try checkCanvas("Home Artwork")
+    XCUIApplication(bundleIdentifier: "com.apple.finder").activate()
+    try checkCanvas("Inactive Window")
+    app.activate()
+    app.windows.firstMatch.buttons[XCUIIdentifierFullScreenWindow].click()
+    _ = XCTWaiter.wait(
+      for: [XCTestExpectation(description: "Native fullscreen transition")], timeout: 2)
+    try checkCanvas("Full Screen")
+    app.buttons["toggle-sidebar"].click()
+    XCTAssertFalse(app.descendants(matching: .any)["primary-sidebar"].exists)
+    app.buttons["toggle-sidebar"].click()
+    try checkCanvas("Restored Sidebar")
+    app.typeKey("f", modifierFlags: [.control, .command])
+  }
+
   @MainActor func testFullscreenSidebarHeaderDoesNotOverlapNavigation() throws {
     let app = launch()
     defer { app.terminate() }
@@ -70,7 +114,7 @@ final class CinemaUITests: XCTestCase {
       let hero = app.descendants(matching: .any)["media-hero"]
       XCTAssertTrue(hero.exists)
       // Background extension exposes a larger AX frame including the sidebar.
-      // Measure only the visible detail area, never the intentionally blurred navigation.
+      // Measure only the visible detail area, excluding the opaque navigation.
       let visibleLeft = max(hero.frame.minX, app.buttons["Back"].frame.minX - 32)
       let visibleRight = min(hero.frame.maxX, window.frame.maxX)
       let visibleWidth = visibleRight - visibleLeft

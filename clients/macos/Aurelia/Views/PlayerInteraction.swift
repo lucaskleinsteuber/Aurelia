@@ -36,6 +36,129 @@ struct PlayerPointerActivity {
   }
 }
 
+/// A shortcut may be consumed during a native transition without requesting a
+/// second transition. Text entry and shortcuts belonging to other windows pass on.
+struct PlayerFullScreenShortcutPolicy {
+  enum Decision: Equatable { case passThrough, consume, toggle }
+
+  static func decision(
+    characters: String?, modifiers: NSEvent.ModifierFlags, isRepeat: Bool,
+    activePlayerWindow: Bool, editingText: Bool, blocked: Bool, transitioning: Bool
+  ) -> Decision {
+    guard characters?.lowercased() == "f",
+      modifiers.intersection([.command, .control, .option]).isEmpty,
+      activePlayerWindow, !editingText, !blocked
+    else { return .passThrough }
+    return isRepeat || transitioning ? .consume : .toggle
+  }
+}
+
+/// The local monitor belongs to the player window, rather than its video view's
+/// first responder. Native controls can retain focus without losing the shortcut.
+@MainActor
+final class PlayerFullScreenKeyboard {
+  private weak var window: NSWindow?
+  private var monitor: Any?
+  private var observers: [NSObjectProtocol] = []
+  private var isBlocked: (() -> Bool)?
+  private var onToggle: (() -> Void)?
+  private(set) var isTransitioning = false
+  private(set) var isRetired = false
+
+  isolated deinit { retire() }
+
+  func install(
+    on window: NSWindow, isBlocked: @escaping () -> Bool, onToggle: @escaping () -> Void
+  ) {
+    guard !isRetired else { return }
+    self.isBlocked = isBlocked
+    self.onToggle = onToggle
+    guard self.window !== window else { return }
+    removeMonitor()
+    self.window = window
+    for name in [
+      NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification,
+      NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
+      NSWindow.willCloseNotification,
+    ] {
+      observers.append(
+        NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
+          [weak self] notification in
+          let notificationName = notification.name
+          MainActor.assumeIsolated {
+            guard let self else { return }
+            switch notificationName {
+            case NSWindow.willCloseNotification:
+              self.retire()
+            case NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification:
+              self.isTransitioning = true
+            default:
+              self.isTransitioning = false
+            }
+          }
+        })
+    }
+    monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      let characters = event.charactersIgnoringModifiers
+      let modifiers = event.modifierFlags.rawValue
+      let isRepeat = event.isARepeat
+      let eventWindowNumber = event.windowNumber
+      let consumed = MainActor.assumeIsolated {
+        guard let self else { return false }
+        return self.consumes(
+          characters: characters, modifierFlags: modifiers,
+          isRepeat: isRepeat, windowNumber: eventWindowNumber)
+      }
+      return consumed ? nil : event
+    }
+  }
+
+  /// Both the keyboard and the full-screen button acquire the same transition.
+  func beginToggle(on window: NSWindow) -> Bool {
+    guard !isRetired, self.window === window, !isTransitioning else { return false }
+    isTransitioning = true
+    return true
+  }
+
+  func retire() {
+    isRetired = true
+    removeMonitor()
+    window = nil
+    isBlocked = nil
+    onToggle = nil
+  }
+
+  private func consumes(
+    characters: String?, modifierFlags: UInt, isRepeat: Bool, windowNumber: Int
+  ) -> Bool {
+    guard let window, !isRetired else { return false }
+    let decision = PlayerFullScreenShortcutPolicy.decision(
+      characters: characters, modifiers: NSEvent.ModifierFlags(rawValue: modifierFlags),
+      isRepeat: isRepeat,
+      activePlayerWindow: NSApp.isActive && NSApp.keyWindow === window
+        && windowNumber == window.windowNumber,
+      editingText: window.firstResponder is NSText || window.firstResponder is NSTextField,
+      blocked: window.attachedSheet != nil || NSApp.modalWindow != nil
+        || RunLoop.current.currentMode == .eventTracking || isBlocked?() == true,
+      transitioning: isTransitioning)
+    switch decision {
+    case .passThrough: return false
+    case .consume: return true
+    case .toggle:
+      onToggle?()
+      return true
+    }
+  }
+
+  private func removeMonitor() {
+    if let monitor { NSEvent.removeMonitor(monitor) }
+    monitor = nil
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    observers.removeAll()
+    isTransitioning = false
+  }
+}
+
 struct PlayerMenuOption {
   let title: String
   var selected = false

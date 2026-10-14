@@ -26,8 +26,9 @@ These rules apply to every task in this repository.
 ## Native client design contract
 
 - Maintain one coherent native macOS visual language.
-- Content extends beneath the transparent sidebar; never introduce a gray or
-  black strip above the content.
+- The sidebar uses the solid, opaque Aurelia canvas color without blur or
+  vibrancy. Keep content full-height beneath native window chrome; never
+  introduce a gray or black strip above the content.
 - Use native macOS window controls and fullscreen behavior. Never draw fake
   traffic-light buttons.
 - Editing, setup, settings, library management, details, and playback should use

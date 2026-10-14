@@ -36,26 +36,8 @@ enum AureliaDesign {
 }
 
 struct AureliaSidebarBackground: View {
-  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
-
   var body: some View {
-    if reduceTransparency {
-      AureliaDesign.canvas
-    } else {
-      SidebarMaterial()
-    }
-  }
-
-  private struct SidebarMaterial: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-      let view = NSVisualEffectView()
-      view.material = .sidebar
-      view.blendingMode = .withinWindow
-      view.state = .active
-      return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+    AureliaDesign.canvas
   }
 }
 
