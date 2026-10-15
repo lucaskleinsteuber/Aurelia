@@ -18,7 +18,7 @@ public sealed class PlaybackProgress
 
     public bool IsCompleted { get; set; }
 
-    public DateTimeOffset LastPlayedAt { get; set; }
+    public DateTimeOffset? LastPlayedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
 

@@ -461,14 +461,15 @@ final class PlaybackFullChainTests: XCTestCase {
       "synthetic_series_episode_assignments_incorrect")
     let first = episodes[0]
     let second = episodes[1]
-    let queue = episodes.dropFirst().map {
-      PlaybackQueueItem(
-        mediaId: $0.id, title: $0.title,
-        subtitle: "\(detail.title) · Season \($0.seasonNumber) · Episode \($0.episodeNumber)")
+    let plan = try await api.playbackPlan(mediaId: series[0].id)
+    try Self.require(
+      plan.target?.id == first.id && plan.queue.map(\.id) == [second.id]
+        && plan.action == .play,
+      "packaged_series_playback_plan_incorrect")
+    guard let presentation = plan.presentation else {
+      throw FullChainFailure.failed("packaged_series_playback_plan_unavailable")
     }
-    let presentation = PlaybackPresentation(
-      mediaId: first.id, title: first.title,
-      subtitle: "\(detail.title) · Season 1 · Episode 1", queue: queue)
+    evidence.check("packaged_series_playback_plan_and_queue")
     var latestPlayer: VLCMediaPlayer?
     let engine = VLCPlaybackEngine(playerFactory: {
       let player = VLCMediaPlayer(options: VLCPlaybackEngine.defaultPlayerOptions)
@@ -521,6 +522,12 @@ final class PlaybackFullChainTests: XCTestCase {
       try Self.require(
         !saved.isCompleted && (10_001...29_999).contains(saved.positionMilliseconds)
           && (saved.revision ?? 0) > 0, "synthetic_episode_unfinished_progress_missing")
+      let resumePlan = try await api.playbackPlan(mediaId: series[0].id)
+      try Self.require(
+        resumePlan.target?.id == first.id && resumePlan.queue.map(\.id) == [second.id]
+          && resumePlan.action == .resume,
+        "packaged_series_resume_plan_incorrect")
+      evidence.check("packaged_series_resume_plan_from_actual_progress")
       evidence.phase = "series_resume_from_actual_saved_progress"
       playback = makeController()
       playback.attachVideoView(view)

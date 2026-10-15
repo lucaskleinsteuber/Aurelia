@@ -83,7 +83,8 @@ public static class ProfileEndpoints
             atomicProfileEditing = true,
             automaticManagementApprovals = true,
             sceneNotes = true,
-            titleAccess = true
+            titleAccess = true,
+            capabilities = LibraryStateService.Capabilities
         });
         app.MapPost("/api/v1/local/owner-pin", async (InitializeProfilesRequest request, LocalOwnerPinRecovery recovery,
             Aurelia.Server.Data.AureliaDbContext database, ProfileService profiles, HttpContext context) =>

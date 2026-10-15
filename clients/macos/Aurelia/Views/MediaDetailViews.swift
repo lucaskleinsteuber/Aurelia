@@ -10,6 +10,14 @@ struct MediaDetailView: View {
   @State private var showingMetadataEditor = false
   @State private var showingMatchEditor = false
   @State private var showingRemoveConfirmation = false
+  @State private var playbackPlan: PlaybackPlanResponse?
+  @State private var isLoadingPlaybackPlan = false
+  @State private var isStartingPlayback = false
+  @State private var loadGeneration = UUID()
+  @State private var loadedProfile: StoredServerProfile?
+  @State private var primarySeasonApplied = false
+  @State private var playbackTask: Task<Void, Never>?
+  @StateObject private var watchActions = MediaWatchActionController()
 
   var body: some View {
     ScrollView {
@@ -17,6 +25,11 @@ struct MediaDetailView: View {
         LazyVStack(alignment: .leading, spacing: 38) {
           DetailHero(
             detail: detail,
+            playLabel: DetailPlaybackPresentation.label(detail: detail, plan: playbackPlan),
+            playTarget: primaryTarget(detail),
+            isPlayLoading: isLoadingPlaybackPlan || isStartingPlayback,
+            canPlay: primaryTarget(detail).map(MediaAvailabilityPresentation.canPlay) == true,
+            watchActions: watchActions,
             onBack: onBack,
             onPlay: { playPrimary(detail) },
             onFavorite: {
@@ -72,7 +85,18 @@ struct MediaDetailView: View {
     .scrollIndicators(.automatic, axes: .vertical)
     .aureliaOverlayScrollbars()
     .accessibilityIdentifier("media-detail-scroll")
-    .task(id: mediaId) { await load() }
+    .task(
+      id: DetailRefreshKey(
+        mediaId: mediaId, revision: model.catalogVisibilityRevision,
+        profile: model.profile)
+    ) { await load() }
+    .modifier(MediaWatchActionConfirmation(controller: watchActions))
+    .onDisappear {
+      loadGeneration = UUID()
+      playbackTask?.cancel()
+      playbackTask = nil
+      isStartingPlayback = false
+    }
     .confirmationDialog(
       "Remove \(detail?.item.title ?? "Title")?", isPresented: $showingRemoveConfirmation,
       titleVisibility: .visible
@@ -93,11 +117,20 @@ struct MediaDetailView: View {
     .alert(
       "Library Action Failed",
       isPresented: Binding(
-        get: { detail != nil && errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
+        get: { detail != nil && (errorMessage != nil || watchActions.errorMessage != nil) },
+        set: {
+          if !$0 {
+            errorMessage = nil
+            watchActions.errorMessage = nil
+          }
+        })
     ) {
-      Button("OK") { errorMessage = nil }
+      Button("OK") {
+        errorMessage = nil
+        watchActions.errorMessage = nil
+      }
     } message: {
-      Text(errorMessage ?? "")
+      Text(errorMessage ?? watchActions.errorMessage ?? "")
     }
     .sheet(isPresented: $showingMetadataEditor) {
       if let detail {
@@ -114,25 +147,54 @@ struct MediaDetailView: View {
   }
 
   private func load() async {
-    if detail?.item.id != mediaId {
+    let request = UUID()
+    loadGeneration = request
+    let profile = model.profile
+    if detail?.item.id != mediaId || loadedProfile != profile {
       detail = nil
       selectedSeason = nil
+      primarySeasonApplied = false
     }
+    loadedProfile = profile
+    playbackPlan = nil
+    isLoadingPlaybackPlan = model.supportsLibraryState
     do {
       let loadedDetail = try await model.catalogDetail(id: mediaId)
-      guard !Task.isCancelled else { return }
+      guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
       detail = loadedDetail
       if !loadedDetail.seasons.contains(where: { $0.number == selectedSeason }) {
         selectedSeason = loadedDetail.seasons.first?.number
       }
       errorMessage = nil
+      if model.supportsLibraryState {
+        let plan = try await model.playbackPlan(mediaId: mediaId)
+        guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
+        playbackPlan = plan
+        if !primarySeasonApplied, let targetSeason = plan.target?.seasonNumber,
+          loadedDetail.seasons.contains(where: { $0.number == targetSeason })
+        {
+          selectedSeason = targetSeason
+        }
+        primarySeasonApplied = true
+      }
+      isLoadingPlaybackPlan = false
     } catch {
-      if !Task.isCancelled, detail == nil { errorMessage = error.localizedDescription }
+      guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
+      isLoadingPlaybackPlan = false
+      if !(error is CancellationError) { errorMessage = error.localizedDescription }
     }
   }
 
+  private func primaryTarget(_ detail: CatalogDetailPresentation) -> CatalogItemSummary? {
+    if model.supportsLibraryState { return playbackPlan?.target }
+    if detail.item.kind != .series { return detail.item }
+    return episodes(in: detail).first?.item
+  }
+
   private func playPrimary(_ detail: CatalogDetailPresentation) {
-    if detail.item.kind == .movie {
+    if model.supportsLibraryState {
+      requestPlannedPlayback(mediaId: detail.item.id)
+    } else if detail.item.kind == .movie {
       model.startPlayback(mediaId: detail.item.id, title: detail.item.title)
     } else {
       let availableEpisodes = episodes(in: detail)
@@ -147,9 +209,18 @@ struct MediaDetailView: View {
     seriesTitle: String,
     allEpisodes: [EpisodePresentation]
   ) {
-    let queue = allEpisodes.drop(while: { $0.id != episode.id }).dropFirst().map {
-      queuedEpisode($0, seriesTitle: seriesTitle)
+    if model.supportsLibraryState {
+      requestPlannedPlayback(mediaId: episode.id)
+      return
     }
+    let queue =
+      episode.seasonNumber == 0
+      ? []
+      : allEpisodes
+        .filter { $0.seasonNumber > 0 }
+        .drop(while: { $0.id != episode.id }).dropFirst().map {
+          queuedEpisode($0, seriesTitle: seriesTitle)
+        }
     model.startPlayback(
       mediaId: episode.item.id,
       title: episode.item.title,
@@ -159,11 +230,25 @@ struct MediaDetailView: View {
     )
   }
 
+  private func requestPlannedPlayback(mediaId: UUID) {
+    guard !isStartingPlayback else { return }
+    isStartingPlayback = true
+    let profile = model.profile
+    playbackTask = Task {
+      do { try await model.startPlannedPlayback(mediaId: mediaId) } catch {
+        if model.profile == profile, !Task.isCancelled, !(error is CancellationError) {
+          errorMessage = error.localizedDescription
+        }
+      }
+      if model.profile == profile, !Task.isCancelled { isStartingPlayback = false }
+    }
+  }
+
   private func episodes(in detail: CatalogDetailPresentation) -> [EpisodePresentation] {
     detail.seasons
       .sorted { $0.number < $1.number }
       .flatMap { $0.episodes.sorted { $0.episodeNumber < $1.episodeNumber } }
-      .filter { $0.item.availability == .available }
+      .filter { MediaAvailabilityPresentation.canPlay($0.item) }
   }
 
   private func queuedEpisode(
@@ -187,17 +272,22 @@ struct MediaDetailView: View {
               selectedSeason = season.number
             } label: {
               if season.number == selectedSeason {
-                Label("Season \(season.number)", systemImage: "checkmark")
+                Label(seasonTitle(season.number), systemImage: "checkmark")
               } else {
-                Text("Season \(season.number)")
+                Text(seasonTitle(season.number))
               }
             }
+          }
+          if let season = activeSeason(detail) {
+            MediaWatchMenuItems(
+              item: detail.item, controller: watchActions, scope: .season,
+              seasonNumber: season.number, includeContinueWatching: false)
           }
         } label: {
           HStack(spacing: 6) {
             Image(systemName: "chevron.up.chevron.down")
               .font(.system(size: 13, weight: .medium))
-            Text("Season \(selectedSeason ?? detail.seasons.first?.number ?? 0)")
+            Text(seasonTitle(selectedSeason ?? detail.seasons.first?.number ?? 0))
               .font(AureliaDesign.sectionTitle)
             Image(systemName: "chevron.down")
               .font(.system(size: 11, weight: .semibold))
@@ -210,6 +300,12 @@ struct MediaDetailView: View {
         .accessibilityIdentifier("season-\(selectedSeason ?? detail.seasons.first?.number ?? 0)")
         Spacer()
         if let season = activeSeason(detail) {
+          if !season.episodes.isEmpty,
+            season.episodes.allSatisfy({ MediaWatchPresentation.isWatched($0.item) })
+          {
+            Label("Watched", systemImage: "checkmark.circle.fill")
+              .font(.caption).foregroundStyle(.secondary)
+          }
           Text("\(season.episodes.count) episodes")
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -224,7 +320,9 @@ struct MediaDetailView: View {
         ) {
           ForEach(season.episodes) { episode in
             Button {
-              guard episode.item.availability == .available else { return }
+              guard MediaAvailabilityPresentation.canPlay(episode.item), !isStartingPlayback else {
+                return
+              }
               play(
                 episode,
                 seriesTitle: detail.item.title,
@@ -233,6 +331,7 @@ struct MediaDetailView: View {
               EpisodeCard(episode: episode)
             }
             .buttonStyle(.plain)
+            .disabled(!MediaAvailabilityPresentation.canPlay(episode.item) || isStartingPlayback)
             .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
             .mediaActions(item: episode.item)
           }
@@ -247,6 +346,10 @@ struct MediaDetailView: View {
 
   private func activeSeason(_ detail: CatalogDetailPresentation) -> SeasonPresentation? {
     detail.seasons.first { $0.number == selectedSeason } ?? detail.seasons.first
+  }
+
+  private func seasonTitle(_ number: Int) -> String {
+    number == 0 ? "Specials" : "Season \(number)"
   }
 
   @ViewBuilder
@@ -280,7 +383,7 @@ struct MediaDetailView: View {
               }
             }
             .buttonStyle(.plain)
-            .disabled(supplement.item.availability != .available)
+            .disabled(!MediaAvailabilityPresentation.canPlay(supplement.item))
             .accessibilityIdentifier("supplement-\(supplement.id.uuidString)")
           }
         }
@@ -368,6 +471,28 @@ struct MediaInformationField: Identifiable, Equatable {
   var id: String { title }
 }
 
+private struct DetailRefreshKey: Equatable {
+  let mediaId: UUID
+  let revision: UInt64
+  let profile: StoredServerProfile?
+}
+
+enum DetailPlaybackPresentation {
+  static func label(detail: CatalogDetailPresentation, plan: PlaybackPlanResponse?) -> String {
+    guard let plan else { return detail.item.progressFraction == nil ? "Play" : "Resume" }
+    let action: String
+    switch plan.action {
+    case .play: action = "Play"
+    case .resume: action = "Resume"
+    case .playAgain: action = "Play Again"
+    }
+    guard detail.item.kind == .series, let target = plan.target,
+      let season = target.seasonNumber, let episode = target.episodeNumber
+    else { return action }
+    return "\(action) S\(String(format: "%02d", season)) E\(String(format: "%02d", episode))"
+  }
+}
+
 enum MediaInformationPresentation {
   static func fields(for detail: CatalogDetailPresentation) -> [MediaInformationField] {
     let metadata = detail.metadata
@@ -408,6 +533,11 @@ enum MediaInformationPresentation {
 
 private struct DetailHero: View {
   let detail: CatalogDetailPresentation
+  let playLabel: String
+  let playTarget: CatalogItemSummary?
+  let isPlayLoading: Bool
+  let canPlay: Bool
+  @ObservedObject var watchActions: MediaWatchActionController
   let onBack: () -> Void
   let onPlay: () -> Void
   let onFavorite: () -> Void
@@ -467,14 +597,11 @@ private struct DetailHero: View {
         }
         HStack(spacing: 10) {
           Button(action: onPlay) {
-            Label(detail.item.progressFraction == nil ? "Play" : "Resume", systemImage: "play.fill")
+            Label(isPlayLoading ? "Loading…" : playLabel, systemImage: "play.fill")
               .font(.headline).padding(.horizontal, 5)
           }
           .buttonStyle(AureliaPrimaryActionButtonStyle())
-          .disabled(
-            detail.item.availability != .available
-              || (detail.item.kind == .series && detail.seasons.isEmpty)
-          )
+          .disabled(!canPlay || isPlayLoading)
           .accessibilityIdentifier("play-media")
           Button(action: onFavorite) {
             Label(
@@ -482,7 +609,15 @@ private struct DetailHero: View {
               systemImage: detail.item.isFavorite ? "star.fill" : "star")
           }
           .buttonStyle(.bordered).controlSize(.large)
-          AvailabilityBadge(availability: detail.item.availability)
+          if let playTarget {
+            AvailabilityBadge(
+              availability: playTarget.availability,
+              libraryAvailability: playTarget.libraryAvailability)
+          }
+          if MediaWatchPresentation.isWatched(detail.item) {
+            Label("Watched", systemImage: "checkmark.circle.fill")
+              .font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.8))
+          }
         }
       }
       .padding(AureliaDesign.pagePadding)
@@ -497,23 +632,23 @@ private struct DetailHero: View {
           }
           .buttonStyle(.plain).accessibilityLabel("Back")
           Spacer()
-          if onEdit != nil || onMatch != nil {
-            Menu {
-              if let onEdit { Button("Edit Metadata", action: onEdit) }
-              if let onMatch { Button("Find Metadata Match", action: onMatch) }
-              if let onRemove {
-                Divider()
-                Button("Remove from Library…", role: .destructive, action: onRemove)
-              }
-            } label: {
-              Image(systemName: "gearshape").font(.headline).frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
+          Menu {
+            MediaWatchMenuItems(item: detail.item, controller: watchActions)
+            if onEdit != nil || onMatch != nil { Divider() }
+            if let onEdit { Button("Edit Metadata", action: onEdit) }
+            if let onMatch { Button("Find Metadata Match", action: onMatch) }
+            if let onRemove {
+              Divider()
+              Button("Remove from Library…", role: .destructive, action: onRemove)
             }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("More Actions")
-            .accessibilityIdentifier("media-actions")
+          } label: {
+            Image(systemName: "ellipsis").font(.headline).frame(width: 44, height: 44)
+              .background(.ultraThinMaterial, in: Circle())
+              .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
           }
+          .menuStyle(.borderlessButton)
+          .accessibilityLabel("More Actions")
+          .accessibilityIdentifier("media-actions")
         }
         .padding(AureliaDesign.pagePadding)
         Spacer()
@@ -554,7 +689,13 @@ private struct EpisodeCard: View {
         HStack {
           Text(episode.item.year.map(String.init) ?? "Episode").font(.caption)
           Spacer()
-          AvailabilityBadge(availability: episode.item.availability)
+          if MediaWatchPresentation.isWatched(episode.item) {
+            Label("Watched", systemImage: "checkmark.circle.fill")
+              .font(.caption)
+          }
+          AvailabilityBadge(
+            availability: episode.item.availability,
+            libraryAvailability: episode.item.libraryAvailability)
         }
       }.padding(16)
       if let progress = episode.item.progressFraction {

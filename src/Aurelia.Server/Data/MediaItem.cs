@@ -14,7 +14,7 @@ public sealed class MediaItem
 
     public MediaItem? Parent { get; set; }
 
-    public List<MediaItem> Children { get; } = [];
+    public List<MediaItem> Children { get; set; } = [];
 
     public MediaKind Kind { get; set; }
 
@@ -53,6 +53,8 @@ public sealed class MediaItem
     public DateTimeOffset UpdatedAt { get; set; }
 
     public List<PlaybackTicket> PlaybackTickets { get; set; } = [];
+
+    public List<ContinueWatchingState> ContinueWatchingStates { get; set; } = [];
 
     public List<PlaybackProgress> PlaybackProgress { get; set; } = [];
 

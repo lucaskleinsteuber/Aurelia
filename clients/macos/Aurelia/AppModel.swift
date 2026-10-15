@@ -75,6 +75,13 @@ final class AppModel: ObservableObject {
   @Published private(set) var playback: PlaybackPresentation?
   @Published private(set) var sceneNotesVersion: UInt64 = 0
   @Published private(set) var catalogVisibilityRevision: UInt64 = 0
+  @Published private(set) var libraryCapabilities: Set<String> = []
+  var supportsLibraryState: Bool {
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled { return true }
+    #endif
+    return libraryCapabilities.contains("library-state-v1")
+  }
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
   @Published private(set) var libraries: [LibrarySummary] = []
   @Published private(set) var activeScans: [LibraryScanSummary] = []
@@ -112,6 +119,10 @@ final class AppModel: ObservableObject {
   private var scanPollingRun = UUID()
   private var syncStartTask: Task<Void, Never>?
   private var connectionGeneration = UUID()
+  private var playbackPlanningTask: Task<Void, Never>?
+  private var playbackPlanningGeneration = UUID()
+  private let libraryStateClientFactory:
+    (@MainActor (StoredServerProfile) -> any LibraryStateServing)?
   private var inspectionGeneration = UUID()
   private let administrationFetcher:
     (@MainActor (StoredServerProfile) async throws -> AdministrationSnapshot)?
@@ -131,6 +142,7 @@ final class AppModel: ObservableObject {
   }
 
   private func invalidateLibraryWork() {
+    libraryCapabilities = []
     invalidateAdministrationWork()
     let retired = connectionGeneration
     connectionGeneration = UUID()
@@ -209,6 +221,9 @@ final class AppModel: ObservableObject {
   }
 
   private func cancelConnectionWork() {
+    playbackPlanningGeneration = UUID()
+    playbackPlanningTask?.cancel()
+    playbackPlanningTask = nil
     homeRefreshTask?.cancel()
     homeRefreshTask = nil
     scanPollTask?.cancel()
@@ -262,7 +277,9 @@ final class AppModel: ObservableObject {
     managementLocker: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
     administrationFetcher: (
       @MainActor (StoredServerProfile) async throws -> AdministrationSnapshot
-    )? = nil
+    )? = nil,
+    initialLibraryCapabilities: Set<String> = [],
+    libraryStateClientFactory: (@MainActor (StoredServerProfile) -> any LibraryStateServing)? = nil
   ) {
     self.store = store ?? Self.defaultStore
     self.serverHost = serverHost
@@ -275,7 +292,9 @@ final class AppModel: ObservableObject {
     self.managementLocker = managementLocker
     self.managementExpiresAt = initialManagementExpiry
     self.administrationFetcher = administrationFetcher
+    self.libraryStateClientFactory = libraryStateClientFactory
     self.profile = initialProfile
+    self.libraryCapabilities = initialLibraryCapabilities
     self.operatingMode = UserDefaults.standard.string(forKey: Self.operatingModeKey)
       .flatMap(OperatingMode.init(rawValue:))
     Self.active = self
@@ -386,6 +405,7 @@ final class AppModel: ObservableObject {
         catalogItems = Self.previewCatalog
         home = CinemaUITestFixture.home(Self.previewHome)
         collections = home?.collections ?? Self.previewHome.collections
+        if LibraryStateUITestFixture.enabled { updateLibraryStateFixture() }
         isStarting = false
         return
       }
@@ -1282,7 +1302,9 @@ final class AppModel: ObservableObject {
     }
     movies = newMovies
     series = newSeries
+    if catalogItems != newCatalog { catalogVisibilityRevision &+= 1 }
     catalogItems = newCatalog
+    libraryCapabilities = Set(info.capabilities ?? [])
     collections = newCollections
     home = newHome
     scheduleHomeRefresh()
@@ -1295,7 +1317,8 @@ final class AppModel: ObservableObject {
   func refreshHome() async {
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
-        home = CinemaUITestFixture.home(Self.previewHome)
+        home = LibraryStateUITestFixture.home(
+          CinemaUITestFixture.home(Self.previewHome), catalog: catalogItems)
         scheduleHomeRefresh()
         return
       }
@@ -1340,6 +1363,178 @@ final class AppModel: ObservableObject {
     }
   }
 
+  func browseCatalog(query: CatalogBrowseQuery, search: String) async throws -> [CatalogItemSummary]
+  {
+    #if DEBUG
+      if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
+        let items =
+          LibraryStateUITestFixture.enabled
+          ? catalogItems : catalogItems + [Self.previewSearchEpisode]
+        return LibraryStateUITestFixture.browse(items, query: query, search: search)
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    return try await currentConnection {
+      try await APIClient(profile: profile).browseCatalog(query: query, search: search)
+    }
+  }
+
+  private func libraryStateClient(_ profile: StoredServerProfile) -> any LibraryStateServing {
+    libraryStateClientFactory?(profile) ?? APIClient(profile: profile)
+  }
+
+  private func requireLibraryState() throws {
+    guard supportsLibraryState else {
+      throw APIClientError.serverRejected(
+        code: "server_update_required",
+        message: "Update Aurelia Server to 1.5.3 to use watch states and improved resume.")
+    }
+  }
+
+  func playbackPlan(mediaId: UUID) async throws -> PlaybackPlanResponse {
+    try requireLibraryState()
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        return try LibraryStateUITestFixture.playbackPlan(mediaId: mediaId, catalog: catalogItems)
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    return try await currentConnection {
+      try await self.libraryStateClient(profile).playbackPlan(mediaId: mediaId)
+    }
+  }
+
+  func startPlannedPlayback(mediaId: UUID) async throws {
+    let intent = beginPlaybackIntent()
+    let plan = try await playbackPlan(mediaId: mediaId)
+    guard !Task.isCancelled, playbackPlanningGeneration == intent else { throw CancellationError() }
+    guard let presentation = plan.presentation else {
+      throw APIClientError.serverRejected(
+        code: "media_unavailable", message: "This media is currently unavailable.")
+    }
+    playback = presentation
+  }
+
+  func watchState(mediaId: UUID, scope: WatchStateScope = .title, seasonNumber: Int? = nil)
+    async throws -> WatchStateResponse
+  {
+    try requireLibraryState()
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        return try LibraryStateUITestFixture.watchState(
+          mediaId: mediaId, scope: scope, seasonNumber: seasonNumber, catalog: catalogItems)
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    return try await currentConnection {
+      try await self.libraryStateClient(profile).watchState(
+        mediaId: mediaId, scope: scope, seasonNumber: seasonNumber)
+    }
+  }
+
+  @discardableResult
+  func setWatchState(
+    mediaId: UUID, isWatched: Bool, scope: WatchStateScope = .title,
+    seasonNumber: Int? = nil, stateToken: String, clientMutationId: UUID = UUID()
+  ) async throws -> WatchStateResponse {
+    try requireLibraryState()
+    let generation = connectionGeneration
+    let request = SetWatchStateRequest(
+      isWatched: isWatched, scope: scope, seasonNumber: seasonNumber,
+      stateToken: stateToken, clientMutationId: clientMutationId)
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        let result = try LibraryStateUITestFixture.setWatchState(
+          mediaId: mediaId, request: request, catalog: catalogItems)
+        updateLibraryStateFixture()
+        return result
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    do {
+      let result = try await currentConnection {
+        try await self.libraryStateClient(profile).setWatchState(mediaId: mediaId, request: request)
+      }
+      await refreshAfterLibraryStateChange(generation: generation, saved: true)
+      return result
+    } catch {
+      if (error as? APIClientError)?.httpStatus == 409 {
+        await refreshAfterLibraryStateChange(generation: generation, saved: false)
+      }
+      throw error
+    }
+  }
+
+  @discardableResult
+  func setContinueWatchingHidden(mediaId: UUID, isHidden: Bool) async throws -> WatchStateResponse {
+    try requireLibraryState()
+    let generation = connectionGeneration
+    let item =
+      catalogItems.first { $0.id == mediaId } ?? home?.continueWatching.first { $0.id == mediaId }
+    var target = item?.kind == .episode ? item?.parentId ?? mediaId : mediaId
+    if target == mediaId, item?.kind == .episode, let profile {
+      let summary = try await currentConnection {
+        try await APIClient(profile: profile).catalogSummary(id: mediaId)
+      }
+      guard let parent = summary.parentId else { throw APIClientError.invalidResponse }
+      target = parent
+    }
+    let snapshot = try await watchState(mediaId: target)
+    let request = SetContinueWatchingRequest(
+      isHidden: isHidden, stateToken: snapshot.stateToken, clientMutationId: UUID())
+    #if DEBUG
+      if LibraryStateUITestFixture.enabled {
+        let result = try LibraryStateUITestFixture.setContinueWatchingHidden(
+          mediaId: target, request: request, catalog: catalogItems)
+        updateLibraryStateFixture()
+        return result
+      }
+    #endif
+    guard let profile else { throw CancellationError() }
+    do {
+      let result = try await currentConnection {
+        try await self.libraryStateClient(profile).setContinueWatchingHidden(
+          mediaId: target, request: request)
+      }
+      await refreshAfterLibraryStateChange(generation: generation, saved: true)
+      return result
+    } catch {
+      if (error as? APIClientError)?.httpStatus == 409 {
+        await refreshAfterLibraryStateChange(generation: generation, saved: false)
+      }
+      throw error
+    }
+  }
+
+  private func refreshAfterLibraryStateChange(generation: UUID, saved: Bool) async {
+    guard isCurrent(generation) else { return }
+    if !saved {
+      errorMessage =
+        "The library changed on another device. Review the current status before trying again."
+    }
+    if libraryStateClientFactory == nil {
+      do { try await refresh(requireCompleteSnapshot: true) } catch {
+        if isCurrent(generation) {
+          errorMessage =
+            saved
+            ? "The change was saved. Reload the library to see it. \(error.localizedDescription)"
+            : "The library changed. Reconnect and reload before trying again. \(error.localizedDescription)"
+        }
+      }
+    }
+    guard isCurrent(generation) else { return }
+    catalogVisibilityRevision &+= 1
+  }
+
+  #if DEBUG
+    private func updateLibraryStateFixture() {
+      catalogItems = catalogItems.map { LibraryStateUITestFixture.decorate($0) }
+      home = LibraryStateUITestFixture.home(
+        CinemaUITestFixture.home(Self.previewHome), catalog: catalogItems)
+      catalogVisibilityRevision &+= 1
+    }
+  #endif
+
   func searchMoviesForImportReview(
     _ query: String,
     libraryId: UUID
@@ -1377,6 +1572,7 @@ final class AppModel: ObservableObject {
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin",
         let item = Self.previewCatalog.first(where: { $0.id == id })
       {
+        if LibraryStateUITestFixture.enabled { return LibraryStateUITestFixture.detail(item) }
         return Self.previewDetail(for: item)
       }
     #endif
@@ -1653,6 +1849,7 @@ final class AppModel: ObservableObject {
     queue: [PlaybackQueueItem] = []
   ) {
     guard profile != nil else { return }
+    beginPlaybackIntent()
     playback = PlaybackPresentation(
       mediaId: mediaId,
       title: title,
@@ -1661,19 +1858,52 @@ final class AppModel: ObservableObject {
   }
 
   func startPlayback(item: CatalogItemSummary) {
+    if supportsLibraryState {
+      guard item.kind == .series || item.isPlayable else { return }
+      let request = beginPlaybackIntent()
+      playbackPlanningTask = Task { [weak self] in
+        guard let self else { return }
+        do {
+          let plan = try await self.playbackPlan(mediaId: item.id)
+          guard !Task.isCancelled, self.playbackPlanningGeneration == request else { return }
+          guard let presentation = plan.presentation else { return }
+          self.playback = presentation
+        } catch {
+          if !Task.isCancelled, self.playbackPlanningGeneration == request,
+            !(error is CancellationError)
+          {
+            self.errorMessage = error.localizedDescription
+          }
+        }
+      }
+      return
+    }
     guard profile != nil, let presentation = CatalogPlaybackLogic.presentation(for: item) else {
       return
     }
+    beginPlaybackIntent()
     playback = presentation
+  }
+
+  @discardableResult
+  private func beginPlaybackIntent() -> UUID {
+    playbackPlanningTask?.cancel()
+    playbackPlanningTask = nil
+    playbackPlanningGeneration = UUID()
+    return playbackPlanningGeneration
   }
 
   // The player awaits its final progress write before calling this method.
   func closePlayback() async {
+    beginPlaybackIntent()
     playback = nil
     await refreshHome()
   }
 
-  func dismissPlayback() { playback = nil }
+  func dismissPlayback() {
+    beginPlaybackIntent()
+    playback = nil
+  }
 
   func loadWatchingProfiles() async throws {
     #if DEBUG
@@ -2433,7 +2663,10 @@ final class AppModel: ObservableObject {
         scheduleHomeRefresh()
       }
       guard isCurrent(generation) else { throw CancellationError() }
-      if changes.changedAreas.contains(.userState) { sceneNotesVersion &+= 1 }
+      if changes.changedAreas.contains(.userState) {
+        sceneNotesVersion &+= 1
+        catalogVisibilityRevision &+= 1
+      }
       if !Self.isTestProcess, !NativePreflightIsolation.isRequested {
         PlaybackProgressOutbox.shared.activate(profile: profile)
       }

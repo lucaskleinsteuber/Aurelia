@@ -528,7 +528,7 @@ final class AureliaUITests: XCTestCase {
     let play = app.buttons["play-media"]
     XCTAssertTrue(play.waitForExistence(timeout: 5))
     XCTAssertFalse(play.isEnabled)
-    XCTAssertTrue(app.staticTexts["Unavailable"].exists)
+    XCTAssertTrue(app.staticTexts["Media file unavailable"].exists)
   }
 
   @MainActor
@@ -639,7 +639,14 @@ final class AureliaUITests: XCTestCase {
     add(detailScreenshot)
 
     XCTAssertTrue(app.buttons["play-media"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.descendants(matching: .any)["media-actions"].exists)
+    let actions = app.descendants(matching: .any)["media-actions"]
+    XCTAssertTrue(actions.exists)
+    actions.click()
+    XCTAssertTrue(app.menuItems["Mark as Watched"].exists)
+    XCTAssertFalse(app.menuItems["Mark as Watched"].isEnabled)
+    XCTAssertFalse(app.menuItems["Edit Metadata"].exists)
+    XCTAssertFalse(app.menuItems["Remove from Library…"].exists)
+    app.typeKey(.escape, modifierFlags: [])
     app.buttons["play-media"].click()
     assertNativePlayer(in: app)
     assertClassicPlayerControls(in: app)

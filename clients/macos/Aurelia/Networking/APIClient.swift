@@ -631,6 +631,90 @@ struct APIClient: Sendable {
     return try await allPages(path: "/api/v1/catalog/items", query: query)
   }
 
+  static func catalogQuery(_ query: CatalogBrowseQuery, search: String) throws -> String? {
+    var values: [(String, String)] = []
+    let search = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !search.isEmpty { values.append(("query", search)) }
+    if let kind = query.kind { values.append(("kind", kind.rawValue)) }
+    if query.favoritesOnly { values.append(("favorite", "true")) }
+    if let genre = query.genre, !genre.isEmpty { values.append(("genre", genre)) }
+    if let year = query.yearFrom { values.append(("yearFrom", String(year))) }
+    if let year = query.yearTo { values.append(("yearTo", String(year))) }
+    switch query.watchState {
+    case .all: break
+    case .unwatched: values.append(("watchState", "unplayed"))
+    case .inProgress: values.append(("watchState", "inProgress"))
+    case .watched: values.append(("watchState", "completed"))
+    }
+    if let sort = query.sort {
+      values.append(("sort", sort.rawValue))
+      values.append(("direction", query.descending ? "descending" : "ascending"))
+    }
+    let result = try values.map { try Self.query(name: $0.0, value: $0.1) }.joined(separator: "&")
+    return result.isEmpty ? nil : result
+  }
+
+  func browseCatalog(query: CatalogBrowseQuery, search: String) async throws -> [CatalogItemSummary]
+  {
+    let search = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    return try await allPages(
+      path: search.isEmpty ? "/api/v1/catalog/items" : "/api/v1/catalog/search",
+      query: Self.catalogQuery(query, search: search))
+  }
+
+  func playbackPlan(mediaId: UUID) async throws -> PlaybackPlanResponse {
+    let result: PlaybackPlanResponse = try await get(
+      "/api/v1/media/\(mediaId.uuidString.lowercased())/playback-plan")
+    guard result.queue.allSatisfy({ $0.kind == .episode }),
+      Set(result.queue.map(\.id)).count == result.queue.count,
+      !result.queue.contains(where: { $0.id == result.target?.id }),
+      result.target?.kind != .series
+    else { throw APIClientError.invalidResponse }
+    if let target = result.target, target.id != mediaId, result.seriesId != mediaId {
+      throw APIClientError.invalidResponse
+    }
+    return result
+  }
+
+  func watchState(mediaId: UUID, scope: WatchStateScope = .title, seasonNumber: Int? = nil)
+    async throws -> WatchStateResponse
+  {
+    let season = seasonNumber.map { "&seasonNumber=\($0)" } ?? ""
+    let result: WatchStateResponse = try await get(
+      "/api/v1/media/\(mediaId.uuidString.lowercased())/watch-state?scope=\(scope.rawValue)\(season)"
+    )
+    guard result.mediaId == mediaId, result.scope == scope, result.seasonNumber == seasonNumber,
+      result.affectedCount >= 0, !result.stateToken.isEmpty
+    else { throw APIClientError.invalidResponse }
+    return result
+  }
+
+  func setWatchState(mediaId: UUID, request: SetWatchStateRequest) async throws
+    -> WatchStateResponse
+  {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/watch-state", method: "PUT",
+      body: JSONEncoder().encode(request))
+    let result = try Self.decode(WatchStateResponse.self, from: data)
+    guard result.mediaId == mediaId, result.scope == request.scope,
+      result.seasonNumber == request.seasonNumber, result.affectedCount >= 0
+    else { throw APIClientError.invalidResponse }
+    return result
+  }
+
+  func setContinueWatchingHidden(mediaId: UUID, request: SetContinueWatchingRequest) async throws
+    -> WatchStateResponse
+  {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/continue-watching", method: "PUT",
+      body: JSONEncoder().encode(request))
+    let result = try Self.decode(WatchStateResponse.self, from: data)
+    guard result.mediaId == mediaId, result.continueWatchingHidden == request.isHidden else {
+      throw APIClientError.invalidResponse
+    }
+    return result
+  }
+
   func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
     try await get("/api/v1/catalog/items/\(id.uuidString.lowercased())")
   }
@@ -993,6 +1077,11 @@ struct APIClient: Sendable {
         return try await CinemaUITestFixture.sceneNotes(path: path, method: method, body: body)
       }
       if await CinemaUITestFixture.enabled, method == "GET",
+        path.hasPrefix("/api/v1/artwork/") || path.contains("/editor/artwork/")
+      {
+        return await CinemaUITestFixture.png
+      }
+      if await LibraryStateUITestFixture.enabled, method == "GET",
         path.hasPrefix("/api/v1/artwork/") || path.contains("/editor/artwork/")
       {
         return await CinemaUITestFixture.png

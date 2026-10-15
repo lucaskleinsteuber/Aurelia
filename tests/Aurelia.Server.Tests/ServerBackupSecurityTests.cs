@@ -131,6 +131,11 @@ public sealed class ServerBackupSecurityTests
                     LastSeenAt = now,
                     ExpiresAt = now.AddDays(90)
                 });
+                if (!previousSchema)
+                {
+                    database.ContinueWatchingStates.Add(new ContinueWatchingState { UserId = viewer.Id, User = viewer, MediaItemId = mediaId, MediaItem = media, IsHidden = true, Revision = 4 });
+                    database.LibraryStateMutations.Add(new LibraryStateMutation { UserId = viewer.Id, User = viewer, ClientMutationId = noteId, Fingerprint = "synthetic-state-receipt", ResponseJson = "synthetic-replay-snapshot", AccessRevision = viewer.AccessRevision });
+                }
                 await database.SaveChangesAsync();
                 if (previousSchema) await database.Database.GetService<IMigrator>().MigrateAsync("20261013052618_ProfilesAndSceneNotes");
             }
@@ -162,10 +167,17 @@ public sealed class ServerBackupSecurityTests
             Assert.Equal("Synthetic private marker", note.Text);
             Assert.Equal(330_000, note.StartMilliseconds);
             Assert.Equal(123_000, (await restored.PlaybackProgress.SingleAsync()).PositionMilliseconds);
+            if (!previousSchema)
+            {
+                var hidden = await restored.ContinueWatchingStates.SingleAsync();
+                Assert.Equal(viewer.Id, hidden.UserId); Assert.Equal(mediaId, hidden.MediaItemId); Assert.True(hidden.IsHidden); Assert.Equal(4, hidden.Revision);
+                var receipt = await restored.LibraryStateMutations.SingleAsync();
+                Assert.Equal(noteId, receipt.ClientMutationId); Assert.Equal("synthetic-replay-snapshot", receipt.ResponseJson);
+            }
             Assert.NotNull((await restored.DeviceSessions.SingleAsync(session => session.Id == deviceId)).RevokedAt);
             Assert.Equal("synthetic-server-password-hash", (await restored.AdministrationCredentials.SingleAsync()).PasswordHash);
             Assert.Equal(serverId, (await restored.ServerIdentities.SingleAsync()).ServerId);
-            Assert.Equal(15, (await backups.VerifyAsync(runtime.DatabasePath, CancellationToken.None)).AppliedMigrationCount);
+            Assert.Equal(16, (await backups.VerifyAsync(runtime.DatabasePath, CancellationToken.None)).AppliedMigrationCount);
             Assert.False(File.Exists(Path.Combine(root, "offline.mkv")));
         }
         finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }

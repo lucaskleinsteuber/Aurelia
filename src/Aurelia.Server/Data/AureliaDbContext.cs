@@ -39,6 +39,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<PlaybackTicket> PlaybackTickets => Set<PlaybackTicket>();
 
     public DbSet<PlaybackProgress> PlaybackProgress => Set<PlaybackProgress>();
+    public DbSet<ContinueWatchingState> ContinueWatchingStates => Set<ContinueWatchingState>();
+    public DbSet<LibraryStateMutation> LibraryStateMutations => Set<LibraryStateMutation>();
     public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
 
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
@@ -76,6 +78,13 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         var changes = new HashSet<(SyncChangeArea Area, Guid? UserId, Guid? MediaId)>();
         var affectedLibraries = new HashSet<Guid>();
         var changedCollections = new HashSet<Guid>();
+        var progressMediaIds = ChangeTracker.Entries<PlaybackProgress>()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            .Select(entry => entry.Entity.MediaItemId).ToList();
+        var progressParents = progressMediaIds.Count == 0 ? new Dictionary<Guid, Guid?>()
+            : MediaItems.Where(item => progressMediaIds.Contains(item.Id)).Select(item => new { item.Id, item.ParentId }).ToDictionary(item => item.Id, item => item.ParentId);
+        foreach (var entry in ChangeTracker.Entries<MediaItem>().Where(entry => progressMediaIds.Contains(entry.Entity.Id)))
+            progressParents[entry.Entity.Id] = entry.Entity.ParentId;
         foreach (var entry in ChangeTracker.Entries().Where(entry =>
                      (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
                      && entry.Entity is not SyncChange))
@@ -121,6 +130,11 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                     break;
                 case PlaybackProgress progress:
                     changes.Add((SyncChangeArea.UserState, progress.UserId, progress.MediaItemId));
+                    var parentId = progressParents.GetValueOrDefault(progress.MediaItemId);
+                    if (parentId.HasValue) changes.Add((SyncChangeArea.UserState, progress.UserId, parentId));
+                    break;
+                case ContinueWatchingState hidden:
+                    changes.Add((SyncChangeArea.UserState, hidden.UserId, hidden.MediaItemId));
                     break;
                 case SceneNote note:
                     changes.Add((SyncChangeArea.UserState, note.UserId, note.MediaItemId));
@@ -259,6 +273,9 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             || (ticket.UserId == AccessUserId && MediaItems.Any(media => media.Id == ticket.MediaItemId)));
         modelBuilder.Entity<PlaybackProgress>().HasQueryFilter(progress => AccessUserId == null
             || (progress.UserId == AccessUserId && MediaItems.Any(media => media.Id == progress.MediaItemId)));
+        modelBuilder.Entity<ContinueWatchingState>().HasQueryFilter(state => AccessUserId == null
+            || (state.UserId == AccessUserId && MediaItems.Any(media => media.Id == state.MediaItemId)));
+        modelBuilder.Entity<LibraryStateMutation>().HasQueryFilter(mutation => AccessUserId == null || mutation.UserId == AccessUserId);
         modelBuilder.Entity<SceneNote>().HasQueryFilter(note => AccessUserId == null
             || (note.UserId == AccessUserId && MediaItems.Any(media => media.Id == note.MediaItemId)));
         modelBuilder.Entity<SceneNote>(entity =>
@@ -514,7 +531,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(progress => progress.Revision).HasDefaultValue(1L);
             entity.Property(progress => progress.LastMutationFingerprint).HasMaxLength(64);
             entity.Property(progress => progress.LastPlayedAt)
-                .HasConversion(dateTimeOffsetConverter);
+                .HasConversion(nullableDateTimeOffsetConverter);
             entity.Property(progress => progress.UpdatedAt)
                 .HasConversion(dateTimeOffsetConverter);
             entity.HasIndex(progress => new { progress.UserId, progress.MediaItemId })
@@ -527,6 +544,19 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 .WithMany(user => user.PlaybackProgress)
                 .HasForeignKey(progress => progress.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContinueWatchingState>(entity =>
+        {
+            entity.HasKey(state => new { state.UserId, state.MediaItemId });
+            entity.HasOne(state => state.User).WithMany().HasForeignKey(state => state.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(state => state.MediaItem).WithMany(item => item.ContinueWatchingStates).HasForeignKey(state => state.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<LibraryStateMutation>(entity =>
+        {
+            entity.HasKey(mutation => new { mutation.UserId, mutation.ClientMutationId });
+            entity.Property(mutation => mutation.Fingerprint).HasMaxLength(64);
+            entity.HasOne(mutation => mutation.User).WithMany().HasForeignKey(mutation => mutation.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MediaMetadata>(entity =>

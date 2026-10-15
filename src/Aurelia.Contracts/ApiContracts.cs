@@ -20,7 +20,8 @@ public sealed record ServerInfoResponse(
     bool LanAccessEnabled,
     int? LanHttpsPort,
     string? PublicKeyFingerprint,
-    string? DisplayFingerprint);
+    string? DisplayFingerprint,
+    IReadOnlyList<string>? Capabilities = null);
 
 public sealed record SetupOwnerRequest(
     string Username,
@@ -128,6 +129,7 @@ public enum MediaAvailability
 {
     Available,
     Missing,
+    Error,
 }
 
 public enum LibraryScanState
@@ -504,7 +506,8 @@ public sealed record CatalogQuery(
     CatalogSort Sort = CatalogSort.Title,
     SortDirection Direction = SortDirection.Ascending,
     int Offset = 0,
-    int Limit = 100);
+    int Limit = 100,
+    bool Relevance = true);
 
 public enum SyncChangeArea
 {
@@ -540,7 +543,11 @@ public sealed record CatalogItemSummary(
     DateTimeOffset AddedAt,
     string? ParentTitle = null,
     int? SeasonNumber = null,
-    int? EpisodeNumber = null);
+    int? EpisodeNumber = null,
+    Guid? ParentId = null,
+    CatalogWatchState WatchState = CatalogWatchState.Unplayed,
+    LibraryAvailability LibraryAvailability = LibraryAvailability.Unknown,
+    bool ContinueWatchingHidden = false);
 
 public sealed record EpisodePresentation(
     CatalogItemSummary Item,

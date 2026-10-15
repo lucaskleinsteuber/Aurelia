@@ -72,6 +72,27 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("ArtworkAssets");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.ContinueWatchingState", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsHidden")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("UserId", "MediaItemId");
+
+                    b.HasIndex("MediaItemId");
+
+                    b.ToTable("ContinueWatchingStates");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.DeviceSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -541,6 +562,31 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("LibraryScanId");
 
                     b.ToTable("LibraryScanIssues");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryStateMutation", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientMutationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AccessRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResponseJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId", "ClientMutationId");
+
+                    b.ToTable("LibraryStateMutations");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaCollectionMember", b =>
@@ -1081,7 +1127,7 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<Guid?>("LastMutationId")
                         .HasColumnType("TEXT");
 
-                    b.Property<long>("LastPlayedAt")
+                    b.Property<long?>("LastPlayedAt")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("MediaItemId")
@@ -1383,6 +1429,25 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("Metadata");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.ContinueWatchingState", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
+                        .WithMany("ContinueWatchingStates")
+                        .HasForeignKey("MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.DeviceSession", b =>
                 {
                     b.HasOne("Aurelia.Server.Data.ServerUser", "User")
@@ -1465,6 +1530,17 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("LibraryScan");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.LibraryStateMutation", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.ServerUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MediaCollectionMember", b =>
@@ -1712,6 +1788,8 @@ namespace Aurelia.Server.Data.Migrations
                     b.Navigation("Children");
 
                     b.Navigation("CollectionMemberships");
+
+                    b.Navigation("ContinueWatchingStates");
 
                     b.Navigation("Favorites");
 

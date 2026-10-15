@@ -9,6 +9,7 @@ struct ServerInfoResponse: Codable, Equatable, Sendable {
   let lanHttpsPort: Int?
   let publicKeyFingerprint: String?
   let displayFingerprint: String?
+  var capabilities: [String]? = nil
 }
 
 struct RedeemPairingCodeRequest: Encodable, Sendable {
@@ -275,6 +276,7 @@ struct PagedResponse<Item: Decodable & Sendable>: Decodable, Sendable {
 enum MediaAvailability: String, Codable, Sendable {
   case available
   case missing
+  case error
 }
 
 enum MediaKind: String, Codable, Sendable {
@@ -366,13 +368,19 @@ struct CatalogItemSummary: Codable, Identifiable, Equatable, Sendable {
   let parentTitle: String?
   let seasonNumber: Int?
   let episodeNumber: Int?
+  var watchState: CatalogWatchState? = nil
+  var libraryAvailability: LibraryAvailability? = nil
+  var parentId: UUID? = nil
+  var continueWatchingHidden = false
 
   init(
     id: UUID, kind: MediaKind, title: String, originalTitle: String?, year: Int?,
     overview: String?, genres: [String], poster: ArtworkSummary?, backdrop: ArtworkSummary?,
     availability: MediaAvailability, isFavorite: Bool, progress: PlaybackProgressResponse?,
     addedAt: String, parentTitle: String? = nil, seasonNumber: Int? = nil,
-    episodeNumber: Int? = nil
+    episodeNumber: Int? = nil, watchState: CatalogWatchState? = nil,
+    libraryAvailability: LibraryAvailability? = nil, parentId: UUID? = nil,
+    continueWatchingHidden: Bool = false
   ) {
     self.id = id
     self.kind = kind
@@ -390,9 +398,48 @@ struct CatalogItemSummary: Codable, Identifiable, Equatable, Sendable {
     self.parentTitle = parentTitle
     self.seasonNumber = seasonNumber
     self.episodeNumber = episodeNumber
+    self.watchState = watchState
+    self.libraryAvailability = libraryAvailability
+    self.parentId = parentId
+    self.continueWatchingHidden = continueWatchingHidden
   }
 
-  var isPlayable: Bool { availability == .available && kind != .series }
+  private enum CodingKeys: String, CodingKey {
+    case id, kind, title, originalTitle, year, overview, genres, poster, backdrop, availability
+    case isFavorite, progress, addedAt, parentTitle, seasonNumber, episodeNumber
+    case watchState, libraryAvailability, parentId, continueWatchingHidden
+  }
+
+  init(from decoder: any Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decode(UUID.self, forKey: .id)
+    kind = try values.decode(MediaKind.self, forKey: .kind)
+    title = try values.decode(String.self, forKey: .title)
+    originalTitle = try values.decodeIfPresent(String.self, forKey: .originalTitle)
+    year = try values.decodeIfPresent(Int.self, forKey: .year)
+    overview = try values.decodeIfPresent(String.self, forKey: .overview)
+    genres = try values.decode([String].self, forKey: .genres)
+    poster = try values.decodeIfPresent(ArtworkSummary.self, forKey: .poster)
+    backdrop = try values.decodeIfPresent(ArtworkSummary.self, forKey: .backdrop)
+    availability = try values.decode(MediaAvailability.self, forKey: .availability)
+    isFavorite = try values.decode(Bool.self, forKey: .isFavorite)
+    progress = try values.decodeIfPresent(PlaybackProgressResponse.self, forKey: .progress)
+    addedAt = try values.decode(String.self, forKey: .addedAt)
+    parentTitle = try values.decodeIfPresent(String.self, forKey: .parentTitle)
+    seasonNumber = try values.decodeIfPresent(Int.self, forKey: .seasonNumber)
+    episodeNumber = try values.decodeIfPresent(Int.self, forKey: .episodeNumber)
+    watchState = try values.decodeIfPresent(CatalogWatchState.self, forKey: .watchState)
+    libraryAvailability = try values.decodeIfPresent(
+      LibraryAvailability.self, forKey: .libraryAvailability)
+    parentId = try values.decodeIfPresent(UUID.self, forKey: .parentId)
+    continueWatchingHidden =
+      try values.decodeIfPresent(Bool.self, forKey: .continueWatchingHidden) ?? false
+  }
+
+  var isPlayable: Bool {
+    availability == .available && kind != .series
+      && libraryAvailability != .unavailable && libraryAvailability != .error
+  }
   var progressFraction: Double? {
     guard let progress, progress.durationMilliseconds > 0, !progress.isCompleted else { return nil }
     return min(

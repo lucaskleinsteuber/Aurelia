@@ -8,7 +8,6 @@ namespace Aurelia.Server.Services;
 
 public sealed class PlaybackProgressService(AureliaDbContext database)
 {
-    private static readonly SemaphoreSlim UpdateLock = new(1, 1);
     private const long MeaningfulProgressMilliseconds = 10_000;
     private const long CompletionWindowMilliseconds = 45_000;
     private const long MinimumCompletionThresholdMilliseconds = 30_000;
@@ -29,14 +28,14 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
         CancellationToken cancellationToken)
     {
         Validate(request);
-        await UpdateLock.WaitAsync(cancellationToken);
+        await LibraryStateService.WriteGate.WaitAsync(cancellationToken);
         try
         {
             return await UpdateCoreAsync(userId, mediaId, request, cancellationToken);
         }
         finally
         {
-            UpdateLock.Release();
+            LibraryStateService.WriteGate.Release();
         }
     }
 
@@ -83,7 +82,6 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
                 MediaItemId = media.Id,
                 User = user,
                 UserId = user.Id,
-                LastPlayedAt = now,
                 UpdatedAt = now,
             };
             database.PlaybackProgress.Add(progress);
@@ -97,12 +95,18 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
         var reset = !completed
             && request.PositionMilliseconds <= MeaningfulProgressMilliseconds;
 
-        progress.PositionMilliseconds = completed || reset
-            ? 0
-            : request.PositionMilliseconds;
+        var newPosition = completed || reset ? 0 : request.PositionMilliseconds;
+        var changed = progress.PositionMilliseconds != newPosition || progress.IsCompleted != completed;
+        progress.PositionMilliseconds = newPosition;
         progress.DurationMilliseconds = request.DurationMilliseconds;
         progress.IsCompleted = completed;
-        progress.LastPlayedAt = now;
+        if (changed && (request.PositionMilliseconds > 0 || request.IsFinished))
+        {
+            progress.LastPlayedAt = now;
+            var logicalId = media.Kind == MediaKind.Episode && media.SeasonNumber > 0 && media.ParentId.HasValue ? media.ParentId.Value : media.Id;
+            var hidden = await database.ContinueWatchingStates.SingleOrDefaultAsync(state => state.UserId == userId && state.MediaItemId == logicalId, cancellationToken);
+            if (hidden is { IsHidden: true }) { hidden.IsHidden = false; hidden.Revision = checked(hidden.Revision + 1); }
+        }
         progress.UpdatedAt = now;
         progress.Revision = checked(progress.Revision + 1);
         progress.LastMutationId = request.ClientMutationId;

@@ -553,10 +553,16 @@ struct MediaPosterCard: View {
               .foregroundStyle(.white)
               .accessibilityLabel("Favorite")
           }
-          if item.availability == .missing {
+          if MediaAvailabilityPresentation.message(for: item) != nil {
             Image(systemName: "exclamationmark.triangle.fill")
               .foregroundStyle(.orange)
-              .accessibilityLabel("Media missing")
+              .accessibilityLabel(
+                MediaAvailabilityPresentation.message(for: item) ?? "Media unavailable")
+          }
+          if MediaWatchPresentation.isWatched(item) {
+            Image(systemName: "checkmark.circle.fill")
+              .foregroundStyle(.white)
+              .accessibilityLabel("Watched")
           }
         }
         .font(.caption.weight(.bold))
@@ -588,7 +594,7 @@ struct MediaPosterCard: View {
   }
 
   private var secondaryLine: String {
-    if item.availability == .missing { return "Unavailable" }
+    if let message = MediaAvailabilityPresentation.message(for: item) { return message }
     if let year = item.year { return String(year) }
     return item.kind == .movie ? "Movie" : "TV Show"
   }
@@ -626,11 +632,18 @@ struct LandscapeMediaCard: View {
           .foregroundStyle(.white.opacity(0.68))
       }
       .padding(16)
-      if item.availability == .missing {
-        AvailabilityBadge(availability: item.availability)
-          .padding(12)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+      VStack(alignment: .trailing, spacing: 6) {
+        AvailabilityBadge(
+          availability: item.availability, libraryAvailability: item.libraryAvailability)
+        if MediaWatchPresentation.isWatched(item) {
+          Label("Watched", systemImage: "checkmark.circle.fill")
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(.black.opacity(0.56), in: Capsule())
+        }
       }
+      .padding(12)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
       if let progress = item.progressFraction {
         GeometryReader { geometry in
           VStack {
@@ -662,10 +675,13 @@ struct LandscapeMediaCard: View {
 
 struct AvailabilityBadge: View {
   let availability: MediaAvailability
+  var libraryAvailability: LibraryAvailability? = nil
 
   var body: some View {
-    if availability == .missing {
-      Label("Unavailable", systemImage: "exclamationmark.triangle.fill")
+    if let message = MediaAvailabilityPresentation.message(
+      availability: availability, libraryAvailability: libraryAvailability)
+    {
+      Label(message, systemImage: "exclamationmark.triangle.fill")
         .font(.caption.weight(.medium))
         .foregroundStyle(.orange)
         .padding(.horizontal, 9)
@@ -673,6 +689,38 @@ struct AvailabilityBadge: View {
         .background(.black.opacity(0.56), in: Capsule())
         .overlay { Capsule().stroke(.orange.opacity(0.28), lineWidth: 1) }
     }
+  }
+}
+
+enum MediaAvailabilityPresentation {
+  static func message(for item: CatalogItemSummary) -> String? {
+    message(availability: item.availability, libraryAvailability: item.libraryAvailability)
+  }
+
+  static func message(
+    availability: MediaAvailability, libraryAvailability: LibraryAvailability?
+  ) -> String? {
+    switch libraryAvailability {
+    case .unavailable: return "Media drive disconnected"
+    case .error: return "Media access unavailable"
+    case .unknown, .available, nil: break
+    }
+    switch availability {
+    case .available: return nil
+    case .missing: return "Media file unavailable"
+    case .error: return "Media access unavailable"
+    }
+  }
+
+  static func canPlay(_ item: CatalogItemSummary) -> Bool {
+    item.kind != .series && message(for: item) == nil
+  }
+}
+
+enum MediaWatchPresentation {
+  static func isWatched(_ item: CatalogItemSummary) -> Bool {
+    if let state = item.watchState { return state == .completed }
+    return item.progress?.isCompleted == true
   }
 }
 

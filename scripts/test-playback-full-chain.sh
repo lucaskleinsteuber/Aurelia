@@ -2,13 +2,14 @@
 set -euo pipefail
 umask 077
 
-# Mandatory real playback gate. Uses only generated test media and a private
+# Optional playback diagnostic, run only at the user's explicit request.
+# Uses only generated test media and a private
 # database/account; never launches/stops the installed app or reads its library.
 # Usage: zsh scripts/test-playback-full-chain.sh /path/to/staged/Aurelia.app [soak-seconds]
 # Capture AURELIA_CANDIDATE_CLIENT_SOURCE_FINGERPRINT before building the
-# candidate; a mandatory all-format >=1800-second run requires that provenance.
+# candidate; an all-format >=1800-second diagnostic requires that provenance.
 # Optional AURELIA_FULL_CHAIN_FORMAT_FILTER=AVI|MP4|MKV is diagnostic only;
-# the default all-format gate is required for release acceptance.
+# the default all-format run checks the complete optional diagnostic criteria.
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
 source "$repository_root/scripts/playback-evidence-common.sh"

@@ -41,7 +41,11 @@ exit or a required forced shutdown fails the functional run. This probe does
 not prove codec decoding, GUI playback, hardware equivalence or Internet access
 safety. Non-notarized package first launch and native UI tests remain separate.
 
-## Mandatory native playback gate
+## Optional native playback diagnostics
+
+Playback tests run only when the user explicitly requests them. They are not
+a build, release, or installation requirement. A user confirmation that playback
+works does not request an automated playback run.
 
 Before building the signed staged candidate, capture its client code and
 compiler-configuration fingerprint from the repository root:
@@ -57,26 +61,26 @@ then run the playback gate with the same exported fingerprint:
 zsh scripts/test-playback-full-chain.sh /path/to/staged/Aurelia.app 1800
 ```
 
-The mandatory all-format run requires this fingerprint and checks it before the
+The optional all-format diagnostic uses this fingerprint and checks it before the
 test-host build, immediately before test launch, and after the run. A mismatch
-fails the gate rather than certifying different client code. This is source and
+fails the diagnostic rather than certifying different client code. This is source and
 compiler-configuration provenance, not an assertion that the XCTest host binary
 is identical to the untouched staged executable.
 
-This separate release gate exercises the production API, the exact packaged
+This optional diagnostic exercises the production API, the exact packaged
 server, pinned HTTPS, the loopback relay, and VLC with real video and audio
 output. The ordinary `test-macos.sh` unit/UI gate excludes this class explicitly;
-it is not a substitute for this gate. Running the full-chain class without its
+it does not run this diagnostic. Running the full-chain class without its
 isolated server configuration fails rather than reporting a skipped pass.
 
 The gate generates AVI, MKV and MP4 sources (including MP4 metadata at the end),
 checks HTTP ranges, seeking, pause/resume, saved progress, ticket renewal, and
 controlled server/source outages. AVI and MKV play for at least two minutes each;
-the duration argument controls the MP4 soak, with 1800 seconds required for the
-30-minute release check. A successful shorter all-format run can exit zero with
+the duration argument controls the MP4 soak, with 1800 seconds selecting the
+30-minute diagnostic. A successful shorter all-format run can exit zero with
 `allFormatSuiteSucceeded` and `diagnosticSubsetSucceeded`, but `passed` and
-`requiredFullGateComplete` remain false. Those release-acceptance fields require
-at least 1800 seconds, Release compilation, all formats, the completed mandatory
+`requiredFullGateComplete` remain false. Those full-diagnostic fields require
+at least 1800 seconds, Release compilation, all formats, the selected playback
 test, and verified client source provenance. The actual test host's version and
 build must also match the staged candidate before launch. Debug runs remain
 diagnostic even when they reach the full duration. The 64-second synthetic sources are replayed by seeking
@@ -85,7 +89,7 @@ not a 30-minute movie or every possible codec. Real VLC counters must show both
 displayed pictures and played audio buffers. Human hearing and picture quality
 remain a separate check.
 
-The all-format gate also provisions a separate synthetic series through the
+The all-format diagnostic also provisions a separate synthetic series through the
 production library APIs, using two numbered copies of its own generated MP4.
 It saves unfinished progress, resumes from that server value, and lets the real
 decoder reach the first episode's EOF. The production controller must start the

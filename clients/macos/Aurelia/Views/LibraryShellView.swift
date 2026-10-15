@@ -43,6 +43,7 @@ struct LibraryShellView: View {
   @State private var sidebarVisible = true
   @State private var sidebarWidth = AureliaDesign.sidebarWidth
   @State private var resizeStartWidth: CGFloat?
+  @State private var findRequest: UUID?
 
   var body: some View {
     GeometryReader { geometry in
@@ -100,6 +101,16 @@ struct LibraryShellView: View {
       .aureliaRemoveEmptyWindowToolbar()
     }
     .background(AureliaDesign.canvas)
+    .background {
+      LibraryFindShortcut(isBlocked: { model.playback != nil }) {
+        if destination == .home || selection != nil {
+          selection = nil
+          destination = .library
+        }
+        findRequest = UUID()
+      }
+      .frame(width: 0, height: 0)
+    }
     .overlay(alignment: .bottom) {
       if let error = model.visibleErrorMessage {
         ErrorBanner(
@@ -175,6 +186,7 @@ struct LibraryShellView: View {
   private func sidebarButton(_ item: LibraryDestination) -> some View {
     Button {
       selection = nil
+      findRequest = nil
       destination = item
       if item == .home { Task { await model.refreshHome() } }
     } label: {
@@ -213,30 +225,24 @@ struct LibraryShellView: View {
         .task { await model.refreshHome() }
       case .library:
         LibraryPage(
+          section: .library, findRequest: findRequest,
           onSelect: { selection = .media($0) },
           onSelectCollection: { selection = .collection($0) })
       case .recentlyAdded:
-        CatalogPage(
-          title: "Recently Added",
-          subtitle: "The newest movies and shows on this server.",
-          items: model.home?.recentlyAdded
-            ?? model.catalogItems.sorted { $0.addedAt > $1.addedAt },
-          emptyMessage: "Newly added movies and TV shows will appear here.",
-          onSelect: { selection = .media($0) })
+        LibraryPage(
+          section: .recentlyAdded, findRequest: findRequest,
+          onSelect: { selection = .media($0) },
+          onSelectCollection: { selection = .collection($0) })
       case .tvShows:
-        CatalogPage(
-          title: "TV Shows",
-          subtitle: "Every series in your library.",
-          items: model.catalogItems.filter { $0.kind == .series },
-          emptyMessage: "No TV shows have been added to this server yet.",
-          onSelect: { selection = .media($0) })
+        LibraryPage(
+          section: .tvShows, findRequest: findRequest,
+          onSelect: { selection = .media($0) },
+          onSelectCollection: { selection = .collection($0) })
       case .movies:
-        CatalogPage(
-          title: "Movies",
-          subtitle: "Every movie in your library.",
-          items: model.catalogItems.filter { $0.kind == .movie },
-          emptyMessage: "No movies have been added to this server yet.",
-          onSelect: { selection = .media($0) })
+        LibraryPage(
+          section: .movies, findRequest: findRequest,
+          onSelect: { selection = .media($0) },
+          onSelectCollection: { selection = .collection($0) })
       }
     }
   }
@@ -246,6 +252,7 @@ private struct HomePage: View {
   @EnvironmentObject private var model: AppModel
   let onSelect: (UUID) -> Void
   let onSelectCollection: (UUID) -> Void
+  @State private var continueWatchingError: String?
 
   var body: some View {
     if model.catalogItems.isEmpty, model.home?.recommendation == nil,
@@ -269,6 +276,7 @@ private struct HomePage: View {
       }
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("home-page")
+
     } else {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 34) {
@@ -294,6 +302,16 @@ private struct HomePage: View {
       .aureliaOverlayScrollbars()
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("home-page")
+      .alert(
+        "Couldn't Update Continue Watching",
+        isPresented: Binding(
+          get: { continueWatchingError != nil },
+          set: { if !$0 { continueWatchingError = nil } })
+      ) {
+        Button("OK") { continueWatchingError = nil }
+      } message: {
+        Text(continueWatchingError ?? "")
+      }
     }
   }
 
@@ -328,6 +346,24 @@ private struct HomePage: View {
                 .compactMap { $0 }.joined(separator: ", ")
             )
             .accessibilityIdentifier("continue-\(item.id.uuidString.lowercased())")
+            .contextMenu {
+              Button("Remove from Continue Watching") {
+                let profile = model.profile
+                Task {
+                  do {
+                    try await model.setContinueWatchingHidden(mediaId: item.id, isHidden: true)
+                  } catch {
+                    guard !(error is CancellationError),
+                      profile?.sessionId == model.profile?.sessionId,
+                      profile?.serverId == model.profile?.serverId
+                    else { return }
+                    continueWatchingError = error.localizedDescription
+                  }
+                }
+              }
+              .disabled(!model.supportsLibraryState)
+              if !model.supportsLibraryState { Text("Requires server version 1.5.3") }
+            }
           }
         }
       }
@@ -462,351 +498,417 @@ private struct HomeHero: View {
   }
 }
 
-private enum LibraryFilter: String, CaseIterable {
-  case all = "All Media"
-  case movies = "Movies"
-  case shows = "TV Shows"
-  case favorites = "Favorites"
-}
-
-private enum LibrarySort: String, CaseIterable {
-  case title = "Title"
-  case newest = "Recently Added"
-  case year = "Release Year"
-}
-
 private struct LibraryPage: View {
   @EnvironmentObject private var model: AppModel
+  let section: CatalogBrowseSection
+  let findRequest: UUID?
   let onSelect: (UUID) -> Void
   let onSelectCollection: (UUID) -> Void
-  @State private var query = ""
-  @State private var searchResults: [CatalogItemSummary]?
-  @State private var filter: LibraryFilter = .all
-  @State private var sort: LibrarySort = .title
+  @StateObject private var browser = LibraryBrowseController()
+  @State private var search = ""
+  @State private var query = CatalogBrowseQuery()
+  @State private var loadedContext = ""
+  @State private var completedRequestKey = ""
+  @State private var retryRevision = 0
   @State private var showingCollectionEditor = false
   @State private var showingMetadataReviewQueue = false
+  @FocusState private var searchFocused: Bool
+
+  private var context: String {
+    [
+      model.profile?.serverId.uuidString ?? "none",
+      model.profile?.user?.id.uuidString ?? "none",
+      model.profile?.sessionId.uuidString ?? "none", section.rawValue,
+    ].joined(separator: ":")
+  }
+
+  private var requestKey: String {
+    "\(context):\(loadedContext):\(query.requestKey):\(search):\(model.catalogVisibilityRevision):\(retryRevision)"
+  }
+
+  private var hasFilters: Bool { section.hasUserFilters(query) }
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
-        libraryHeader
-
-        if query.isEmpty, !model.collections.isEmpty {
-          VStack(alignment: .leading, spacing: 14) {
-            AureliaSectionHeading(title: "Collections", count: model.collections.count)
-            AureliaHorizontalRail(
-              cardWidth: 210, itemCount: model.collections.count, title: "Collections"
-            ) {
-              ForEach(model.collections) { collection in
-                Button {
-                  onSelectCollection(collection.id)
-                } label: {
-                  CollectionCard(collection: collection)
-                }
-                .buttonStyle(.plain)
-              }
-            }
+        if loadedContext == context {
+          libraryHeader
+          if hasFilters { activeFilters }
+          if section == .library, search.isEmpty, !hasFilters, !model.collections.isEmpty {
+            collectionRow
           }
+        } else {
+          Text(section.title)
+            .font(AureliaDesign.pageTitle)
+            .accessibilityIdentifier("library-title")
         }
 
-        if displayedItems.isEmpty {
-          EmptyCatalogResults(
-            query: query,
-            canAddMedia: model.canManageMedia,
-            addMedia: { model.showMediaManager() })
-        } else if query.isEmpty {
-          mediaSections
+        if loadedContext != context || completedRequestKey != requestKey || browser.isLoading {
+          ProgressView()
+            .frame(maxWidth: .infinity, minHeight: 250)
+            .accessibilityLabel("Loading Library")
+        } else if let error = browser.errorMessage {
+          ContentUnavailableView {
+            Label("Library Unavailable", systemImage: "wifi.exclamationmark")
+          } description: {
+            Text(error)
+          } actions: {
+            Button("Try Again") { retryRevision += 1 }
+          }
+          .frame(maxWidth: .infinity, minHeight: 250)
+        } else if browser.items.isEmpty {
+          if !search.isEmpty || hasFilters {
+            ContentUnavailableView(
+              "No Results", systemImage: "magnifyingglass",
+              description: Text("Try another search or clear your filters.")
+            )
+            .frame(maxWidth: .infinity, minHeight: 300)
+          } else {
+            EmptyCatalogResults(
+              query: search, canAddMedia: model.canManageMedia,
+              addMedia: { model.showMediaManager() })
+          }
         } else {
-          searchResultSections
+          resultSections
         }
       }
       .padding(AureliaDesign.pagePadding)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .task(id: "\(query):\(model.catalogVisibilityRevision)") {
-      searchResults = nil
-      guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        searchResults = nil
+    .accessibilityIdentifier("browse-\(section.rawValue)")
+    .task(id: requestKey) {
+      if loadedContext != context {
+        browser.invalidate()
+        search = ""
+        if let profile = model.profile {
+          query = LibraryBrowsePreferenceStore(
+            defaults: LibraryBrowsePreferenceStore.applicationDefaults
+          ).load(
+            serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId,
+            section: section)
+        } else {
+          query = section.defaultQuery
+        }
+        loadedContext = context
         return
       }
-      try? await Task.sleep(for: .milliseconds(220))
-      guard !Task.isCancelled else { return }
+      let profile = model.profile
       let revision = model.catalogVisibilityRevision
-      let result = try? await model.searchCatalog(query)
-      guard !Task.isCancelled, revision == model.catalogVisibilityRevision else { return }
-      searchResults = result
+      let request = requestKey
+      await browser.load(query: query, search: search) { query, search in
+        let items = try await model.browseCatalog(query: query, search: search)
+        guard profile?.serverId == model.profile?.serverId,
+          profile?.user?.id == model.profile?.user?.id,
+          profile?.sessionId == model.profile?.sessionId,
+          revision == model.catalogVisibilityRevision
+        else { throw CancellationError() }
+        return items
+      }
+      guard !Task.isCancelled, request == requestKey else { return }
+      completedRequestKey = request
     }
+    .task(id: "\(context):\(loadedContext):\(findRequest?.uuidString ?? "none")") {
+      guard loadedContext == context, findRequest != nil else { return }
+      searchFocused = false
+      await Task.yield()
+      guard !Task.isCancelled, loadedContext == context else { return }
+      searchFocused = true
+    }
+    .onChange(of: query) {
+      guard loadedContext == context, let profile = model.profile else { return }
+      LibraryBrowsePreferenceStore(defaults: LibraryBrowsePreferenceStore.applicationDefaults).save(
+        query, serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId,
+        section: section)
+    }
+    .onDisappear { browser.invalidate() }
     .sheet(isPresented: $showingCollectionEditor) {
-      CollectionEditorSheet(collection: nil)
-        .environmentObject(model)
+      CollectionEditorSheet(collection: nil).environmentObject(model)
+    }
+    .sheet(isPresented: $showingMetadataReviewQueue) {
+      MetadataReviewQueueSheet().environmentObject(model)
     }
   }
 
   private var libraryHeader: some View {
-    ViewThatFits(in: .horizontal) {
-      HStack(alignment: .top, spacing: 20) {
-        libraryTitle
-        Spacer(minLength: 28)
-        libraryControls
+    VStack(alignment: .leading, spacing: 18) {
+      HStack(alignment: .firstTextBaseline, spacing: 10) {
+        Text(section.title)
+          .font(AureliaDesign.pageTitle)
+          .tracking(-0.35)
+          .accessibilityIdentifier("library-title")
+        if completedRequestKey == requestKey, !browser.isLoading {
+          Text(String(browser.items.count))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+        }
+        Spacer()
+        if model.canManageMedia, section == .library { managementActions }
       }
-      VStack(alignment: .leading, spacing: 18) {
-        libraryTitle
-        libraryControls
+      HStack(spacing: 10) {
+        searchField
+        filterMenu
+        sortMenu
       }
     }
   }
 
-  private var libraryTitle: some View {
-    VStack(alignment: .leading, spacing: 5) {
-      Text("Library")
-        .font(AureliaDesign.pageTitle)
-        .tracking(-0.35)
-        .accessibilityIdentifier("library-title")
-      Text("\(movieCount) movies · \(showCount) TV shows · \(model.collections.count) collections")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-    }
-  }
-
-  private var libraryControls: some View {
-    HStack(spacing: 10) {
-      AureliaSearchField(prompt: "Search Library", text: $query)
-        .frame(minWidth: 220, idealWidth: 300, maxWidth: 340)
+  private var searchField: some View {
+    HStack(spacing: 9) {
+      Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+      TextField("Search \(section.title)", text: $search)
+        .textFieldStyle(.plain)
+        .focused($searchFocused)
         .accessibilityIdentifier("library-search")
-
-      Menu {
-        ForEach(LibraryFilter.allCases, id: \.self) { value in
-          Button {
-            filter = value
-          } label: {
-            if filter == value {
-              Label(value.rawValue, systemImage: "checkmark")
-            } else {
-              Text(value.rawValue)
-            }
-          }
-        }
-      } label: {
-        Image(systemName: "line.3.horizontal.decrease")
-          .frame(width: 36, height: 36)
-          .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
-          .overlay {
-            RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline)
-          }
-      }
-      .menuStyle(.borderlessButton)
-      .accessibilityLabel("Filter: \(filter.rawValue)")
-
-      Menu {
-        ForEach(LibrarySort.allCases, id: \.self) { value in
-          Button {
-            sort = value
-          } label: {
-            if sort == value {
-              Label(value.rawValue, systemImage: "checkmark")
-            } else {
-              Text(value.rawValue)
-            }
-          }
-        }
-      } label: {
-        Image(systemName: "arrow.up.arrow.down")
-          .frame(width: 36, height: 36)
-          .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
-          .overlay {
-            RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline)
-          }
-      }
-      .menuStyle(.borderlessButton)
-      .accessibilityLabel("Sort: \(sort.rawValue)")
-
-      if model.canManageMedia {
+      if !search.isEmpty {
         Button {
-          showingMetadataReviewQueue = true
+          search = ""
         } label: {
-          Label("Review Matches", systemImage: "checklist")
-            .font(.callout.weight(.medium))
-            .lineLimit(1)
-        }
-        .buttonStyle(.bordered)
-        .accessibilityIdentifier("library-review-metadata")
-        .help("Review uncertain metadata matches")
-        .sheet(isPresented: $showingMetadataReviewQueue) {
-          MetadataReviewQueueSheet()
-            .environmentObject(model)
-        }
-
-        Button {
-          model.showMediaManager()
-        } label: {
-          Image(systemName: "plus")
-            .font(.system(size: 15, weight: .semibold))
-            .frame(width: 38, height: 38)
-        }
-        .buttonStyle(.borderedProminent)
-        .clipShape(Circle())
-        .accessibilityLabel("Add Media")
-        .accessibilityIdentifier("library-add-media")
-
-        Button {
-          showingCollectionEditor = true
-        } label: {
-          Image(systemName: "rectangle.stack.badge.plus")
-            .frame(width: 36, height: 36)
-            .background(AureliaDesign.raisedSurface, in: Circle())
-            .overlay { Circle().stroke(AureliaDesign.hairline) }
+          Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Create Collection")
+        .accessibilityLabel("Clear Search")
+      }
+    }
+    .padding(.horizontal, 12)
+    .frame(height: 38)
+    .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
+    .overlay { RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline) }
+  }
+
+  private var filterMenu: some View {
+    Menu {
+      if section == .library {
+        Picker("Media Type", selection: $query.kind) {
+          Text("All Media").tag(Optional<MediaKind>.none)
+          Text("Movies").tag(Optional(MediaKind.movie))
+          Text("TV Shows").tag(Optional(MediaKind.series))
+        }
+      }
+      Toggle("Favorites Only", isOn: $query.favoritesOnly)
+      Picker("Genre", selection: $query.genre) {
+        Text("All Genres").tag(Optional<String>.none)
+        ForEach(genres, id: \.self) { Text($0).tag(Optional($0)) }
+      }
+      Menu("Release Year") {
+        Picker("From", selection: fromYear) {
+          Text("Any Year").tag(Optional<Int>.none)
+          ForEach(years, id: \.self) { Text(String($0)).tag(Optional($0)) }
+        }
+        Picker("To", selection: toYear) {
+          Text("Any Year").tag(Optional<Int>.none)
+          ForEach(years, id: \.self) { Text(String($0)).tag(Optional($0)) }
+        }
+      }
+      Picker("Watch Status", selection: $query.watchState) {
+        ForEach(CatalogWatchFilter.allCases, id: \.self) { Text($0.title).tag($0) }
+      }
+      .disabled(!model.supportsLibraryState)
+      if !model.supportsLibraryState { Text("Watch filters require server version 1.5.3") }
+      Divider()
+      Button("Clear Filters") { query.clearFilters(preserving: section.fixedKind) }
+        .disabled(!hasFilters)
+    } label: {
+      Image(
+        systemName: hasFilters
+          ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease"
+      )
+      .frame(width: 38, height: 38)
+      .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
+      .overlay { RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline) }
+    }
+    .menuStyle(.borderlessButton)
+    .accessibilityLabel("Filter Library")
+    .accessibilityIdentifier("library-filters")
+  }
+
+  private var sortMenu: some View {
+    Menu {
+      Picker("Sort By", selection: $query.sort) {
+        Text(search.isEmpty ? "Default" : "Relevance").tag(Optional<CatalogBrowseSort>.none)
+        ForEach(CatalogBrowseSort.allCases, id: \.self) {
+          Text($0.title).tag(Optional($0))
+        }
+      }
+      Divider()
+      Picker("Direction", selection: $query.descending) {
+        Text("Ascending").tag(false)
+        Text("Descending").tag(true)
+      }
+      .disabled(query.sort == nil)
+    } label: {
+      Image(systemName: "arrow.up.arrow.down")
+        .frame(width: 38, height: 38)
+        .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline) }
+    }
+    .menuStyle(.borderlessButton)
+    .accessibilityLabel("Sort: \(query.sort?.title ?? (search.isEmpty ? "Default" : "Relevance"))")
+    .accessibilityIdentifier("library-sort")
+  }
+
+  private var activeFilters: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 12) {
+      Text(filterSummary)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("library-active-filters")
+      Spacer(minLength: 8)
+      Button("Clear Filters") { query.clearFilters(preserving: section.fixedKind) }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
+        .accessibilityIdentifier("library-clear-filters")
+    }
+  }
+
+  private var filterSummary: String {
+    var parts: [String] = []
+    if section == .library, let kind = query.kind {
+      parts.append(kind == .movie ? "Movies" : "TV Shows")
+    }
+    if query.favoritesOnly { parts.append("Favorites") }
+    if let genre = query.genre { parts.append(genre) }
+    if let from = query.yearFrom, let to = query.yearTo {
+      parts.append(from == to ? String(from) : "\(from)–\(to)")
+    } else if let from = query.yearFrom {
+      parts.append("From \(from)")
+    } else if let to = query.yearTo {
+      parts.append("Through \(to)")
+    }
+    if query.watchState != .all { parts.append(query.watchState.title) }
+    return parts.joined(separator: " · ")
+  }
+
+  private var genres: [String] {
+    Set(model.catalogItems.flatMap(\.genres)).sorted {
+      $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+    }
+  }
+
+  private var years: [Int] { Set(model.catalogItems.compactMap(\.year)).sorted(by: >) }
+
+  private var fromYear: Binding<Int?> {
+    Binding(
+      get: { query.yearFrom },
+      set: { value in
+        query.yearFrom = value
+        if let value, let to = query.yearTo, value > to { query.yearTo = value }
+      })
+  }
+
+  private var toYear: Binding<Int?> {
+    Binding(
+      get: { query.yearTo },
+      set: { value in
+        query.yearTo = value
+        if let value, let from = query.yearFrom, value < from { query.yearFrom = value }
+      })
+  }
+
+  private var managementActions: some View {
+    HStack(spacing: 10) {
+      Button {
+        showingMetadataReviewQueue = true
+      } label: {
+        Label("Review Matches", systemImage: "checklist")
+      }
+      .buttonStyle(.bordered)
+      .accessibilityIdentifier("library-review-metadata")
+      Button {
+        model.showMediaManager()
+      } label: {
+        Image(systemName: "plus").frame(width: 32, height: 32)
+      }
+      .buttonStyle(.borderedProminent)
+      .clipShape(Circle())
+      .accessibilityLabel("Add Media")
+      .accessibilityIdentifier("library-add-media")
+      Button {
+        showingCollectionEditor = true
+      } label: {
+        Image(systemName: "rectangle.stack.badge.plus").frame(width: 32, height: 32)
+      }
+      .buttonStyle(.bordered)
+      .accessibilityLabel("Create Collection")
+    }
+  }
+
+  private var collectionRow: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      AureliaSectionHeading(title: "Collections", count: model.collections.count)
+      AureliaHorizontalRail(
+        cardWidth: 210, itemCount: model.collections.count, title: "Collections"
+      ) {
+        ForEach(model.collections) { collection in
+          Button {
+            onSelectCollection(collection.id)
+          } label: {
+            CollectionCard(collection: collection)
+          }
+          .buttonStyle(.plain)
+        }
       }
     }
   }
 
-  @ViewBuilder
-  private var mediaSections: some View {
-    let movies = displayedItems.filter { $0.kind == .movie }
-    let shows = displayedItems.filter { $0.kind == .series }
-    VStack(alignment: .leading, spacing: 34) {
-      if !movies.isEmpty {
-        VStack(alignment: .leading, spacing: 16) {
-          AureliaSectionHeading(title: "Movies", count: movies.count)
-          posterGrid(movies, onSelect: onSelect)
-        }
-      }
-      if !shows.isEmpty {
-        VStack(alignment: .leading, spacing: 16) {
-          AureliaSectionHeading(title: "TV Shows", count: shows.count)
-          posterGrid(shows, onSelect: onSelect)
-        }
-      }
-    }
-  }
-
-  private var movieCount: Int { model.catalogItems.filter { $0.kind == .movie }.count }
-  private var showCount: Int { model.catalogItems.filter { $0.kind == .series }.count }
-
-  private var displayedItems: [CatalogItemSummary] {
-    var items = searchResults ?? model.catalogItems
-    switch filter {
-    case .all: break
-    case .movies: items = items.filter { $0.kind == .movie }
-    case .shows: items = items.filter { $0.kind == .series }
-    case .favorites: items = items.filter(\.isFavorite)
-    }
-    switch sort {
-    case .title:
-      items.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-    case .newest:
-      items.sort { $0.addedAt > $1.addedAt }
-    case .year:
-      items.sort {
-        let leftYear = $0.year ?? 0
-        let rightYear = $1.year ?? 0
-        if leftYear != rightYear { return leftYear > rightYear }
-        return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
-      }
-    }
-    return items
-  }
-
-  @ViewBuilder
-  private var searchResultSections: some View {
-    let movies = displayedItems.filter { $0.kind == .movie }
-    let shows = displayedItems.filter { $0.kind == .series }
-    let episodes = displayedItems.filter { $0.kind == .episode }
-    VStack(alignment: .leading, spacing: 34) {
-      if !movies.isEmpty {
-        VStack(alignment: .leading, spacing: 16) {
-          AureliaSectionHeading(title: "Movies", count: movies.count)
-          posterGrid(movies, onSelect: onSelect)
-        }
-      }
-      if !shows.isEmpty {
-        VStack(alignment: .leading, spacing: 16) {
-          AureliaSectionHeading(title: "TV Shows", count: shows.count)
-          posterGrid(shows, onSelect: onSelect)
-        }
-      }
-      if !episodes.isEmpty {
-        VStack(alignment: .leading, spacing: 16) {
-          AureliaSectionHeading(title: "Episodes", count: episodes.count)
-          LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 22)],
-            alignment: .leading,
-            spacing: 22
-          ) {
-            ForEach(episodes) { episode in
-              Button {
-                model.startPlayback(item: episode)
-              } label: {
-                LandscapeMediaCard(
-                  item: episode,
-                  width: 300,
-                  eyebrow: episodeSearchEyebrow(episode))
-              }
-              .buttonStyle(.plain)
-              .disabled(!episode.isPlayable)
-              .accessibilityLabel(
-                "\(episode.title), \(CatalogPlaybackLogic.subtitle(for: episode) ?? "Episode")"
-              )
-              .accessibilityIdentifier("search-episode-\(episode.id.uuidString.lowercased())")
-            }
+  @ViewBuilder private var resultSections: some View {
+    let movies = browser.items.filter { $0.kind == .movie }
+    let shows = browser.items.filter { $0.kind == .series }
+    let episodes = browser.items.filter { $0.kind == .episode }
+    if section == .movies || section == .tvShows
+      || (section == .recentlyAdded && episodes.isEmpty)
+    {
+      posterGrid(browser.items, onSelect: onSelect)
+    } else {
+      VStack(alignment: .leading, spacing: 34) {
+        if !movies.isEmpty {
+          VStack(alignment: .leading, spacing: 16) {
+            AureliaSectionHeading(title: "Movies", count: movies.count)
+            posterGrid(movies, onSelect: onSelect)
           }
         }
+        if !shows.isEmpty {
+          VStack(alignment: .leading, spacing: 16) {
+            AureliaSectionHeading(title: "TV Shows", count: shows.count)
+            posterGrid(shows, onSelect: onSelect)
+          }
+        }
+        if !episodes.isEmpty {
+          VStack(alignment: .leading, spacing: 16) {
+            AureliaSectionHeading(title: "Episodes", count: episodes.count)
+            episodeResults(episodes)
+          }
+        }
+      }
+    }
+  }
+
+  private func episodeResults(_ episodes: [CatalogItemSummary]) -> some View {
+    LazyVGrid(
+      columns: [GridItem(.adaptive(minimum: 280, maximum: 340), spacing: 22)],
+      alignment: .leading, spacing: 22
+    ) {
+      ForEach(episodes) { episode in
+        Button {
+          model.startPlayback(item: episode)
+        } label: {
+          LandscapeMediaCard(item: episode, width: 300, eyebrow: episodeSearchEyebrow(episode))
+        }
+        .buttonStyle(.plain)
+        .disabled(!episode.isPlayable)
+        .accessibilityLabel(
+          "\(episode.title), \(CatalogPlaybackLogic.subtitle(for: episode) ?? "Episode")"
+        )
+        .accessibilityIdentifier("search-episode-\(episode.id.uuidString.lowercased())")
+        .mediaActions(item: episode)
       }
     }
   }
 
   private func episodeSearchEyebrow(_ item: CatalogItemSummary) -> String {
-    let number = [
-      item.seasonNumber.map { "S\($0)" },
-      item.episodeNumber.map { "E\($0)" },
-    ].compactMap { $0 }.joined(separator: " ")
-    return [item.parentTitle, number.isEmpty ? nil : number]
-      .compactMap { $0 }
-      .joined(separator: " · ")
-  }
-
-}
-
-private struct CatalogPage: View {
-  let title: String
-  let subtitle: String
-  let items: [CatalogItemSummary]
-  let emptyMessage: String
-  let onSelect: (UUID) -> Void
-
-  var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 26) {
-        VStack(alignment: .leading, spacing: 5) {
-          HStack(alignment: .firstTextBaseline, spacing: 9) {
-            Text(title)
-              .font(AureliaDesign.pageTitle)
-              .tracking(-0.35)
-              .accessibilityIdentifier("library-title")
-            Text(String(items.count))
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.tertiary)
-          }
-          Text(subtitle)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-        }
-        if items.isEmpty {
-          ContentUnavailableView(
-            title,
-            systemImage: "rectangle.stack",
-            description: Text(emptyMessage)
-          )
-          .frame(maxWidth: .infinity, minHeight: 360)
-        } else {
-          posterGrid(items, onSelect: onSelect)
-        }
-      }
-      .padding(AureliaDesign.pagePadding)
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    let number = [item.seasonNumber.map { "S\($0)" }, item.episodeNumber.map { "E\($0)" }]
+      .compactMap { $0 }.joined(separator: " ")
+    return [item.parentTitle, number.isEmpty ? nil : number].compactMap { $0 }.joined(
+      separator: " · ")
   }
 }
 

@@ -236,7 +236,13 @@
     let profile: StoredServerProfile
     init(profile: StoredServerProfile) { self.profile = profile }
     func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
-      PlaybackSourceResponse(
+      if LibraryStateUITestFixture.enabled {
+        return PlaybackSourceResponse(
+          id: UUID(), mediaId: mediaId, streamPath: "/synthetic", contentType: "video/test",
+          contentLength: 0, expiresAt: "2099-01-01T00:00:00Z",
+          progress: LibraryStateUITestFixture.playbackProgress(mediaId: mediaId))
+      }
+      return PlaybackSourceResponse(
         id: UUID(), mediaId: mediaId, streamPath: "/synthetic",
         contentType: "video/test", contentLength: 0, expiresAt: "2099-01-01T00:00:00Z",
         progress: PlaybackProgressResponse(

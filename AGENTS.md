@@ -61,7 +61,11 @@ These rules apply to every task in this repository.
   or decrease a build number.
 - Use the pinned SDK and dependencies. At minimum run restore, format
   verification, warning-free .NET and Swift builds, all relevant tests, and the
-  appropriate host/playback smoke tests.
+  appropriate host smoke tests.
+- Do not automatically run playback tests, playback smoke tests, or native
+  playback soak gates for builds, releases, or installation. Run playback
+  verification only when the user explicitly requests those tests. A user's
+  confirmation that playback works does not request an automated playback run.
 - Treat warnings as errors. Do not publish or install a failing candidate.
 - Verify arm64 and x86_64 server payloads and the universal macOS bundle. State
   clearly when an architecture could only be built, not executed locally.
