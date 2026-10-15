@@ -1,11 +1,30 @@
 using Aurelia.Server.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Aurelia.Server.Tests;
 
 public sealed class HostRecoveryTests
 {
+    [Fact]
+    public async Task BonjourShutdownIsIdempotentWhenHostStopAndDisposalOverlap()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var service = factory.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+            .OfType<BonjourAdvertisementService>().Single();
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tasks = Enumerable.Range(0, 32).Select(async index =>
+        {
+            await ready.Task;
+            if (index % 2 == 0) await service.StopAsync(CancellationToken.None);
+            else await service.DisposeAsync();
+        }).ToArray();
+        ready.SetResult();
+        await Task.WhenAll(tasks);
+    }
+
     [Fact]
     public async Task ServerShutdownCancelsPendingRequestsAndRestoresTheirOriginalToken()
     {

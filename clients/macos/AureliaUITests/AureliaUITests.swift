@@ -380,6 +380,40 @@ final class AureliaUITests: XCTestCase {
   }
 
   @MainActor
+  func testMetadataJobShowsWaitingTimeAndSkippedCount() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    configureTestLaunch(app)
+    app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "server-settings"
+    app.launchEnvironment["AURELIA_METADATA_WAIT_UI_TESTS"] = "1"
+    app.launch()
+    app.activate()
+    defer { app.terminate() }
+    app.typeKey(",", modifierFlags: .command)
+    XCTAssertTrue(app.buttons["Server"].waitForExistence(timeout: 8))
+    app.buttons["Server"].click()
+    let status = app.staticTexts["metadata-wait-status"]
+    XCTAssertTrue(status.waitForExistence(timeout: 8))
+    let displayedStatus = status.value as? String ?? status.label
+    XCTAssertTrue(displayedStatus.hasPrefix("Waiting for TMDB · Retry at "), displayedStatus)
+    XCTAssertTrue(app.staticTexts["1 skipped"].exists)
+    XCTAssertTrue(app.buttons["Cancel"].exists)
+    XCTAssertFalse(app.staticTexts["The server returned an invalid response."].exists)
+    let settingsWindow = app.windows["Server"]
+    for _ in 0..<12 {
+      if status.isHittable { break }
+      settingsWindow.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.7))
+        .scroll(byDeltaX: 0, deltaY: -550)
+    }
+    XCTAssertTrue(status.isHittable)
+    let screenshot = XCTAttachment(screenshot: app.screenshot())
+    screenshot.name = "Metadata job waiting for provider - synthetic state"
+    screenshot.lifetime = .keepAlways
+    add(screenshot)
+    assertNoUnexpectedDialog(in: app)
+  }
+
+  @MainActor
   func testClosingWindowAndReopeningThroughLaunchServicesRestoresIt() throws {
     continueAfterFailure = false
     let app = XCUIApplication()

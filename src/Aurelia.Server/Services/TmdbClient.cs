@@ -35,7 +35,7 @@ public interface ITmdbClient
         CancellationToken cancellationToken);
 }
 
-public sealed class TmdbClient(HttpClient client) : ITmdbClient
+public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : ITmdbClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -63,7 +63,7 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
 
         using var response = await SendAsync(token, path, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var results = document.RootElement.GetProperty("results").EnumerateArray().Take(8);
         return results.Select(result =>
         {
@@ -104,7 +104,7 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
             $"{mediaType}/{providerId}?language={language}&append_to_response={additions}",
             cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var root = document.RootElement;
         var title = GetString(root, mediaType == "movie" ? "title" : "name") ?? "Untitled";
         var releaseDate = GetString(root, mediaType == "movie" ? "release_date" : "first_air_date");
@@ -152,7 +152,7 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
             throw new MetadataException("invalid_metadata_match", "The series metadata match is invalid.", StatusCodes.Status400BadRequest);
         using var response = await SendAsync(token, $"tv/{seriesProviderId}/season/{seasonNumber}?language={language}", cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         if (!document.RootElement.TryGetProperty("episodes", out var episodes)) return [];
         return episodes.EnumerateArray().Select(episode => new TmdbEpisodeMetadata(
             episode.GetProperty("id").GetInt32().ToString(CultureInfo.InvariantCulture),
@@ -177,7 +177,7 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
             throw new MetadataException("invalid_artwork_path", "The artwork path is invalid.", StatusCodes.Status400BadRequest);
         }
 
-        using var response = await SendWithRetryAsync(() =>
+        using var response = await SendProviderAsync(() =>
         {
             var request = new HttpRequestMessage(HttpMethod.Get, $"https://image.tmdb.org/t/p/{size}{providerPath}");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -215,7 +215,7 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
 
     private async Task<HttpResponseMessage> SendAsync(string token, string path, CancellationToken cancellationToken)
     {
-        return await SendWithRetryAsync(() =>
+        return await SendProviderAsync(() =>
         {
             var request = new HttpRequestMessage(HttpMethod.Get, new Uri(new Uri("https://api.themoviedb.org/3/"), path));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -224,47 +224,59 @@ public sealed class TmdbClient(HttpClient client) : ITmdbClient
         }, cancellationToken);
     }
 
-    private async Task<HttpResponseMessage> SendWithRetryAsync(
+    private async Task<HttpResponseMessage> SendProviderAsync(
         Func<HttpRequestMessage> requestFactory,
         CancellationToken cancellationToken)
     {
-        for (var attempt = 0; ; attempt++)
+        using var request = requestFactory();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (client.Timeout != Timeout.InfiniteTimeSpan) deadline.CancelAfter(client.Timeout);
+        HttpResponseMessage? response = null;
+        try
         {
-            using var request = requestFactory();
-            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (attempt >= 2 || ((int)response.StatusCode != StatusCodes.Status429TooManyRequests && (int)response.StatusCode < 500))
+            response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+            if (!response.IsSuccessStatusCode)
             {
-                return response;
+                var status = (int)response.StatusCode;
+                var retryAfter = response.Headers.RetryAfter switch
+                {
+                    { Delta: { } delta } => delta,
+                    { Date: { } date } => date - (clock ?? TimeProvider.System).GetUtcNow(),
+                    _ => TimeSpan.Zero,
+                };
+                throw new MetadataProviderException(
+                    status is 401 or 403 ? "TMDB rejected the API token." : "TMDB is temporarily unavailable.",
+                    transient: status is 408 or 429 || status >= 500,
+                    authenticationFailure: status is 401 or 403,
+                    retryAfter: retryAfter > TimeSpan.Zero ? retryAfter : null);
             }
-
-            var retryAfter = response.Headers.RetryAfter switch
-            {
-                { Delta: { } delta } => delta,
-                { Date: { } date } => date - DateTimeOffset.UtcNow,
-                _ => TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt)),
-            };
-            if (retryAfter < TimeSpan.Zero)
-            {
-                retryAfter = TimeSpan.Zero;
-            }
-            response.Dispose();
-            await Task.Delay(retryAfter > TimeSpan.FromSeconds(10) ? TimeSpan.FromSeconds(10) : retryAfter, cancellationToken);
+            // The deadline also covers stalled response bodies, not just headers.
+            // Only provider JSON/images are buffered; media files never pass here.
+            await response.Content.LoadIntoBufferAsync(10 * 1024 * 1024, deadline.Token);
+            return response;
+        }
+        catch (HttpRequestException)
+        {
+            response?.Dispose();
+            throw new MetadataProviderException("TMDB could not be reached.", transient: true);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            response?.Dispose();
+            throw new MetadataProviderException("TMDB did not respond in time.", transient: true);
+        }
+        catch
+        {
+            response?.Dispose();
+            throw;
         }
     }
 
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        if (response.IsSuccessStatusCode)
-        {
-            return;
-        }
-
-        _ = await response.Content.ReadAsStringAsync(cancellationToken);
-        var status = (int)response.StatusCode;
-        throw new MetadataException(
-            status is 401 or 403 ? "metadata_authentication_failed" : "metadata_provider_failed",
-            status is 401 or 403 ? "TMDB rejected the API token." : "TMDB is temporarily unavailable.",
-            status is 401 or 403 ? StatusCodes.Status400BadRequest : StatusCodes.Status502BadGateway);
+        cancellationToken.ThrowIfCancellationRequested();
+        response.EnsureSuccessStatusCode();
+        return Task.CompletedTask;
     }
 
     private static bool IsSafeImagePath(string path) =>

@@ -672,6 +672,34 @@ struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
   let completedAt: String?
   var mode: MetadataJobMode? = nil
   var attempt: Int? = nil
+  var nextAttemptAt: String? = nil
+  var waitReason: String? = nil
+  var itemsSkipped: Int? = nil
+
+  func waitingStatus(locale: Locale = .current, timeZone: TimeZone = .current) -> String? {
+    guard state == .queued || state == .running,
+      waitReason != nil || nextAttemptAt != nil
+    else { return nil }
+    let reason =
+      switch waitReason {
+      case "tmdb": "Waiting for TMDB"
+      case "storage": "Waiting for writable storage"
+      default: "Waiting"
+      }
+    guard let nextAttemptAt else { return reason }
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    guard
+      let date = iso.date(from: nextAttemptAt)
+        ?? ISO8601DateFormatter().date(from: nextAttemptAt)
+    else { return reason }
+    let formatter = DateFormatter()
+    formatter.locale = locale
+    formatter.timeZone = timeZone
+    formatter.dateStyle = .none
+    formatter.timeStyle = .short
+    return "\(reason) · Retry at \(formatter.string(from: date))"
+  }
 }
 
 enum SyncChangeArea: String, Codable, Sendable {

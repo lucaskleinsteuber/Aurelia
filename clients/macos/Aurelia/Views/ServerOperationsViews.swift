@@ -420,8 +420,17 @@ struct ServerLibraryJobsEditor: View {
           }
           ForEach(jobs.metadata.prefix(12)) { job in
             HStack {
-              Text("Metadata · \(job.state.rawValue) · \(job.itemsProcessed)/\(job.itemsTotal)")
-                .font(.caption)
+              VStack(alignment: .leading, spacing: 3) {
+                Text("Metadata · \(job.state.rawValue) · \(job.itemsProcessed)/\(job.itemsTotal)")
+                  .font(.caption)
+                if let status = job.waitingStatus() {
+                  Text(status).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("metadata-wait-status")
+                }
+                if let skipped = job.itemsSkipped, skipped > 0 {
+                  Text("\(skipped) skipped").font(.caption).foregroundStyle(.secondary)
+                }
+              }
               Spacer()
               if [.queued, .running].contains(job.state) {
                 Button("Cancel") {

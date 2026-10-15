@@ -146,8 +146,21 @@ public sealed record MetadataProviderConfiguration(
     string? Token,
     long ArtworkLimitBytes);
 
-public sealed class MetadataException(string code, string message, int statusCode) : Exception(message)
+public class MetadataException(string code, string message, int statusCode) : Exception(message)
 {
     public string Code { get; } = code;
     public int StatusCode { get; } = statusCode;
+}
+
+public sealed class MetadataProviderException(
+    string message,
+    bool transient,
+    bool authenticationFailure = false,
+    TimeSpan? retryAfter = null)
+    : MetadataException(authenticationFailure ? "metadata_authentication_failed" : "metadata_provider_failed",
+        message, authenticationFailure ? StatusCodes.Status400BadRequest : StatusCodes.Status502BadGateway)
+{
+    public bool Transient { get; } = transient;
+    public bool AuthenticationFailure { get; } = authenticationFailure;
+    public TimeSpan? RetryAfter { get; } = retryAfter;
 }

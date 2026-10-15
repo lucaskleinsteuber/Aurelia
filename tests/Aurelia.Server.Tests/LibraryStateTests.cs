@@ -1,3 +1,5 @@
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Net;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
@@ -215,8 +217,11 @@ public sealed class LibraryStateTests
             await database.SaveChangesAsync();
         }
         var combined = await fixture.Get<PagedResponse<CatalogItemSummary>>("/api/v1/catalog/search?query=Season%202&favorite=true&genre=Drama&yearFrom=2024&yearTo=2024&sort=lastPlayed&direction=descending");
-        Assert.Equal(2, combined.Total);
-        Assert.Equal(fixture.Episodes.Skip(3).Select(item => item.Id).Order(), combined.Items.Select(item => item.Id).Order());
+        // FTS combines word prefixes: "2" also matches episode 2 in season 1.
+        Assert.Equal(3, combined.Total);
+        Assert.Equal(fixture.Episodes.Where(item => item.SeasonNumber == 2 || item.EpisodeNumber == 2).Select(item => item.Id).Order(), combined.Items.Select(item => item.Id).Order());
+        var unfiltered = await fixture.Get<PagedResponse<CatalogItemSummary>>("/api/v1/catalog/search?query=Season%202");
+        Assert.Equal(unfiltered.Items.Select(item => item.Id).Order(), combined.Items.Select(item => item.Id).Order());
         await fixture.Progress(fixture.Episodes[4], 45_000);
         var ordered = await fixture.Get<PagedResponse<CatalogItemSummary>>("/api/v1/catalog/items?sort=lastPlayed&direction=descending");
         Assert.Equal(fixture.Series.Id, ordered.Items[0].Id);
@@ -227,6 +232,62 @@ public sealed class LibraryStateTests
         var special = await fixture.Put<WatchStateResponse>($"/api/v1/media/{fixture.Series.Id}/watch-state", new SetWatchStateRequest(true, WatchStateScope.Season, 0, specialState.StateToken, Guid.NewGuid()));
         Assert.Equal(1, special.AffectedCount);
         Assert.Equal(CatalogWatchState.InProgress, (await fixture.State(fixture.Series.Id)).WatchState);
+    }
+
+    [Fact]
+    public async Task SeriesSelectionAndQueueShareASnapshotWhileTheCatalogChanges()
+    {
+        var interceptor = new PlanSnapshotInterceptor();
+        using var fixture = await Fixture.CreateAsync(interceptor);
+        var addedId = Guid.NewGuid();
+        interceptor.Mutate = async token =>
+        {
+            await using var scope = fixture.Factory.Services.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            database.MediaItems.Add(new MediaItem { Id = addedId, LibraryRootId = fixture.Series.LibraryRootId, ParentId = fixture.Series.Id, Kind = MediaKind.Episode, SeasonNumber = 3, EpisodeNumber = 1, DetectedTitle = "Added concurrently", SourcePath = "synthetic/concurrent", NormalizedSourcePath = "SYNTHETIC/CONCURRENT" });
+            foreach (var episode in fixture.Episodes)
+                database.PlaybackProgress.Add(new PlaybackProgress { Id = Guid.NewGuid(), UserId = fixture.Owner.User.Id, User = null!, MediaItemId = episode.Id, MediaItem = null!, IsCompleted = true });
+            await database.SaveChangesAsync(token);
+        };
+        var original = await fixture.Get<PlaybackPlanResponse>($"/api/v1/media/{fixture.Series.Id}/playback-plan");
+        Assert.True(interceptor.SnapshotObserved);
+        Assert.Equal(fixture.Episodes[0].Id, original.Target!.Id);
+        Assert.Equal(fixture.Episodes.Skip(1).Select(item => item.Id), original.Queue.Select(item => item.Id));
+        var changed = await fixture.Get<PlaybackPlanResponse>($"/api/v1/media/{fixture.Series.Id}/playback-plan");
+        Assert.Equal(addedId, changed.Target!.Id);
+        Assert.Empty(changed.Queue);
+    }
+
+    private sealed class PlanSnapshotInterceptor : DbCommandInterceptor
+    {
+        public Func<CancellationToken, Task>? Mutate { get; set; }
+        public bool SnapshotObserved { get; private set; }
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("WITH eligible AS", StringComparison.Ordinal) && Mutate is { } mutate)
+            {
+                Mutate = null;
+                SnapshotObserved = command.Transaction is not null;
+                await mutate(cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    [Fact]
+    public async Task CompactContinueWatchingKeepsAnOfflineSeriesAndItsExactTarget()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.Progress(fixture.Episodes[3], 45_000);
+        await using var scope = fixture.Factory.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        await database.MediaItems.Where(item => item.Id == fixture.Series.Id || item.Id == fixture.Episodes[3].Id)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.Availability, MediaAvailability.Missing));
+        File.Delete(fixture.Episodes[3].SourcePath); // Isolated synthetic fixture, no personal media.
+        var card = Assert.Single((await fixture.Get<HomeResponse>("/api/v1/home")).ContinueWatching);
+        Assert.Equal(fixture.Episodes[3].Id, card.Id);
+        Assert.Equal(MediaAvailability.Missing, card.Availability);
     }
 
     [Fact]
@@ -450,9 +511,12 @@ public sealed class LibraryStateTests
         public required List<MediaItem> Episodes { get; init; }
         public required MediaItem Special { get; init; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(DbCommandInterceptor? interceptor = null)
         {
-            var factory = new AureliaServerFactory(TestPaths.CreateDataDirectory());
+            var factory = new AureliaServerFactory(TestPaths.CreateDataDirectory(), configureServices: services =>
+            {
+                if (interceptor is not null) services.AddDbContext<AureliaDbContext>(options => options.AddInterceptors(interceptor));
+            });
             var client = factory.CreateClient();
             var owner = await ApiTestClient.SetupOwnerAsync(client);
             var root = Path.Combine(factory.DataDirectory, "Synthetic Media");

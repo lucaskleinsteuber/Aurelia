@@ -27,6 +27,14 @@ public sealed class MediaLibraryApiTests
             using var client = factory.CreateClient();
             var owner = await ApiTestClient.SetupOwnerAsync(client);
             var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.TvShows);
+            // This case verifies explicit reconciliation. Watcher acknowledgement
+            // has its own tests and must not race the file-removal assertions here.
+            await using (var monitoringScope = factory.Services.CreateAsyncScope())
+            {
+                var database = monitoringScope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                await database.LibraryRoots.Where(item => item.Id == library.Id)
+                    .ExecuteUpdateAsync(set => set.SetProperty(item => item.MonitoringEnabled, false));
+            }
 
             var user = await CreateUserAsync(client, owner.Token);
             var userLogin = await LoginAsync(client, "viewer", "a secure viewer password");

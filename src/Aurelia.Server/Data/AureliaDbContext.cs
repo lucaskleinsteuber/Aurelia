@@ -48,6 +48,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<ArtworkAsset> ArtworkAssets => Set<ArtworkAsset>();
     public DbSet<MetadataReview> MetadataReviews => Set<MetadataReview>();
     public DbSet<MetadataJob> MetadataJobs => Set<MetadataJob>();
+    public DbSet<MetadataJobItem> MetadataJobItems => Set<MetadataJobItem>();
+    public DbSet<MetadataProviderCooldown> MetadataProviderCooldowns => Set<MetadataProviderCooldown>();
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
     public DbSet<MediaCollectionRecord> MediaCollections => Set<MediaCollectionRecord>();
     public DbSet<MediaCollectionMember> MediaCollectionMembers => Set<MediaCollectionMember>();
@@ -397,6 +399,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 .IsUnique();
             entity.HasIndex(item => new { item.LibraryRootId, item.FileSystemIdentity });
             entity.HasIndex(item => new { item.Kind, item.Availability, item.CreatedAt });
+            entity.HasIndex(item => new { item.Kind, item.ParentId, item.SeasonNumber, item.EpisodeNumber, item.DetectedTitle, item.Id });
             entity.HasIndex(item => new { item.LibraryRootId, item.Kind, item.Year });
             entity.HasIndex(item => new
             {
@@ -644,7 +647,25 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(job => job.LeaseExpiresAt).HasConversion(nullableDateTimeOffsetConverter);
             entity.Property(job => job.HeartbeatAt).HasConversion(nullableDateTimeOffsetConverter);
             entity.Property(job => job.CancelRequestedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.NextAttemptAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(job => job.WaitReason).HasMaxLength(32);
             entity.HasIndex(job => new { job.State, job.CreatedAt });
+            entity.HasIndex(job => new { job.State, job.NextAttemptAt, job.CreatedAt });
+        });
+        modelBuilder.Entity<MetadataJobItem>(entity =>
+        {
+            entity.HasKey(item => new { item.JobId, item.MediaItemId });
+            entity.Property(item => item.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.CompletedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(item => new { item.JobId, item.State, item.Ordinal });
+            entity.HasOne(item => item.Job).WithMany().HasForeignKey(item => item.JobId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<MetadataProviderCooldown>(entity =>
+        {
+            entity.HasKey(item => item.Provider);
+            entity.Property(item => item.Provider).HasMaxLength(32);
+            entity.Property(item => item.NotBefore).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(item => item.WaitReason).HasMaxLength(32);
         });
 
         modelBuilder.Entity<UserFavorite>(entity =>

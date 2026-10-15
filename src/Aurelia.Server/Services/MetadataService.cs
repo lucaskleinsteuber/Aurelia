@@ -11,8 +11,8 @@ public sealed class MetadataService(
     ITmdbClient tmdb,
     MetadataJobScheduler scheduler,
     ArtworkStore artworkStore,
-    ServerConfigurationStore configuration,
-    CatalogMutationGate mutations)
+    CatalogMutationGate mutations,
+    MetadataJobStore jobs)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -58,41 +58,7 @@ public sealed class MetadataService(
         CancellationToken cancellationToken)
     {
         RequireEnabled();
-        var libraryId = request.LibraryId;
-        var mediaId = request.MediaId;
-        if (database.AccessUserId != null && !database.AccessIsOwner && database.AccessMode == ProfileAccessMode.SelectedTitles && !mediaId.HasValue)
-            throw new MetadataException("full_library_access_required", "Select one shared title. Library-wide jobs require full library access.", 403);
-        if (database.AccessUserId != null && !database.AccessIsOwner && libraryId == null && mediaId == null)
-            throw new MetadataException("owner_required", "Select one of your shared libraries. Only an owner may refresh the entire server.", 403);
-        if (libraryId.HasValue && !await database.LibraryRoots.AnyAsync(item => item.Id == libraryId, cancellationToken))
-            throw NotFound("library_not_found", "The storage location was not found.");
-        if (mediaId.HasValue && !await database.MediaItems.AnyAsync(item => item.Id == mediaId, cancellationToken))
-            throw NotFound("media_not_found", "The media item was not found.");
-        if (request.Mode == MetadataJobMode.SingleItem && !mediaId.HasValue)
-            throw new MetadataException("metadata_item_required", "Single-item metadata refresh requires a media ID.", StatusCodes.Status400BadRequest);
-        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-        var duplicate = await database.MetadataJobs.AsNoTracking().FirstOrDefaultAsync(job =>
-            (job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running)
-            && job.LibraryRootId == libraryId && job.MediaItemId == mediaId && job.Mode == request.Mode, cancellationToken);
-        if (duplicate is not null) return ToSummary(duplicate);
-        if (await database.MetadataJobs.IgnoreQueryFilters().CountAsync(job => job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running, cancellationToken)
-            >= configuration.Current.JobQueueLimit)
-            throw new MetadataException("job_queue_full", "The metadata queue is full. Wait for existing jobs to finish.", 409);
-
-        var job = new MetadataJob
-        {
-            Id = Guid.NewGuid(),
-            LibraryRootId = libraryId,
-            MediaItemId = mediaId,
-            Mode = request.Mode,
-            State = MetadataJobState.Queued,
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-        database.MetadataJobs.Add(job);
-        await database.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        scheduler.Pulse();
-        return ToSummary(job);
+        return await jobs.StartAsync(request, cancellationToken);
     }
 
     public async Task<MetadataJobSummary> GetJobAsync(Guid id, CancellationToken cancellationToken) =>
@@ -100,11 +66,8 @@ public sealed class MetadataService(
             ?? throw NotFound("metadata_job_not_found", "The metadata job was not found."));
     public async Task<MetadataJobSummary> RetryJobAsync(Guid id, CancellationToken token)
     {
-        var job = await database.MetadataJobs.AsNoTracking().SingleOrDefaultAsync(value => value.Id == id, token)
-            ?? throw NotFound("metadata_job_not_found", "The metadata job was not found.");
-        if (job.State is not MetadataJobState.Failed and not MetadataJobState.Interrupted and not MetadataJobState.Cancelled)
-            throw new MetadataException("job_not_retryable", "Only a failed, interrupted or cancelled job can be retried.", 409);
-        return await StartAsync(new StartMetadataJobRequest(job.Mode, job.LibraryRootId, job.MediaItemId), token);
+        RequireEnabled();
+        return await jobs.RetryAsync(id, token);
     }
 
     public async Task<IReadOnlyList<MetadataJobSummary>> ListJobsAsync(
@@ -129,6 +92,8 @@ public sealed class MetadataService(
             or MetadataJobState.Interrupted or MetadataJobState.Cancelled)
             return;
         job.CancelRequestedAt ??= DateTimeOffset.UtcNow;
+        job.NextAttemptAt = null;
+        job.WaitReason = null;
         if (job.State == MetadataJobState.Queued)
         {
             job.State = MetadataJobState.Cancelled;
@@ -222,9 +187,10 @@ public sealed class MetadataService(
         return MetadataPresentation.ToSummary(item);
     }
 
-    internal async Task ApplyAsync(MediaItem item, TmdbMetadata provider, double confidence, CancellationToken cancellationToken)
+    internal async Task ApplyAsync(MediaItem item, TmdbMetadata provider, double confidence, CancellationToken cancellationToken, Func<CancellationToken, Task<bool>>? canApply = null)
     {
         using var lease = await mutations.EnterAsync(cancellationToken);
+        if (canApply is not null && !await canApply(cancellationToken)) return;
         // Refresh catalog entities after waiting for an editor/deletion transaction,
         // without detaching the worker's durable job counters and completion state.
         foreach (var entry in database.ChangeTracker.Entries().Where(entry => entry.Entity is
@@ -276,10 +242,11 @@ public sealed class MetadataService(
             ProfilePath = credit.ProfilePath,
         }).ToList();
         if (!manualCredits) database.MediaCredits.AddRange(credits);
-        await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken);
-        await artworkStore.StoreAsync(database, item.Id, item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, provider.BackdropPath, cancellationToken);
+        await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken, canApply);
+        await artworkStore.StoreAsync(database, item.Id, item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, provider.BackdropPath, cancellationToken, canApply);
         foreach (var profilePath in deduplicatedCredits.Select(credit => credit.ProfilePath).Where(path => path is not null).Distinct().Take(20))
-            await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Profile, profilePath, cancellationToken);
+            await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Profile, profilePath, cancellationToken, canApply);
+        if (canApply is not null && !await canApply(cancellationToken)) return;
         metadata.ProviderCreditsJson = JsonSerializer.Serialize(credits.Select(credit => MediaEditorService.Credit(item, credit)), MediaEditorService.Json);
         var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
         if (review is not null) review.State = MetadataReviewState.Matched;
@@ -289,7 +256,7 @@ public sealed class MetadataService(
         original.Metadata = metadata;
     }
 
-    internal async Task ApplyEpisodesAsync(MediaItem series, TmdbMetadata provider, MetadataProviderConfiguration configuration, CancellationToken cancellationToken)
+    internal async Task ApplyEpisodesAsync(MediaItem series, TmdbMetadata provider, MetadataProviderConfiguration configuration, CancellationToken cancellationToken, Func<CancellationToken, Task<bool>>? canApply = null)
     {
         if (series.Kind != MediaKind.Series) return;
         var episodes = await database.MediaItems.Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
@@ -297,12 +264,15 @@ public sealed class MetadataService(
             .ToListAsync(cancellationToken);
         foreach (var season in episodes.GroupBy(item => item.SeasonNumber!.Value))
         {
+            if (canApply is not null && !await canApply(cancellationToken)) return;
             var providerEpisodes = await tmdb.GetEpisodesAsync(configuration.Token!, configuration.Language, provider.ProviderId, season.Key, cancellationToken);
             foreach (var item in season)
             {
                 var match = providerEpisodes.SingleOrDefault(value => value.EpisodeNumber == item.EpisodeNumber);
                 if (match is null) continue;
                 using var lease = await mutations.EnterAsync(cancellationToken);
+                if (canApply is not null && !await canApply(cancellationToken)) return;
+                if (!await database.MediaItems.AsNoTracking().AnyAsync(value => value.Id == item.Id, cancellationToken)) continue;
                 await database.Entry(item).ReloadAsync(cancellationToken);
                 if (database.Entry(item).State == EntityState.Detached) continue;
                 if (item.Metadata is not null) await database.Entry(item.Metadata).ReloadAsync(cancellationToken);
@@ -324,7 +294,8 @@ public sealed class MetadataService(
                 item.Metadata.ProviderUpdatedAt = DateTimeOffset.UtcNow;
                 item.Metadata.UpdatedAt = DateTimeOffset.UtcNow;
                 await database.SaveChangesAsync(cancellationToken);
-                await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Still, match.StillPath, cancellationToken);
+                await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Still, match.StillPath, cancellationToken, canApply);
+                if (canApply is not null && !await canApply(cancellationToken)) return;
                 await database.SaveChangesAsync(cancellationToken);
             }
         }
@@ -359,7 +330,7 @@ public sealed class MetadataService(
             .SingleOrDefaultAsync(item => item.Id == id && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series), cancellationToken)
             ?? throw NotFound("media_not_found", "A matchable movie or series was not found.");
 
-    internal static MetadataJobSummary ToSummary(MetadataJob job) => new(job.Id, job.LibraryRootId, job.MediaItemId, job.State, job.ItemsTotal, job.ItemsProcessed, job.ItemsMatched, job.ItemsNeedingReview, job.ItemsFailed, job.Error, job.CreatedAt, job.StartedAt, job.CompletedAt, job.Mode, job.Attempt);
+    internal static MetadataJobSummary ToSummary(MetadataJob job) => new(job.Id, job.LibraryRootId, job.MediaItemId, job.State, job.ItemsTotal, job.ItemsProcessed, job.ItemsMatched, job.ItemsNeedingReview, job.ItemsFailed, job.Error, job.CreatedAt, job.StartedAt, job.CompletedAt, job.Mode, job.Attempt, job.NextAttemptAt, job.WaitReason, job.ItemsSkipped);
 
     private static MetadataReviewSummary ToReview(MetadataReview review) => new(
         review.Id, review.MediaItemId, review.MediaItem.OverrideTitle ?? review.MediaItem.DetectedTitle,

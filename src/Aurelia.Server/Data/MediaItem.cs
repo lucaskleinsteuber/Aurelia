@@ -4,6 +4,9 @@ namespace Aurelia.Server.Data;
 
 public sealed class MediaItem
 {
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public CatalogWatchState? CardWatchState { get; set; }
+
     public Guid Id { get; set; }
 
     public Guid LibraryRootId { get; set; }

@@ -471,6 +471,15 @@ struct AppSettingsView: View {
             ) {
               Text("Metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
             }
+            if let status = job.waitingStatus() {
+              Text(status)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("metadata-wait-status")
+            }
+            if let skipped = job.itemsSkipped, skipped > 0 {
+              Text("\(skipped) skipped").font(.caption).foregroundStyle(.secondary)
+            }
           }
         } else {
           SecureField("TMDB API Read Access Token", text: $tmdbToken)

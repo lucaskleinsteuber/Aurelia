@@ -821,6 +821,8 @@ namespace Aurelia.Server.Data.Migrations
 
                     b.HasIndex("Kind", "Availability", "CreatedAt");
 
+                    b.HasIndex("Kind", "ParentId", "SeasonNumber", "EpisodeNumber", "DetectedTitle", "Id");
+
                     b.HasIndex("LibraryRootId", "Kind", "Year");
 
                     b.HasIndex("LibraryRootId", "Kind", "ParentId", "SeasonNumber", "EpisodeNumber");
@@ -1003,6 +1005,9 @@ namespace Aurelia.Server.Data.Migrations
                     b.Property<int>("ItemsProcessed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("ItemsSkipped")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("ItemsTotal")
                         .HasColumnType("INTEGER");
 
@@ -1020,6 +1025,12 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("NextAttemptAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("RequestedByUserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("StartedAt")
                         .HasColumnType("INTEGER");
 
@@ -1028,11 +1039,67 @@ namespace Aurelia.Server.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("WaitReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("WorklistInitialized")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("State", "CreatedAt");
 
+                    b.HasIndex("State", "NextAttemptAt", "CreatedAt");
+
                     b.ToTable("MetadataJobs");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MetadataJobItem", b =>
+                {
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Attempt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CompletedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("JobId", "MediaItemId");
+
+                    b.HasIndex("JobId", "State", "Ordinal");
+
+                    b.ToTable("MetadataJobItems");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MetadataProviderCooldown", b =>
+                {
+                    b.Property<string>("Provider")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("NotBefore")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("WaitReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Provider");
+
+                    b.ToTable("MetadataProviderCooldowns");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MetadataReview", b =>
@@ -1611,6 +1678,17 @@ namespace Aurelia.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MetadataJobItem", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MetadataJob", "Job")
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Job");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MetadataReview", b =>

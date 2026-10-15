@@ -1321,7 +1321,17 @@ struct APIClient: Sendable {
           {"enabled":false,"hasToken":false,"language":"en-US","artworkBytes":0,
           "artworkLimitBytes":1073741824,"provider":"TMDB","attribution":"Synthetic test provider"}
           """
-      case "/api/v1/server/jobs": response = "{\"scans\":[],\"metadata\":[]}"
+      case "/api/v1/server/jobs":
+        if ProcessInfo.processInfo.environment["AURELIA_METADATA_WAIT_UI_TESTS"] == "1" {
+          response = """
+            {"scans":[],"metadata":[{"id":"70000000-0000-0000-0000-000000000001",
+            "state":"queued","itemsTotal":10,"itemsProcessed":4,"itemsMatched":2,
+            "itemsNeedingReview":1,"itemsFailed":0,"itemsSkipped":1,
+            "createdAt":"2026-10-15T12:00:00Z","nextAttemptAt":"2026-10-15T14:32:00Z","waitReason":"tmdb"}]}
+            """
+        } else {
+          response = "{\"scans\":[],\"metadata\":[]}"
+        }
       case "/api/v1/server/operations/current": response = "null"
       default: throw APIClientError.invalidResponse
       }

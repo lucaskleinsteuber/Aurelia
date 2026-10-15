@@ -133,6 +133,10 @@ public sealed class ServerBackupSecurityTests
                 });
                 if (!previousSchema)
                 {
+                    var jobId = Guid.NewGuid();
+                    database.MetadataJobs.Add(new MetadataJob { Id = jobId, RequestedByUserId = owner.Id, WorklistInitialized = true, State = MetadataJobState.Queued, ItemsTotal = 1, NextAttemptAt = now.AddMinutes(20), WaitReason = "tmdb" });
+                    database.MetadataJobItems.Add(new MetadataJobItem { JobId = jobId, MediaItemId = mediaId, State = MetadataWorkState.Pending, Attempt = 2 });
+                    database.MetadataProviderCooldowns.Add(new MetadataProviderCooldown { NotBefore = now.AddMinutes(20), WaitReason = "tmdb" });
                     database.ContinueWatchingStates.Add(new ContinueWatchingState { UserId = viewer.Id, User = viewer, MediaItemId = mediaId, MediaItem = media, IsHidden = true, Revision = 4 });
                     database.LibraryStateMutations.Add(new LibraryStateMutation { UserId = viewer.Id, User = viewer, ClientMutationId = noteId, Fingerprint = "synthetic-state-receipt", ResponseJson = "synthetic-replay-snapshot", AccessRevision = viewer.AccessRevision });
                 }
@@ -169,6 +173,16 @@ public sealed class ServerBackupSecurityTests
             Assert.Equal(123_000, (await restored.PlaybackProgress.SingleAsync()).PositionMilliseconds);
             if (!previousSchema)
             {
+                var restoredJob = await restored.MetadataJobs.SingleAsync();
+                Assert.True(restoredJob.WorklistInitialized);
+                Assert.Equal(owner.Id, restoredJob.RequestedByUserId);
+                Assert.Equal("tmdb", restoredJob.WaitReason);
+                Assert.Equal(now.AddMinutes(20).ToUnixTimeMilliseconds(), restoredJob.NextAttemptAt!.Value.ToUnixTimeMilliseconds());
+                var work = await restored.MetadataJobItems.SingleAsync();
+                Assert.Equal(mediaId, work.MediaItemId);
+                Assert.Equal(2, work.Attempt);
+                Assert.Equal(MetadataWorkState.Pending, work.State);
+                Assert.Equal(restoredJob.NextAttemptAt, (await restored.MetadataProviderCooldowns.SingleAsync()).NotBefore);
                 var hidden = await restored.ContinueWatchingStates.SingleAsync();
                 Assert.Equal(viewer.Id, hidden.UserId); Assert.Equal(mediaId, hidden.MediaItemId); Assert.True(hidden.IsHidden); Assert.Equal(4, hidden.Revision);
                 var receipt = await restored.LibraryStateMutations.SingleAsync();
@@ -177,7 +191,7 @@ public sealed class ServerBackupSecurityTests
             Assert.NotNull((await restored.DeviceSessions.SingleAsync(session => session.Id == deviceId)).RevokedAt);
             Assert.Equal("synthetic-server-password-hash", (await restored.AdministrationCredentials.SingleAsync()).PasswordHash);
             Assert.Equal(serverId, (await restored.ServerIdentities.SingleAsync()).ServerId);
-            Assert.Equal(16, (await backups.VerifyAsync(runtime.DatabasePath, CancellationToken.None)).AppliedMigrationCount);
+            Assert.Equal(17, (await backups.VerifyAsync(runtime.DatabasePath, CancellationToken.None)).AppliedMigrationCount);
             Assert.False(File.Exists(Path.Combine(root, "offline.mkv")));
         }
         finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }

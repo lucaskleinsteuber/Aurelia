@@ -14,6 +14,52 @@ namespace Aurelia.Server.Tests;
 public sealed class MigrationUpgradeTests
 {
     [Fact]
+    public async Task MetadataWorklistUpgradeRetainsHistoryAndInterruptsLegacyOpenJobs()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>().UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.GetService<IMigrator>().MigrateAsync("20261014163033_LibraryState");
+            var owner = new ServerUser { Id = Guid.NewGuid(), Username = "Owner", NormalizedUsername = "OWNER", PasswordHash = "synthetic", Role = UserRole.Owner };
+            var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", NormalizedPath = "synthetic" };
+            var series = new MediaItem { Id = Guid.NewGuid(), Kind = MediaKind.Series, DetectedTitle = "Old Series", LibraryRootId = library.Id, LibraryRoot = library, NormalizedSourcePath = "SERIES" };
+            series.Metadata = new MediaMetadata { MediaItemId = series.Id, ManualTitle = "Renamed Galaxy" };
+            var episode = new MediaItem { Id = Guid.NewGuid(), Kind = MediaKind.Episode, DetectedTitle = "Pilot", SeasonNumber = 1, EpisodeNumber = 1, Parent = series, LibraryRootId = library.Id, LibraryRoot = library, NormalizedSourcePath = "EPISODE" };
+            database.AddRange(owner, library, series, episode);
+            await database.SaveChangesAsync();
+            await database.Database.ExecuteSqlRawAsync("DELETE FROM MediaSearchIndex; INSERT INTO MediaSearchIndex(MediaId,Title,OriginalTitle,Details) SELECT lower(replace(Id,'-','')),DetectedTitle,'','' FROM MediaItems;");
+            var completed = Guid.NewGuid();
+            var running = Guid.NewGuid();
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO MetadataJobs (Id,State,Mode,Attempt,ItemsTotal,ItemsProcessed,ItemsMatched,ItemsNeedingReview,ItemsFailed,CreatedAt)
+                VALUES ({completed},'Completed','FullRefresh',1,10,10,8,1,1,0),
+                       ({running},'Running','Incremental',2,20,7,6,1,0,0);
+                """);
+            await database.Database.MigrateAsync();
+            var history = await database.MetadataJobs.SingleAsync(value => value.Id == completed);
+            Assert.Equal(MetadataJobState.Completed, history.State);
+            Assert.Equal(10, history.ItemsProcessed);
+            Assert.Equal(8, history.ItemsMatched);
+            var interrupted = await database.MetadataJobs.SingleAsync(value => value.Id == running);
+            Assert.Equal(MetadataJobState.Interrupted, interrupted.State);
+            Assert.Equal(20, interrupted.ItemsTotal);
+            Assert.Equal(7, interrupted.ItemsProcessed);
+            Assert.False(interrupted.WorklistInitialized);
+            Assert.Contains("Retry", interrupted.Error!, StringComparison.Ordinal);
+            Assert.Empty(await database.MetadataJobItems.ToListAsync());
+            var search = new PresentationService(database, TimeProvider.System, new MediaSearchIndexService(database));
+            var rebuilt = await search.SearchAsync(owner.Id, "Renamed Galaxy", new CatalogQuery(), default);
+            Assert.Equal(2, rebuilt.Total);
+            Assert.Contains(rebuilt.Items, item => item.Id == episode.Id);
+            Assert.Contains(rebuilt.Items, item => item.Id == series.Id);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task OptionalPinMigrationPreservesProtectedAndPendingProfilesWithoutChangingCredentials()
     {
         var root = TestPaths.CreateDataDirectory();
@@ -238,7 +284,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(16L, await command.ExecuteScalarAsync());
+            Assert.Equal(17L, await command.ExecuteScalarAsync());
             command.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsLock';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
@@ -291,7 +337,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(16L, await command.ExecuteScalarAsync());
+            Assert.Equal(17L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='SyncChanges';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaSearchIndex';";
@@ -336,7 +382,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(16L, await command.ExecuteScalarAsync());
+            Assert.Equal(17L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaMetadata';";
@@ -392,7 +438,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(16L, await command.ExecuteScalarAsync());
+            Assert.Equal(17L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaItems';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MetadataJobs';";

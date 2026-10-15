@@ -101,14 +101,14 @@ public static class ApiEndpointMappings
 
         var media = api.MapGroup("/media").RequireAuthorization();
         media.MapPost("/{mediaId:guid}/playback", CreatePlaybackAsync);
-        media.MapGet("/{mediaId:guid}/playback-plan", (HttpContext context, Guid mediaId, LibraryStateService states, PresentationService presentation, CancellationToken token) => ExecuteAsync(async () =>
+        media.MapGet("/{mediaId:guid}/playback-plan", (HttpContext context, Guid mediaId, LibraryStateService states, PresentationService presentation, SyncChangeService changes, CancellationToken token) => ExecuteAsync(() => changes.SnapshotAsync(context.User.RequireUserId(), async _ =>
         {
             var userId = context.User.RequireUserId();
             var plan = await states.SelectAsync(userId, mediaId, token);
             var target = plan.Target is null ? null : await presentation.SummaryAsync(userId, plan.Target.Id, token);
             var queue = await presentation.SummariesAsync(userId, plan.Queue.Select(item => item.Id).ToList(), token);
             return new PlaybackPlanResponse(target, plan.SeriesId, queue, plan.Action, plan.ContinueWatchingEligible);
-        }));
+        }, token)));
         media.MapGet("/{mediaId:guid}/watch-state", (HttpContext context, Guid mediaId, WatchStateScope? scope, int? seasonNumber, LibraryStateService states, CancellationToken token) =>
             states.GetAsync(context.User.RequireUserId(), mediaId, scope ?? WatchStateScope.Title, seasonNumber, token));
         media.MapPut("/{mediaId:guid}/watch-state", (HttpContext context, Guid mediaId, SetWatchStateRequest request, LibraryStateService states, CancellationToken token) =>

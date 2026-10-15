@@ -8,10 +8,12 @@ namespace Aurelia.Server.Services;
 public sealed partial class MetadataJobWorker(
     MetadataJobScheduler scheduler,
     IServiceScopeFactory scopeFactory,
-    ILogger<MetadataJobWorker> logger) : BackgroundService
+    ILogger<MetadataJobWorker> logger,
+    TimeProvider clock) : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(10)];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -24,276 +26,342 @@ public sealed partial class MetadataJobWorker(
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 wait.CancelAfter(TimeSpan.FromSeconds(1));
-                try
-                {
-                    await scheduler.WaitAsync(wait.Token);
-                }
-                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-                {
-                    // SQLite is authoritative, so periodically check even if a wake signal was lost.
-                }
-
+                try { await scheduler.WaitAsync(wait.Token); }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
                 continue;
             }
-
             var jobToken = scheduler.Register(jobId.Value, stoppingToken);
+            using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(jobToken);
+            var heartbeatTask = HeartbeatAsync(jobId.Value, heartbeat.Token);
             try
             {
                 await ProcessAsync(jobId.Value, jobToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (jobToken.IsCancellationRequested)
             {
-                await recovery.RunAsync(() => FinishCancellationAsync(jobId.Value, stoppingToken.IsCancellationRequested), stoppingToken);
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    try { await ReleaseAsync(jobId.Value, serverStopping: true); }
+                    catch (Exception exception) when (StorageRecovery.IsRecoverable(exception))
+                    { /* The durable processing marker is recovered on the next host start. */ }
+                }
+                else await recovery.RunAsync(() => ReleaseAsync(jobId.Value), stoppingToken);
             }
-            catch (Exception exception) when (StorageRecovery.IsRecoverableDatabase(exception))
+            catch (Exception exception) when (StorageRecovery.IsRecoverable(exception))
             {
-                await recovery.RunAsync(() => RetryOrFailAsync(jobId.Value, "The metadata job is waiting for writable storage.", storageFailure: true), stoppingToken);
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                await recovery.RunAsync(() => ReleaseAsync(jobId.Value, storageFailure: true), stoppingToken);
             }
             catch (Exception exception) when (!StorageRecovery.IsCorruptDatabase(exception))
             {
-                LogJobFailed(logger, jobId.Value, exception.GetType().Name);
-                await recovery.RunAsync(() => RetryOrFailAsync(jobId.Value, "Metadata enrichment failed."), stoppingToken);
+                LogJobFailed(logger, jobId.Value, exception.GetType().Name,
+                    string.Join(" <- ", new System.Diagnostics.StackTrace(exception, false).GetFrames().Take(12)
+                        .Select(frame => frame.GetMethod()?.DeclaringType?.Name + "." + frame.GetMethod()?.Name)));
+                await recovery.RunAsync(() => ReleaseAsync(jobId.Value, failure: "Metadata enrichment failed. Retry to resume unfinished titles."), stoppingToken);
             }
             finally
             {
+                await heartbeat.CancelAsync();
+                await heartbeatTask;
                 scheduler.Unregister(jobId.Value);
             }
         }
     }
 
-    private async Task RecoverAsync(CancellationToken cancellationToken)
+    private async Task RecoverAsync(CancellationToken token)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        var jobs = await database.MetadataJobs
-            .Where(job => job.State == MetadataJobState.Running)
-            .ToListAsync(cancellationToken);
+        var jobs = await database.MetadataJobs.IgnoreQueryFilters().Where(job => job.State == MetadataJobState.Running).ToListAsync(token);
         foreach (var job in jobs)
         {
-            job.State = job.Attempt < 3 ? MetadataJobState.Queued : MetadataJobState.Interrupted;
-            job.CompletedAt = job.Attempt < 3 ? null : DateTimeOffset.UtcNow;
-            job.Error = job.Attempt < 3
-                ? "The interrupted metadata job will resume automatically."
-                : "The metadata job was interrupted too many times.";
-            job.LeaseExpiresAt = null;
-            job.HeartbeatAt = null;
+            job.State = job.WorklistInitialized ? MetadataJobState.Queued : MetadataJobState.Interrupted;
+            job.CompletedAt = job.WorklistInitialized ? null : clock.GetUtcNow();
+            job.Error = job.WorklistInitialized ? null : "The legacy metadata job was interrupted. Retry to create a worklist.";
+            job.LeaseExpiresAt = job.HeartbeatAt = null;
+            await ResetProcessingAsync(database, job.Id, token);
         }
-
-        await database.SaveChangesAsync(cancellationToken);
+        await database.SaveChangesAsync(token);
         scheduler.Pulse();
     }
 
-    private async Task<Guid?> ClaimNextAsync(CancellationToken cancellationToken)
+    private async Task<Guid?> ClaimNextAsync(CancellationToken token)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var now = clock.GetUtcNow();
+        var cooldown = await database.MetadataProviderCooldowns.AsNoTracking().SingleOrDefaultAsync(value => value.Provider == "tmdb", token);
+        if (cooldown?.NotBefore > now)
+        {
+            await database.MetadataJobs.IgnoreQueryFilters().Where(job => job.State == MetadataJobState.Queued
+                && (job.NextAttemptAt == null || job.NextAttemptAt < cooldown.NotBefore))
+                .ExecuteUpdateAsync(set => set.SetProperty(job => job.NextAttemptAt, cooldown.NotBefore)
+                    .SetProperty(job => job.WaitReason, cooldown.WaitReason), token);
+            return null;
+        }
         while (true)
         {
-            var job = await database.MetadataJobs
-                .Where(candidate => candidate.State == MetadataJobState.Queued)
-                .OrderBy(candidate => candidate.CreatedAt)
-                .ThenBy(candidate => candidate.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (job is null)
+            var job = await database.MetadataJobs.IgnoreQueryFilters()
+                .Where(candidate => candidate.State == MetadataJobState.Queued && (candidate.NextAttemptAt == null || candidate.NextAttemptAt <= now))
+                .OrderBy(candidate => candidate.CreatedAt).ThenBy(candidate => candidate.Id).FirstOrDefaultAsync(token);
+            if (job is null) return null;
+            if (job.CancelRequestedAt.HasValue || !job.WorklistInitialized)
             {
-                return null;
-            }
-
-            if (job.CancelRequestedAt.HasValue)
-            {
-                job.State = MetadataJobState.Cancelled;
-                job.CompletedAt = DateTimeOffset.UtcNow;
-                await database.SaveChangesAsync(cancellationToken);
+                job.State = job.CancelRequestedAt.HasValue ? MetadataJobState.Cancelled : MetadataJobState.Interrupted;
+                job.CompletedAt = now;
+                await database.SaveChangesAsync(token);
                 continue;
             }
-
-            var now = DateTimeOffset.UtcNow;
             job.State = MetadataJobState.Running;
-            job.Attempt += 1;
+            job.Attempt++;
             job.StartedAt ??= now;
             job.HeartbeatAt = now;
             job.LeaseExpiresAt = now.Add(LeaseDuration);
-            job.Error = null;
-            await database.SaveChangesAsync(cancellationToken);
+            job.NextAttemptAt = null;
+            job.WaitReason = job.Error = null;
+            await database.SaveChangesAsync(token);
             return job.Id;
         }
     }
 
-    private async Task ProcessAsync(Guid jobId, CancellationToken cancellationToken)
+    private async Task ProcessAsync(Guid jobId, CancellationToken token)
+    {
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var ids = await database.MetadataJobItems.AsNoTracking().Where(item => item.JobId == jobId && item.State == MetadataWorkState.Pending)
+                .OrderBy(item => item.Ordinal).Take(32).Select(item => item.MediaItemId).ToListAsync(token);
+            if (ids.Count == 0)
+            {
+                var job = await database.MetadataJobs.IgnoreQueryFilters().SingleAsync(value => value.Id == jobId, token);
+                await MetadataJobStore.RecountAsync(database, job, token);
+                job.State = job.ItemsFailed == 0 ? MetadataJobState.Completed : MetadataJobState.Failed;
+                job.CompletedAt = clock.GetUtcNow();
+                job.LeaseExpiresAt = job.HeartbeatAt = null;
+                await database.SaveChangesAsync(token);
+                return;
+            }
+            foreach (var id in ids)
+                if (!await ProcessItemAsync(jobId, id, token)) return;
+        }
+    }
+
+    private async Task<bool> ProcessItemAsync(Guid jobId, Guid mediaId, CancellationToken token)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
         var service = scope.ServiceProvider.GetRequiredService<MetadataService>();
         var settings = scope.ServiceProvider.GetRequiredService<MetadataProviderSettingsStore>().Load();
         var tmdb = scope.ServiceProvider.GetRequiredService<ITmdbClient>();
-        var job = await database.MetadataJobs.SingleAsync(value => value.Id == jobId, cancellationToken);
+        var job = await database.MetadataJobs.IgnoreQueryFilters().SingleAsync(value => value.Id == jobId, token);
+        var work = await database.MetadataJobItems.SingleAsync(value => value.JobId == jobId && value.MediaItemId == mediaId, token);
+        if (job.CancelRequestedAt.HasValue) { scheduler.RequestCancellation(jobId); throw new OperationCanceledException(token); }
         if (!settings.Enabled || settings.Token is null)
         {
+            await FailAsync("TMDB is not enabled.");
+            return false;
+        }
+        if (!await MetadataJobStore.RefreshAccessAsync(database, job, token))
+        {
+            await FailAsync("The requesting profile no longer has metadata management access.");
+            return false;
+        }
+        var item = await database.MediaItems.Include(value => value.Metadata)!.ThenInclude(value => value!.Credits)
+            .Include(value => value.Metadata)!.ThenInclude(value => value!.Artwork)
+            .SingleOrDefaultAsync(value => value.Id == mediaId && (value.Kind == MediaKind.Movie || value.Kind == MediaKind.Series), token);
+        if (item is null)
+        {
+            await CompleteAsync(MetadataWorkState.Skipped);
+            return true;
+        }
+        var initialRevision = item.Metadata?.EditorRevision ?? 0;
+        var applying = false;
+        work.State = MetadataWorkState.Processing;
+        work.Attempt++;
+        await database.SaveChangesAsync(token);
+        try
+        {
+            var title = item.Metadata?.ManualTitle ?? item.OverrideTitle ?? item.DetectedTitle;
+            var candidates = await tmdb.SearchAsync(settings.Token, settings.Language, item.Kind, title, item.Year, token);
+            if (!await CanApplyAsync(token))
+            {
+                await CompleteAsync(MetadataWorkState.Skipped);
+                return true;
+            }
+            var match = MetadataMatcher.SelectAutomaticMatch(candidates, title, item.Year);
+            if (match is not null)
+            {
+                var details = await tmdb.GetAsync(settings.Token, settings.Language, match.MediaType, match.ProviderMediaId, token);
+                if (!await CanApplyAsync(token)) { await CompleteAsync(MetadataWorkState.Skipped); return true; }
+                applying = true;
+                await service.ApplyAsync(item, details, match.Confidence, token, CanApplyAsync);
+                await service.ApplyEpisodesAsync(item, details, settings, token, CanApplyAsync);
+                await CompleteAsync(await CanApplyAsync(token) ? MetadataWorkState.Matched : MetadataWorkState.Skipped);
+            }
+            else
+            {
+                using var lease = await scope.ServiceProvider.GetRequiredService<CatalogMutationGate>().EnterAsync(token);
+                if (!await CanApplyAsync(token)) { await CompleteAsync(MetadataWorkState.Skipped); return true; }
+                await StoreReviewAsync(database, item, candidates, token);
+                await CompleteAsync(MetadataWorkState.NeedsReview);
+            }
+            return true;
+        }
+        catch (MetadataProviderException error) when (error.Transient)
+        {
+            await WaitOrFailAsync(error.Message, error.RetryAfter);
+            return false;
+        }
+        catch (HttpRequestException)
+        {
+            await WaitOrFailAsync("TMDB could not be reached.", null);
+            return false;
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            await WaitOrFailAsync("TMDB did not respond in time.", null);
+            return false;
+        }
+        catch (JsonException)
+        {
+            await WaitOrFailAsync("TMDB returned an incomplete response.", null);
+            return false;
+        }
+        catch (MetadataException error)
+        {
+            // Provider/transport failures are not evidence that a title needs manual matching.
+            job.Error = error.Message;
+            await CompleteAsync(MetadataWorkState.Failed);
+            if (error.Code == "metadata_authentication_failed") { await FailAsync(error.Message); return false; }
+            return true;
+        }
+
+        async Task<bool> CanApplyAsync(CancellationToken cancellation)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var cancelled = await database.MetadataJobs.IgnoreQueryFilters().AsNoTracking()
+                .AnyAsync(value => value.Id == job.Id && value.CancelRequestedAt != null, cancellation);
+            if (cancelled) { scheduler.RequestCancellation(jobId); throw new OperationCanceledException(token); }
+            return await MetadataJobStore.RefreshAccessAsync(database, job, cancellation)
+                && await database.MediaItems.AsNoTracking().AnyAsync(value => value.Id == mediaId, cancellation)
+                && (applying || !await database.MediaMetadata.AsNoTracking().AnyAsync(value => value.MediaItemId == mediaId && value.EditorRevision != initialRevision, cancellation));
+        }
+        async Task CompleteAsync(MetadataWorkState state)
+        {
+            if (state == MetadataWorkState.Skipped)
+                foreach (var entry in database.ChangeTracker.Entries().Where(entry => entry.Entity is
+                    MediaItem or MediaMetadata or MediaCredit or ArtworkAsset or MetadataReview
+                    or MediaCollectionRecord or MediaCollectionMember).ToArray()) entry.State = EntityState.Detached;
+            work.State = state;
+            work.CompletedAt = clock.GetUtcNow();
+            await using var transaction = await database.Database.BeginTransactionAsync(token);
+            await database.SaveChangesAsync(token);
+            await MetadataJobStore.RecountAsync(database, job, token);
+            await database.SaveChangesAsync(token);
+            await transaction.CommitAsync(token);
+        }
+        async Task FailAsync(string error)
+        {
             job.State = MetadataJobState.Failed;
-            job.Error = "TMDB is not enabled.";
-            job.CompletedAt = DateTimeOffset.UtcNow;
-            await database.SaveChangesAsync(cancellationToken);
-            return;
+            job.Error = error;
+            job.CompletedAt = clock.GetUtcNow();
+            job.LeaseExpiresAt = job.HeartbeatAt = null;
+            job.NextAttemptAt = null;
+            job.WaitReason = null;
+            await database.SaveChangesAsync(token);
         }
-
-        var query = database.MediaItems
-            .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Credits)
-            .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
-            .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
-        if (job.LibraryRootId.HasValue) query = query.Where(item => item.LibraryRootId == job.LibraryRootId);
-        if (job.MediaItemId.HasValue) query = query.Where(item => item.Id == job.MediaItemId);
-        query = job.Mode switch
+        async Task WaitOrFailAsync(string error, TimeSpan? retryAfter)
         {
-            MetadataJobMode.Incremental => query.Where(item =>
-                item.Metadata == null
-                || item.Metadata.ProviderMediaId == null
-                || item.Metadata.ReviewState == MetadataReviewState.NeedsReview),
-            MetadataJobMode.RetryFailed => query.Where(item =>
-                item.MetadataReviews.Any(review => review.State == MetadataReviewState.NeedsReview)),
-            MetadataJobMode.SingleItem => query.Where(item => job.MediaItemId.HasValue
-                && item.Id == job.MediaItemId.Value),
-            _ => query,
-        };
-        var items = await query.OrderBy(item => item.DetectedTitle).ToListAsync(cancellationToken);
-        job.ItemsTotal = items.Count;
-        await database.SaveChangesAsync(cancellationToken);
-
-        foreach (var item in items)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            if (work.Attempt >= 4)
             {
-                var title = item.OverrideTitle ?? item.DetectedTitle;
-                var candidates = await tmdb.SearchAsync(settings.Token, settings.Language, item.Kind, title, item.Year, cancellationToken);
-                var match = MetadataMatcher.SelectAutomaticMatch(candidates, title, item.Year);
-                if (match is not null)
-                {
-                    var details = await tmdb.GetAsync(settings.Token, settings.Language, match.MediaType, match.ProviderMediaId, cancellationToken);
-                    await service.ApplyAsync(item, details, match.Confidence, cancellationToken);
-                    await service.ApplyEpisodesAsync(item, details, settings, cancellationToken);
-                    job.ItemsMatched++;
-                }
-                else
-                {
-                    await StoreReviewAsync(database, item, candidates, cancellationToken);
-                    job.ItemsNeedingReview++;
-                }
+                await CompleteAsync(MetadataWorkState.Failed);
+                await FailAsync(error);
+                return;
             }
-            catch (MetadataException exception)
-            {
-                job.ItemsFailed++;
-                job.Error = exception.Message;
-                await StoreReviewAsync(
-                    database,
-                    item,
-                    [],
-                    $"Metadata refresh failed: {exception.Message}",
-                    cancellationToken);
-            }
-            job.ItemsProcessed++;
-            job.HeartbeatAt = DateTimeOffset.UtcNow;
-            job.LeaseExpiresAt = job.HeartbeatAt.Value.Add(LeaseDuration);
-            await database.SaveChangesAsync(cancellationToken);
+            var delay = RetryDelays[work.Attempt - 1];
+            if (retryAfter > delay) delay = retryAfter.Value;
+            var next = clock.GetUtcNow().Add(delay);
+            work.State = MetadataWorkState.Pending;
+            job.State = MetadataJobState.Queued;
+            job.NextAttemptAt = next;
+            job.WaitReason = "tmdb";
+            job.Error = null;
+            job.LeaseExpiresAt = job.HeartbeatAt = null;
+            var cooldown = await database.MetadataProviderCooldowns.SingleOrDefaultAsync(value => value.Provider == "tmdb", token);
+            if (cooldown is null) { cooldown = new MetadataProviderCooldown(); database.MetadataProviderCooldowns.Add(cooldown); }
+            if (cooldown.NotBefore is null || cooldown.NotBefore < next) cooldown.NotBefore = next;
+            cooldown.WaitReason = "tmdb";
+            await database.SaveChangesAsync(token);
         }
-
-        job.State = MetadataJobState.Completed;
-        job.CompletedAt = DateTimeOffset.UtcNow;
-        job.LeaseExpiresAt = null;
-        await database.SaveChangesAsync(cancellationToken);
-        await PruneJobsAsync(database, job.Id, cancellationToken);
     }
 
-    private static async Task StoreReviewAsync(AureliaDbContext database, MediaItem item, IReadOnlyList<MetadataCandidateSummary> candidates, CancellationToken cancellationToken)
-        => await StoreReviewAsync(database, item, candidates, null, cancellationToken);
+    private async Task ReleaseAsync(Guid id, bool serverStopping = false, bool storageFailure = false, string? failure = null)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var job = await database.MetadataJobs.IgnoreQueryFilters().SingleOrDefaultAsync(value => value.Id == id);
+        if (job is null || job.State is MetadataJobState.Completed or MetadataJobState.Cancelled or MetadataJobState.Failed) return;
+        if (failure is null) await ResetProcessingAsync(database, id, CancellationToken.None);
+        else
+        {
+            var now = clock.GetUtcNow();
+            await database.MetadataJobItems.Where(item => item.JobId == id && item.State == MetadataWorkState.Processing)
+                .ExecuteUpdateAsync(set => set.SetProperty(item => item.State, MetadataWorkState.Failed)
+                    .SetProperty(item => item.CompletedAt, now));
+            await MetadataJobStore.RecountAsync(database, job, CancellationToken.None);
+        }
+        job.State = failure is not null ? MetadataJobState.Failed
+            : job.CancelRequestedAt.HasValue || !serverStopping && !storageFailure ? MetadataJobState.Cancelled : MetadataJobState.Queued;
+        job.CompletedAt = job.State == MetadataJobState.Queued ? null : clock.GetUtcNow();
+        job.Error = failure;
+        job.LeaseExpiresAt = job.HeartbeatAt = null;
+        job.NextAttemptAt = storageFailure ? clock.GetUtcNow().AddSeconds(5) : null;
+        job.WaitReason = storageFailure ? "storage" : null;
+        await database.SaveChangesAsync();
+        scheduler.Pulse();
+    }
 
-    private static async Task StoreReviewAsync(
-        AureliaDbContext database,
-        MediaItem item,
-        IReadOnlyList<MetadataCandidateSummary> candidates,
-        string? failureReason,
-        CancellationToken cancellationToken)
+    private static async Task ResetProcessingAsync(AureliaDbContext database, Guid id, CancellationToken token)
+    {
+        await database.MetadataJobItems.Where(item => item.JobId == id && item.State == MetadataWorkState.Processing)
+            .ExecuteUpdateAsync(set => set.SetProperty(item => item.State, MetadataWorkState.Pending)
+                .SetProperty(item => item.Attempt, item => Math.Max(0, item.Attempt - 1)), token);
+    }
+
+    private async Task HeartbeatAsync(Guid id, CancellationToken token)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), token);
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var now = clock.GetUtcNow();
+                await database.MetadataJobs.IgnoreQueryFilters().Where(job => job.Id == id && job.State == MetadataJobState.Running)
+                    .ExecuteUpdateAsync(set => set.SetProperty(job => job.HeartbeatAt, now).SetProperty(job => job.LeaseExpiresAt, now.Add(LeaseDuration)), token);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) when (StorageRecovery.IsRecoverable(error)) { }
+    }
+
+    private static async Task StoreReviewAsync(AureliaDbContext database, MediaItem item, IReadOnlyList<MetadataCandidateSummary> candidates, CancellationToken token)
     {
         var now = DateTimeOffset.UtcNow;
-        var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
+        var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, token);
         if (review is null)
         {
             review = new MetadataReview { Id = Guid.NewGuid(), MediaItemId = item.Id, CreatedAt = now };
             database.MetadataReviews.Add(review);
         }
-        review.Reason = failureReason
-            ?? MetadataMatcher.ReviewReason(
-                item.OverrideTitle ?? item.DetectedTitle,
-                item.Year,
-                candidates);
+        review.Reason = MetadataMatcher.ReviewReason(item.OverrideTitle ?? item.DetectedTitle, item.Year, candidates);
         review.CandidatesJson = JsonSerializer.Serialize(candidates.Take(8), JsonOptions);
         review.State = MetadataReviewState.NeedsReview;
         review.UpdatedAt = now;
     }
 
-    private async Task RetryOrFailAsync(Guid id, string error, bool storageFailure = false)
-    {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id);
-        if (job is null || job.State is MetadataJobState.Completed or MetadataJobState.Cancelled or MetadataJobState.Interrupted or MetadataJobState.Failed)
-        {
-            return;
-        }
-
-        if (storageFailure) job.Attempt = Math.Max(0, job.Attempt - 1);
-        job.State = storageFailure || job.Attempt < 3 ? MetadataJobState.Queued : MetadataJobState.Failed;
-        job.Error = error;
-        job.CompletedAt = job.State == MetadataJobState.Failed ? DateTimeOffset.UtcNow : null;
-        job.LeaseExpiresAt = null;
-        job.HeartbeatAt = null;
-        await database.SaveChangesAsync();
-        if (job.State == MetadataJobState.Queued)
-        {
-            scheduler.Pulse();
-        }
-    }
-
-    private async Task FinishCancellationAsync(Guid id, bool serverStopping)
-    {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        var job = await database.MetadataJobs.SingleOrDefaultAsync(value => value.Id == id);
-        if (job is null)
-        {
-            return;
-        }
-
-        if (job.State is MetadataJobState.Completed
-            or MetadataJobState.Failed
-            or MetadataJobState.Interrupted
-            or MetadataJobState.Cancelled)
-        {
-            return;
-        }
-
-        job.State = serverStopping && !job.CancelRequestedAt.HasValue
-            ? MetadataJobState.Queued
-            : MetadataJobState.Cancelled;
-        job.CompletedAt = job.State == MetadataJobState.Cancelled ? DateTimeOffset.UtcNow : null;
-        job.Error = job.State == MetadataJobState.Cancelled ? "The metadata job was cancelled." : null;
-        job.LeaseExpiresAt = null;
-        job.HeartbeatAt = null;
-        await database.SaveChangesAsync();
-        if (job.State == MetadataJobState.Queued)
-        {
-            scheduler.Pulse();
-        }
-    }
-
-    private static async Task PruneJobsAsync(AureliaDbContext database, Guid current, CancellationToken cancellationToken)
-    {
-        var old = await database.MetadataJobs.Where(job => job.Id != current && job.State != MetadataJobState.Running && job.State != MetadataJobState.Queued)
-            .OrderByDescending(job => job.CreatedAt).Skip(24).ToListAsync(cancellationToken);
-        database.MetadataJobs.RemoveRange(old);
-        await database.SaveChangesAsync(cancellationToken);
-    }
-
-    [LoggerMessage(LogLevel.Error, "Metadata job {JobId} failed with {ErrorType}.")]
-    private static partial void LogJobFailed(ILogger logger, Guid jobId, string errorType);
+    [LoggerMessage(LogLevel.Error, "Metadata job {JobId} failed with {ErrorType} at {FailureLocation}.")]
+    private static partial void LogJobFailed(ILogger logger, Guid jobId, string errorType, string failureLocation);
 }

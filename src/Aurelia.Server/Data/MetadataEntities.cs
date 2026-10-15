@@ -88,6 +88,11 @@ public sealed class MetadataReview
 
 public sealed class MetadataJob
 {
+    public Guid? RequestedByUserId { get; set; }
+    public bool WorklistInitialized { get; set; }
+    public int ItemsSkipped { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public string? WaitReason { get; set; }
     public Guid Id { get; set; }
     public Guid? LibraryRootId { get; set; }
     public Guid? MediaItemId { get; set; }
@@ -106,6 +111,27 @@ public sealed class MetadataJob
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+}
+
+public enum MetadataWorkState { Pending, Processing, Matched, NeedsReview, Skipped, Failed }
+
+public sealed class MetadataJobItem
+{
+    public Guid JobId { get; set; }
+    public MetadataJob Job { get; set; } = null!;
+    // Deliberately retained when a title is removed, so totals remain stable.
+    public Guid MediaItemId { get; set; }
+    public int Ordinal { get; set; }
+    public MetadataWorkState State { get; set; }
+    public int Attempt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+}
+
+public sealed class MetadataProviderCooldown
+{
+    public string Provider { get; set; } = "tmdb";
+    public DateTimeOffset? NotBefore { get; set; }
+    public string? WaitReason { get; set; }
 }
 
 public sealed class UserFavorite

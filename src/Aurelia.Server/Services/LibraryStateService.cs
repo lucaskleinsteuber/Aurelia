@@ -32,35 +32,11 @@ public sealed class LibraryStateService(AureliaDbContext database)
                 progress is { IsCompleted: false, PositionMilliseconds: > 10_000 });
         }
         var episodes = await EpisodesAsync(userId, media.Id, null, cancellationToken);
-        return SelectSeries(media.Id, episodes, userId);
-    }
-
-    internal static PlaybackSelection SelectSeries(Guid seriesId, IReadOnlyList<MediaItem> episodes, Guid userId)
-    {
-        if (episodes.Count == 0) return new(null, seriesId, [], PlaybackPlanAction.Play, false);
-        var latest = episodes.Where(item => item.PlaybackProgress.Any(progress => progress.UserId == userId && progress.LastPlayedAt.HasValue))
-            .OrderByDescending(item => item.PlaybackProgress.Single(progress => progress.UserId == userId).LastPlayedAt)
-            .ThenBy(item => item.Id).FirstOrDefault();
-        MediaItem? target;
-        var action = PlaybackPlanAction.Play;
-        var eligible = false;
-        if (latest is not null)
-        {
-            var progress = latest.PlaybackProgress.Single(value => value.UserId == userId);
-            if (!progress.IsCompleted && progress.PositionMilliseconds > 10_000)
-            { target = latest; action = PlaybackPlanAction.Resume; eligible = true; }
-            else
-            {
-                target = episodes.SkipWhile(item => item.Id != latest.Id).Skip(progress.IsCompleted ? 1 : 0)
-                    .FirstOrDefault(item => !item.PlaybackProgress.Any(value => value.UserId == userId && value.IsCompleted));
-                eligible = progress.IsCompleted && target is not null;
-            }
-        }
-        else target = episodes.FirstOrDefault(item => !item.PlaybackProgress.Any(value => value.UserId == userId && value.IsCompleted));
-        if (target is null) { target = episodes[0]; action = PlaybackPlanAction.PlayAgain; eligible = false; }
-        if (action == PlaybackPlanAction.Play && target.PlaybackProgress.Any(value => value.UserId == userId && !value.IsCompleted && value.PositionMilliseconds > 10_000))
-            action = PlaybackPlanAction.Resume;
-        return new(target, seriesId, episodes.SkipWhile(item => item.Id != target.Id).Skip(1).ToList(), action, eligible);
+        var plan = await new SeriesResumeQuery(database).Plans(userId).SingleOrDefaultAsync(value => value.SeriesId == media.Id, cancellationToken);
+        if (plan is null) return new(null, media.Id, [], PlaybackPlanAction.Play, false);
+        var target = episodes.Single(value => value.Id == plan.TargetId);
+        return new(target, media.Id, episodes.SkipWhile(value => value.Id != target.Id).Skip(1).ToList(),
+            (PlaybackPlanAction)plan.ActionCode, plan.ContinueWatchingEligible);
     }
 
     internal async Task<List<MediaItem>> EpisodesAsync(Guid userId, Guid seriesId, int? season, CancellationToken cancellationToken) =>

@@ -26,6 +26,8 @@ public sealed class BonjourAdvertisementService(
             "Bonjour discovery could not start. Manual server addresses remain available.");
 
     private readonly List<MdnsAdvertiser> advertisers = [];
+    private readonly object lifecycleGate = new();
+    private bool stopped;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -41,11 +43,15 @@ public sealed class BonjourAdvertisementService(
             .SingleAsync(candidate => candidate.Id == 1, cancellationToken);
         try
         {
-            foreach (var serviceType in new[] { ServiceType, LegacyServiceType })
+            lock (lifecycleGate)
             {
-                var advertiser = new MdnsAdvertiser(CreateProfile(runtime, identity.ServerId, serviceType));
-                advertiser.Start();
-                advertisers.Add(advertiser);
+                if (stopped) return;
+                foreach (var serviceType in new[] { ServiceType, LegacyServiceType })
+                {
+                    var advertiser = new MdnsAdvertiser(CreateProfile(runtime, identity.ServerId, serviceType));
+                    advertisers.Add(advertiser);
+                    advertiser.Start();
+                }
             }
             DiscoveryStarted(logger, identity.ServerId, null);
         }
@@ -97,11 +103,13 @@ public sealed class BonjourAdvertisementService(
 
     private void DisposeAdvertisers()
     {
-        foreach (var advertiser in advertisers)
+        MdnsAdvertiser[] owned;
+        lock (lifecycleGate)
         {
-            advertiser.Dispose();
+            stopped = true;
+            owned = [.. advertisers];
+            advertisers.Clear();
         }
-
-        advertisers.Clear();
+        foreach (var advertiser in owned) advertiser.Dispose();
     }
 }

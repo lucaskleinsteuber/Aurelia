@@ -17,9 +17,11 @@ public sealed class ArtworkStore(
         Guid mediaId,
         ArtworkKind kind,
         string? providerPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<bool>>? canApply = null)
     {
         if (string.IsNullOrWhiteSpace(providerPath)) return null;
+        if (canApply is not null && !await canApply(cancellationToken)) return null;
         var configuration = settings.Load();
         if (!configuration.Enabled || configuration.Token is null) return null;
 
@@ -41,6 +43,7 @@ public sealed class ArtworkStore(
             _ => "w1280",
         };
         var bytes = await tmdb.DownloadImageAsync(configuration.Token, providerPath, size, cancellationToken);
+        if (canApply is not null && !await canApply(cancellationToken)) return null;
         if (currentBytes + bytes.LongLength > configuration.ArtworkLimitBytes)
         {
             throw new MetadataException("artwork_limit_reached", "Artwork storage reached its 1 GiB limit.", StatusCodes.Status507InsufficientStorage);

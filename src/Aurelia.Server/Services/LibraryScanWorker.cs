@@ -6,7 +6,6 @@ namespace Aurelia.Server.Services;
 
 public sealed partial class LibraryScanWorker(
     LibraryScanScheduler queue,
-    MetadataJobScheduler metadataQueue,
     MetadataProviderSettingsStore metadataSettings,
     IServiceScopeFactory scopeFactory,
     IMediaLibraryScanner scanner,
@@ -375,22 +374,21 @@ public sealed partial class LibraryScanWorker(
             cancellationToken);
         await RebuildLocalCollectionsAsync(database, library, cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
-        if (metadataSettings.Load().Enabled
+        var provider = metadataSettings.Load();
+        if (provider.Enabled && provider.Token is not null
             && !await database.MetadataJobs.AnyAsync(
                 job => job.State == MetadataJobState.Queued || job.State == MetadataJobState.Running,
                 cancellationToken))
         {
-            var metadataJob = new MetadataJob
+            try
             {
-                Id = Guid.NewGuid(),
-                LibraryRootId = library.Id,
-                Mode = MetadataJobMode.Incremental,
-                State = MetadataJobState.Queued,
-                CreatedAt = DateTimeOffset.UtcNow,
-            };
-            database.MetadataJobs.Add(metadataJob);
-            await database.SaveChangesAsync(cancellationToken);
-            metadataQueue.Pulse();
+                await scope.ServiceProvider.GetRequiredService<MetadataJobStore>().StartAsync(
+                    new StartMetadataJobRequest(MetadataJobMode.Incremental, library.Id), cancellationToken);
+            }
+            catch (MetadataException exception) when (exception.Code == "job_queue_full")
+            {
+                // The scan is already committed; the next scan can enqueue enrichment.
+            }
         }
     }
 

@@ -110,6 +110,31 @@ struct AureliaTests {
     #expect(job.state == .running)
     #expect(job.itemsProcessed == 4)
     #expect(job.itemsNeedingReview == 1)
+    #expect(job.nextAttemptAt == nil)
+    #expect(job.waitReason == nil)
+    #expect(job.itemsSkipped == nil)
+    #expect(job.waitingStatus() == nil)
+  }
+
+  @Test
+  func metadataWaitingStatusDecodesAdditiveFieldsAndUsesLocalTime() throws {
+    var job = try JSONDecoder().decode(
+      MetadataJobSummary.self,
+      from: Data(
+        """
+        {"id":"00000000-0000-0000-0000-000000000009","state":"queued",
+        "itemsTotal":10,"itemsProcessed":4,"itemsMatched":2,"itemsNeedingReview":1,
+        "itemsSkipped":1,"itemsFailed":0,"createdAt":"2026-10-15T12:00:00Z",
+        "nextAttemptAt":"2026-10-15T14:32:00.000Z","waitReason":"tmdb"}
+        """.utf8))
+    #expect(job.itemsSkipped == 1)
+    #expect(
+      job.waitingStatus(locale: Locale(identifier: "en_GB"), timeZone: .gmt)
+        == "Waiting for TMDB · Retry at 14:32")
+    job.nextAttemptAt = "invalid"
+    #expect(job.waitingStatus() == "Waiting for TMDB")
+    job.waitReason = "storage"
+    #expect(job.waitingStatus() == "Waiting for writable storage")
   }
 
   @Test

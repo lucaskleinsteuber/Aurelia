@@ -223,15 +223,16 @@ public sealed class MetadataPresentationTests
     }
 
     [Fact]
-    public async Task TmdbClientRetriesTemporaryRateLimitsWithoutChangingAuthorization()
+    public async Task TmdbClientReportsRateLimitsToTheDurableJobScheduler()
     {
         var handler = new RateLimitedHandler();
         using var client = new HttpClient(handler);
         var tmdb = new TmdbClient(client);
 
-        await tmdb.ValidateAsync("temporary-test-token", CancellationToken.None);
-
-        Assert.Equal(3, handler.RequestCount);
+        var error = await Assert.ThrowsAsync<MetadataProviderException>(() => tmdb.ValidateAsync("temporary-test-token", CancellationToken.None));
+        Assert.True(error.Transient);
+        Assert.False(error.AuthenticationFailure);
+        Assert.Equal(1, handler.RequestCount);
         Assert.All(handler.AuthorizationValues, value => Assert.Equal("Bearer temporary-test-token", value));
     }
 

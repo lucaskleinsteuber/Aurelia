@@ -55,6 +55,9 @@ public sealed class PresentationService(
             .ThenBy(candidate => candidate.DetectedTitle).ThenBy(candidate => candidate.Id), userId)
             .ToListAsync(cancellationToken);
 
+        item.CardWatchState = item.Kind == MediaKind.Series
+            ? LibraryStateService.Aggregate(children.Count(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0), children.Where(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0).SelectMany(child => child.PlaybackProgress))
+            : null;
         var seasons = children.Where(child => child.SeasonNumber.HasValue)
             .GroupBy(child => child.SeasonNumber!.Value).OrderBy(group => group.Key)
             .Select(group => new SeasonPresentation(
@@ -82,6 +85,7 @@ public sealed class PresentationService(
 
     public async Task<IReadOnlyList<CatalogItemSummary>> SummariesAsync(Guid userId, IReadOnlyList<Guid> ids, CancellationToken cancellationToken)
     {
+        if (ids.Count == 0) return [];
         var items = await Cards(BaseItems(userId).Where(item => ids.Contains(item.Id)), userId).ToListAsync(cancellationToken);
         var byId = items.ToDictionary(item => item.Id);
         return ids.Where(byId.ContainsKey).Select(id => ToCatalog(byId[id], userId)).ToList();
@@ -91,96 +95,50 @@ public sealed class PresentationService(
         await SearchAsync(userId, query, new CatalogQuery(Offset: offset, Limit: limit), cancellationToken);
 
     public async Task<PagedResponse<CatalogItemSummary>> SearchAsync(
-        Guid userId,
-        string query,
-        CatalogQuery request,
-        CancellationToken cancellationToken)
+        Guid userId, string query, CatalogQuery request, CancellationToken cancellationToken)
     {
         ValidateQuery(request);
         var term = query.Trim();
         if (term.Length is < 1 or > 200)
             throw new MetadataException("invalid_search", "Search text must contain between 1 and 200 characters.", StatusCodes.Status400BadRequest);
-        if (request.Kind is null && request.LibraryId is null && request.Genre is null
-            && request.Availability is null && request.Favorite is null && request.WatchState is null
-            && request.YearFrom is null && request.YearTo is null
-            && request.Relevance && request.Sort == CatalogSort.Title && request.Direction == SortDirection.Ascending)
-        {
-            var result = await searchIndex.SearchAsync(term, request.Offset, request.Limit, cancellationToken);
-            var indexedItems = await Cards(BaseItems(userId).Where(item => result.Ids.Contains(item.Id)), userId)
-                .ToListAsync(cancellationToken);
-            var byId = indexedItems.ToDictionary(item => item.Id);
-            return new PagedResponse<CatalogItemSummary>(
-                result.Ids.Where(byId.ContainsKey).Select(id => ToCatalog(byId[id], userId)).ToList(),
-                request.Offset,
-                request.Limit,
-                result.Total);
-        }
-
-        var pattern = $"%{EscapeLike(term)}%";
-        var prefix = $"{EscapeLike(term)}%";
-        var matches = BaseItems(userId)
-            .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series || item.Kind == MediaKind.Episode)
-            .Where(item => EF.Functions.Like(item.DetectedTitle, pattern, "\\")
-                || (item.OverrideTitle != null && EF.Functions.Like(item.OverrideTitle, pattern, "\\"))
-                || (item.Metadata != null && (
-                    (item.Metadata.ManualTitle != null && EF.Functions.Like(item.Metadata.ManualTitle, pattern, "\\"))
-                    || (item.Metadata.ProviderTitle != null && EF.Functions.Like(item.Metadata.ProviderTitle, pattern, "\\"))
-                    || (item.Metadata.ManualOriginalTitle != null && EF.Functions.Like(item.Metadata.ManualOriginalTitle, pattern, "\\"))
-                    || (item.Metadata.ProviderOriginalTitle != null && EF.Functions.Like(item.Metadata.ProviderOriginalTitle, pattern, "\\"))
-                    || EF.Functions.Like(item.Metadata.ProviderGenresJson, pattern, "\\")
-                    || (item.Metadata.ManualGenresJson != null && EF.Functions.Like(item.Metadata.ManualGenresJson, pattern, "\\"))
-                    || item.Metadata.Credits.Any(credit => EF.Functions.Like(credit.Name, pattern, "\\")
-                        || (credit.Character != null && EF.Functions.Like(credit.Character, pattern, "\\")))))
-                || (item.Parent != null && (EF.Functions.Like(item.Parent.DetectedTitle, pattern, "\\")
-                    || (item.Parent.OverrideTitle != null && EF.Functions.Like(item.Parent.OverrideTitle, pattern, "\\"))
-                    || (item.Parent.Metadata != null && ((item.Parent.Metadata.ManualTitle != null && EF.Functions.Like(item.Parent.Metadata.ManualTitle, pattern, "\\"))
-                        || (item.Parent.Metadata.ProviderTitle != null && EF.Functions.Like(item.Parent.Metadata.ProviderTitle, pattern, "\\"))))))
-                || (item.SeasonNumber != null && EF.Functions.Like("Season " + item.SeasonNumber, pattern, "\\"))
-                || (item.EpisodeNumber != null && EF.Functions.Like("Episode " + item.EpisodeNumber, pattern, "\\")));
-        matches = ApplyFilters(matches, userId, request);
+        var visible = ApplyFilters(BaseItems(userId).Where(item => item.Kind == MediaKind.Movie
+            || item.Kind == MediaKind.Series || item.Kind == MediaKind.Episode), userId, request);
+        var hits = searchIndex.Hits(term);
+        // The transactionally maintained index contains exactly the searchable
+        // media kinds. An unrestricted, unfiltered request needs no redundant
+        // catalog lookup for every FTS hit before counting or ranking.
+        var restricted = database.AccessUserId != null && !database.AccessWholeCatalog
+            || request.Kind.HasValue || request.LibraryId.HasValue || request.Availability.HasValue
+            || request.Favorite.HasValue || request.WatchState.HasValue || request.YearFrom.HasValue
+            || request.YearTo.HasValue || !string.IsNullOrWhiteSpace(request.Genre);
+        var matches = restricted ? visible.Join(hits, item => item.Id, hit => hit.Id, (item, hit) => hit) : hits;
         var total = await matches.CountAsync(cancellationToken);
-        IOrderedQueryable<MediaItem> ordered = request.Relevance ? matches
-            .OrderByDescending(item => EF.Functions.Like(item.DetectedTitle, prefix, "\\")
-                || (item.OverrideTitle != null && EF.Functions.Like(item.OverrideTitle, prefix, "\\")))
-            .ThenBy(item => item.DetectedTitle)
-            .ThenBy(item => item.Id) : Order(matches, userId, request.Sort, request.Direction);
-        var items = await Cards(ordered.Skip(request.Offset).Take(request.Limit), userId).ToListAsync(cancellationToken);
-        return new PagedResponse<CatalogItemSummary>(items.Select(item => ToCatalog(item, userId)).ToList(), request.Offset, request.Limit, total);
+        var orderedIds = request.Relevance
+            ? matches.OrderBy(hit => hit.Rank).ThenBy(hit => hit.Id).Select(hit => hit.Id)
+            : Order(visible.Join(hits, item => item.Id, hit => hit.Id, (item, hit) => item), userId, request.Sort, request.Direction).Select(item => item.Id);
+        var ids = await orderedIds.Skip(request.Offset).Take(request.Limit).ToListAsync(cancellationToken);
+        var items = await SummariesAsync(userId, ids, cancellationToken);
+        return new PagedResponse<CatalogItemSummary>(items, request.Offset, request.Limit, total);
     }
 
     public async Task<HomeResponse> HomeAsync(Guid userId, CancellationToken cancellationToken)
     {
-        var allowedEpisodes = AllowedRegularEpisodeIds();
         var available = BaseItems(userId)
             .Where(item => item.Availability == MediaAvailability.Available);
         var topLevel = available.Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
-        var continueCandidates = await BaseItems(userId)
-            .AsSplitQuery()
-            .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)
-            .Where(item => !item.ContinueWatchingStates.Any(state => state.UserId == userId && state.IsHidden))
-            .Where(item => item.Kind == MediaKind.Movie
-                ? item.PlaybackProgress.Any(progress => progress.UserId == userId && !progress.IsCompleted && progress.PositionMilliseconds > 10_000)
-                : item.Children.Any(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0 && allowedEpisodes.Contains(child.Id)
-                    && child.PlaybackProgress.Any(progress => progress.UserId == userId && progress.LastPlayedAt.HasValue)))
-            .ToListAsync(cancellationToken);
-        var selections = new List<(Guid Id, DateTimeOffset? Played)>();
-        foreach (var item in continueCandidates)
-        {
-            if (item.Kind == MediaKind.Movie)
-            {
-                var progress = item.PlaybackProgress.SingleOrDefault(value => value.UserId == userId);
-                if (progress is { IsCompleted: false, PositionMilliseconds: > 10_000 }) selections.Add((item.Id, progress.LastPlayedAt));
-            }
-            else
-            {
-                var episodes = item.Children.Where(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0)
-                    .OrderBy(child => child.SeasonNumber).ThenBy(child => child.EpisodeNumber).ThenBy(child => child.DetectedTitle).ThenBy(child => child.Id).ToList();
-                var plan = LibraryStateService.SelectSeries(item.Id, episodes, userId);
-                if (plan.ContinueWatchingEligible && plan.Target is not null)
-                    selections.Add((plan.Target.Id, episodes.SelectMany(episode => episode.PlaybackProgress).Where(value => value.UserId == userId).Max(value => value.LastPlayedAt)));
-            }
-        }
-        var continueIds = selections.OrderByDescending(value => value.Played).ThenBy(value => value.Id).Take(20).Select(value => value.Id).ToList();
+        var plans = new SeriesResumeQuery(database).Plans(userId);
+        var seriesTargets = await BaseItems(userId).Where(item => item.Kind == MediaKind.Series
+                && !item.ContinueWatchingStates.Any(state => state.UserId == userId && state.IsHidden))
+            .Join(plans.Where(plan => plan.ContinueWatchingEligible), item => item.Id, plan => plan.SeriesId, (item, plan) => plan)
+            .OrderByDescending(plan => plan.LastPlayedAt).ThenBy(plan => plan.TargetId).Take(20).ToListAsync(cancellationToken);
+        var movieTargets = await BaseItems(userId).Where(item => item.Kind == MediaKind.Movie
+                && !item.ContinueWatchingStates.Any(state => state.UserId == userId && state.IsHidden)
+                && item.PlaybackProgress.Any(progress => progress.UserId == userId && !progress.IsCompleted && progress.PositionMilliseconds > 10_000))
+            .Select(item => new { item.Id, Played = item.PlaybackProgress.Where(progress => progress.UserId == userId).Select(progress => progress.LastPlayedAt).FirstOrDefault() })
+            .OrderByDescending(item => item.Played).ThenBy(item => item.Id).Take(20).ToListAsync(cancellationToken);
+        var continueIds = seriesTargets.Select(plan => (Id: plan.TargetId, Played: plan.LastPlayedAt.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(plan.LastPlayedAt.Value) : (DateTimeOffset?)null))
+            .Concat(movieTargets.Select(item => (item.Id, item.Played)))
+            .OrderByDescending(item => item.Played).ThenBy(item => item.Id).Take(20).Select(item => item.Id).ToList();
         var continueItems = await SummariesAsync(userId, continueIds, cancellationToken);
         var recentItems = await Cards(topLevel.OrderByDescending(item => item.CreatedAt)
             .ThenBy(item => item.Id).Take(30), userId).ToListAsync(cancellationToken);
@@ -214,21 +172,24 @@ public sealed class PresentationService(
     public async Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
-        var allowedEpisodes = AllowedRegularEpisodeIds();
         var collections = await database.MediaCollections.AsNoTracking()
-            .Include(collection => collection.Members).ThenInclude(member => member.MediaItem).ThenInclude(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
-            .Include(collection => collection.Members).ThenInclude(member => member.MediaItem).ThenInclude(item => item.Favorites)
-            .Include(collection => collection.Members).ThenInclude(member => member.MediaItem).ThenInclude(item => item.PlaybackProgress)
-            .Include(collection => collection.Members).ThenInclude(member => member.MediaItem).ThenInclude(item => item.LibraryRoot)
-            .Include(collection => collection.Members).ThenInclude(member => member.MediaItem).ThenInclude(item => item.ContinueWatchingStates.Where(value => value.UserId == userId))
-            .Include(collection => collection.Members).ThenInclude(member => member.MediaItem).ThenInclude(item => item.Children.Where(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0 && allowedEpisodes.Contains(child.Id))).ThenInclude(child => child.PlaybackProgress.Where(value => value.UserId == userId))
             .Where(collection => collection.Members.Count >= 2)
-            .OrderBy(collection => collection.Name).ThenBy(collection => collection.Id).Skip(offset).Take(limit).ToListAsync(cancellationToken);
-        return collections.Select(collection => new CollectionSummary(
-            collection.Id,
-            collection.Name,
-            collection.Members.OrderBy(member => member.SortOrder).Select(member => MetadataPresentation.ToSummary(member.MediaItem).Poster).FirstOrDefault(poster => poster is not null),
-            collection.Members.OrderBy(member => member.SortOrder).Select(member => ToCatalog(member.MediaItem, userId)).ToList())).ToList();
+            .OrderBy(collection => collection.Name).ThenBy(collection => collection.Id).Skip(offset).Take(limit)
+            .Select(collection => new
+            {
+                collection.Id,
+                collection.Name,
+                Ids = collection.Members.OrderBy(member => member.SortOrder).Select(member => member.MediaItemId).ToList()
+            })
+            .ToListAsync(cancellationToken);
+        var ids = collections.SelectMany(collection => collection.Ids).Distinct().ToList();
+        var cards = ids.Count == 0 ? [] : await SummariesAsync(userId, ids, cancellationToken);
+        var byId = cards.ToDictionary(item => item.Id);
+        return collections.Select(collection =>
+        {
+            var members = collection.Ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+            return new CollectionSummary(collection.Id, collection.Name, members.Select(item => item.Poster).FirstOrDefault(poster => poster is not null), members);
+        }).ToList();
     }
 
     public async Task<bool> SetFavoriteAsync(Guid userId, Guid mediaId, bool isFavorite, CancellationToken cancellationToken)
@@ -322,7 +283,6 @@ public sealed class PresentationService(
 
     private IQueryable<MediaItem> BaseItems(Guid userId)
     {
-        var allowedEpisodes = AllowedRegularEpisodeIds();
         return database.MediaItems.AsNoTracking()
         .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
         .Include(item => item.Parent)!.ThenInclude(parent => parent!.Metadata)
@@ -330,9 +290,7 @@ public sealed class PresentationService(
         .Include(item => item.PlaybackProgress.Where(value => value.UserId == userId))
         .Include(item => item.LibraryRoot)
         .Include(item => item.ContinueWatchingStates.Where(value => value.UserId == userId))
-        .Include(item => item.Parent)!.ThenInclude(parent => parent!.ContinueWatchingStates.Where(value => value.UserId == userId))
-        .Include(item => item.Children.Where(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0 && allowedEpisodes.Contains(child.Id)))
-            .ThenInclude(child => child.PlaybackProgress.Where(value => value.UserId == userId));
+        .Include(item => item.Parent)!.ThenInclude(parent => parent!.ContinueWatchingStates.Where(value => value.UserId == userId));
     }
 
     // Project only the fields used by cards. Credits, profile artwork, source paths,
@@ -349,13 +307,16 @@ public sealed class PresentationService(
             LibraryRoot = new LibraryRoot { Availability = item.LibraryRoot.Availability, Path = item.LibraryRoot.Path },
             SourcePath = item.SourcePath,
             ContinueWatchingStates = item.ContinueWatchingStates.Where(state => state.UserId == userId).Select(state => new ContinueWatchingState { IsHidden = state.IsHidden }).ToList(),
-            Children = item.Children.Where(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0 && allowedEpisodes.Contains(child.Id)).Select(child => new MediaItem
-            {
-                Id = child.Id,
-                Kind = child.Kind,
-                PlaybackProgress = child.PlaybackProgress.Where(progress => progress.UserId == userId).Select(progress => new PlaybackProgress
-                { UserId = progress.UserId, User = null!, MediaItem = null!, PositionMilliseconds = progress.PositionMilliseconds, IsCompleted = progress.IsCompleted, LastPlayedAt = progress.LastPlayedAt }).ToList()
-            }).ToList(),
+            CardWatchState = item.Kind == MediaKind.Series
+                ? item.Children.Any(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0 && allowedEpisodes.Contains(child.Id))
+                    && !item.Children.Any(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0 && allowedEpisodes.Contains(child.Id)
+                        && !child.PlaybackProgress.Any(progress => progress.UserId == userId && progress.IsCompleted))
+                    ? CatalogWatchState.Completed
+                    : item.Children.Any(child => child.Kind == MediaKind.Episode && child.SeasonNumber > 0 && allowedEpisodes.Contains(child.Id)
+                        && child.PlaybackProgress.Any(progress => progress.UserId == userId && (progress.IsCompleted || progress.PositionMilliseconds > 0)))
+                        ? CatalogWatchState.InProgress : CatalogWatchState.Unplayed
+                : item.PlaybackProgress.Any(progress => progress.UserId == userId && progress.IsCompleted) ? CatalogWatchState.Completed
+                    : item.PlaybackProgress.Any(progress => progress.UserId == userId && progress.PositionMilliseconds > 0) ? CatalogWatchState.InProgress : CatalogWatchState.Unplayed,
             DetectedTitle = item.DetectedTitle,
             OverrideTitle = item.OverrideTitle,
             Year = item.Year,
@@ -428,25 +389,10 @@ public sealed class PresentationService(
             item.SeasonNumber,
             item.EpisodeNumber,
             item.ParentId,
-            item.Kind == MediaKind.Series ? LibraryStateService.Aggregate(item.Children.Count, item.Children.SelectMany(child => child.PlaybackProgress).Where(value => value.UserId == userId))
-                : progress is { IsCompleted: true } ? CatalogWatchState.Completed : progress is { PositionMilliseconds: > 0 } ? CatalogWatchState.InProgress : CatalogWatchState.Unplayed,
+            item.CardWatchState ?? (item.Kind == MediaKind.Series ? LibraryStateService.Aggregate(item.Children.Count, item.Children.SelectMany(child => child.PlaybackProgress).Where(value => value.UserId == userId))
+                : progress is { IsCompleted: true } ? CatalogWatchState.Completed : progress is { PositionMilliseconds: > 0 } ? CatalogWatchState.InProgress : CatalogWatchState.Unplayed),
             libraryAvailability,
             (item.Kind == MediaKind.Episode ? item.Parent?.ContinueWatchingStates : item.ContinueWatchingStates)?.Any(state => state.IsHidden) ?? false);
-    }
-
-    private static string SearchText(MediaItem item)
-    {
-        var metadata = item.Metadata;
-        return string.Join('\n', new[]
-        {
-            item.OverrideTitle, item.DetectedTitle, metadata?.ManualTitle, metadata?.ProviderTitle,
-            metadata?.ManualOriginalTitle, metadata?.ProviderOriginalTitle, metadata?.ManualGenresJson,
-            metadata?.ProviderGenresJson,
-            metadata is null ? null : string.Join(' ', metadata.Credits.Select(credit => credit.Name)),
-            item.Parent is null ? null : EffectiveTitle(item.Parent),
-            item.SeasonNumber is null ? null : $"Season {item.SeasonNumber}",
-            item.EpisodeNumber is null ? null : $"Episode {item.EpisodeNumber}",
-        }.Where(value => !string.IsNullOrWhiteSpace(value)));
     }
 
     private IQueryable<MediaItem> ApplyFilters(

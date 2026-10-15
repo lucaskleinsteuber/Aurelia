@@ -471,7 +471,10 @@ public sealed record MetadataJobSummary(
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt,
     MetadataJobMode Mode = MetadataJobMode.FullRefresh,
-    int Attempt = 0);
+    int Attempt = 0,
+    DateTimeOffset? NextAttemptAt = null,
+    string? WaitReason = null,
+    int ItemsSkipped = 0);
 
 public enum CatalogWatchState
 {
