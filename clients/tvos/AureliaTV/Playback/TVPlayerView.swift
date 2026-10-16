@@ -136,10 +136,12 @@ struct TVPlayerView: View {
           icon(
             "Forward \(controller.seekInterval / 1_000) Seconds", symbol: "goforward", id: .forward
           ) { controller.seek(by: controller.seekInterval) }.disabled(!controller.canSeek)
-        }.focusSection().onMoveCommand { direction in
-          if direction == .up { focus = .rate }
-          if direction == .down { focus = .timeline }
-        }
+        }.padding(.horizontal, 24).padding(.vertical, 16)
+          .background(.ultraThinMaterial, in: Capsule())
+          .focusSection().onMoveCommand { direction in
+            if direction == .up { focus = .rate }
+            if direction == .down { focus = .timeline }
+          }
         Spacer()
         VStack(alignment: .leading, spacing: 18) {
           Text(controller.title).font(.system(size: 30, weight: .semibold)).lineLimit(2)
@@ -240,7 +242,7 @@ struct TVPlayerView: View {
 
   private func menuView(_ menu: TVPlaybackController.TrackMenu) -> some View {
     ZStack {
-      Color.black.opacity(0.72).ignoresSafeArea()
+      Color.black.opacity(0.55).ignoresSafeArea()
       VStack(alignment: .leading, spacing: 22) {
         Text(menuTitle(menu)).font(.title2.weight(.semibold))
         ScrollViewReader { proxy in
@@ -294,8 +296,8 @@ struct TVPlayerView: View {
         Button("Done") { controller.trackMenu = nil }.buttonStyle(TVButtonStyle()).focused(
           $focus, equals: .closeMenu
         ).accessibilityIdentifier("player-tracks-done")
-      }.padding(32).frame(width: 740).background(
-        TVDesign.canvas, in: RoundedRectangle(cornerRadius: 20)
+      }.padding(36).frame(width: 740).background(
+        .regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous)
       ).focusSection()
     }.accessibilityIdentifier("player-tracks")
   }

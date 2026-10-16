@@ -5,7 +5,7 @@
   library. Platform-neutral TV files under `AureliaTV/Core` are compiled directly
   into the hostless macOS logic-test target.
 - The approved client identity is **Aurelia**, bundle ID
-  `com.lucas.aurelia.tvos`, version **0.1.2**, build **3**, minimum **tvOS 26**.
+  `com.lucas.aurelia.tvos`, version **0.1.3**, build **4**, minimum **tvOS 26**.
   `Configuration/BuildNumber.xcconfig` owns the TV version. Confirm later product
   name or release-version changes with the user before editing them.
 - Keep UI text in English. Use Aurelia's opaque `#202326` canvas, large artwork,
@@ -25,8 +25,8 @@
   an isolated memory/defaults outbox and simulated engine/relay. Never access
   the user's
   Keychain/server or start a real video engine/stream relay in these tests.
-  Keep the fixture entry point unavailable in Release builds. For this update
-  only, a separate explicitly invoked physical-device check
+  Keep the fixture entry point unavailable in Release builds. The 0.1.2 update
+  added a separate explicitly invoked physical-device check
   may play the user-approved episode for at most five minutes with next-episode
   playback disabled, preserving media and measuring only source size/mtime.
   Keep it out of ordinary tests; no other codec or playback gates are authorized.

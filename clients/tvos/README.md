@@ -1,8 +1,9 @@
 # Aurelia for Apple TV
 
 A native tvOS 26 client for an Aurelia server on your local network. Version
-0.1.2 offers server discovery, device approval on the Mac, profiles, Home with
-Continue Watching, Favorites, Recently Added and Collections, search and filters,
+0.1.3 brings the Mac app's design to the TV: a full-bleed Home hero, Continue
+Watching, Favorites, Recently Added and Collections shelves, native focus lift on
+posters, centered profiles with a digits-only PIN keypad, search and filters,
 favorite and watched actions, and fullscreen playback with saved progress,
 audio and subtitle selection, playback speed, a sleep timer and automatic next
 episodes.

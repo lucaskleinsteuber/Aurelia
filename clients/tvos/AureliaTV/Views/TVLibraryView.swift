@@ -1,32 +1,52 @@
 import SwiftUI
 import UIKit
 
+/// Mac-style poster card. Focus uses the native tvOS lift, shadow and sheen on
+/// the artwork, which stays visible on bright or white-edged posters.
 struct TVPosterLabel: View {
   let item: TVCatalogItem
-  var isFocused = false
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
+    VStack(alignment: .leading, spacing: 18) {
       TVArtworkView(artwork: item.poster, width: 640, symbol: item.kind == .series ? "tv" : "film")
         .aspectRatio(2 / 3, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-          RoundedRectangle(cornerRadius: 14).stroke(
-            .white.opacity(isFocused ? 0.9 : 0), lineWidth: 2))
-      Text(item.title).font(.system(size: 28, weight: .semibold)).multilineTextAlignment(.leading)
-        .lineLimit(2).frame(
-          height: 68, alignment: .topLeading)
-      HStack {
-        if let year = item.year { Text(String(year)) }
-        Spacer()
-        if item.watchState == "completed" || item.progress?.isCompleted == true {
-          Image(systemName: "checkmark.circle.fill")
+        .overlay(alignment: .topTrailing) { TVItemBadges(item: item).padding(12) }
+        .overlay(alignment: .bottom) {
+          if let fraction = item.progressFraction {
+            TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
+          }
         }
-      }.font(.caption).foregroundStyle(.secondary)
-      if let message = item.availabilityMessage {
-        Text(message).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+        .hoverEffect(.highlight)
+      VStack(alignment: .leading, spacing: 6) {
+        Text(item.title).font(.system(size: 24, weight: .semibold)).lineLimit(1)
+        Text(subtitle).font(.system(size: 20)).foregroundStyle(.secondary).lineLimit(1)
       }
-    }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
-      .scaleEffect(isFocused ? 1.025 : 1).animation(.easeOut(duration: 0.12), value: isFocused)
+    }.frame(maxWidth: .infinity, alignment: .leading)
+  }
+  private var subtitle: String {
+    item.availabilityMessage ?? item.year.map(String.init) ?? item.kindLabel
+  }
+}
+
+/// Favorite, watched and unavailable markers in the artwork's top-right corner.
+struct TVItemBadges: View {
+  let item: TVCatalogItem
+  var body: some View {
+    let symbols =
+      [
+        item.availabilityMessage != nil ? "exclamationmark.triangle.fill" : nil,
+        item.isFavorite ? "star.fill" : nil, item.isWatched ? "checkmark.circle.fill" : nil,
+      ].compactMap { $0 }
+    if !symbols.isEmpty {
+      HStack(spacing: 8) {
+        ForEach(symbols, id: \.self) { symbol in
+          Image(systemName: symbol).foregroundStyle(
+            symbol.hasPrefix("exclamation") ? Color.orange : Color.white)
+        }
+      }.font(.system(size: 20, weight: .semibold)).padding(.horizontal, 10).padding(.vertical, 7)
+        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityHidden(true)
+    }
   }
 }
 
@@ -34,7 +54,7 @@ struct TVArtworkView: View {
   @EnvironmentObject private var model: TVAppModel
   let artwork: TVArtwork?
   let width: Int
-  var symbol = "film"
+  var symbol: String? = "film"
   @State private var image: UIImage?
 
   var body: some View {
@@ -42,7 +62,7 @@ struct TVArtworkView: View {
       TVDesign.surface
       if let image {
         Image(uiImage: image).resizable().scaledToFill()
-      } else {
+      } else if let symbol {
         Image(systemName: symbol).font(.system(size: 54)).foregroundStyle(.tertiary)
       }
     }.clipped().task(id: key) {

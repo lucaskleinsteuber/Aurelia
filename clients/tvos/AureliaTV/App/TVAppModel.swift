@@ -570,9 +570,8 @@ final class TVAppModel: ObservableObject {
       guard session?.sessionId == sessionID, !playerPresented else { return }
       deferredRefresh = false
       libraryRefresh = UUID()
+      // Lists observe this revision and refresh in place without clearing.
       detailRefresh = UUID()
-      movies.invalidate()
-      shows.invalidate()
     }
   }
 

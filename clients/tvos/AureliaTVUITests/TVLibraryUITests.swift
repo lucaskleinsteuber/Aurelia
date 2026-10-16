@@ -9,16 +9,18 @@ final class TVLibraryUITests: XCTestCase {
   @MainActor private var remote: XCUIRemote { .shared }
 
   @MainActor
-  func testContinueWatchingSeeAllUsesServerTargetOnce() {
+  func testContinueWatchingUsesServerTargetOnceWithoutHeaderButtons() {
     let app = launch()
     defer { app.terminate() }
-    select(app.buttons["home-all-continueWatching"], in: app)
-    let resume = app.buttons["catalog-\(resumeID)"]
+    let resume = app.buttons["home-continueWatching-\(resumeID)"]
     XCTAssertTrue(resume.waitForExistence(timeout: 10))
-    XCTAssertEqual(app.buttons.matching(identifier: "catalog-\(resumeID)").count, 1)
-    XCTAssertFalse(app.buttons["catalog-\(seriesID)"].exists)
-    XCTAssertFalse(app.staticTexts["The server returned an invalid response."].exists)
-    capture(app, "Library - Complete Continue Watching")
+    XCTAssertEqual(app.buttons.matching(identifier: "home-continueWatching-\(resumeID)").count, 1)
+    XCTAssertFalse(app.buttons["home-continueWatching-\(seriesID)"].exists)
+    XCTAssertEqual(
+      app.buttons.matching(NSPredicate(format: "label == %@", "See All")).count, 0,
+      "Home rows must not carry header buttons.")
+    XCTAssertTrue(app.buttons["home-hero"].exists)
+    capture(app, "Home - Hero and Continue Watching")
     select(resume, in: app)
     expectFocus(app.buttons["detail-play"])
     XCTAssertEqual(app.buttons["detail-play"].label, "Resume S02 E02")
@@ -26,15 +28,60 @@ final class TVLibraryUITests: XCTestCase {
   }
 
   @MainActor
+  func testHomeRowsMoveFreelyWithoutSnappingBack() {
+    let app = launch()
+    defer { app.terminate() }
+    let hero = app.buttons["home-hero"]
+    XCTAssertTrue(hero.waitForExistence(timeout: 10))
+    for _ in 0..<3 where !hasNativeFocus(hero) { remote.press(.down) }
+    expectFocus(hero)
+    let resume = app.buttons["home-continueWatching-\(resumeID)"]
+    let recent = app.buttons["home-recentlyAdded-\(movieID)"]
+    let collection = app.buttons["collection-00000000-0000-4000-8000-000000000030"]
+    for target in [resume, recent, collection] {
+      remote.press(.down)
+      expectFocus(target)
+    }
+    capture(app, "Home - Collections Row Focus")
+    for target in [recent, resume, hero] {
+      remote.press(.up)
+      expectFocus(target)
+    }
+  }
+
+  @MainActor
+  func testTabBarKeepsFocusWhileSwitchingTabs() {
+    let app = launch()
+    defer { app.terminate() }
+    for _ in 0..<6 where !app.buttons["Home"].firstMatch.hasFocus { remote.press(.up) }
+    expectFocus(app.buttons["Home"].firstMatch)
+    remote.press(.right)
+    expectFocus(app.buttons["Movies"].firstMatch)
+    remote.press(.left)
+    expectFocus(app.buttons["Home"].firstMatch)
+    remote.press(.right)
+    remote.press(.select)
+    select(app.buttons["catalog-\(movieID)"], in: app)
+    expectFocus(app.buttons["detail-play"])
+    remote.press(.up)
+    expectFocus(app.buttons["Movies"].firstMatch)
+    remote.press(.left)
+    expectFocus(app.buttons["Home"].firstMatch)
+  }
+
+  @MainActor
   func testFavoriteAndSingleTitleWatchActionsUpdateMenus() {
     let app = launch()
     defer { app.terminate() }
     openMovie(app)
+    let favorite = app.buttons["detail-favorite"]
+    XCTAssertEqual(favorite.label, "Add to Favorites")
+    select(favorite, in: app)
+    let favorited = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "label == %@", "Remove from Favorites"), object: favorite)
+    XCTAssertEqual(XCTWaiter.wait(for: [favorited], timeout: 8), .completed)
     openMore(app)
-    select(app.buttons["Add to Favorites"], in: app)
-    XCTAssertTrue(app.buttons["detail-more"].waitForExistence(timeout: 5))
-    openMore(app)
-    XCTAssertTrue(app.buttons["Remove from Favorites"].waitForExistence(timeout: 8))
+    XCTAssertFalse(app.buttons["Add to Favorites"].exists, "Favorite has its own button.")
     select(app.buttons["Mark as Watched"], in: app)
     XCTAssertTrue(app.buttons["detail-more"].waitForExistence(timeout: 5))
     openMore(app)
@@ -44,6 +91,8 @@ final class TVLibraryUITests: XCTestCase {
     openMore(app)
     XCTAssertTrue(app.buttons["Mark as Watched"].waitForExistence(timeout: 8))
     remote.press(.menu)
+    XCTAssertTrue(app.buttons["Mark as Watched"].waitForNonExistence(timeout: 5))
+    expectFocus(app.buttons["detail-more"])
     selectTab(app, title: "Home")
     XCTAssertTrue(app.staticTexts["Favorites"].firstMatch.waitForExistence(timeout: 8))
     XCTAssertTrue(app.buttons["home-favorites-\(movieID)"].exists)
@@ -59,9 +108,9 @@ final class TVLibraryUITests: XCTestCase {
     XCTAssertTrue(dialogText(app, "Mark 16 episodes as watched?").waitForExistence(timeout: 8))
     capture(app, "Series - Confirm Watched Count")
     select(app.buttons["Cancel"].firstMatch, in: app)
-    XCTAssertTrue(app.buttons["detail-season-options"].waitForExistence(timeout: 5))
-    select(app.buttons["detail-season-options"], in: app)
-    select(app.buttons["Mark Season as Unwatched"], in: app)
+    XCTAssertTrue(app.buttons["detail-more"].waitForExistence(timeout: 5))
+    openMore(app)
+    select(app.buttons["Mark Season 2 as Unwatched"], in: app)
     XCTAssertTrue(dialogText(app, "Mark 8 episodes as unwatched?").waitForExistence(timeout: 8))
     XCTAssertTrue(
       app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Playback positions"))
@@ -295,6 +344,12 @@ final class TVLibraryUITests: XCTestCase {
         XCTNSPredicateExpectation(
           predicate: NSPredicate { _, _ in self.hasNativeFocus(element) }, object: nil)
       ], timeout: 6)
+    if result != .completed {
+      let focused = XCUIApplication().descendants(matching: .any).matching(
+        NSPredicate(format: "hasFocus == true")
+      ).firstMatch
+      print("Focused instead: \(focused.exists ? focused.debugDescription : "nothing")")
+    }
     XCTAssertEqual(
       result, .completed, "Expected native focus on \(element).", file: file, line: line)
   }

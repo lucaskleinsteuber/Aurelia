@@ -138,16 +138,14 @@ final class TVFocusUITests: XCTestCase {
     let remote = XCUIRemote.shared
     remote.press(.down)
     expectFocus(app.buttons["detail-season"])
-    remote.press(.down)
-    let first = app.buttons["detail-episode-00000000-0000-4000-8000-000000000141"]
-    expectFocus(first)
+    // The shelf opens at the resume episode, so moving down lands on it.
     remote.press(.down)
     let second = app.buttons["detail-episode-00000000-0000-4000-8000-000000000142"]
     expectFocus(second)
-    remote.press(.down)
+    remote.press(.right)
     let third = app.buttons["detail-episode-00000000-0000-4000-8000-000000000143"]
     expectFocus(third)
-    shot(app, "Series - Long Episode Row Focus")
+    shot(app, "Series - Episode Shelf Focus")
     remote.press(.select)
     expectFocus(app.buttons["player-play"])
     XCTAssertTrue(
@@ -155,9 +153,10 @@ final class TVFocusUITests: XCTestCase {
         .exists)
     remote.press(.menu)
     expectFocus(third)
-    remote.press(.up)
+    remote.press(.left)
     expectFocus(second)
-    remote.press(.up)
+    remote.press(.left)
+    let first = app.buttons["detail-episode-00000000-0000-4000-8000-000000000141"]
     expectFocus(first)
     remote.press(.up)
     expectFocus(app.buttons["detail-season"])
@@ -204,9 +203,38 @@ final class TVFocusUITests: XCTestCase {
     let profile = app.buttons["profile-00000000-0000-4000-8000-000000000002"]
     expectFocus(profile)
     shot(app, "Profiles - Avatar Focus")
+    let profiles = app.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH %@", "profile-0"))
+    XCTAssertEqual(profiles.count, 2)
+    let center =
+      (profiles.element(boundBy: 0).frame.midX + profiles.element(boundBy: 1).frame.midX) / 2
+    XCTAssertEqual(center, app.frame.midX, accuracy: 40, "Profiles must be centered.")
     XCUIRemote.shared.press(.select)
-    XCTAssertTrue(app.secureTextFields["profile-pin"].waitForExistence(timeout: 5))
-    shot(app, "Profiles - Native PIN Input")
+    let one = app.buttons["pin-key-1"]
+    expectFocus(one)
+    XCTAssertFalse(app.keyboards.firstMatch.exists, "The PIN uses the on-screen keypad.")
+    XCTAssertFalse(app.buttons["profile-continue"].isEnabled)
+    shot(app, "Profiles - PIN Keypad")
+    // Enter 1-2-3-4 with the remote and continue with OK.
+    let remote = XCUIRemote.shared
+    remote.press(.select)
+    remote.press(.right)
+    remote.press(.select)
+    remote.press(.right)
+    remote.press(.select)
+    remote.press(.down)
+    remote.press(.left)
+    remote.press(.left)
+    expectFocus(app.buttons["pin-key-4"])
+    remote.press(.select)
+    XCTAssertEqual(app.otherElements["profile-pin"].value as? String, "4 digits entered")
+    remote.press(.down)
+    remote.press(.down)
+    remote.press(.right)
+    remote.press(.right)
+    expectFocus(app.buttons["profile-continue"])
+    remote.press(.select)
+    XCTAssertTrue(app.buttons["Home"].firstMatch.waitForExistence(timeout: 10))
     app.terminate()
 
     let library = launch()
@@ -229,15 +257,20 @@ final class TVFocusUITests: XCTestCase {
     XCUIRemote.shared.press(.select)
     expectFocus(app.buttons["detail-play"])
     XCUIRemote.shared.press(.right)
-    let more = app.buttons["detail-more"]
-    if !more.hasFocus { XCUIRemote.shared.press(.down) }
-    expectFocus(more)
-    XCUIRemote.shared.press(.select)
-    let favorite = app.buttons["Add to Favorites"]
+    let favorite = app.buttons["detail-favorite"]
     expectFocus(favorite)
     XCUIRemote.shared.press(.select)
-    XCTAssertTrue(more.waitForExistence(timeout: 5))
+    let favorited = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "label == %@", "Remove from Favorites"), object: favorite)
+    XCTAssertEqual(XCTWaiter.wait(for: [favorited], timeout: 8), .completed)
+    XCUIRemote.shared.press(.right)
+    let more = app.buttons["detail-more"]
+    expectFocus(more)
+    XCUIRemote.shared.press(.select)
+    expectFocus(app.buttons["Mark as Watched"])
     shot(app, "Details - Library Actions")
+    XCUIRemote.shared.press(.menu)
+    expectFocus(more)
   }
 
   @MainActor
@@ -374,9 +407,14 @@ final class TVFocusUITests: XCTestCase {
     if hasNativeFocus(element) { return }
     let expectation = XCTNSPredicateExpectation(
       predicate: NSPredicate { _, _ in self.hasNativeFocus(element) }, object: nil)
-    XCTAssertEqual(
-      XCTWaiter.wait(for: [expectation], timeout: 6), .completed,
-      "Expected focus on \(element).", file: file, line: line)
+    let result = XCTWaiter.wait(for: [expectation], timeout: 6)
+    if result != .completed {
+      let focused = XCUIApplication().descendants(matching: .any).matching(
+        NSPredicate(format: "hasFocus == true")
+      ).firstMatch
+      print("Focused instead: \(focused.exists ? focused.debugDescription : "nothing")")
+    }
+    XCTAssertEqual(result, .completed, "Expected focus on \(element).", file: file, line: line)
   }
 
   /// Menu items are children of the focused row cell rather than focus items.

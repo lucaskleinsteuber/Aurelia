@@ -21,6 +21,7 @@ struct TVDetailView: View {
   @State private var focusRequest: FocusRequest?
   @State private var launchOrigin: Focus = .play
   @State private var choosingSeason = false
+  @State private var shelfAnchor: Focus?
   @FocusState private var focused: Focus?
 
   private enum Focus: Hashable {
@@ -38,166 +39,40 @@ struct TVDetailView: View {
   var body: some View {
     ScrollViewReader { proxy in
       ScrollView {
-        VStack(alignment: .leading, spacing: 42) {
-          HStack(alignment: .top, spacing: 42) {
-            TVArtworkView(
-              artwork: item.poster, width: 640, symbol: item.kind == .series ? "tv" : "film"
-            )
-            .frame(width: 270, height: 405).clipShape(RoundedRectangle(cornerRadius: 18))
-            VStack(alignment: .leading, spacing: 22) {
-              Text(item.title).font(.system(size: 48, weight: .bold)).lineLimit(3)
-              HStack(spacing: 22) {
-                if let year = item.year { Text(String(year)) }
-                if let runtime = detail?.metadata.runtimeMinutes { Text("\(runtime) min") }
-                if let rating = detail?.metadata.contentRating { Text(rating) }
-              }.font(.callout).foregroundStyle(.secondary)
-              if !item.genres.isEmpty {
-                Text(item.genres.joined(separator: " · ")).font(.callout).foregroundStyle(
-                  .secondary)
-              }
-              if let overview = detail?.metadata.overview ?? item.overview {
-                Text(overview).font(.system(size: 27)).lineLimit(6)
-              }
-              HStack(spacing: 22) {
-                Button(action: playTarget) {
-                  Label(playLabel, systemImage: "play.fill")
-                }.buttonStyle(TVButtonStyle()).focusEffectDisabled()
-                  .disabled(loading || launching || plan?.target?.isPlayable != true)
-                  .focused($focused, equals: .play).id(Focus.play)
-                  .accessibilityIdentifier("detail-play")
-                  .onMoveCommand { direction in
-                    if direction == .down, !seasons.isEmpty { requestFocus(.season) }
-                  }
-                Menu {
-                  TVMediaContextActions(item: item, actions: actions)
-                } label: {
-                  Label("More", systemImage: "ellipsis")
-                }
-                .buttonStyle(TVButtonStyle()).focusEffectDisabled()
-                .accessibilityIdentifier("detail-more").disabled(actions.busy)
-              }.focusSection()
-              if let target = plan?.target, let unavailable = target.availabilityMessage {
-                Text(unavailable).foregroundStyle(.secondary)
-              } else if !loading, plan?.target == nil {
-                Text("No playable media available.").foregroundStyle(.secondary)
-              }
-              if loading { ProgressView("Loading…").accessibilityIdentifier("detail-loading") }
-            }.frame(maxWidth: .infinity, alignment: .leading)
-          }.focusSection().id("detail-top")
+        VStack(alignment: .leading, spacing: 46) {
+          hero.id("detail-top")
           if let error {
-            TVErrorText(message: error)
-            Button("Try Again") { Task { await load() } }.buttonStyle(TVButtonStyle())
+            VStack(alignment: .leading, spacing: 18) {
+              TVErrorText(message: error)
+              Button("Try Again") { Task { await load() } }.buttonStyle(TVButtonStyle())
+            }.padding(.horizontal, TVDesign.pagePadding)
           }
-          if item.kind == .series && !seasons.isEmpty {
-            VStack(alignment: .leading, spacing: 24) {
-              HStack(spacing: 22) {
-                Button(selectedSeason == 0 ? "Specials" : "Season \(selectedSeason ?? 1)") {
-                  choosingSeason = true
-                }
-                .buttonStyle(TVButtonStyle()).focusEffectDisabled()
-                .focused($focused, equals: .season).id(Focus.season)
-                .accessibilityIdentifier("detail-season")
-                .onMoveCommand { direction in
-                  if direction == .up, plan?.target?.isPlayable == true { requestFocus(.play) }
-                  if direction == .down,
-                    let first = season?.episodes.first(where: { $0.item.isPlayable })
-                  {
-                    requestFocus(.episode(first.item.id))
-                  }
-                }
-                Menu("Season Options") {
-                  Button("Mark Season as Watched") { seasonWatch(true) }
-                  Button("Mark Season as Unwatched", role: .destructive) { seasonWatch(false) }
-                }.buttonStyle(TVButtonStyle()).accessibilityIdentifier("detail-season-options")
-                  .disabled(actions.busy)
-              }.focusSection()
-              ForEach(season?.episodes ?? [], id: \.item.id) { value in
-                let episode = TVEpisode(
-                  item: model.overlay(value.item), seasonNumber: value.seasonNumber,
-                  episodeNumber: value.episodeNumber)
-                Button {
-                  launchTask?.cancel()
-                  launchTask = Task { await openEpisode(episode.item) }
-                } label: {
-                  HStack(spacing: 24) {
-                    TVArtworkView(
-                      artwork: episode.item.backdrop ?? episode.item.poster,
-                      width: 320, symbol: "play.rectangle"
-                    )
-                    .frame(width: 230, height: 130).clipShape(RoundedRectangle(cornerRadius: 12))
-                    VStack(alignment: .leading, spacing: 10) {
-                      Text("\(episode.item.episodeLabel ?? "Episode") · \(episode.item.title)")
-                        .font(.system(size: 28, weight: .semibold)).lineLimit(2)
-                      if let overview = episode.item.overview {
-                        Text(overview).font(.system(size: 24)).lineLimit(2).foregroundStyle(
-                          .secondary)
-                      }
-                      if let message = episode.item.availabilityMessage {
-                        Text(message).font(.caption).foregroundStyle(.secondary)
-                      }
-                      if let progress = episode.item.progress, progress.durationMilliseconds > 0,
-                        !progress.isCompleted
-                      {
-                        ProgressView(
-                          value: min(
-                            1,
-                            Double(progress.positionMilliseconds)
-                              / Double(progress.durationMilliseconds))
-                        )
-                        .frame(maxWidth: 500)
-                      }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    if episode.item.watchState == "completed"
-                      || episode.item.progress?.isCompleted == true
-                    {
-                      Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
-                    }
-                  }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                }.buttonStyle(TVButtonStyle(kind: .row)).focusEffectDisabled()
-                  .contextMenu { TVMediaContextActions(item: episode.item, actions: actions) }
-                  .disabled(!episode.item.isPlayable || launching).focused(
-                    $focused, equals: .episode(episode.item.id)
-                  )
-                  .onMoveCommand { direction in
-                    if direction == .up,
-                      episode.item.id
-                        == season?.episodes.first(where: { $0.item.isPlayable })?.item.id
-                    {
-                      requestFocus(.season)
-                    }
-                  }
-                  .id(Focus.episode(episode.item.id)).accessibilityIdentifier(
-                    "detail-episode-\(episode.item.id)")
-              }
-            }.focusSection()
-          }
-        }.padding(64)
+          if item.kind == .series && !seasons.isEmpty { episodes }
+        }.padding(.bottom, 80)
       }
-      .background {
-        ZStack {
-          TVDesign.canvas
-          if let backdrop = item.backdrop {
-            TVArtworkView(artwork: backdrop, width: 1920).opacity(0.14)
-          }
-        }.ignoresSafeArea()
-      }
+      .ignoresSafeArea(edges: .top)
+      .background(TVDesign.canvas.ignoresSafeArea())
       .task(id: model.detailRefresh) { await load() }
       .task(id: focusRequest?.id) {
         guard let request = focusRequest, playing == nil else { return }
         await Task.yield()
+        if case .episode = request.target { shelfAnchor = request.target }
         proxy.scrollTo(
-          request.target == .play ? AnyHashable("detail-top") : AnyHashable(request.target),
-          anchor: request.target == .play ? .top : .center)
+          request.target == .play ? AnyHashable("detail-top") : AnyHashable("detail-episodes"),
+          anchor: .top)
         await Task.yield()
         guard !Task.isCancelled, !loading, playing == nil, focusRequest?.id == request.id else {
           return
         }
         focused = request.target
+        // Applied once; a later background refresh must not pull focus back here.
+        focusRequest = nil
       }
       .confirmationDialog("Season", isPresented: $choosingSeason, titleVisibility: .visible) {
         ForEach(seasons, id: \.number) { value in
           Button(value.number == 0 ? "Specials" : "Season \(value.number)") {
             selectedSeason = value.number
+            shelfAnchor = value.episodes.first.map { .episode($0.item.id) }
           }.accessibilityIdentifier("season-option-\(value.number)")
         }
         Button("Cancel", role: .cancel) {}
@@ -235,6 +110,121 @@ struct TVDetailView: View {
       launchTask = nil
       navigationID = UUID()
     }
+  }
+
+  /// Full-bleed artwork with the title block and one compact action row.
+  private var hero: some View {
+    ZStack(alignment: .bottomLeading) {
+      TVHeroBackdrop(artwork: item.backdrop ?? item.poster)
+      VStack(alignment: .leading, spacing: 18) {
+        TVEyebrow(text: eyebrow)
+        Text(item.title).font(.system(size: 72, weight: .bold)).tracking(-0.8).lineLimit(2)
+        if !item.genres.isEmpty {
+          Text(item.genres.joined(separator: " · ")).font(.system(size: 24, weight: .semibold))
+        }
+        if let overview = detail?.metadata.overview ?? item.overview {
+          Text(overview).font(.system(size: 26)).lineLimit(4)
+            .frame(maxWidth: 1100, alignment: .leading).foregroundStyle(.white.opacity(0.88))
+        }
+        if let target = plan?.target, let unavailable = target.availabilityMessage {
+          Label(unavailable, systemImage: "exclamationmark.triangle.fill").font(
+            .system(size: 22, weight: .semibold)
+          ).foregroundStyle(.orange)
+        } else if !loading, plan?.target == nil {
+          Text("No playable media available.").foregroundStyle(.secondary)
+        }
+        HStack(spacing: 26) {
+          Button(action: playTarget) {
+            Label(playLabel, systemImage: "play.fill")
+          }.buttonStyle(TVButtonStyle(kind: .primary))
+            .disabled(loading || launching || plan?.target?.isPlayable != true)
+            .focused($focused, equals: .play).accessibilityIdentifier("detail-play")
+          if item.kind == .movie || item.kind == .series {
+            Button {
+              Task { await actions.favorite(item, model: model) }
+            } label: {
+              Image(systemName: item.isFavorite ? "star.fill" : "star")
+            }.buttonStyle(TVButtonStyle(kind: .icon))
+              .accessibilityIdentifier("detail-favorite")
+              .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
+          }
+          Menu {
+            TVMediaContextActions(item: item, actions: actions, includeFavorite: false)
+            if item.kind == .series, let selectedSeason {
+              let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
+              Button("Mark \(name) as Watched") { seasonWatch(true) }
+              Button("Mark \(name) as Unwatched", role: .destructive) { seasonWatch(false) }
+            }
+          } label: {
+            Image(systemName: "ellipsis")
+          }.buttonStyle(TVButtonStyle(kind: .icon))
+            .accessibilityIdentifier("detail-more").accessibilityLabel("More")
+          if loading { ProgressView().accessibilityIdentifier("detail-loading") }
+        }.padding(.top, 14).focusSection()
+      }.padding(.horizontal, TVDesign.pagePadding).padding(.bottom, 40)
+    }.frame(maxWidth: .infinity, minHeight: 820, alignment: .bottomLeading)
+  }
+
+  /// Season selection above a horizontal shelf that opens at the target episode.
+  private var episodes: some View {
+    VStack(alignment: .leading, spacing: 24) {
+      HStack(alignment: .firstTextBaseline, spacing: 22) {
+        Button {
+          choosingSeason = true
+        } label: {
+          Label(
+            selectedSeason == 0 ? "Specials" : "Season \(selectedSeason ?? 1)",
+            systemImage: "chevron.down"
+          )
+          .labelStyle(TVTrailingIconLabelStyle())
+        }
+        .buttonStyle(TVButtonStyle()).focused($focused, equals: .season)
+        .accessibilityIdentifier("detail-season")
+        .accessibilityLabel(selectedSeason == 0 ? "Specials" : "Season \(selectedSeason ?? 1)")
+        if let count = season?.episodes.count {
+          Text(count == 1 ? "1 episode" : "\(count) episodes").font(
+            .system(size: 22, weight: .semibold)
+          )
+          .foregroundStyle(.tertiary)
+        }
+      }.padding(.horizontal, TVDesign.pagePadding).focusSection()
+      ScrollView(.horizontal) {
+        LazyHStack(alignment: .top, spacing: 44) {
+          ForEach(season?.episodes ?? [], id: \.item.id) { value in
+            let episode = model.overlay(value.item)
+            Button {
+              launchTask?.cancel()
+              launchTask = Task { await openEpisode(episode) }
+            } label: {
+              TVEpisodeCard(item: episode)
+            }.buttonStyle(.borderless)
+              .contextMenu { TVMediaContextActions(item: episode, actions: actions) }
+              .disabled(!episode.isPlayable || launching)
+              .focused($focused, equals: .episode(episode.id))
+              .id(Focus.episode(episode.id))
+              .accessibilityIdentifier("detail-episode-\(episode.id)")
+          }
+        }.scrollTargetLayout().padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
+      }.scrollIndicators(.hidden).scrollClipDisabled()
+        .scrollPosition(id: $shelfAnchor, anchor: .leading)
+        // Entering the shelf from above starts at the resume or first episode.
+        .defaultFocus($focused, shelfEntry, priority: .userInitiated).focusSection()
+    }.id("detail-episodes")
+  }
+
+  private var shelfEntry: Focus? {
+    let episodes = season?.episodes.map(\.item) ?? []
+    let target =
+      episodes.first { $0.id == plan?.target?.id && $0.isPlayable }
+      ?? episodes.first { $0.isPlayable }
+    return target.map { .episode($0.id) }
+  }
+
+  private var eyebrow: String {
+    [
+      item.kindLabel, item.year.map(String.init),
+      detail?.metadata.runtimeMinutes.map { "\($0) min" }, detail?.metadata.contentRating,
+    ].compactMap { $0 }.joined(separator: " · ")
   }
 
   private func requestFocus(_ target: Focus) { focusRequest = FocusRequest(target: target) }
@@ -327,6 +317,9 @@ struct TVDetailView: View {
         selectedSeason =
           newPlan.target?.seasonNumber ?? newDetail.seasons.first(where: { $0.number > 0 })?.number
           ?? newDetail.seasons.first?.number
+        shelfAnchor = (newPlan.target?.kind == .episode ? newPlan.target?.id : nil).map {
+          .episode($0)
+        }
       }
       loading = false
       if let focusRequest, playing == nil { requestFocus(focusRequest.target) }
@@ -345,6 +338,45 @@ struct TVDetailView: View {
       loading = false
       self.error = error.localizedDescription
       model.handleSessionFailure(error)
+    }
+  }
+}
+
+/// Episode thumbnail with the title, progress and badges below the artwork.
+private struct TVEpisodeCard: View {
+  let item: TVCatalogItem
+  private let width: CGFloat = 420
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      TVArtworkView(artwork: item.backdrop ?? item.poster, width: 800, symbol: "play.rectangle")
+        .frame(width: width, height: width * 9 / 16)
+        .overlay(alignment: .topTrailing) { TVItemBadges(item: item).padding(10) }
+        .overlay(alignment: .bottom) {
+          if let fraction = item.progressFraction {
+            TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
+          }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+        .hoverEffect(.highlight)
+      Text("\(item.episodeLabel ?? "Episode") · \(item.title)").font(
+        .system(size: 23, weight: .semibold)
+      )
+      .lineLimit(2)
+      if let message = item.availabilityMessage {
+        Text(message).font(.system(size: 19, weight: .semibold)).foregroundStyle(.orange)
+      } else if let overview = item.overview {
+        Text(overview).font(.system(size: 19)).foregroundStyle(.secondary).lineLimit(2)
+      }
+    }.frame(width: width, alignment: .leading).opacity(item.isPlayable ? 1 : 0.55)
+  }
+}
+
+/// Places a label's icon after its title, as in a pop-up button.
+private struct TVTrailingIconLabelStyle: LabelStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HStack(spacing: 12) {
+      configuration.title
+      configuration.icon.font(.system(size: 18, weight: .bold))
     }
   }
 }

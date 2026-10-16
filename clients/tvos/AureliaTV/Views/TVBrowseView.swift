@@ -47,7 +47,13 @@ struct TVLibraryGrid: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 30) {
         HStack(spacing: 24) {
-          Text(title).font(.system(size: 46, weight: .bold))
+          HStack(alignment: .firstTextBaseline, spacing: 14) {
+            Text(title).font(.system(size: 56, weight: .bold))
+            if !listing.items.isEmpty {
+              Text("\(listing.total)").font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            }
+          }
           Spacer()
           Button {
             filters = true
@@ -74,7 +80,7 @@ struct TVLibraryGrid: View {
             .foregroundStyle(.secondary)
         }
         LazyVGrid(
-          columns: Array(repeating: GridItem(.flexible(), spacing: 36), count: 5), spacing: 44
+          columns: Array(repeating: GridItem(.flexible(), spacing: 48), count: 6), spacing: 56
         ) {
           ForEach(listing.items) { original in
             let item = model.overlay(original)
@@ -84,9 +90,9 @@ struct TVLibraryGrid: View {
                 selectedEpisodeID: listing.section == .search && item.kind == .episode
                   ? item.id : nil)
             } label: {
-              TVPosterLabel(item: item, isFocused: focusedItem == item.id)
+              TVPosterLabel(item: item)
             }
-            .buttonStyle(TVContentButtonStyle()).focusEffectDisabled().focused(
+            .buttonStyle(.borderless).focused(
               $focusedItem, equals: item.id
             ).id(item.id).accessibilityIdentifier("catalog-\(item.id)")
             .contextMenu {
@@ -103,11 +109,21 @@ struct TVLibraryGrid: View {
           TVErrorText(message: error)
           Button("Try Again") { loadNext() }.buttonStyle(TVButtonStyle())
         }
-      }.padding(.horizontal, 64).padding(.vertical, 40)
+      }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 40)
     }.scrollPosition(id: $scrollAnchor, anchor: .top).background(TVDesign.canvas.ignoresSafeArea())
       .onAppear { restore() }
       .task(id: key) {
         let request = key
+        if let previous = lastKey, previous != request, previous.query == request.query,
+          previous.search == request.search, previous.session == request.session
+        {
+          // Only the library revision changed: update the shown titles in place.
+          lastKey = request
+          if let api = model.client {
+            await listing.refresh(api: api, onFailure: model.handleSessionFailure)
+          }
+          return
+        }
         if lastKey != request {
           listing.configure(query: query, search: search, profileID: model.session?.user.id)
           listing.invalidate()

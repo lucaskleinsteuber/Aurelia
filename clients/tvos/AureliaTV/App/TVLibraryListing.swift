@@ -10,7 +10,7 @@ final class TVLibraryListing: ObservableObject {
   @Published private(set) var error: String?
   @Published private(set) var query: TVBrowseQuery
   @Published private(set) var search = ""
-  private var total = 1
+  private(set) var total = 1
   private var offset = 0
   private var revision: String?
   private var generation = UUID()
@@ -100,6 +100,57 @@ final class TVLibraryListing: ObservableObject {
       }
     }
     error = "The library changed while loading. Try again."
+  }
+
+  /// Reloads the loaded range and swaps it in at once. Visible items, focus and
+  /// pushed details stay in place instead of emptying the grid during a refresh.
+  func refresh(api: TVAPIClient, onFailure: (Error) -> Void) async {
+    guard !items.isEmpty else {
+      await loadNext(api: api, onFailure: onFailure)
+      return
+    }
+    generation = UUID()
+    let run = generation
+    let wanted = items.count
+    loading = true
+    defer { if generation == run { loading = false } }
+    var collected: [TVCatalogItem] = []
+    var nextOffset = 0
+    var pageTotal = 0
+    var pageRevision: String?
+    do {
+      repeat {
+        let page = try await api.browsePage(
+          query: query, search: search, offset: nextOffset, revision: pageRevision)
+        guard generation == run, !Task.isCancelled else { return }
+        var next = page.items
+        if section == .continueWatching {
+          next = try await continuationTargets(next, api: api, run: run)
+        }
+        guard generation == run, !Task.isCancelled else { return }
+        let existing = Set(collected.map(\.id))
+        collected.append(contentsOf: next.filter { !existing.contains($0.id) })
+        pageTotal = page.total
+        pageRevision = page.revision
+        nextOffset = page.offset + page.items.count
+        if page.items.isEmpty { break }
+      } while nextOffset < pageTotal && collected.count < wanted
+      items = collected
+      total = pageTotal
+      offset = nextOffset
+      revision = pageRevision
+      error = nil
+    } catch let failure as TVCoreError
+      where failure.code == "catalog_changed" && failure.statusCode == 409
+    {
+      guard generation == run, !Task.isCancelled else { return }
+      invalidate()
+      await loadNext(api: api, onFailure: onFailure)
+    } catch {
+      guard generation == run, !Task.isCancelled, !(error is CancellationError) else { return }
+      self.error = error.localizedDescription
+      onFailure(error)
+    }
   }
 
   private func continuationTargets(_ candidates: [TVCatalogItem], api: TVAPIClient, run: UUID)

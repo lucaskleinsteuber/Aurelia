@@ -145,8 +145,9 @@ struct TVMediaContextActions: View {
   let item: TVCatalogItem
   @ObservedObject var actions: TVLibraryActions
   var continuation = false
+  var includeFavorite = true
   var body: some View {
-    if item.kind == .movie || item.kind == .series {
+    if includeFavorite, item.kind == .movie || item.kind == .series {
       Button(item.isFavorite ? "Remove from Favorites" : "Add to Favorites") {
         Task { await actions.favorite(item, model: model) }
       }.disabled(actions.busy)
