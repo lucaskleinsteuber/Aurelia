@@ -168,12 +168,13 @@ struct ServerProfileEditor: View {
             SecureField("Confirm PIN", text: $pinConfirmation)
               .accessibilityIdentifier("profile-editor-pin-confirmation")
           }.textFieldStyle(.roundedBorder)
-          Text(
-            hasExistingPIN
-              ? "Leave both fields empty to keep the current PIN. Changing it locks active sessions."
-              : "Choose a 4–8 digit PIN to protect this profile."
-          )
-          .font(.caption).foregroundStyle(.secondary)
+          PINRequirementNote(pin: pin, confirmation: pinConfirmation)
+          if hasExistingPIN {
+            Text(
+              "Leave both fields empty to keep the current PIN. Changing it locks active sessions."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          }
         } else {
           Text(
             "Anyone on a paired device can open this profile and see its favorites, progress and notes."

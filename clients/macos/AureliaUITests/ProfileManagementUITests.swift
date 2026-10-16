@@ -64,7 +64,17 @@ final class ProfileManagementUITests: XCTestCase {
     XCTAssertFalse(protection.isEnabled)
     XCTAssertTrue(app.secureTextFields["profile-editor-pin"].exists)
     XCTAssertFalse(app.buttons["profile-editor-save"].isEnabled)
+    let rule = app.descendants(matching: .any)["pin-requirement"]
+    let problem = app.descendants(matching: .any)["pin-requirement-error"]
+    XCTAssertTrue(rule.exists, "The PIN rule is shown before typing.")
     app.secureTextFields["profile-editor-pin"].click()
+    app.secureTextFields["profile-editor-pin"].typeText("12ab")
+    XCTAssertTrue(problem.waitForExistence(timeout: 3), "Letters are reported immediately.")
+    XCTAssertFalse(rule.exists, "The error replaces the PIN rule; its wording is unit-tested.")
+    XCTAssertFalse(app.buttons["profile-editor-save"].isEnabled)
+    app.secureTextFields["profile-editor-pin"].typeKey("a", modifierFlags: .command)
+    app.secureTextFields["profile-editor-pin"].typeKey(.delete, modifierFlags: [])
+    XCTAssertTrue(problem.waitForNonExistence(timeout: 3))
     app.secureTextFields["profile-editor-pin"].typeText("1234")
     app.secureTextFields["profile-editor-pin-confirmation"].click()
     app.secureTextFields["profile-editor-pin-confirmation"].typeText("1234")

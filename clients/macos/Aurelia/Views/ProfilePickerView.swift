@@ -173,6 +173,7 @@ struct ProfilePickerView: View {
       SecureField("Server Password", text: $password).textFieldStyle(.roundedBorder)
       SecureField("Owner PIN (4–8 digits)", text: $pin).textFieldStyle(.roundedBorder)
       SecureField("Confirm owner PIN", text: $confirmation).textFieldStyle(.roundedBorder)
+      PINRequirementNote(pin: pin, confirmation: confirmation)
       Text(
         "Other profiles stay locked until the owner sets their PIN protection in Users & Access. Your library and paired devices stay unchanged."
       )
@@ -195,7 +196,7 @@ struct ProfilePickerView: View {
     guard !isSubmitting else { return }
     model.clearProfileSelectionError()
     guard ProfilePIN.isValid(pin) else {
-      validationError = "Enter 4–8 digits."
+      validationError = ProfilePIN.problem(pin) ?? "Enter 4–8 digits."
       pinFocused = true
       return
     }
@@ -247,6 +248,7 @@ struct ProfilePickerView: View {
       SecureField("Server Password", text: $password)
       SecureField("New owner PIN (4–8 digits)", text: $pin)
       SecureField("Confirm new owner PIN", text: $confirmation)
+      PINRequirementNote(pin: pin, confirmation: confirmation)
       HStack {
         Button("Cancel") {
           recoveringOwner = false
@@ -429,6 +431,10 @@ struct ChangeProfilePINView: View {
         if protected { SecureField("Current PIN", text: $current) }
         SecureField("New PIN (4–8 digits)", text: $new)
         SecureField("Confirm new PIN", text: $confirmation)
+        if protected, let problem = ProfilePIN.problem(current) {
+          PINProblemText(message: problem)
+        }
+        PINRequirementNote(pin: new, confirmation: confirmation)
         Button(protected ? "Change PIN & Lock Profile" : "Enable PIN & Lock Profile") {
           updateProtection(enabled: true)
         }.disabled(
@@ -475,5 +481,28 @@ struct ChangeProfilePINView: View {
     current = ""
     new = ""
     confirmation = ""
+  }
+}
+
+/// States the PIN rule below PIN fields and replaces it with a live error.
+struct PINRequirementNote: View {
+  let pin: String
+  var confirmation = ""
+
+  var body: some View {
+    if let problem = ProfilePIN.problem(pin, confirmation: confirmation) {
+      PINProblemText(message: problem)
+    } else {
+      Text(ProfilePIN.requirement).font(.caption).foregroundStyle(.secondary)
+        .accessibilityIdentifier("pin-requirement")
+    }
+  }
+}
+
+struct PINProblemText: View {
+  let message: String
+  var body: some View {
+    Label(message, systemImage: "exclamationmark.triangle.fill").font(.caption)
+      .foregroundStyle(.orange).accessibilityIdentifier("pin-requirement-error")
   }
 }

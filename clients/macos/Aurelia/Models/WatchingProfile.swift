@@ -85,8 +85,22 @@ struct ProfileUpdateRequest: Codable, Sendable {
 }
 
 enum ProfilePIN {
+  static let requirement = "Numbers only (0–9), 4 to 8 digits."
+
   static func isValid(_ pin: String) -> Bool {
     (4...8).contains(pin.count) && pin.utf8.allSatisfy { (48...57).contains($0) }
+  }
+
+  /// Live feedback while a PIN is typed. Letters and other characters are reported
+  /// immediately; length and confirmation only once a confirmation is entered.
+  static func problem(_ pin: String, confirmation: String = "") -> String? {
+    if !pin.utf8.allSatisfy({ (48...57).contains($0) }) {
+      return "A PIN can only contain numbers (0–9). Letters are not allowed."
+    }
+    if pin.count > 8 { return "A PIN can have at most 8 digits." }
+    guard !confirmation.isEmpty else { return nil }
+    if pin.count < 4 { return "A PIN needs at least 4 digits." }
+    return confirmation == pin ? nil : "The PINs don't match."
   }
 
   static func canSave(

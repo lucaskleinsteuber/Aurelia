@@ -10,6 +10,18 @@ struct ProfilePINTests {
       #expect(!ProfilePIN.isValid(value))
     }
   }
+  @Test func lettersAreReportedWhileTypingAndLengthAfterConfirmation() {
+    #expect(ProfilePIN.problem("") == nil)
+    #expect(ProfilePIN.problem("12") == nil)
+    for value in ["12a", "abcd", "12 34", "１２３４"] {
+      #expect(ProfilePIN.problem(value)?.contains("only contain numbers") == true)
+    }
+    #expect(ProfilePIN.problem("123456789")?.contains("at most 8") == true)
+    #expect(ProfilePIN.problem("12", confirmation: "12")?.contains("at least 4") == true)
+    #expect(ProfilePIN.problem("1234", confirmation: "1235") == "The PINs don't match.")
+    #expect(ProfilePIN.problem("1234", confirmation: "1234") == nil)
+  }
+
   @Test func olderStoredDeviceCredentialRemainsDecodableWithoutViewingState() throws {
     let data = Data(
       #"{"serverId":"00000000-0000-0000-0000-000000000001","name":"Synthetic","baseURL":"https://fixture.invalid","publicKeyFingerprint":"AAAA","token":"synthetic-only","sessionId":"00000000-0000-0000-0000-000000000002","expiresAt":"2099-01-01T00:00:00Z"}"#
