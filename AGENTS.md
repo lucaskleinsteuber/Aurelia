@@ -54,9 +54,21 @@ These rules apply to every task in this repository.
   be read in place for an explicitly requested, bounded playback check; record
   size and modification time before and after it.
 
-## Build and verification
+## Client versions and verification
 
-- `AureliaBuildNumber` in `Directory.Build.props` is authoritative. Increment it
+- macOS/server and tvOS are separate products with independent version/build
+  counters. Confirm product names and intended versions with the user before
+  changing them. The approved Mac profile-deletion release is 1.5.6 (51); the
+  independent tvOS client starts at 0.1 (1), requires tvOS 26, and is named Aurelia.
+- Keep tvOS in its own Xcode project with no Mac source references or shared
+  Aurelia product library. A third-party playback engine is allowed.
+- For the initial TV client, run device builds and host-executable logic/contract
+  tests only. Do not run simulators or automated UI, playback or soak tests. The
+  user tests the actual TV UI and playback. Install on the already paired Apple
+  TV when reachable and correctly provisioned; report a concrete installation
+  blocker without resetting its configuration.
+
+- For macOS/server, `AureliaBuildNumber` in `Directory.Build.props` is authoritative. Increment it
   exactly once, only after the pre-version verification is green; never reuse
   or decrease a build number.
 - Use the pinned SDK and dependencies. At minimum run restore, format
@@ -109,8 +121,10 @@ These rules apply to every task in this repository.
 - Before committing, inspect the full diff and audit it for secrets, personal or
   unportable paths, generated data, databases, binaries, media, caches, and test
   results.
-- Commit a completed build with exactly its product version as the message
-  (for example `1.1.0`), push to `origin/main`, and verify the remote hash.
+- Use a short English description of the completed change as the commit subject,
+  without a version/build number. The approved subjects for this work are
+  `Add profile deletion` and `Add tvOS client foundation`. Push to `origin/main`
+  and verify the remote hash after each independent completed change.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
 - After verification, create exactly one concise English Markdown summary in

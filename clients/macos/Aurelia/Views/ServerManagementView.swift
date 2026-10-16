@@ -10,6 +10,10 @@ struct ServerManagementView: View {
   @State private var error: String?
   @State private var loading = false
   @State private var capabilities: ServerCapabilities?
+  @State private var profileToDelete: UserAccessSummary?
+  @State private var deletingProfile: UUID?
+  @State private var deletionTask: Task<Void, Never>?
+  @State private var deletionRun = UUID()
 
   private var client: APIClient? { model.profile.map(APIClient.init(profile:)) }
 
@@ -97,11 +101,19 @@ struct ServerManagementView: View {
                   }
                   Spacer()
                   Button("Edit Profile…") { editingUser = access }
+                    .disabled(deletingProfile != nil)
                     .accessibilityIdentifier("edit-profile-\(access.id.uuidString)")
+                  if canDelete(access) {
+                    Button("Delete Profile…", role: .destructive) { profileToDelete = access }
+                      .disabled(deletingProfile != nil)
+                      .accessibilityIdentifier("delete-profile-\(access.id.uuidString)")
+                  }
+                  if deletingProfile == access.id { ProgressView().controlSize(.small) }
                 }.padding(.vertical, 5)
                 Divider()
               }
               Button("Create Profile…") { creatingUser = true }
+                .disabled(deletingProfile != nil)
                 .accessibilityIdentifier("create-profile")
               Text(
                 "Choose the entire library or individual films and series for each profile. New profiles start without title access. Owners always have full access."
@@ -124,7 +136,8 @@ struct ServerManagementView: View {
             }
             .id("diagnostics-\(configuration.stored.revision)")
           }
-          Button("Refresh Server Status") { Task { await reload() } }.disabled(loading)
+          Button("Refresh Server Status") { Task { await reload() } }
+            .disabled(loading || deletingProfile != nil)
         }
       } else {
         ManagementUnlockView()
@@ -133,7 +146,10 @@ struct ServerManagementView: View {
     .task(id: model.administrationGeneration) {
       if model.managementUnlocked { await reload() }
     }
-    .onChange(of: model.administrationGeneration) { _, _ in error = nil }
+    .onChange(of: model.administrationGeneration) { _, _ in
+      cancelDeletion()
+      error = nil
+    }
     .onChange(of: model.profile?.sessionId) { _, _ in
       configuration = nil
       status = nil
@@ -141,7 +157,23 @@ struct ServerManagementView: View {
       capabilities = nil
       editingUser = nil
       creatingUser = false
+      cancelDeletion()
       error = nil
+    }
+    .onDisappear { cancelDeletion() }
+    .alert(
+      "Delete \(profileToDelete?.user.username ?? "Profile")?",
+      isPresented: Binding(
+        get: { profileToDelete != nil },
+        set: { if !$0 { profileToDelete = nil } }),
+      presenting: profileToDelete
+    ) { access in
+      Button("Cancel", role: .cancel) {}
+      Button("Delete Profile", role: .destructive) { delete(access) }
+    } message: { access in
+      Text(
+        "Favorites, playback progress and scene notes for \(access.user.username) will be permanently removed. Active sessions will end. Your media and shared library will stay unchanged."
+      )
     }
     .sheet(item: $editingUser) { access in
       if let client {
@@ -163,6 +195,57 @@ struct ServerManagementView: View {
   private func contentStatus(_ user: UserSummary) -> String {
     if user.role == .owner || user.accessMode == .entireLibrary { return "Entire Library" }
     return user.accessMode == .selectedTitles ? "Selected Titles" : "Existing Storage Grants"
+  }
+
+  private func canDelete(_ access: UserAccessSummary) -> Bool {
+    guard model.managementUnlocked, model.profile?.user?.role == .owner,
+      access.id != model.profile?.user?.id
+    else { return false }
+    return access.user.role != .owner || !access.isEnabled
+      || users.filter { $0.user.role == .owner && $0.isEnabled }.count > 1
+  }
+
+  private func cancelDeletion() {
+    deletionRun = UUID()
+    deletionTask?.cancel()
+    deletionTask = nil
+    deletingProfile = nil
+    profileToDelete = nil
+  }
+
+  private func delete(_ access: UserAccessSummary) {
+    guard deletingProfile == nil, canDelete(access), let client else { return }
+    let generation = model.administrationGeneration
+    let run = UUID()
+    deletionRun = run
+    deletingProfile = access.id
+    error = nil
+    deletionTask = Task { @MainActor in
+      defer {
+        if deletionRun == run {
+          deletingProfile = nil
+          deletionTask = nil
+        }
+      }
+      do {
+        try await model.currentAdministration { try await client.deleteProfile(id: access.id) }
+        guard deletionRun == run, model.isCurrentAdministration(generation), !Task.isCancelled
+        else { return }
+        model.didDeleteWatchingProfile(id: access.id)
+        await reload()
+      } catch is CancellationError {
+      } catch {
+        guard deletionRun == run, model.isCurrentAdministration(generation), !Task.isCancelled
+        else { return }
+        if let failure = error as? APIClientError,
+          failure.isManagementLocked || failure == .serverIdentityMismatch
+        {
+          model.handleAdministrationFailure(error, generation: generation)
+        } else {
+          self.error = error.localizedDescription
+        }
+      }
+    }
   }
 
   @MainActor private func reload() async {

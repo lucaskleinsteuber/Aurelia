@@ -149,6 +149,11 @@ public sealed class AccountService(
             }
         }
 
+        // A viewing profile can use a device paired by another owner. Such tickets
+        // do not cascade through the target's devices, and their user FK is NoAction.
+        await database.PlaybackTickets.IgnoreQueryFilters()
+            .Where(ticket => ticket.UserId == targetId)
+            .ExecuteDeleteAsync(cancellationToken);
         database.Users.Remove(target);
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

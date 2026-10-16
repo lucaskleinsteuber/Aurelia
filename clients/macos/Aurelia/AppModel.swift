@@ -1995,6 +1995,10 @@ final class AppModel: ObservableObject {
     profileSelectionError = nil
   }
 
+  func didDeleteWatchingProfile(id: UUID) {
+    watchingProfiles.removeAll { $0.id == id }
+  }
+
   /// Invalidates an unlock even when the underlying request does not cooperate with cancellation.
   func cancelWatchingProfileSelection() {
     guard requiresProfileSelection, !isSwitchingProfile else { return }
