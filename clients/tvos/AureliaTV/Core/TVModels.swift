@@ -306,7 +306,7 @@ struct TVCatalogItem: Codable, Identifiable, Equatable, Sendable {
   let parentId: UUID?
   let watchState: String?
   let libraryAvailability: TVLibraryAvailability?
-  let continueWatchingHidden: Bool?
+  var continueWatchingHidden: Bool? = nil
 
   var isPlayable: Bool {
     [.movie, .episode, .extra, .trailer].contains(kind) && availability == .available

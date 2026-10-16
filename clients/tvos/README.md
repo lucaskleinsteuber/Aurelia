@@ -1,8 +1,11 @@
 # Aurelia for Apple TV
 
 A native tvOS 26 client for an Aurelia server on your local network. Version
-0.1.1 starts with server discovery, device approval on the Mac, profiles, a small
-movie and series library, and fullscreen playback with saved progress.
+0.1.2 offers server discovery, device approval on the Mac, profiles, Home with
+Continue Watching, Favorites, Recently Added and Collections, search and filters,
+favorite and watched actions, and fullscreen playback with saved progress,
+audio and subtitle selection, playback speed, a sleep timer and automatic next
+episodes.
 
 Open `AureliaTV.xcodeproj` and select the **AureliaTV** scheme. The TV client has
 its own project, bundle identifier and version; it does not share an application
@@ -48,3 +51,8 @@ read personal credentials, contact a real server, or start the video engine.
 The fixture entry point is absent from Release builds. Actual remote navigation
 and video playback still receive separate user acceptance on a physical Apple
 TV; no automated codec, stream or playback gate runs.
+
+The separate **AureliaTVDeviceCheck** scheme and `scripts/test-tvos-device.sh`
+exist only for the explicitly approved, five-minute check of one episode on a
+paired Apple TV. It requires opt-in environment variables, never runs with the
+simulator tests and removes its test runner afterwards.

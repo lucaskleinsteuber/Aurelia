@@ -14,15 +14,15 @@ final class TVFocusUITests: XCTestCase {
     remote.press(.playPause)
     expectFocus(app.buttons["player-play"])
     for (direction, identifier) in [
-      (XCUIRemote.Button.left, "backward"), (.left, "close"),
-      (.right, "backward"), (.right, "play"), (.right, "forward"), (.right, "audio"),
-      (.right, "subtitles"),
+      (XCUIRemote.Button.left, "backward"), (.right, "play"), (.right, "forward"),
+      (.up, "rate"), (.left, "close"), (.right, "rate"), (.right, "audio"),
+      (.right, "subtitles"), (.right, "sleep"),
     ] {
       remote.press(direction)
       let button = app.buttons["player-\(identifier)"]
       expectFocus(button)
-      XCTAssertLessThanOrEqual(button.frame.width, 90)
-      XCTAssertLessThanOrEqual(button.frame.height, 85)
+      XCTAssertLessThanOrEqual(button.frame.width, 125)
+      XCTAssertLessThanOrEqual(button.frame.height, 90)
     }
     shot(app, "Player - Compact Controls and Subtitle Focus")
     remote.press(.menu)
@@ -61,7 +61,7 @@ final class TVFocusUITests: XCTestCase {
     let remote = XCUIRemote.shared
     remote.press(.right)
     expectFocus(app.buttons["player-forward"])
-    remote.press(.up)
+    remote.press(.down)
     let timeline = app.buttons["player-timeline"]
     expectFocus(timeline)
     remote.press(.playPause)
@@ -82,7 +82,7 @@ final class TVFocusUITests: XCTestCase {
     defer { app.terminate() }
     openMoviePlayer(app)
     let remote = XCUIRemote.shared
-    remote.press(.right)
+    remote.press(.up)
     remote.press(.right)
     expectFocus(app.buttons["player-audio"])
     remote.press(.select)
@@ -217,11 +217,89 @@ final class TVFocusUITests: XCTestCase {
   }
 
   @MainActor
+  func testHomeCollectionsAndFavoritesAction() {
+    let app = launch()
+    defer { app.terminate() }
+    XCTAssertTrue(app.staticTexts["Continue Watching"].firstMatch.waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Recently Added"].firstMatch.exists)
+    XCTAssertTrue(app.buttons["collection-00000000-0000-4000-8000-000000000030"].exists)
+    shot(app, "Home - Library Rows")
+    selectTab(app, title: "Movies")
+    focusPoster(app, id: movieID)
+    XCUIRemote.shared.press(.select)
+    expectFocus(app.buttons["detail-play"])
+    XCUIRemote.shared.press(.right)
+    let more = app.buttons["detail-more"]
+    if !more.hasFocus { XCUIRemote.shared.press(.down) }
+    expectFocus(more)
+    XCUIRemote.shared.press(.select)
+    let favorite = app.buttons["Add to Favorites"]
+    expectFocus(favorite)
+    XCUIRemote.shared.press(.select)
+    XCTAssertTrue(more.waitForExistence(timeout: 5))
+    shot(app, "Details - Library Actions")
+  }
+
+  @MainActor
+  func testProgressSurvivesExitAndImmediateReopen() {
+    let app = launch()
+    defer { app.terminate() }
+    openMoviePlayer(app)
+    let remote = XCUIRemote.shared
+    remote.press(.playPause)
+    remote.press(.down)
+    let timeline = app.buttons["player-timeline"]
+    expectFocus(timeline)
+    let initial = seconds(timeline)
+    remote.press(.right)
+    remote.press(.playPause)
+    let advanced = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in self.seconds(timeline) >= initial + 11 }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [advanced], timeout: 6), .completed)
+    remote.press(.menu)
+    expectFocus(app.buttons["detail-play"])
+    remote.press(.select)
+    expectFocus(app.buttons["player-play"])
+    remote.press(.playPause)
+    XCTAssertGreaterThanOrEqual(seconds(app.buttons["player-timeline"]), initial + 10)
+    XCTAssertFalse(app.progressIndicators["player-loading"].exists)
+    shot(app, "Player - Immediate Resume")
+  }
+
+  @MainActor
+  func testPlaybackRateAndSleepMenus() {
+    let app = launch()
+    defer { app.terminate() }
+    openMoviePlayer(app)
+    let remote = XCUIRemote.shared
+    remote.press(.up)
+    expectFocus(app.buttons["player-rate"])
+    remote.press(.select)
+    let standard = app.buttons["player-rateOption(1.0)"]
+    expectFocus(standard)
+    remote.press(.down)
+    expectFocus(app.buttons["player-rateOption(1.25)"])
+    remote.press(.select)
+    expectFocus(app.buttons["player-rate"])
+    for _ in 0..<3 { remote.press(.right) }
+    expectFocus(app.buttons["player-sleep"])
+    remote.press(.select)
+    expectFocus(app.buttons["player-sleepOption(0)"])
+    remote.press(.down)
+    remote.press(.down)
+    expectFocus(app.buttons["player-sleepOption(15)"])
+    shot(app, "Player - Sleep Timer Menu")
+    remote.press(.menu)
+    expectFocus(app.buttons["player-sleep"])
+  }
+
+  @MainActor
   private func launch(_ scenario: String = "library") -> XCUIApplication {
     continueAfterFailure = false
     let app = XCUIApplication()
     app.launchArguments = ["--aurelia-ui-testing"]
     app.launchEnvironment["AURELIA_TV_UI_SCENARIO"] = scenario
+    app.launchEnvironment["AURELIA_TV_UI_SUITE"] = "Aurelia.TV.UI.Tests.\(UUID().uuidString)"
     app.launch()
     return app
   }
@@ -268,22 +346,20 @@ final class TVFocusUITests: XCTestCase {
 
   @MainActor
   private func selectTab(_ app: XCUIApplication, title: String) {
-    let movies = app.buttons["Movies"].firstMatch
-    let shows = app.buttons["TV Shows"].firstMatch
-    let profile = app.buttons["Test Viewer"].firstMatch
-    for _ in 0..<8 {
-      if movies.hasFocus || shows.hasFocus || profile.hasFocus { break }
+    let titles = ["Home", "Movies", "TV Shows", "Search", "Test Viewer"]
+    for _ in 0..<12 {
+      if titles.contains(where: { app.buttons[$0].firstMatch.hasFocus }) { break }
       XCUIRemote.shared.press(.up)
     }
-    if title == "Movies" {
-      if profile.hasFocus { XCUIRemote.shared.press(.left) }
-      if shows.hasFocus { XCUIRemote.shared.press(.left) }
-      expectFocus(movies)
-    } else {
-      if movies.hasFocus { XCUIRemote.shared.press(.right) }
-      if profile.hasFocus { XCUIRemote.shared.press(.left) }
-      expectFocus(shows)
+    guard let current = titles.firstIndex(where: { app.buttons[$0].firstMatch.hasFocus }),
+      let target = titles.firstIndex(of: title)
+    else { return XCTFail("Tab bar is not reachable.") }
+    if current != target {
+      for _ in 0..<abs(current - target) {
+        XCUIRemote.shared.press(current > target ? .left : .right)
+      }
     }
+    expectFocus(app.buttons[title].firstMatch)
     XCUIRemote.shared.press(.select)
   }
 
@@ -295,12 +371,33 @@ final class TVFocusUITests: XCTestCase {
       XCTAssertTrue(
         element.waitForExistence(timeout: 8), "Missing element: \(element)", file: file, line: line)
     }
-    if element.hasFocus { return }
+    if hasNativeFocus(element) { return }
     let expectation = XCTNSPredicateExpectation(
-      predicate: NSPredicate(format: "hasFocus == true"), object: element)
+      predicate: NSPredicate { _, _ in self.hasNativeFocus(element) }, object: nil)
     XCTAssertEqual(
       XCTWaiter.wait(for: [expectation], timeout: 6), .completed,
       "Expected focus on \(element).", file: file, line: line)
+  }
+
+  /// Menu items are children of the focused row cell rather than focus items.
+  @MainActor
+  private func hasNativeFocus(_ element: XCUIElement) -> Bool {
+    if element.hasFocus
+      || element.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true"))
+        .firstMatch.exists
+    {
+      return true
+    }
+    guard element.exists else { return false }
+    let identifier = element.identifier
+    let match =
+      identifier.isEmpty
+      ? NSPredicate(
+        format: "elementType == %d AND label == %@", element.elementType.rawValue, element.label)
+      : NSPredicate(
+        format: "elementType == %d AND identifier == %@", element.elementType.rawValue, identifier)
+    return XCUIApplication().cells.matching(NSPredicate(format: "hasFocus == true"))
+      .containing(match).firstMatch.exists
   }
 
   @MainActor

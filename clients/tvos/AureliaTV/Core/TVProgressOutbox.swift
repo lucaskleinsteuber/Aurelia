@@ -66,7 +66,7 @@ enum TVProgressSaveState: String, Codable, Sendable {
   case pending, conflict, accessDenied, unavailable
 }
 
-private struct TVProgressEntry: Codable, Sendable {
+private struct TVProgressEntry: Codable, Equatable, Sendable {
   let scope: TVProgressScope
   let mediaID: UUID
   var latest: TVProgressSnapshot
@@ -75,15 +75,110 @@ private struct TVProgressEntry: Codable, Sendable {
   var state: TVProgressSaveState = .pending
 }
 
-/// Only identifiers, positions and concurrency tokens are persisted. A write
-/// with an uncertain result retains its exact mutation ID, revision and body.
-/// Device/profile credentials and media locations never enter this file.
-actor TVProgressOutbox {
-  static let shared = TVProgressOutbox(storageURL: defaultStorageURL())
-  static let capacity = 256
-  static let maximumBytes = 512 * 1_024
+/// Journal storage is injectable so tests never use the app's preferences.
+protocol TVProgressJournalStore: Sendable {
+  func read() throws -> Data?
+  func write(_ data: Data) throws
+}
 
-  private let storageURL: URL?
+final class TVDefaultsProgressJournal: TVProgressJournalStore, @unchecked Sendable {
+  static let key = "aurelia.progress-journal.v1"
+  private let defaults: UserDefaults
+  private let key: String
+  private let lock = NSLock()
+
+  init(defaults: UserDefaults, key: String = TVDefaultsProgressJournal.key) {
+    self.defaults = defaults
+    self.key = key
+  }
+
+  func read() throws -> Data? {
+    lock.lock()
+    defer { lock.unlock() }
+    guard let value = defaults.object(forKey: key) else { return nil }
+    guard let data = value as? Data else { throw CocoaError(.fileReadCorruptFile) }
+    return data
+  }
+
+  func write(_ data: Data) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    guard data.count <= TVProgressOutbox.maximumBytes else {
+      throw CocoaError(.fileWriteOutOfSpace)
+    }
+    defaults.set(data, forKey: key)
+    // The journal is deliberately small. Flush it before reporting a durable
+    // enqueue, including when the app is about to enter the background.
+    guard defaults.synchronize(), defaults.data(forKey: key) == data else {
+      throw CocoaError(.fileWriteUnknown)
+    }
+  }
+}
+
+private struct TVFileProgressJournal: TVProgressJournalStore {
+  let url: URL
+
+  func read() throws -> Data? {
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let metadata = try url.resourceValues(forKeys: [
+      .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
+    ])
+    guard metadata.isRegularFile == true, metadata.isSymbolicLink != true,
+      (metadata.fileSize ?? .max) <= TVProgressOutbox.legacyMaximumBytes
+    else { throw CocoaError(.fileReadCorruptFile) }
+    return try Data(contentsOf: url)
+  }
+
+  func write(_ data: Data) throws {
+    let directory = url.deletingLastPathComponent()
+    try FileManager.default.createDirectory(
+      at: directory, withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700])
+    let metadata = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+    guard metadata.isDirectory == true, metadata.isSymbolicLink != true else {
+      throw CocoaError(.fileWriteNoPermission)
+    }
+    try data.write(to: url, options: .atomic)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+  }
+}
+
+private struct TVProgressJournal: Codable {
+  let version: Int
+  let entries: [TVProgressEntry]
+  let legacyImported: Bool
+}
+
+enum TVProgressFlushResult: Equatable, Sendable {
+  case saved, pending, conflict, storageFailure, inactive, cancelled
+}
+
+enum TVProgressStorageIssue: Sendable {
+  case unreadable, capacity, write, migration
+}
+
+struct TVProgressOutboxChange: Sendable {
+  enum Reason: Sendable { case enqueued, acknowledged, stateChanged, storageFailure }
+  let reason: Reason
+  let scope: TVProgressScope
+  let mediaID: UUID?
+  let snapshot: TVProgressSnapshot?
+  let progress: TVPlaybackProgress?
+  let state: TVProgressSaveState?
+  let storageFailed: Bool
+}
+
+/// Only identifiers, positions and concurrency tokens enter the journal.
+/// An uncertain write retains its exact mutation ID, revision and body.
+actor TVProgressOutbox {
+  static let shared = TVProgressOutbox(
+    journal: TVDefaultsProgressJournal(defaults: .standard),
+    legacyStorageURL: defaultStorageURL())
+  static let capacity = 256
+  static let maximumBytes = 256 * 1_024
+  fileprivate static let legacyMaximumBytes = 512 * 1_024
+
+  private let journal: (any TVProgressJournalStore)?
   private var entries: [TVProgressEntry] = []
   private var activeScope: TVProgressScope?
   private var activeSessionID: UUID?
@@ -92,39 +187,77 @@ actor TVProgressOutbox {
   private var worker: Task<Void, Never>?
   private var generation = UUID()
   private var readFailed = false
+  private var legacyImported = false
   private var knownRevisions: [String: Int64] = [:]
+  private var confirmedProgress: [String: TVPlaybackProgress] = [:]
+  private var observers:
+    [UUID: (TVProgressScope, AsyncStream<TVProgressOutboxChange>.Continuation)] = [:]
   private(set) var storageFailed = false
+  private(set) var storageIssue: TVProgressStorageIssue?
 
+  /// The default is memory-only, including all synthetic UI fixtures. The URL
+  /// overload remains available for isolated legacy compatibility tests.
   init(storageURL: URL? = nil) {
-    self.storageURL = storageURL
-    guard let storageURL, FileManager.default.fileExists(atPath: storageURL.path) else { return }
+    journal = storageURL.map { TVFileProgressJournal(url: $0) }
     do {
-      let metadata = try storageURL.resourceValues(forKeys: [
-        .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
-      ])
-      guard metadata.isRegularFile == true, metadata.isSymbolicLink != true,
-        (metadata.fileSize ?? .max) <= Self.maximumBytes
-      else { throw CocoaError(.fileReadCorruptFile) }
-      let saved = try JSONDecoder().decode(
-        [TVProgressEntry].self, from: Data(contentsOf: storageURL))
-      guard saved.count <= Self.capacity,
-        saved.allSatisfy({ entry in
-          entry.latest.isValid && (entry.revision.map { $0 >= 0 } ?? true)
-            && (entry.mutation.map {
-              $0.mediaID == entry.mediaID && $0.expectedRevision >= 0 && $0.snapshot.isValid
-            } ?? true)
-        }),
-        Set(
-          saved.map {
-            "\($0.scope.serverID):\($0.scope.profileID):\($0.scope.fingerprint):\($0.mediaID)"
-          }
-        ).count == saved.count
-      else { throw CocoaError(.fileReadCorruptFile) }
-      entries = saved
+      if let data = try journal?.read() {
+        let saved = try Self.decode(data, maximumBytes: Self.maximumBytes)
+        entries = saved.entries
+        legacyImported = saved.legacyImported
+      }
     } catch {
-      // Preserve an unreadable queue for recovery instead of replacing it.
       readFailed = true
       storageFailed = true
+      storageIssue = .unreadable
+    }
+  }
+
+  init(journal: any TVProgressJournalStore, legacyStorageURL: URL? = nil) {
+    self.journal = journal
+    do {
+      if let data = try journal.read() {
+        let saved = try Self.decode(data, maximumBytes: Self.maximumBytes)
+        entries = saved.entries
+        legacyImported = saved.legacyImported
+      }
+    } catch {
+      readFailed = true
+      storageFailed = true
+      storageIssue = .unreadable
+      return
+    }
+    guard !legacyImported, let legacyStorageURL,
+      FileManager.default.fileExists(atPath: legacyStorageURL.path)
+    else { return }
+    do {
+      let legacy = TVFileProgressJournal(url: legacyStorageURL)
+      guard let data = try legacy.read() else { return }
+      let saved = try Self.decode(data, maximumBytes: Self.legacyMaximumBytes)
+      var merged = entries
+      for entry in saved.entries {
+        if let existing = merged.first(where: {
+          $0.scope == entry.scope && $0.mediaID == entry.mediaID
+        }) {
+          // Never pick a winner between two uncertain mutations.
+          guard existing == entry else { throw CocoaError(.fileReadCorruptFile) }
+        } else {
+          merged.append(entry)
+        }
+      }
+      guard merged.count <= Self.capacity else { throw CocoaError(.fileWriteOutOfSpace) }
+      let migrated = try Self.encode(merged, legacyImported: true)
+      try journal.write(migrated)
+      guard try journal.read() == migrated else { throw CocoaError(.fileWriteUnknown) }
+      entries = merged
+      legacyImported = true
+      // A persisted receipt prevents a later import if cleanup is unavailable.
+      // Removal is attempted only after a verified, readable replacement.
+      try? FileManager.default.removeItem(at: legacyStorageURL)
+    } catch {
+      // Neither an unreadable source nor a failed replacement is discarded.
+      readFailed = true
+      storageFailed = true
+      storageIssue = .migration
     }
   }
 
@@ -140,6 +273,7 @@ actor TVProgressOutbox {
     for index in entries.indices where entries[index].scope == scope {
       if entries[index].state == .accessDenied { entries[index].state = .pending }
     }
+    if storageFailed { _ = persist() }
     kick()
   }
 
@@ -152,6 +286,7 @@ actor TVProgressOutbox {
     activeSessionID = nil
     authenticationFailure = nil
     knownRevisions.removeAll()
+    confirmedProgress.removeAll()
   }
 
   func noteBaseline(scope: TVProgressScope, progress: TVPlaybackProgress, sessionID: UUID? = nil) {
@@ -160,6 +295,7 @@ actor TVProgressOutbox {
     }
     let key = revisionKey(scope: scope, mediaID: progress.mediaId)
     knownRevisions[key] = max(knownRevisions[key] ?? 0, progress.revision)
+    rememberConfirmed(progress, scope: scope)
     guard
       let index = entries.firstIndex(where: { $0.scope == scope && $0.mediaID == progress.mediaId })
     else { return }
@@ -183,13 +319,19 @@ actor TVProgressOutbox {
       entries[index].latest = snapshot
       // The already-dispatched mutation is intentionally not replaced.
     } else {
-      guard entries.count < Self.capacity else { return false }
+      guard entries.count < Self.capacity else {
+        storageFailed = true
+        storageIssue = .capacity
+        notify(reason: .storageFailure, scope: scope, mediaID: mediaID)
+        return false
+      }
       let known = knownRevisions[revisionKey(scope: scope, mediaID: mediaID)]
       let revision = [known, baselineRevision].compactMap { $0 }.max()
       entries.append(
         TVProgressEntry(scope: scope, mediaID: mediaID, latest: snapshot, revision: revision))
     }
     guard persist() else { return false }
+    notify(reason: .enqueued, scope: scope, mediaID: mediaID, snapshot: snapshot)
     kick()
     return true
   }
@@ -200,13 +342,84 @@ actor TVProgressOutbox {
 
   func count(scope: TVProgressScope) -> Int { entries.filter { $0.scope == scope }.count }
 
+  /// A confirmed conflict must never become an automatic local resume point.
+  func latestPendingSnapshot(scope: TVProgressScope, mediaID: UUID) -> TVProgressSnapshot? {
+    entries.first { $0.scope == scope && $0.mediaID == mediaID && $0.state == .pending }?.latest
+  }
+
+  /// Resolve against revisions in one actor turn. An acknowledged local sample
+  /// never replaces a newer server revision, while an in-flight own sample stays usable.
+  func resumePosition(scope: TVProgressScope, server: TVPlaybackProgress) -> Int64 {
+    if let pending = latestPendingSnapshot(scope: scope, mediaID: server.mediaId) {
+      return pending.finished ? 0 : pending.position
+    }
+    let known = confirmedProgress[revisionKey(scope: scope, mediaID: server.mediaId)]
+    let newest = (known?.revision ?? -1) > server.revision ? known! : server
+    return TVPlayerPolicy.resumePosition(newest)
+  }
+
+  private func rememberConfirmed(_ progress: TVPlaybackProgress, scope: TVProgressScope) {
+    let key = revisionKey(scope: scope, mediaID: progress.mediaId)
+    guard progress.revision >= (confirmedProgress[key]?.revision ?? -1) else { return }
+    confirmedProgress[key] = progress
+    if confirmedProgress.count > 256,
+      let oldest = confirmedProgress.keys.first(where: { $0 != key })
+    {
+      confirmedProgress.removeValue(forKey: oldest)
+    }
+  }
+
+  func pendingSnapshots(scope: TVProgressScope) -> [UUID: TVProgressSnapshot] {
+    Dictionary(
+      uniqueKeysWithValues: entries.filter { $0.scope == scope && $0.state == .pending }
+        .map { ($0.mediaID, $0.latest) })
+  }
+
+  /// Register first, then read pendingSnapshots to avoid missing a concurrent
+  /// acknowledgement while building a view's initial local overlay.
+  func changes(scope: TVProgressScope) -> AsyncStream<TVProgressOutboxChange> {
+    let id = UUID()
+    let (stream, continuation) = AsyncStream<TVProgressOutboxChange>.makeStream(
+      bufferingPolicy: .bufferingNewest(64))
+    observers[id] = (scope, continuation)
+    continuation.onTermination = { [weak self] _ in
+      Task { await self?.removeObserver(id) }
+    }
+    return stream
+  }
+
+  /// Observe the independent outbox worker for at most two seconds. Cancellation
+  /// stops this wait immediately even if a transport ignores task cancellation.
+  func flush(
+    scope: TVProgressScope, mediaID: UUID, timeout: Duration = .seconds(2)
+  ) async -> TVProgressFlushResult {
+    let operation = generation
+    let deadline = ContinuousClock.now.advanced(by: min(.seconds(2), max(.zero, timeout)))
+    kick()
+    while true {
+      if Task.isCancelled { return .cancelled }
+      guard operation == generation, activeScope == scope else { return .inactive }
+      if storageFailed { return .storageFailure }
+      guard let entry = entries.first(where: { $0.scope == scope && $0.mediaID == mediaID }) else {
+        return .saved
+      }
+      if entry.state == .conflict { return .conflict }
+      if entry.state == .accessDenied { return .inactive }
+      let now = ContinuousClock.now
+      guard now < deadline else { return .pending }
+      do {
+        try await Task.sleep(for: min(.milliseconds(25), now.duration(to: deadline)))
+      } catch { return .cancelled }
+    }
+  }
+
   // Read-only diagnostic for deterministic logic tests; contains no secrets.
   func pendingMutation(scope: TVProgressScope, mediaID: UUID) -> TVProgressMutation? {
     entries.first { $0.scope == scope && $0.mediaID == mediaID }?.mutation
   }
 
   private func kick() {
-    guard worker == nil, !readFailed, client != nil, let activeScope,
+    guard worker == nil, !readFailed, !storageFailed, client != nil, let activeScope,
       entries.contains(where: { $0.scope == activeScope && $0.state == .pending })
     else { return }
     let operation = generation
@@ -236,9 +449,10 @@ actor TVProgressOutbox {
           entries[index].mutation = TVProgressMutation(
             mediaID: mediaID, mutationID: UUID(), expectedRevision: revision,
             snapshot: entries[index].latest)
-          // Durability precedes the first network attempt.
-          guard persist() else { break }
         }
+        // Durability precedes every attempt, including a retry after a local
+        // write failure. The uncertain mutation body is never regenerated.
+        guard persist() else { break }
         guard let index = entryIndex(scope: scope, mediaID: mediaID),
           let mutation = entries[index].mutation
         else { continue }
@@ -249,13 +463,21 @@ actor TVProgressOutbox {
         else { throw TVCoreError.invalidResponse }
         guard let index = entryIndex(scope: scope, mediaID: mediaID) else { continue }
         knownRevisions[revisionKey(scope: scope, mediaID: mediaID)] = result.revision
+        rememberConfirmed(result, scope: scope)
+        let beforeAcknowledgement = entries
         if entries[index].latest.id == mutation.snapshot.id {
           entries.remove(at: index)
         } else {
           entries[index].mutation = nil
           entries[index].revision = result.revision
         }
-        guard persist() else { break }
+        guard persist() else {
+          entries = beforeAcknowledgement
+          break
+        }
+        notify(
+          reason: .acknowledged, scope: scope, mediaID: mediaID,
+          snapshot: latestPendingSnapshot(scope: scope, mediaID: mediaID), progress: result)
         failures = 0
       } catch {
         guard operation == generation, !Task.isCancelled else { return }
@@ -263,11 +485,13 @@ actor TVProgressOutbox {
         if let api = error as? TVCoreError, api.isConflict {
           entries[index].state = .conflict
           _ = persist()
+          notify(reason: .stateChanged, scope: scope, mediaID: mediaID)
           continue
         }
         if let api = error as? TVCoreError, api.isAuthenticationFailure {
           entries[index].state = .accessDenied
           _ = persist()
+          notify(reason: .stateChanged, scope: scope, mediaID: mediaID)
           let callback = authenticationFailure
           deactivate()
           await callback?(api)
@@ -278,6 +502,7 @@ actor TVProgressOutbox {
         {
           entries[index].state = .unavailable
           _ = persist()
+          notify(reason: .stateChanged, scope: scope, mediaID: mediaID)
           continue
         }
         failures += 1
@@ -307,29 +532,74 @@ actor TVProgressOutbox {
 
   private func persist() -> Bool {
     guard !readFailed else { return false }
-    guard let storageURL else { return true }
     do {
-      let data = try JSONEncoder().encode(entries)
-      guard data.count <= Self.maximumBytes else { throw CocoaError(.fileWriteOutOfSpace) }
-      let directory = storageURL.deletingLastPathComponent()
-      try FileManager.default.createDirectory(
-        at: directory, withIntermediateDirectories: true,
-        attributes: [.posixPermissions: 0o700])
-      let directoryInfo = try directory.resourceValues(forKeys: [
-        .isDirectoryKey, .isSymbolicLinkKey,
-      ])
-      guard directoryInfo.isDirectory == true, directoryInfo.isSymbolicLink != true else {
-        throw CocoaError(.fileWriteNoPermission)
+      let data = try Self.encode(entries, legacyImported: legacyImported)
+      if let journal {
+        try journal.write(data)
+        guard try journal.read() == data else { throw CocoaError(.fileWriteUnknown) }
       }
-      try data.write(to: storageURL, options: .atomic)
-      try FileManager.default.setAttributes(
-        [.posixPermissions: 0o600], ofItemAtPath: storageURL.path)
       storageFailed = false
+      storageIssue = nil
       return true
     } catch {
       storageFailed = true
+      storageIssue = (error as? CocoaError)?.code == .fileWriteOutOfSpace ? .capacity : .write
+      for scope in Set(entries.map(\.scope)) {
+        notify(reason: .storageFailure, scope: scope, mediaID: nil)
+      }
       return false
     }
+  }
+
+  private func removeObserver(_ id: UUID) { observers.removeValue(forKey: id) }
+
+  private func notify(
+    reason: TVProgressOutboxChange.Reason, scope: TVProgressScope, mediaID: UUID?,
+    snapshot: TVProgressSnapshot? = nil, progress: TVPlaybackProgress? = nil
+  ) {
+    let change = TVProgressOutboxChange(
+      reason: reason, scope: scope, mediaID: mediaID, snapshot: snapshot, progress: progress,
+      state: mediaID.flatMap { state(scope: scope, mediaID: $0) }, storageFailed: storageFailed)
+    for (observedScope, continuation) in observers.values where observedScope == scope {
+      continuation.yield(change)
+    }
+  }
+
+  private static func encode(_ entries: [TVProgressEntry], legacyImported: Bool) throws -> Data {
+    let data = try JSONEncoder().encode(
+      TVProgressJournal(version: 1, entries: entries, legacyImported: legacyImported))
+    guard entries.count <= capacity, data.count <= maximumBytes else {
+      throw CocoaError(.fileWriteOutOfSpace)
+    }
+    return data
+  }
+
+  private static func decode(_ data: Data, maximumBytes limit: Int) throws -> TVProgressJournal {
+    guard !data.isEmpty, data.count <= limit else { throw CocoaError(.fileReadCorruptFile) }
+    let saved: TVProgressJournal
+    if let journal = try? JSONDecoder().decode(TVProgressJournal.self, from: data) {
+      guard journal.version == 1 else { throw CocoaError(.fileReadCorruptFile) }
+      saved = journal
+    } else {
+      saved = TVProgressJournal(
+        version: 1, entries: try JSONDecoder().decode([TVProgressEntry].self, from: data),
+        legacyImported: false)
+    }
+    guard saved.entries.count <= capacity,
+      saved.entries.allSatisfy({ entry in
+        entry.latest.isValid && (entry.revision.map { $0 >= 0 } ?? true)
+          && (entry.mutation.map {
+            $0.mediaID == entry.mediaID && $0.expectedRevision >= 0 && $0.snapshot.isValid
+          } ?? true)
+      }),
+      Set(
+        saved.entries.map {
+          "\($0.scope.serverID):\($0.scope.profileID):\($0.scope.fingerprint):\($0.mediaID)"
+        }
+      )
+      .count == saved.entries.count
+    else { throw CocoaError(.fileReadCorruptFile) }
+    return saved
   }
 
   private static func defaultStorageURL() -> URL? {

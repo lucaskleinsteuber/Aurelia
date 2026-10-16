@@ -2,7 +2,7 @@
   import Foundation
 
   enum TVUITestScenario: String, Sendable {
-    case library, profiles, delayed, offline, limitedTracks
+    case library, profiles, delayed, offline, limitedTracks, nextEpisode
     static var current: Self? {
       guard ProcessInfo.processInfo.arguments.contains("--aurelia-ui-testing") else { return nil }
       return ProcessInfo.processInfo.environment["AURELIA_TV_UI_SCENARIO"].flatMap(
@@ -117,6 +117,45 @@
   actor TVUITestTransport: TVHTTPTransport {
     let scenario: TVUITestScenario
     private var saved: [UUID: [String: Any]] = [:]
+    private var favorites = Set<UUID>()
+    private var hidden = Set<UUID>()
+    private var watched = Set<UUID>()
+    private var revision = 1
+    private func item(_ value: [String: Any]) -> [String: Any] {
+      var value = value
+      let id = UUID(uuidString: value["id"] as! String)!
+      value["isFavorite"] = favorites.contains(id)
+      value["continueWatchingHidden"] = hidden.contains(id)
+      if let progress = saved[id] {
+        value["progress"] = progress
+        value["watchState"] =
+          progress["isCompleted"] as? Bool == true
+          ? "completed"
+          : (progress["positionMilliseconds"] as? Int64 ?? 0) > 0 ? "inProgress" : "unplayed"
+      }
+      if watched.contains(id) {
+        value["watchState"] = "completed"
+        var state = TVUITestFixtures.progress(id: id, position: 0)
+        state["isCompleted"] = true
+        value["progress"] = state
+      }
+      return value
+    }
+    private func collection() -> [String: Any] {
+      [
+        "id": "00000000-0000-4000-8000-000000000030", "name": "Test Collection",
+        "items": [item(TVUITestFixtures.movie()), item(TVUITestFixtures.series())],
+      ]
+    }
+    private func watchState(id: UUID, scope: String, season: Int?) -> [String: Any] {
+      [
+        "mediaId": id.uuidString, "scope": scope,
+        "seasonNumber": season.map { $0 as Any } ?? NSNull(),
+        "watchState": watched.contains(id) ? "completed" : "unplayed",
+        "affectedCount": scope == "season" ? 8 : scope == "series" ? 16 : 1,
+        "stateToken": "fixture-\(revision)", "continueWatchingHidden": hidden.contains(id),
+      ]
+    }
     init(scenario: TVUITestScenario) { self.scenario = scenario }
 
     func execute(_ request: URLRequest, trust: TVTrustMode) async throws -> TVHTTPResponse {
@@ -124,6 +163,11 @@
         throw TVCoreError.invalidAddress
       }
       let path = url.path
+      let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      func parameter(_ key: String) -> String? { query.first { $0.name == key }?.value }
+      let payload =
+        request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        ?? [:]
       var status = 200
       let body: Any
       if path == "/api/v1/profiles" {
@@ -151,27 +195,106 @@
           return TVHTTPResponse(
             statusCode: 200, headers: [:], body: data, fingerprint: TVUITestFixtures.fingerprint)
         }
-      } else if path == "/api/v1/catalog/items" {
-        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        let kind = query.first { $0.name == "kind" }?.value ?? "movie"
-        let offset = Int(query.first { $0.name == "offset" }?.value ?? "0") ?? 0
-        let all = TVUITestFixtures.catalog(kind: kind)
+      } else if path == "/api/v1/home" {
         body = [
-          "items": Array(all.dropFirst(offset)), "offset": offset,
-          "limit": 60, "total": all.count, "revision": "fixture-1",
+          "continueWatching": hidden.contains(TVUITestFixtures.seriesID)
+            ? [] : [item(TVUITestFixtures.episode(season: 2, number: 2))],
+          "recentlyAdded": [item(TVUITestFixtures.movie()), item(TVUITestFixtures.series())],
+          "favorites": favorites.isEmpty ? [] : [item(TVUITestFixtures.movie())],
+          "collections": [collection()], "recommendationChangesAt": TVUITestFixtures.expiry,
         ]
+      } else if path == "/api/v1/catalog/collections" {
+        body = parameter("offset") == "0" ? [collection()] : []
+      } else if path == "/api/v1/sync/changes" {
+        try await Task.sleep(for: .seconds(1))
+        body = [
+          "cursor": revision, "resetRequired": false, "changedAreas": [], "changedMediaIds": [],
+          "generation": "fixture",
+        ]
+      } else if path == "/api/v1/catalog/items" || path == "/api/v1/catalog/search" {
+        let kind = parameter("kind")
+        let offset = Int(parameter("offset") ?? "0") ?? 0
+        let limit = Int(parameter("limit") ?? "60") ?? 60
+        var all =
+          (kind.map { TVUITestFixtures.catalog(kind: $0) }
+          ?? (TVUITestFixtures.catalog(kind: "movie") + TVUITestFixtures.catalog(kind: "series")))
+          .map(item)
+        if let term = parameter("query"), !term.isEmpty {
+          all = all.filter { ($0["title"] as? String ?? "").localizedCaseInsensitiveContains(term) }
+        }
+        if parameter("favorite") == "true" {
+          all = all.filter { $0["isFavorite"] as? Bool == true }
+        }
+        if let status = parameter("watchState") {
+          all = all.filter {
+            $0["watchState"] as? String == status
+              || ($0["id"] as? String == TVUITestFixtures.seriesID.uuidString
+                && status == "inProgress")
+          }
+        }
+        body = [
+          "items": Array(all.dropFirst(offset).prefix(limit)), "offset": offset,
+          "limit": limit, "total": all.count, "revision": "fixture-\(revision)",
+        ]
+      } else if path.hasSuffix("/summary") {
+        let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
+        body = item(
+          id == TVUITestFixtures.seriesID ? TVUITestFixtures.series() : TVUITestFixtures.movie())
       } else if path.hasPrefix("/api/v1/catalog/items/") {
         if scenario == .delayed { try await Task.sleep(for: .seconds(1.5)) }
         let id = UUID(uuidString: url.lastPathComponent)!
-        body = TVUITestFixtures.detail(id: id, offline: scenario == .offline)
+        var detail = TVUITestFixtures.detail(id: id, offline: scenario == .offline)
+        detail["item"] = item(detail["item"] as! [String: Any])
+        body = detail
+      } else if path.hasSuffix("/favorite") {
+        let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
+        if payload["isFavorite"] as? Bool == true {
+          favorites.insert(id)
+        } else {
+          favorites.remove(id)
+        }
+        revision += 1
+        body = favorites.contains(id)
+      } else if path.hasSuffix("/watch-state") || path.hasSuffix("/continue-watching") {
+        let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
+        let scope =
+          payload["scope"] as? String ?? parameter("scope")
+          ?? (id == TVUITestFixtures.seriesID ? "series" : "title")
+        let season = payload["seasonNumber"] as? Int ?? parameter("seasonNumber").flatMap(Int.init)
+        if request.httpMethod == "PUT" {
+          if path.hasSuffix("/continue-watching") {
+            if payload["isHidden"] as? Bool == true { hidden.insert(id) } else { hidden.remove(id) }
+          } else {
+            if payload["isWatched"] as? Bool == true {
+              watched.insert(id)
+            } else {
+              watched.remove(id)
+              saved[id] = TVUITestFixtures.progress(id: id, position: 0)
+            }
+          }
+          revision += 1
+        }
+        body = watchState(id: id, scope: scope, season: season)
       } else if path.hasSuffix("/playback-plan") {
         let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
+        let isSeries = id == TVUITestFixtures.seriesID
+        let selectedEpisode = (0...2).flatMap { season in
+          (1...8).map { TVUITestFixtures.episode(season: season, number: $0) }
+        }.first { $0["id"] as? String == id.uuidString }
+        let target =
+          isSeries
+          ? TVUITestFixtures.episode(season: 2, number: 2, offline: scenario == .offline)
+          : selectedEpisode ?? TVUITestFixtures.movie()
+        let regular = target["seasonNumber"] as? Int ?? 0 > 0
+        let number = target["episodeNumber"] as? Int ?? 8
+        let remaining =
+          regular && number < 8
+          ? ((number + 1)...8).map { TVUITestFixtures.episode(season: 2, number: $0) } : []
         body = [
-          "target": id == TVUITestFixtures.seriesID
-            ? TVUITestFixtures.episode(season: 2, number: 2, offline: scenario == .offline)
-            : TVUITestFixtures.movie(),
-          "seriesId": id == TVUITestFixtures.seriesID ? id.uuidString as Any : NSNull(),
-          "queue": [], "action": "resume", "continueWatchingEligible": true,
+          "target": item(target),
+          "seriesId": isSeries || selectedEpisode != nil
+            ? TVUITestFixtures.seriesID.uuidString as Any : NSNull(),
+          "queue": remaining.map(item), "action": "resume", "continueWatchingEligible": true,
         ]
       } else if path.hasSuffix("/playback") && request.httpMethod == "POST" {
         let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
@@ -180,7 +303,8 @@
           "streamPath": "/api/v1/streams/" + String(repeating: "S", count: 43),
           "contentType": "video/mp4", "contentLength": 1_000_000,
           "expiresAt": TVUITestFixtures.expiry,
-          "progress": saved[id] ?? TVUITestFixtures.progress(id: id),
+          "progress": saved[id]
+            ?? TVUITestFixtures.progress(id: id, position: scenario == .nextEpisode ? 0 : 90_000),
         ]
       } else if path.hasSuffix("/progress") {
         let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
@@ -192,6 +316,7 @@
           saved[id] = TVUITestFixtures.progress(
             id: id, position: position,
             revision: revision + 1, mutation: payload["clientMutationId"] as? String)
+          saved[id]?["isCompleted"] = payload["isFinished"] as? Bool ?? false
         }
         body = saved[id] ?? TVUITestFixtures.progress(id: id)
       } else if request.httpMethod == "DELETE" || path == "/api/v1/profile/end" {
@@ -202,7 +327,7 @@
       }
       return TVHTTPResponse(
         statusCode: status, headers: ["Content-Type": "application/json"],
-        body: try JSONSerialization.data(withJSONObject: body),
+        body: try JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed]),
         fingerprint: TVUITestFixtures.fingerprint)
     }
   }

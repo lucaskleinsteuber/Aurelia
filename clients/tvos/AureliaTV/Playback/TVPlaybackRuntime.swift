@@ -1,11 +1,6 @@
 import Foundation
 import UIKit
 
-struct TVPlaybackTrack: Identifiable, Equatable {
-  let id: Int32
-  let title: String
-}
-
 enum TVVideoTerminal: Equatable { case ended, failed }
 
 @MainActor
@@ -19,10 +14,16 @@ protocol TVPlaybackEngine: AnyObject {
   var position: Int64 { get }
   var duration: Int64 { get }
   var hasObservedPlayback: Bool { get }
+  var progressPosition: Int64? { get }
+  var playbackRate: Double { get set }
+  var audioSelectionPending: Bool { get }
+  var subtitleSelectionPending: Bool { get }
   var audioTracks: [TVPlaybackTrack] { get }
   var subtitleTracks: [TVPlaybackTrack] { get }
   var audioTrackID: Int32 { get }
   var subtitleTrackID: Int32 { get }
+  func applyPreferences(_ preferences: TVPlaybackPreferences)
+  func sample()
   func attach(to view: UIView)
   func load(url: URL, resumeAt: Int64)
   func play()

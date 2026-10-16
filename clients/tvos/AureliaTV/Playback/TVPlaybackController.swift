@@ -5,12 +5,18 @@ import UIKit
 
 @MainActor
 final class TVPlaybackController: ObservableObject {
-  enum TrackMenu: Equatable { case audio, subtitles }
+  enum TrackMenu: Equatable { case audio, subtitles, rate, sleep }
 
   let engine: any TVPlaybackEngine
   private let runtime: TVPlaybackRuntime
   @Published private(set) var isScrubbing = false
-  let title: String
+  @Published private(set) var title: String
+  @Published private(set) var playbackRate: Double = 1
+  @Published private(set) var sleepTimer: TVSleepTimer = .off
+  @Published private(set) var audioSelectionPending = false
+  @Published private(set) var subtitleSelectionPending = false
+  @Published private(set) var isClosing = false
+  @Published private(set) var canRetry = true
   @Published private(set) var isPlaying = false
   @Published private(set) var isLoading = true
   @Published private(set) var position: Int64 = 0
@@ -30,7 +36,18 @@ final class TVPlaybackController: ObservableObject {
   private let api: TVAPIClient
   private let connection: TVStoredConnection
   private let session: TVProfileSession
-  private let mediaID: UUID
+  private var mediaID: UUID
+  private var queue: [TVCatalogItem]
+  private var preferences: TVPlaybackPreferences
+  private let preferencesStore: TVPlaybackPreferencesStore
+  private var sleepTask: Task<Void, Never>?
+  private var advanceTask: Task<Void, Never>?
+  private var watchdogTask: Task<Void, Never>?
+  private var audioSelectionTask: Task<Void, Never>?
+  private var subtitleSelectionTask: Task<Void, Never>?
+  private var audioSelectionID = UUID()
+  private var subtitleSelectionID = UUID()
+  private var watchdog = TVPlaybackWatchdog()
   private let scope: TVProgressScope
   private let onClose: @MainActor () -> Void
   private let onSessionFailure: @MainActor (Error) -> Void
@@ -56,12 +73,21 @@ final class TVPlaybackController: ObservableObject {
     connection: TVStoredConnection, session: TVProfileSession, mediaID: UUID, title: String,
     outbox: TVProgressOutbox = .shared,
     api: TVAPIClient? = nil, runtime: TVPlaybackRuntime? = nil,
+    queue: [TVCatalogItem] = [], preferences: TVPlaybackPreferences? = nil,
+    preferencesStore: TVPlaybackPreferencesStore? = nil,
     onClose: @escaping @MainActor () -> Void,
     onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in }
   ) {
     self.connection = connection
     self.session = session
     self.mediaID = mediaID
+    self.queue = queue
+    let store = preferencesStore ?? .shared
+    self.preferencesStore = store
+    self.preferences =
+      (preferences
+      ?? store.preferences(
+        serverID: connection.serverID, profileID: session.user.id)).normalized
     self.title = title
     self.outbox = outbox
     self.onClose = onClose
@@ -70,6 +96,8 @@ final class TVPlaybackController: ObservableObject {
     let selectedRuntime = runtime ?? .live()
     self.runtime = selectedRuntime
     engine = selectedRuntime.engine
+    playbackRate = self.preferences.defaultPlaybackRate
+    engine.applyPreferences(self.preferences)
     scope = TVProgressScope(connection: connection, session: session)
     engine.onUpdate = { [weak self] in self?.updateFromEngine() }
     engine.onTerminal = { [weak self] terminal in self?.engineTerminated(terminal) }
@@ -103,6 +131,7 @@ final class TVPlaybackController: ObservableObject {
 
   func seek(by offset: Int64) {
     guard canSeek, !closed else { return }
+    watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
     engine.seek(
       to: TVPlayerPolicy.seekPosition(current: position, offset: offset, duration: duration))
     userInteracted()
@@ -110,21 +139,115 @@ final class TVPlaybackController: ObservableObject {
 
   func seek(to milliseconds: Int64) {
     guard canSeek, !closed else { return }
+    watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
     engine.seek(
       to: TVPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration))
     userInteracted()
   }
 
   func selectAudio(_ track: Int32) {
+    guard !closed, let selected = audioTracks.first(where: { $0.id == track }) else { return }
+    audioSelectionTask?.cancel()
+    let request = UUID()
+    audioSelectionID = request
     engine.selectAudioTrack(track)
+    audioSelectionTask = confirmSelection(
+      track: track, preference: selected.preference, audio: true, request: request)
     trackMenu = nil
     userInteracted()
   }
 
   func selectSubtitle(_ track: Int32) {
+    guard !closed, track == -1 || subtitleTracks.contains(where: { $0.id == track }) else { return }
+    subtitleSelectionTask?.cancel()
+    let request = UUID()
+    subtitleSelectionID = request
+    let preference = subtitleTracks.first(where: { $0.id == track })?.preference
     engine.selectSubtitleTrack(track)
+    subtitleSelectionTask = confirmSelection(
+      track: track, preference: preference, audio: false, request: request)
     trackMenu = nil
     userInteracted()
+  }
+
+  private func confirmSelection(
+    track: Int32, preference: TVPlaybackTrackPreference?, audio: Bool, request: UUID
+  ) -> Task<Void, Never> {
+    Task { [weak self] in
+      let deadline = ContinuousClock.now.advanced(by: .milliseconds(2_500))
+      while !Task.isCancelled {
+        guard let self, !closed,
+          request == (audio ? audioSelectionID : subtitleSelectionID)
+        else { return }
+        engine.sample()
+        guard !closed else { return }
+        let actual = audio ? engine.audioTrackID : engine.subtitleTrackID
+        let pending = audio ? engine.audioSelectionPending : engine.subtitleSelectionPending
+        if actual == track, !pending {
+          if audio {
+            preferences.preferredAudioTrack = preference
+          } else {
+            preferences.preferredSubtitleTrack = preference
+          }
+          persistPreferences()
+          return
+        }
+        if ContinuousClock.now >= deadline {
+          progressMessage =
+            audio
+            ? "The audio track could not be changed. Try another track."
+            : "The subtitle track could not be changed. Try another track."
+          return
+        }
+        do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+      }
+    }
+  }
+
+  private func cancelTrackSelections() {
+    audioSelectionTask?.cancel()
+    subtitleSelectionTask?.cancel()
+    audioSelectionTask = nil
+    subtitleSelectionTask = nil
+    audioSelectionID = UUID()
+    subtitleSelectionID = UUID()
+  }
+
+  var seekInterval: Int64 { Int64(preferences.seekInterval) * 1_000 }
+  var hasNextEpisode: Bool { !queue.isEmpty }
+
+  func setPlaybackRate(_ rate: Double) {
+    guard TVPlaybackPreferences.supportedRates.contains(rate), !closed else { return }
+    engine.playbackRate = rate
+    playbackRate = engine.playbackRate
+    trackMenu = nil
+    userInteracted()
+  }
+
+  func setSleepTimer(_ timer: TVSleepTimer) {
+    sleepTask?.cancel()
+    sleepTimer = timer
+    trackMenu = nil
+    if case .minutes(let minutes) = timer {
+      sleepTask = Task { [weak self] in
+        do { try await Task.sleep(for: .seconds(Double(minutes) * 60)) } catch { return }
+        guard let self, !closed else { return }
+        wantsPlayback = false
+        engine.pause()
+        sleepTimer = .off
+        await saveProgress(finished: false)
+        userInteracted()
+      }
+    }
+    userInteracted()
+  }
+
+  private func persistPreferences() {
+    if !preferencesStore.save(
+      preferences, serverID: connection.serverID, profileID: session.user.id)
+    {
+      progressMessage = "Playback preferences could not be saved on this Apple TV."
+    }
   }
 
   func userInteracted() {
@@ -132,8 +255,9 @@ final class TVPlaybackController: ObservableObject {
     controlsVisible = true
     controlsTask?.cancel()
     guard mayHideControls else { return }
+    let delay = preferences.controlsDelay
     controlsTask = Task { [weak self] in
-      do { try await Task.sleep(for: .seconds(TVPlayerPolicy.controlsDelay)) } catch { return }
+      do { try await Task.sleep(for: .seconds(delay)) } catch { return }
       guard let self, mayHideControls, !closed else { return }
       controlsVisible = false
     }
@@ -154,7 +278,7 @@ final class TVPlaybackController: ObservableObject {
   }
 
   func retry() {
-    guard !closed else { return }
+    guard !closed, canRetry else { return }
     recoveryBudget = TVPlaybackRecoveryBudget()
     wantsPlayback = true
     recover(message: "Reconnecting…")
@@ -172,8 +296,11 @@ final class TVPlaybackController: ObservableObject {
   func close() {
     guard !closed else { return }
     // Capture while the engine still owns the input. Queueing only waits for
-    // its private atomic file write, never for a network flush.
+    // its private local journal write, never for a network flush.
     let snapshot = currentSnapshot(finished: finished)
+    // Sampling may synchronously observe EOF and close this player.
+    guard !closed else { return }
+    isClosing = true
     closed = true
     generation = UUID()
     stopResources()
@@ -199,6 +326,7 @@ final class TVPlaybackController: ObservableObject {
 
   private func open(resumeAt: Int64?, operation: UUID) async {
     isLoading = true
+    canRetry = true
     errorMessage = nil
     progressMessage = nil
     controlsVisible = true
@@ -209,6 +337,8 @@ final class TVPlaybackController: ObservableObject {
       if let id = unclaimedTicketID { Task { [api] in try? await api.revokeTicket(id: id) } }
     }
     do {
+      _ = await outbox.flush(scope: scope, mediaID: mediaID, timeout: .seconds(2))
+      guard !closed, operation == generation, !Task.isCancelled else { return }
       let created = try await api.createTicket(mediaID: mediaID)
       unclaimedTicketID = created.id
       guard !closed, operation == generation, !Task.isCancelled else { return }
@@ -241,8 +371,18 @@ final class TVPlaybackController: ObservableObject {
       }
       transportFailed = false
       finished = false
-      engine.load(
-        url: localURL, resumeAt: resumeAt ?? TVPlayerPolicy.resumePosition(created.progress))
+      let resolvedPosition = await outbox.resumePosition(scope: scope, server: created.progress)
+      let conflict = await outbox.state(scope: scope, mediaID: mediaID) == .conflict
+      guard !closed, operation == generation, !Task.isCancelled else { return }
+      let resumePosition = preferences.automaticResume ? resolvedPosition : 0
+      if conflict {
+        progressMessage = "Progress changed on another device. Its newer position has been kept."
+      }
+      let desiredRate = playbackRate
+      engine.applyPreferences(preferences)
+      engine.playbackRate = desiredRate
+      engine.load(url: localURL, resumeAt: resumeAt ?? resumePosition)
+      startWatchdog(operation: operation)
       scheduleRenewal(created, operation: operation)
       userInteracted()
     } catch {
@@ -261,20 +401,26 @@ final class TVPlaybackController: ObservableObject {
   private func updateFromEngine() {
     guard !closed else { return }
     let wasPlaying = isPlaying
-    isPlaying = engine.isPlaying
-    isLoading = engine.isLoading
-    position = engine.position
-    duration = engine.duration > 0 ? engine.duration : (ticket?.progress.durationMilliseconds ?? 0)
-    canSeek = engine.isSeekable && duration > 0
-    audioTracks = engine.audioTracks
-    subtitleTracks = engine.subtitleTracks
-    selectedAudio = engine.audioTrackID
-    selectedSubtitle = engine.subtitleTrackID
+    let wasLoading = isLoading
+    assignIfChanged(&isPlaying, engine.isPlaying)
+    assignIfChanged(&isLoading, engine.isLoading)
+    assignIfChanged(&position, engine.position)
+    assignIfChanged(
+      &duration,
+      engine.duration > 0 ? engine.duration : (ticket?.progress.durationMilliseconds ?? 0))
+    assignIfChanged(&canSeek, engine.isSeekable && duration > 0)
+    assignIfChanged(&audioTracks, engine.audioTracks)
+    assignIfChanged(&subtitleTracks, engine.subtitleTracks)
+    assignIfChanged(&selectedAudio, engine.audioTrackID)
+    assignIfChanged(&selectedSubtitle, engine.subtitleTrackID)
+    assignIfChanged(&audioSelectionPending, engine.audioSelectionPending)
+    assignIfChanged(&subtitleSelectionPending, engine.subtitleSelectionPending)
+    assignIfChanged(&playbackRate, engine.playbackRate)
     if !wantsPlayback, isPlaying {
       engine.pause()
       return
     }
-    if wasPlaying != isPlaying { userInteracted() }
+    if wasPlaying != isPlaying || wasLoading != isLoading { userInteracted() }
     if !isPlaying { controlsVisible = true }
   }
 
@@ -287,7 +433,13 @@ final class TVPlaybackController: ObservableObject {
         observedPlayback: engine.hasObservedPlayback, transportFailed: transportFailed)
     {
       finished = true
-      close()
+      if sleepTimer != .endOfEpisode, preferences.automaticallyPlayNextEpisode,
+        let next = queue.first
+      {
+        advanceTask = Task { [weak self] in await self?.advance(to: next) }
+      } else {
+        close()
+      }
     } else {
       recover(message: "The stream was interrupted. Reconnecting…")
     }
@@ -319,8 +471,11 @@ final class TVPlaybackController: ObservableObject {
     }
     let resume = max(position, engine.position)
     let snapshot = currentSnapshot(finished: false)
+    guard !closed else { return }
     openingTask?.cancel()
     renewalTask?.cancel()
+    watchdogTask?.cancel()
+    cancelTrackSelections()
     relayGeneration = UUID()
     engine.stop()
     relay?.stop()
@@ -341,6 +496,29 @@ final class TVPlaybackController: ObservableObject {
       do { try await Task.sleep(for: .seconds(delay)) } catch { return }
       guard !closed, operation == generation else { return }
       await open(resumeAt: resume, operation: operation)
+    }
+  }
+
+  private func startWatchdog(operation: UUID) {
+    watchdogTask?.cancel()
+    watchdog.reset(at: ProcessInfo.processInfo.systemUptime)
+    watchdogTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        guard let self, !closed, !finished, operation == generation, errorMessage == nil else {
+          return
+        }
+        engine.sample()
+        guard !closed, !finished, operation == generation else { return }
+        if watchdog.shouldRecover(
+          progressPosition: engine.progressPosition, wantsPlayback: wantsPlayback,
+          interacting: trackMenu != nil || isScrubbing,
+          at: ProcessInfo.processInfo.systemUptime)
+        {
+          recover(message: "The stream stopped responding. Reconnecting…")
+          return
+        }
+      }
     }
   }
 
@@ -378,17 +556,54 @@ final class TVPlaybackController: ObservableObject {
   }
 
   private func currentSnapshot(finished: Bool) -> TVProgressSnapshot? {
-    guard engine.isActive else { return nil }
-    let observed = engine.hasObservedPlayback
-    let actualPosition = max(0, engine.position)
+    guard engine.isActive || finished else { return nil }
+    engine.sample()
+    guard let actualPosition = engine.progressPosition else { return nil }
     let knownDuration = max(engine.duration, duration)
-    guard observed, knownDuration > 0, actualPosition > 0 else { return nil }
+    guard knownDuration > 0, actualPosition > 0 else { return nil }
     return TVProgressSnapshot(
-      position: min(actualPosition, knownDuration), duration: knownDuration, finished: finished)
+      position: min(actualPosition, knownDuration), duration: knownDuration,
+      finished: finished || self.finished)
+  }
+
+  private func assignIfChanged<Value: Equatable>(_ value: inout Value, _ updated: Value) {
+    if value != updated { value = updated }
+  }
+
+  private func advance(to next: TVCatalogItem) async {
+    guard !closed else { return }
+    await saveProgress(finished: true)
+    guard !closed, !Task.isCancelled else { return }
+    _ = await outbox.flush(scope: scope, mediaID: mediaID, timeout: .seconds(2))
+    guard !closed, !Task.isCancelled else { return }
+    guard next.isPlayable else {
+      fail(next.availabilityMessage ?? "The next episode is unavailable.", canRetry: false)
+      return
+    }
+    renewalTask?.cancel()
+    watchdogTask?.cancel()
+    cancelTrackSelections()
+    relayGeneration = UUID()
+    engine.stop()
+    relay?.stop()
+    relay = nil
+    if let id = ticket?.id { Task { [api] in try? await api.revokeTicket(id: id) } }
+    ticket = nil
+    queue.removeFirst()
+    mediaID = next.id
+    title = next.parentTitle.map { "\($0) · \(next.episodeLabel ?? next.title)" } ?? next.title
+    baselineRevision = nil
+    position = 0
+    duration = 0
+    finished = false
+    isScrubbing = false
+    recoveryBudget = TVPlaybackRecoveryBudget()
+    generation = UUID()
+    await open(resumeAt: nil, operation: generation)
   }
 
   private func saveProgress(finished: Bool) async {
-    guard !closed, let snapshot = currentSnapshot(finished: finished) else { return }
+    guard !closed, let snapshot = currentSnapshot(finished: finished), !closed else { return }
     let saved = await outbox.enqueue(
       scope: scope, mediaID: mediaID, snapshot: snapshot,
       baselineRevision: baselineRevision, sessionID: session.sessionId)
@@ -411,8 +626,10 @@ final class TVPlaybackController: ObservableObject {
     }
   }
 
-  private func fail(_ message: String) {
+  private func fail(_ message: String, canRetry: Bool = true) {
     let snapshot = currentSnapshot(finished: false)
+    guard !closed else { return }
+    self.canRetry = canRetry
     if let snapshot {
       Task { [outbox, scope, mediaID, baselineRevision, session] in
         _ = await outbox.enqueue(
@@ -422,6 +639,8 @@ final class TVPlaybackController: ObservableObject {
     }
     openingTask?.cancel()
     renewalTask?.cancel()
+    watchdogTask?.cancel()
+    cancelTrackSelections()
     relayGeneration = UUID()
     engine.stop()
     relay?.stop()
@@ -460,6 +679,10 @@ final class TVPlaybackController: ObservableObject {
   private func stopResources() {
     openingTask?.cancel()
     renewalTask?.cancel()
+    sleepTask?.cancel()
+    advanceTask?.cancel()
+    watchdogTask?.cancel()
+    cancelTrackSelections()
     progressTask?.cancel()
     controlsTask?.cancel()
     relayGeneration = UUID()

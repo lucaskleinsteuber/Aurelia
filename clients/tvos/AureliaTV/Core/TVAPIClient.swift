@@ -152,6 +152,102 @@ struct TVAPIClient: Sendable {
     return page
   }
 
+  func browsePage(
+    query: TVBrowseQuery, search: String = "", offset: Int = 0,
+    limit: Int = 60, revision: String? = nil
+  ) async throws -> TVPage<TVCatalogItem> {
+    guard offset >= 0, (1...200).contains(limit) else { throw TVCoreError.invalidResponse }
+    var values = try query.queryItems(search: search)
+    values.append(URLQueryItem(name: "offset", value: String(offset)))
+    values.append(URLQueryItem(name: "limit", value: String(limit)))
+    if let revision { values.append(URLQueryItem(name: "revision", value: revision)) }
+    let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    let data = try await send(
+      term.isEmpty ? "/api/v1/catalog/items" : "/api/v1/catalog/search", query: values)
+    let page = try Self.decode(TVPage<TVCatalogItem>.self, data: data)
+    guard page.offset == offset, page.limit == limit, page.total >= offset,
+      page.items.count <= min(limit, page.total - offset),
+      !page.items.isEmpty || page.total == offset,
+      Set(page.items.map(\.id)).count == page.items.count,
+      page.items.allSatisfy({
+        query.kind == nil
+          ? (term.isEmpty ? [.movie, .series] : [.movie, .series, .episode]).contains($0.kind)
+          : $0.kind == query.kind
+      }),
+      revision == nil || revision == page.revision
+    else { throw TVCoreError.invalidResponse }
+    return page
+  }
+
+  func home() async throws -> TVHome { try await get("/api/v1/home") }
+  func collections(offset: Int = 0, limit: Int = 60) async throws -> [TVCollection] {
+    guard offset >= 0, (1...200).contains(limit) else { throw TVCoreError.invalidResponse }
+    let data = try await send(
+      "/api/v1/catalog/collections",
+      query: [
+        URLQueryItem(name: "offset", value: String(offset)),
+        URLQueryItem(name: "limit", value: String(limit)),
+      ])
+    let values = try Self.decode([TVCollection].self, data: data)
+    guard values.count <= limit, Set(values.map(\.id)).count == values.count else {
+      throw TVCoreError.invalidResponse
+    }
+    return values
+  }
+  func summary(id: UUID) async throws -> TVCatalogItem {
+    let item: TVCatalogItem = try await get("/api/v1/catalog/items/\(id.uuidString)/summary")
+    guard item.id == id else { throw TVCoreError.invalidResponse }
+    return item
+  }
+  func setFavorite(mediaID: UUID, isFavorite: Bool) async throws -> Bool {
+    struct Payload: Encodable { let isFavorite: Bool }
+    let data = try await send(
+      "/api/v1/media/\(mediaID.uuidString)/favorite", method: "PUT",
+      body: JSONEncoder().encode(Payload(isFavorite: isFavorite)))
+    return try Self.decode(Bool.self, data: data)
+  }
+  func watchState(mediaID: UUID, scope: TVWatchScope = .title, season: Int? = nil) async throws
+    -> TVWatchState
+  {
+    var query = [URLQueryItem(name: "scope", value: scope.rawValue)]
+    if let season { query.append(URLQueryItem(name: "seasonNumber", value: String(season))) }
+    let data = try await send("/api/v1/media/\(mediaID.uuidString)/watch-state", query: query)
+    let state = try Self.decode(TVWatchState.self, data: data)
+    try state.validate(mediaID: mediaID, scope: scope, season: season)
+    return state
+  }
+  func setWatchState(mediaID: UUID, request: TVSetWatchState) async throws -> TVWatchState {
+    let data = try await send(
+      "/api/v1/media/\(mediaID.uuidString)/watch-state", method: "PUT",
+      body: JSONEncoder().encode(request))
+    let state = try Self.decode(TVWatchState.self, data: data)
+    try state.validate(mediaID: mediaID, scope: request.scope, season: request.seasonNumber)
+    return state
+  }
+  func setContinueWatchingHidden(mediaID: UUID, request: TVSetContinueWatching) async throws
+    -> TVWatchState
+  {
+    let data = try await send(
+      "/api/v1/media/\(mediaID.uuidString)/continue-watching", method: "PUT",
+      body: JSONEncoder().encode(request))
+    let state = try Self.decode(TVWatchState.self, data: data)
+    guard state.mediaId == mediaID, state.continueWatchingHidden == request.isHidden,
+      !state.stateToken.isEmpty
+    else { throw TVCoreError.invalidResponse }
+    return state
+  }
+  func syncChanges(after cursor: Int64, generation: String?) async throws -> TVSyncChanges {
+    var values = [
+      URLQueryItem(name: "after", value: String(cursor)),
+      URLQueryItem(name: "waitSeconds", value: "15"),
+    ]
+    if let generation { values.append(URLQueryItem(name: "generation", value: generation)) }
+    let data = try await send("/api/v1/sync/changes", query: values)
+    let response = try Self.decode(TVSyncChanges.self, data: data)
+    guard response.cursor >= 0 else { throw TVCoreError.invalidResponse }
+    return response
+  }
+
   func detail(id: UUID) async throws -> TVCatalogDetail {
     let value: TVCatalogDetail = try await get("/api/v1/catalog/items/\(id.uuidString)")
     guard value.item.id == id, value.metadata.mediaId == id,

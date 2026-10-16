@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum TVLibraryTab: Hashable { case movies, shows, profile }
+private enum TVLibraryTab: Hashable { case home, movies, shows, search, profile }
 
 enum TVDesign {
   static let canvas = Color(red: 32 / 255, green: 35 / 255, blue: 38 / 255)
@@ -9,7 +9,7 @@ enum TVDesign {
 
 struct TVRootView: View {
   @EnvironmentObject private var model: TVAppModel
-  @State private var tab: TVLibraryTab = .movies
+  @State private var tab: TVLibraryTab = .home
 
   var body: some View {
     Group {
@@ -20,11 +20,16 @@ struct TVRootView: View {
       case .profiles: TVProfilesView()
       case .library:
         TabView(selection: $tab) {
+          NavigationStack { TVHomeView() }.tabItem { Label("Home", systemImage: "house.fill") }.tag(
+            TVLibraryTab.home)
           NavigationStack { TVLibraryGrid(listing: model.movies, title: "Movies") }
             .tabItem { Label("Movies", systemImage: "film") }.tag(TVLibraryTab.movies)
           NavigationStack { TVLibraryGrid(listing: model.shows, title: "TV Shows") }
             .tabItem { Label("TV Shows", systemImage: "tv") }.tag(TVLibraryTab.shows)
-          TVConnectionMenu()
+          NavigationStack { TVBrowseDestination(section: .search) }.tabItem {
+            Label("Search", systemImage: "magnifyingglass")
+          }.tag(TVLibraryTab.search)
+          NavigationStack { TVConnectionMenu() }
             .tabItem {
               Label(model.session?.user.username ?? "Profile", systemImage: "person.crop.circle")
             }
@@ -34,7 +39,17 @@ struct TVRootView: View {
     }
     .background(TVDesign.canvas.ignoresSafeArea())
     .buttonStyle(TVButtonStyle())
-    .onChange(of: model.session?.sessionId) { _, _ in tab = .movies }
+    .onChange(of: model.session?.sessionId) { _, _ in tab = .home }
+    .alert(
+      "Playback Progress",
+      isPresented: Binding(
+        get: { model.progressWarning != nil }, set: { if !$0 { model.progressWarning = nil } }
+      )
+    ) {
+      Button("OK") { model.progressWarning = nil }
+    } message: {
+      Text(model.progressWarning ?? "")
+    }
   }
 }
 
@@ -251,6 +266,8 @@ struct TVConnectionMenu: View {
         .secondary)
       Text(model.session?.user.username ?? "Profile").font(.largeTitle.bold())
       Text(model.connection?.name ?? "Aurelia Server").foregroundStyle(.secondary)
+      NavigationLink("Playback Settings") { TVPlaybackSettingsView() }.accessibilityIdentifier(
+        "profile-playback-settings")
       Button("Switch Profile") { Task { await model.switchProfile() } }
       Button("Disconnect Apple TV", role: .destructive) { confirmingDisconnect = true }
       Text(

@@ -18,8 +18,23 @@ final class TVAppModel: ObservableObject {
   let browser = TVBonjourBrowser()
   let movies = TVLibraryListing(kind: .movie)
   let shows = TVLibraryListing(kind: .series)
-  let images = NSCache<NSString, NSData>()
-  var playerPresented = false
+  let artwork = TVArtworkPipeline()
+  @Published var progressWarning: String?
+  @Published private(set) var home: TVHome?
+  @Published private(set) var homeLoading = false
+  @Published private(set) var homeError: String?
+  @Published private(set) var libraryRefresh = UUID()
+  @Published private(set) var pendingProgress: [UUID: TVProgressSnapshot] = [:]
+  @Published private(set) var acknowledgedProgress: [UUID: TVPlaybackProgress] = [:]
+  @Published private var mutationSummaries: [UUID: TVCatalogItem] = [:]
+  private var syncTask: Task<Void, Never>?
+  private var progressObserver: Task<Void, Never>?
+  private var refreshTask: Task<Void, Never>?
+  private var deferredRefresh = false
+  private var homeRequest = UUID()
+  var playerPresented = false {
+    didSet { if !playerPresented && deferredRefresh { scheduleLibraryRefresh() } }
+  }
   private let credentials = TVCredentialStore()
   let environment = TVAppEnvironment.current()
   private var generation = UUID()
@@ -34,7 +49,8 @@ final class TVAppModel: ObservableObject {
     return makeClient(connection: connection, session: session)
   }
 
-  init() { images.totalCostLimit = 64 * 1024 * 1024 }
+  var browsePreferences: TVBrowsePreferenceStore { environment.browsePreferences }
+  init() {}
 
   func start() async {
     guard !started else { return }
@@ -343,7 +359,7 @@ final class TVAppModel: ObservableObject {
 
   func enterForeground() {
     isForeground = true
-    detailRefresh = UUID()
+    scheduleLibraryRefresh()
     if phase == .connection { startDiscovery() }
     if phase == .profiles, selectedProfile == nil { Task { await refreshProfiles() } }
     if let session, let date = TVServerDate.parse(session.expiresAt), date <= Date() {
@@ -354,8 +370,19 @@ final class TVAppModel: ObservableObject {
   }
 
   func updateSummary(_ item: TVCatalogItem) {
+    mutationSummaries[item.id] = nil
     movies.update(item)
     shows.update(item)
+  }
+
+  func applyMutationSummary(_ item: TVCatalogItem) {
+    updateSummary(item)
+    mutationSummaries[item.id] = item
+    if mutationSummaries.count > 256,
+      let oldest = mutationSummaries.keys.first(where: { $0 != item.id })
+    {
+      mutationSummaries.removeValue(forKey: oldest)
+    }
   }
 
   func makeClient(connection: TVStoredConnection, session: TVProfileSession? = nil) -> TVAPIClient {
@@ -469,12 +496,157 @@ final class TVAppModel: ObservableObject {
     profiles = []
     movies.clear()
     shows.clear()
-    images.removeAllObjects()
+    home = nil
+    homeError = nil
+    homeLoading = false
+    homeRequest = UUID()
+    progressWarning = nil
+    pendingProgress.removeAll()
+    acknowledgedProgress.removeAll()
+    mutationSummaries.removeAll()
+    syncTask?.cancel()
+    syncTask = nil
+    progressObserver?.cancel()
+    progressObserver = nil
+    refreshTask?.cancel()
+    refreshTask = nil
+    deferredRefresh = false
+    Task { await artwork.clear() }
     playerPresented = false
     deactivateProgress()
   }
 
+  func overlay(_ original: TVCatalogItem) -> TVCatalogItem {
+    let item = mutationSummaries[original.id] ?? original
+    if let pending = pendingProgress[item.id] {
+      return item.replacing(
+        progress: TVPlaybackProgress(
+          mediaId: item.id, positionMilliseconds: pending.position,
+          durationMilliseconds: pending.duration, isCompleted: pending.finished,
+          lastPlayedAt: item.progress?.lastPlayedAt, updatedAt: nil,
+          revision: item.progress?.revision ?? 0, lastMutationId: nil))
+    }
+    if let progress = acknowledgedProgress[item.id],
+      progress.revision >= (item.progress?.revision ?? 0)
+    {
+      return item.replacing(progress: progress)
+    }
+    return item
+  }
+
+  func loadHome() async {
+    guard let api = client, let sessionID = session?.sessionId else { return }
+    let request = UUID()
+    homeRequest = request
+    homeLoading = true
+    defer { if homeRequest == request { homeLoading = false } }
+    do {
+      let value = try await api.home()
+      guard !Task.isCancelled, session?.sessionId == sessionID, homeRequest == request else {
+        return
+      }
+      let refreshed = value.continueWatching + value.favorites + value.recentlyAdded
+      for item in refreshed { mutationSummaries[item.id] = nil }
+      if let item = value.recommendation { mutationSummaries[item.id] = nil }
+      home = value
+      homeError = nil
+    } catch {
+      guard !Task.isCancelled, session?.sessionId == sessionID, homeRequest == request else {
+        return
+      }
+      homeError = error.localizedDescription
+      handleSessionFailure(error)
+    }
+  }
+
+  func scheduleLibraryRefresh() {
+    deferredRefresh = true
+    guard !playerPresented, refreshTask == nil else { return }
+    let sessionID = session?.sessionId
+    refreshTask = Task { [weak self] in
+      do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+      guard let self else { return }
+      refreshTask = nil
+      guard session?.sessionId == sessionID, !playerPresented else { return }
+      deferredRefresh = false
+      libraryRefresh = UUID()
+      detailRefresh = UUID()
+      movies.invalidate()
+      shows.invalidate()
+    }
+  }
+
+  private func observePersonalState(connection: TVStoredConnection, session: TVProfileSession) {
+    syncTask?.cancel()
+    progressObserver?.cancel()
+    let api = makeClient(connection: connection, session: session)
+    let sessionID = session.sessionId
+    let scope = TVProgressScope(connection: connection, session: session)
+    progressObserver = Task { [weak self] in
+      guard let self else { return }
+      let stream = await environment.outbox.changes(scope: scope)
+      guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+      let initialSnapshots = await environment.outbox.pendingSnapshots(scope: scope)
+      guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+      pendingProgress = initialSnapshots
+      let storageFailed = await environment.outbox.storageFailed
+      guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+      if storageFailed {
+        progressWarning =
+          "Playback progress could not be saved on this Apple TV. Free storage and try again."
+      }
+      for await change in stream {
+        guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+        let snapshots = await environment.outbox.pendingSnapshots(scope: scope)
+        guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+        pendingProgress = snapshots
+        if change.storageFailed {
+          progressWarning =
+            "Playback progress could not be saved on this Apple TV. Free storage and try again."
+        } else if change.state == .conflict {
+          progressWarning = "Progress changed on another device. Its newer position has been kept."
+        }
+        if let progress = change.progress {
+          acknowledgedProgress[progress.mediaId] = progress
+          if acknowledgedProgress.count > 256 {
+            acknowledgedProgress.removeValue(forKey: acknowledgedProgress.keys.first!)
+          }
+        }
+        if change.reason != .enqueued { scheduleLibraryRefresh() }
+      }
+    }
+    syncTask = Task { [weak self] in
+      var cursor: Int64 = 0
+      var generation: String?
+      while !Task.isCancelled {
+        do {
+          let result = try await api.syncChanges(after: cursor, generation: generation)
+          guard let self, !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+          cursor = result.cursor
+          generation = result.generation
+          if result.resetRequired {
+            mutationSummaries.removeAll()
+          } else {
+            for id in result.changedMediaIds { mutationSummaries[id] = nil }
+          }
+          if result.resetRequired || !result.changedAreas.isEmpty { scheduleLibraryRefresh() }
+          // A well-behaved server long-polls. This also bounds an immediate empty response.
+          try await Task.sleep(for: .seconds(1))
+        } catch {
+          guard let self, !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+          handleSessionFailure(error)
+          if (error as? TVCoreError)?.isAuthenticationFailure == true { return }
+          do { try await Task.sleep(for: .seconds(5)) } catch { return }
+        }
+      }
+    }
+  }
+
   private func deactivateProgress() {
+    syncTask?.cancel()
+    syncTask = nil
+    progressObserver?.cancel()
+    progressObserver = nil
     let previous = outboxTransition
     outboxTransition = Task {
       await previous?.value
@@ -483,6 +655,7 @@ final class TVAppModel: ObservableObject {
   }
 
   private func activateProgress(connection: TVStoredConnection, session: TVProfileSession) {
+    observePersonalState(connection: connection, session: session)
     let previous = outboxTransition
     let run = generation
     outboxTransition = Task { [weak self] in
@@ -503,69 +676,5 @@ final class TVAppModel: ObservableObject {
   private func handleProgressFailure(_ failure: TVCoreError, sessionID: UUID) {
     guard session?.sessionId == sessionID else { return }
     handleSessionFailure(failure)
-  }
-}
-
-@MainActor
-final class TVLibraryListing: ObservableObject {
-  let kind: TVMediaKind
-  @Published private(set) var items: [TVCatalogItem] = []
-  @Published private(set) var loading = false
-  @Published private(set) var error: String?
-  private var total = 1
-  private var revision: String?
-  private var generation = UUID()
-
-  init(kind: TVMediaKind) { self.kind = kind }
-  func clear() {
-    generation = UUID()
-    items = []
-    total = 1
-    revision = nil
-    error = nil
-    loading = false
-  }
-  func update(_ item: TVCatalogItem) {
-    if let i = items.firstIndex(where: { $0.id == item.id }) { items[i] = item }
-  }
-
-  func loadNext(api: TVAPIClient, onFailure: (Error) -> Void) async {
-    guard !loading, items.count < total else { return }
-    let run = generation
-    loading = true
-    defer { if generation == run { loading = false } }
-    var restarts = 0
-    while restarts < 2 {
-      do {
-        let offset = items.count
-        let page = try await api.catalogPage(kind: kind, offset: offset, revision: revision)
-        guard generation == run, !Task.isCancelled else { return }
-        guard page.offset == offset, page.limit > 0, page.total >= offset + page.items.count,
-          !page.items.isEmpty || offset == page.total,
-          offset == 0 || page.total == total,
-          revision == nil || revision == page.revision,
-          Set(items.map(\.id) + page.items.map(\.id)).count == items.count + page.items.count
-        else { throw TVCoreError.invalidResponse }
-        items.append(contentsOf: page.items)
-        total = page.total
-        revision = page.revision
-        error = nil
-        return
-      } catch let failure as TVCoreError
-        where failure.statusCode == 409 && failure.code == "catalog_changed"
-      {
-        guard generation == run, !Task.isCancelled else { return }
-        items = []
-        total = 1
-        revision = nil
-        restarts += 1
-      } catch {
-        guard generation == run, !Task.isCancelled, !(error is CancellationError) else { return }
-        self.error = error.localizedDescription
-        onFailure(error)
-        return
-      }
-    }
-    error = "The library changed while loading. Try again."
   }
 }

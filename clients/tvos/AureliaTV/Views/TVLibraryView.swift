@@ -1,51 +1,6 @@
 import SwiftUI
 import UIKit
 
-struct TVLibraryGrid: View {
-  @EnvironmentObject private var model: TVAppModel
-  @ObservedObject var listing: TVLibraryListing
-  let title: String
-  @State private var scrollAnchor: UUID?
-  @FocusState private var focusedItem: UUID?
-
-  var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 36) {
-        Text(title).font(.system(size: 46, weight: .bold))
-        if listing.items.isEmpty && !listing.loading && listing.error == nil {
-          Text("No titles shared with this profile.").foregroundStyle(.secondary)
-        }
-        LazyVGrid(
-          columns: Array(repeating: GridItem(.flexible(), spacing: 36), count: 5), spacing: 44
-        ) {
-          ForEach(listing.items) { item in
-            NavigationLink {
-              TVDetailView(id: item.id, initial: item)
-            } label: {
-              TVPosterLabel(item: item, isFocused: focusedItem == item.id)
-            }.buttonStyle(TVContentButtonStyle()).focusEffectDisabled().focused(
-              $focusedItem, equals: item.id
-            ).id(item.id).accessibilityIdentifier("catalog-\(item.id)")
-              .onAppear { if item.id == listing.items.last?.id { loadNext() } }
-          }
-        }.scrollTargetLayout().focusSection()
-        if listing.loading { ProgressView().frame(maxWidth: .infinity) }
-        if let error = listing.error {
-          TVErrorText(message: error)
-          Button("Try Again") { loadNext() }
-        }
-      }.padding(.horizontal, 64).padding(.vertical, 40)
-    }.scrollPosition(id: $scrollAnchor, anchor: .top)
-      .background(TVDesign.canvas.ignoresSafeArea())
-      .task(id: model.session?.sessionId) { loadNext() }
-  }
-
-  private func loadNext() {
-    guard let api = model.client else { return }
-    Task { await listing.loadNext(api: api, onFailure: model.handleSessionFailure) }
-  }
-}
-
 struct TVPosterLabel: View {
   let item: TVCatalogItem
   var isFocused = false
@@ -92,17 +47,11 @@ struct TVArtworkView: View {
       }
     }.clipped().task(id: key) {
       image = nil
-      guard let artwork, let api = model.client, let key else { return }
+      guard let artwork, let api = model.client, key != nil else { return }
       let sessionID = model.session?.sessionId
-      if let cached = model.images.object(forKey: key as NSString) {
-        image = UIImage(data: cached as Data)
-        return
-      }
       do {
-        let data = try await api.artworkData(artwork: artwork, width: width)
+        let decoded = try await model.artwork.image(artwork: artwork, width: width, api: api)
         guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
-        guard let decoded = UIImage(data: data) else { return }
-        model.images.setObject(data as NSData, forKey: key as NSString, cost: data.count)
         image = decoded
       } catch {}
     }

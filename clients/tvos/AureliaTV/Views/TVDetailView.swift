@@ -4,6 +4,12 @@ struct TVDetailView: View {
   @EnvironmentObject private var model: TVAppModel
   let id: UUID
   let initial: TVCatalogItem
+  var selectedEpisodeID: UUID? = nil
+  @StateObject private var actions = TVLibraryActions()
+  @State private var playingQueue: [TVCatalogItem] = []
+  @State private var launching = false
+  @State private var launchTask: Task<Void, Never>?
+  @State private var navigationID = UUID()
   @State private var detail: TVCatalogDetail?
   @State private var plan: TVPlaybackPlan?
   @State private var selectedSeason: Int?
@@ -25,7 +31,7 @@ struct TVDetailView: View {
     let id = UUID()
     let target: Focus
   }
-  private var item: TVCatalogItem { detail?.item ?? initial }
+  private var item: TVCatalogItem { model.overlay(detail?.item ?? initial) }
   private var seasons: [TVSeason] { detail?.seasons ?? [] }
   private var season: TVSeason? { seasons.first { $0.number == selectedSeason } }
 
@@ -52,15 +58,24 @@ struct TVDetailView: View {
               if let overview = detail?.metadata.overview ?? item.overview {
                 Text(overview).font(.system(size: 27)).lineLimit(6)
               }
-              Button(action: playTarget) {
-                Label(playLabel, systemImage: "play.fill")
-              }.buttonStyle(TVButtonStyle()).focusEffectDisabled()
-                .disabled(loading || plan?.target?.isPlayable != true)
-                .focused($focused, equals: .play).id(Focus.play)
-                .accessibilityIdentifier("detail-play")
-                .onMoveCommand { direction in
-                  if direction == .down, !seasons.isEmpty { requestFocus(.season) }
+              HStack(spacing: 22) {
+                Button(action: playTarget) {
+                  Label(playLabel, systemImage: "play.fill")
+                }.buttonStyle(TVButtonStyle()).focusEffectDisabled()
+                  .disabled(loading || launching || plan?.target?.isPlayable != true)
+                  .focused($focused, equals: .play).id(Focus.play)
+                  .accessibilityIdentifier("detail-play")
+                  .onMoveCommand { direction in
+                    if direction == .down, !seasons.isEmpty { requestFocus(.season) }
+                  }
+                Menu {
+                  TVMediaContextActions(item: item, actions: actions)
+                } label: {
+                  Label("More", systemImage: "ellipsis")
                 }
+                .buttonStyle(TVButtonStyle()).focusEffectDisabled()
+                .accessibilityIdentifier("detail-more").disabled(actions.busy)
+              }.focusSection()
               if let target = plan?.target, let unavailable = target.availabilityMessage {
                 Text(unavailable).foregroundStyle(.secondary)
               } else if !loading, plan?.target == nil {
@@ -75,23 +90,34 @@ struct TVDetailView: View {
           }
           if item.kind == .series && !seasons.isEmpty {
             VStack(alignment: .leading, spacing: 24) {
-              Button(selectedSeason == 0 ? "Specials" : "Season \(selectedSeason ?? 1)") {
-                choosingSeason = true
-              }
-              .buttonStyle(TVButtonStyle()).focusEffectDisabled()
-              .focused($focused, equals: .season).id(Focus.season)
-              .accessibilityIdentifier("detail-season")
-              .onMoveCommand { direction in
-                if direction == .up, plan?.target?.isPlayable == true { requestFocus(.play) }
-                if direction == .down,
-                  let first = season?.episodes.first(where: { $0.item.isPlayable })
-                {
-                  requestFocus(.episode(first.item.id))
+              HStack(spacing: 22) {
+                Button(selectedSeason == 0 ? "Specials" : "Season \(selectedSeason ?? 1)") {
+                  choosingSeason = true
                 }
-              }
-              ForEach(season?.episodes ?? [], id: \.item.id) { episode in
+                .buttonStyle(TVButtonStyle()).focusEffectDisabled()
+                .focused($focused, equals: .season).id(Focus.season)
+                .accessibilityIdentifier("detail-season")
+                .onMoveCommand { direction in
+                  if direction == .up, plan?.target?.isPlayable == true { requestFocus(.play) }
+                  if direction == .down,
+                    let first = season?.episodes.first(where: { $0.item.isPlayable })
+                  {
+                    requestFocus(.episode(first.item.id))
+                  }
+                }
+                Menu("Season Options") {
+                  Button("Mark Season as Watched") { seasonWatch(true) }
+                  Button("Mark Season as Unwatched", role: .destructive) { seasonWatch(false) }
+                }.buttonStyle(TVButtonStyle()).accessibilityIdentifier("detail-season-options")
+                  .disabled(actions.busy)
+              }.focusSection()
+              ForEach(season?.episodes ?? [], id: \.item.id) { value in
+                let episode = TVEpisode(
+                  item: model.overlay(value.item), seasonNumber: value.seasonNumber,
+                  episodeNumber: value.episodeNumber)
                 Button {
-                  open(episode.item, origin: .episode(episode.item.id))
+                  launchTask?.cancel()
+                  launchTask = Task { await openEpisode(episode.item) }
                 } label: {
                   HStack(spacing: 24) {
                     TVArtworkView(
@@ -128,9 +154,18 @@ struct TVDetailView: View {
                     }
                   }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(TVButtonStyle(kind: .row)).focusEffectDisabled()
-                  .disabled(!episode.item.isPlayable).focused(
+                  .contextMenu { TVMediaContextActions(item: episode.item, actions: actions) }
+                  .disabled(!episode.item.isPlayable || launching).focused(
                     $focused, equals: .episode(episode.item.id)
                   )
+                  .onMoveCommand { direction in
+                    if direction == .up,
+                      episode.item.id
+                        == season?.episodes.first(where: { $0.item.isPlayable })?.item.id
+                    {
+                      requestFocus(.season)
+                    }
+                  }
                   .id(Focus.episode(episode.item.id)).accessibilityIdentifier(
                     "detail-episode-\(episode.item.id)")
               }
@@ -182,7 +217,9 @@ struct TVDetailView: View {
                 title: target.episodeLabel.map { "\(item.title) · \($0)" } ?? target.title,
                 outbox: model.environment.outbox,
                 api: model.makeClient(connection: connection, session: session),
-                runtime: model.environment.makePlaybackRuntime(), onClose: { playing = nil },
+                runtime: model.environment.makePlaybackRuntime(),
+                queue: playingQueue, preferencesStore: model.environment.preferences,
+                onClose: { playing = nil },
                 onSessionFailure: { failure in
                   guard model.session?.sessionId == session.sessionId else { return }
                   model.handleSessionFailure(failure)
@@ -191,6 +228,12 @@ struct TVDetailView: View {
             })
           }
         })
+    }
+    .modifier(TVLibraryActionPresentation(actions: actions))
+    .onDisappear {
+      launchTask?.cancel()
+      launchTask = nil
+      navigationID = UUID()
     }
   }
 
@@ -210,16 +253,52 @@ struct TVDetailView: View {
   }
   private var playLabel: String {
     let action: String
+    let resumeEnabled =
+      model.connection.flatMap { connection in
+        model.session.map {
+          model.environment.preferences.preferences(
+            serverID: connection.serverID, profileID: $0.user.id
+          ).automaticResume
+        }
+      } ?? true
     switch plan?.action {
-    case .resume: action = "Resume"
+    case .resume: action = resumeEnabled ? "Resume" : "Play"
     case .playAgain: action = "Play Again"
     default: action = "Play"
     }
     return plan?.target?.episodeLabel.map { "\(action) \($0)" } ?? action
   }
-  private func playTarget() { if let target = plan?.target { open(target, origin: .play) } }
-  private func open(_ item: TVCatalogItem, origin: Focus) {
+  private func seasonWatch(_ watched: Bool) {
+    guard let selectedSeason else { return }
+    Task {
+      await actions.watch(
+        item, scope: .season, season: selectedSeason, watched: watched, model: model)
+    }
+  }
+  private func playTarget() {
+    if let target = plan?.target { open(target, queue: plan?.queue ?? [], origin: .play) }
+  }
+  private func openEpisode(_ episode: TVCatalogItem) async {
+    guard !launching, playing == nil, let api = model.client else { return }
+    launching = true
+    let sessionID = model.session?.sessionId
+    let navigation = navigationID
+    defer { launching = false }
+    do {
+      let selected = try await api.playbackPlan(mediaID: episode.id)
+      guard !Task.isCancelled, navigationID == navigation, model.session?.sessionId == sessionID,
+        let target = selected.target, target.id == episode.id
+      else { return }
+      open(target, queue: selected.queue, origin: .episode(episode.id))
+    } catch {
+      guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
+      self.error = error.localizedDescription
+      model.handleSessionFailure(error)
+    }
+  }
+  private func open(_ item: TVCatalogItem, queue: [TVCatalogItem], origin: Focus) {
     guard item.isPlayable, playing == nil else { return }
+    playingQueue = queue
     launchOrigin = origin
     focusRequest = nil
     model.playerPresented = true
@@ -230,10 +309,10 @@ struct TVDetailView: View {
     let sessionID = model.session?.sessionId
     let request = UUID()
     requestID = request
-    loading = true
+    loading = detail == nil
     do {
       async let loadedDetail = api.detail(id: id)
-      async let loadedPlan = api.playbackPlan(mediaID: id)
+      async let loadedPlan = api.playbackPlan(mediaID: selectedEpisodeID ?? id)
       let (newDetail, newPlan) = try await (loadedDetail, loadedPlan)
       guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
         return
@@ -250,6 +329,7 @@ struct TVDetailView: View {
           ?? newDetail.seasons.first?.number
       }
       loading = false
+      if let focusRequest, playing == nil { requestFocus(focusRequest.target) }
       if firstLoad {
         if newPlan.target?.isPlayable == true {
           requestFocus(.play)
