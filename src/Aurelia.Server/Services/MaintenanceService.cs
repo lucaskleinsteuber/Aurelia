@@ -51,6 +51,9 @@ public sealed partial class MaintenanceService(
                 .ExecuteDeleteAsync(cancellationToken);
         }, cancellationToken);
 
+        await phases.RunAsync("device pairing cleanup", () => scope.ServiceProvider.GetRequiredService<DeviceAuthorizationService>()
+            .PruneAsync(cancellationToken), cancellationToken);
+
         await phases.RunAsync("device session cleanup", async () =>
         {
             var sessionCutoff = now.AddDays(-30);

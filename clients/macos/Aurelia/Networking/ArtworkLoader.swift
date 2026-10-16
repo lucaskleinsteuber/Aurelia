@@ -27,11 +27,15 @@ final class ArtworkLoader {
     self.fetcher = fetcher
   }
 
-  func data(for artwork: ArtworkSummary, profile: StoredServerProfile) async throws -> Data {
+  func data(for artwork: ArtworkSummary, profile: StoredServerProfile, width: Int? = nil)
+    async throws -> Data
+  {
+    let artwork = ArtworkVariantRequest.artwork(artwork, width: width)
     guard APIClient.isValidArtworkPath(artwork.path) else {
       throw APIClientError.invalidResponse
     }
-    let flightKey = "\(profile.serverId.uuidString):\(profile.sessionId.uuidString):\(artwork.path)"
+    let flightKey =
+      "\(profile.serverId.uuidString):\(profile.sessionId.uuidString):\(artwork.path):r\(artwork.revision ?? 0)"
     let cacheKey = flightKey as NSString
     if let cached = cache.object(forKey: cacheKey) {
       return cached as Data

@@ -2,39 +2,6 @@ import AppKit
 @preconcurrency import Foundation
 import Security
 
-// Release preflight uses the real app/helper/API, but never the personal Keychain,
-// operating-mode preferences or a previously registered background service.
-// Both the executable and synthetic data must belong to the same private test run.
-enum NativePreflightIsolation {
-  static var isRequested: Bool {
-    ProcessInfo.processInfo.environment["AURELIA_PREFLIGHT_TEST"] == "1"
-  }
-  static var isActive: Bool {
-    let environment = ProcessInfo.processInfo.environment
-    guard environment["AURELIA_PREFLIGHT_TEST"] == "1", let data = environment["AURELIA_DATA_DIR"]
-    else { return false }
-    return accepts(bundleURL: Bundle.main.bundleURL, dataDirectory: URL(fileURLWithPath: data))
-  }
-
-  static func accepts(bundleURL: URL, dataDirectory: URL) -> Bool {
-    let bundle = bundleURL.standardizedFileURL.resolvingSymlinksInPath()
-    let runPath = canonicalTemporaryPath(bundle.deletingLastPathComponent().path)
-    guard runPath.hasPrefix("/private/tmp/Aurelia/"), bundle.lastPathComponent == "Aurelia.app"
-    else { return false }
-    // URL equality also compares the directory slash. In the app sandbox the
-    // filesystem cannot always infer it, so compare canonical paths instead.
-    // Do not resolve the expected Data path: a symlink escaping this run must fail.
-    return canonicalTemporaryPath(dataDirectory.standardizedFileURL.resolvingSymlinksInPath().path)
-      == runPath + "/Data"
-  }
-
-  private static func canonicalTemporaryPath(_ path: String) -> String {
-    // /tmp is macOS's alias of /private/tmp. Foundation may retain that alias
-    // when resolving a path from inside the app sandbox.
-    path.hasPrefix("/tmp/") ? "/private" + path : path
-  }
-}
-
 enum OperatingMode: String, Codable, Sendable {
   case host
   case client
@@ -115,7 +82,7 @@ final class NativeServerHost {
           let port = object["port"] as? Int, (1...65535).contains(port),
           let url = URL(string: "http://127.0.0.1:\(port)/\(settings.controlSecret)"),
           let snapshot = try? await status(at: url),
-          snapshot.state != .stopped && snapshot.state != .failed
+          snapshot.state != .stopped
         {
           controlURL = url
           runningApplication = nil
@@ -129,7 +96,9 @@ final class NativeServerHost {
     if let controlURL {
       do {
         let snapshot = try await status(at: controlURL)
-        if snapshot.state != .failed && snapshot.state != .stopped { return snapshot }
+        // A live host may have deliberately exhausted its recovery budget.
+        // Reattaching must preserve that failure until the user chooses Restart.
+        if snapshot.state != .stopped { return snapshot }
         await discardCurrentHelper(requestShutdown: true)
       } catch {
         await discardCurrentHelper(requestShutdown: false)

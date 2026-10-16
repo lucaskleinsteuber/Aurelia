@@ -22,6 +22,7 @@ struct AppSettingsView: View {
   @State private var tmdbToken = ""
   @State private var showingReviewQueue = false
   @State private var showingMediaManager = false
+  @State private var showingDeviceApproval = false
 
   var body: some View {
     TabView(selection: $selectedPage) {
@@ -92,6 +93,7 @@ struct AppSettingsView: View {
     }
     .frame(width: 760, height: 640)
     .background(AureliaBackdrop())
+    .sheet(isPresented: $showingDeviceApproval) { DeviceApprovalView() }
     .task {
       isLoadingAdministration = true
       await model.reloadAdministration()
@@ -411,6 +413,15 @@ struct AppSettingsView: View {
         }
         Button("Pair Another Device") { Task { await model.generatePairingCode() } }
           .buttonStyle(AureliaPrimaryActionButtonStyle())
+        if model.profile?.user?.role == .owner {
+          Button("Approve Device…") { showingDeviceApproval = true }
+            .disabled(!model.libraryCapabilities.contains("device-authorization-v1"))
+            .help(
+              model.libraryCapabilities.contains("device-authorization-v1")
+                ? "Enter the code shown on the new device." : "Requires Aurelia Server 1.5.5."
+            )
+            .accessibilityIdentifier("approve-device")
+        }
         ForEach(model.sessions.filter(\.isActive)) { session in
           HStack {
             VStack(alignment: .leading) {

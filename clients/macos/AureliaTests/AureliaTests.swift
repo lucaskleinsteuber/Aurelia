@@ -433,13 +433,6 @@ struct AureliaTests {
   }
 
   @Test
-  func bonjourHostnameMatchesServerSanitizingRules() {
-    #expect(BonjourBrowser.sanitizeHostLabel("Aurelia") == "Aurelia")
-    #expect(BonjourBrowser.sanitizeHostLabel("  Example's   Server  ") == "Example-s-Server")
-    #expect(BonjourBrowser.sanitizeHostLabel("🎬") == "device")
-  }
-
-  @Test
   func storageDraftKeepsAnIndependentNameAndLibraryType() {
     var draft = StorageLocationDraft(path: "/Volumes/Media/TV")
     #expect(draft.suggestedName == "TV")

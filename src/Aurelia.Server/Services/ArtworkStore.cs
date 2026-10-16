@@ -52,7 +52,8 @@ public sealed class ArtworkStore(
         var contentType = ArtworkFile.ContentType(bytes);
         PrivateFilePermissions.CreatePrivateDirectory(artworkDirectory);
         var id = existing?.Id ?? Guid.NewGuid();
-        var relative = id.ToString("N") + ArtworkFile.Extension(contentType);
+        var revision = existing is null ? 1 : checked(existing.Revision + 1);
+        var relative = $"{id:N}-r{revision:x}" + ArtworkFile.Extension(contentType);
         var destination = Path.Combine(artworkDirectory, relative);
         var temporary = destination + ".tmp";
         try
@@ -72,16 +73,15 @@ public sealed class ArtworkStore(
             existing = new ArtworkAsset { Id = id, MediaItemId = mediaId };
             database.ArtworkAssets.Add(existing);
         }
-        else if (!string.Equals(existing.RelativeFilePath, relative, StringComparison.Ordinal))
-        {
-            DeleteFile(existing.RelativeFilePath);
-        }
+        // Old revisions remain readable until the database commit. Maintenance
+        // removes their unreferenced files; a failed commit must keep the old asset.
 
         existing.Kind = kind;
         existing.ProviderPath = providerPath;
         existing.RelativeFilePath = relative;
         existing.ContentType = contentType;
         existing.ContentLength = bytes.LongLength;
+        existing.Revision = revision;
         existing.CreatedAt = DateTimeOffset.UtcNow;
         return existing;
     }
@@ -94,7 +94,11 @@ public sealed class ArtworkStore(
         if (!File.Exists(path)) return null;
         var info = new FileInfo(path);
         if (info.Length != asset.ContentLength || info.LinkTarget is not null) return null;
-        return new ArtworkFileResult(File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read), asset.ContentType, asset.ContentLength, asset.CreatedAt);
+        try
+        {
+            return new ArtworkFileResult(File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete), asset.ContentType, asset.ContentLength, asset.CreatedAt, asset.Revision);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
 
     public async Task<long> UsedBytesAsync(AureliaDbContext database, CancellationToken cancellationToken) =>
@@ -127,4 +131,4 @@ public sealed class ArtworkStore(
     }
 }
 
-public sealed record ArtworkFileResult(Stream Stream, string ContentType, long ContentLength, DateTimeOffset LastModified);
+public sealed record ArtworkFileResult(Stream Stream, string ContentType, long ContentLength, DateTimeOffset LastModified, long Revision = 1);

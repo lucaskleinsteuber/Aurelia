@@ -352,7 +352,7 @@ public sealed class PresentationService(
                 ManualGenresJson = item.Metadata.ManualGenresJson,
                 ProviderGenresJson = item.Metadata.ProviderGenresJson,
                 Artwork = item.Metadata.Artwork.Where(art => art.Kind != ArtworkKind.Profile).Select(art => new ArtworkAsset
-                { Id = art.Id, Kind = art.Kind, IsManual = art.IsManual, ContentType = art.ContentType, ContentLength = art.ContentLength }).ToList(),
+                { Id = art.Id, Kind = art.Kind, IsManual = art.IsManual, ContentType = art.ContentType, ContentLength = art.ContentLength, Revision = art.Revision }).ToList(),
             },
             Favorites = item.Favorites.Where(favorite => favorite.UserId == userId).Select(favorite => new UserFavorite { UserId = favorite.UserId }).ToList(),
             PlaybackProgress = item.PlaybackProgress.Where(progress => progress.UserId == userId).Select(progress => new PlaybackProgress

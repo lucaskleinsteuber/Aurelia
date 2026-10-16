@@ -125,6 +125,12 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
                 command.CommandText = "UPDATE DeviceSessions SET RevokedAt=$now WHERE RevokedAt IS NULL; UPDATE PairingCodes SET ConsumedAt=$now WHERE ConsumedAt IS NULL; DELETE FROM PlaybackTickets;";
                 command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                 await command.ExecuteNonQueryAsync(token);
+                command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='DeviceAuthorizationRequests';";
+                if (Convert.ToInt64(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture) > 0)
+                {
+                    command.CommandText = "UPDATE DeviceAuthorizationRequests SET State='Expired', ProtectedAuthentication=NULL WHERE AcknowledgedAt IS NULL AND State IN ('Pending','Approved');";
+                    await command.ExecuteNonQueryAsync(token);
+                }
                 command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='SyncHistoryState';";
                 if (Convert.ToInt64(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture) > 0)
                 {

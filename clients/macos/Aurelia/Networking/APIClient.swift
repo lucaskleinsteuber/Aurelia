@@ -915,11 +915,18 @@ struct APIClient: Sendable {
   }
 
   static func isValidArtworkPath(_ path: String) -> Bool {
-    guard path.hasPrefix("/api/v1/artwork/"), !path.contains("?"), !path.contains("#") else {
+    guard path.hasPrefix("/api/v1/artwork/"),
+      let components = URLComponents(string: path), components.scheme == nil,
+      components.host == nil, components.fragment == nil,
+      components.percentEncodedPath == components.path
+    else {
       return false
     }
-    let identifier = String(path.dropFirst("/api/v1/artwork/".count))
-    return UUID(uuidString: identifier) != nil
+    let identifier = String(components.path.dropFirst("/api/v1/artwork/".count))
+    guard UUID(uuidString: identifier) != nil else { return false }
+    guard let query = components.queryItems else { return true }
+    return query.count == 1 && query[0].name == "width"
+      && ["320", "640", "1280", "1920"].contains(query[0].value ?? "")
   }
 
   static func query(name: String, value: String) throws -> String {
@@ -1098,6 +1105,28 @@ struct APIClient: Sendable {
         || ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "local-host-recovery"
         || profile.baseURL.host == "server-settings-preview.invalid"
       {
+        if ProcessInfo.processInfo.environment["AURELIA_DEVICE_APPROVAL_UI_TESTS"] == "1",
+          path.hasPrefix("/api/v1/server/device-pairings/")
+        {
+          if path.hasSuffix("/lookup") {
+            guard let body,
+              let values = try JSONSerialization.jsonObject(with: body) as? [String: String],
+              values["code"] == "12345678"
+            else {
+              throw APIClientError.serverRejected(
+                code: "invalid_device_pairing_code",
+                message: "The device code is invalid or has expired.")
+            }
+          }
+          let state =
+            path.hasSuffix("/approve") ? "approved" : path.hasSuffix("/deny") ? "denied" : "pending"
+          return Data(
+            """
+            {"id":"15500000-0000-0000-0000-000000000001","deviceName":"Living Room Apple TV",
+            "serverId":"00000000-0000-0000-0000-000000000004","serverName":"Synthetic UI Server",
+            "state":"\(state)","expiresAt":"2099-01-01T00:00:00Z"}
+            """.utf8)
+        }
         guard method == "GET" else { throw APIClientError.invalidResponse }
         return try Self.serverSettingsFixture(path: path)
       }
@@ -1131,6 +1160,30 @@ struct APIClient: Sendable {
   func serverCapabilities() async throws -> ServerCapabilities {
     try Self.decode(
       ServerCapabilities.self, from: await perform(path: "/api/v1/server/capabilities"))
+  }
+  func lookupDeviceAuthorization(code: String) async throws -> DeviceAuthorizationPreview {
+    struct Request: Encodable { let code: String }
+    let response = try Self.decode(
+      DeviceAuthorizationPreview.self,
+      from: await perform(
+        path: "/api/v1/server/device-pairings/lookup", method: "POST",
+        body: JSONEncoder().encode(Request(code: code))))
+    guard response.serverId == profile.serverId else { throw APIClientError.serverIdentityMismatch }
+    return response
+  }
+
+  func decideDeviceAuthorization(id: UUID, approve: Bool) async throws -> DeviceAuthorizationPreview
+  {
+    let action = approve ? "approve" : "deny"
+    let response = try Self.decode(
+      DeviceAuthorizationPreview.self,
+      from: await perform(
+        path: "/api/v1/server/device-pairings/\(id.uuidString.lowercased())/\(action)",
+        method: "POST"))
+    guard response.id == id, response.serverId == profile.serverId else {
+      throw APIClientError.invalidResponse
+    }
+    return response
   }
   func serverBackups() async throws -> [ServerBackupSummary] {
     try Self.decode([ServerBackupSummary].self, from: await perform(path: "/api/v1/server/backups"))
@@ -1311,7 +1364,8 @@ struct APIClient: Sendable {
       case "/api/v1/server/status":
         response = """
           {"state":"running","version":"\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.2")","uptimeSeconds":3600,"activeStreams":0,"databaseBytes":1048576,
-          "users":1,"libraries":0,"freeDiskBytes":10737418240,"certificateExpiresAt":"2036-10-01T12:00:00Z","networkAddresses":["192.168.1.10"]}
+          "users":1,"libraries":0,"freeDiskBytes":10737418240,"certificateExpiresAt":"2036-10-01T12:00:00Z","networkAddresses":["192.168.1.10"],
+          "readiness":{"state":"degraded","components":[{"id":"database","state":"ready"},{"id":"media","state":"degraded","reason":"media_drive_disconnected"}],"checkedAt":"2026-10-15T12:00:00Z"},"recentRecoveryEvents":[]}
           """
       case "/api/v1/server/users", "/api/v1/server/backups", "/api/v1/server/diagnostics",
         "/api/v1/libraries", "/api/v1/auth/sessions", "/api/v1/libraries/scans":

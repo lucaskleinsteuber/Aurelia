@@ -1,0 +1,93 @@
+{
+  "artworkLegacy": {
+    "id": "10000000-0000-0000-0000-000000000099",
+    "kind": "poster",
+    "path": "/api/v1/artwork/10000000-0000-0000-0000-000000000099",
+    "contentType": "image/jpeg",
+    "contentLength": 1234
+  },
+  "artwork": {
+    "id": "10000000-0000-0000-0000-000000000099",
+    "kind": "poster",
+    "path": "/api/v1/artwork/10000000-0000-0000-0000-000000000099",
+    "contentType": "image/jpeg",
+    "contentLength": 1234,
+    "revision": 3,
+    "unknownFutureField": true
+  },
+  "status": {
+    "state": "running",
+    "version": "1.5.5",
+    "uptimeSeconds": 12,
+    "activeStreams": 0,
+    "databaseBytes": 4096,
+    "users": 1,
+    "libraries": 2,
+    "networkAddresses": [],
+    "readiness": {
+      "state": "degraded",
+      "components": [
+        {
+          "id": "media",
+          "state": "degraded",
+          "reason": "media_drive_disconnected"
+        }
+      ],
+      "checkedAt": "2026-10-15T12:00:00+00:00"
+    },
+    "recentRecoveryEvents": []
+  },
+  "statusLegacy": {
+    "state": "running",
+    "version": "1.5.5",
+    "uptimeSeconds": 12,
+    "activeStreams": 0,
+    "databaseBytes": 4096,
+    "users": 1,
+    "libraries": 2,
+    "networkAddresses": []
+  },
+  "pairing": {
+    "state": "pending",
+    "expiresAt": "2026-10-15T12:05:00+00:00",
+    "pollIntervalSeconds": 5,
+    "acknowledged": false
+  },
+  "capabilities": {
+    "formatVersion": 2,
+    "minimumClientVersion": "1.5.1",
+    "profilePins": true,
+    "optionalProfilePins": true,
+    "atomicProfileEditing": true,
+    "automaticManagementApprovals": true,
+    "sceneNotes": true,
+    "titleAccess": true,
+    "capabilities": [
+      "library-state-v1",
+      "server-readiness-v1",
+      "device-authorization-v1",
+      "artwork-variants-v1"
+    ]
+  },
+  "problem": {
+    "code": "device_session_revoked",
+    "message": "Pair this device again."
+  },
+  "pairingApproved": {
+    "state": "approved",
+    "expiresAt": "2026-10-15T12:05:00+00:00",
+    "pollIntervalSeconds": 5,
+    "acknowledged": false,
+    "authentication": {
+      "user": {
+        "id": "15500000-0000-0000-0000-000000000002",
+        "username": "Synthetic Owner",
+        "role": "owner",
+        "createdAt": "2026-10-15T12:00:00+00:00"
+      },
+      "sessionId": "15500000-0000-0000-0000-000000000003",
+      "token": "synthetic-contract-token-no-real-credential-0001",
+      "expiresAt": "2027-01-13T12:00:00+00:00"
+    }
+  }
+}

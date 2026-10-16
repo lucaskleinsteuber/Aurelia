@@ -452,6 +452,7 @@ struct AureliaPrimaryActionButtonStyle: ButtonStyle {
 
 struct AuthenticatedArtwork: View {
   @EnvironmentObject private var model: AppModel
+  @Environment(\.displayScale) private var displayScale
   let artwork: ArtworkSummary?
   let symbol: String
   var contentMode: ContentMode = .fill
@@ -460,6 +461,7 @@ struct AuthenticatedArtwork: View {
 
   var body: some View {
     GeometryReader { geometry in
+      let width = ArtworkVariantRequest.width(for: geometry.size.width, scale: displayScale)
       ZStack {
         MediaArtworkPlaceholder(symbol: symbol, symbolSize: placeholderSymbolSize)
           .accessibilityElement(children: .ignore)
@@ -474,25 +476,27 @@ struct AuthenticatedArtwork: View {
       }
       .frame(width: geometry.size.width, height: geometry.size.height)
       .clipped()
-    }
-    .accessibilityElement(children: .contain)
-    .task(id: taskID) {
-      image = nil
-      guard let artwork, let profile = model.profile else { return }
-      do {
-        let data = try await model.artworkLoader.data(for: artwork, profile: profile)
-        try Task.checkCancellation()
-        image = NSImage(data: data)
-      } catch is CancellationError {
-        return
-      } catch {
+      .task(id: taskID(width: width)) {
         image = nil
+        guard let artwork, let profile = model.profile else { return }
+        do {
+          let data = try await model.artworkLoader.data(
+            for: artwork, profile: profile,
+            width: model.libraryCapabilities.contains("artwork-variants-v1") ? width : nil)
+          try Task.checkCancellation()
+          image = NSImage(data: data)
+        } catch is CancellationError {
+          return
+        } catch {
+          image = nil
+        }
       }
     }
+    .accessibilityElement(children: .contain)
   }
 
-  private var taskID: String {
-    "\(model.profile?.serverId.uuidString ?? "none"):\(artwork?.id.uuidString ?? "none")"
+  private func taskID(width: Int) -> String {
+    "\(model.profile?.serverId.uuidString ?? "none"):\(model.profile?.sessionId.uuidString ?? "none"):\(artwork?.id.uuidString ?? "none"):r\(artwork?.revision ?? 0):w\(width):variants\(model.libraryCapabilities.contains("artwork-variants-v1"))"
   }
 }
 

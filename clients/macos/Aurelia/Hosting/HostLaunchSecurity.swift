@@ -2,6 +2,39 @@ import AppKit
 import Darwin
 import Foundation
 
+// Release preflight uses the real app/helper/API, but never the personal Keychain,
+// operating-mode preferences or a previously registered background service.
+// Both the executable and synthetic data must belong to the same private test run.
+enum NativePreflightIsolation {
+  static var isRequested: Bool {
+    ProcessInfo.processInfo.environment["AURELIA_PREFLIGHT_TEST"] == "1"
+  }
+  static var isActive: Bool {
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["AURELIA_PREFLIGHT_TEST"] == "1", let data = environment["AURELIA_DATA_DIR"]
+    else { return false }
+    return accepts(bundleURL: Bundle.main.bundleURL, dataDirectory: URL(fileURLWithPath: data))
+  }
+
+  static func accepts(bundleURL: URL, dataDirectory: URL) -> Bool {
+    let bundle = bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+    let runPath = canonicalTemporaryPath(bundle.deletingLastPathComponent().path)
+    guard runPath.hasPrefix("/private/tmp/Aurelia/"), bundle.lastPathComponent == "Aurelia.app"
+    else { return false }
+    // URL equality also compares the directory slash. In the app sandbox the
+    // filesystem cannot always infer it, so compare canonical paths instead.
+    // Do not resolve the expected Data path: a symlink escaping this run must fail.
+    return canonicalTemporaryPath(dataDirectory.standardizedFileURL.resolvingSymlinksInPath().path)
+      == runPath + "/Data"
+  }
+
+  private static func canonicalTemporaryPath(_ path: String) -> String {
+    // /tmp is macOS's alias of /private/tmp. Foundation may retain that alias
+    // when resolving a path from inside the app sandbox.
+    path.hasPrefix("/tmp/") ? "/private" + path : path
+  }
+}
+
 @_silgen_name("AureliaOpenPipe")
 func aureliaOpenPipe(_ path: UnsafePointer<CChar>, _ flags: Int32) -> Int32
 
@@ -19,6 +52,75 @@ struct HostLaunchDescription: Codable, Equatable {
 struct ValidatedHostLaunchPaths: Equatable {
   let rendezvousURL: URL
   let pipeURL: URL
+}
+
+struct HostPreflightBackgroundDescription: Codable {
+  let version: Int
+  let controlSecret: String
+  let dataDirectory: String
+  let logDirectory: String
+}
+
+struct ValidatedHostPreflightBackground {
+  let secret: String
+  let dataDirectory: URL
+  let logDirectory: URL
+  let rendezvousURL: URL
+}
+
+enum HostPreflightBackgroundSecurity {
+  static func enclosingApplication(helperBundleURL: URL) -> URL? {
+    let helper = helperBundleURL.standardizedFileURL.resolvingSymlinksInPath()
+    let application = helper.deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent()
+    let expected = application.appendingPathComponent("Contents/Helpers/Aurelia Server Host.app")
+    guard helper.path == expected.path,
+      NativePreflightIsolation.accepts(
+        bundleURL: application,
+        dataDirectory: application.deletingLastPathComponent().appendingPathComponent("Data"))
+    else { return nil }
+    return application
+  }
+
+  static func load(
+    environment: [String: String], helperBundleURL: URL
+  ) throws -> ValidatedHostPreflightBackground {
+    guard environment["AURELIA_PREFLIGHT_TEST"] == "1",
+      environment["AURELIA_SERVER_EXECUTABLE"] == nil,
+      let application = enclosingApplication(helperBundleURL: helperBundleURL),
+      let configurationPath = environment["AURELIA_HOST_PREFLIGHT_CONFIG"]
+    else { throw HostLaunchSecurityError.invalidDescription }
+    let root = application.deletingLastPathComponent()
+    let bootstrap = root.appendingPathComponent("Host", isDirectory: true)
+    let configuration = URL(fileURLWithPath: configurationPath).standardizedFileURL
+    guard configuration.path == bootstrap.appendingPathComponent("preflight.json").path else {
+      throw HostLaunchSecurityError.invalidPathLocation
+    }
+    try HostLaunchSecurity.validateBootstrapDirectory(at: root)
+    try HostLaunchSecurity.validateBootstrapDirectory(at: bootstrap)
+    try HostLaunchSecurity.validateConfigurationFile(
+      at: configuration.path, bootstrapDirectory: bootstrap)
+    let values = try configuration.resourceValues(forKeys: [.fileSizeKey])
+    guard (values.fileSize ?? 0) <= 65_536 else {
+      throw HostLaunchSecurityError.invalidDescription
+    }
+    let description = try JSONDecoder().decode(
+      HostPreflightBackgroundDescription.self, from: Data(contentsOf: configuration))
+    let data = URL(fileURLWithPath: description.dataDirectory, isDirectory: true)
+      .standardizedFileURL
+    let logs = URL(fileURLWithPath: description.logDirectory, isDirectory: true)
+      .standardizedFileURL
+    guard description.version == 1, description.controlSecret.count == 64,
+      description.controlSecret.allSatisfy(\.isHexDigit),
+      NativePreflightIsolation.accepts(bundleURL: application, dataDirectory: data),
+      logs.path == root.appendingPathComponent("Logs").path
+    else { throw HostLaunchSecurityError.invalidDescription }
+    try HostLaunchSecurity.validateBootstrapDirectory(at: data)
+    try HostLaunchSecurity.validateBootstrapDirectory(at: logs)
+    return ValidatedHostPreflightBackground(
+      secret: description.controlSecret, dataDirectory: data, logDirectory: logs,
+      rendezvousURL: bootstrap.appendingPathComponent("background-rendezvous.json"))
+  }
 }
 
 enum HostBootstrapLocation {

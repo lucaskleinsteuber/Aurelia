@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Aurelia.Server.Data;
 using Aurelia.Server.Services;
+using Aurelia.Contracts;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -15,7 +16,9 @@ public sealed class DeviceTokenAuthenticationHandler(
     AureliaDbContext database,
     TokenService tokenService,
     SessionActivityRecorder activity,
-    ProfileSessionStore profiles)
+    ProfileSessionStore profiles,
+    TimeProvider clock,
+    ServerConfigurationStore configuration)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "AureliaDeviceToken";
@@ -37,7 +40,7 @@ public sealed class DeviceTokenAuthenticationHandler(
         }
 
         var tokenHash = tokenService.Hash(rawToken);
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         var viewing = profiles.Find(tokenHash);
         var session = await database.DeviceSessions
             .AsNoTracking()
@@ -46,7 +49,10 @@ public sealed class DeviceTokenAuthenticationHandler(
                 candidate => (viewing != null ? candidate.Id == viewing.DeviceId : candidate.TokenHash == tokenHash)
                     && candidate.RevokedAt == null
                     && candidate.ExpiresAt > now
-                    && candidate.User.IsEnabled,
+                    && candidate.User.IsEnabled
+                    && !database.DeviceAuthorizationRequests.Any(request => request.DeviceSessionId == candidate.Id
+                        && request.AcknowledgedAt == null && (request.ExpiresAt <= now
+                            || request.State != DeviceAuthorizationState.Approved || !configuration.Current.PairingEnabled)),
                 Context.RequestAborted);
 
         if (session is null)

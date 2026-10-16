@@ -306,6 +306,7 @@ struct ArtworkSummary: Codable, Identifiable, Equatable, Sendable {
   let path: String
   let contentType: String
   let contentLength: Int64
+  var revision: Int64? = nil
 }
 
 struct CreditSummary: Codable, Identifiable, Equatable, Sendable {

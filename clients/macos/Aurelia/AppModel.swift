@@ -119,6 +119,8 @@ final class AppModel: ObservableObject {
   private var scanPollingRun = UUID()
   private var syncStartTask: Task<Void, Never>?
   private var connectionGeneration = UUID()
+  private let reconnectCoordinator: ServerReconnectCoordinator
+  private var reconnectTask: Task<Void, Never>?
   private var playbackPlanningTask: Task<Void, Never>?
   private var playbackPlanningGeneration = UUID()
   private let libraryStateClientFactory:
@@ -191,6 +193,7 @@ final class AppModel: ObservableObject {
     guard !(error is CancellationError), error as? APIClientError != .supersededSnapshot else {
       return
     }
+    if handleSessionFailure(error) { return }
     if let failure = error as? APIClientError, failure.isManagementLocked {
       managementExpiresAt = nil
       clearAdministrationState()
@@ -221,6 +224,9 @@ final class AppModel: ObservableObject {
   }
 
   private func cancelConnectionWork() {
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
     playbackPlanningGeneration = UUID()
     playbackPlanningTask?.cancel()
     playbackPlanningTask = nil
@@ -279,11 +285,13 @@ final class AppModel: ObservableObject {
       @MainActor (StoredServerProfile) async throws -> AdministrationSnapshot
     )? = nil,
     initialLibraryCapabilities: Set<String> = [],
-    libraryStateClientFactory: (@MainActor (StoredServerProfile) -> any LibraryStateServing)? = nil
+    libraryStateClientFactory: (@MainActor (StoredServerProfile) -> any LibraryStateServing)? = nil,
+    reconnectCoordinator: ServerReconnectCoordinator = ServerReconnectCoordinator()
   ) {
     self.store = store ?? Self.defaultStore
     self.serverHost = serverHost
     self.syncController = syncController
+    self.reconnectCoordinator = reconnectCoordinator
     self.profileSelectionOverride = profileSelectionEnabled
     self.profileUnlocker = profileUnlocker
     self.profileSessionEnder = profileSessionEnder
@@ -360,6 +368,11 @@ final class AppModel: ObservableObject {
       if Self.uiTestMode == "server-settings" {
         operatingMode = .client
         profile = Self.previewOwnerProfile
+        if ProcessInfo.processInfo.environment["AURELIA_DEVICE_APPROVAL_UI_TESTS"] == "1" {
+          libraryCapabilities = [
+            "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
+          ]
+        }
         isStarting = false
         if let path = ProcessInfo.processInfo.environment["AURELIA_SERVER_SETTINGS_RENDER"] {
           do {
@@ -534,7 +547,10 @@ final class AppModel: ObservableObject {
         startSync()
       }
     } catch {
-      errorMessage = error.localizedDescription
+      if !handleSessionFailure(error) {
+        errorMessage = error.localizedDescription
+        beginReconnectIfNeeded(after: error)
+      }
     }
     isStarting = false
   }
@@ -675,7 +691,22 @@ final class AppModel: ObservableObject {
       }
     #endif
     if hostSnapshot.state == .failed || hostSnapshot.state == .stopped {
-      await startNativeHost()
+      let live: NativeHostSnapshot
+      do { live = try await serverHost.status() } catch {
+        _ = await startNativeHost()
+        return
+      }
+      if live.state == .failed {
+        // Only an explicit retry may reset the independent host's recovery budget.
+        do {
+          try await serverHost.restart()
+          hostSnapshot = NativeHostSnapshot(
+            state: .restarting, message: nil, bootstrapToken: nil, serverInfo: nil)
+          startHostPolling()
+        } catch { errorMessage = error.localizedDescription }
+        return
+      }
+      _ = await startNativeHost()
       return
     }
     do {
@@ -1148,6 +1179,7 @@ final class AppModel: ObservableObject {
       paired.publicKeyFingerprint == updated.publicKeyFingerprint
     else { throw APIClientError.invalidResponse }
     try store.save(paired)
+    if profile?.baseURL != updated.baseURL { invalidateLibraryWork() }
     deviceConnection = paired
     profile = updated
     managementExpiresAt = managementExpiry.flatMap(Self.sessionDate)
@@ -1195,7 +1227,11 @@ final class AppModel: ObservableObject {
   }
 
   func inspect(discovered: DiscoveredServer) async {
-    await inspect(address: discovered.baseURL.absoluteString)
+    for address in [discovered.baseURL] + discovered.alternativeURLs {
+      await inspect(address: address.absoluteString)
+      if inspectedServer != nil { return }
+      guard !Task.isCancelled else { return }
+    }
   }
 
   func cancelInspection() {
@@ -1713,7 +1749,7 @@ final class AppModel: ObservableObject {
     {
       errorMessage = nil
       hostHealth = HostHealthPolicy()
-      _ = await startNativeHost()
+      await restartNativeHost()
       return
     }
     errorMessage = nil
@@ -1728,7 +1764,10 @@ final class AppModel: ObservableObject {
       guard isCurrent(generation), selection == profileSelectionGeneration,
         viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
       else { return }
-      errorMessage = error.localizedDescription
+      if !handleSessionFailure(error) {
+        errorMessage = error.localizedDescription
+        beginReconnectIfNeeded(after: error)
+      }
     }
   }
 
@@ -1747,15 +1786,15 @@ final class AppModel: ObservableObject {
       onFailure: { [weak self] error in
         guard let self, self.isCurrent(generation) else { return }
         self.synchronizationErrorMessage = error.localizedDescription
-        if error.httpStatus == 401, self.profile?.isViewingSession == true,
-          !self.hasPendingNetworkConfirmation
-        {
-          Task { await self.switchWatchingProfile() }
-        }
+        _ = self.handleSessionFailure(error)
       },
       onSuccess: { [weak self] in
         guard let self, self.isCurrent(generation) else { return }
         self.synchronizationErrorMessage = nil
+      },
+      onTransportFailure: { [weak self] in
+        guard let self, self.isCurrent(generation) else { return }
+        self.beginReconnectIfNeeded(after: URLError(.networkConnectionLost))
       },
       onChanges: { [weak self] changes in
         guard let self, self.isCurrent(generation) else { throw CancellationError() }
@@ -1765,6 +1804,9 @@ final class AppModel: ObservableObject {
   }
 
   func systemWillSleep() async {
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
     hostPollTask?.cancel()
     hostPollTask = nil
     scanPollTask?.cancel()
@@ -1782,6 +1824,7 @@ final class AppModel: ObservableObject {
     if operatingMode == .host { startHostPolling() }
     if !activeScans.isEmpty { startScanPolling() }
     await setApplicationActive(NSApplication.shared.isActive)
+    if operatingMode != .host, profile != nil { await refreshFromUI() }
   }
 
   func movieDetail(id: UUID) async throws -> MovieDetailResponse {
@@ -1944,6 +1987,7 @@ final class AppModel: ObservableObject {
         return
       }
       profileSelectionError = error.localizedDescription
+      if !handleSessionFailure(error) { beginReconnectIfNeeded(after: error) }
     }
   }
 
@@ -2065,6 +2109,7 @@ final class AppModel: ObservableObject {
           return false
         }
         errorMessage = error.localizedDescription
+        beginReconnectIfNeeded(after: error)
       } else if profile == device {
         profileSelectionError = error.localizedDescription
       }
@@ -2413,20 +2458,24 @@ final class AppModel: ObservableObject {
       while !Task.isCancelled {
         do { try await Task.sleep(for: .seconds(2)) } catch { return }
         guard let self, !Task.isCancelled else { return }
-        var confirmedExit = false
         do {
           let snapshot = try await self.serverHost.status()
           guard !Task.isCancelled else { return }
           if snapshot.state == .failed || snapshot.state == .stopped {
-            confirmedExit = true
-            throw NativeHostStartupError.failed(snapshot.message ?? "The local server stopped.")
+            // A replying helper owns its recovery budget and planned stops. Do not
+            // bypass that decision by launching another host from the UI process.
+            self.hostSnapshot = snapshot
+            self.errorMessage =
+              snapshot.message ?? "The local server stopped. Choose Try Again to restart it."
+            self.hostPollTask = nil
+            return
           }
           self.hostSnapshot = snapshot
           self.hostHealth.healthy(at: ProcessInfo.processInfo.systemUptime)
         } catch {
           guard !Task.isCancelled else { return }
           let action = self.hostHealth.failed(
-            at: ProcessInfo.processInfo.systemUptime, confirmedExit: confirmedExit)
+            at: ProcessInfo.processInfo.systemUptime, confirmedExit: false)
           switch action {
           case .wait(let delay):
             // A transient control-channel timeout must not restart a live host.
@@ -2571,6 +2620,88 @@ final class AppModel: ObservableObject {
     }
   }
 
+  private func beginReconnectIfNeeded(after error: Error) {
+    guard operatingMode != .host, !hasPendingNetworkConfirmation,
+      ServerReconnectPolicy.isConnectivityFailure(error),
+      reconnectTask == nil, let current = profile
+    else { return }
+    let generation = connectionGeneration
+    reconnectTask = Task { [weak self] in
+      guard let self else { return }
+      do {
+        let inspected = try await self.reconnectCoordinator.reconnect(current)
+        guard self.isCurrent(generation) else { return }
+        let device = self.deviceConnection ?? current
+        guard !device.isViewingSession else { throw APIClientError.invalidResponse }
+        let paired = device.changingAddress(inspected.baseURL, name: inspected.info.name)
+        try self.store.save(paired)
+        self.deviceConnection = paired
+        self.profile = current.changingAddress(inspected.baseURL, name: inspected.info.name)
+        // Retire all captured old-address requests before publishing a fresh snapshot.
+        self.reconnectTask = nil
+        self.invalidateLibraryWork()
+        let resumedGeneration = self.connectionGeneration
+        do {
+          try await self.refresh(requireCompleteSnapshot: true)
+          guard self.isCurrent(resumedGeneration) else { return }
+          self.errorMessage = nil
+          self.profileSelectionError = nil
+          self.synchronizationErrorMessage = nil
+          self.startSync()
+        } catch let failure as APIClientError where failure.httpStatus == 401 {
+          guard self.isCurrent(resumedGeneration) else { return }
+          if self.profile?.isViewingSession == true {
+            await self.switchWatchingProfile()
+          } else {
+            self.requireDevicePairing()
+          }
+        } catch {
+          guard self.isCurrent(resumedGeneration) else { return }
+          self.errorMessage = error.localizedDescription
+          self.beginReconnectIfNeeded(after: error)
+        }
+      } catch is CancellationError {
+      } catch {
+        guard self.isCurrent(generation) else { return }
+        self.reconnectTask = nil
+        self.errorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func handleSessionFailure(_ error: Error) -> Bool {
+    guard usesProfileSelection, let failure = error as? APIClientError else { return false }
+    if failure.problemCode == "device_session_revoked"
+      || (failure.httpStatus == 401 && profile?.isViewingSession != true)
+    {
+      requireDevicePairing()
+      return true
+    }
+    if profile?.isViewingSession == true, !hasPendingNetworkConfirmation,
+      failure.httpStatus == 401 || failure.problemCode == "profile_session_expired"
+        || failure.problemCode == "profile_session_revoked"
+    {
+      Task { await switchWatchingProfile() }
+      return true
+    }
+    return false
+  }
+
+  private func requireDevicePairing() {
+    // Keep the saved credential until an explicit disconnect/replacement. A network
+    // failure never erases it; a confirmed device rejection shows connection UI.
+    guard usesProfileSelection else { return }
+    profileExpiryTask?.cancel()
+    managementExpiryTask?.cancel()
+    managementExpiresAt = nil
+    clearPersonalViewState()
+    profile = nil
+    deviceConnection = nil
+    watchingProfiles = []
+    inspectedServer = nil
+    errorMessage = "This device is no longer authorized. Pair it with your server again."
+  }
+
   private func startSync() {
     guard !requiresProfileSelection else { return }
     guard let profile else { return }
@@ -2583,15 +2714,15 @@ final class AppModel: ObservableObject {
         onFailure: { [weak self] error in
           guard let self, self.isCurrent(generation) else { return }
           self.synchronizationErrorMessage = error.localizedDescription
-          if error.httpStatus == 401, self.profile?.isViewingSession == true,
-            !self.hasPendingNetworkConfirmation
-          {
-            Task { await self.switchWatchingProfile() }
-          }
+          _ = self.handleSessionFailure(error)
         },
         onSuccess: { [weak self] in
           guard let self, self.isCurrent(generation) else { return }
           self.synchronizationErrorMessage = nil
+        },
+        onTransportFailure: { [weak self] in
+          guard let self, self.isCurrent(generation) else { return }
+          self.beginReconnectIfNeeded(after: URLError(.networkConnectionLost))
         }
       ) { [weak self] changes in
         guard let self, self.isCurrent(generation) else { throw CancellationError() }

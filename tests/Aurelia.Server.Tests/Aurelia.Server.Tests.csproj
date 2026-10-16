@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Fixtures/ImportStructurePaths.txt" />
+    <EmbeddedResource Include="../../clients/macos/AureliaTests/Fixtures/client-contracts-v1.json" LogicalName="client-contracts-v1.json" />
     <ProjectReference Include="../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />
     <ProjectReference Include="../../src/Aurelia.Server/Aurelia.Server.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />

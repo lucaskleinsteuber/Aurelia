@@ -18,6 +18,8 @@ public sealed record DatabaseVerificationResult(
     string Message,
     int AppliedMigrationCount);
 
+public sealed record DatabaseBackupRuntimeStatus(bool LastAttemptFailed, DateTimeOffset? LastSucceededAt);
+
 public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerConfigurationStore? configuration = null)
 {
     private const string BackupPrefix = "aurelia-database-";
@@ -27,16 +29,45 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerCo
     private static readonly TimeSpan WeeklyInterval = TimeSpan.FromDays(7);
 
     public string BackupDirectory => Path.Combine(runtime.DataDirectory, "Backups");
+    private DatabaseBackupRuntimeStatus health = new(false, null);
+    public DatabaseBackupRuntimeStatus Health => Volatile.Read(ref health);
 
     public async Task<string> CreateBackupAsync(
         DatabaseBackupKind kind,
         CancellationToken cancellationToken)
     {
-        using var operationLock = AcquireOperationLock();
-        return await CreateBackupLockedAsync(kind, cancellationToken);
+        try
+        {
+            using var operationLock = AcquireOperationLock();
+            var path = await CreateBackupLockedAsync(kind, cancellationToken);
+            Volatile.Write(ref health, new(false, DateTimeOffset.UtcNow));
+            return path;
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            Volatile.Write(ref health, new(true, Health.LastSucceededAt));
+            throw;
+        }
     }
 
     public async Task<string?> CreateScheduledBackupIfDueAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var path = await CreateScheduledBackupCoreAsync(now, cancellationToken);
+            if (path is not null) Volatile.Write(ref health, new(false, DateTimeOffset.UtcNow));
+            return path;
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            Volatile.Write(ref health, new(true, Health.LastSucceededAt));
+            throw;
+        }
+    }
+
+    private async Task<string?> CreateScheduledBackupCoreAsync(
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
@@ -345,6 +376,12 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerCo
                 {
                     command.CommandText = "UPDATE DeviceSessions SET RevokedAt=$now WHERE RevokedAt IS NULL; UPDATE PairingCodes SET ConsumedAt=$now WHERE ConsumedAt IS NULL; DELETE FROM PlaybackTickets;";
                     command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                    await command.ExecuteNonQueryAsync(cancellationToken);
+                }
+                command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='DeviceAuthorizationRequests';";
+                if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) > 0)
+                {
+                    command.CommandText = "UPDATE DeviceAuthorizationRequests SET State='Expired', ProtectedAuthentication=NULL WHERE AcknowledgedAt IS NULL AND State IN ('Pending','Approved');";
                     await command.ExecuteNonQueryAsync(cancellationToken);
                 }
                 command.CommandText = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='SyncHistoryState';";

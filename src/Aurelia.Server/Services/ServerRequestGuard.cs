@@ -56,6 +56,8 @@ public sealed class ServerRequestGuard
         if (path.Contains("/exclusions/", StringComparison.Ordinal)) return false;
         if (path == "/api/v1/libraries/reset") return true;
         if (path == "/api/v1/auth/pairings") return true;
+        if (path == "/api/v1/server/device-pairings/lookup") return false;
+        if (path.StartsWith("/api/v1/server/device-pairings/", StringComparison.Ordinal)) return true;
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/auth/sessions/", StringComparison.Ordinal)) return true;
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/media/", StringComparison.Ordinal)
             && path.Split('/').Length == 5) return true;
@@ -149,6 +151,7 @@ public sealed class ServerRequestGuard
             throw new AccountException("profile_session_revoked", "The viewing profile is no longer authorized for this action.", 403);
         if (!context.RequestServices.GetRequiredService<ProfileSessionStore>().ManagementGrantActive(context.User.RequireProfileSessionId(), managementGeneration))
             throw new AccountException("management_locked", "Unlock server management with the Server Password. Access lasts ten minutes.", 403);
+        context.Items["Aurelia.AdministrationGeneration"] = managementGeneration;
         context.Items["Aurelia.AdministrationApproved"] = true;
     }
 }

@@ -191,7 +191,8 @@ public sealed class ServerBackupSecurityTests
             Assert.NotNull((await restored.DeviceSessions.SingleAsync(session => session.Id == deviceId)).RevokedAt);
             Assert.Equal("synthetic-server-password-hash", (await restored.AdministrationCredentials.SingleAsync()).PasswordHash);
             Assert.Equal(serverId, (await restored.ServerIdentities.SingleAsync()).ServerId);
-            Assert.Equal(17, (await backups.VerifyAsync(runtime.DatabasePath, CancellationToken.None)).AppliedMigrationCount);
+            Assert.Equal(restored.Database.GetMigrations().Count(),
+                (await backups.VerifyAsync(runtime.DatabasePath, CancellationToken.None)).AppliedMigrationCount);
             Assert.False(File.Exists(Path.Combine(root, "offline.mkv")));
         }
         finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }

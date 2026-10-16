@@ -12,7 +12,7 @@ public static class ServerManagementEndpoints
     {
         var server = app.MapGroup("/api/v1/server").RequireAuthorization("Owner");
         server.MapGet("/settings", (ServerConfigurationStore configuration) => configuration.Read());
-        server.MapGet("/capabilities", (NativeHostOperations operations) => new { nativeHostOperations = operations.Available, encryptedBackups = true, transcoding = false });
+        server.MapGet("/capabilities", (NativeHostOperations operations) => new ServerManagementCapabilities(operations.Available, true, false));
         server.MapGet("/operations/current", (NativeHostOperations operations, CancellationToken token) => operations.StatusAsync(token));
         server.MapGet("/hosting", (NativeHostOperations operations, CancellationToken token) => operations.HostingStatusAsync(token));
         server.MapPost("/operations/restart", (HttpContext context, NativeHostOperations operations) => operations.RestartAsync(context.User.RequireSessionId(), context.RequestAborted));
@@ -64,23 +64,8 @@ public static class ServerManagementEndpoints
             return new AdministrationApprovalResponse(result.Token, result.ExpiresAt);
         });
         server.MapGet("/users", (AccountService accounts, CancellationToken token) => accounts.ListAccessAsync(token));
-        server.MapGet("/status", async (ServerRuntimeOptions runtime, ServerTlsIdentity identity, ServerConfigurationStore configuration, ActiveStreamRegistry streams, AureliaDbContext database) => new
-        {
-            state = "running",
-            version = ServerProductVersion.Current,
-            uptimeSeconds = (DateTimeOffset.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).TotalSeconds,
-            activeStreams = streams.Count,
-            databaseBytes = File.Exists(runtime.DatabasePath) ? new FileInfo(runtime.DatabasePath).Length : 0,
-            users = await database.Users.CountAsync(),
-            libraries = await database.LibraryRoots.CountAsync(),
-            freeDiskBytes = AvailableSpace(runtime.DataDirectory),
-            certificateExpiresAt = identity.Certificate?.NotAfter.ToUniversalTime(),
-            networkAddresses = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
-                .Where(network => network.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
-                .SelectMany(network => network.GetIPProperties().UnicastAddresses).Select(address => address.Address)
-                .Where(address => ServerRequestGuard.NetworkAllowed(address, configuration.Current.AllowedNetworks))
-                .Select(address => address.ToString()).Distinct().Take(64).ToArray(),
-        });
+        server.MapGet("/status", (ServerReadinessService readiness, ServerTlsIdentity identity, ActiveStreamRegistry streams) =>
+            readiness.Status(identity, streams));
         server.MapGet("/sessions/{userId:guid}", (HttpContext context, Guid userId, AccountService accounts) =>
             accounts.ListSessionsAsync(userId, context.User.RequireSessionId(), context.RequestAborted));
         server.MapDelete("/sessions/{sessionId:guid}", async (HttpContext context, Guid sessionId, AccountService accounts) =>
@@ -104,10 +89,5 @@ public static class ServerManagementEndpoints
             await accounts.RevokeAllSessionsAsync(context.User.RequireUserId(), userId, context.RequestAborted);
             return Results.NoContent();
         });
-    }
-    private static long? AvailableSpace(string path)
-    {
-        try { return new DriveInfo(path).AvailableFreeSpace; }
-        catch (Exception exception) when (exception is IOException or ArgumentException or UnauthorizedAccessException) { return null; }
     }
 }

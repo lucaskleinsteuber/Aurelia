@@ -144,9 +144,9 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
         finally { decodeGate.Release(); }
     }
 
-    private sealed record DecodedImage(SKBitmap Image, SKEncodedOrigin Origin) : IDisposable
+    internal sealed record DecodedImage(SKBitmap Image, SKEncodedOrigin Origin) : IDisposable
     { public void Dispose() => Image.Dispose(); }
-    private static DecodedImage Decode(byte[] bytes, bool allowProviderWebP = false)
+    internal static DecodedImage Decode(byte[] bytes, bool allowProviderWebP = false)
     {
         using var stream = new SKMemoryStream(bytes);
         using var codec = SKCodec.Create(stream);
@@ -164,7 +164,7 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
     {
         using var image = Decode(File.ReadAllBytes(path));
     }
-    private static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)
+    internal static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)
     {
         var swap = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
         var result = new SKBitmap(swap ? source.Height : source.Width, swap ? source.Width : source.Height);

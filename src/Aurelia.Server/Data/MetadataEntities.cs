@@ -68,6 +68,7 @@ public sealed class ArtworkAsset
     public string RelativeFilePath { get; set; } = string.Empty;
     public string ContentType { get; set; } = string.Empty;
     public long ContentLength { get; set; }
+    public long Revision { get; set; } = 1;
     public bool IsManual { get; set; }
     public string? OriginalFilePath { get; set; }
     public string? CropJson { get; set; }

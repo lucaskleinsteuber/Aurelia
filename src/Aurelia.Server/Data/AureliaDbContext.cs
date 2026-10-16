@@ -20,6 +20,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
 
     public DbSet<PairingCode> PairingCodes => Set<PairingCode>();
 
+    public DbSet<DeviceAuthorizationRequest> DeviceAuthorizationRequests => Set<DeviceAuthorizationRequest>();
+
     public DbSet<ServerIdentity> ServerIdentities => Set<ServerIdentity>();
 
     public DbSet<LibraryRoot> LibraryRoots => Set<LibraryRoot>();
@@ -351,6 +353,25 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<DeviceAuthorizationRequest>(entity =>
+        {
+            entity.HasKey(request => request.Id);
+            entity.Property(request => request.DeviceName).HasMaxLength(128).IsRequired();
+            entity.Property(request => request.CodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(request => request.SecretHash).HasMaxLength(64).IsRequired();
+            entity.Property(request => request.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(request => request.ProtectedAuthentication).HasMaxLength(4096);
+            entity.Property(request => request.CreatedAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(request => request.ExpiresAt).HasConversion(dateTimeOffsetConverter);
+            entity.Property(request => request.LastPolledAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.Property(request => request.AcknowledgedAt).HasConversion(nullableDateTimeOffsetConverter);
+            entity.HasIndex(request => request.CodeHash).IsUnique();
+            entity.HasIndex(request => request.ExpiresAt);
+            entity.HasIndex(request => request.DeviceSessionId).IsUnique();
+            entity.HasOne(request => request.DeviceSession).WithMany().HasForeignKey(request => request.DeviceSessionId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
         modelBuilder.Entity<ServerIdentity>(entity =>
         {
             entity.HasKey(identity => identity.Id);
@@ -611,6 +632,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         modelBuilder.Entity<ArtworkAsset>(entity =>
         {
             entity.HasKey(asset => asset.Id);
+            entity.Property(asset => asset.Revision).HasDefaultValue(1L);
             entity.Property(asset => asset.Kind).HasConversion<string>().HasMaxLength(16);
             entity.Property(asset => asset.ProviderPath).HasMaxLength(512).IsRequired();
             entity.Property(asset => asset.RelativeFilePath).HasMaxLength(512).IsRequired();

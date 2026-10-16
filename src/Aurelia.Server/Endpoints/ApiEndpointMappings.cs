@@ -186,7 +186,7 @@ public static class ApiEndpointMappings
             runtime.LanAccessEnabled ? runtime.LanHttpsPort : null,
             runtime.LanAccessEnabled ? tlsIdentity.PublicKeyFingerprint : null,
             runtime.LanAccessEnabled ? tlsIdentity.DisplayFingerprint : null,
-            LibraryStateService.Capabilities));
+            ServerFeatures.All));
     }
 
     private static async Task<IResult> SetupOwnerAsync(
@@ -737,14 +737,26 @@ public static class ApiEndpointMappings
         throw new MetadataException(code, message, StatusCodes.Status400BadRequest);
     }
 
-    private static async Task<IResult> ArtworkAsync(HttpContext context, Guid artworkId, ArtworkStore artwork, AureliaDbContext database, CancellationToken cancellationToken)
+    private static async Task<IResult> ArtworkAsync(HttpContext context, Guid artworkId, int? width, ArtworkStore artwork, ArtworkVariantStore variants, AureliaDbContext database, CancellationToken cancellationToken)
     {
+        if (width.HasValue && !ArtworkVariantStore.IsSupportedWidth(width.Value))
+            throw new AccountException("invalid_artwork_width", "Choose an artwork width of 320, 640, 1280 or 1920.", 400);
         var source = await artwork.OpenAsync(artworkId, database, cancellationToken);
         if (source is null) return Results.NotFound();
-        context.Response.Headers.CacheControl = "private, max-age=86400";
+        var revision = source.Revision;
+        if (width.HasValue)
+        {
+            try
+            {
+                var variant = await variants.OpenAsync(artworkId, revision, width.Value, source, database, cancellationToken);
+                if (variant is not null) { await source.Stream.DisposeAsync(); source = variant; }
+            }
+            catch { await source.Stream.DisposeAsync(); throw; }
+        }
+        context.Response.Headers.CacheControl = "private, no-cache";
         context.Response.Headers.XContentTypeOptions = "nosniff";
         return Results.File(source.Stream, source.ContentType, lastModified: source.LastModified,
-            entityTag: new EntityTagHeaderValue($"\"{artworkId:N}-{source.ContentLength:x}\""));
+            entityTag: new EntityTagHeaderValue($"\"{artworkId:N}-r{revision:x}-w{width ?? 0}-{source.ContentLength:x}\""));
     }
 
     private static Task<IResult> CreatePlaybackAsync(

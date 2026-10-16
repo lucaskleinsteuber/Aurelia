@@ -11,6 +11,7 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
     subsystem: "com.lucas.aurelia.media.server-host", category: "lifecycle")
   private var runtime: ServerHostRuntime?
   private var terminationAuthorized = false
+  private var workspaceObservers: [NSObjectProtocol] = []
 
   static func main() {
     let application = NSApplication.shared
@@ -29,6 +30,15 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
         environment: ProcessInfo.processInfo.environment,
         terminationHandler: { [weak self] in self?.finishTermination() })
       try runtime?.start()
+      let center = NSWorkspace.shared.notificationCenter
+      workspaceObservers = [
+        center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) {
+          [weak runtime] _ in runtime?.systemWillSleep()
+        },
+        center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) {
+          [weak runtime] _ in runtime?.systemDidWake()
+        },
+      ]
     } catch {
       let category = (error as? HostError)?.diagnosticCategory ?? "runtime-initialization"
       Self.logger.error("Server host startup failed: \(category, privacy: .public)")
@@ -96,6 +106,7 @@ private struct ResolvedHostLaunch {
   let logDirectory: URL
   let serverName: String
   let lanPort: Int
+  var isolatedBackground = false
 }
 
 private enum ChildServerReadiness: Equatable {
@@ -112,6 +123,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private let dataDirectory: URL
   private let logDirectory: URL
   private let terminationHandler: @MainActor @Sendable () -> Void
+  private let isolatedBackground: Bool
   private var listener: NWListener?
   private var process: Process?
   private var serverLifeline: Pipe?
@@ -125,7 +137,10 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private var pendingBackgroundHandoff = false
   private var sleepAssertion: IOPMAssertionID = 0
   private var shuttingDown = false
-  private var restartDates: [Date] = []
+  private var watchdog = HostWatchdogPolicy()
+  private var watchdogTimer: DispatchSourceTimer?
+  private var watchdogRequest: Task<Void, Never>?
+  private var watchdogRequestID: UUID?
   private var readinessGeneration: UInt64 = 0
   private var serverReadyGeneration: UInt64?
   private var serverStoppingGeneration: UInt64?
@@ -146,6 +161,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
     self.dataDirectory = launch.dataDirectory
     self.logDirectory = launch.logDirectory
     self.terminationHandler = terminationHandler
+    self.isolatedBackground = launch.isolatedBackground
 
     if !FileManager.default.fileExists(atPath: settingsURL.path) {
       do {
@@ -178,11 +194,41 @@ private final class ServerHostRuntime: @unchecked Sendable {
     queue.async { [weak self] in self?.beginShutdown() }
   }
 
+  func systemWillSleep() {
+    queue.async { [weak self] in
+      guard let self else { return }
+      self.watchdog.willSleep()
+      self.cancelWatchdogRequest()
+    }
+  }
+
+  func systemDidWake() {
+    queue.async { [weak self] in
+      guard let self else { return }
+      self.watchdog.didWake(at: ProcessInfo.processInfo.systemUptime)
+      self.cancelWatchdogRequest()
+    }
+  }
+
   private var settingsURL: URL {
     dataDirectory.appendingPathComponent("server-settings.json")
   }
 
   private static func resolveLaunch(environment: [String: String]) throws -> ResolvedHostLaunch {
+    if ProcessInfo.processInfo.arguments.contains("--preflight-background") {
+      guard ProcessInfo.processInfo.arguments.contains("--background") else {
+        throw HostError.invalidLaunchDescription
+      }
+      let preflight: ValidatedHostPreflightBackground
+      do {
+        preflight = try HostPreflightBackgroundSecurity.load(
+          environment: environment, helperBundleURL: Bundle.main.bundleURL)
+      } catch { throw HostError.invalidLaunchDescription }
+      return ResolvedHostLaunch(
+        secret: preflight.secret, parentProcessID: 0, rendezvousURL: preflight.rendezvousURL,
+        dataDirectory: preflight.dataDirectory, logDirectory: preflight.logDirectory,
+        serverName: "Synthetic Watchdog", lanPort: 43_111, isolatedBackground: true)
+    }
     if ProcessInfo.processInfo.arguments.contains("--background") {
       let settings = try HostServiceSettings.load()
       guard settings.backgroundEnabled else { throw HostError.invalidLaunchDescription }
@@ -312,6 +358,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private func startServer(lan: Bool) {
     guard !shuttingDown else { return }
+    stopWatchdog()
     readinessGeneration &+= 1
     let generation = readinessGeneration
     serverReadyGeneration = nil
@@ -332,6 +379,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
             guard runtime.readinessGeneration == generation else { return }
             runtime.serverReadyGeneration = nil
             runtime.serverStoppingGeneration = generation
+            runtime.stopWatchdog()
           }
         },
         onServerReady: { [weak self] in
@@ -419,6 +467,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
                 operation["state"] = "completed"
                 try? self.writeOperation(operation)
               }
+              self.startWatchdog(generation: generation)
             }
           }
           return
@@ -450,8 +499,141 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
   }
 
+  private func startWatchdog(generation: UInt64) {
+    stopWatchdog()
+    watchdog.didBecomeReady()
+    let timer = DispatchSource.makeTimerSource(queue: queue)
+    timer.schedule(deadline: .now() + 15, repeating: 15)
+    timer.setEventHandler { [weak self] in self?.probeServerLiveness(generation: generation) }
+    watchdogTimer = timer
+    timer.resume()
+  }
+
+  private func stopWatchdog() {
+    watchdogTimer?.cancel()
+    watchdogTimer = nil
+    cancelWatchdogRequest()
+  }
+
+  private func cancelWatchdogRequest() {
+    watchdogRequest?.cancel()
+    watchdogRequest = nil
+    watchdogRequestID = nil
+  }
+
+  private func watchdogMayProbe(generation: UInt64) -> Bool {
+    let operation = try? readOperation()
+    let plannedOperation = ["restarting", "awaitingConfirmation", "awaitingMacApproval"]
+      .contains(operation?["state"] as? String ?? "")
+    return watchdog.mayProbe(
+      at: ProcessInfo.processInfo.systemUptime,
+      ready: readinessGeneration == generation && serverReadyGeneration == generation
+        && serverStoppingGeneration != generation && process?.isRunning == true
+        && (status.state == .running || status.state == .setupRequired),
+      operationActive: shuttingDown || pendingRestartLAN != nil || pendingRestoreID != nil
+        || restoreProcess != nil || pendingBackgroundHandoff || plannedOperation)
+  }
+
+  private func probeServerLiveness(generation: UInt64) {
+    guard watchdogRequest == nil, watchdogMayProbe(generation: generation) else { return }
+    let requestID = UUID()
+    watchdogRequestID = requestID
+    watchdogRequest = Task { [weak self] in
+      let receivedResponse = await Self.serverAnsweredLivenessProbe()
+      guard !Task.isCancelled, let self else { return }
+      self.queue.async {
+        guard self.watchdogRequestID == requestID else { return }
+        self.watchdogRequest = nil
+        self.watchdogRequestID = nil
+        guard self.watchdogMayProbe(generation: generation) else { return }
+        switch self.watchdog.transportCompleted(
+          receivedHTTPResponse: receivedResponse, at: ProcessInfo.processInfo.systemUptime)
+        {
+        case .none:
+          break
+        case .restart:
+          self.recordRecovery("host_transport_restart")
+          self.restart(lan: (try? self.loadSettings().lanAccessEnabled) ?? false)
+        case .limitReached:
+          self.recordRecovery("host_restart_limit")
+          self.stopWatchdog()
+          self.updateStatus(
+            .failed,
+            message:
+              "Aurelia Server did not respond after repeated recovery attempts. Choose Restart to try again."
+          )
+        }
+      }
+    }
+  }
+
+  private static func serverAnsweredLivenessProbe() async -> Bool {
+    var request = URLRequest(url: URL(string: "http://127.0.0.1:43110/api/v1/health/live")!)
+    // HEAD completes after headers, even if a faulty service stalls its body.
+    // Every valid HTTP status (including 429/503) confirms transport liveness.
+    request.httpMethod = "HEAD"
+    request.timeoutInterval = 3
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.urlCache = nil
+    configuration.connectionProxyDictionary = [:]
+    configuration.timeoutIntervalForResource = 3
+    let session = URLSession(
+      configuration: configuration, delegate: LivenessRedirectPolicy(), delegateQueue: nil)
+    defer { session.invalidateAndCancel() }
+    do {
+      let (_, response) = try await session.data(for: request)
+      return response is HTTPURLResponse
+    } catch { return false }
+  }
+
+  private final class LivenessRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+      _ session: URLSession, task: URLSessionTask,
+      willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+      completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+      // A redirect already proves that the local service can answer HTTP.
+      completionHandler(nil)
+    }
+  }
+
+  private struct RecoveryEvent: Codable {
+    let at: Date
+    let code: String
+  }
+
+  private func recordRecovery(_ code: String) {
+    let allowed = [
+      "host_transport_restart", "host_process_restart", "host_restart_limit", "host_manual_retry",
+    ]
+    guard allowed.contains(code) else { return }
+    let url = dataDirectory.appendingPathComponent("host-recovery.json")
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    var events: [RecoveryEvent] = []
+    if let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey]),
+      values.isSymbolicLink != true, (values.fileSize ?? 0) <= 65_536,
+      let data = try? Data(contentsOf: url),
+      let previous = try? decoder.decode([RecoveryEvent].self, from: data)
+    {
+      events = Array(previous.filter { allowed.contains($0.code) }.suffix(19))
+    }
+    events.append(RecoveryEvent(at: Date(), code: code))
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    do {
+      let data = try encoder.encode(events)
+      try data.write(to: url, options: .atomic)
+      try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    } catch {
+      // Recovery must not depend on writable diagnostics storage.
+    }
+  }
+
   private func restart(lan: Bool) {
     guard !shuttingDown else { return }
+    stopWatchdog()
     if pendingRestartLAN != nil {
       pendingRestartLAN = lan
       return
@@ -462,7 +644,11 @@ private final class ServerHostRuntime: @unchecked Sendable {
     pendingRestartLAN = lan
     updateStatus(.restarting)
     if let process, process.isRunning {
+      let processIdentifier = process.processIdentifier
       process.terminate()
+      queue.asyncAfter(deadline: .now() + 10) { [weak process] in
+        if process?.isRunning == true { kill(processIdentifier, SIGKILL) }
+      }
     } else {
       pendingRestartLAN = nil
       startServer(lan: lan)
@@ -470,6 +656,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
   }
 
   private func serverTerminated(status terminationStatus: Int32) {
+    stopWatchdog()
     process = nil
     closeServerLifeline()
     serverReadyGeneration = nil
@@ -524,15 +711,15 @@ private final class ServerHostRuntime: @unchecked Sendable {
       return
     }
 
-    let now = Date()
-    restartDates = restartDates.filter { now.timeIntervalSince($0) < 60 }
-    guard restartDates.count < 3 else {
+    guard watchdog.requestAutomaticRecovery(at: ProcessInfo.processInfo.systemUptime) == .restart
+    else {
+      recordRecovery("host_restart_limit")
       updateStatus(
         .failed,
-        message: "Aurelia Server stopped repeatedly (exit \(terminationStatus)).")
+        message: "Aurelia Server stopped repeatedly. Check Server Settings, then choose Restart.")
       return
     }
-    restartDates.append(now)
+    recordRecovery("host_process_restart")
     updateStatus(.restarting, message: "Aurelia Server stopped unexpectedly. Restarting…")
     queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.startServer(lan: false) }
   }
@@ -546,6 +733,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private func beginShutdown() {
     guard !shuttingDown else { return }
     shuttingDown = true
+    stopWatchdog()
     readinessGeneration &+= 1
     serverReadyGeneration = nil
     serverStoppingGeneration = nil
@@ -616,6 +804,13 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private func handle(_ request: HostRequest, on connection: NWConnection) {
     guard request.secret == secret else {
+      respond(connection, status: 404, body: Data())
+      return
+    }
+    if isolatedBackground,
+      !((request.method == "GET" && request.action == "status")
+        || (request.method == "POST" && ["restart", "shutdown"].contains(request.action)))
+    {
       respond(connection, status: 404, body: Data())
       return
     }
@@ -690,6 +885,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
       let body = (try? JSONEncoder().encode(status)) ?? Data()
       respond(connection, status: 200, body: body)
     case ("POST", "restart"):
+      watchdog.manualRetry()
+      recordRecovery("host_manual_retry")
       respond(connection, status: 202, body: Data())
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
@@ -740,6 +937,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
       respond(connection, status: 202, body: Data())
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
+        self.stopWatchdog()
         self.updateStatus(
           .restarting,
           message: "Restoring verified server state. All devices will need to sign in again.")
@@ -760,6 +958,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
       respond(connection, status: 202, body: Data())
       queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
         guard let self else { return }
+        self.stopWatchdog()
         self.pendingBackgroundHandoff = true
         if let process = self.process, process.isRunning {
           process.terminate()
@@ -830,6 +1029,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
 
   private var operationURL: URL { dataDirectory.appendingPathComponent("host-operation.json") }
   private func updateSleepAssertion() {
+    guard !isolatedBackground else { return }
     let requested = (try? HostServiceSettings.load().preventIdleSleep) == true
     if requested && sleepAssertion == 0 {
       var assertion: IOPMAssertionID = 0

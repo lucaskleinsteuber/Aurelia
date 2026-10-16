@@ -81,7 +81,8 @@ public static class MetadataPresentation
         asset.Kind,
         $"/api/v1/artwork/{asset.Id}",
         asset.ContentType,
-        asset.ContentLength);
+        asset.ContentLength,
+        asset.Revision);
 
     public static IReadOnlyList<string> ParseList(string? json)
     {

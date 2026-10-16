@@ -6,10 +6,10 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <AureliaBuildNumber>49</AureliaBuildNumber>
-    <Version>1.5.4</Version>
-    <FileVersion>1.5.4.$(AureliaBuildNumber)</FileVersion>
-    <InformationalVersion>1.5.4+build.$(AureliaBuildNumber)</InformationalVersion>
+    <AureliaBuildNumber>50</AureliaBuildNumber>
+    <Version>1.5.5</Version>
+    <FileVersion>1.5.5.$(AureliaBuildNumber)</FileVersion>
+    <InformationalVersion>1.5.5+build.$(AureliaBuildNumber)</InformationalVersion>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">$([System.IO.Path]::Combine('$(HOME)', 'Library', 'Caches', 'Aurelia', 'Artifacts'))</AureliaOtherRoot>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == '' and '$(AureliaOtherRoot)' == ''">$([System.IO.Path]::Combine($([System.Environment]::GetFolderPath(SpecialFolder.UserProfile)), '.cache', 'Aurelia', 'Artifacts'))</AureliaOtherRoot>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == '' and '$(XDG_CACHE_HOME)' != '' and !$([MSBuild]::IsOSPlatform('OSX'))">$([System.IO.Path]::Combine('$(XDG_CACHE_HOME)', 'Aurelia', 'Artifacts'))</AureliaOtherRoot>

@@ -13,6 +13,88 @@ namespace Aurelia.Server.Tests;
 
 public sealed class MigrationUpgradeTests
 {
+    private static long CurrentMigrationCount(AureliaServerFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<AureliaDbContext>().Database.GetMigrations().LongCount();
+    }
+
+    [Fact]
+    public async Task DeviceAuthorizationUpgradePreservesPairedDevicesAndInitializesExistingArtworkRevision()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.GetService<IMigrator>().MigrateAsync("20261015134947_DurableMetadataWorklists");
+            var now = DateTimeOffset.UtcNow;
+            var owner = new ServerUser
+            {
+                Id = Guid.NewGuid(),
+                Username = "Owner",
+                NormalizedUsername = "OWNER",
+                PasswordHash = "synthetic-password-hash",
+                Role = UserRole.Owner,
+            };
+            var device = new DeviceSession
+            {
+                Id = Guid.NewGuid(),
+                User = owner,
+                UserId = owner.Id,
+                DeviceName = "Existing Mac",
+                TokenHash = "synthetic-existing-device-hash",
+                CreatedAt = now,
+                LastSeenAt = now,
+                ExpiresAt = now.AddDays(30),
+            };
+            var legacyPairing = new PairingCode
+            {
+                Id = Guid.NewGuid(),
+                User = owner,
+                UserId = owner.Id,
+                CodeHash = "synthetic-legacy-code-hash",
+                CreatedAt = now,
+                ExpiresAt = now.AddMinutes(5),
+            };
+            var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", NormalizedPath = "synthetic" };
+            var media = new MediaItem
+            {
+                Id = Guid.NewGuid(),
+                LibraryRoot = library,
+                LibraryRootId = library.Id,
+                Kind = MediaKind.Movie,
+                DetectedTitle = "Existing Film",
+                NormalizedSourcePath = "EXISTING-FILM",
+            };
+            media.Metadata = new MediaMetadata { MediaItemId = media.Id, ManualTitle = "Existing Manual Title" };
+            database.AddRange(owner, device, legacyPairing, library, media);
+            await database.SaveChangesAsync();
+            var artworkId = Guid.NewGuid();
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO ArtworkAssets (Id,MediaItemId,Kind,ProviderPath,RelativeFilePath,ContentType,ContentLength,CreatedAt,IsManual)
+                VALUES ({artworkId},{media.Id},'Poster','manual-existing','Artwork/manual-existing.png','image/png',12,{now.ToUnixTimeMilliseconds()},1);
+                """);
+            await database.Database.MigrateAsync();
+            Assert.Empty(await database.DeviceAuthorizationRequests.ToListAsync());
+            var retainedDevice = await database.DeviceSessions.AsNoTracking().SingleAsync();
+            Assert.Equal(device.Id, retainedDevice.Id);
+            Assert.Equal(device.TokenHash, retainedDevice.TokenHash);
+            Assert.Null(retainedDevice.RevokedAt);
+            Assert.Null((await database.PairingCodes.AsNoTracking().SingleAsync()).ConsumedAt);
+            Assert.Equal("Existing Manual Title", (await database.MediaMetadata.AsNoTracking().SingleAsync()).ManualTitle);
+            var artwork = await database.ArtworkAssets.AsNoTracking().SingleAsync();
+            Assert.Equal(artworkId, artwork.Id);
+            Assert.Equal(1, artwork.Revision);
+            Assert.True(artwork.IsManual);
+            Assert.Equal("Artwork/manual-existing.png", artwork.RelativeFilePath);
+            Assert.Equal(database.Database.GetMigrations().Count(), (await database.Database.GetAppliedMigrationsAsync()).Count());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public async Task MetadataWorklistUpgradeRetainsHistoryAndInterruptsLegacyOpenJobs()
     {
@@ -284,7 +366,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(17L, await command.ExecuteScalarAsync());
+            Assert.Equal(CurrentMigrationCount(factory), await command.ExecuteScalarAsync());
             command.CommandText =
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='__EFMigrationsLock';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
@@ -337,7 +419,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(17L, await command.ExecuteScalarAsync());
+            Assert.Equal(CurrentMigrationCount(factory), await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='SyncChanges';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaSearchIndex';";
@@ -382,7 +464,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(17L, await command.ExecuteScalarAsync());
+            Assert.Equal(CurrentMigrationCount(factory), await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='PlaybackProgress';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaMetadata';";
@@ -438,7 +520,7 @@ public sealed class MigrationUpgradeTests
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM __EFMigrationsHistory;";
-            Assert.Equal(17L, await command.ExecuteScalarAsync());
+            Assert.Equal(CurrentMigrationCount(factory), await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MediaItems';";
             Assert.Equal(1L, await command.ExecuteScalarAsync());
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='MetadataJobs';";

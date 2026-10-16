@@ -23,7 +23,14 @@ struct ServerManagementView: View {
           if let status {
             GroupBox("Overview") {
               VStack(alignment: .leading, spacing: 10) {
-                LabeledContent("State", value: status.state.capitalized)
+                LabeledContent(
+                  "State", value: (status.readiness?.state ?? status.state).capitalized)
+                if let readiness = status.readiness {
+                  ForEach(readiness.components) { component in
+                    LabeledContent(component.title, value: component.detail)
+                      .foregroundStyle(component.state == "ready" ? .primary : .secondary)
+                  }
+                }
                 LabeledContent("Version", value: status.version)
                 LabeledContent(
                   "Uptime",

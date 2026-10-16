@@ -119,6 +119,8 @@ builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<ProfileService>();
 builder.Services.AddSingleton<ProfileSessionStore>();
 builder.Services.AddSingleton<ProfilePinAttemptGuard>();
+builder.Services.AddSingleton<DeviceAuthorizationGuard>();
+builder.Services.AddScoped<DeviceAuthorizationService>();
 builder.Services.AddSingleton<LocalOwnerPinRecovery>();
 builder.Services.AddScoped<LibraryAccessService>();
 builder.Services.AddSingleton<CatalogMutationGate>();
@@ -134,6 +136,8 @@ builder.Services.AddSingleton<ServerRequestGuard>();
 builder.Services.AddSingleton<NativeHostOperations>();
 builder.Services.AddSingleton<ServerDiagnosticsStore>();
 builder.Services.AddHostedService(services => services.GetRequiredService<ServerDiagnosticsStore>());
+builder.Services.AddSingleton<ServerReadinessService>();
+builder.Services.AddHostedService(services => services.GetRequiredService<ServerReadinessService>());
 builder.Services.AddScoped<LibraryService>();
 builder.Services.AddScoped<ImportPlanningService>();
 builder.Services.AddScoped<CatalogService>();
@@ -150,6 +154,7 @@ builder.Services.AddScoped<SyncChangeService>();
 builder.Services.AddScoped<MediaSearchIndexService>();
 builder.Services.AddSingleton<MetadataProviderSettingsStore>();
 builder.Services.AddSingleton<ArtworkStore>();
+builder.Services.AddSingleton<ArtworkVariantStore>();
 builder.Services.AddSingleton<MetadataJobScheduler>();
 builder.Services.AddHttpClient<ITmdbClient, TmdbClient>(client =>
 {
@@ -298,7 +303,7 @@ app.Use(async (context, next) =>
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record(exception.Code, severity, context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
         context.Items["Aurelia.FailureRecorded"] = true;
         context.Response.StatusCode = exception.StatusCode;
-        if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = "60";
+        if (exception.StatusCode == 429) context.Response.Headers.RetryAfter = exception.Code == "device_pairing_slow_down" ? "5" : "60";
         await context.Response.WriteAsJsonAsync(new ApiProblem(exception.Code, exception.Message));
     }
     catch (InvalidDataException) when (!context.Response.HasStarted)
@@ -321,10 +326,12 @@ app.Use(async (context, next) =>
 });
 app.MapAureliaApi();
 app.MapServerManagement();
+app.MapServerReadiness();
 app.MapMediaEditing();
 app.MapImportPlanning();
 app.MapSceneNotes();
 app.MapProfiles();
+app.MapDeviceAuthorization();
 
 try
 {

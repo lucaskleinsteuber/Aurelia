@@ -47,6 +47,7 @@ actor LibrarySyncController {
     runID: UUID = UUID(),
     onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
     onSuccess: (@MainActor @Sendable () async -> Void)? = nil,
+    onTransportFailure: (@MainActor @Sendable () async -> Void)? = nil,
     onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async throws -> Void
   ) {
     guard !Task.isCancelled else { return }
@@ -122,6 +123,7 @@ actor LibrarySyncController {
               return
             }
           }
+          if ServerReconnectPolicy.isConnectivityFailure(error) { await onTransportFailure?() }
           failures = min(failures + 1, 4)
           let retry =
             (error as? APIClientError)?.retryDelay
@@ -142,12 +144,14 @@ actor LibrarySyncController {
     runID: UUID = UUID(),
     onFailure: (@MainActor @Sendable (APIClientError) async -> Void)? = nil,
     onSuccess: (@MainActor @Sendable () async -> Void)? = nil,
+    onTransportFailure: (@MainActor @Sendable () async -> Void)? = nil,
     onChanges: @escaping @MainActor @Sendable (SyncChangesResponse) async throws -> Void
   ) {
     isForeground = foreground
     if foreground, let profile {
       start(
         profile: profile, runID: runID, onFailure: onFailure, onSuccess: onSuccess,
+        onTransportFailure: onTransportFailure,
         onChanges: onChanges)
     } else {
       stop()

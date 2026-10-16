@@ -413,7 +413,8 @@ public sealed record ArtworkSummary(
     ArtworkKind Kind,
     string Path,
     string ContentType,
-    long ContentLength);
+    long ContentLength,
+    long? Revision = null);
 
 public sealed record CreditSummary(
     string Name,

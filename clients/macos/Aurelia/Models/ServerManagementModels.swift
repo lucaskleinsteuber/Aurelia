@@ -88,6 +88,57 @@ struct ServerStatusSummary: Decodable, Sendable {
   let freeDiskBytes: Int64?
   let certificateExpiresAt: String?
   let networkAddresses: [String]
+  var readiness: ServerReadinessSummary? = nil
+  var recentRecoveryEvents: [ServerRecoveryEvent]? = nil
+}
+
+struct ServerReadinessSummary: Decodable, Sendable {
+  let state: String
+  let components: [ServerComponentStatus]
+  let checkedAt: String
+}
+
+struct ServerComponentStatus: Decodable, Sendable, Identifiable {
+  let id: String
+  let state: String
+  let reason: String?
+
+  var title: String {
+    switch id {
+    case "storage": "Server storage"
+    case "database": "Database"
+    case "media": "Media drives"
+    case "metadata": "Metadata provider"
+    case "backups": "Backups"
+    case "recovery": "Recovery"
+    default: "Server component"
+    }
+  }
+
+  var detail: String {
+    switch reason {
+    case "server_disk_full": "Server disk full"
+    case "server_disk_low": "Server disk space low"
+    case "server_storage_unwritable": "Server storage unavailable"
+    case "database_unavailable": "Database unavailable"
+    case "media_access_error": "Media access error"
+    case "media_drive_disconnected": "Media drive disconnected"
+    case "provider_retry_pending": "Waiting to retry"
+    case "metadata_job_failed": "Metadata job failed"
+    case "automatic_backups_disabled": "Automatic backups disabled"
+    case "first_backup_pending": "First backup pending"
+    case "scheduled_backup_overdue": "Scheduled backup overdue"
+    case "backup_storage_unavailable": "Backup storage unavailable"
+    case "backup_attempt_failed": "Last backup attempt failed"
+    case "restore_in_progress": "Restore in progress"
+    default: state.capitalized
+    }
+  }
+}
+
+struct ServerRecoveryEvent: Decodable, Sendable {
+  let at: String
+  let code: String
 }
 struct UserAccessSummary: Codable, Identifiable, Sendable {
   var id: UUID { user.id }
