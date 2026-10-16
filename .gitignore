@@ -4,6 +4,7 @@
 xcuserdata/
 *.xcuserstate
 clients/macos/Dependencies/
+clients/tvos/Dependencies/
 *.user
 *.suo
 

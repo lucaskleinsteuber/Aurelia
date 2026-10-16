@@ -1,0 +1,14 @@
+{
+  "info" : {
+    "author" : "com.lucas.aurelia.tvos",
+    "version" : 1
+  },
+  "layers" : [
+    {
+      "filename" : "Front.imagestacklayer"
+    },
+    {
+      "filename" : "Back.imagestacklayer"
+    }
+  ]
+}
