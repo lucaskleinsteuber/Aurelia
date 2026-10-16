@@ -2,14 +2,9 @@ import Foundation
 @preconcurrency import TVVLCKit
 import UIKit
 
-struct TVPlaybackTrack: Identifiable, Equatable {
-  let id: Int32
-  let title: String
-}
-
 @MainActor
-final class TVVideoEngine {
-  enum Terminal: Equatable { case ended, failed }
+final class TVVideoEngine: TVPlaybackEngine {
+  typealias Terminal = TVVideoTerminal
 
   var onUpdate: (() -> Void)?
   var onTerminal: ((Terminal) -> Void)?

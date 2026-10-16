@@ -59,14 +59,17 @@ These rules apply to every task in this repository.
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
   changing them. The approved Mac profile-deletion release is 1.5.6 (51); the
-  independent tvOS client starts at 0.1 (1), requires tvOS 26, and is named Aurelia.
+  independent tvOS client is named Aurelia, requires tvOS 26, and the approved
+  focus/UI-test update is 0.1.1 (2).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
-- For the initial TV client, run device builds and host-executable logic/contract
-  tests only. Do not run simulators or automated UI, playback or soak tests. The
-  user tests the actual TV UI and playback. Install on the already paired Apple
-  TV when reachable and correctly provisioned; report a concrete installation
-  blocker without resetting its configuration.
+- For tvOS, run warning-free device/simulator builds, host-executable logic tests
+  and XCUITest on the dedicated tvOS 26 simulator. UI tests must use synthetic
+  data and a simulated engine through the production views/control logic, with
+  no real video engine, stream relay, personal credentials or server access.
+  Actual playback remains the user's physical Apple TV check. Install the
+  signed update on the already paired TV when reachable; preserve its data and
+  configuration and report concrete blockers without resetting it.
 
 - For macOS/server, `AureliaBuildNumber` in `Directory.Build.props` is authoritative. Increment it
   exactly once, only after the pre-version verification is green; never reuse
@@ -122,8 +125,8 @@ These rules apply to every task in this repository.
   unportable paths, generated data, databases, binaries, media, caches, and test
   results.
 - Use a short English description of the completed change as the commit subject,
-  without a version/build number. The approved subjects for this work are
-  `Add profile deletion` and `Add tvOS client foundation`. Push to `origin/main`
+  without a version/build number. The approved subject for the current TV update
+  is `Fix tvOS focus and player controls`. Push to `origin/main`
   and verify the remote hash after each independent completed change.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.

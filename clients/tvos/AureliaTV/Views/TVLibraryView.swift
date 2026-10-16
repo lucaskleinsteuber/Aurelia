@@ -22,8 +22,10 @@ struct TVLibraryGrid: View {
             NavigationLink {
               TVDetailView(id: item.id, initial: item)
             } label: {
-              TVPosterLabel(item: item)
-            }.buttonStyle(.card).focused($focusedItem, equals: item.id).id(item.id)
+              TVPosterLabel(item: item, isFocused: focusedItem == item.id)
+            }.buttonStyle(TVContentButtonStyle()).focusEffectDisabled().focused(
+              $focusedItem, equals: item.id
+            ).id(item.id).accessibilityIdentifier("catalog-\(item.id)")
               .onAppear { if item.id == listing.items.last?.id { loadNext() } }
           }
         }.scrollTargetLayout().focusSection()
@@ -46,13 +48,18 @@ struct TVLibraryGrid: View {
 
 struct TVPosterLabel: View {
   let item: TVCatalogItem
+  var isFocused = false
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       TVArtworkView(artwork: item.poster, width: 640, symbol: item.kind == .series ? "tv" : "film")
         .aspectRatio(2 / 3, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-      Text(item.title).font(.system(size: 28, weight: .semibold)).lineLimit(2).frame(
-        height: 68, alignment: .topLeading)
+        .overlay(
+          RoundedRectangle(cornerRadius: 14).stroke(
+            .white.opacity(isFocused ? 0.9 : 0), lineWidth: 2))
+      Text(item.title).font(.system(size: 28, weight: .semibold)).multilineTextAlignment(.leading)
+        .lineLimit(2).frame(
+          height: 68, alignment: .topLeading)
       HStack {
         if let year = item.year { Text(String(year)) }
         Spacer()
@@ -63,7 +70,8 @@ struct TVPosterLabel: View {
       if let message = item.availabilityMessage {
         Text(message).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
       }
-    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+    }.padding(6).frame(maxWidth: .infinity, alignment: .leading)
+      .scaleEffect(isFocused ? 1.025 : 1).animation(.easeOut(duration: 0.12), value: isFocused)
   }
 }
 

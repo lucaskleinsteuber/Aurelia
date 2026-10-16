@@ -6,116 +6,118 @@ struct TVPlayerView: View {
   @StateObject private var controller: TVPlaybackController
   @Environment(\.scenePhase) private var scenePhase
   @FocusState private var focus: Control?
+  @State private var lastTransport: Control = .play
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, retry, closeMenu
     case audioTrack(Int32)
     case subtitleTrack(Int32)
+    var isTransport: Bool {
+      switch self {
+      case .close, .backward, .play, .forward, .audio, .subtitles: true
+      default: false
+      }
+    }
   }
 
-  init(
-    connection: TVStoredConnection, session: TVProfileSession, mediaID: UUID, title: String,
-    onClose: @escaping @MainActor () -> Void,
-    onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in }
-  ) {
-    _controller = StateObject(
-      wrappedValue: TVPlaybackController(
-        connection: connection, session: session, mediaID: mediaID, title: title,
-        onClose: onClose, onSessionFailure: onSessionFailure))
+  init(makeController: @escaping @MainActor () -> TVPlaybackController) {
+    _controller = StateObject(wrappedValue: makeController())
   }
 
   var body: some View {
     ZStack {
       Color.black.ignoresSafeArea()
-      TVVideoSurface(engine: controller.engine).ignoresSafeArea()
+      TVVideoSurface(engine: controller.engine).ignoresSafeArea().accessibilityIdentifier(
+        "player-surface")
       if !controller.controlsVisible {
-        Button {
-          controller.userInteracted()
-        } label: {
-          Color.clear.contentShape(Rectangle()).frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .focused($focus, equals: .surface)
-        .accessibilityLabel("Show playback controls")
+        Color.clear.contentShape(Rectangle())
+          .focusable().focusEffectDisabled().focused($focus, equals: .surface)
+          .onTapGesture { revealControls() }
+          .onMoveCommand { _ in revealControls() }
+          .accessibilityLabel("Show playback controls")
+          .accessibilityIdentifier("player-wake-surface")
       }
-      if controller.controlsVisible || controller.errorMessage != nil {
-        controls
-      }
+      if controller.controlsVisible || controller.errorMessage != nil { controls }
       if controller.isLoading && controller.errorMessage == nil {
-        ProgressView().scaleEffect(1.5).tint(.white)
-          .accessibilityLabel("Loading playback")
+        ProgressView().scaleEffect(1.5).tint(.white).accessibilityLabel("Loading playback")
       }
       if let menu = controller.trackMenu { tracks(menu) }
     }
     .preferredColorScheme(.dark)
-    .onAppear {
-      controller.start()
-      focus = .play
-    }
+    .onAppear { controller.start() }
     .onDisappear { controller.close() }
     .onPlayPauseCommand { controller.togglePlayPause() }
     .onExitCommand { controller.back() }
-    .onMoveCommand { _ in controller.userInteracted() }
-    .onChange(of: focus) { _, _ in
-      if controller.controlsVisible { controller.userInteracted() }
-    }
-    .onChange(of: controller.controlsVisible) { _, visible in
-      if controller.trackMenu == nil { focus = visible ? .play : .surface }
-    }
-    .onChange(of: controller.errorMessage) { _, message in
-      if message != nil { focus = .retry }
-    }
-    .onChange(of: controller.trackMenu) { _, menu in
-      switch menu {
-      case .audio:
-        focus =
-          controller.audioTracks.first(where: { $0.id == controller.selectedAudio })
-          .map { .audioTrack($0.id) } ?? controller.audioTracks.first.map { .audioTrack($0.id) }
-          ?? .closeMenu
-      case .subtitles:
-        focus = .subtitleTrack(controller.selectedSubtitle)
-      case nil:
-        focus = .play
+    .onChange(of: focus) { _, value in
+      if let value, value.isTransport { lastTransport = value }
+      if controller.controlsVisible, value != .surface {
+        controller.setScrubbing(value == .timeline)
       }
     }
-    .onChange(of: scenePhase) { _, phase in
-      if phase == .background { controller.background() }
+    .task(id: controller.controlsVisible) {
+      let visible = controller.controlsVisible
+      await Task.yield()
+      await Task.yield()
+      guard !Task.isCancelled, controller.controlsVisible == visible, controller.trackMenu == nil
+      else { return }
+      focus = visible ? .play : .surface
     }
+    .task(id: controller.isLoading) {
+      guard !controller.isLoading, controller.controlsVisible, controller.trackMenu == nil else {
+        return
+      }
+      await Task.yield()
+      if !Task.isCancelled { focus = .play }
+    }
+    .onChange(of: controller.errorMessage) { _, message in if message != nil { focus = .retry } }
+    .onChange(of: controller.trackMenu) { previous, menu in
+      switch menu {
+      case .audio:
+        focus = .audioTrack(
+          controller.audioTracks.first(where: { $0.id == controller.selectedAudio })?.id
+            ?? controller.audioTracks.first?.id ?? -1)
+      case .subtitles:
+        focus = .subtitleTrack(
+          controller.subtitleTracks.contains(where: { $0.id == controller.selectedSubtitle })
+            ? controller.selectedSubtitle : -1)
+      case nil: focus = previous == .audio ? .audio : .subtitles
+      }
+    }
+    .onChange(of: scenePhase) { _, phase in if phase == .background { controller.background() } }
+  }
+
+  private func revealControls() {
+    controller.userInteracted()
   }
 
   private var controls: some View {
     VStack {
       Spacer()
-      VStack(alignment: .leading, spacing: 26) {
-        Text(controller.title).font(.title2.weight(.semibold)).lineLimit(2)
+      VStack(alignment: .leading, spacing: 22) {
+        Text(controller.title).font(.system(size: 30, weight: .semibold)).lineLimit(2)
         if let message = controller.errorMessage {
-          Text(message).font(.body).foregroundStyle(.white.opacity(0.85))
+          Text(message).foregroundStyle(.secondary)
           HStack(spacing: 24) {
-            Button("Try Again") { controller.retry() }
-              .focused($focus, equals: .retry)
-            Button("Back to Library") { controller.close() }
-              .focused($focus, equals: .close)
-          }
+            Button("Try Again") { controller.retry() }.focused($focus, equals: .retry)
+            Button("Back to Library") { controller.close() }.focused($focus, equals: .close)
+          }.buttonStyle(TVButtonStyle())
         } else {
           timeline
-          HStack(spacing: 22) {
+          HStack(spacing: 18) {
             control("Close", symbol: "xmark", id: .close) { controller.close() }
-            Spacer(minLength: 22)
             control("Back 10 Seconds", symbol: "gobackward.10", id: .backward) {
               controller.seek(by: -10_000)
             }
             .disabled(!controller.canSeek)
             control(
               controller.isPlaying ? "Pause" : "Play",
-              symbol: controller.isPlaying ? "pause.fill" : "play.fill", id: .play
-            ) { controller.togglePlayPause() }
-            .disabled(controller.isLoading)
+              symbol: controller.isPlaying ? "pause.fill" : "play.fill",
+              id: .play
+            ) { controller.togglePlayPause() }.disabled(controller.isLoading)
             control("Forward 10 Seconds", symbol: "goforward.10", id: .forward) {
               controller.seek(by: 10_000)
             }
             .disabled(!controller.canSeek)
-            Spacer(minLength: 22)
             control("Audio", symbol: "speaker.wave.2", id: .audio) { controller.trackMenu = .audio }
               .disabled(controller.audioTracks.isEmpty)
             control("Subtitles", symbol: "captions.bubble", id: .subtitles) {
@@ -123,21 +125,20 @@ struct TVPlayerView: View {
             }
             .disabled(controller.subtitleTracks.isEmpty)
           }
+          .frame(maxWidth: .infinity)
+          .focusSection()
           if let message = controller.progressMessage {
-            Text(message).font(.footnote).foregroundStyle(.white.opacity(0.75))
+            Text(message).font(.footnote).foregroundStyle(.secondary)
           }
         }
       }
-      .padding(.horizontal, 90)
-      .padding(.top, 90)
-      .padding(.bottom, 64)
+      .padding(.horizontal, 90).padding(.top, 70).padding(.bottom, 58)
       .background(
         LinearGradient(
-          colors: [.clear, .black.opacity(0.85), .black], startPoint: .top, endPoint: .bottom)
-      )
-      .focusSection()
+          colors: [.clear, .black.opacity(0.85), .black], startPoint: .top, endPoint: .bottom))
     }
     .ignoresSafeArea(edges: .bottom)
+    .defaultFocus($focus, .play, priority: .userInitiated)
     .disabled(controller.trackMenu != nil)
   }
 
@@ -145,35 +146,32 @@ struct TVPlayerView: View {
     Button {
       controller.togglePlayPause()
     } label: {
-      VStack(spacing: 16) {
+      VStack(spacing: 12) {
         GeometryReader { geometry in
           ZStack(alignment: .leading) {
-            Capsule().fill(.white.opacity(0.25))
-            Capsule().fill(focus == .timeline ? .white : .white.opacity(0.8))
+            Capsule().fill(.white.opacity(0.22))
+            Capsule().fill(.white.opacity(focus == .timeline ? 1 : 0.72))
               .frame(width: geometry.size.width * fraction)
           }
-        }
-        .frame(height: focus == .timeline ? 10 : 6)
+        }.frame(height: focus == .timeline ? 8 : 5)
         HStack {
           Text(TVPlayerPolicy.timeLabel(milliseconds: controller.position))
           Spacer()
           Text(TVPlayerPolicy.timeLabel(milliseconds: controller.duration))
-        }
-        .font(.callout.monospacedDigit())
-        .foregroundStyle(.white.opacity(0.8))
-      }
-      .padding(.vertical, 14)
-      .contentShape(Rectangle())
+        }.font(.system(size: 22).monospacedDigit()).foregroundStyle(.secondary)
+      }.padding(.vertical, 14).contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
-    .focusEffectDisabled()
-    .focused($focus, equals: .timeline)
-    .disabled(!controller.canSeek)
+    .buttonStyle(TVContentButtonStyle()).focusEffectDisabled()
+    .focused($focus, equals: .timeline).disabled(!controller.canSeek)
     .onMoveCommand { direction in
-      if direction == .left { controller.seek(by: -10_000) }
-      if direction == .right { controller.seek(by: 10_000) }
+      switch direction {
+      case .left: controller.seek(by: -10_000)
+      case .right: controller.seek(by: 10_000)
+      case .down: focus = lastTransport
+      default: break
+      }
     }
-    .accessibilityLabel("Playback position")
+    .accessibilityIdentifier("player-timeline").accessibilityLabel("Playback position")
     .accessibilityValue(
       "\(TVPlayerPolicy.timeLabel(milliseconds: controller.position)) of \(TVPlayerPolicy.timeLabel(milliseconds: controller.duration))"
     )
@@ -188,8 +186,8 @@ struct TVPlayerView: View {
   }
 
   private var fraction: Double {
-    guard controller.duration > 0 else { return 0 }
-    return min(1, max(0, Double(controller.position) / Double(controller.duration)))
+    controller.duration > 0
+      ? min(1, max(0, Double(controller.position) / Double(controller.duration))) : 0
   }
 
   private func control(_ title: String, symbol: String, id: Control, action: @escaping () -> Void)
@@ -199,17 +197,10 @@ struct TVPlayerView: View {
       controller.userInteracted()
       action()
     } label: {
-      Image(systemName: symbol)
-        .font(.title3.weight(.semibold))
-        .frame(width: 86, height: 66)
-        .foregroundStyle(focus == id ? .black : .white)
-        .background(
-          focus == id ? .white : .white.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
+      Image(systemName: symbol).font(.system(size: 24, weight: .semibold))
     }
-    .buttonStyle(.plain)
-    .focusEffectDisabled()
-    .focused($focus, equals: id)
-    .accessibilityLabel(title)
+    .buttonStyle(TVButtonStyle(kind: .icon)).focusEffectDisabled().focused($focus, equals: id)
+    .accessibilityLabel(title).accessibilityIdentifier("player-\(id)")
   }
 
   private func tracks(_ menu: TVPlaybackController.TrackMenu) -> some View {
@@ -217,70 +208,67 @@ struct TVPlayerView: View {
       Color.black.opacity(0.65).ignoresSafeArea()
       VStack(alignment: .leading, spacing: 22) {
         Text(menu == .audio ? "Audio" : "Subtitles").font(.title2.weight(.semibold))
-        ScrollView {
-          VStack(spacing: 18) {
-            if menu == .subtitles {
-              trackButton(
-                "Off", selected: controller.selectedSubtitle < 0, focusID: .subtitleTrack(-1)
-              ) {
-                controller.selectSubtitle(-1)
+        ScrollViewReader { proxy in
+          ScrollView {
+            VStack(spacing: 14) {
+              if menu == .subtitles {
+                trackButton(
+                  "Off", selected: controller.selectedSubtitle < 0, focusID: .subtitleTrack(-1)
+                ) {
+                  controller.selectSubtitle(-1)
+                }.id(Int32(-1))
               }
-            }
-            ForEach(menu == .audio ? controller.audioTracks : controller.subtitleTracks) { track in
-              trackButton(
-                track.title,
-                selected: menu == .audio
-                  ? controller.selectedAudio == track.id : controller.selectedSubtitle == track.id,
-                focusID: menu == .audio ? .audioTrack(track.id) : .subtitleTrack(track.id)
-              ) {
-                if menu == .audio {
-                  controller.selectAudio(track.id)
-                } else {
-                  controller.selectSubtitle(track.id)
-                }
+              ForEach(menu == .audio ? controller.audioTracks : controller.subtitleTracks) {
+                track in
+                trackButton(
+                  track.title,
+                  selected: menu == .audio
+                    ? controller.selectedAudio == track.id
+                    : controller.selectedSubtitle == track.id,
+                  focusID: menu == .audio ? .audioTrack(track.id) : .subtitleTrack(track.id)
+                ) {
+                  if menu == .audio {
+                    controller.selectAudio(track.id)
+                  } else {
+                    controller.selectSubtitle(track.id)
+                  }
+                }.id(track.id)
               }
+            }.padding(8)
+          }.frame(maxHeight: 460)
+            .task {
+              proxy.scrollTo(
+                menu == .audio ? controller.selectedAudio : controller.selectedSubtitle,
+                anchor: .center)
             }
-          }
-          .padding(12)
         }
-        .frame(maxHeight: 460)
-        Button("Done") { controller.trackMenu = nil }.focused($focus, equals: .closeMenu)
+        Button("Done") { controller.trackMenu = nil }.buttonStyle(TVButtonStyle())
+          .focused($focus, equals: .closeMenu).accessibilityIdentifier("player-tracks-done")
       }
-      .padding(44)
-      .frame(width: 720)
-      .background(
-        Color(red: 32 / 255, green: 35 / 255, blue: 38 / 255),
-        in: RoundedRectangle(cornerRadius: 24)
-      )
-      .focusSection()
-    }
+      .padding(32).frame(width: 740)
+      .background(TVDesign.canvas, in: RoundedRectangle(cornerRadius: 20)).focusSection()
+    }.accessibilityIdentifier("player-tracks")
   }
 
   private func trackButton(
     _ title: String, selected: Bool, focusID: Control, action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      HStack {
-        Text(title).lineLimit(2)
+      HStack(spacing: 16) {
+        Text(title).font(.system(size: 24)).lineLimit(2)
         Spacer()
         if selected { Image(systemName: "checkmark") }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 22).padding(.vertical, 18)
-      .foregroundStyle(focus == focusID ? .black : .white)
-      .background(
-        focus == focusID ? .white : .white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+      }.frame(maxWidth: .infinity, minHeight: 56, alignment: .leading).padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
-    .buttonStyle(.plain)
-    .focusEffectDisabled()
-    .focused($focus, equals: focusID)
-    .accessibilityAddTraits(selected ? .isSelected : [])
+    .buttonStyle(TVButtonStyle(kind: .row)).focusEffectDisabled().focused($focus, equals: focusID)
+    .accessibilityIdentifier("player-\(focusID)").accessibilityAddTraits(
+      selected ? .isSelected : [])
   }
 }
 
 private struct TVVideoSurface: UIViewRepresentable {
-  let engine: TVVideoEngine
-
+  let engine: any TVPlaybackEngine
   func makeUIView(context: Context) -> UIView {
     let view = UIView()
     view.backgroundColor = .black
@@ -288,6 +276,5 @@ private struct TVVideoSurface: UIViewRepresentable {
     engine.attach(to: view)
     return view
   }
-
   func updateUIView(_ uiView: UIView, context: Context) {}
 }

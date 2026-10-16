@@ -21,6 +21,7 @@ final class TVAppModel: ObservableObject {
   let images = NSCache<NSString, NSData>()
   var playerPresented = false
   private let credentials = TVCredentialStore()
+  let environment = TVAppEnvironment.current()
   private var generation = UUID()
   private var task: Task<Void, Never>?
   private var expiry: Task<Void, Never>?
@@ -30,7 +31,7 @@ final class TVAppModel: ObservableObject {
 
   var client: TVAPIClient? {
     guard let connection, let session else { return nil }
-    return TVAPIClient(connection: connection, session: session)
+    return makeClient(connection: connection, session: session)
   }
 
   init() { images.totalCostLimit = 64 * 1024 * 1024 }
@@ -38,12 +39,27 @@ final class TVAppModel: ObservableObject {
   func start() async {
     guard !started else { return }
     started = true
+    #if DEBUG
+      if let scenario = TVUITestScenario.current {
+        connection = TVUITestFixtures.connection
+        if scenario == .profiles {
+          phase = .profiles
+          await refreshProfiles()
+        } else {
+          session = TVUITestFixtures.session
+          phase = .library
+          activateProgress(
+            connection: TVUITestFixtures.connection, session: TVUITestFixtures.session)
+        }
+        return
+      }
+    #endif
     do {
-      connection = try credentials.load()
-      if connection != nil { await reconnect() } else { browser.start() }
+      connection = environment.allowsPersistentCredentials ? try credentials.load() : nil
+      if connection != nil { await reconnect() } else { startDiscovery() }
     } catch {
       self.error = "The saved connection could not be read. Try connecting again."
-      browser.start()
+      startDiscovery()
     }
   }
 
@@ -58,8 +74,9 @@ final class TVAppModel: ObservableObject {
     task = Task {
       defer { finish(run) }
       do {
-        let candidate = try await TVAPIClient.inspect(baseURL: url)
-        let capabilities = try await TVAPIClient(inspected: candidate).capabilities()
+        let candidate = try await TVAPIClient.inspect(
+          baseURL: url, transport: environment.transport)
+        let capabilities = try await makeClient(inspected: candidate).capabilities()
         try validate(capabilities)
         guard current(run) else { return }
         guard candidate.info.isSetup else {
@@ -82,22 +99,22 @@ final class TVAppModel: ObservableObject {
       let candidate = try await inspectKnownServer(saved, run: run)
       guard current(run) else { return }
       var relocated = saved.relocating(to: candidate.baseURL)
-      try validate(try await TVAPIClient(connection: relocated).capabilities())
+      try validate(try await makeClient(connection: relocated).capabilities())
       if let pending = relocated.pendingAcknowledgement {
-        let receipt = try await TVAPIClient(connection: relocated).acknowledgePairing(
+        let receipt = try await makeClient(connection: relocated).acknowledgePairing(
           id: pending.id, secret: pending.secret)
         guard receipt.acknowledged else { throw TVCoreError.invalidResponse }
         relocated.pendingAcknowledgement = nil
       }
       guard current(run) else { return }
-      try credentials.save(relocated)
+      try saveCredentials(relocated)
       connection = relocated
       try await loadProfiles(run: run)
     } catch {
       show(error, run: run)
       if current(run) {
         phase = .connection
-        browser.start()
+        startDiscovery()
       }
     }
   }
@@ -111,7 +128,7 @@ final class TVAppModel: ObservableObject {
     task = Task {
       defer { finish(run) }
       do {
-        let api = TVAPIClient(inspected: inspected)
+        let api = makeClient(inspected: inspected)
         if let previous {
           _ = try? await api.cancelPairing(id: previous.id, secret: previous.secret)
           guard current(run) else { return }
@@ -142,16 +159,16 @@ final class TVAppModel: ObservableObject {
               var paired = try inspected.connection(authentication: auth)
               paired.pendingAcknowledgement = TVPendingPairingAcknowledgement(
                 id: created.id, secret: created.secret, expiresAt: created.expiresAt)
-              try credentials.save(paired)
+              try saveCredentials(paired)
               connection = paired
               let receipt = try await api.acknowledgePairing(id: created.id, secret: created.secret)
               guard current(run) else {
-                Task { try? await TVAPIClient(connection: paired).disconnectDevice() }
+                Task { try? await makeClient(connection: paired).disconnectDevice() }
                 return
               }
               guard receipt.acknowledged else { throw TVCoreError.invalidResponse }
               paired.pendingAcknowledgement = nil
-              try credentials.save(paired)
+              try saveCredentials(paired)
               guard current(run) else { return }
               connection = paired
               pairing = nil
@@ -189,19 +206,19 @@ final class TVAppModel: ObservableObject {
     }
     retireWork()
     if unclaimed != nil {
-      do { try credentials.delete() } catch { self.error = error.localizedDescription }
+      do { try deleteCredentials() } catch { self.error = error.localizedDescription }
       connection = nil
     }
     pairing = nil
     inspected = nil
     phase = .connection
-    browser.start()
+    startDiscovery()
     Task {
       // The receipt may have committed even when its response was lost. A
       // credential saved before acknowledgement lets cancellation revoke it.
-      if let unclaimed { try? await TVAPIClient(connection: unclaimed).disconnectDevice() }
+      if let unclaimed { try? await makeClient(connection: unclaimed).disconnectDevice() }
       if let pending, let server {
-        _ = try? await TVAPIClient(inspected: server).cancelPairing(
+        _ = try? await makeClient(inspected: server).cancelPairing(
           id: pending.id, secret: pending.secret)
       }
     }
@@ -222,7 +239,7 @@ final class TVAppModel: ObservableObject {
     task = Task { [self] in
       defer { finish(run) }
       do {
-        let opened = try await TVAPIClient(connection: connection).unlockProfile(
+        let opened = try await makeClient(connection: connection).unlockProfile(
           id: profile.id, pin: pin)
         guard current(run) else { return }
         guard opened.user.id == profile.id, let end = TVServerDate.parse(opened.expiresAt),
@@ -281,9 +298,9 @@ final class TVAppModel: ObservableObject {
     inspected = nil
     pairing = nil
     phase = .connection
-    do { try credentials.delete() } catch { self.error = error.localizedDescription }
-    browser.start()
-    if let stored { try? await TVAPIClient(connection: stored).disconnectDevice() }
+    do { try deleteCredentials() } catch { self.error = error.localizedDescription }
+    startDiscovery()
+    if let stored { try? await makeClient(connection: stored).disconnectDevice() }
   }
 
   func handleSessionFailure(_ failure: Error) {
@@ -294,7 +311,7 @@ final class TVAppModel: ObservableObject {
       clearPersonalState()
       phase = .connection
       error = core.localizedDescription
-      browser.start()
+      startDiscovery()
     } else if core.statusCode == 401
       || ["profile_session_expired", "profile_session_revoked", "device_session_revoked"].contains(
         core.code ?? "")
@@ -304,7 +321,7 @@ final class TVAppModel: ObservableObject {
       clearPersonalState()
       if deviceRejected {
         phase = .connection
-        browser.start()
+        startDiscovery()
         error = "Pair this Apple TV with your server again."
       } else {
         phase = .profiles
@@ -327,7 +344,7 @@ final class TVAppModel: ObservableObject {
   func enterForeground() {
     isForeground = true
     detailRefresh = UUID()
-    if phase == .connection { browser.start() }
+    if phase == .connection { startDiscovery() }
     if phase == .profiles, selectedProfile == nil { Task { await refreshProfiles() } }
     if let session, let date = TVServerDate.parse(session.expiresAt), date <= Date() {
       Task { await switchProfile() }
@@ -341,6 +358,26 @@ final class TVAppModel: ObservableObject {
     shows.update(item)
   }
 
+  func makeClient(connection: TVStoredConnection, session: TVProfileSession? = nil) -> TVAPIClient {
+    TVAPIClient(connection: connection, session: session, transport: environment.transport)
+  }
+
+  private func makeClient(inspected: TVInspectedServer) -> TVAPIClient {
+    TVAPIClient(inspected: inspected, transport: environment.transport)
+  }
+
+  private func saveCredentials(_ connection: TVStoredConnection) throws {
+    if environment.allowsPersistentCredentials { try credentials.save(connection) }
+  }
+
+  private func deleteCredentials() throws {
+    if environment.allowsPersistentCredentials { try credentials.delete() }
+  }
+
+  private func startDiscovery() {
+    if environment.allowsDiscovery { browser.start() }
+  }
+
   private func inspectKnownServer(_ saved: TVStoredConnection, run: UUID) async throws
     -> TVInspectedServer
   {
@@ -348,7 +385,7 @@ final class TVAppModel: ObservableObject {
     for delay in [0, 3, 6, 12] {
       guard current(run) else { throw CancellationError() }
       if delay > 0 {
-        browser.start()
+        startDiscovery()
         try await Task.sleep(for: .seconds(delay))
       }
       guard current(run) else { throw CancellationError() }
@@ -357,7 +394,8 @@ final class TVAppModel: ObservableObject {
       var tried: Set<URL> = []
       for address in [saved.baseURL] + discovered where tried.insert(address).inserted {
         do {
-          let candidate = try await TVAPIClient.inspect(baseURL: address)
+          let candidate = try await TVAPIClient.inspect(
+            baseURL: address, transport: environment.transport)
           guard current(run) else { throw CancellationError() }
           try candidate.validate(against: saved)
           return candidate
@@ -376,7 +414,7 @@ final class TVAppModel: ObservableObject {
   private func loadProfiles(run: UUID) async throws {
     guard current(run), let connection else { return }
     phase = .profiles
-    let result = try await TVAPIClient(connection: connection).profiles()
+    let result = try await makeClient(connection: connection).profiles()
     guard current(run) else { return }
     guard result.formatVersion == 1 || result.formatVersion == 2 else {
       throw TVCoreError.unsupportedServer
@@ -440,7 +478,7 @@ final class TVAppModel: ObservableObject {
     let previous = outboxTransition
     outboxTransition = Task {
       await previous?.value
-      await TVProgressOutbox.shared.deactivate()
+      await environment.outbox.deactivate()
     }
   }
 
@@ -452,9 +490,9 @@ final class TVAppModel: ObservableObject {
       guard let self, self.current(run), self.isForeground,
         self.session?.sessionId == session.sessionId
       else { return }
-      await TVProgressOutbox.shared.activate(
+      await environment.outbox.activate(
         scope: TVProgressScope(connection: connection, session: session),
-        client: TVAPIClient(connection: connection, session: session),
+        client: makeClient(connection: connection, session: session),
         sessionID: session.sessionId,
         onAuthenticationFailure: { [weak self] failure in
           await self?.handleProgressFailure(failure, sessionID: session.sessionId)

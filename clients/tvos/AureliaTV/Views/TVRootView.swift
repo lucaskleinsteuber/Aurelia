@@ -33,6 +33,7 @@ struct TVRootView: View {
       }
     }
     .background(TVDesign.canvas.ignoresSafeArea())
+    .buttonStyle(TVButtonStyle())
     .onChange(of: model.session?.sessionId) { _, _ in tab = .movies }
   }
 }
@@ -90,7 +91,7 @@ struct TVServerTrustView: View {
       if let error = model.error { TVErrorText(message: error) }
       HStack(spacing: 32) {
         Button("Back") { model.cancelPairing() }
-        Button("Trust and Continue") { model.beginPairing() }.buttonStyle(.borderedProminent)
+        Button("Trust and Continue") { model.beginPairing() }.buttonStyle(TVButtonStyle())
       }.disabled(model.isBusy)
     }.padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
       .onExitCommand { model.cancelPairing() }
@@ -170,19 +171,23 @@ struct TVProfilesView: View {
                           .padding(9).background(TVDesign.canvas, in: Circle())
                       }
                     }
-                    Text(profile.name).font(.headline).multilineTextAlignment(.center)
-                      .lineLimit(2).frame(height: 64)
-                    if profile.needsPinSetup {
-                      Text("Set up on Mac").font(.caption).foregroundStyle(.secondary)
-                    }
+                    Text(profile.name).font(.system(size: 26, weight: .semibold))
+                      .multilineTextAlignment(.center)
+                      .lineLimit(2).frame(height: 68, alignment: .top)
+                    Text(profile.needsPinSetup ? "Set up on Mac" : "")
+                      .font(.caption).foregroundStyle(.secondary).frame(height: 30)
+                      .accessibilityHidden(!profile.needsPinSetup)
                   }.frame(width: 220).padding(.vertical, 12)
-                }.buttonStyle(.plain).disabled(model.isBusy || profile.needsPinSetup)
-                  .focused($focusedProfile, equals: profile.id)
-                  .accessibilityLabel(profile.name)
-                  .accessibilityValue(
-                    profile.needsPinSetup
-                      ? "PIN setup required"
-                      : profile.pinProtectionEnabled ? "PIN protected" : "No PIN")
+                }.buttonStyle(TVContentButtonStyle()).focusEffectDisabled().disabled(
+                  model.isBusy || profile.needsPinSetup
+                )
+                .focused($focusedProfile, equals: profile.id)
+                .accessibilityIdentifier("profile-\(profile.id)")
+                .accessibilityLabel(profile.name)
+                .accessibilityValue(
+                  profile.needsPinSetup
+                    ? "PIN setup required"
+                    : profile.pinProtectionEnabled ? "PIN protected" : "No PIN")
               }
             }.frame(maxWidth: 1200)
             if let error = model.error {
@@ -211,15 +216,17 @@ struct TVPINView: View {
       } label: {
         Image(systemName: "person.crop.circle.fill").font(.system(size: 110)).padding(8)
           .overlay(Circle().stroke(.white, lineWidth: avatarFocused ? 3 : 0))
-      }.buttonStyle(.plain).focused($avatarFocused).accessibilityLabel("Choose another profile")
+      }.buttonStyle(TVContentButtonStyle()).focusEffectDisabled().focused($avatarFocused)
+        .accessibilityLabel("Choose another profile")
       Text(profile.name).font(.title2.bold())
       SecureField("PIN", text: $pin)
         .keyboardType(.numberPad).textContentType(.password).submitLabel(.go)
         .focused($pinFocused).onSubmit(submit).disabled(model.isBusy)
-        .frame(width: 440)
+        .frame(width: 440).accessibilityIdentifier("profile-pin")
       if let error = model.error { TVErrorText(message: error) }
       if model.isBusy { ProgressView() }
       Button("Continue", action: submit).disabled(model.isBusy || pin.isEmpty)
+        .accessibilityIdentifier("profile-continue")
     }.padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
       .onAppear { pinFocused = true }
       .onChange(of: model.error) { _, error in
@@ -246,7 +253,9 @@ struct TVConnectionMenu: View {
       Text(model.connection?.name ?? "Aurelia Server").foregroundStyle(.secondary)
       Button("Switch Profile") { Task { await model.switchProfile() } }
       Button("Disconnect Apple TV", role: .destructive) { confirmingDisconnect = true }
-      Text("Aurelia 0.1 (1)").font(.caption).foregroundStyle(.secondary)
+      Text(
+        "Aurelia \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))"
+      ).font(.caption).foregroundStyle(.secondary)
     }.frame(maxWidth: .infinity, maxHeight: .infinity)
       .confirmationDialog(
         "Disconnect from this server?", isPresented: $confirmingDisconnect,

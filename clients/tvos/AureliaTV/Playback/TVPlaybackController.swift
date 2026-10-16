@@ -7,7 +7,9 @@ import UIKit
 final class TVPlaybackController: ObservableObject {
   enum TrackMenu: Equatable { case audio, subtitles }
 
-  let engine = TVVideoEngine()
+  let engine: any TVPlaybackEngine
+  private let runtime: TVPlaybackRuntime
+  @Published private(set) var isScrubbing = false
   let title: String
   @Published private(set) var isPlaying = false
   @Published private(set) var isLoading = true
@@ -33,7 +35,7 @@ final class TVPlaybackController: ObservableObject {
   private let onClose: @MainActor () -> Void
   private let onSessionFailure: @MainActor (Error) -> Void
   private let outbox: TVProgressOutbox
-  private var relay: TVStreamRelay?
+  private var relay: (any TVPlaybackRelay)?
   private var ticket: TVPlaybackTicket?
   private var baselineRevision: Int64?
   private var openingTask: Task<Void, Never>?
@@ -53,6 +55,7 @@ final class TVPlaybackController: ObservableObject {
   init(
     connection: TVStoredConnection, session: TVProfileSession, mediaID: UUID, title: String,
     outbox: TVProgressOutbox = .shared,
+    api: TVAPIClient? = nil, runtime: TVPlaybackRuntime? = nil,
     onClose: @escaping @MainActor () -> Void,
     onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in }
   ) {
@@ -63,7 +66,10 @@ final class TVPlaybackController: ObservableObject {
     self.outbox = outbox
     self.onClose = onClose
     self.onSessionFailure = onSessionFailure
-    api = TVAPIClient(connection: connection, session: session)
+    self.api = api ?? TVAPIClient(connection: connection, session: session)
+    let selectedRuntime = runtime ?? .live()
+    self.runtime = selectedRuntime
+    engine = selectedRuntime.engine
     scope = TVProgressScope(connection: connection, session: session)
     engine.onUpdate = { [weak self] in self?.updateFromEngine() }
     engine.onTerminal = { [weak self] terminal in self?.engineTerminated(terminal) }
@@ -133,6 +139,11 @@ final class TVPlaybackController: ObservableObject {
     }
   }
 
+  func setScrubbing(_ active: Bool) {
+    isScrubbing = active
+    userInteracted()
+  }
+
   func back() {
     if trackMenu != nil {
       trackMenu = nil
@@ -192,7 +203,7 @@ final class TVPlaybackController: ObservableObject {
     progressMessage = nil
     controlsVisible = true
     var unclaimedTicketID: UUID?
-    var unclaimedRelay: TVStreamRelay?
+    var unclaimedRelay: (any TVPlaybackRelay)?
     defer {
       unclaimedRelay?.stop()
       if let id = unclaimedTicketID { Task { [api] in try? await api.revokeTicket(id: id) } }
@@ -202,9 +213,7 @@ final class TVPlaybackController: ObservableObject {
       unclaimedTicketID = created.id
       guard !closed, operation == generation, !Task.isCancelled else { return }
       let url = try api.validatedStreamURL(path: created.streamPath)
-      let secureRelay = try TVStreamRelay(
-        sourceURL: url,
-        publicKeyFingerprint: connection.fingerprint, authorizationToken: session.token)
+      let secureRelay = try runtime.makeRelay(url, connection.fingerprint, session.token)
       unclaimedRelay = secureRelay
       let localURL = try await secureRelay.start()
       guard !closed, operation == generation, !Task.isCancelled else { return }
@@ -226,8 +235,10 @@ final class TVPlaybackController: ObservableObject {
       await outbox.noteBaseline(
         scope: scope, progress: created.progress, sessionID: session.sessionId)
       guard !closed, operation == generation, !Task.isCancelled else { return }
-      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-      try AVAudioSession.sharedInstance().setActive(true)
+      if runtime.managesAudioSession {
+        try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try AVAudioSession.sharedInstance().setActive(true)
+      }
       transportFailed = false
       finished = false
       engine.load(
@@ -417,7 +428,9 @@ final class TVPlaybackController: ObservableObject {
     relay = nil
     if let id = ticket?.id { Task { [api] in try? await api.revokeTicket(id: id) } }
     ticket = nil
-    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    if runtime.managesAudioSession {
+      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
     isLoading = false
     isPlaying = false
     errorMessage = message
@@ -434,7 +447,7 @@ final class TVPlaybackController: ObservableObject {
   private var mayHideControls: Bool {
     TVPlayerPolicy.mayHideControls(
       playing: isPlaying, menuOpen: trackMenu != nil,
-      interacting: false, loading: isLoading, hasError: errorMessage != nil)
+      interacting: isScrubbing, loading: isLoading, hasError: errorMessage != nil)
   }
 
   private func endBackgroundSave() {
@@ -455,6 +468,8 @@ final class TVPlaybackController: ObservableObject {
     relay = nil
     engine.onUpdate = nil
     engine.onTerminal = nil
-    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    if runtime.managesAudioSession {
+      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
   }
 }

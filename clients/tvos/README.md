@@ -1,7 +1,7 @@
 # Aurelia for Apple TV
 
 A native tvOS 26 client for an Aurelia server on your local network. Version
-0.1 starts with server discovery, device approval on the Mac, profiles, a small
+0.1.1 starts with server discovery, device approval on the Mac, profiles, a small
 movie and series library, and fullscreen playback with saved progress.
 
 Open `AureliaTV.xcodeproj` and select the **AureliaTV** scheme. The TV client has
@@ -14,6 +14,7 @@ From the repository root:
 scripts/prepare-tvvlckit.sh
 scripts/build-tvos.sh --unsigned
 scripts/test-tvos-logic.sh
+scripts/test-tvos-ui.sh
 ```
 
 For a device-signed build, omit `--unsigned`. If Xcode needs to fetch a matching
@@ -34,7 +35,16 @@ stays external; ignored `Dependencies` symlinks make the project portable.
 `TVVLCKIT_ROOT` can override that dependency directory. The vendor license is
 included in the app's resources.
 
-The **AureliaTVLogicTests** scheme runs only platform-neutral TV logic directly
-on the Mac without an app host or TVVLCKit. No simulator, automated UI or playback
-tests are run. Actual remote navigation and playback are accepted separately by
-the user on an Apple TV; a successful build alone does not verify them.
+The **AureliaTVLogicTests** scheme runs platform-neutral TV logic directly
+on the Mac without an app host or TVVLCKit. The **AureliaTVUITests** scheme uses
+`XCUIRemote` in a dedicated tvOS 26.0 Apple TV simulator for real focus and
+navigation checks, geometry assertions and attached screenshots. Install that
+runtime in Xcode Components before running `scripts/test-tvos-ui.sh`; the script
+creates and removes only its own simulator and leaves results outside Git.
+
+UI tests use the same app views and playback controller, with Debug-only
+synthetic profiles, catalog responses and a simulated engine/relay. They never
+read personal credentials, contact a real server, or start the video engine.
+The fixture entry point is absent from Release builds. Actual remote navigation
+and video playback still receive separate user acceptance on a physical Apple
+TV; no automated codec, stream or playback gate runs.
