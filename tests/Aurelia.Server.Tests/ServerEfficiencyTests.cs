@@ -70,6 +70,17 @@ public sealed class ServerEfficiencyTests
         }
     }
 
+    [Fact]
+    public void FloodGuardAllowsBrowsingThousandsOfPostersButStillStopsFloods()
+    {
+        var guard = new Aurelia.Server.Services.ServerRequestGuard();
+        var address = System.Net.IPAddress.Parse("192.168.1.20");
+        for (var request = 0; request < Aurelia.Server.Services.ServerRequestGuard.RequestsPerMinute; request++)
+            Assert.True(guard.Admit(address));
+        Assert.False(guard.Admit(address));
+        Assert.True(guard.Admit(System.Net.IPAddress.Parse("192.168.1.21")));
+    }
+
     private static HttpRequestMessage Request(string path, string token)
     {
         var request = ApiTestClient.Authorized(HttpMethod.Get, path, token);

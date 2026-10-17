@@ -73,6 +73,9 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Limits.MaxRequestBodySize = ServerRequestGuard.MaximumJsonBytes;
     options.Limits.MaxRequestHeadersTotalSize = 16_384;
     options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(15);
+    // A new TLS connection costs about 50 ms on macOS because the key lives in a keychain;
+    // idle client connections therefore stay open longer so they can be reused.
+    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
 });
 if (tlsIdentity.Certificate is not null)
 {

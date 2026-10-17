@@ -9,6 +9,12 @@ namespace Aurelia.Server.Services;
 public sealed class ServerRequestGuard
 {
     public const long MaximumJsonBytes = 65_536;
+    /// <summary>
+    /// Coarse flood protection per address and minute. Browsing a library loads one image per
+    /// title, so the budget fits scrolling through thousands of posters; sign-in, PIN and
+    /// pairing attempts keep their own much stricter limits.
+    /// </summary>
+    public const int RequestsPerMinute = 3_000;
     private readonly object gate = new();
     private readonly Dictionary<string, (int Count, DateTimeOffset Window)> addresses = [];
     private static readonly IPNetwork[] PrivateNetworks = [IPNetwork.Parse("10.0.0.0/8"), IPNetwork.Parse("172.16.0.0/12"),
@@ -33,7 +39,7 @@ public sealed class ServerRequestGuard
                     addresses.Remove(stale);
             if (addresses.TryGetValue(key, out var entry) && now - entry.Window < TimeSpan.FromMinutes(1))
             {
-                if (entry.Count >= 600) return false;
+                if (entry.Count >= RequestsPerMinute) return false;
                 addresses[key] = (entry.Count + 1, entry.Window);
             }
             else
