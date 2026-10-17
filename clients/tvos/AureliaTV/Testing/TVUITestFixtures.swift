@@ -198,7 +198,8 @@
       } else if path == "/api/v1/home" {
         body = [
           "continueWatching": hidden.contains(TVUITestFixtures.seriesID)
-            ? [] : [item(TVUITestFixtures.episode(season: 2, number: 2))],
+            ? []
+            : [item(TVUITestFixtures.episode(season: 2, number: 2, offline: scenario == .offline))],
           "recentlyAdded": [item(TVUITestFixtures.movie()), item(TVUITestFixtures.series())],
           "favorites": favorites.isEmpty ? [] : [item(TVUITestFixtures.movie())],
           "collections": [collection()], "recommendationChangesAt": TVUITestFixtures.expiry,

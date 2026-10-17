@@ -16,26 +16,42 @@ protocol TVHTTPTransport: Sendable {
 }
 
 struct TVURLSessionTransport: TVHTTPTransport {
+  var pool: TVPinnedSessionPool = .shared
+
   func execute(_ request: URLRequest, trust: TVTrustMode) async throws -> TVHTTPResponse {
     guard let url = request.url, url.scheme == "https", let host = url.host else {
       throw TVCoreError.invalidAddress
     }
-    let delegate = TVTLSTrustDelegate(mode: trust, allowedHost: host)
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.urlCache = nil
-    configuration.httpCookieStorage = nil
-    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-    configuration.timeoutIntervalForRequest = 20
-    configuration.timeoutIntervalForResource = 40
-    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
-    defer { session.invalidateAndCancel() }
+    // Inspection captures an unknown identity once, so it keeps a private session.
+    // Pinned requests reuse one session per server identity: TLS handshakes and
+    // connection setup happen once instead of for every catalog or artwork request.
+    let lease: TVPinnedSessionPool.Lease
+    let ownsSession: Bool
+    switch trust {
+    case .inspect:
+      let delegate = TVTLSTrustDelegate(mode: trust, allowedHost: host)
+      lease = .init(
+        session: URLSession(
+          configuration: TVPinnedSessionPool.configuration(), delegate: delegate,
+          delegateQueue: nil), delegate: delegate)
+      ownsSession = true
+    case .pinned(let fingerprint):
+      lease = pool.lease(host: host, fingerprint: fingerprint)
+      ownsSession = false
+    }
+    defer { if ownsSession { lease.session.invalidateAndCancel() } }
     let data: Data
     let response: URLResponse
     do {
-      (data, response) = try await session.data(for: request)
+      (data, response) = try await lease.session.data(for: request)
       try Task.checkCancellation()
     } catch {
-      if delegate.didRejectTrust { throw TVCoreError.identityMismatch }
+      if lease.delegate.didRejectTrust {
+        if case .pinned(let fingerprint) = trust {
+          pool.discard(host: host, fingerprint: fingerprint)
+        }
+        throw TVCoreError.identityMismatch
+      }
       throw error
     }
     guard let http = response as? HTTPURLResponse else { throw TVCoreError.invalidResponse }
@@ -44,6 +60,64 @@ struct TVURLSessionTransport: TVHTTPTransport {
     }
     return TVHTTPResponse(
       statusCode: http.statusCode, headers: headers, body: data,
-      fingerprint: delegate.capturedFingerprint)
+      fingerprint: lease.delegate.capturedFingerprint)
+  }
+}
+
+/// Long-lived sessions for already trusted servers. Every new TLS connection is
+/// still checked against the pinned fingerprint by its delegate; a rejected
+/// identity discards the session so nothing is reused after a mismatch.
+final class TVPinnedSessionPool: @unchecked Sendable {
+  struct Lease {
+    let session: URLSession
+    let delegate: TVTLSTrustDelegate
+  }
+  static let shared = TVPinnedSessionPool()
+  static let capacity = 4
+  private let lock = NSLock()
+  private var leases: [String: Lease] = [:]
+  private var order: [String] = []
+
+  static func configuration() -> URLSessionConfiguration {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.urlCache = nil
+    configuration.httpCookieStorage = nil
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.timeoutIntervalForRequest = 20
+    configuration.timeoutIntervalForResource = 40
+    configuration.httpMaximumConnectionsPerHost = 6
+    return configuration
+  }
+
+  func lease(host: String, fingerprint: String) -> Lease {
+    let key = Self.key(host: host, fingerprint: fingerprint)
+    return lock.withLock {
+      if let existing = leases[key] { return existing }
+      let delegate = TVTLSTrustDelegate(mode: .pinned(fingerprint), allowedHost: host)
+      let lease = Lease(
+        session: URLSession(
+          configuration: Self.configuration(), delegate: delegate, delegateQueue: nil),
+        delegate: delegate)
+      leases[key] = lease
+      order.append(key)
+      while order.count > Self.capacity {
+        leases.removeValue(forKey: order.removeFirst())?.session.finishTasksAndInvalidate()
+      }
+      return lease
+    }
+  }
+
+  func discard(host: String, fingerprint: String) {
+    let key = Self.key(host: host, fingerprint: fingerprint)
+    lock.withLock {
+      order.removeAll { $0 == key }
+      leases.removeValue(forKey: key)?.session.invalidateAndCancel()
+    }
+  }
+
+  var count: Int { lock.withLock { leases.count } }
+
+  private static func key(host: String, fingerprint: String) -> String {
+    "\(TVServerAddress.trustHost(host))|\(fingerprint.uppercased())"
   }
 }

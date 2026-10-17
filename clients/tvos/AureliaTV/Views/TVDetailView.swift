@@ -16,16 +16,16 @@ struct TVDetailView: View {
   @State private var loading = true
   @State private var error: String?
   @State private var playing: TVCatalogItem?
-  @State private var firstLoad = true
   @State private var requestID = UUID()
   @State private var focusRequest: FocusRequest?
   @State private var launchOrigin: Focus = .play
-  @State private var choosingSeason = false
   @State private var shelfAnchor: Focus?
+  @State private var unavailable: TVCatalogItem?
   @FocusState private var focused: Focus?
 
   private enum Focus: Hashable {
-    case play, season
+    case play
+    case season(Int)
     case episode(UUID)
   }
   private struct FocusRequest {
@@ -68,16 +68,22 @@ struct TVDetailView: View {
         // Applied once; a later background refresh must not pull focus back here.
         focusRequest = nil
       }
-      .confirmationDialog("Season", isPresented: $choosingSeason, titleVisibility: .visible) {
-        ForEach(seasons, id: \.number) { value in
-          Button(value.number == 0 ? "Specials" : "Season \(value.number)") {
-            selectedSeason = value.number
-            shelfAnchor = value.episodes.first.map { .episode($0.item.id) }
-          }.accessibilityIdentifier("season-option-\(value.number)")
-        }
-        Button("Cancel", role: .cancel) {}
+      .defaultFocus($focused, .play)
+      .onChange(of: focused) { _, value in
+        // Moving across the season bar switches the shelf at once, like the TV app.
+        if case .season(let number) = value, number != selectedSeason { selectSeason(number) }
       }
-      .onChange(of: choosingSeason) { _, showing in if !showing { requestFocus(.season) } }
+      .alert(
+        "Not Available",
+        isPresented: Binding(get: { unavailable != nil }, set: { if !$0 { unavailable = nil } }),
+        presenting: unavailable
+      ) { _ in
+        Button("OK") { unavailable = nil }
+      } message: { item in
+        Text(
+          "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your Mac, then try again."
+        )
+      }
       .onChange(of: model.session?.sessionId) { _, _ in
         playing = nil
         focusRequest = nil
@@ -137,7 +143,9 @@ struct TVDetailView: View {
           Button(action: playTarget) {
             Label(playLabel, systemImage: "play.fill")
           }.buttonStyle(TVButtonStyle(kind: .primary))
-            .disabled(loading || launching || plan?.target?.isPlayable != true)
+            // Always focusable: loading never moves focus later, and an unavailable
+            // target is explained when pressed instead of leaving a gap.
+            .disabled(launching)
             .focused($focused, equals: .play).accessibilityIdentifier("detail-play")
           if item.kind == .movie || item.kind == .series {
             Button {
@@ -168,26 +176,31 @@ struct TVDetailView: View {
   /// Season selection above a horizontal shelf that opens at the target episode.
   private var episodes: some View {
     VStack(alignment: .leading, spacing: 24) {
-      HStack(alignment: .firstTextBaseline, spacing: 22) {
-        Button {
-          choosingSeason = true
-        } label: {
-          Label(
-            selectedSeason == 0 ? "Specials" : "Season \(selectedSeason ?? 1)",
-            systemImage: "chevron.down"
-          )
-          .labelStyle(TVTrailingIconLabelStyle())
-        }
-        .buttonStyle(TVButtonStyle()).focused($focused, equals: .season)
-        .accessibilityIdentifier("detail-season")
-        .accessibilityLabel(selectedSeason == 0 ? "Specials" : "Season \(selectedSeason ?? 1)")
-        if let count = season?.episodes.count {
-          Text(count == 1 ? "1 episode" : "\(count) episodes").font(
-            .system(size: 22, weight: .semibold)
-          )
-          .foregroundStyle(.tertiary)
-        }
-      }.padding(.horizontal, TVDesign.pagePadding).focusSection()
+      ScrollView(.horizontal) {
+        HStack(alignment: .center, spacing: 16) {
+          ForEach(seasons, id: \.number) { value in
+            Button {
+              selectSeason(value.number)
+            } label: {
+              Text(seasonName(value.number))
+            }
+            .buttonStyle(TVSeasonChipStyle(selected: value.number == selectedSeason))
+            .focused($focused, equals: .season(value.number))
+            // The one explicit route: up from the season bar always returns to Play.
+            .onMoveCommand { if $0 == .up { focused = .play } }
+            .accessibilityIdentifier("season-option-\(value.number)")
+            .accessibilityAddTraits(value.number == selectedSeason ? .isSelected : [])
+          }
+          if let count = season?.episodes.count {
+            Text(count == 1 ? "1 episode" : "\(count) episodes").font(
+              .system(size: 22, weight: .semibold)
+            )
+            .foregroundStyle(.tertiary).padding(.leading, 12)
+          }
+        }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 10)
+      }.scrollIndicators(.hidden).scrollClipDisabled()
+        .defaultFocus($focused, .season(selectedSeason ?? 1), priority: .userInitiated)
+        .focusSection()
       ScrollView(.horizontal) {
         LazyHStack(alignment: .top, spacing: 44) {
           ForEach(season?.episodes ?? [], id: \.item.id) { value in
@@ -199,7 +212,7 @@ struct TVDetailView: View {
               TVEpisodeCard(item: episode)
             }.buttonStyle(.borderless)
               .contextMenu { TVMediaContextActions(item: episode, actions: actions) }
-              .disabled(!episode.isPlayable || launching)
+              .disabled(launching)
               .focused($focused, equals: .episode(episode.id))
               .id(Focus.episode(episode.id))
               .accessibilityIdentifier("detail-episode-\(episode.id)")
@@ -214,9 +227,7 @@ struct TVDetailView: View {
 
   private var shelfEntry: Focus? {
     let episodes = season?.episodes.map(\.item) ?? []
-    let target =
-      episodes.first { $0.id == plan?.target?.id && $0.isPlayable }
-      ?? episodes.first { $0.isPlayable }
+    let target = episodes.first { $0.id == plan?.target?.id } ?? episodes.first
     return target.map { .episode($0.id) }
   }
 
@@ -228,6 +239,13 @@ struct TVDetailView: View {
   }
 
   private func requestFocus(_ target: Focus) { focusRequest = FocusRequest(target: target) }
+  private func seasonName(_ number: Int) -> String { number == 0 ? "Specials" : "Season \(number)" }
+  private func selectSeason(_ number: Int) {
+    selectedSeason = number
+    let episodes = seasons.first { $0.number == number }?.episodes.map(\.item) ?? []
+    let start = episodes.first { $0.id == plan?.target?.id } ?? episodes.first
+    shelfAnchor = start.map { .episode($0.id) }
+  }
   private func playerDismissed() {
     model.playerPresented = false
     Task {
@@ -235,7 +253,7 @@ struct TVDetailView: View {
       if case .episode(let id) = launchOrigin,
         !seasons.flatMap(\.episodes).contains(where: { $0.item.id == id && $0.item.isPlayable })
       {
-        requestFocus(.season)
+        requestFocus(.season(selectedSeason ?? 1))
       } else {
         requestFocus(launchOrigin)
       }
@@ -266,9 +284,18 @@ struct TVDetailView: View {
     }
   }
   private func playTarget() {
-    if let target = plan?.target { open(target, queue: plan?.queue ?? [], origin: .play) }
+    guard let target = plan?.target else { return }
+    guard target.isPlayable else {
+      unavailable = target
+      return
+    }
+    open(target, queue: plan?.queue ?? [], origin: .play)
   }
   private func openEpisode(_ episode: TVCatalogItem) async {
+    guard episode.isPlayable else {
+      unavailable = episode
+      return
+    }
     guard !launching, playing == nil, let api = model.client else { return }
     launching = true
     let sessionID = model.session?.sessionId
@@ -323,14 +350,6 @@ struct TVDetailView: View {
       }
       loading = false
       if let focusRequest, playing == nil { requestFocus(focusRequest.target) }
-      if firstLoad {
-        if newPlan.target?.isPlayable == true {
-          requestFocus(.play)
-        } else if !newDetail.seasons.isEmpty {
-          requestFocus(.season)
-        }
-        firstLoad = false
-      }
     } catch {
       guard !Task.isCancelled, requestID == request, model.session?.sessionId == sessionID else {
         return
@@ -371,12 +390,20 @@ private struct TVEpisodeCard: View {
   }
 }
 
-/// Places a label's icon after its title, as in a pop-up button.
-private struct TVTrailingIconLabelStyle: LabelStyle {
+/// Season bar chip: the current season stays highlighted, focus turns it white.
+private struct TVSeasonChipStyle: ButtonStyle {
+  let selected: Bool
+  @Environment(\.isFocused) private var focused
   func makeBody(configuration: Configuration) -> some View {
-    HStack(spacing: 12) {
-      configuration.title
-      configuration.icon.font(.system(size: 18, weight: .bold))
-    }
+    configuration.label
+      .font(.system(size: 24, weight: selected || focused ? .bold : .semibold))
+      .padding(.horizontal, 26).frame(minHeight: 58)
+      .foregroundStyle(focused ? Color.black : .white.opacity(selected ? 1 : 0.7))
+      .background(
+        Capsule().fill(focused ? Color.white : .white.opacity(selected ? 0.24 : 0.08))
+      )
+      .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 14, y: 8)
+      .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.06 : 1)
+      .animation(.easeOut(duration: 0.12), value: focused)
   }
 }

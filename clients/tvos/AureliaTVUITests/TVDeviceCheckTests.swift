@@ -67,17 +67,12 @@ final class TVDeviceCheckTests: XCTestCase {
         throw XCTSkip("The selected catalog card does not match the approved series.")
       }
       XCUIRemote.shared.press(.select)
-      let season = app.buttons["detail-season"]
+      let season = app.buttons["season-option-1"]
       guard season.waitForExistence(timeout: 12) else {
         throw XCTSkip("Approved series details are unavailable.")
       }
+      // Focusing a season in the season bar selects it.
       try focus(season, in: app)
-      if season.label != "Season 1" {
-        XCUIRemote.shared.press(.select)
-        let firstSeason = app.buttons["season-option-1"]
-        try focus(firstSeason, in: app)
-        XCUIRemote.shared.press(.select)
-      }
       let episode: XCUIElement
       if let identifier = environment["AURELIA_TV_DEVICE_EPISODE_ID"],
         UUID(uuidString: identifier) != nil

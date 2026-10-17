@@ -60,7 +60,7 @@ These rules apply to every task in this repository.
   counters. Confirm product names and intended versions with the user before
   changing them. The approved Mac PIN-input release is 1.5.7 (52); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
-  artwork/continue-playback fix is 0.1.4 (5).
+  performance/navigation update is 0.1.5 (6).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - For tvOS, run warning-free device/simulator builds, host-executable logic tests
@@ -133,7 +133,7 @@ These rules apply to every task in this repository.
   results.
 - Use a short English description of the completed change as the commit subject,
   without a version/build number. The approved subject for the current TV update
-  is `Fix tvOS artwork and continue playback`. Push to `origin/main`
+  is `Speed up tvOS browsing and navigation`. Push to `origin/main`
   and verify the remote hash after each independent completed change.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.

@@ -75,6 +75,23 @@ final class TVLibraryUITests: XCTestCase {
   }
 
   @MainActor
+  func testOfflineContinueWatchingStaysReachableAndExplains() {
+    let app = launch("offline")
+    defer { app.terminate() }
+    let card = app.buttons["home-continueWatching-\(resumeID)"]
+    XCTAssertTrue(card.waitForExistence(timeout: 10))
+    select(card, in: app)
+    let ok = app.buttons["OK"].firstMatch
+    XCTAssertTrue(ok.waitForExistence(timeout: 5), "Selecting an offline title explains it.")
+    XCTAssertFalse(app.buttons["player-play"].exists)
+    capture(app, "Home - Offline Continue Watching")
+    select(app.buttons["Show Details"].firstMatch, in: app)
+    expectFocus(app.buttons["detail-play"])
+    XCTAssertTrue(
+      app.staticTexts["Media drive disconnected"].firstMatch.waitForExistence(timeout: 5))
+  }
+
+  @MainActor
   func testFavoriteAndSingleTitleWatchActionsUpdateMenus() {
     let app = launch()
     defer { app.terminate() }
@@ -248,7 +265,10 @@ final class TVLibraryUITests: XCTestCase {
     selectTab(app, title: "TV Shows")
     select(app.buttons["catalog-\(seriesID)"], in: app)
     expectFocus(app.buttons["detail-play"])
-    XCTAssertEqual(app.buttons["detail-play"].label, "Resume S02 E02")
+    let resume = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "label == %@", "Resume S02 E02"),
+      object: app.buttons["detail-play"])
+    XCTAssertEqual(XCTWaiter.wait(for: [resume], timeout: 8), .completed)
   }
 
   @MainActor

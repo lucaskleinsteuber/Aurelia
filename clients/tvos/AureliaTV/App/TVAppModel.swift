@@ -559,6 +559,27 @@ final class TVAppModel: ObservableObject {
     }
   }
 
+  /// Loads the first Movies and TV Shows pages and their leading posters in the
+  /// background, so the tabs are already filled when they are opened.
+  func preloadLibrary() async {
+    guard let api = client, let connection, let session else { return }
+    for listing in [movies, shows] where listing.items.isEmpty && !listing.loading {
+      let query = environment.browsePreferences.load(
+        serverID: connection.serverID, profileID: session.user.id, section: listing.section)
+      listing.configure(query: query, search: "", profileID: session.user.id)
+      await listing.loadNext(api: api, onFailure: handleSessionFailure)
+      guard self.session?.sessionId == session.sessionId else { return }
+    }
+    for listing in [movies, shows] {
+      for item in listing.items.prefix(12) {
+        guard self.session?.sessionId == session.sessionId else { return }
+        if let poster = item.poster {
+          _ = try? await artwork.image(artwork: poster, width: 640, api: api)
+        }
+      }
+    }
+  }
+
   func scheduleLibraryRefresh() {
     deferredRefresh = true
     guard !playerPresented, refreshTask == nil else { return }

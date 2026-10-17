@@ -125,15 +125,15 @@ struct TVLibraryGrid: View {
           return
         }
         if lastKey != request {
+          // Configuring an unchanged query keeps titles that Home already preloaded.
           listing.configure(query: query, search: search, profileID: model.session?.user.id)
-          listing.invalidate()
           lastKey = request
           save()
           if !search.isEmpty {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
           }
         }
-        guard !Task.isCancelled, let api = model.client else { return }
+        guard !Task.isCancelled, listing.items.isEmpty, let api = model.client else { return }
         await listing.loadNext(api: api, onFailure: model.handleSessionFailure)
       }
       .sheet(isPresented: $filters) { TVBrowseFilters(query: $query, section: listing.section) }

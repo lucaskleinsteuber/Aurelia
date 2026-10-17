@@ -117,7 +117,11 @@ final class TVFocusUITests: XCTestCase {
     openSeries(app)
     let resume = app.buttons["detail-play"]
     expectFocus(resume)
-    XCTAssertEqual(resume.label, "Resume S02 E02")
+    // Focus stays on Play while the delayed plan arrives; only the label updates.
+    let loaded = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "label == %@", "Resume S02 E02"), object: resume)
+    XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed)
+    expectFocus(resume)
     XCTAssertTrue(resume.isEnabled)
     XCTAssertLessThanOrEqual(resume.frame.height, 90)
     shot(app, "Series - Resume Focus After Delayed Load")
@@ -137,7 +141,9 @@ final class TVFocusUITests: XCTestCase {
     openSeries(app)
     let remote = XCUIRemote.shared
     remote.press(.down)
-    expectFocus(app.buttons["detail-season"])
+    // The season bar is entered at the current season.
+    let seasonTwo = app.buttons["season-option-2"]
+    expectFocus(seasonTwo)
     // The shelf opens at the resume episode, so moving down lands on it.
     remote.press(.down)
     let second = app.buttons["detail-episode-00000000-0000-4000-8000-000000000142"]
@@ -151,7 +157,7 @@ final class TVFocusUITests: XCTestCase {
     XCTAssertTrue(
       app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "S02 E03")).firstMatch
         .exists)
-    remote.press(.menu)
+    closePlayer(app)
     expectFocus(third)
     remote.press(.left)
     expectFocus(second)
@@ -159,18 +165,16 @@ final class TVFocusUITests: XCTestCase {
     let first = app.buttons["detail-episode-00000000-0000-4000-8000-000000000141"]
     expectFocus(first)
     remote.press(.up)
-    expectFocus(app.buttons["detail-season"])
-    remote.press(.select)
-    let seasonOne = app.buttons["Season 1"].firstMatch
-    XCTAssertTrue(seasonOne.waitForExistence(timeout: 5))
-    for _ in 0..<3 {
-      if seasonOne.hasFocus { break }
-      remote.press(.down)
-    }
+    expectFocus(seasonTwo)
+    // Moving across the bar switches the season immediately, without a dialog.
+    remote.press(.left)
+    let seasonOne = app.buttons["season-option-1"]
     expectFocus(seasonOne)
-    remote.press(.select)
-    expectFocus(app.buttons["detail-season"])
-    XCTAssertEqual(app.buttons["detail-season"].label, "Season 1")
+    XCTAssertTrue(
+      app.buttons["detail-episode-00000000-0000-4000-8000-000000000121"].waitForExistence(
+        timeout: 2))
+    XCTAssertTrue(seasonOne.isSelected)
+    shot(app, "Series - Season Bar")
     remote.press(.up)
     expectFocus(app.buttons["detail-play"])
     XCTAssertEqual(app.buttons["detail-play"].label, "Resume S02 E02")
@@ -180,10 +184,24 @@ final class TVFocusUITests: XCTestCase {
   func testUnavailableTargetAndDisabledPlayerActions() {
     let app = launch("offline")
     openSeries(app)
-    XCTAssertFalse(app.buttons["detail-play"].isEnabled)
-    expectFocus(app.buttons["detail-season"])
-    XCTAssertTrue(app.staticTexts["Media drive disconnected"].firstMatch.exists)
+    // Unavailable titles keep their place in focus and explain themselves.
+    let play = app.buttons["detail-play"]
+    expectFocus(play)
+    XCTAssertTrue(
+      app.staticTexts["Media drive disconnected"].firstMatch.waitForExistence(timeout: 5))
     shot(app, "Series - Offline Target")
+    XCUIRemote.shared.press(.select)
+    let ok = app.buttons["OK"].firstMatch
+    XCTAssertTrue(ok.waitForExistence(timeout: 5))
+    XCTAssertTrue(
+      app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Connect the drive"))
+        .firstMatch.exists)
+    XCTAssertFalse(app.buttons["player-play"].exists)
+    XCUIRemote.shared.press(.select)
+    XCTAssertTrue(ok.waitForNonExistence(timeout: 5))
+    expectFocus(play)
+    XCUIRemote.shared.press(.down)
+    expectFocus(app.buttons["season-option-2"])
     app.terminate()
 
     let limited = launch("limitedTracks")
@@ -436,6 +454,19 @@ final class TVFocusUITests: XCTestCase {
         format: "elementType == %d AND identifier == %@", element.elementType.rawValue, identifier)
     return XCUIApplication().cells.matching(NSPredicate(format: "hasFocus == true"))
       .containing(match).firstMatch.exists
+  }
+
+  /// Waits until the player has finished presenting before Back is pressed, so the
+  /// press is not swallowed by the cover's transition on a cold simulator.
+  @MainActor
+  private func closePlayer(_ app: XCUIApplication) {
+    XCTAssertTrue(app.progressIndicators["player-loading"].waitForNonExistence(timeout: 8))
+    let surface = app.descendants(matching: .any)["player-surface"]
+    for _ in 0..<3 where surface.exists {
+      XCUIRemote.shared.press(.menu)
+      if surface.waitForNonExistence(timeout: 3) { break }
+    }
+    XCTAssertFalse(surface.exists, "Back must close the player.")
   }
 
   @MainActor

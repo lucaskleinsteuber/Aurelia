@@ -8,6 +8,7 @@ struct TVHomeView: View {
   @State private var playback: TVHomePlayback?
   @State private var launching = false
   @State private var detailItem: TVHomeDetail?
+  @State private var unavailable: TVCatalogItem?
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
@@ -43,7 +44,10 @@ struct TVHomeView: View {
     // The hero artwork reaches the top edge beneath the native tab bar.
     .ignoresSafeArea(edges: .top)
     .background(TVDesign.canvas.ignoresSafeArea())
-    .task(id: model.libraryRefresh) { await model.loadHome() }
+    .task(id: model.libraryRefresh) {
+      await model.loadHome()
+      await model.preloadLibrary()
+    }
     .modifier(TVLibraryActionPresentation(actions: actions))
     .navigationDestination(item: $detailItem) { value in
       TVDetailView(id: value.item.detailID, initial: value.item)
@@ -74,10 +78,30 @@ struct TVHomeView: View {
       }
     )
     .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
+    .alert(
+      "Not Available",
+      isPresented: Binding(get: { unavailable != nil }, set: { if !$0 { unavailable = nil } }),
+      presenting: unavailable
+    ) { item in
+      Button("Show Details") {
+        detailItem = TVHomeDetail(item: item)
+        unavailable = nil
+      }
+      Button("OK", role: .cancel) { unavailable = nil }
+    } message: { item in
+      Text(
+        "\(item.availabilityMessage ?? "This title can't be played right now.") Connect the drive on your Mac, then try again."
+      )
+    }
   }
 
   /// Continue Watching starts playback right away from the server's resume target.
   private func play(_ item: TVCatalogItem) {
+    // Offline titles stay reachable in Continue Watching; selecting one explains why.
+    guard item.isPlayable else {
+      unavailable = item
+      return
+    }
     guard !launching, playback == nil, let api = model.client else { return }
     launching = true
     let sessionID = model.session?.sessionId
@@ -86,8 +110,12 @@ struct TVHomeView: View {
       do {
         let plan = try await api.playbackPlan(mediaID: item.id)
         guard model.session?.sessionId == sessionID, playback == nil else { return }
-        guard let target = plan.target, target.isPlayable else {
+        guard let target = plan.target else {
           detailItem = TVHomeDetail(item: item)
+          return
+        }
+        guard target.isPlayable else {
+          unavailable = target
           return
         }
         let series = target.parentTitle ?? item.parentTitle
@@ -124,7 +152,7 @@ struct TVHomeView: View {
                     play(item)
                   } label: {
                     TVContinueCard(item: item)
-                  }.disabled(!item.isPlayable)
+                  }
                 } else {
                   NavigationLink {
                     TVDetailView(id: item.detailID, initial: item)
@@ -208,7 +236,7 @@ private struct TVHomeHero: View {
           .foregroundStyle(.white.opacity(0.88))
         }
         Group {
-          if item.progressFraction != nil, item.isPlayable {
+          if item.progressFraction != nil {
             Button {
               play(item)
             } label: {

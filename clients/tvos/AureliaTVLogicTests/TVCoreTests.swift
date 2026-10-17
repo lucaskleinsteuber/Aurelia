@@ -3,6 +3,18 @@ import Testing
 
 @Suite("TV client contracts and transport")
 struct TVCoreTests {
+  @Test func pinnedSessionsAreReusedPerIdentityAndBounded() {
+    let pool = TVPinnedSessionPool()
+    let first = pool.lease(host: "tv.local", fingerprint: "aa")
+    #expect(pool.lease(host: "tv.local", fingerprint: "AA").session === first.session)
+    #expect(pool.lease(host: "tv.local", fingerprint: "bb").session !== first.session)
+    for index in 0..<8 { _ = pool.lease(host: "host\(index).local", fingerprint: "cc") }
+    #expect(pool.count == TVPinnedSessionPool.capacity)
+    pool.discard(host: "host7.local", fingerprint: "cc")
+    #expect(pool.count == TVPinnedSessionPool.capacity - 1)
+    #expect(pool.lease(host: "tv.local", fingerprint: "aa").session !== first.session)
+  }
+
   private static let fingerprint = String(repeating: "A", count: 64)
   private static let serverID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
   private static let profileID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!

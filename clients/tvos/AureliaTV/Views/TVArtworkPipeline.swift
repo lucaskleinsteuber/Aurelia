@@ -10,10 +10,13 @@ actor TVArtworkPipeline {
   private var active = 0
   private var waiters: [CheckedContinuation<Void, Never>] = []
   private var generation = UUID()
+  /// Views still waiting for each request. When all of them disappear, the
+  /// download is cancelled so visible artwork is not queued behind it.
+  private var interest: [String: Int] = [:]
 
   init() {
-    cache.totalCostLimit = 80 * 1024 * 1024
-    cache.countLimit = 180
+    cache.totalCostLimit = 160 * 1024 * 1024
+    cache.countLimit = 320
   }
 
   func image(artwork: TVArtwork, width: Int, api: TVAPIClient) async throws -> UIImage {
@@ -23,7 +26,7 @@ actor TVArtworkPipeline {
     let key =
       "\(connection.serverID):\(session.sessionId):\(artwork.id):\(artwork.revision ?? 0):\(width)"
     if let cached = cache.object(forKey: key as NSString) { return cached }
-    if let pending = requests[key] { return try await pending.value.image }
+    if let pending = requests[key] { return try await waitFor(pending, key: key).image }
     let run = generation
     let task = Task<TVDecodedArtwork, Error> {
       await acquire()
@@ -60,21 +63,47 @@ actor TVArtworkPipeline {
     }
     requests[key] = task
     do {
-      let value = try await task.value
+      let value = try await waitFor(task, key: key)
       guard generation == run else { throw CancellationError() }
       requests[key] = nil
+      interest[key] = nil
       let cost = value.image.cgImage.map { $0.bytesPerRow * $0.height } ?? width * width * 4
       cache.setObject(value.image, forKey: key as NSString, cost: cost)
       return value.image
     } catch {
-      if generation == run { requests[key] = nil }
+      if generation == run, requests[key] == task {
+        requests[key] = nil
+        interest[key] = nil
+      }
       throw error
     }
+  }
+
+  private func waitFor(_ task: Task<TVDecodedArtwork, Error>, key: String) async throws
+    -> TVDecodedArtwork
+  {
+    interest[key, default: 0] += 1
+    return try await withTaskCancellationHandler {
+      try await task.value
+    } onCancel: {
+      Task { await self.abandon(key, task: task) }
+    }
+  }
+
+  private func abandon(_ key: String, task: Task<TVDecodedArtwork, Error>) {
+    guard requests[key] == task else { return }
+    let remaining = (interest[key] ?? 1) - 1
+    interest[key] = remaining
+    guard remaining <= 0 else { return }
+    task.cancel()
+    requests[key] = nil
+    interest[key] = nil
   }
   func clear() {
     generation = UUID()
     for request in requests.values { request.cancel() }
     requests.removeAll()
+    interest.removeAll()
     cache.removeAllObjects()
   }
   private func acquire() async {
