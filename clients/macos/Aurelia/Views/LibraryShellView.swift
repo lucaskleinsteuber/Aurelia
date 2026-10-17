@@ -30,6 +30,12 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
   }
 }
 
+/// Cmd-F focuses the library search; coming from Home or a detail page starts a new search.
+private struct FindRequest: Equatable {
+  let id = UUID()
+  let startsNewSearch: Bool
+}
+
 private enum MediaSelection: Hashable {
   case media(UUID)
   case collection(UUID)
@@ -43,7 +49,7 @@ struct LibraryShellView: View {
   @State private var sidebarVisible = true
   @State private var sidebarWidth = AureliaDesign.sidebarWidth
   @State private var resizeStartWidth: CGFloat?
-  @State private var findRequest: UUID?
+  @State private var findRequest: FindRequest?
 
   var body: some View {
     GeometryReader { geometry in
@@ -103,11 +109,12 @@ struct LibraryShellView: View {
     .background(AureliaDesign.canvas)
     .background {
       LibraryFindShortcut(isBlocked: { model.playback != nil }) {
-        if destination == .home || selection != nil {
+        let leaving = destination == .home || selection != nil
+        if leaving {
           selection = nil
           destination = .library
         }
-        findRequest = UUID()
+        findRequest = FindRequest(startsNewSearch: leaving)
       }
       .frame(width: 0, height: 0)
     }
@@ -199,51 +206,71 @@ struct LibraryShellView: View {
     .accessibilityIdentifier("sidebar-\(item.rawValue)")
   }
 
-  @ViewBuilder
+  /// The browsing page stays alive underneath a detail page, so going back keeps its scroll
+  /// position and artwork exactly where they were.
   private var content: some View {
-    if let activeSelection = selection {
-      switch activeSelection {
-      case .media(let id):
-        MediaDetailView(
-          mediaId: id,
-          onBack: { selection = nil })
-      case .collection(let id):
-        if let collection = model.collections.first(where: { $0.id == id }) {
-          CollectionDetailView(
-            collection: collection,
-            onBack: { selection = nil },
-            onSelect: { selection = .media($0) })
-        }
+    ZStack {
+      browsePage
+        .opacity(selection == nil ? 1 : 0)
+        .allowsHitTesting(selection == nil)
+        .accessibilityHidden(selection != nil)
+      if let activeSelection = selection {
+        selectedPage(activeSelection)
       }
-    } else {
-      switch destination {
-      case .home:
-        HomePage(
-          onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) }
-        )
-        .task { await model.refreshHome() }
-      case .library:
-        LibraryPage(
-          section: .library, findRequest: findRequest,
-          onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) })
-      case .recentlyAdded:
-        LibraryPage(
-          section: .recentlyAdded, findRequest: findRequest,
-          onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) })
-      case .tvShows:
-        LibraryPage(
-          section: .tvShows, findRequest: findRequest,
-          onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) })
-      case .movies:
-        LibraryPage(
-          section: .movies, findRequest: findRequest,
-          onSelect: { selection = .media($0) },
-          onSelectCollection: { selection = .collection($0) })
+    }
+    .onChange(of: selection) { _, value in
+      if value == nil, destination == .home { Task { await model.refreshHome() } }
+      // Typing must never reach a search field hidden underneath the detail page.
+      if value != nil { NSApp.keyWindow?.makeFirstResponder(nil) }
+    }
+  }
+
+  @ViewBuilder
+  private func selectedPage(_ activeSelection: MediaSelection) -> some View {
+    switch activeSelection {
+    case .media(let id):
+      MediaDetailView(
+        mediaId: id,
+        onBack: { selection = nil })
+    case .collection(let id):
+      if let collection = model.collections.first(where: { $0.id == id }) {
+        CollectionDetailView(
+          collection: collection,
+          onBack: { selection = nil },
+          onSelect: { selection = .media($0) })
       }
+    }
+  }
+
+  @ViewBuilder
+  private var browsePage: some View {
+    switch destination {
+    case .home:
+      HomePage(
+        onSelect: { selection = .media($0) },
+        onSelectCollection: { selection = .collection($0) }
+      )
+      .task { await model.refreshHome() }
+    case .library:
+      LibraryPage(
+        section: .library, findRequest: findRequest,
+        onSelect: { selection = .media($0) },
+        onSelectCollection: { selection = .collection($0) })
+    case .recentlyAdded:
+      LibraryPage(
+        section: .recentlyAdded, findRequest: findRequest,
+        onSelect: { selection = .media($0) },
+        onSelectCollection: { selection = .collection($0) })
+    case .tvShows:
+      LibraryPage(
+        section: .tvShows, findRequest: findRequest,
+        onSelect: { selection = .media($0) },
+        onSelectCollection: { selection = .collection($0) })
+    case .movies:
+      LibraryPage(
+        section: .movies, findRequest: findRequest,
+        onSelect: { selection = .media($0) },
+        onSelectCollection: { selection = .collection($0) })
     }
   }
 }
@@ -508,7 +535,7 @@ private struct HomeHero: View {
 private struct LibraryPage: View {
   @EnvironmentObject private var model: AppModel
   let section: CatalogBrowseSection
-  let findRequest: UUID?
+  let findRequest: FindRequest?
   let onSelect: (UUID) -> Void
   let onSelectCollection: (UUID) -> Void
   @StateObject private var browser = LibraryBrowseController()
@@ -614,8 +641,9 @@ private struct LibraryPage: View {
       guard !Task.isCancelled, request == requestKey else { return }
       completedRequestKey = request
     }
-    .task(id: "\(context):\(loadedContext):\(findRequest?.uuidString ?? "none")") {
-      guard loadedContext == context, findRequest != nil else { return }
+    .task(id: "\(context):\(loadedContext):\(findRequest?.id.uuidString ?? "none")") {
+      guard loadedContext == context, let findRequest else { return }
+      if findRequest.startsNewSearch { search = "" }
       searchFocused = false
       await Task.yield()
       guard !Task.isCancelled, loadedContext == context else { return }

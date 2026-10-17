@@ -20,13 +20,26 @@ struct MediaDetailView: View {
   @State private var usedPreparedDetail = false
   @StateObject private var watchActions = MediaWatchActionController()
 
+  /// What the page shows now: loaded details, else prepared ones, else the list entry that
+  /// was just selected, so artwork, title and overview appear in the first frame.
+  private var shownDetail: CatalogDetailPresentation? {
+    if let detail { return detail }
+    guard errorMessage == nil else { return nil }
+    return model.preparedDetail(id: mediaId)?.detail
+      ?? model.listedItem(id: mediaId).map(AppModel.provisionalDetail)
+  }
+
+  private var shownPlan: PlaybackPlanResponse? {
+    playbackPlan ?? (detail == nil ? model.preparedDetail(id: mediaId)?.plan : nil)
+  }
+
   var body: some View {
     ScrollView {
-      if let detail {
+      if let detail = shownDetail {
         LazyVStack(alignment: .leading, spacing: 38) {
           DetailHero(
             detail: detail,
-            playLabel: DetailPlaybackPresentation.label(detail: detail, plan: playbackPlan),
+            playLabel: DetailPlaybackPresentation.label(detail: detail, plan: shownPlan),
             playTarget: primaryTarget(detail),
             isPlayLoading: isLoadingPlaybackPlan || isStartingPlayback,
             canPlay: primaryTarget(detail).map(MediaAvailabilityPresentation.canPlay) == true,
@@ -218,7 +231,7 @@ struct MediaDetailView: View {
   }
 
   private func primaryTarget(_ detail: CatalogDetailPresentation) -> CatalogItemSummary? {
-    if model.supportsLibraryState { return playbackPlan?.target }
+    if model.supportsLibraryState { return shownPlan?.target }
     if detail.item.kind != .series { return detail.item }
     return episodes(in: detail).first?.item
   }

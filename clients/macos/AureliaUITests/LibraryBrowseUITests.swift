@@ -35,7 +35,9 @@ final class LibraryBrowseUITests: XCTestCase {
     XCTAssertTrue(movie.waitForExistence(timeout: 5))
     movie.click()
     XCTAssertTrue(app.buttons["play-media"].waitForExistence(timeout: 5))
-    XCTAssertFalse(search.exists)
+    // The library stays alive underneath the detail page, but its search is out of reach.
+    XCTAssertFalse(search.isHittable)
+    XCTAssertNotEqual(search.value(forKey: "hasKeyboardFocus") as? Bool, true)
     app.typeKey("f", modifierFlags: .command)
     XCTAssertTrue(search.waitForExistence(timeout: 5))
     XCTAssertEqual(search.value as? String, "")
@@ -45,6 +47,37 @@ final class LibraryBrowseUITests: XCTestCase {
       app.buttons["media-20000000-0000-0000-0000-000000000001"]
         .waitForExistence(timeout: 5))
     screenshot(app, "1.5.3 - Find from Detail")
+  }
+
+  @MainActor func testReturningFromDetailKeepsHomeScrollPositionAndHero() throws {
+    let app = launch()
+    defer { app.terminate() }
+    let hero = app.descendants(matching: .any)["home-hero"]
+    XCTAssertTrue(hero.waitForExistence(timeout: 5))
+    let heroFrame = hero.frame
+    app.descendants(matching: .any)["home-page"].scroll(byDeltaX: 0, deltaY: -400)
+    XCTAssertNotEqual(hero.frame.minY, heroFrame.minY, "Home did not scroll.")
+    let window = app.windows.firstMatch.frame
+    let posters = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "media-"))
+    let card = try XCTUnwrap(
+      posters.allElementsBoundByIndex.first {
+        let frame = $0.frame
+        return !frame.isEmpty
+          && window.insetBy(dx: 260, dy: 120).contains(
+            CGPoint(x: frame.midX, y: frame.midY))
+      })
+    let before = card.frame
+    click(card, in: app)
+    XCTAssertTrue(app.buttons["play-media"].waitForExistence(timeout: 5))
+    app.buttons["Back"].firstMatch.click()
+    XCTAssertTrue(card.waitForExistence(timeout: 5))
+    XCTAssertEqual(card.frame.minY, before.minY, accuracy: 2)
+    XCTAssertEqual(card.frame.minX, before.minX, accuracy: 2)
+    // Back at the top, the hero is exactly where it was before opening a title.
+    app.descendants(matching: .any)["home-page"].scroll(byDeltaX: 0, deltaY: 2_000)
+    XCTAssertEqual(hero.frame.minY, heroFrame.minY, accuracy: 2)
+    XCTAssertEqual(hero.frame.height, heroFrame.height, accuracy: 2)
+    screenshot(app, "1.6.2 - Home After Returning From Detail")
   }
 
   @MainActor func testFiltersPersistPerPageAndAcrossRelaunchWithoutPersistingSearch() throws {
@@ -91,6 +124,15 @@ final class LibraryBrowseUITests: XCTestCase {
     XCTAssertTrue(series.waitForExistence(timeout: 5))
     XCTAssertFalse(app.staticTexts["library-active-filters"].exists)
     screenshot(app, "1.5.3 - Cleared Filters after Relaunch")
+  }
+
+  /// Clicks at the element's center through the window, without accessibility auto-scrolling.
+  @MainActor private func click(_ element: XCUIElement, in app: XCUIApplication) {
+    let window = app.windows.firstMatch
+    let frame = element.frame
+    window.coordinate(withNormalizedOffset: .zero).withOffset(
+      CGVector(dx: frame.midX - window.frame.minX, dy: frame.midY - window.frame.minY)
+    ).click()
   }
 
   @MainActor private func launch(preferenceSuite: String? = nil) -> XCUIApplication {

@@ -1658,6 +1658,29 @@ final class AppModel: ObservableObject {
     return (entry.detail, entry.plan)
   }
 
+  /// The list entry for a title the user just selected, from data already on screen.
+  func listedItem(id: UUID) -> CatalogItemSummary? {
+    if let item = catalogItems.first(where: { $0.id == id }) { return item }
+    let home =
+      [home?.recommendation].compactMap { $0 } + (home?.recentlyAdded ?? [])
+      + (home?.favorites ?? []) + (home?.continueWatching ?? [])
+    return home.first { $0.id == id }
+      ?? collections.lazy.flatMap(\.items).first { $0.id == id }
+  }
+
+  /// A detail page built from a list entry, shown until the full details arrive.
+  static func provisionalDetail(_ item: CatalogItemSummary) -> CatalogDetailPresentation {
+    CatalogDetailPresentation(
+      item: item,
+      metadata: MediaMetadataSummary(
+        mediaId: item.id, title: item.title, originalTitle: item.originalTitle,
+        overview: item.overview, releaseDate: nil, year: item.year, runtimeMinutes: nil,
+        rating: nil, contentRating: nil, genres: item.genres, studios: [], countries: [],
+        credits: [], poster: item.poster, backdrop: item.backdrop, still: nil, provider: nil,
+        providerMediaId: nil, reviewState: .matched),
+      seasons: [], supplements: [])
+  }
+
   /// The artwork a detail page shows full width at the top.
   static func heroArtwork(_ detail: CatalogDetailPresentation) -> ArtworkSummary? {
     detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop

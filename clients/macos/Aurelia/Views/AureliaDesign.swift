@@ -612,7 +612,7 @@ struct MediaPosterCard: View {
     .task(id: hovering) {
       // Once the pointer rests on a title, prepare its detail page so it opens complete.
       guard hovering else { return }
-      try? await Task.sleep(for: .milliseconds(250))
+      try? await Task.sleep(for: .milliseconds(100))
       guard !Task.isCancelled else { return }
       model.prepareDetail(for: item)
     }

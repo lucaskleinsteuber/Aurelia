@@ -95,7 +95,9 @@ final class LibraryStateActionsUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["Mark 12 episodes as watched?"].exists)
     app.typeKey("f", modifierFlags: .command)
     XCTAssertTrue(confirm.exists)
-    XCTAssertFalse(app.textFields["library-search"].exists)
+    // The library stays alive underneath the detail page, but Find cannot reach it.
+    XCTAssertTrue(play.exists)
+    XCTAssertFalse(app.textFields["library-search"].isHittable)
     confirm.click()
     XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
     scroll(app, by: 600)
