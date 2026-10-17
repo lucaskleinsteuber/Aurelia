@@ -300,7 +300,7 @@ public sealed class LibraryService(
             throw BadRequest("unexpected_movie", "Ignore does not accept a movie selection.");
         }
 
-        if (!scanQueue.TryReserve(libraryId))
+        if (!await TryReserveScanAsync(libraryId, cancellationToken))
         {
             throw ScanAlreadyActive();
         }
@@ -493,7 +493,7 @@ public sealed class LibraryService(
         var library = await RequireLibraryAsync(libraryId, cancellationToken);
         if (library.ImportPreviewRequired)
             throw new LibraryException("import_preview_required", "Review and confirm the first import before starting a scan.", 409);
-        if (!scanQueue.TryReserve(libraryId))
+        if (!await TryReserveScanAsync(libraryId, cancellationToken))
         {
             throw ScanAlreadyActive();
         }
@@ -826,6 +826,23 @@ public sealed class LibraryService(
             scan.PendingFiles,
             scan.IgnoredFiles,
             scan.FailedFiles);
+    }
+
+    private async Task<bool> TryReserveScanAsync(Guid libraryId, CancellationToken cancellationToken)
+    {
+        if (scanQueue.TryReserve(libraryId)) return true;
+        // The worker stores a terminal state before it releases the in-memory reservation.
+        // A client that saw the finished scan may ask again inside that short window.
+        for (var attempt = 0; attempt < 20; attempt += 1)
+        {
+            var active = await database.LibraryScans.AsNoTracking().AnyAsync(scan => scan.LibraryRootId == libraryId
+                && (scan.State == LibraryScanState.Queued || scan.State == LibraryScanState.Running
+                    || scan.State == LibraryScanState.WaitingForStorage), cancellationToken);
+            if (active) return false;
+            await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken);
+            if (scanQueue.TryReserve(libraryId)) return true;
+        }
+        return false;
     }
 
     private static LibraryException ScanAlreadyActive()

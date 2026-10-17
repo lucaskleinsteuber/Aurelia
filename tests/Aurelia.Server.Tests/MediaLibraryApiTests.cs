@@ -750,6 +750,37 @@ public sealed class MediaLibraryApiTests
     }
 
     [Fact]
+    public async Task AScanRequestedJustAfterCompletionWaitsForTheReleasedReservation()
+    {
+        var root = CreateDirectory("Movies");
+        Touch(root, "Movie.mkv");
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.Movies);
+            Assert.Equal(LibraryScanState.Completed,
+                (await StartAndWaitForScanAsync(client, owner.Token, library.Id)).State);
+
+            // Reproduce the moment between the stored terminal state and the worker's release.
+            var scheduler = factory.Services.GetRequiredService<Aurelia.Server.Services.LibraryScanScheduler>();
+            scheduler.ReserveExisting(library.Id);
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
+                scheduler.Release(library.Id);
+            });
+            Assert.Equal(LibraryScanState.Completed,
+                (await StartAndWaitForScanAsync(client, owner.Token, library.Id)).State);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
     public async Task OverlappingLibrariesAndParallelScansAreRejected()
     {
         var root = CreateDirectory("Movies");
