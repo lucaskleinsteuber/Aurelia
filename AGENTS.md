@@ -60,7 +60,7 @@ These rules apply to every task in this repository.
   counters. Confirm product names and intended versions with the user before
   changing them. The approved Mac PIN-input release is 1.5.7 (52); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
-  focus/skip update is 0.1.7 (8).
+  playback-responsiveness update is 0.1.8 (9).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - For tvOS, run warning-free device/simulator builds, host-executable logic tests
@@ -133,7 +133,7 @@ These rules apply to every task in this repository.
   results.
 - Use a short English description of the completed change as the commit subject,
   without a version/build number. The approved subject for the current TV update
-  is `Improve tvOS focus entry and skipping`. Push to `origin/main`
+  is `Speed up tvOS seeking`. Push to `origin/main`
   and verify the remote hash after each independent completed change.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.

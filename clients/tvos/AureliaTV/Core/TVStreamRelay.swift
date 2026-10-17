@@ -40,7 +40,13 @@ final class TVStreamRelay: @unchecked Sendable {
   private var sourceURL: URL
   private var listener: NWListener?
   private var startContinuation: CheckedContinuation<URL, Error>?
-  private var sessions: [UUID: URLSession] = [:]
+  private var sessions: [UUID: TVRelayPooledSession] = [:]
+  /// Upstream sessions whose last transfer ended. A seek reuses one, so its
+  /// already verified HTTP/2 connection carries the new range request instead of
+  /// a fresh TCP and TLS handshake. Each session still runs one transfer at a time.
+  private var idleSessions: [TVRelayPooledSession] = []
+  static let maximumIdleSessions = 2
+  private var createdSessionCount = 0
   private var connections: [UUID: NWConnection] = [:]
   private var upstreamDelegates: [UUID: TVRelayUpstreamDelegate] = [:]
   private var failureHandler: (@MainActor @Sendable (TVStreamFailure) -> Void)?
@@ -116,14 +122,19 @@ final class TVStreamRelay: @unchecked Sendable {
     lock.withLock { failureHandler = handler }
   }
 
+  /// Upstream sessions created so far; reuse keeps this below the request count.
+  var upstreamSessionCount: Int { lock.withLock { createdSessionCount } }
+
   func stop() {
     let resources = lock.withLock {
       () -> (NWListener?, [URLSession], [NWConnection], [TVRelayUpstreamDelegate]) in
       let resources = (
-        listener, Array(sessions.values), Array(connections.values), Array(upstreamDelegates.values)
+        listener, (Array(sessions.values) + idleSessions).map(\.session),
+        Array(connections.values), Array(upstreamDelegates.values)
       )
       listener = nil
       sessions.removeAll()
+      idleSessions.removeAll()
       connections.removeAll()
       upstreamDelegates.removeAll()
       if let continuation = startContinuation {
@@ -267,18 +278,30 @@ final class TVStreamRelay: @unchecked Sendable {
         self?.finishConnection(id)
       }
     )
-    let session = sessionFactory(delegate)
-    let task = session.dataTask(with: request)
+    let pooled =
+      lock.withLock { () -> TVRelayPooledSession? in
+        guard let index = idleSessions.lastIndex(where: { $0.host == host }) else { return nil }
+        return idleSessions.remove(at: index)
+      }
+      ?? {
+        let dispatcher = TVRelaySessionDispatcher()
+        lock.withLock { createdSessionCount += 1 }
+        return TVRelayPooledSession(
+          session: sessionFactory(dispatcher), dispatcher: dispatcher, host: host)
+      }()
+    let task = pooled.session.dataTask(with: request)
     delegate.task = task
+    pooled.dispatcher.attach(delegate, task: task)
     let isActive = lock.withLock {
       guard listener != nil, connections[id] != nil else { return false }
-      sessions[id] = session
+      sessions[id] = pooled
       upstreamDelegates[id] = delegate
       return true
     }
     guard isActive else {
       delegate.cancelForwarding()
-      session.invalidateAndCancel()
+      pooled.dispatcher.detach()
+      pooled.session.invalidateAndCancel()
       connection.cancel()
       return
     }
@@ -311,14 +334,25 @@ final class TVStreamRelay: @unchecked Sendable {
   }
 
   private func finishConnection(_ id: UUID) {
-    let resources = lock.withLock { () -> (URLSession?, NWConnection?, TVRelayUpstreamDelegate?) in
+    let resources = lock.withLock {
+      () -> (TVRelayPooledSession?, NWConnection?, TVRelayUpstreamDelegate?) in
       (
         sessions.removeValue(forKey: id), connections.removeValue(forKey: id),
         upstreamDelegates.removeValue(forKey: id)
       )
     }
+    // Cancelling the task wakes a delegate waiting for downstream capacity and
+    // resets only its HTTP/2 stream; late callbacks of that task are dropped.
     resources.2?.cancelForwarding()
-    resources.0?.invalidateAndCancel()
+    if let pooled = resources.0 {
+      pooled.dispatcher.detach()
+      let reused = lock.withLock { () -> Bool in
+        guard listener != nil, idleSessions.count < Self.maximumIdleSessions else { return false }
+        idleSessions.append(pooled)
+        return true
+      }
+      if !reused { pooled.session.invalidateAndCancel() }
+    }
     resources.1?.cancel()
   }
 
@@ -357,6 +391,88 @@ final class TVStreamRelay: @unchecked Sendable {
     // A decoder's backpressure must not cut a healthy long movie at one hour.
     configuration.timeoutIntervalForResource = 12 * 60 * 60
     return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+  }
+}
+
+struct TVRelayPooledSession {
+  let session: URLSession
+  let dispatcher: TVRelaySessionDispatcher
+  let host: String
+}
+
+/// The fixed delegate of one pooled upstream session. It forwards callbacks to the
+/// transfer currently attached and drops late callbacks of earlier, cancelled tasks.
+final class TVRelaySessionDispatcher: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+  private let lock = NSLock()
+  private var target: TVRelayUpstreamDelegate?
+  private var taskIdentifier: Int?
+
+  fileprivate func attach(_ delegate: TVRelayUpstreamDelegate, task: URLSessionTask) {
+    lock.withLock {
+      target = delegate
+      taskIdentifier = task.taskIdentifier
+    }
+  }
+
+  func detach() {
+    lock.withLock {
+      target = nil
+      taskIdentifier = nil
+    }
+  }
+
+  private func current(for task: URLSessionTask?) -> TVRelayUpstreamDelegate? {
+    lock.withLock {
+      guard let target, task == nil || task?.taskIdentifier == taskIdentifier else { return nil }
+      return target
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    didReceive challenge: URLAuthenticationChallenge,
+    completionHandler:
+      @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+  ) {
+    guard let target = current(for: nil) else {
+      completionHandler(.cancelAuthenticationChallenge, nil)
+      return
+    }
+    target.urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest,
+    completionHandler: @escaping @Sendable (URLRequest?) -> Void
+  ) {
+    completionHandler(nil)
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    dataTask: URLSessionDataTask,
+    didReceive response: URLResponse,
+    completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+  ) {
+    guard let target = current(for: dataTask) else {
+      completionHandler(.cancel)
+      return
+    }
+    target.urlSession(
+      session, dataTask: dataTask, didReceive: response, completionHandler: completionHandler)
+  }
+
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    current(for: dataTask)?.urlSession(session, dataTask: dataTask, didReceive: data)
+  }
+
+  func urlSession(
+    _ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?
+  ) {
+    current(for: task)?.urlSession(session, task: task, didCompleteWithError: error)
   }
 }
 

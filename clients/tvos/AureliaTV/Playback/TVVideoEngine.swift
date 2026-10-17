@@ -88,7 +88,8 @@ final class TVVideoEngine: TVPlaybackEngine {
     let media = VLCMedia(url: url)
     // The decoder sees only a random loopback route. All remote TLS and
     // authentication is performed by TVStreamRelay, with no video disk cache.
-    media.addOption(":network-caching=1000")
+    // Half a second of prebuffer keeps seeks quick on a local network.
+    media.addOption(":network-caching=500")
     player.media = media
     player.play()
     player.rate = Float(requestedRate)
