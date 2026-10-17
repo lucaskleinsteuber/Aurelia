@@ -7,6 +7,8 @@ struct TVPlayerView: View {
   @Environment(\.scenePhase) private var scenePhase
   @FocusState private var focus: Control?
   @State private var lastTransport: Control = .play
+  /// Brief indicator for skips made while the controls are hidden.
+  @State private var skip: TVSkipIndicator?
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, retry,
@@ -31,11 +33,19 @@ struct TVPlayerView: View {
         Color.clear.contentShape(Rectangle()).focusable().focusEffectDisabled()
           .focused($focus, equals: .surface)
           .onTapGesture { controller.userInteracted() }
-          .onMoveCommand { _ in controller.userInteracted() }
+          // Left and right skip like the Apple TV player; up and down only reveal.
+          .onMoveCommand { direction in
+            switch direction {
+            case .left where controller.canSeek: skip(by: -controller.seekInterval)
+            case .right where controller.canSeek: skip(by: controller.seekInterval)
+            default: controller.userInteracted()
+            }
+          }
           .accessibilityLabel("Show playback controls").accessibilityIdentifier(
             "player-wake-surface")
       }
       if controller.controlsVisible || controller.errorMessage != nil { controls }
+      if let skip, !controller.controlsVisible { skipIndicator(skip) }
       // With controls shown, loading is drawn inside Play instead of behind it.
       if controller.isLoading && controller.errorMessage == nil && !controller.controlsVisible {
         ProgressView().tint(.white).scaleEffect(1.4).accessibilityIdentifier("player-loading")
@@ -177,6 +187,47 @@ struct TVPlayerView: View {
       }.padding(.horizontal, 80).padding(.vertical, 54)
     }.defaultFocus($focus, .play, priority: .userInitiated).disabled(
       controller.trackMenu != nil || controller.isClosing)
+  }
+
+  /// Skips with hidden controls: the picture stays clear, so further presses
+  /// keep skipping. Only a slim position bar appears for a moment.
+  private func skip(by offset: Int64) {
+    controller.seek(by: offset, revealControls: false)
+    let indicator = TVSkipIndicator(offset: offset)
+    skip = indicator
+    Task {
+      try? await Task.sleep(for: .seconds(2))
+      if skip?.id == indicator.id { skip = nil }
+    }
+  }
+
+  private func skipIndicator(_ indicator: TVSkipIndicator) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Label(
+        "\(indicator.offset > 0 ? "+" : "−")\(abs(indicator.offset) / 1_000) s",
+        systemImage: indicator.offset > 0 ? "goforward" : "gobackward"
+      ).font(.system(size: 26, weight: .semibold))
+      GeometryReader { geometry in
+        ZStack(alignment: .leading) {
+          Capsule().fill(.white.opacity(0.25))
+          Capsule().fill(.white).frame(width: geometry.size.width * fraction)
+        }
+      }.frame(height: 6)
+      HStack {
+        Text(TVPlayerPolicy.timeLabel(milliseconds: controller.position))
+        Spacer()
+        Text(TVPlayerPolicy.timeLabel(milliseconds: controller.duration))
+      }.font(.system(size: 22).monospacedDigit()).foregroundStyle(.secondary)
+    }
+    .padding(.horizontal, 30).padding(.vertical, 22)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .padding(.horizontal, 80).padding(.bottom, 60)
+    .frame(maxHeight: .infinity, alignment: .bottom)
+    .accessibilityElement(children: .ignore).accessibilityIdentifier("player-skip")
+    .accessibilityValue(
+      "\(TVPlayerPolicy.timeLabel(milliseconds: controller.position)) of \(TVPlayerPolicy.timeLabel(milliseconds: controller.duration))"
+    )
+    .allowsHitTesting(false)
   }
 
   private var timeline: some View {
@@ -349,4 +400,9 @@ private struct TVVideoSurface: UIViewRepresentable {
     return view
   }
   func updateUIView(_ uiView: UIView, context: Context) {}
+}
+
+private struct TVSkipIndicator {
+  let id = UUID()
+  let offset: Int64
 }

@@ -28,6 +28,7 @@ struct TVDetailView: View {
     case season(Int)
     case episode(UUID)
     case supplement(UUID)
+    case person(String)
     case about
   }
   private struct FocusRequest {
@@ -270,7 +271,12 @@ struct TVDetailView: View {
                 .accessibilityIdentifier("supplement-\(value.id)")
             }
           }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
-        }.scrollIndicators(.hidden).scrollClipDisabled().focusSection()
+        }.scrollIndicators(.hidden).scrollClipDisabled()
+          // Moving into a shelf from above or below starts at its first card.
+          .defaultFocus(
+            $focused, group.items.first.map { .supplement($0.item.id) }, priority: .userInitiated
+          )
+          .focusSection()
       }
     }
   }
@@ -285,10 +291,17 @@ struct TVDetailView: View {
         ScrollView(.horizontal) {
           LazyHStack(alignment: .top, spacing: 40) {
             ForEach(people) { person in
-              TVPersonCardView(person: person)
+              Button {
+              } label: {
+                TVPersonLabel(person: person)
+              }.buttonStyle(TVPortraitButtonStyle())
+                .focused($focused, equals: .person(person.id))
+                .accessibilityIdentifier("person-\(person.id)")
             }
           }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
-        }.scrollIndicators(.hidden).scrollClipDisabled().focusSection()
+        }.scrollIndicators(.hidden).scrollClipDisabled()
+          .defaultFocus($focused, people.first.map { .person($0.id) }, priority: .userInitiated)
+          .focusSection()
       }.accessibilityIdentifier("cast-and-crew")
     }
   }
@@ -544,24 +557,21 @@ private struct TVSupplementCard: View {
   }
 }
 
-/// Round portrait with name and role; focusable so the row can be browsed. The
-/// portrait grows on focus instead of showing a rectangular platter.
-private struct TVPersonCardView: View {
+/// Round portrait with name and role. The surrounding button makes the row
+/// browsable and grows on focus instead of showing a rectangular platter.
+private struct TVPersonLabel: View {
   let person: TVPersonCard
   var body: some View {
-    Button {
-    } label: {
-      VStack(spacing: 14) {
-        TVArtworkView(artwork: person.profile, width: 320, symbol: "person.fill")
-          .frame(width: 150, height: 150).clipShape(Circle())
-          .overlay(Circle().stroke(.white.opacity(0.1), lineWidth: 1))
-        Text(person.name).font(.system(size: 22, weight: .semibold)).lineLimit(1)
-        if let subtitle = person.subtitle {
-          Text(subtitle).font(.system(size: 18)).foregroundStyle(.secondary).lineLimit(2)
-            .multilineTextAlignment(.center)
-        }
-      }.frame(width: 190)
-    }.buttonStyle(TVPortraitButtonStyle()).accessibilityIdentifier("person-\(person.id)")
+    VStack(spacing: 14) {
+      TVArtworkView(artwork: person.profile, width: 320, symbol: "person.fill")
+        .frame(width: 150, height: 150).clipShape(Circle())
+        .overlay(Circle().stroke(.white.opacity(0.1), lineWidth: 1))
+      Text(person.name).font(.system(size: 22, weight: .semibold)).lineLimit(1)
+      if let subtitle = person.subtitle {
+        Text(subtitle).font(.system(size: 18)).foregroundStyle(.secondary).lineLimit(2)
+          .multilineTextAlignment(.center)
+      }
+    }.frame(width: 190)
   }
 }
 

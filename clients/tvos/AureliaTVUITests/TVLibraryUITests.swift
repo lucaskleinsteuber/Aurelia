@@ -265,6 +265,13 @@ final class TVLibraryUITests: XCTestCase {
     expectFocus(lead)
     XCTAssertTrue(lead.label.contains("Main Character"), "Credits of one person are merged.")
     capture(app, "Details - Cast and Crew")
+    // Re-entering a shelf starts at its first card, not under the previous focus.
+    remote.press(.right)
+    expectFocus(app.buttons["person-support"])
+    remote.press(.up)
+    expectFocus(extra)
+    remote.press(.down)
+    expectFocus(lead)
     remote.press(.down)
     let about = app.buttons["detail-about"]
     expectFocus(about)

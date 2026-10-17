@@ -68,6 +68,7 @@ final class TVPlaybackController: ObservableObject {
   private var recoveryBudget = TVPlaybackRecoveryBudget()
   private var wantsPlayback = true
   private var startOver: Bool
+  private var quietSkipUntil: TimeInterval = 0
   private var backgroundSave: UIBackgroundTaskIdentifier = .invalid
 
   init(
@@ -132,12 +133,16 @@ final class TVPlaybackController: ObservableObject {
     userInteracted()
   }
 
-  func seek(by offset: Int64) {
+  /// `revealControls: false` skips while the controls stay hidden, like the
+  /// Apple TV player; the view shows only a brief position indicator.
+  func seek(by offset: Int64, revealControls: Bool = true) {
     guard canSeek, !closed else { return }
     watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
+    // Set before seeking: the engine reports the seek synchronously.
+    if !revealControls { quietSkipUntil = ProcessInfo.processInfo.systemUptime + 2.5 }
     engine.seek(
       to: TVPlayerPolicy.seekPosition(current: position, offset: offset, duration: duration))
-    userInteracted()
+    if revealControls { userInteracted() }
   }
 
   func seek(to milliseconds: Int64) {
@@ -425,6 +430,10 @@ final class TVPlaybackController: ObservableObject {
       engine.pause()
       return
     }
+    // A skip with hidden controls briefly reports buffering; that alone must not
+    // bring the controls back while the viewer keeps skipping.
+    let quietSkip = wantsPlayback && ProcessInfo.processInfo.systemUptime < quietSkipUntil
+    if quietSkip { return }
     if wasPlaying != isPlaying || wasLoading != isLoading { userInteracted() }
     if !isPlaying { controlsVisible = true }
   }
@@ -671,7 +680,9 @@ final class TVPlaybackController: ObservableObject {
   private var mayHideControls: Bool {
     TVPlayerPolicy.mayHideControls(
       playing: isPlaying, menuOpen: trackMenu != nil,
-      interacting: isScrubbing, loading: isLoading, hasError: errorMessage != nil)
+      // Timeline focus alone does not pin the controls: every skip restarts the
+      // auto-hide delay, and an idle timeline hides like the transport buttons.
+      interacting: false, loading: isLoading, hasError: errorMessage != nil)
   }
 
   private func endBackgroundSave() {

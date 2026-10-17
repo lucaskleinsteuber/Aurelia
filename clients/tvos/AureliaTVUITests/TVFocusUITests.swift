@@ -42,15 +42,62 @@ final class TVFocusUITests: XCTestCase {
     expectFocus(play)
     XCTAssertEqual(play.label, "Pause", "Select on the hidden surface must only reveal controls.")
     XCTAssertTrue(play.waitForNonExistence(timeout: 9))
-    XCUIRemote.shared.press(.right)
+    // Up and down only reveal the controls.
+    XCUIRemote.shared.press(.down)
     expectFocus(play)
     XCTAssertEqual(play.label, "Pause")
+    let base = seconds(app.buttons["player-timeline"])
     XCTAssertTrue(play.waitForNonExistence(timeout: 9))
+    // Left and right on hidden controls skip without revealing them; a slim
+    // indicator shows the new position and further presses keep skipping.
+    XCUIRemote.shared.press(.right)
+    let skip = app.descendants(matching: .any)["player-skip"]
+    XCTAssertTrue(skip.waitForExistence(timeout: 3))
+    XCTAssertFalse(play.exists, "Skipping must not reveal the controls.")
+    XCTAssertGreaterThanOrEqual(seconds(skip), base + 10)
+    let afterOne = seconds(skip)
+    XCUIRemote.shared.press(.right)
+    let skipped = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in skip.exists && self.seconds(skip) >= afterOne + 10 },
+      object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [skipped], timeout: 3), .completed)
+    shot(app, "Player - Skip From Hidden Controls")
+    XCUIRemote.shared.press(.left)
+    let back = XCTNSPredicateExpectation(
+      predicate: NSPredicate { _, _ in skip.exists && self.seconds(skip) <= afterOne + 3 },
+      object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [back], timeout: 3), .completed)
+    XCTAssertTrue(skip.waitForNonExistence(timeout: 5), "The indicator fades out by itself.")
+    XCTAssertFalse(play.exists)
     XCUIRemote.shared.press(.playPause)
     XCTAssertTrue(play.waitForExistence(timeout: 5))
     XCTAssertEqual(play.label, "Play")
     XCTAssertFalse(play.waitForNonExistence(timeout: 5), "Paused controls must remain visible.")
     shot(app, "Player - Paused Controls")
+  }
+
+  @MainActor
+  func testGridEntersAtFirstTitleFromTabBar() {
+    let app = launch()
+    defer { app.terminate() }
+    selectTab(app, title: "Movies")
+    let first = app.buttons["catalog-\(movieID)"]
+    XCTAssertTrue(first.waitForExistence(timeout: 10))
+    // Leave the grid from the third column, then come back down from the tab bar.
+    for _ in 0..<6 where !first.hasFocus { XCUIRemote.shared.press(.down) }
+    expectFocus(first)
+    XCUIRemote.shared.press(.right)
+    XCUIRemote.shared.press(.right)
+    XCTAssertFalse(first.hasFocus)
+    XCUIRemote.shared.press(.up)
+    expectFocus(app.buttons["Movies"].firstMatch)
+    // Give the tab bar its expand animation, as a person would.
+    _ = XCTWaiter.wait(
+      for: [XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)],
+      timeout: 1)
+    XCUIRemote.shared.press(.down)
+    expectFocus(first)
+    shot(app, "Library - Grid Entry")
   }
 
   @MainActor

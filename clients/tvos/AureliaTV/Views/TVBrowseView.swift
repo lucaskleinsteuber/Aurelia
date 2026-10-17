@@ -101,7 +101,10 @@ struct TVLibraryGrid: View {
             }
             .onAppear { if original.id == listing.items.last?.id { loadNext() } }
           }
-        }.scrollTargetLayout().focusSection()
+        }.scrollTargetLayout()
+          // Coming from the tab bar or the header always starts at the first title.
+          .defaultFocus($focusedItem, listing.items.first?.id, priority: .userInitiated)
+          .focusSection()
         if listing.loading {
           ProgressView().frame(maxWidth: .infinity).accessibilityIdentifier("browse-loading")
         }

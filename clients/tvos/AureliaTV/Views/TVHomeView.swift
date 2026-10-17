@@ -373,6 +373,7 @@ struct TVCollectionsView: View {
   @State private var complete = false
   @State private var error: String?
   @State private var generation = UUID()
+  @FocusState private var focused: UUID?
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 24) {
@@ -385,11 +386,11 @@ struct TVCollectionsView: View {
               TVCollectionView(collection: collection)
             } label: {
               TVCollectionCard(collection: collection)
-            }.buttonStyle(.borderless).onAppear {
+            }.buttonStyle(.borderless).focused($focused, equals: collection.id).onAppear {
               if collection.id == collections.last?.id { Task { await next() } }
             }
           }
-        }.focusSection()
+        }.defaultFocus($focused, collections.first?.id, priority: .userInitiated).focusSection()
         if loading { ProgressView() }
         if let error {
           TVErrorText(message: error)
@@ -444,6 +445,7 @@ struct TVCollectionView: View {
   @State private var unavailable = false
   @State private var error: String?
   @State private var requestID = UUID()
+  @FocusState private var focused: UUID?
 
   var body: some View {
     ScrollView {
@@ -460,10 +462,12 @@ struct TVCollectionView: View {
               } label: {
                 TVPosterLabel(item: item)
               }
-              .buttonStyle(.borderless).accessibilityIdentifier("collection-item-\(item.id)")
+              .buttonStyle(.borderless).focused($focused, equals: item.id)
+              .accessibilityIdentifier("collection-item-\(item.id)")
               .contextMenu { TVMediaContextActions(item: item, actions: actions) }
             }
-          }.focusSection()
+          }.defaultFocus($focused, current.items.first?.id, priority: .userInitiated)
+            .focusSection()
           if current.items.isEmpty {
             ContentUnavailableView("No Titles Available", systemImage: "rectangle.stack")
           }

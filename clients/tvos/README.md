@@ -1,7 +1,7 @@
 # Aurelia for Apple TV
 
 A native tvOS 26 client for an Aurelia server on your local network, designed
-like the Aurelia Mac app. Version 0.1.6 includes:
+like the Aurelia Mac app. Version 0.1.7 includes:
 
 - Home with a hero, Continue Watching that resumes directly, genre shelves,
   Favorites, Collections and Recently Added
@@ -9,7 +9,8 @@ like the Aurelia Mac app. Version 0.1.6 includes:
 - Details with a season bar, episodes, trailers, extras, cast and crew and full
   information, plus favorite, watched and Start Over actions
 - Fullscreen playback with saved progress, audio and subtitle selection,
-  playback speed, a sleep timer and automatic next episodes
+  playback speed, a sleep timer, automatic next episodes and left/right skipping
+  while the controls are hidden
 - Centered profiles with a digits-only PIN keypad
 
 Open `AureliaTV.xcodeproj` and select the **AureliaTV** scheme. The TV client has
