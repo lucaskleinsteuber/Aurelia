@@ -1293,7 +1293,10 @@ final class AppModel: ObservableObject {
     let generation = connectionGeneration
     isWorking = true
     defer { isWorking = false }
-    let homeRequest = homeRefresher.beginRequest()
+    let homeRequest = homeRefresher.beginSnapshot()
+    defer {
+      if homeRefresher.endSnapshot() { Task { await self.refreshHome() } }
+    }
     let client = APIClient(profile: profile)
     let info = try await client.serverInfo()
     guard info.serverId == profile.serverId else {
@@ -1366,7 +1369,7 @@ final class AppModel: ObservableObject {
     guard !requiresProfileSelection else { return }
     guard let profile else { return }
     let generation = connectionGeneration
-    let request = homeRefresher.beginRequest()
+    guard let request = homeRefresher.beginHomeOnlyRequest() else { return }
     do {
       guard let refreshed = try await homeRefresher.load(request: request, profile: profile),
         isCurrent(generation)

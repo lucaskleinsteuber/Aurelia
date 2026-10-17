@@ -2,9 +2,13 @@ import Foundation
 
 // Home can be refreshed by sync, navigation, activation and player shutdown.
 // A request started before the latest progress save must not replace a newer Home.
+// A Home-only refresh never supersedes a complete library snapshot in flight;
+// it is deferred and runs once that snapshot has finished.
 @MainActor
 final class HomeRefreshCoordinator {
   private var latestRequest = UUID()
+  private var activeSnapshots = 0
+  private var deferredHomeRefresh = false
   private let fetch: (StoredServerProfile) async throws -> HomeResponse
 
   init(
@@ -18,6 +22,28 @@ final class HomeRefreshCoordinator {
   func beginRequest() -> UUID {
     latestRequest = UUID()
     return latestRequest
+  }
+
+  func beginSnapshot() -> UUID {
+    activeSnapshots += 1
+    return beginRequest()
+  }
+
+  /// Returns true when a Home-only refresh was deferred and should run now.
+  func endSnapshot() -> Bool {
+    activeSnapshots = max(0, activeSnapshots - 1)
+    guard activeSnapshots == 0, deferredHomeRefresh else { return false }
+    deferredHomeRefresh = false
+    return true
+  }
+
+  /// Returns nil while a complete snapshot is loading; the refresh is deferred.
+  func beginHomeOnlyRequest() -> UUID? {
+    guard activeSnapshots == 0 else {
+      deferredHomeRefresh = true
+      return nil
+    }
+    return beginRequest()
   }
 
   func invalidate() {

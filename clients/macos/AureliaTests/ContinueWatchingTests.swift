@@ -50,6 +50,40 @@ struct ContinueWatchingTests {
   }
 
   @Test
+  func aHomeOnlyRefreshDuringASnapshotIsDeferredInsteadOfSupersedingIt() async throws {
+    let fetcher = ControlledHomeFetcher()
+    let loader = HomeRefreshCoordinator(fetch: fetcher.fetch)
+    let snapshot = loader.beginSnapshot()
+    let snapshotLoad = Task { try await loader.load(request: snapshot, profile: profile) }
+    try await fetcher.waitForRequests(1)
+
+    // The library view appears and asks for Home while the unlock snapshot loads.
+    #expect(loader.beginHomeOnlyRequest() == nil)
+    #expect(loader.isCurrent(snapshot))
+    let loaded = home(continueWatching: [item(kind: .movie)])
+    fetcher.complete(0, with: .success(loaded))
+    #expect(try await snapshotLoad.value == loaded)
+    #expect(loader.isCurrent(snapshot))
+
+    #expect(loader.endSnapshot())
+    #expect(!loader.endSnapshot())
+    let deferred = try #require(loader.beginHomeOnlyRequest())
+    #expect(!loader.isCurrent(snapshot))
+    #expect(loader.isCurrent(deferred))
+  }
+
+  @Test
+  func aSnapshotWithoutDeferredHomeRequestsDoesNotRefreshAgain() {
+    let loader = HomeRefreshCoordinator { _ in home(continueWatching: []) }
+    _ = loader.beginSnapshot()
+    _ = loader.beginSnapshot()
+    #expect(!loader.endSnapshot())
+    #expect(loader.beginHomeOnlyRequest() == nil)
+    #expect(loader.endSnapshot())
+    #expect(loader.beginHomeOnlyRequest() != nil)
+  }
+
+  @Test
   func obsoleteErrorsAreIgnoredButCurrentErrorsRemainVisible() async throws {
     let fetcher = ControlledHomeFetcher()
     let loader = HomeRefreshCoordinator(fetch: fetcher.fetch)
