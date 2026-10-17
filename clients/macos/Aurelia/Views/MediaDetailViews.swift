@@ -329,7 +329,9 @@ struct MediaDetailView: View {
         Menu {
           ForEach(detail.seasons) { season in
             Button {
-              selectedSeason = season.number
+              withAnimation(reduceMotion ? nil : .smooth(duration: 0.32)) {
+                selectedSeason = season.number
+              }
             } label: {
               if season.number == selectedSeason {
                 Label(seasonTitle(season.number), systemImage: "checkmark")
@@ -369,6 +371,7 @@ struct MediaDetailView: View {
           Text("\(season.episodes.count) episodes")
             .font(.callout)
             .foregroundStyle(.secondary)
+            .contentTransition(.numericText())
         }
       }
       .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
@@ -397,6 +400,7 @@ struct MediaDetailView: View {
           }
         }
         .id(season.number)
+        .transition(.opacity.combined(with: .offset(x: reduceMotion ? 0 : 28)))
         supplementSections(
           season.supplements,
           parentTitle: "\(detail.item.title) · Season \(season.number)")
@@ -613,6 +617,7 @@ private struct DetailHero: View {
         contentMode: .fill,
         placeholderSymbolSize: 64
       )
+      .aureliaHeroSettle()
       .backgroundExtensionEffect()
       LinearGradient(
         stops: [
@@ -638,14 +643,18 @@ private struct DetailHero: View {
 
       VStack(alignment: .leading, spacing: 12) {
         Text(metadataLine).font(.caption.weight(.bold)).tracking(1).foregroundStyle(
-          .white.opacity(0.74))
+          .white.opacity(0.74)
+        )
+        .aureliaRiseIn(0)
         Text(detail.metadata.title)
           .font(AureliaDesign.heroTitle)
           .tracking(-0.6)
           .lineLimit(2)
+          .aureliaRiseIn(1)
         if !detail.metadata.genres.isEmpty {
           Text(detail.metadata.genres.prefix(3).joined(separator: "  ·  "))
             .font(.callout.weight(.semibold)).foregroundStyle(.white.opacity(0.78))
+            .aureliaRiseIn(2)
         }
         if let overview = detail.metadata.overview {
           Text(overview)
@@ -654,6 +663,7 @@ private struct DetailHero: View {
             .foregroundStyle(.white.opacity(0.78))
             .lineSpacing(2)
             .frame(maxWidth: 620, alignment: .leading)
+            .aureliaRiseIn(3)
         }
         HStack(spacing: 10) {
           Button(action: onPlay) {
@@ -666,7 +676,10 @@ private struct DetailHero: View {
           Button(action: onFavorite) {
             Label(
               detail.item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
-              systemImage: detail.item.isFavorite ? "star.fill" : "star")
+              systemImage: detail.item.isFavorite ? "star.fill" : "star"
+            )
+            .contentTransition(.symbolEffect(.replace))
+            .symbolEffect(.bounce, value: detail.item.isFavorite)
           }
           .buttonStyle(.bordered).controlSize(.large)
           if let playTarget {
@@ -679,6 +692,7 @@ private struct DetailHero: View {
               .font(.caption.weight(.medium)).foregroundStyle(.white.opacity(0.8))
           }
         }
+        .aureliaRiseIn(4)
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.bottom, 16)

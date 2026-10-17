@@ -487,12 +487,11 @@ struct AuthenticatedArtwork: View {
         image = nil
         guard let artwork, let profile = model.profile else { return }
         do {
-          let data = try await model.artworkLoader.data(
+          let loaded = try await model.artworkLoader.image(
             for: artwork, profile: profile,
             width: model.libraryCapabilities.contains("artwork-variants-v1") ? width : nil)
           try Task.checkCancellation()
           // Newly loaded artwork fades in; artwork already in memory is drawn at once.
-          let loaded = NSImage(data: data)
           withAnimation(reduceMotion ? nil : .easeOut(duration: 0.28)) { image = loaded }
         } catch is CancellationError {
           return
@@ -534,6 +533,78 @@ struct MediaArtworkPlaceholder: View {
         .symbolRenderingMode(.hierarchical)
         .foregroundStyle(.white.opacity(0.54))
     }
+  }
+}
+
+/// Content that glides up into place when it first appears, like hero titles in Apple's apps.
+/// `order` staggers related elements by a few hundredths of a second.
+struct AureliaRiseIn: ViewModifier {
+  let order: Int
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @State private var shown = false
+
+  func body(content: Content) -> some View {
+    content
+      .opacity(shown ? 1 : 0)
+      .offset(y: shown || reduceMotion ? 0 : 14)
+      .onAppear {
+        guard !shown else { return }
+        withAnimation(
+          reduceMotion
+            ? .easeOut(duration: 0.18)
+            : .spring(response: 0.5, dampingFraction: 0.9).delay(0.045 * Double(order))
+        ) { shown = true }
+      }
+  }
+}
+
+/// Hero artwork that settles from a slight zoom when it first appears.
+struct AureliaHeroSettle: ViewModifier {
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @State private var settled = false
+
+  func body(content: Content) -> some View {
+    content
+      .scaleEffect(settled || reduceMotion ? 1 : 1.045)
+      .onAppear {
+        guard !settled else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 1.1)) { settled = true }
+      }
+  }
+}
+
+/// Lets a grid or rail move its cards to their new places when the list changes.
+struct AureliaListMotion<ID: Equatable>: ViewModifier {
+  let ids: ID
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+
+  func body(content: Content) -> some View {
+    content.animation(reduceMotion ? nil : .smooth(duration: 0.32), value: ids)
+  }
+}
+
+extension View {
+  func aureliaRiseIn(_ order: Int = 0) -> some View { modifier(AureliaRiseIn(order: order)) }
+  func aureliaHeroSettle() -> some View { modifier(AureliaHeroSettle()) }
+  func aureliaListMotion<ID: Equatable>(_ ids: ID) -> some View {
+    modifier(AureliaListMotion(ids: ids))
+  }
+}
+
+/// A spinner that appears only when loading takes longer than a moment, so fast loads never
+/// flash a progress indicator.
+struct AureliaDelayedProgress: View {
+  @State private var visible = false
+
+  var body: some View {
+    ProgressView()
+      .controlSize(.large)
+      .opacity(visible ? 1 : 0)
+      .task {
+        try? await Task.sleep(for: .milliseconds(350))
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.25)) { visible = true }
+      }
   }
 }
 

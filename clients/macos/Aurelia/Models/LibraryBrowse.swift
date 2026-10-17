@@ -163,11 +163,21 @@ struct LibraryBrowsePreferenceStore {
     isLoading = false
   }
 
+  /// Shows a list that is already known, for example the last result of this page.
+  func show(_ cached: [CatalogItemSummary]) {
+    generation = UUID()
+    items = cached
+    errorMessage = nil
+  }
+
+  /// Loads a list. The visible items stay until the new result replaces them, so pages never
+  /// flash empty. With `quietly`, a failure keeps the shown list instead of an error.
   func load(
     query: CatalogBrowseQuery, search: String, debounce: Duration = .milliseconds(220),
+    quietly: Bool = false,
     operation: (CatalogBrowseQuery, String) async throws -> [CatalogItemSummary]
   ) async {
-    invalidate()
+    generation = UUID()
     let request = generation
     let normalized = search.trimmingCharacters(in: .whitespacesAndNewlines)
     isLoading = true
@@ -178,9 +188,12 @@ struct LibraryBrowsePreferenceStore {
       let result = try await operation(query, normalized)
       try Task.checkCancellation()
       guard request == generation else { return }
-      items = result
+      if items != result { items = result }
+      errorMessage = nil
     } catch {
-      guard request == generation, !Task.isCancelled, !(error is CancellationError) else { return }
+      guard request == generation, !Task.isCancelled, !(error is CancellationError), !quietly
+      else { return }
+      items = []
       errorMessage = error.localizedDescription
     }
   }

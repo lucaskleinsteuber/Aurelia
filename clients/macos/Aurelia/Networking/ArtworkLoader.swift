@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 
 @MainActor
 final class ArtworkLoader {
@@ -28,6 +29,8 @@ final class ArtworkLoader {
   ) {
     cache.totalCostLimit = memoryLimit
     cache.countLimit = itemLimit
+    // Decoded images are bounded by their pixel memory, not only by count.
+    images.totalCostLimit = 2 * memoryLimit
     images.countLimit = itemLimit
     self.diskCache = diskCache
     self.fetcher = fetcher
@@ -46,11 +49,63 @@ final class ArtworkLoader {
           ArtworkVariantRequest.artwork(artwork, width: candidate), profile: profile) as NSString
       if let image = images.object(forKey: key) { return image }
       if let data = cache.object(forKey: key), let image = NSImage(data: data as Data) {
-        images.setObject(image, forKey: key)
+        images.setObject(image, forKey: key, cost: data.length)
         return image
       }
     }
     return nil
+  }
+
+  /// Artwork decoded off the main thread at the size it is shown, as the Apple TV does, so
+  /// drawing it never stalls scrolling or animations.
+  func image(for artwork: ArtworkSummary, profile: StoredServerProfile, width: Int?)
+    async throws -> NSImage
+  {
+    let key =
+      Self.cacheKey(ArtworkVariantRequest.artwork(artwork, width: width), profile: profile)
+      as NSString
+    if let image = images.object(forKey: key) { return image }
+    let data = try await data(for: artwork, profile: profile, width: width)
+    if let image = images.object(forKey: key) { return image }
+    let decoded = await Task.detached(priority: .userInitiated) {
+      Self.decode(data, width: width)
+    }.value
+    try Task.checkCancellation()
+    guard let decoded else { throw APIClientError.invalidResponse }
+    let image = NSImage(cgImage: decoded.image, size: .zero)
+    images.setObject(image, forKey: key, cost: decoded.bytes)
+    return image
+  }
+
+  private struct DecodedArtwork: @unchecked Sendable {
+    let image: CGImage
+    let bytes: Int
+  }
+
+  nonisolated private static func decode(_ data: Data, width: Int?) -> DecodedArtwork? {
+    guard
+      let source = CGImageSourceCreateWithData(
+        data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+      let pixelWidth = properties[kCGImagePropertyPixelWidth] as? Int,
+      let pixelHeight = properties[kCGImagePropertyPixelHeight] as? Int,
+      pixelWidth > 0, pixelHeight > 0, pixelWidth <= 32_768, pixelHeight <= 32_768
+    else { return nil }
+    let orientation = properties[kCGImagePropertyOrientation] as? Int ?? 1
+    let shownWidth = (5...8).contains(orientation) ? pixelHeight : pixelWidth
+    let longest = max(pixelWidth, pixelHeight)
+    let target = width.map { Int((Double($0) * Double(longest) / Double(shownWidth)).rounded(.up)) }
+    guard
+      let image = CGImageSourceCreateThumbnailAtIndex(
+        source, 0,
+        [
+          kCGImageSourceCreateThumbnailFromImageAlways: true,
+          kCGImageSourceCreateThumbnailWithTransform: true,
+          kCGImageSourceShouldCacheImmediately: true,
+          kCGImageSourceThumbnailMaxPixelSize: min(target ?? longest, longest, 4_096),
+        ] as CFDictionary)
+    else { return nil }
+    return DecodedArtwork(image: image, bytes: image.bytesPerRow * image.height)
   }
 
   private static func cacheKey(_ artwork: ArtworkSummary, profile: StoredServerProfile) -> String {

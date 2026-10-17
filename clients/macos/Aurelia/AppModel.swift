@@ -112,6 +112,9 @@ final class AppModel: ObservableObject {
   private let serverHost: NativeServerHost
   private let syncController: LibrarySyncController
   private let homeRefresher = HomeRefreshCoordinator()
+  /// The last list of every library page (without search), so switching pages shows it at once.
+  private var browseResults: [String: [CatalogItemSummary]] = [:]
+  private var browseWarmup: Task<Void, Never>?
   private struct PreparedDetail {
     let detail: CatalogDetailPresentation
     let plan: PlaybackPlanResponse?
@@ -1359,6 +1362,7 @@ final class AppModel: ObservableObject {
     collections = newCollections
     home = newHome
     scheduleHomeRefresh()
+    warmLibraryBrowsing()
     if !Self.isTestProcess, !NativePreflightIsolation.isRequested, let current = self.profile {
       PlaybackProgressOutbox.shared.activate(profile: current)
       PlaybackProgressOutbox.shared.retryAfterReconnect()
@@ -1425,8 +1429,54 @@ final class AppModel: ObservableObject {
       }
     #endif
     guard let profile else { throw CancellationError() }
+    let client = APIClient(profile: profile).pagingCatalog(for: Array(libraryCapabilities))
     return try await currentConnection {
-      try await APIClient(profile: profile).browseCatalog(query: query, search: search)
+      try await client.browseCatalog(query: query, search: search)
+    }
+  }
+
+  private func browseKey(section: CatalogBrowseSection, query: CatalogBrowseQuery, search: String)
+    -> String?
+  {
+    guard let profile, search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return nil
+    }
+    return "\(profile.serverId):\(profile.sessionId):\(section.rawValue):\(query.requestKey)"
+  }
+
+  /// The last loaded list of a library page; shown at once and refreshed in the background.
+  func cachedBrowse(section: CatalogBrowseSection, query: CatalogBrowseQuery, search: String)
+    -> [CatalogItemSummary]?
+  {
+    browseKey(section: section, query: query, search: search).flatMap { browseResults[$0] }
+  }
+
+  func storeBrowse(
+    _ items: [CatalogItemSummary], section: CatalogBrowseSection, query: CatalogBrowseQuery,
+    search: String
+  ) {
+    guard let key = browseKey(section: section, query: query, search: search) else { return }
+    if browseResults.count >= 24, browseResults[key] == nil { browseResults.removeAll() }
+    browseResults[key] = items
+  }
+
+  /// Loads every library page's current list in the background after a refresh, so switching
+  /// between Movies, TV Shows and the Library shows them at once, as on the Apple TV.
+  private func warmLibraryBrowsing() {
+    browseWarmup?.cancel()
+    guard let profile else { return }
+    let store = LibraryBrowsePreferenceStore(
+      defaults: LibraryBrowsePreferenceStore.applicationDefaults)
+    browseWarmup = Task { [weak self] in
+      for section in [CatalogBrowseSection.movies, .tvShows, .library, .recentlyAdded] {
+        guard let self, !Task.isCancelled, self.profile == profile else { return }
+        let query = store.load(
+          serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId,
+          section: section)
+        guard let items = try? await browseCatalog(query: query, search: "") else { continue }
+        guard !Task.isCancelled, self.profile == profile else { return }
+        storeBrowse(items, section: section, query: query, search: "")
+      }
     }
   }
 
@@ -1690,7 +1740,7 @@ final class AppModel: ObservableObject {
   func prefetchHeroArtwork(_ artwork: ArtworkSummary) {
     guard let profile else { return }
     let width = libraryCapabilities.contains("artwork-variants-v1") ? 1920 : nil
-    Task { _ = try? await artworkLoader.data(for: artwork, profile: profile, width: width) }
+    Task { _ = try? await artworkLoader.image(for: artwork, profile: profile, width: width) }
   }
 
   func optionalPlaybackPlan(mediaId: UUID) async throws -> PlaybackPlanResponse? {
@@ -2334,6 +2384,9 @@ final class AppModel: ObservableObject {
   }
 
   private func clearPersonalViewState() {
+    browseWarmup?.cancel()
+    browseWarmup = nil
+    browseResults.removeAll()
     for preparation in detailPreparations.values { preparation.cancel() }
     detailPreparations.removeAll()
     preparedDetails.removeAll()

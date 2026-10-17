@@ -1427,16 +1427,29 @@ struct APIClient: Sendable {
     else {
       throw APIClientError.invalidAddress
     }
-    let delegate = TLSTrustDelegate(mode: trustMode, allowedHost: host)
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-    configuration.urlCache = nil
-    configuration.httpCookieStorage = nil
-    configuration.timeoutIntervalForRequest = timeout
-    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
-    defer { session.invalidateAndCancel() }
+    let delegate: TLSTrustDelegate
+    let session: URLSession
+    let pooled: Bool
+    switch trustMode {
+    case .pinned(let fingerprint):
+      // Pinned requests share open connections instead of a new TLS handshake each time.
+      (session, delegate) = PinnedSessionPool.shared.lease(
+        host: host, port: url.port, fingerprint: fingerprint)
+      pooled = true
+    case .inspect:
+      // Inspection captures the presented key of exactly one fresh connection.
+      delegate = TLSTrustDelegate(mode: trustMode, allowedHost: host)
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+      configuration.urlCache = nil
+      configuration.httpCookieStorage = nil
+      session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+      pooled = false
+    }
+    defer { if !pooled { session.invalidateAndCancel() } }
 
     var request = URLRequest(url: url)
+    request.timeoutInterval = timeout
     request.httpMethod = method
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue("application/json", forHTTPHeaderField: "Accept")

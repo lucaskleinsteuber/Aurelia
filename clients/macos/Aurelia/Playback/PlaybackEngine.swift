@@ -103,7 +103,8 @@ protocol PlaybackEngine: AnyObject {
 final class VLCPlaybackEngine: PlaybackEngine {
   static let defaultPlayerOptions = [
     "--no-video-title-show",
-    "--network-caching=1000",
+    // Half a second of prebuffering after a seek, as on the Apple TV.
+    "--network-caching=500",
     "--no-metadata-network-access",
     // VLCKit's macOS defaults pause at EOF, suppressing the completion
     // event that drives progress completion and the next episode.

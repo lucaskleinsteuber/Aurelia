@@ -68,6 +68,97 @@ final class LoopbackStreamRelayTests: XCTestCase {
     XCTAssertTrue(failures.values.isEmpty)
   }
 
+  func testSequentialRangeRequestsReuseOneVerifiedUpstreamSession() async throws {
+    let failures = RelayFailureRecorder()
+    let relay = try LoopbackStreamRelay(
+      sourceURL: URL(string: "https://relay.test/old")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      authorizationToken: "test-device-token",
+      sessionFactory: Self.stubSession)
+    relay.setFailureHandler { failures.record($0) }
+    let localURL = try await relay.start()
+    defer { relay.stop() }
+    // Each seek opens a new local request; the upstream connection is reused.
+    for (range, expected) in [
+      ("bytes=0-3", RelayURLProtocol.oldPayload[0...3]),
+      ("bytes=8-11", RelayURLProtocol.oldPayload[8...11]),
+      ("bytes=4-7", RelayURLProtocol.oldPayload[4...7]),
+    ] {
+      let (data, response) = try await Self.range(range, from: localURL)
+      XCTAssertEqual(response.statusCode, 206)
+      XCTAssertEqual(data, Data(expected))
+    }
+    XCTAssertEqual(relay.upstreamSessionCount, 1)
+    XCTAssertTrue(failures.values.isEmpty)
+  }
+
+  func testCancelledSeekReturnsItsSessionForTheNextRange() async throws {
+    let failures = RelayFailureRecorder()
+    let relay = try LoopbackStreamRelay(
+      sourceURL: URL(string: "https://relay.test/waiting")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      authorizationToken: "test-device-token",
+      sessionFactory: Self.stubSession)
+    relay.setFailureHandler { failures.record($0) }
+    let localURL = try await relay.start()
+    defer { relay.stop() }
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    let started = expectation(description: "Waiting upstream started")
+    RelayURLProtocol.cancellationRecorder.setStartedHandler { started.fulfill() }
+    defer { RelayURLProtocol.cancellationRecorder.setStartedHandler(nil) }
+    let stopped = expectation(description: "Cancelled seek stops its upstream transfer")
+    RelayURLProtocol.cancellationRecorder.setHandler { stopped.fulfill() }
+    defer { RelayURLProtocol.cancellationRecorder.setHandler(nil) }
+    let request = session.dataTask(with: localURL)
+    request.resume()
+    await fulfillment(of: [started], timeout: 5)
+    request.cancel()
+    await fulfillment(of: [stopped], timeout: 5)
+
+    // The next range after the seek uses the same session, and a late callback
+    // of the cancelled transfer cannot reach it.
+    relay.updateSourceURL(URL(string: "https://relay.test/old")!)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    var reused = false
+    while ContinuousClock.now < deadline {
+      let (data, response) = try await Self.range("bytes=2-5", from: localURL)
+      XCTAssertEqual(response.statusCode, 206)
+      XCTAssertEqual(data, Data(RelayURLProtocol.oldPayload[2...5]))
+      if relay.upstreamSessionCount == 1 {
+        reused = true
+        break
+      }
+    }
+    XCTAssertTrue(reused, "The session of the cancelled seek is reused.")
+    XCTAssertTrue(failures.values.isEmpty)
+  }
+
+  func testParallelRequestsUseSeparateSessionsAndThePoolStaysBounded() async throws {
+    let relay = try LoopbackStreamRelay(
+      sourceURL: URL(string: "https://relay.test/old")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      authorizationToken: "test-device-token",
+      sessionFactory: Self.stubSession)
+    let localURL = try await relay.start()
+    defer { relay.stop() }
+    async let first = Self.range("bytes=0-1", from: localURL)
+    async let second = Self.range("bytes=2-3", from: localURL)
+    async let third = Self.range("bytes=4-5", from: localURL)
+    let results = try await [first, second, third]
+    XCTAssertEqual(
+      results.map(\.0),
+      [
+        Data(RelayURLProtocol.oldPayload[0...1]), Data(RelayURLProtocol.oldPayload[2...3]),
+        Data(RelayURLProtocol.oldPayload[4...5]),
+      ])
+    XCTAssertGreaterThanOrEqual(relay.upstreamSessionCount, 1)
+    XCTAssertLessThanOrEqual(relay.upstreamSessionCount, 3)
+    let before = relay.upstreamSessionCount
+    for _ in 0..<4 { _ = try await Self.range("bytes=6-7", from: localURL) }
+    XCTAssertEqual(relay.upstreamSessionCount, before, "Idle sessions are reused, not recreated.")
+  }
+
   func testWrongSecretAndMethodStayLocalAndAreRejected() async throws {
     let relay = try LoopbackStreamRelay(
       sourceURL: URL(string: "https://relay.test/old")!,

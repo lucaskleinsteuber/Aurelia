@@ -133,9 +133,15 @@ struct LibraryShellView: View {
             }
           },
           retryLabel: model.canRestoreLocalHosting ? "Start Local Server" : "Try Again",
-          retryDisabled: model.isRecoveringLocalHost)
+          retryDisabled: model.isRecoveringLocalHost
+        )
+        .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
+    .animation(
+      reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.42, dampingFraction: 0.82),
+      value: model.visibleErrorMessage
+    )
     .onChange(of: scenePhase) {
       if scenePhase == .active { Task { await model.refreshHome() } }
     }
@@ -211,7 +217,10 @@ struct LibraryShellView: View {
   /// position and artwork exactly where they were.
   private var content: some View {
     ZStack {
+      // Switching pages in the sidebar cross-fades instead of cutting.
       browsePage
+        .id(destination)
+        .transition(.opacity)
         .opacity(selection == nil ? 1 : 0)
         .allowsHitTesting(selection == nil)
         .accessibilityHidden(selection != nil)
@@ -223,9 +232,8 @@ struct LibraryShellView: View {
             reduceMotion
               ? .opacity
               : .asymmetric(
-                insertion: .opacity.combined(with: .scale(scale: 0.97)).combined(
-                  with: .offset(y: 18)),
-                removal: .opacity.combined(with: .scale(scale: 1.015)))
+                insertion: .opacity.combined(with: .scale(scale: 0.985)),
+                removal: .opacity.combined(with: .scale(scale: 1.01)))
           )
           .zIndex(1)
       }
@@ -234,6 +242,7 @@ struct LibraryShellView: View {
       reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.4, dampingFraction: 0.86),
       value: selection
     )
+    .animation(.easeInOut(duration: reduceMotion ? 0.12 : 0.22), value: destination)
     .onChange(of: selection) { _, value in
       if value == nil, destination == .home { Task { await model.refreshHome() } }
       // Typing must never reach a search field hidden underneath the detail page.
@@ -480,6 +489,7 @@ private struct HomeHero: View {
         contentMode: .fill,
         placeholderSymbolSize: 64
       )
+      .aureliaHeroSettle()
       .backgroundExtensionEffect()
       LinearGradient(
         stops: [
@@ -507,16 +517,19 @@ private struct HomeHero: View {
         .font(.caption.weight(.bold))
         .tracking(1)
         .foregroundStyle(.white.opacity(0.72))
+        .aureliaRiseIn(0)
 
         Text(item.title)
           .font(AureliaDesign.heroTitle)
           .tracking(-0.6)
           .lineLimit(2)
+          .aureliaRiseIn(1)
 
         if !item.genres.isEmpty {
           Text(item.genres.prefix(3).joined(separator: "  ·  "))
             .font(.callout.weight(.semibold))
             .foregroundStyle(.white.opacity(0.8))
+            .aureliaRiseIn(2)
         }
 
         if let overview = item.overview, !overview.isEmpty {
@@ -526,6 +539,7 @@ private struct HomeHero: View {
             .lineLimit(3)
             .lineSpacing(2)
             .frame(maxWidth: 610, alignment: .leading)
+            .aureliaRiseIn(3)
         }
 
         Button(action: action) {
@@ -538,6 +552,7 @@ private struct HomeHero: View {
         }
         .buttonStyle(AureliaPrimaryActionButtonStyle())
         .accessibilityIdentifier("home-hero-action")
+        .aureliaRiseIn(4)
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.bottom, 22)
@@ -578,6 +593,11 @@ private struct LibraryPage: View {
 
   private var hasFilters: Bool { section.hasUserFilters(query) }
 
+  /// A list for this profile and page is shown; newer requests replace it in place.
+  private var hasResultForContext: Bool {
+    loadedContext == context && completedRequestKey.hasPrefix(context + ":")
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
@@ -593,8 +613,9 @@ private struct LibraryPage: View {
             .accessibilityIdentifier("library-title")
         }
 
-        if loadedContext != context || completedRequestKey != requestKey || browser.isLoading {
-          ProgressView()
+        if !hasResultForContext || (browser.items.isEmpty && browser.isLoading) {
+          // Known lists appear at once; a spinner only shows when loading takes a moment.
+          AureliaDelayedProgress()
             .frame(maxWidth: .infinity, minHeight: 250)
             .accessibilityLabel("Loading Library")
         } else if let error = browser.errorMessage {
@@ -645,7 +666,14 @@ private struct LibraryPage: View {
       let profile = model.profile
       let revision = model.catalogVisibilityRevision
       let request = requestKey
-      await browser.load(query: query, search: search) { query, search in
+      let cached = model.cachedBrowse(section: section, query: query, search: search)
+      if let cached {
+        browser.show(cached)
+        completedRequestKey = request
+      }
+      let loadedQuery = query
+      let loadedSearch = search
+      await browser.load(query: query, search: search, quietly: cached != nil) { query, search in
         let items = try await model.browseCatalog(query: query, search: search)
         guard profile?.serverId == model.profile?.serverId,
           profile?.user?.id == model.profile?.user?.id,
@@ -655,6 +683,9 @@ private struct LibraryPage: View {
         return items
       }
       guard !Task.isCancelled, request == requestKey else { return }
+      if browser.errorMessage == nil {
+        model.storeBrowse(browser.items, section: section, query: loadedQuery, search: loadedSearch)
+      }
       completedRequestKey = request
     }
     .task(id: "\(context):\(loadedContext):\(findRequest?.id.uuidString ?? "none")") {
@@ -1150,4 +1181,6 @@ private func posterGrid(_ items: [CatalogItemSummary], onSelect: @escaping (UUID
       .mediaActions(item: item)
     }
   }
+  // Filtering and sorting let cards glide to their new places instead of jumping.
+  .aureliaListMotion(items.map(\.id))
 }
