@@ -58,7 +58,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac connection-and-motion release is 1.6.4 (60); the
+  changing them. The approved Mac server-security release is 1.6.5 (61); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   artwork-cache update is 0.2.0 (10).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

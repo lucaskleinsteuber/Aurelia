@@ -76,6 +76,10 @@ builder.WebHost.ConfigureKestrel(options =>
     // A new TLS connection costs about 50 ms on macOS because the key lives in a keychain;
     // idle client connections therefore stay open longer so they can be reused.
     options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
+    // A household needs a few dozen connections; the cap stops one device from holding
+    // thousands of idle connections open. The server name is not advertised.
+    options.Limits.MaxConcurrentConnections = 512;
+    options.AddServerHeader = false;
 });
 if (tlsIdentity.Certificate is not null)
 {
@@ -249,6 +253,15 @@ var app = builder.Build();
 // Long polling and active streams must not hold the old database instance open
 // for the full HTTP shutdown timeout after the native helper disappears.
 app.Use((context, next) => ServerShutdownRequest.RunAsync(context, next, app.Lifetime.ApplicationStopping));
+app.Use((context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        SecurityHeaders.Apply(context.Response.Headers);
+        return Task.CompletedTask;
+    });
+    return next(context);
+});
 HostReadinessSignal.Register(
     app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>(),
     Console.Out,

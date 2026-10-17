@@ -228,6 +228,21 @@ public sealed class ProfileAndSceneNoteTests
         Assert.Throws<AccountException>(() => attempts.Check(device, user));
         clock.Advance(TimeSpan.FromSeconds(1));
         attempts.Check(device, user);
+        // Another paired device does not get fresh guesses, and every lock lasts longer.
+        var otherDevice = Guid.NewGuid();
+        for (var index = 0; index < 5; index++) { attempts.Check(otherDevice, user); attempts.Record(otherDevice, user, false); }
+        var locked = Assert.Throws<AccountException>(() => attempts.Check(device, user));
+        Assert.Equal("profile_pin_locked", locked.Code);
+        clock.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(1));
+        Assert.Throws<AccountException>(() => attempts.Check(otherDevice, user));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        attempts.Check(otherDevice, user);
+        Assert.Equal(TimeSpan.FromMinutes(30), ProfilePinAttemptGuard.LockDuration(15));
+        Assert.Equal(TimeSpan.FromHours(2), ProfilePinAttemptGuard.LockDuration(40));
+        // A correct PIN starts over; another profile is never affected.
+        attempts.Record(device, user, true);
+        attempts.Check(device, user);
+        attempts.Check(device, Guid.NewGuid());
     }
 
     private static async Task<AuthenticationResponse> DeviceAsync(HttpClient client)
