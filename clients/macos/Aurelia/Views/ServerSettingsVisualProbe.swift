@@ -8,7 +8,7 @@
       defer { AppModel.active = previous }
       let model = AppModel.serverSettingsRenderPreview()
       let view = NSHostingView(
-        rootView: ServerManagementView().environmentObject(model)
+        rootView: ServerManagementView(showsAdvanced: true).environmentObject(model)
           .padding(24).frame(width: 712, alignment: .topLeading)
           .background(AureliaDesign.canvas).environment(\.colorScheme, .dark))
       let window = NSWindow(

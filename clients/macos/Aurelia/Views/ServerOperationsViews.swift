@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-@MainActor private struct ServerAdministrationScope {
+@MainActor struct ServerAdministrationScope {
   let model: AppModel
   let generation: UUID
 
@@ -215,45 +215,60 @@ struct ServerHostingEditor: View {
   @State private var actionTask: Task<Void, Never>?
   @State private var message: String?
   var body: some View {
-    GroupBox("Hosting") {
+    AureliaSettingsSection(
+      "When the Server Runs",
+      symbol: "power",
+      description: "The server can't be reached while this Mac is asleep or turned off."
+    ) {
       VStack(alignment: .leading, spacing: 12) {
-        if let activeHosting {
-          LabeledContent(
-            "Active host",
-            value: activeHosting.backgroundEnabled
-              ? "Independent background service" : "Tied to the open Aurelia app")
-          if activeHosting.state == "awaitingPermission" {
-            Text("Awaiting permission on the host Mac.").foregroundStyle(.orange)
-          }
+        Picker("Run the server", selection: $settings.backgroundEnabled) {
+          Text("Only while the Aurelia app is open").tag(false)
+          Text("Also when the Aurelia app is closed").tag(true)
         }
-        Picker("Operating mode", selection: $settings.backgroundEnabled) {
-          Text("Only while Aurelia is running").tag(false)
-          Text("Run in background").tag(true)
-        }.accessibilityIdentifier("server-hosting-mode")
-        Toggle("Start server at Mac login", isOn: $settings.startAtLogin).disabled(
-          !settings.backgroundEnabled)
-        Toggle("Prevent automatic idle sleep while hosting", isOn: $settings.preventIdleSleep)
-        Text(
-          "Background hosting is a user service, not a root service. It works after login while this Mac is awake; it cannot serve while the Mac is off or asleep with its lid closed."
-        )
-        .font(.caption).foregroundStyle(.secondary)
+        .pickerStyle(.radioGroup)
+        .accessibilityIdentifier("server-hosting-mode")
+        Divider()
+        ServerSwitchRow("Start automatically when you log in", isOn: $settings.startAtLogin)
+          .disabled(!settings.backgroundEnabled)
+        ServerSwitchRow(
+          "Keep this Mac awake while the server runs", isOn: $settings.preventIdleSleep)
+        if let activeHosting, activeHosting.state == "awaitingPermission" {
+          Text("Waiting for permission on the server Mac.").foregroundStyle(.orange)
+        }
         if model.isLocalHost {
-          LabeledContent("macOS permission", value: permission)
+          if settings.backgroundEnabled, !BackgroundHostingController.permitted {
+            HStack {
+              Label(
+                "macOS must allow Aurelia to run in the background (\(permission)).",
+                systemImage: "exclamationmark.triangle"
+              )
+              .font(.caption).foregroundStyle(.orange)
+              Spacer()
+              Button("Open Login Items Settings") { BackgroundHostingController.openPermissions() }
+            }
+          }
           if let pending {
             Label(
               "A trusted owner requested a hosting change.", systemImage: "exclamationmark.triangle"
             )
             Button("Review Requested Mode") { settings = pending.settings }
           }
-          Button("Open Login Items Permissions") { BackgroundHostingController.openPermissions() }
         } else {
           Text(
-            "Changing the hosting mode remotely creates a request. Open Aurelia on the host Mac to review it and grant any required macOS permission."
+            "Changes made from another device are sent as a request. Open Aurelia on the server Mac to approve it."
           )
           .font(.caption).foregroundStyle(.secondary)
         }
         HStack {
-          Button(model.isLocalHost ? "Apply Hosting Mode" : "Request Hosting Mode") {
+          if let activeHosting {
+            Text(
+              activeHosting.backgroundEnabled
+                ? "Currently runs in the background." : "Currently runs while the app is open."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          }
+          Spacer()
+          Button(model.isLocalHost ? "Apply" : "Request Change") {
             run { scope in
               if !settings.backgroundEnabled { settings.startAtLogin = false }
               if model.isLocalHost {
@@ -262,25 +277,22 @@ struct ServerHostingEditor: View {
                 pending = try HostServiceRequest.load()
                 message =
                   settings.backgroundEnabled && !BackgroundHostingController.permitted
-                  ? "Awaiting permission. The server is still tied to this app."
-                  : "Hosting mode applied."
+                  ? "Waiting for macOS permission. Until then the server runs while the app is open."
+                  : "Saved."
               } else {
                 _ = try await scope.request { try await client.authorizeHostingChange(settings) }
                 message =
-                  "Request saved. Awaiting approval on the host Mac; the active mode has not changed."
+                  "Request sent. Approve it in Aurelia on the server Mac; nothing has changed yet."
               }
               activeHosting = try await scope.request { try await client.serverHosting() }
             }
           }
-          Button("Restart Server") {
-            run { scope in
-              _ = try await scope.request { try await client.restartServer() }
-              message = "Restart requested. Reconnect after the host has restarted."
-            }
-          }
+          .accessibilityIdentifier("server-hosting-apply")
         }.disabled(working || !available)
         if let message { Text(message).font(.caption).textSelection(.enabled) }
-      }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+      }
+      .toggleStyle(.switch)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }.task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
@@ -344,28 +356,28 @@ struct ServerLibraryJobsEditor: View {
     _settings = State(initialValue: configuration.stored)
   }
   var body: some View {
-    GroupBox("Library & Jobs") {
+    GroupBox("Library Maintenance") {
       VStack(alignment: .leading, spacing: 12) {
-        Toggle("Monitor storage locations", isOn: $settings.monitoringEnabled)
+        Toggle("Notice new and removed files automatically", isOn: $settings.monitoringEnabled)
         Stepper(
-          "Reconciliation interval: \(settings.reconciliationMinutes) minutes",
+          "Full check every \(Self.interval(settings.reconciliationMinutes))",
           value: $settings.reconciliationMinutes, in: 15...10080, step: 15)
         HStack {
           Stepper(
-            "Maintenance starts: \(settings.maintenanceStartHour):00",
+            "Maintenance from \(settings.maintenanceStartHour):00",
             value: $settings.maintenanceStartHour, in: 0...23)
           Stepper(
-            "Ends: \(settings.maintenanceEndHour):00", value: $settings.maintenanceEndHour,
+            "to \(settings.maintenanceEndHour):00", value: $settings.maintenanceEndHour,
             in: 1...24)
         }
         Stepper(
-          "Maximum jobs per queue: \(settings.jobQueueLimit)", value: $settings.jobQueueLimit,
+          "Maximum waiting tasks: \(settings.jobQueueLimit)", value: $settings.jobQueueLimit,
           in: 10...10000, step: 10)
         Text(
           "Maintenance hours use the host's local time. Manual scans remain available. Media is read directly; Aurelia does not transcode or copy videos."
         ).font(.caption).foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
-        Button("Save Job Settings") {
+        Button("Save Maintenance Settings") {
           run { scope in
             saved(try await scope.request { try await client.saveServerSettings(settings) })
           }
@@ -462,6 +474,12 @@ struct ServerLibraryJobsEditor: View {
       }
     }.onDisappear { actionTask?.cancel() }
   }
+  static func interval(_ minutes: Int) -> String {
+    guard minutes >= 60, minutes % 60 == 0 else { return "\(minutes) minutes" }
+    let hours = minutes / 60
+    return hours == 1 ? "hour" : "\(hours) hours"
+  }
+
   private func refresh(_ scope: ServerAdministrationScope) async throws {
     try scope.check()
     async let roots = client.libraries()
@@ -517,11 +535,11 @@ struct ServerBackupsEditor: View {
     _settings = State(initialValue: configuration.stored)
   }
   var body: some View {
-    GroupBox("Backups") {
+    GroupBox("Backup Details") {
       VStack(alignment: .leading, spacing: 12) {
-        Toggle("Automatic database backups", isOn: $settings.automaticBackupsEnabled)
         Stepper(
-          "Interval: \(settings.backupIntervalHours) hours", value: $settings.backupIntervalHours,
+          "Automatic backup every \(settings.backupIntervalHours) hours",
+          value: $settings.backupIntervalHours,
           in: 1...168)
         Stepper(
           "Keep \(settings.dailyBackupsRetained) daily backups",
@@ -534,26 +552,13 @@ struct ServerBackupsEditor: View {
             saved(try await scope.request { try await client.saveServerSettings(settings) })
           }
         }.disabled(settings == configuration.stored)
-        HStack {
-          Button("Backup Now") {
-            run { scope in
-              try await scope.request { try await client.createDatabaseBackup() }
-              backups = try await scope.request { try await client.serverBackups() }
-              message = "Database backup created and verified."
-            }
-          }
-          Button("Refresh Backups") {
-            run { scope in backups = try await scope.request { try await client.serverBackups() } }
-          }
-        }
-        if let latest = backups.first {
-          Text("Last verified backup: \(latest.createdAt)").font(.caption).foregroundStyle(
-            .secondary)
+        Button("Refresh Backups") {
+          run { scope in backups = try await scope.request { try await client.serverBackups() } }
         }
         ForEach(backups.prefix(8)) { backup in
           HStack {
             Text(
-              "\(backup.kind) · \(backup.createdAt) · \(ByteCountFormatter.string(fromByteCount: backup.bytes, countStyle: .file))"
+              "\(backup.kind.capitalized) · \(ServerDateText.display(backup.createdAt)) · \(ByteCountFormatter.string(fromByteCount: backup.bytes, countStyle: .file))"
             ).font(.caption)
             Spacer()
             Button("Verify") {

@@ -349,7 +349,7 @@ final class AureliaUITests: XCTestCase {
   }
 
   @MainActor
-  func testServerSettingsExposeAllEightSectionsWithoutEnablingBackgroundService() throws {
+  func testServerSettingsShowEverydaySettingsFirstAndAdvancedOnRequest() throws {
     continueAfterFailure = false
     let app = XCUIApplication()
     configureTestLaunch(app)
@@ -361,14 +361,31 @@ final class AureliaUITests: XCTestCase {
     let serverTab = app.buttons["Server"]
     XCTAssertTrue(serverTab.waitForExistence(timeout: 8))
     serverTab.click()
-    XCTAssertTrue(app.staticTexts["Overview"].waitForExistence(timeout: 8))
-    for section in [
-      "Network", "Hosting", "Users & Access", "Devices & Security", "Library & Jobs", "Backups",
-      "Diagnostics",
-    ] {
-      XCTAssertTrue(app.staticTexts[section].exists, "Missing server settings section: \(section)")
+    XCTAssertTrue(app.staticTexts["Your Server"].waitForExistence(timeout: 8))
+    for section in ["When the Server Runs", "Devices & Backups", "Profiles"] {
+      XCTAssertTrue(app.staticTexts[section].exists, "Missing everyday section: \(section)")
     }
+    XCTAssertTrue(app.buttons["server-advanced-settings"].exists)
     XCTAssertTrue(app.descendants(matching: .any)["server-hosting-mode"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["server-pairing-enabled"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["server-automatic-backups"].exists)
+    let advanced = [
+      "Server Details", "Network", "Sign-In & Streaming Limits", "Library Maintenance",
+      "Backup Details", "Diagnostics",
+    ]
+    for section in advanced {
+      XCTAssertFalse(app.staticTexts[section].exists, "Advanced section shown early: \(section)")
+    }
+    let collapsed = XCTAttachment(screenshot: app.screenshot())
+    collapsed.name = "Server settings - everyday settings"
+    collapsed.lifetime = .keepAlways
+    add(collapsed)
+    app.buttons["server-advanced-settings"].click()
+    for section in advanced {
+      XCTAssertTrue(
+        app.staticTexts[section].waitForExistence(timeout: 3),
+        "Missing advanced section: \(section)")
+    }
     XCTAssertFalse(app.buttons["Try Network Settings (60-second rollback)"].isEnabled)
     XCTAssertFalse(app.buttons["Restart Server"].isEnabled)
     let screenshot = XCTAttachment(screenshot: app.screenshot())
@@ -392,6 +409,9 @@ final class AureliaUITests: XCTestCase {
     app.typeKey(",", modifierFlags: .command)
     XCTAssertTrue(app.buttons["Server"].waitForExistence(timeout: 8))
     app.buttons["Server"].click()
+    let advanced = app.buttons["server-advanced-settings"]
+    XCTAssertTrue(advanced.waitForExistence(timeout: 8))
+    advanced.click()
     let status = app.staticTexts["metadata-wait-status"]
     XCTAssertTrue(status.waitForExistence(timeout: 8))
     let displayedStatus = status.value as? String ?? status.label

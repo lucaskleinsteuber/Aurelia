@@ -510,9 +510,9 @@ struct AppSettingsView: View {
 
   private func advanced(_ profile: StoredServerProfile) -> some View {
     AureliaSettingsSection(
-      "Server",
-      symbol: "server.rack",
-      description: "Connection identity and server controls for this Mac."
+      "Connection",
+      symbol: "link",
+      description: "How this Mac connects to the server."
     ) {
       VStack(alignment: .leading, spacing: 12) {
         LabeledContent("Server", value: profile.name)
@@ -526,8 +526,11 @@ struct AppSettingsView: View {
         }
         Divider()
         if model.operatingMode == .host {
-          LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
-          Button("Restart Server") { Task { await model.restartNativeHost() } }
+          if profile.user?.role != .owner || !model.managementUnlocked {
+            // Owners with unlocked management restart from the Your Server summary.
+            LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
+            Button("Restart Server") { Task { await model.restartNativeHost() } }
+          }
           Button("Switch to Another Server…", role: .destructive) {
             showingSwitchConfirmation = true
           }

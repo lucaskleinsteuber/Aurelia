@@ -14,6 +14,11 @@ struct ServerManagementView: View {
   @State private var deletingProfile: UUID?
   @State private var deletionTask: Task<Void, Never>?
   @State private var deletionRun = UUID()
+  @State private var showsAdvanced: Bool
+
+  init(showsAdvanced: Bool = false) {
+    _showsAdvanced = State(initialValue: showsAdvanced)
+  }
 
   private var client: APIClient? { model.profile.map(APIClient.init(profile:)) }
 
@@ -23,121 +28,51 @@ struct ServerManagementView: View {
         VStack(alignment: .leading, spacing: 20) {
           ManagementStatusView()
           if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-          if loading { ProgressView("Loading server settings…") }
+          if loading && status == nil { ProgressView("Loading server settings…") }
           if let status {
-            GroupBox("Overview") {
-              VStack(alignment: .leading, spacing: 10) {
-                LabeledContent(
-                  "State", value: (status.readiness?.state ?? status.state).capitalized)
-                if let readiness = status.readiness {
-                  ForEach(readiness.components) { component in
-                    LabeledContent(component.title, value: component.detail)
-                      .foregroundStyle(component.state == "ready" ? .primary : .secondary)
-                  }
-                }
-                LabeledContent("Version", value: status.version)
-                LabeledContent(
-                  "Uptime",
-                  value: Duration.seconds(status.uptimeSeconds).formatted(
-                    .time(pattern: .hourMinuteSecond)))
-                LabeledContent("Active stream requests", value: "\(status.activeStreams)")
-                LabeledContent(
-                  "Database",
-                  value: ByteCountFormatter.string(
-                    fromByteCount: status.databaseBytes, countStyle: .file))
-                LabeledContent("Libraries", value: "\(status.libraries)")
-                LabeledContent("Profiles", value: "\(status.users)")
-                if let bytes = status.freeDiskBytes {
-                  LabeledContent(
-                    "Available storage",
-                    value: ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))
-                  if bytes < 1024 * 1024 * 1024 {
-                    Label(
-                      "Low disk space. Backups and library updates may fail.",
-                      systemImage: "exclamationmark.triangle"
-                    ).foregroundStyle(.orange)
-                  }
-                }
-                if let expires = status.certificateExpiresAt {
-                  LabeledContent("TLS certificate expires", value: expires)
-                }
-                LabeledContent(
-                  "Host addresses", value: status.networkAddresses.joined(separator: ", "))
-              }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-            }
-          }
-          if let configuration, let client {
-            ServerNetworkEditor(
-              configuration: configuration, client: client,
-              nativeHostAvailable: capabilities?.nativeHostOperations == true
+            ServerSummaryCard(
+              status: status, configuration: configuration, client: client,
+              nativeHostAvailable: capabilities?.nativeHostOperations == true,
+              refreshing: loading || deletingProfile != nil
             ) { Task { await reload() } }
-            .id("network-\(configuration.stored.revision)")
+          }
+          if let client {
             ServerHostingEditor(
               client: client, available: capabilities?.nativeHostOperations == true)
-            ServerSecurityEditor(configuration: configuration, client: client) { configuration in
-              self.configuration = configuration
-            }.id(configuration.stored.revision)
-          }
-          GroupBox("Users & Access") {
-            VStack(alignment: .leading, spacing: 12) {
-              ForEach(users) { access in
-                HStack(spacing: 12) {
-                  Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 34)).symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.secondary)
-                  VStack(alignment: .leading, spacing: 4) {
-                    Text(access.user.username).font(.headline)
-                    Text(
-                      "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled")"
-                    )
-                    .font(.caption).foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
-                      Label(
-                        pinStatus(access.user),
-                        systemImage: access.user.pinProtectionEnabled
-                          ? "lock" : "person.crop.circle")
-                      Text(contentStatus(access.user))
-                    }.font(.caption).foregroundStyle(.secondary)
-                  }
-                  Spacer()
-                  Button("Edit Profile…") { editingUser = access }
-                    .disabled(deletingProfile != nil)
-                    .accessibilityIdentifier("edit-profile-\(access.id.uuidString)")
-                  if canDelete(access) {
-                    Button("Delete Profile…", role: .destructive) { profileToDelete = access }
-                      .disabled(deletingProfile != nil)
-                      .accessibilityIdentifier("delete-profile-\(access.id.uuidString)")
-                  }
-                  if deletingProfile == access.id { ProgressView().controlSize(.small) }
-                }.padding(.vertical, 5)
-                Divider()
-              }
-              Button("Create Profile…") { creatingUser = true }
-                .disabled(deletingProfile != nil)
-                .accessibilityIdentifier("create-profile")
-              Text(
-                "Choose the entire library or individual films and series for each profile. New profiles start without title access. Owners always have full access."
-              )
-              .font(.caption).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
           }
           if let configuration, let client {
-            ServerLibraryJobsEditor(configuration: configuration, client: client) {
+            ServerEssentialsEditor(configuration: configuration, client: client) {
               self.configuration = $0
             }
-            .id("jobs-\(configuration.stored.revision)")
-            ServerBackupsEditor(
-              configuration: configuration, client: client,
-              nativeHostAvailable: capabilities?.nativeHostOperations == true
-            ) { self.configuration = $0 }
-            .id("backups-\(configuration.stored.revision)")
-            ServerDiagnosticsEditor(configuration: configuration, client: client) {
-              self.configuration = $0
-            }
-            .id("diagnostics-\(configuration.stored.revision)")
+            .id("essentials-\(configuration.stored.revision)")
           }
-          Button("Refresh Server Status") { Task { await reload() } }
-            .disabled(loading || deletingProfile != nil)
+          profiles
+          ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
+            if let status { ServerDetailsBox(status: status) }
+            if let configuration, let client {
+              ServerNetworkEditor(
+                configuration: configuration, client: client,
+                nativeHostAvailable: capabilities?.nativeHostOperations == true
+              ) { Task { await reload() } }
+              .id("network-\(configuration.stored.revision)")
+              ServerSecurityEditor(configuration: configuration, client: client) { configuration in
+                self.configuration = configuration
+              }.id(configuration.stored.revision)
+              ServerLibraryJobsEditor(configuration: configuration, client: client) {
+                self.configuration = $0
+              }
+              .id("jobs-\(configuration.stored.revision)")
+              ServerBackupsEditor(
+                configuration: configuration, client: client,
+                nativeHostAvailable: capabilities?.nativeHostOperations == true
+              ) { self.configuration = $0 }
+              .id("backups-\(configuration.stored.revision)")
+              ServerDiagnosticsEditor(configuration: configuration, client: client) {
+                self.configuration = $0
+              }
+              .id("diagnostics-\(configuration.stored.revision)")
+            }
+          }
         }
       } else {
         ManagementUnlockView()
@@ -184,6 +119,56 @@ struct ServerManagementView: View {
     }
     .sheet(isPresented: $creatingUser) {
       if let client { ServerProfileEditor(client: client) { Task { await reload() } } }
+    }
+  }
+
+  private var profiles: some View {
+    AureliaSettingsSection(
+      "Profiles",
+      symbol: "person.2.fill",
+      description:
+        "Everyone who watches gets a profile. Choose what each profile can see; owners always see everything."
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        ForEach(users) { access in
+          HStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.fill")
+              .font(.system(size: 34)).symbolRenderingMode(.hierarchical)
+              .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+              Text(access.user.username).font(.headline)
+              Text(
+                "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled")"
+              )
+              .font(.caption).foregroundStyle(.secondary)
+              HStack(spacing: 10) {
+                Label(
+                  pinStatus(access.user),
+                  systemImage: access.user.pinProtectionEnabled
+                    ? "lock" : "person.crop.circle")
+                Text(contentStatus(access.user))
+              }.font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Edit Profile…") { editingUser = access }
+              .disabled(deletingProfile != nil)
+              .accessibilityIdentifier("edit-profile-\(access.id.uuidString)")
+            if canDelete(access) {
+              Button("Delete Profile…", role: .destructive) { profileToDelete = access }
+                .disabled(deletingProfile != nil)
+                .accessibilityIdentifier("delete-profile-\(access.id.uuidString)")
+            }
+            if deletingProfile == access.id { ProgressView().controlSize(.small) }
+          }.padding(.vertical, 5)
+          Divider()
+        }
+        Button("Create Profile…") { creatingUser = true }
+          .disabled(deletingProfile != nil)
+          .accessibilityIdentifier("create-profile")
+        Text("New profiles start without access to any titles until you choose them.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
 
@@ -299,24 +284,23 @@ private struct ServerSecurityEditor: View {
     _settings = State(initialValue: configuration.stored)
   }
   var body: some View {
-    GroupBox("Devices & Security") {
+    GroupBox("Sign-In & Streaming Limits") {
       VStack(alignment: .leading, spacing: 12) {
-        Toggle("Allow new device pairing", isOn: $settings.pairingEnabled)
         Stepper(
-          "New device session lifetime: \(settings.deviceSessionDays) days",
+          "Keep new devices signed in for \(settings.deviceSessionDays) days",
           value: $settings.deviceSessionDays, in: 1...365)
         Stepper(
-          "Simultaneous stream requests: \(settings.globalStreamLimit) server-wide",
+          "Streams at the same time: \(settings.globalStreamLimit) in total",
           value: $settings.globalStreamLimit, in: settings.userStreamLimit...128)
         Stepper(
-          "Simultaneous stream requests: \(settings.userStreamLimit) per user",
+          "Streams at the same time: \(settings.userStreamLimit) per profile",
           value: $settings.userStreamLimit, in: 1...min(16, settings.globalStreamLimit))
         Text(
           "Existing sessions keep their current expiry. New pairing codes expire after five minutes. Device revocation stops affected streams immediately."
         )
         .font(.caption).foregroundStyle(.secondary)
         if let error { Text(error).foregroundStyle(.red) }
-        Button(saving ? "Saving…" : "Save Security Settings") {
+        Button(saving ? "Saving…" : "Save Limits") {
           let generation = model.administrationGeneration
           saving = true
           saveTask = Task {

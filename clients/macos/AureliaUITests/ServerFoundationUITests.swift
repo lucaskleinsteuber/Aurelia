@@ -44,7 +44,7 @@ final class ServerFoundationUITests: XCTestCase {
     let app = launch()
     defer { app.terminate() }
     app.buttons["Server"].click()
-    XCTAssertTrue(app.staticTexts["Overview"].waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Your Server"].waitForExistence(timeout: 8))
     XCTAssertTrue(app.staticTexts["Degraded"].exists)
     XCTAssertTrue(app.staticTexts["Media drive disconnected"].exists)
     screenshot(app, "Server readiness")
