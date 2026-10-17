@@ -172,16 +172,22 @@ public sealed class LibraryMutationService(AureliaDbContext database, CatalogMut
 }
 
 public sealed partial class LibraryCleanupWorker(IServiceScopeFactory scopes, CatalogMutationGate mutations, EditorArtworkStore images,
-    ILogger<LibraryCleanupWorker> logger) : BackgroundService
+    DatabaseChangeSignal changes, ILogger<LibraryCleanupWorker> logger) : BackgroundService
 {
+    // Cleanup receipts are committed database rows, so an idle server only needs a slow fallback.
+    private static readonly TimeSpan IdleFallback = TimeSpan.FromMinutes(5);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var failureReported = false;
+        var changed = Task.CompletedTask;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                await DatabaseChangeSignal.WaitAsync(changed, IdleFallback, stoppingToken);
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                changed = changes.Snapshot();
                 using var lease = await mutations.EnterAsync(stoppingToken);
                 await using var scope = scopes.CreateAsyncScope();
                 var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
@@ -198,6 +204,7 @@ public sealed partial class LibraryCleanupWorker(IServiceScopeFactory scopes, Ca
                 // A full disk or unavailable database must not stop the media server. The durable receipts remain pending.
                 if (!failureReported) CleanupUnavailable(logger);
                 failureReported = true;
+                changed = Task.CompletedTask;
             }
         }
     }

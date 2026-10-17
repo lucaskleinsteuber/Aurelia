@@ -13,6 +13,7 @@ public sealed partial class MetadataJobWorker(
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan IdleFallback = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(10)];
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -25,7 +26,8 @@ public sealed partial class MetadataJobWorker(
             if (!jobId.HasValue)
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                wait.CancelAfter(TimeSpan.FromSeconds(1));
+                // New jobs pulse the scheduler; otherwise sleep until the next delayed attempt.
+                wait.CancelAfter(await recovery.RunAsync(() => IdleDelayAsync(stoppingToken), stoppingToken));
                 try { await scheduler.WaitAsync(wait.Token); }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
                 continue;
@@ -82,6 +84,22 @@ public sealed partial class MetadataJobWorker(
         }
         await database.SaveChangesAsync(token);
         scheduler.Pulse();
+    }
+
+    private async Task<TimeSpan> IdleDelayAsync(CancellationToken token)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var next = await database.MetadataJobs.IgnoreQueryFilters()
+            .Where(job => job.State == MetadataJobState.Queued && job.NextAttemptAt != null)
+            .OrderBy(job => job.NextAttemptAt).Select(job => job.NextAttemptAt).FirstOrDefaultAsync(token);
+        var cooldown = await database.MetadataProviderCooldowns.AsNoTracking()
+            .Where(value => value.Provider == "tmdb").Select(value => value.NotBefore).SingleOrDefaultAsync(token);
+        var now = clock.GetUtcNow();
+        var due = new[] { next, cooldown }.Where(value => value > now).Min();
+        if (due is null) return IdleFallback;
+        var delay = due.Value - now + TimeSpan.FromMilliseconds(50);
+        return delay < IdleFallback ? delay : IdleFallback;
     }
 
     private async Task<Guid?> ClaimNextAsync(CancellationToken token)

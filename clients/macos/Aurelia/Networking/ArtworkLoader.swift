@@ -14,16 +14,19 @@ final class ArtworkLoader {
   private let cache = NSCache<NSString, NSData>()
   private var flights: [String: Flight] = [:]
   private let fetcher: Fetcher
+  private let diskCache: ArtworkDiskCache?
 
   init(
     memoryLimit: Int = 96 * 1_024 * 1_024,
     itemLimit: Int = 300,
+    diskCache: ArtworkDiskCache? = .standard,
     fetcher: @escaping Fetcher = { artwork, profile in
       try await APIClient(profile: profile).artworkData(path: artwork.path)
     }
   ) {
     cache.totalCostLimit = memoryLimit
     cache.countLimit = itemLimit
+    self.diskCache = diskCache
     self.fetcher = fetcher
   }
 
@@ -87,9 +90,30 @@ final class ArtworkLoader {
 
     let fetcher = self.fetcher
     let flightID = UUID()
+    // Artwork with a revision survives app restarts; a new revision is a new entry.
+    let diskCache = self.diskCache
+    let diskKey = artwork.revision.map {
+      ArtworkDiskCache.key(
+        serverID: profile.serverId, profileID: profile.user?.id, path: artwork.path, revision: $0)
+    }
     let task = Task { [weak self] in
       do {
-        let data = try await fetcher(artwork, profile)
+        let data: Data
+        if let diskCache, let diskKey,
+          let stored = await Task.detached(
+            priority: .utility,
+            operation: {
+              diskCache.data(forKey: diskKey)
+            }
+          ).value
+        {
+          data = stored
+        } else {
+          data = try await fetcher(artwork, profile)
+          if let diskCache, let diskKey {
+            Task.detached(priority: .utility) { diskCache.store(data, forKey: diskKey) }
+          }
+        }
         guard !Task.isCancelled else { throw CancellationError() }
         self?.finish(
           flightKey: flightKey, flightID: flightID, cacheKey: cacheKey, result: .success(data))

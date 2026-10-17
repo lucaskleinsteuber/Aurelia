@@ -38,7 +38,9 @@ public sealed class ServerReadinessService(
             while (!stoppingToken.IsCancellationRequested)
             {
                 if (lifetime.ApplicationStarted.IsCancellationRequested) await RefreshAsync(stoppingToken);
-                await Task.Delay(TimeSpan.FromSeconds(Current.State == "starting" ? 1 : 15), clock, stoppingToken);
+                // A healthy server is checked less often; problems are rechecked sooner.
+                var interval = Current.State switch { "starting" => 1, "ready" => 30, _ => 15 };
+                await Task.Delay(TimeSpan.FromSeconds(interval), clock, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }

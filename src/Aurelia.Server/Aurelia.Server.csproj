@@ -3,6 +3,23 @@
     <AssemblyName>Aurelia.Server</AssemblyName>
     <RootNamespace>Aurelia.Server</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- A home server serves a handful of clients: workstation GC keeps memory and threads small. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <!--
+    Release payloads (restored and published for a runtime identifier) start precompiled and leave out
+    unused framework code. Partial trimming only removes code from framework libraries that
+    declare themselves trimmable; Aurelia, EF Core, SQLite and Bonjour stay complete, so their
+    reflection keeps working. Minimal API handlers and JSON keep their reflection-based paths.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != '' or '$(RuntimeIdentifiers)' != ''">
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <EnableRequestDelegateGenerator>false</EnableRequestDelegateGenerator>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Aurelia.Server.Tests" />

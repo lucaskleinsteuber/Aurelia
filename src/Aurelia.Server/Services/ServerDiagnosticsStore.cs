@@ -46,6 +46,14 @@ public sealed class ServerDiagnosticsStore(
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                // Sleep until an event arrives (or hourly for retention); a failed write retries soon.
+                if (!needsPersistence)
+                {
+                    using var idle = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    idle.CancelAfter(TimeSpan.FromHours(1));
+                    try { await pending.Reader.WaitToReadAsync(idle.Token); }
+                    catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
+                }
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                 await FlushAsync(stoppingToken);
             }

@@ -86,17 +86,26 @@ public sealed class ArtworkStore(
         return existing;
     }
 
-    public async Task<ArtworkFileResult?> OpenAsync(Guid id, AureliaDbContext database, CancellationToken cancellationToken)
+    public async Task<ArtworkFileResult?> OpenAsync(Guid id, AureliaDbContext database, CancellationToken cancellationToken) =>
+        await DescribeAsync(id, database, cancellationToken) is { } source ? Open(source) : null;
+
+    /// <summary>Validates an original without opening it, so cached variants and 304 replies skip the file.</summary>
+    public async Task<ArtworkSource?> DescribeAsync(Guid id, AureliaDbContext database, CancellationToken cancellationToken)
     {
         var asset = await database.ArtworkAssets.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (asset is null || Path.GetFileName(asset.RelativeFilePath) != asset.RelativeFilePath) return null;
         var path = Path.Combine(artworkDirectory, asset.RelativeFilePath);
-        if (!File.Exists(path)) return null;
         var info = new FileInfo(path);
-        if (info.Length != asset.ContentLength || info.LinkTarget is not null) return null;
+        if (!info.Exists || info.Length != asset.ContentLength || info.LinkTarget is not null) return null;
+        return new ArtworkSource(path, asset.ContentType, asset.ContentLength, asset.CreatedAt, asset.Revision);
+    }
+
+    public static ArtworkFileResult? Open(ArtworkSource source)
+    {
         try
         {
-            return new ArtworkFileResult(File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete), asset.ContentType, asset.ContentLength, asset.CreatedAt, asset.Revision);
+            return new ArtworkFileResult(File.Open(source.Path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete),
+                source.ContentType, source.ContentLength, source.LastModified, source.Revision);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
@@ -130,5 +139,7 @@ public sealed class ArtworkStore(
         if (File.Exists(path)) File.Delete(path);
     }
 }
+
+public sealed record ArtworkSource(string Path, string ContentType, long ContentLength, DateTimeOffset LastModified, long Revision);
 
 public sealed record ArtworkFileResult(Stream Stream, string ContentType, long ContentLength, DateTimeOffset LastModified, long Revision = 1);

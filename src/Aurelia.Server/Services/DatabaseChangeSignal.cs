@@ -16,6 +16,15 @@ public sealed class DatabaseChangeSignal
         previous.TrySetResult();
     }
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Waits for a captured snapshot or the fallback, without leaving a timer behind.</summary>
+    public static async Task WaitAsync(Task snapshot, TimeSpan fallback, CancellationToken token)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(fallback);
+        try { await snapshot.WaitAsync(timeout.Token); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+    }
 }
 
 public sealed class DatabaseSaveSignal(DatabaseChangeSignal signal) : SaveChangesInterceptor

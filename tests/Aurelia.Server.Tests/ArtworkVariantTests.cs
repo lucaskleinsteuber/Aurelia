@@ -45,6 +45,47 @@ public sealed class ArtworkVariantTests
     }
 
     [Fact]
+    public async Task CachedVariantsAndUnchangedRepliesDoNotOpenTheOriginal()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var asset = await SeedAsync(factory, 640, 320, false);
+        using var firstRequest = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/artwork/{asset.Id}?width=320", owner.Token);
+        using var first = await client.SendAsync(firstRequest);
+        first.EnsureSuccessStatusCode();
+        var bytes = await first.Content.ReadAsByteArrayAsync();
+        var etag = Assert.IsType<System.Net.Http.Headers.EntityTagHeaderValue>(first.Headers.ETag);
+        var source = Path.Combine(factory.DataDirectory, "Artwork", asset.RelativeFilePath);
+        // An unreadable original proves that cached and unchanged replies never open it.
+        File.SetUnixFileMode(source, UnixFileMode.None);
+        try
+        {
+            using var cachedRequest = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/artwork/{asset.Id}?width=320", owner.Token);
+            using var cached = await client.SendAsync(cachedRequest);
+            cached.EnsureSuccessStatusCode();
+            Assert.Equal(bytes, await cached.Content.ReadAsByteArrayAsync());
+            Assert.Equal(etag, cached.Headers.ETag);
+
+            using var conditionalRequest = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/artwork/{asset.Id}?width=320", owner.Token);
+            conditionalRequest.Headers.IfNoneMatch.Add(etag);
+            using var conditional = await client.SendAsync(conditionalRequest);
+            Assert.Equal(HttpStatusCode.NotModified, conditional.StatusCode);
+            Assert.Equal(etag, conditional.Headers.ETag);
+            Assert.Empty(await conditional.Content.ReadAsByteArrayAsync());
+
+            using var originalRequest = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/artwork/{asset.Id}", owner.Token);
+            using var original = await client.SendAsync(originalRequest);
+            Assert.Equal(HttpStatusCode.NotFound, original.StatusCode);
+        }
+        finally
+        {
+            File.SetUnixFileMode(source, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
     public async Task RevisionInvalidatesETagAndCachedVariantForSameArtworkID()
     {
         using var factory = new AureliaServerFactory();

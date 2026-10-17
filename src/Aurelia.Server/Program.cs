@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -106,7 +108,8 @@ builder.Services.AddSingleton<DatabaseChangeSignal>();
 builder.Services.AddSingleton<DatabaseSaveSignal>();
 builder.Services.AddSingleton<DatabaseCommitSignal>();
 builder.Services.AddDbContext<AureliaDbContext>((services, options) =>
-    options.UseSqlite(connectionString).AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>()));
+    options.UseSqlite(connectionString).AddInterceptors(services.GetRequiredService<DatabaseSaveSignal>(), services.GetRequiredService<DatabaseCommitSignal>(),
+        SqliteWriteMode.Interceptor));
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<SessionActivityRecorder>();
 builder.Services.AddSingleton<DatabaseBackupService>();
@@ -198,6 +201,19 @@ builder.Services.ConfigureHttpJsonOptions(options =>
         new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
 });
 
+// Library lists compress well and travel over Wi-Fi to the TV. Only GET catalog
+// responses are compressed: they never contain credentials (no BREACH exposure),
+// and media streams keep their exact byte ranges.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.MimeTypes = ["application/json"];
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -276,6 +292,7 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
+app.UseWhen(CatalogCompression.Applies, branch => branch.UseResponseCompression());
 app.Use(async (context, next) =>
 {
     context.RequestServices.GetRequiredService<LibraryAccessService>().Bind(context);

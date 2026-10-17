@@ -18,6 +18,8 @@ public sealed partial class LibraryMonitoringService(
     private readonly Dictionary<Guid, WatchRegistration> watchers = [];
     private readonly HashSet<Guid> startupConsidered = [];
     private DateTimeOffset nextLibraryRefresh = DateTimeOffset.MinValue;
+    // File events wake the loop; without pending changes it sleeps until the next library refresh.
+    private readonly DatabaseChangeSignal recorded = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -26,6 +28,7 @@ public sealed partial class LibraryMonitoringService(
             var recovery = new StorageRecovery(logger, "library monitoring");
             while (!stoppingToken.IsCancellationRequested)
             {
+                var arrival = recorded.Snapshot();
                 var now = DateTimeOffset.UtcNow;
                 if (now >= nextLibraryRefresh)
                 {
@@ -34,7 +37,14 @@ public sealed partial class LibraryMonitoringService(
                 }
 
                 await recovery.RunAsync(() => FlushPendingAsync(now, stoppingToken), stoppingToken);
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                if (!pending.IsEmpty)
+                {
+                    // Debounce and stability checks need a short cadence while changes wait.
+                    await Task.Delay(configuration.IsMaintenanceWindow(now) ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(1), stoppingToken);
+                    continue;
+                }
+                var untilRefresh = nextLibraryRefresh - DateTimeOffset.UtcNow;
+                await DatabaseChangeSignal.WaitAsync(arrival, untilRefresh > TimeSpan.FromSeconds(1) ? untilRefresh : TimeSpan.FromSeconds(1), stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -188,7 +198,11 @@ public sealed partial class LibraryMonitoringService(
         while (true)
         {
             var state = pending.GetOrAdd(library.Id, _ => new PendingChanges(library.Path));
-            if (state.TryRecord(path, forceFull)) return;
+            if (state.TryRecord(path, forceFull))
+            {
+                recorded.Pulse();
+                return;
+            }
             // A flush retired this state while the watcher callback held a
             // reference to it. Retry against the current dictionary entry.
         }

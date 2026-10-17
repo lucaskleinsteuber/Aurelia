@@ -741,23 +741,42 @@ public static class ApiEndpointMappings
     {
         if (width.HasValue && !ArtworkVariantStore.IsSupportedWidth(width.Value))
             throw new AccountException("invalid_artwork_width", "Choose an artwork width of 320, 640, 1280 or 1920.", 400);
-        var source = await artwork.OpenAsync(artworkId, database, cancellationToken);
+        var described = await artwork.DescribeAsync(artworkId, database, cancellationToken);
+        if (described is null) return Results.NotFound();
+        var revision = described.Revision;
+        context.Response.Headers.CacheControl = "private, no-cache";
+        context.Response.Headers.XContentTypeOptions = "nosniff";
+        // A cached variant answers without opening the original; an unchanged one needs no file at all.
+        var cached = width.HasValue ? variants.OpenCached(artworkId, revision, width.Value, described.LastModified) : null;
+        var entityTag = ArtworkEntityTag(artworkId, revision, cached is not null ? width!.Value : 0);
+        if ((cached is not null || !width.HasValue) && IsUnchanged(context, entityTag))
+        {
+            if (cached is not null) await cached.Stream.DisposeAsync();
+            context.Response.Headers.ETag = entityTag.ToString();
+            return Results.StatusCode(StatusCodes.Status304NotModified);
+        }
+        var source = cached ?? ArtworkStore.Open(described);
         if (source is null) return Results.NotFound();
-        var revision = source.Revision;
-        if (width.HasValue)
+        if (cached is null && width.HasValue)
         {
             try
             {
                 var variant = await variants.OpenAsync(artworkId, revision, width.Value, source, database, cancellationToken);
                 if (variant is not null) { await source.Stream.DisposeAsync(); source = variant; }
+                entityTag = ArtworkEntityTag(artworkId, revision, variant is not null ? width.Value : 0);
             }
             catch { await source.Stream.DisposeAsync(); throw; }
         }
-        context.Response.Headers.CacheControl = "private, no-cache";
-        context.Response.Headers.XContentTypeOptions = "nosniff";
-        return Results.File(source.Stream, source.ContentType, lastModified: source.LastModified,
-            entityTag: new EntityTagHeaderValue($"\"{artworkId:N}-r{revision:x}-w{width ?? 0}-{source.ContentLength:x}\""));
+        return Results.File(source.Stream, source.ContentType, lastModified: source.LastModified, entityTag: entityTag);
     }
+
+    // Variants are deterministic per artwork revision and width; "v1" changes with the encoder.
+    private static EntityTagHeaderValue ArtworkEntityTag(Guid artworkId, long revision, int width) =>
+        new($"\"{artworkId:N}-r{revision:x}-w{width}-v1\"");
+
+    private static bool IsUnchanged(HttpContext context, EntityTagHeaderValue entityTag) =>
+        context.Request.GetTypedHeaders().IfNoneMatch is { Count: > 0 } candidates
+        && candidates.Any(candidate => candidate.Equals(EntityTagHeaderValue.Any) || candidate.Compare(entityTag, useStrongComparison: false));
 
     private static Task<IResult> CreatePlaybackAsync(
         HttpContext context,

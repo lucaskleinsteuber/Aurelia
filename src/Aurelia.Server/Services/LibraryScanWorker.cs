@@ -11,6 +11,8 @@ public sealed partial class LibraryScanWorker(
     IMediaLibraryScanner scanner,
     ILogger<LibraryScanWorker> logger) : BackgroundService
 {
+    internal static readonly TimeSpan IdleFallback = TimeSpan.FromSeconds(30);
+
     private const int MaximumStoredIssues = 500;
     private const int RetainedScansPerLibrary = 25;
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
@@ -25,7 +27,9 @@ public sealed partial class LibraryScanWorker(
             if (request is null)
             {
                 using var wait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                wait.CancelAfter(TimeSpan.FromSeconds(1));
+                // Every queued scan pulses the scheduler, so an idle server does not need to
+                // query the database every second. The fallback still recovers a lost wake.
+                wait.CancelAfter(IdleFallback);
                 try
                 {
                     await queue.WaitAsync(wait.Token);

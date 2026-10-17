@@ -58,7 +58,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac simplified-settings release is 1.5.10 (55); the
+  changing them. The approved Mac server-performance release is 1.6.0 (56); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   playback-responsiveness update is 0.1.8 (9).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

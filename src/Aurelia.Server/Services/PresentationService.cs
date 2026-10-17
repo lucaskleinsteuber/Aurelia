@@ -513,7 +513,8 @@ public sealed class PresentationService(
     }
     private static void ValidatePage(int offset, int limit)
     {
-        if (offset < 0 || limit is < 1 or > 200)
-            throw new MetadataException("invalid_page", "Offset must be zero or greater and limit must be between 1 and 200.", StatusCodes.Status400BadRequest);
+        if (offset < 0 || limit is < 1 or > ServerFeatures.MaximumCatalogPageSize)
+            throw new MetadataException("invalid_page",
+                $"Offset must be zero or greater and limit must be between 1 and {ServerFeatures.MaximumCatalogPageSize}.", StatusCodes.Status400BadRequest);
     }
 }

@@ -145,11 +145,11 @@ public sealed class CatalogService(AureliaDbContext database)
 
     private static void ValidatePage(int offset, int limit)
     {
-        if (offset < 0 || limit is < 1 or > 200)
+        if (offset < 0 || limit is < 1 or > ServerFeatures.MaximumCatalogPageSize)
         {
             throw new LibraryException(
                 "invalid_page",
-                "Offset must be zero or greater and limit must be between 1 and 200.",
+                $"Offset must be zero or greater and limit must be between 1 and {ServerFeatures.MaximumCatalogPageSize}.",
                 StatusCodes.Status400BadRequest);
         }
     }

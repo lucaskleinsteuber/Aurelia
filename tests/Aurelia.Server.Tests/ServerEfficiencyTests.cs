@@ -1,0 +1,80 @@
+using System.Net;
+using System.Net.Http.Headers;
+using Aurelia.Contracts;
+using Aurelia.Server.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Aurelia.Server.Tests;
+
+public sealed class ServerEfficiencyTests
+{
+    [Fact]
+    public async Task CatalogListsAcceptLargePagesAndAreTheOnlyCompressedResponses()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+
+        using var capabilities = await client.GetAsync("/api/v1/capabilities");
+        var features = (await ApiTestClient.ReadAsync<ClientCapabilitiesResponse>(capabilities)).Capabilities;
+        Assert.Contains("catalog-pages-500-v1", features);
+
+        foreach (var path in new[] { "/api/v1/catalog/items", "/api/v1/catalog/movies", "/api/v1/catalog/series" })
+        {
+            using var large = Request($"{path}?offset=0&limit=500", owner.Token);
+            using var accepted = await client.SendAsync(large);
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            Assert.Contains("br", accepted.Content.Headers.ContentEncoding);
+            using var tooLarge = Request($"{path}?offset=0&limit=501", owner.Token);
+            using var rejected = await client.SendAsync(tooLarge);
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        }
+
+        using var home = Request("/api/v1/home", owner.Token);
+        using var homeResponse = await client.SendAsync(home);
+        Assert.Equal(HttpStatusCode.OK, homeResponse.StatusCode);
+        Assert.Contains("br", homeResponse.Content.Headers.ContentEncoding);
+
+        // Responses that can carry credentials or personal state stay uncompressed.
+        foreach (var path in new[] { "/api/v1/auth/me", "/api/v1/auth/sessions", "/api/v1/capabilities" })
+        {
+            using var request = Request(path, owner.Token);
+            using var response = await client.SendAsync(request);
+            Assert.True(response.IsSuccessStatusCode, path);
+            Assert.Empty(response.Content.Headers.ContentEncoding);
+        }
+    }
+
+    [Fact]
+    public async Task DatabaseConnectionsUseNormalSynchronisationInWalMode()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        _ = await ApiTestClient.SetupOwnerAsync(client);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        await database.Database.OpenConnectionAsync();
+        try
+        {
+            await using var command = database.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "PRAGMA journal_mode;";
+            Assert.Equal("wal", await command.ExecuteScalarAsync());
+            command.CommandText = "PRAGMA synchronous;";
+            Assert.Equal(1L, await command.ExecuteScalarAsync());
+        }
+        finally
+        {
+            await database.Database.CloseConnectionAsync();
+        }
+    }
+
+    private static HttpRequestMessage Request(string path, string token)
+    {
+        var request = ApiTestClient.Authorized(HttpMethod.Get, path, token);
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
+        request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
+        return request;
+    }
+}

@@ -1324,11 +1324,12 @@ final class AppModel: ObservableObject {
       if !updated.isViewingSession { try store.save(updated) }
       self.profile = updated
     }
-    async let loadedMovies = client.movies()
-    async let loadedSeries = client.series()
-    async let loadedCatalog = client.catalogItems()
+    let catalogClient = client.pagingCatalog(for: info.capabilities)
+    async let loadedMovies = catalogClient.movies()
+    async let loadedSeries = catalogClient.series()
+    async let loadedCatalog = catalogClient.catalogItems()
     async let loadedHome = homeRefresher.load(request: homeRequest, profile: profile)
-    async let loadedCollections = client.collections()
+    async let loadedCollections = catalogClient.collections()
     let (newMovies, newSeries, newCatalog, newHome, newCollections) = try await (
       loadedMovies, loadedSeries, loadedCatalog, loadedHome, loadedCollections
     )

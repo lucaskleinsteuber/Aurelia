@@ -21,6 +21,11 @@ Clients must tolerate absent optional fields and unknown additive fields. Featur
 introduced in 1.5.5 are `server-readiness-v1`, `device-authorization-v1`, and
 `artwork-variants-v1`. They do not change the existing minimum client version.
 
+Since 1.6.0, `catalog-pages-500-v1` means catalog lists (`/api/v1/catalog/items`,
+`/movies`, `/series` and `/search`) accept a `limit` of up to 500; older servers
+accept up to 200. Catalog, Home and collection GET responses are compressed with
+Brotli or gzip when the request sends `Accept-Encoding`; other responses are not.
+
 `GET /api/v1/health/live` (also HEAD) indicates HTTP liveness without a database
 read. `GET /api/v1/health/ready` reports a coarse cached state. Component details
 and bounded recovery history require the Owner management endpoint
@@ -49,7 +54,9 @@ Pairing never unlocks a watching profile. Existing pairing-code APIs remain vali
 `GET /api/v1/artwork/{id}?width=320` supports widths 320, 640, 1280, and 1920.
 Omit width for the stored source. Variants preserve orientation, crop, aspect ratio,
 and transparency and never upscale. HTTP ETags and the optional artwork `revision`
-change with the source. Cache by server, session, artwork revision, and width.
+change with the source. Cache by server, watching profile, artwork revision, and
+width; bytes cached for a revision stay valid until the revision changes. An
+`If-None-Match` request for unchanged artwork returns `304` without a body.
 On older servers, request the existing artwork path without a width parameter.
 
 The shared synthetic JSON fixtures in the Mac test target are also embedded in

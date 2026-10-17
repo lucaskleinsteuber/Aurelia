@@ -34,17 +34,25 @@ public sealed class ArtworkVariantStore(ServerRuntimeOptions runtime, TimeProvid
         var stem = $"{id:N}-r{revision:x}-w{width}-v1";
         if (Directory.Exists(directory) && new DirectoryInfo(directory).LinkTarget is not null) return null;
         // Variants are published by an atomic rename, so a hit never sees a partial file.
-        if (OpenCached(stem, original, revision) is { } hit) return hit;
+        if (OpenCached(stem, original.LastModified, revision) is { } hit) return hit;
         var variantLock = variantLocks[(int)((uint)StringComparer.Ordinal.GetHashCode(stem) % (uint)variantLocks.Length)];
         await variantLock.WaitAsync(token);
         try
         {
-            if (OpenCached(stem, original, revision) is { } concurrent) return concurrent;
+            if (OpenCached(stem, original.LastModified, revision) is { } concurrent) return concurrent;
             await generation.WaitAsync(token);
             try { return await GenerateAsync(id, revision, width, stem, original, database, token); }
             finally { generation.Release(); }
         }
         finally { variantLock.Release(); }
+    }
+
+    /// <summary>Opens an existing variant without touching the original artwork file.</summary>
+    public ArtworkFileResult? OpenCached(Guid id, long revision, int width, DateTimeOffset lastModified)
+    {
+        if (!IsSupportedWidth(width)) return null;
+        if (Directory.Exists(directory) && new DirectoryInfo(directory).LinkTarget is not null) return null;
+        return OpenCached($"{id:N}-r{revision:x}-w{width}-v1", lastModified, revision);
     }
 
     internal bool IsCached(Guid id, long revision, int width)
@@ -64,7 +72,7 @@ public sealed class ArtworkVariantStore(ServerRuntimeOptions runtime, TimeProvid
         }
     }
 
-    private ArtworkFileResult? OpenCached(string stem, ArtworkFileResult original, long revision)
+    private ArtworkFileResult? OpenCached(string stem, DateTimeOffset lastModified, long revision)
     {
         foreach (var extension in VariantExtensions)
         {
@@ -82,7 +90,7 @@ public sealed class ArtworkVariantStore(ServerRuntimeOptions runtime, TimeProvid
                     try { File.SetLastWriteTimeUtc(cached, now); }
                     catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
                 }
-                return new(stream, extension == ".png" ? "image/png" : "image/jpeg", stream.Length, original.LastModified, revision);
+                return new(stream, extension == ".png" ? "image/png" : "image/jpeg", stream.Length, lastModified, revision);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         }

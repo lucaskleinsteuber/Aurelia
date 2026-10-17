@@ -63,6 +63,21 @@ enum APIClientError: LocalizedError, Equatable {
 
 struct APIClient: Sendable {
   let profile: StoredServerProfile
+  /// Servers with "catalog-pages-500-v1" accept larger pages, so whole lists need fewer requests.
+  var catalogPageSize = 100
+
+  init(profile: StoredServerProfile) {
+    self.profile = profile
+  }
+
+  static let largeCatalogPagesFeature = "catalog-pages-500-v1"
+
+  func pagingCatalog(for capabilities: [String]?) -> APIClient {
+    var client = self
+    client.catalogPageSize =
+      capabilities?.contains(Self.largeCatalogPagesFeature) == true ? 500 : 100
+    return client
+  }
 
   static func normalizedServerURL(_ input: String) throws -> URL {
     var value = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1012,7 +1027,8 @@ struct APIClient: Sendable {
       let prefix = query.map { "\($0)&" } ?? ""
       let revisionQuery =
         try revision.map { "&" + (try Self.query(name: "revision", value: $0)) } ?? ""
-      return try await get("\(path)?\(prefix)offset=\(offset)&limit=100\(revisionQuery)")
+      return try await get(
+        "\(path)?\(prefix)offset=\(offset)&limit=\(catalogPageSize)\(revisionQuery)")
     }
   }
 
