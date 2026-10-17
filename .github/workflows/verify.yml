@@ -1,9 +1,37 @@
 name: Verify server
 
+# macOS runner minutes are billed at a multiple, so client-only changes skip this server job.
+# The Mac version file stays included because the build-number check compares it with the server.
 on:
   push:
     branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "tools/**"
+      - "scripts/**"
+      - ".config/**"
+      - ".github/workflows/verify.yml"
+      - "Aurelia.slnx"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "NuGet.Config"
+      - "global.json"
+      - "clients/macos/Configuration/BuildNumber.xcconfig"
   pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "tools/**"
+      - "scripts/**"
+      - ".config/**"
+      - ".github/workflows/verify.yml"
+      - "Aurelia.slnx"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "NuGet.Config"
+      - "global.json"
+      - "clients/macos/Configuration/BuildNumber.xcconfig"
   workflow_dispatch:
 
 permissions:
