@@ -18,6 +18,7 @@ struct MediaDetailView: View {
   @State private var primarySeasonApplied = false
   @State private var playbackTask: Task<Void, Never>?
   @State private var usedPreparedDetail = false
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
   @StateObject private var watchActions = MediaWatchActionController()
 
   /// What the page shows now: loaded details, else prepared ones, else the list entry that
@@ -27,6 +28,11 @@ struct MediaDetailView: View {
     guard errorMessage == nil else { return nil }
     return model.preparedDetail(id: mediaId)?.detail
       ?? model.listedItem(id: mediaId).map(AppModel.provisionalDetail)
+  }
+
+  /// The page shows a list entry while the full details are still on their way.
+  private var isWaitingForDetails: Bool {
+    detail == nil && errorMessage == nil && model.preparedDetail(id: mediaId) == nil
   }
 
   private var shownPlan: PlaybackPlanResponse? {
@@ -63,14 +69,22 @@ struct MediaDetailView: View {
               ? { showingRemoveConfirmation = true } : nil
           )
 
-          if !detail.seasons.isEmpty {
-            seasons(detail)
+          if isWaitingForDetails {
+            DetailLoadingPlaceholder(isSeries: detail.item.kind == .series)
+              .transition(.opacity)
+          } else {
+            Group {
+              if !detail.seasons.isEmpty {
+                seasons(detail)
+              }
+              supplementSections(
+                detail.supplements, parentTitle: detail.item.title,
+                headingPrefix: detail.item.kind == .series ? "Series " : "")
+              credits(detail.metadata.credits)
+              about(detail)
+            }
+            .transition(.opacity.combined(with: .offset(y: reduceMotion ? 0 : 16)))
           }
-          supplementSections(
-            detail.supplements, parentTitle: detail.item.title,
-            headingPrefix: detail.item.kind == .series ? "Series " : "")
-          credits(detail.metadata.credits)
-          about(detail)
         }
         .padding(.bottom, 48)
       } else if let errorMessage {
@@ -213,7 +227,8 @@ struct MediaDetailView: View {
       async let loadedPlan = model.optionalPlaybackPlan(mediaId: mediaId)
       let loadedDetail = try await model.catalogDetail(id: mediaId)
       guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
-      detail = loadedDetail
+      // Seasons, cast and information glide in under the hero that is already shown.
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.32)) { detail = loadedDetail }
       if !loadedDetail.seasons.contains(where: { $0.number == selectedSeason }) {
         selectedSeason = loadedDetail.seasons.first?.number
       }
@@ -375,7 +390,7 @@ struct MediaDetailView: View {
             } label: {
               EpisodeCard(episode: episode)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AureliaCardButtonStyle())
             .disabled(!MediaAvailabilityPresentation.canPlay(episode.item) || isStartingPlayback)
             .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
             .mediaActions(item: episode.item)
@@ -427,7 +442,7 @@ struct MediaDetailView: View {
                   .background(.ultraThinMaterial, in: Circle())
               }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AureliaCardButtonStyle())
             .disabled(!MediaAvailabilityPresentation.canPlay(supplement.item))
             .accessibilityIdentifier("supplement-\(supplement.id.uuidString)")
           }
@@ -788,4 +803,61 @@ struct SeriesDetailView: View {
   let seriesId: UUID
   let onBack: () -> Void
   var body: some View { MediaDetailView(mediaId: seriesId, onBack: onBack) }
+}
+
+/// Shimmering stand-ins for the episodes and cast while the details load.
+private struct DetailLoadingPlaceholder: View {
+  let isSeries: Bool
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @State private var phase: CGFloat = -1
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 18) {
+      bar(width: 160, height: 22)
+      HStack(spacing: 18) {
+        ForEach(0..<4, id: \.self) { _ in
+          VStack(alignment: .leading, spacing: 10) {
+            bar(width: isSeries ? 260 : 154, height: isSeries ? 146 : 231)
+            bar(width: isSeries ? 180 : 120, height: 14)
+          }
+        }
+      }
+      bar(width: 140, height: 22).padding(.top, 12)
+      HStack(spacing: 22) {
+        ForEach(0..<6, id: \.self) { _ in
+          Circle().fill(AureliaDesign.surface).frame(width: 74, height: 74)
+            .overlay { shimmer.clipShape(Circle()) }
+        }
+      }
+    }
+    .padding(.horizontal, AureliaDesign.pagePadding)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Loading details")
+    .accessibilityIdentifier("detail-loading")
+    .onAppear {
+      guard !reduceMotion else { return }
+      withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) { phase = 1 }
+    }
+  }
+
+  private func bar(width: CGFloat, height: CGFloat) -> some View {
+    RoundedRectangle(cornerRadius: min(12, height / 2), style: .continuous)
+      .fill(AureliaDesign.surface)
+      .frame(width: width, height: height)
+      .overlay {
+        shimmer.clipShape(RoundedRectangle(cornerRadius: min(12, height / 2), style: .continuous))
+      }
+  }
+
+  private var shimmer: some View {
+    GeometryReader { geometry in
+      LinearGradient(
+        colors: [.clear, .white.opacity(0.08), .clear], startPoint: .leading,
+        endPoint: .trailing
+      )
+      .frame(width: geometry.size.width * 0.8)
+      .offset(x: phase * geometry.size.width * 1.4)
+    }
+    .allowsHitTesting(false)
+  }
 }

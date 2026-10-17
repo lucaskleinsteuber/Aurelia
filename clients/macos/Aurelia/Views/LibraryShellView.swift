@@ -50,6 +50,7 @@ struct LibraryShellView: View {
   @State private var sidebarWidth = AureliaDesign.sidebarWidth
   @State private var resizeStartWidth: CGFloat?
   @State private var findRequest: FindRequest?
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   var body: some View {
     GeometryReader { geometry in
@@ -215,9 +216,24 @@ struct LibraryShellView: View {
         .allowsHitTesting(selection == nil)
         .accessibilityHidden(selection != nil)
       if let activeSelection = selection {
+        // A detail page rises gently into place; going back fades it away over the page.
         selectedPage(activeSelection)
+          .id(activeSelection)
+          .transition(
+            reduceMotion
+              ? .opacity
+              : .asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.97)).combined(
+                  with: .offset(y: 18)),
+                removal: .opacity.combined(with: .scale(scale: 1.015)))
+          )
+          .zIndex(1)
       }
     }
+    .animation(
+      reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.4, dampingFraction: 0.86),
+      value: selection
+    )
     .onChange(of: selection) { _, value in
       if value == nil, destination == .home { Task { await model.refreshHome() } }
       // Typing must never reach a search field hidden underneath the detail page.
@@ -366,7 +382,7 @@ private struct HomePage: View {
             } label: {
               LandscapeMediaCard(item: item, eyebrow: eyebrow)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AureliaCardButtonStyle())
             .disabled(!item.isPlayable)
             .accessibilityLabel(
               ["Continue \(item.title)", CatalogPlaybackLogic.subtitle(for: item)]
@@ -412,7 +428,7 @@ private struct HomePage: View {
             } label: {
               MediaPosterCard(item: item)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AureliaCardButtonStyle())
             .accessibilityIdentifier("media-\(item.id.uuidString)")
           }
         }
@@ -436,7 +452,7 @@ private struct HomePage: View {
             } label: {
               CollectionCard(collection: collection)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AureliaCardButtonStyle())
             .accessibilityIdentifier("collection-\(collection.id.uuidString.lowercased())")
           }
         }
@@ -879,7 +895,7 @@ private struct LibraryPage: View {
           } label: {
             CollectionCard(collection: collection)
           }
-          .buttonStyle(.plain)
+          .buttonStyle(AureliaCardButtonStyle())
         }
       }
     }
@@ -928,7 +944,7 @@ private struct LibraryPage: View {
         } label: {
           LandscapeMediaCard(item: episode, width: 300, eyebrow: episodeSearchEyebrow(episode))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaCardButtonStyle())
         .disabled(!episode.isPlayable)
         .accessibilityLabel(
           "\(episode.title), \(CatalogPlaybackLogic.subtitle(for: episode) ?? "Episode")"
@@ -1129,7 +1145,7 @@ private func posterGrid(_ items: [CatalogItemSummary], onSelect: @escaping (UUID
       } label: {
         MediaPosterCard(item: item)
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaCardButtonStyle())
       .accessibilityIdentifier("media-\(item.id.uuidString)")
       .mediaActions(item: item)
     }

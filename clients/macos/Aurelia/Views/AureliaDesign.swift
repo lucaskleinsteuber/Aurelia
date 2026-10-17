@@ -453,6 +453,7 @@ struct AureliaPrimaryActionButtonStyle: ButtonStyle {
 struct AuthenticatedArtwork: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.displayScale) private var displayScale
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
   let artwork: ArtworkSummary?
   let symbol: String
   var contentMode: ContentMode = .fill
@@ -490,7 +491,9 @@ struct AuthenticatedArtwork: View {
             for: artwork, profile: profile,
             width: model.libraryCapabilities.contains("artwork-variants-v1") ? width : nil)
           try Task.checkCancellation()
-          image = NSImage(data: data)
+          // Newly loaded artwork fades in; artwork already in memory is drawn at once.
+          let loaded = NSImage(data: data)
+          withAnimation(reduceMotion ? nil : .easeOut(duration: 0.28)) { image = loaded }
         } catch is CancellationError {
           return
         } catch {
@@ -534,6 +537,20 @@ struct MediaArtworkPlaceholder: View {
   }
 }
 
+/// Cards stay fully lit when pressed and sink slightly with a spring instead of dimming.
+struct AureliaCardButtonStyle: ButtonStyle {
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+      .brightness(configuration.isPressed ? -0.03 : 0)
+      .animation(
+        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
+        value: configuration.isPressed)
+  }
+}
+
 struct MediaPosterCard: View {
   @EnvironmentObject private var model: AppModel
   let item: CatalogItemSummary
@@ -565,34 +582,13 @@ struct MediaPosterCard: View {
       .frame(width: width, height: width * 1.5)
       .clipShape(RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous))
       .overlay(alignment: .topTrailing) {
-        VStack(spacing: 7) {
-          if item.isFavorite {
-            Image(systemName: "star.fill")
-              .foregroundStyle(.white)
-              .accessibilityLabel("Favorite")
-          }
-          if MediaAvailabilityPresentation.message(for: item) != nil {
-            Image(systemName: "exclamationmark.triangle.fill")
-              .foregroundStyle(.orange)
-              .accessibilityLabel(
-                MediaAvailabilityPresentation.message(for: item) ?? "Media unavailable")
-          }
-          if MediaWatchPresentation.isWatched(item) {
-            Image(systemName: "checkmark.circle.fill")
-              .foregroundStyle(.white)
-              .accessibilityLabel("Watched")
-          }
-        }
-        .font(.caption.weight(.bold))
-        .padding(9)
-        .background(.black.opacity(0.44), in: RoundedRectangle(cornerRadius: 10))
-        .padding(9)
+        if hasBadges { badges }
       }
       .overlay {
         RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
-          .stroke(hovering ? .white.opacity(0.25) : AureliaDesign.hairline, lineWidth: 1)
+          .stroke(hovering ? .white.opacity(0.35) : AureliaDesign.hairline, lineWidth: 1)
       }
-      .shadow(color: .black.opacity(hovering ? 0.34 : 0), radius: 14, y: 8)
+      .shadow(color: .black.opacity(hovering ? 0.42 : 0), radius: 18, y: 10)
 
       Text(item.title)
         .font(.headline)
@@ -606,8 +602,11 @@ struct MediaPosterCard: View {
         .frame(width: width, alignment: .leading)
     }
     .contentShape(Rectangle())
-    .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
-    .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
+    .scaleEffect(hovering && !reduceMotion ? 1.035 : 1)
+    .offset(y: hovering && !reduceMotion ? -3 : 0)
+    .animation(
+      reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.78), value: hovering
+    )
     .onHover { hovering = $0 }
     .task(id: hovering) {
       // Once the pointer rests on a title, prepare its detail page so it opens complete.
@@ -616,6 +615,37 @@ struct MediaPosterCard: View {
       guard !Task.isCancelled else { return }
       model.prepareDetail(for: item)
     }
+  }
+
+  /// Favorite, unavailable and watched markers; the box is drawn only when one applies.
+  private var hasBadges: Bool {
+    item.isFavorite || MediaAvailabilityPresentation.message(for: item) != nil
+      || MediaWatchPresentation.isWatched(item)
+  }
+
+  private var badges: some View {
+    VStack(spacing: 7) {
+      if item.isFavorite {
+        Image(systemName: "star.fill")
+          .foregroundStyle(.white)
+          .accessibilityLabel("Favorite")
+      }
+      if MediaAvailabilityPresentation.message(for: item) != nil {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundStyle(.orange)
+          .accessibilityLabel(
+            MediaAvailabilityPresentation.message(for: item) ?? "Media unavailable")
+      }
+      if MediaWatchPresentation.isWatched(item) {
+        Image(systemName: "checkmark.circle.fill")
+          .foregroundStyle(.white)
+          .accessibilityLabel("Watched")
+      }
+    }
+    .font(.caption.weight(.bold))
+    .padding(9)
+    .background(.black.opacity(0.44), in: RoundedRectangle(cornerRadius: 10))
+    .padding(9)
   }
 
   private var secondaryLine: String {
