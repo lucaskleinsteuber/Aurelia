@@ -9,6 +9,21 @@ struct PersonCardPresentation: Identifiable, Equatable {
 }
 
 enum CreditPresentation {
+  /// The leading cast for a hero's "Starring" line: actors in billing order, each name once.
+  static func starring(_ credits: [CreditSummary], limit: Int = 3) -> [String] {
+    var seen: Set<String> = []
+    return credits.enumerated()
+      .filter { $0.element.department.caseInsensitiveCompare("Acting") == .orderedSame }
+      .sorted {
+        $0.element.order == $1.element.order
+          ? $0.offset < $1.offset : $0.element.order < $1.element.order
+      }
+      .map { $0.element.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty && seen.insert($0).inserted }
+      .prefix(limit)
+      .map { $0 }
+  }
+
   /// Display projection only: raw credits, jobs, order and manual editor data are untouched.
   static func people(_ credits: [CreditSummary]) -> [PersonCardPresentation] {
     var groups: [String: [(Int, CreditSummary)]] = [:]

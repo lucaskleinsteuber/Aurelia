@@ -156,29 +156,47 @@ struct LibraryShellView: View {
   }
 
   private var sidebar: some View {
-    List(selection: $destination) {
-      Section {
-        sidebarButton(.home)
-      }
-      Section("Library") {
-        sidebarButton(.library)
-        sidebarButton(.recentlyAdded)
-        sidebarButton(.tvShows)
-        sidebarButton(.movies)
-      }
-      if model.profile?.isViewingSession == true {
+    VStack(spacing: 0) {
+      List(selection: $destination) {
         Section {
-          Button {
-            Task { await model.switchWatchingProfile() }
-          } label: {
-            Label(
-              model.profile?.user?.username ?? "Switch Profile", systemImage: "person.crop.circle")
-          }.disabled(model.isSelectingProfile).accessibilityIdentifier("switch-watching-profile")
+          sidebarButton(.home)
+        }
+        Section("Library") {
+          sidebarButton(.library)
+          sidebarButton(.recentlyAdded)
+          sidebarButton(.tvShows)
+          sidebarButton(.movies)
         }
       }
+      .listStyle(.sidebar)
+      .scrollContentBackground(.hidden)
+      // The profile sits at the foot of the sidebar, like the account in the Apple TV app.
+      if model.profile?.isViewingSession == true {
+        Button {
+          Task { await model.switchWatchingProfile() }
+        } label: {
+          HStack(spacing: 10) {
+            AureliaProfileAvatar(
+              id: model.profile?.user?.id, name: model.profile?.user?.username ?? "?", size: 30)
+            Text(model.profile?.user?.username ?? "Switch Profile")
+              .font(.body.weight(.semibold))
+              .lineLimit(1)
+            Spacer(minLength: 0)
+          }
+          .padding(.horizontal, 10)
+          .frame(height: 46)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(SidebarFooterButtonStyle())
+        .padding(.horizontal, 10)
+        .padding(.bottom, 12)
+        .disabled(model.isSelectingProfile)
+        .help("Switch Profile")
+        .accessibilityLabel("Switch Profile, \(model.profile?.user?.username ?? "")")
+        .accessibilityIdentifier("switch-watching-profile")
+      }
     }
-    .listStyle(.sidebar)
-    .scrollContentBackground(.hidden)
+    .accessibilityElement(children: .contain)
     .accessibilityIdentifier("primary-sidebar")
   }
 
@@ -204,9 +222,14 @@ struct LibraryShellView: View {
       destination = item
       if item == .home { Task { await model.refreshHome() } }
     } label: {
-      Label(item.title, systemImage: item.symbol)
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-        .contentShape(Rectangle())
+      Label {
+        Text(item.title).font(.body.weight(destination == item ? .semibold : .regular))
+      } icon: {
+        // Tinted symbols, as in the Apple TV app's sidebar.
+        Image(systemName: item.symbol).foregroundStyle(.tint)
+      }
+      .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .tag(item)
@@ -603,7 +626,6 @@ private struct LibraryPage: View {
       VStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
         if loadedContext == context {
           libraryHeader
-          if hasFilters { activeFilters }
           if section == .library, search.isEmpty, !hasFilters, !model.collections.isEmpty {
             collectionRow
           }
@@ -728,9 +750,11 @@ private struct LibraryPage: View {
       }
       HStack(spacing: 10) {
         searchField
-        filterMenu
-        sortMenu
+        LibrarySortButton(query: $query, isSearching: !search.isEmpty)
       }
+      LibraryFilterBar(
+        section: section, query: $query, genres: genres, years: years,
+        isSearching: !search.isEmpty, supportsWatchState: model.supportsLibraryState)
     }
   }
 
@@ -751,113 +775,11 @@ private struct LibraryPage: View {
         .accessibilityLabel("Clear Search")
       }
     }
-    .padding(.horizontal, 12)
+    .padding(.horizontal, 14)
     .frame(height: 38)
-    .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
-    .overlay { RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline) }
-  }
-
-  private var filterMenu: some View {
-    Menu {
-      if section == .library {
-        Picker("Media Type", selection: $query.kind) {
-          Text("All Media").tag(Optional<MediaKind>.none)
-          Text("Movies").tag(Optional(MediaKind.movie))
-          Text("TV Shows").tag(Optional(MediaKind.series))
-        }
-      }
-      Toggle("Favorites Only", isOn: $query.favoritesOnly)
-      Picker("Genre", selection: $query.genre) {
-        Text("All Genres").tag(Optional<String>.none)
-        ForEach(genres, id: \.self) { Text($0).tag(Optional($0)) }
-      }
-      Menu("Release Year") {
-        Picker("From", selection: fromYear) {
-          Text("Any Year").tag(Optional<Int>.none)
-          ForEach(years, id: \.self) { Text(String($0)).tag(Optional($0)) }
-        }
-        Picker("To", selection: toYear) {
-          Text("Any Year").tag(Optional<Int>.none)
-          ForEach(years, id: \.self) { Text(String($0)).tag(Optional($0)) }
-        }
-      }
-      Picker("Watch Status", selection: $query.watchState) {
-        ForEach(CatalogWatchFilter.allCases, id: \.self) { Text($0.title).tag($0) }
-      }
-      .disabled(!model.supportsLibraryState)
-      if !model.supportsLibraryState { Text("Watch filters require server version 1.5.3") }
-      Divider()
-      Button("Clear Filters") { query.clearFilters(preserving: section.fixedKind) }
-        .disabled(!hasFilters)
-    } label: {
-      Image(
-        systemName: hasFilters
-          ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease"
-      )
-      .frame(width: 38, height: 38)
-      .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
-      .overlay { RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline) }
-    }
-    .menuStyle(.borderlessButton)
-    .accessibilityLabel("Filter Library")
-    .accessibilityIdentifier("library-filters")
-  }
-
-  private var sortMenu: some View {
-    Menu {
-      Picker("Sort By", selection: $query.sort) {
-        Text(search.isEmpty ? "Default" : "Relevance").tag(Optional<CatalogBrowseSort>.none)
-        ForEach(CatalogBrowseSort.allCases, id: \.self) {
-          Text($0.title).tag(Optional($0))
-        }
-      }
-      Divider()
-      Picker("Direction", selection: $query.descending) {
-        Text("Ascending").tag(false)
-        Text("Descending").tag(true)
-      }
-      .disabled(query.sort == nil)
-    } label: {
-      Image(systemName: "arrow.up.arrow.down")
-        .frame(width: 38, height: 38)
-        .background(AureliaDesign.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
-        .overlay { RoundedRectangle(cornerRadius: 10).stroke(AureliaDesign.hairline) }
-    }
-    .menuStyle(.borderlessButton)
-    .accessibilityLabel("Sort: \(query.sort?.title ?? (search.isEmpty ? "Default" : "Relevance"))")
-    .accessibilityIdentifier("library-sort")
-  }
-
-  private var activeFilters: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 12) {
-      Text(filterSummary)
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .accessibilityIdentifier("library-active-filters")
-      Spacer(minLength: 8)
-      Button("Clear Filters") { query.clearFilters(preserving: section.fixedKind) }
-        .buttonStyle(.plain)
-        .foregroundStyle(.tint)
-        .accessibilityIdentifier("library-clear-filters")
-    }
-  }
-
-  private var filterSummary: String {
-    var parts: [String] = []
-    if section == .library, let kind = query.kind {
-      parts.append(kind == .movie ? "Movies" : "TV Shows")
-    }
-    if query.favoritesOnly { parts.append("Favorites") }
-    if let genre = query.genre { parts.append(genre) }
-    if let from = query.yearFrom, let to = query.yearTo {
-      parts.append(from == to ? String(from) : "\(from)–\(to)")
-    } else if let from = query.yearFrom {
-      parts.append("From \(from)")
-    } else if let to = query.yearTo {
-      parts.append("Through \(to)")
-    }
-    if query.watchState != .all { parts.append(query.watchState.title) }
-    return parts.joined(separator: " · ")
+    .background(.white.opacity(0.08), in: Capsule())
+    .overlay { Capsule().strokeBorder(AureliaDesign.hairline) }
+    .frame(maxWidth: 520)
   }
 
   private var genres: [String] {
@@ -867,24 +789,6 @@ private struct LibraryPage: View {
   }
 
   private var years: [Int] { Set(model.catalogItems.compactMap(\.year)).sorted(by: >) }
-
-  private var fromYear: Binding<Int?> {
-    Binding(
-      get: { query.yearFrom },
-      set: { value in
-        query.yearFrom = value
-        if let value, let to = query.yearTo, value > to { query.yearTo = value }
-      })
-  }
-
-  private var toYear: Binding<Int?> {
-    Binding(
-      get: { query.yearTo },
-      set: { value in
-        query.yearTo = value
-        if let value, let from = query.yearFrom, value < from { query.yearFrom = value }
-      })
-  }
 
   private var managementActions: some View {
     HStack(spacing: 10) {
@@ -1098,6 +1002,9 @@ private struct CollectionDetailView: View {
       .padding(.bottom, 48)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .scrollClipDisabled()
+    .aureliaOverlayScrollbars()
+    .aureliaCompactHeader(title: collection.name, threshold: 360, onBack: onBack)
     .sheet(isPresented: $showingEditor) {
       CollectionEditorSheet(collection: collection).environmentObject(model)
     }
@@ -1111,12 +1018,22 @@ private struct CollectionDetailView: View {
         contentMode: .fill
       )
       .backgroundExtensionEffect()
+      .aureliaHeroSettle()
       LinearGradient(
-        colors: [.black.opacity(0.84), .black.opacity(0.24), .clear],
+        stops: [
+          .init(color: .black.opacity(0.7), location: 0),
+          .init(color: .black.opacity(0.3), location: 0.4),
+          .init(color: .clear, location: 0.75),
+        ],
         startPoint: .leading,
         endPoint: .trailing)
       LinearGradient(
-        colors: [.clear, AureliaDesign.canvas.opacity(0.18), AureliaDesign.canvas],
+        stops: [
+          .init(color: .clear, location: 0.42),
+          .init(color: AureliaDesign.canvas.opacity(0.3), location: 0.66),
+          .init(color: AureliaDesign.canvas.opacity(0.78), location: 0.88),
+          .init(color: AureliaDesign.canvas, location: 1),
+        ],
         startPoint: .top,
         endPoint: .bottom)
 
@@ -1124,12 +1041,17 @@ private struct CollectionDetailView: View {
         Text("COLLECTION")
           .font(.caption.weight(.bold))
           .tracking(1)
-          .foregroundStyle(.white.opacity(0.7))
+          .foregroundStyle(.white.opacity(0.72))
+          .aureliaRiseIn(0)
         Text(collection.name)
           .font(AureliaDesign.heroTitle)
-          .tracking(-0.5)
+          .tracking(-0.6)
+          .lineLimit(2)
+          .aureliaRiseIn(1)
         Text("\(collection.items.count) titles")
-          .foregroundStyle(.white.opacity(0.7))
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(.white.opacity(0.78))
+          .aureliaRiseIn(2)
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.bottom, 16)
@@ -1149,14 +1071,10 @@ private struct CollectionDetailView: View {
         Spacer()
       }
     }
-    .frame(height: 420)
+    // Full-bleed like every other hero; artwork continues beneath the sidebar.
+    .frame(height: 460)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("collection-hero")
-    .clipShape(
-      UnevenRoundedRectangle(
-        bottomLeadingRadius: AureliaDesign.heroRadius,
-        bottomTrailingRadius: AureliaDesign.heroRadius)
-    )
   }
 }
 

@@ -38,8 +38,17 @@ final class ProfileAndNotesUITests: XCTestCase {
     defer { app.terminate() }
     let viewer = app.buttons["watching-profile-70000000-0000-0000-0000-000000000002"]
     XCTAssertTrue(viewer.waitForExistence(timeout: 8))
-    XCTAssertTrue(app.buttons["recover-owner-pin"].exists)
+    // Recovery is offered where it helps: on the owner's PIN screen, not on the picker.
+    XCTAssertFalse(app.buttons["recover-owner-pin"].exists)
     assertReducedSelection(app)
+    let owner = app.buttons["watching-profile-70000000-0000-0000-0000-000000000001"]
+    owner.click()
+    XCTAssertTrue(app.buttons["recover-owner-pin"].waitForExistence(timeout: 5))
+    shot(app, "Profile PIN - Owner With Forgot PIN")
+    app.buttons["recover-owner-pin"].click()
+    XCTAssertTrue(app.staticTexts["Recover Owner PIN"].waitForExistence(timeout: 5))
+    app.buttons["Cancel"].click()
+    XCTAssertTrue(viewer.waitForExistence(timeout: 5))
     viewer.click()
     let pin = app.secureTextFields["profile-pin"]
     XCTAssertTrue(pin.waitForExistence(timeout: 5))
@@ -53,7 +62,6 @@ final class ProfileAndNotesUITests: XCTestCase {
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(viewer.waitForExistence(timeout: 5))
     XCTAssertFalse(app.staticTexts["Enter 4–8 digits."].exists)
-    XCTAssertTrue(app.buttons["recover-owner-pin"].exists)
     viewer.click()
     XCTAssertTrue(pin.waitForExistence(timeout: 5))
     pin.typeText("123")
@@ -62,8 +70,11 @@ final class ProfileAndNotesUITests: XCTestCase {
     viewer.click()
     XCTAssertTrue(pin.waitForExistence(timeout: 5))
     XCTAssertEqual(pin.value as? String, "")
-    shot(app, "Profile PIN - Avatar and Field Only")
-    pin.typeText("12345678\r")
+    shot(app, "Profile PIN - Avatar, Field and Confirm Arrow")
+    // Letters are ignored, and the arrow confirms without pressing Return.
+    pin.typeText("12ab345678")
+    XCTAssertEqual((pin.value as? String)?.count, 8)
+    app.buttons["profile-unlock"].click()
     XCTAssertTrue(app.buttons["switch-watching-profile"].waitForExistence(timeout: 8))
   }
 
@@ -159,13 +170,15 @@ final class ProfileAndNotesUITests: XCTestCase {
     XCTAssertFalse(app.staticTexts["Who’s watching?"].exists)
     XCTAssertFalse(app.buttons["Choose Another Profile"].exists)
     XCTAssertFalse(app.buttons["Watch"].exists)
-    XCTAssertFalse(app.buttons["profile-unlock"].exists)
+    XCTAssertTrue(app.buttons["profile-unlock"].exists)
     XCTAssertFalse(app.buttons["recover-owner-pin"].exists)
     XCTAssertTrue(app.buttons["profile-back"].exists)
   }
 
   @MainActor
   private func assertCenteredProfileRows(_ app: XCUIApplication) {
+    // Profiles rise in with a short stagger; measure them once they have settled.
+    _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Profiles settle")], timeout: 1)
     let profiles = app.buttons.matching(
       NSPredicate(format: "identifier BEGINSWITH 'watching-profile-'")
     )

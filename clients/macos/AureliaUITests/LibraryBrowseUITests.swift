@@ -89,16 +89,15 @@ final class LibraryBrowseUITests: XCTestCase {
     }
     app.descendants(matching: .any)["sidebar-library"].click()
     XCTAssertTrue(app.textFields["library-search"].waitForExistence(timeout: 5))
-    app.descendants(matching: .any)["library-filters"].click()
-    app.menuItems["Favorites Only"].click()
+    app.buttons["library-filter-favorites"].click()
     let movie = app.buttons["media-10000000-0000-0000-0000-000000000001"]
     let series = app.buttons["media-20000000-0000-0000-0000-000000000001"]
     XCTAssertTrue(movie.waitForExistence(timeout: 5))
     XCTAssertTrue(series.waitForNonExistence(timeout: 5))
-    XCTAssertTrue(app.staticTexts["library-active-filters"].exists)
+    XCTAssertTrue(app.buttons["library-clear-filters"].exists)
     app.descendants(matching: .any)["sidebar-tvShows"].click()
     XCTAssertTrue(series.waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["library-active-filters"].exists)
+    XCTAssertFalse(app.buttons["library-clear-filters"].exists)
     app.descendants(matching: .any)["sidebar-library"].click()
     XCTAssertTrue(series.waitForNonExistence(timeout: 5))
     let search = app.textFields["library-search"]
@@ -117,12 +116,12 @@ final class LibraryBrowseUITests: XCTestCase {
     XCTAssertTrue(movie.waitForExistence(timeout: 5))
     XCTAssertTrue(series.waitForNonExistence(timeout: 5))
     app.buttons["library-clear-filters"].click()
-    XCTAssertTrue(app.staticTexts["library-active-filters"].waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["library-clear-filters"].waitForNonExistence(timeout: 5))
     // Clearing restores the Collections rail above the lazy TV Shows grid.
     app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
       .scroll(byDeltaX: 0, deltaY: -480)
     XCTAssertTrue(series.waitForExistence(timeout: 5))
-    XCTAssertFalse(app.staticTexts["library-active-filters"].exists)
+    XCTAssertFalse(app.buttons["library-clear-filters"].exists)
     screenshot(app, "1.5.3 - Cleared Filters after Relaunch")
   }
 

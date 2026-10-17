@@ -12,6 +12,8 @@ enum AureliaDesign {
   static let compactRadius: CGFloat = 12
   static let heroRadius: CGFloat = 24
   static let sidebarWidth: CGFloat = 236
+  /// Canvas tint over the sidebar's blur; keeps labels legible above bright artwork.
+  static let sidebarTint: Double = 0.66
   static let minimumControlSize: CGFloat = 44
 
   static let pageTitle = Font.system(size: 34, weight: .bold, design: .default)
@@ -35,9 +37,28 @@ enum AureliaDesign {
   static let responsiveSpring = Animation.spring(response: 0.3, dampingFraction: 1)
 }
 
+/// A dark, blurred panel like the Apple TV app's sidebar: artwork and rails that pass beneath it
+/// stay softly visible. Reduce Transparency falls back to the opaque canvas.
 struct AureliaSidebarBackground: View {
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+
   var body: some View {
-    AureliaDesign.canvas
+    if reduceTransparency {
+      AureliaDesign.canvas
+    } else {
+      ZStack {
+        Rectangle().fill(.ultraThinMaterial)
+        AureliaDesign.canvas.opacity(AureliaDesign.sidebarTint)
+        // Bright hero artwork sits at the top, so the tint deepens there.
+        LinearGradient(
+          stops: [
+            .init(color: AureliaDesign.canvas.opacity(0.5), location: 0),
+            .init(color: AureliaDesign.canvas.opacity(0.0), location: 0.6),
+          ],
+          startPoint: .top, endPoint: .bottom)
+      }
+      .environment(\.colorScheme, .dark)
+    }
   }
 }
 

@@ -26,9 +26,11 @@ These rules apply to every task in this repository.
 ## Native client design contract
 
 - Maintain one coherent native macOS visual language.
-- The sidebar uses the solid, opaque Aurelia canvas color without blur or
-  vibrancy. Keep content full-height beneath native window chrome; never
-  introduce a gray or black strip above the content.
+- The sidebar is a dark, blurred panel like the Apple TV app's: hero artwork
+  and rails may pass beneath it softly, its labels stay legible, and Reduce
+  Transparency falls back to the opaque Aurelia canvas color. Keep content
+  full-height beneath native window chrome; never introduce a gray or black
+  strip above the content.
 - Use native macOS window controls and fullscreen behavior. Never draw fake
   traffic-light buttons.
 - Editing, setup, settings, library management, details, and playback should use
@@ -58,7 +60,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac server-security release is 1.6.5 (61); the
+  changing them. The approved Mac interface release is 1.6.6 (62); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   artwork-cache update is 0.2.0 (10).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

@@ -11,14 +11,16 @@ struct ProfilePickerView: View {
   @State private var validationError: String?
   @State private var unlockTask: Task<Void, Never>?
   @State private var unlockAttempt = UUID()
+  @State private var failedAttempts = 0
   @FocusState private var pinFocused: Bool
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   private var isSubmitting: Bool { unlockTask != nil || model.isSelectingProfile }
 
   var body: some View {
     GeometryReader { geometry in
       ScrollView {
-        VStack(spacing: 28) {
+        VStack(spacing: 34) {
           if model.managementSetupRequired {
             Text("Set Up Viewing Profiles").font(.largeTitle.weight(.semibold))
             firstSetup
@@ -30,29 +32,24 @@ struct ProfilePickerView: View {
           } else if let choice {
             unlock(choice)
           } else {
-            Text("Who’s watching?").font(.largeTitle.weight(.semibold))
+            Text("Who’s watching?")
+              .font(.system(size: 40, weight: .bold))
+              .tracking(-0.5)
+              .aureliaRiseIn(0)
             profiles
             selectionFeedback
-            if model.operatingMode == .host, model.deviceConnection?.locallyManaged == true {
-              Button("Recover Owner PIN on This Mac…") {
-                model.cancelWatchingProfileSelection()
-                validationError = nil
-                recoveringOwner = true
-                pin = ""
-                password = ""
-                confirmation = ""
-              }
-              .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
-              .disabled(model.isSelectingProfile)
-              .accessibilityIdentifier("recover-owner-pin")
-            }
           }
         }
         .padding(40)
         .frame(maxWidth: 980)
         .frame(maxWidth: .infinity, minHeight: geometry.size.height)
       }
+      .scrollIndicators(.never)
     }
+    .background { AureliaAmbientBackground() }
+    .animation(
+      reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.32), value: choice?.id
+    )
     .accessibilityIdentifier("profile-picker")
     .task { await reloadProfilesIfSafe() }
     .onChange(of: scenePhase) { _, phase in
@@ -74,7 +71,7 @@ struct ProfilePickerView: View {
 
   private var profiles: some View {
     CenteredProfileLayout {
-      ForEach(model.watchingProfiles) { profile in
+      ForEach(Array(model.watchingProfiles.enumerated()), id: \.element.id) { index, profile in
         Button {
           model.cancelWatchingProfileSelection()
           validationError = nil
@@ -85,10 +82,18 @@ struct ProfilePickerView: View {
             startUnlock(profile, submittedPIN: "")
           }
         } label: {
-          VStack(spacing: 10) {
+          VStack(spacing: 12) {
             ProfileAvatar(profile: profile)
-            Text(profile.name).font(.headline).lineLimit(2)
-              .multilineTextAlignment(.center).frame(height: 44, alignment: .top)
+            HStack(spacing: 5) {
+              Text(profile.name).font(.headline).lineLimit(2)
+                .multilineTextAlignment(.center)
+              if profile.pinProtectionEnabled || profile.needsPinSetup {
+                Image(systemName: "lock.fill")
+                  .font(.system(size: 10, weight: .semibold))
+                  .foregroundStyle(.secondary)
+              }
+            }
+            .frame(height: 44, alignment: .top)
             if profile.needsPinSetup {
               Text("Set up PIN").font(.caption).foregroundStyle(.secondary)
             }
@@ -96,6 +101,7 @@ struct ProfilePickerView: View {
           .frame(width: CenteredProfileLayout.entryWidth)
           .frame(maxHeight: .infinity, alignment: .top)
           .contentShape(Rectangle())
+          .aureliaRiseIn(index + 1)
         }
         .buttonStyle(ProfileAvatarButtonStyle())
         .disabled(profile.needsPinSetup || isSubmitting)
@@ -120,48 +126,103 @@ struct ProfilePickerView: View {
   }
 
   private func unlock(_ choice: WatchingProfile) -> some View {
-    VStack(spacing: 18) {
+    VStack(spacing: 22) {
       Button {
         returnToProfiles()
       } label: {
         ProfileAvatar(profile: choice)
       }
       .buttonStyle(ProfileAvatarButtonStyle())
+      .help("Choose another profile")
       .accessibilityLabel("Choose another profile")
       .accessibilityIdentifier("profile-back")
-      Text(choice.name).font(.title2.weight(.medium)).multilineTextAlignment(.center)
-        .frame(maxWidth: 360)
+      VStack(spacing: 6) {
+        Text(choice.name).font(.title2.weight(.semibold)).multilineTextAlignment(.center)
+          .frame(maxWidth: 360)
+        Text("Enter your PIN").font(.callout).foregroundStyle(.secondary)
+      }
+      pinField(choice)
+        .modifier(PINShake(attempts: failedAttempts, reduceMotion: reduceMotion))
       ZStack {
-        RoundedRectangle(cornerRadius: 12)
-          .fill(Color(red: 0.07, green: 0.08, blue: 0.09))
-        SecureField("PIN", text: $pin)
-          .textFieldStyle(.plain).font(.system(size: 22, weight: .medium, design: .rounded))
-          .multilineTextAlignment(.center).padding(.horizontal, 16)
-          .focused($pinFocused).disabled(isSubmitting)
-          .accessibilityLabel("Profile PIN").accessibilityIdentifier("profile-pin")
-          .onSubmit { submit(choice) }
+        if isSubmitting {
+          ProgressView().controlSize(.small).accessibilityLabel("Opening profile")
+            .accessibilityIdentifier("profile-unlock-progress")
+        } else if let error = validationError ?? model.profileSelectionError {
+          Text(error).font(.callout).foregroundStyle(.orange).multilineTextAlignment(.center)
+            .frame(maxWidth: 360).accessibilityIdentifier("profile-pin-error")
+        }
       }
-      .frame(width: 280, height: 52)
-      .overlay {
-        RoundedRectangle(cornerRadius: 12).strokeBorder(
-          pinFocused ? Color.accentColor : Color.white.opacity(0.16),
-          lineWidth: pinFocused ? 2 : 1)
-      }
-      .accessibilityElement(children: .contain)
-      .accessibilityIdentifier("profile-pin-container")
-      if isSubmitting {
-        ProgressView().controlSize(.small).accessibilityLabel("Opening profile")
-          .accessibilityIdentifier("profile-unlock-progress")
-      }
-      if let error = validationError ?? model.profileSelectionError {
-        Text(error).font(.callout).foregroundStyle(.orange).multilineTextAlignment(.center)
-          .frame(maxWidth: 360).accessibilityIdentifier("profile-pin-error")
+      .frame(minHeight: 22)
+      if choice.role == .owner, model.operatingMode == .host,
+        model.deviceConnection?.locallyManaged == true
+      {
+        Button("Forgot PIN?") {
+          model.cancelWatchingProfileSelection()
+          validationError = nil
+          self.choice = nil
+          recoveringOwner = true
+          pin = ""
+          password = ""
+          confirmation = ""
+        }
+        .buttonStyle(.plain).font(.callout).foregroundStyle(.tint)
+        .disabled(isSubmitting)
+        .help("Set a new owner PIN with the Server Password on this Mac")
+        .accessibilityIdentifier("recover-owner-pin")
       }
     }
     .task(id: choice.id) {
       await Task.yield()
       pinFocused = true
     }
+  }
+
+  /// A rounded field with a confirm arrow, like the macOS login window.
+  private func pinField(_ choice: WatchingProfile) -> some View {
+    HStack(spacing: 8) {
+      SecureField("PIN", text: $pin)
+        .textFieldStyle(.plain).font(.system(size: 20, weight: .medium, design: .rounded))
+        .multilineTextAlignment(.center)
+        .focused($pinFocused).disabled(isSubmitting)
+        .accessibilityLabel("Profile PIN").accessibilityIdentifier("profile-pin")
+        .onSubmit { submit(choice) }
+        .onChange(of: pin) { _, value in
+          let digits = String(value.filter(\.isNumber).prefix(8))
+          if digits != value { pin = digits }
+        }
+        .padding(.leading, 44)
+      Button {
+        submit(choice)
+      } label: {
+        Image(systemName: "arrow.right")
+          .font(.system(size: 15, weight: .bold))
+          .foregroundStyle(ProfilePIN.isValid(pin) ? Color.black : Color.white.opacity(0.5))
+          .frame(width: 36, height: 36)
+          .background(
+            Circle().fill(ProfilePIN.isValid(pin) ? Color.white : Color.white.opacity(0.12))
+          )
+          .contentShape(Circle())
+      }
+      .buttonStyle(.plain)
+      .disabled(pin.isEmpty || isSubmitting)
+      .animation(.smooth(duration: 0.2), value: ProfilePIN.isValid(pin))
+      .help("Open Profile")
+      .accessibilityLabel("Open Profile")
+      .accessibilityIdentifier("profile-unlock")
+    }
+    .padding(.trailing, 8)
+    .frame(width: 280, height: 52)
+    .background {
+      Capsule().fill(.ultraThinMaterial)
+      Capsule().fill(Color.black.opacity(0.25))
+    }
+    .overlay {
+      Capsule().strokeBorder(
+        pinFocused ? Color.accentColor : Color.white.opacity(0.16),
+        lineWidth: pinFocused ? 2 : 1)
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("profile-pin-container")
   }
 
   private var firstSetup: some View {
@@ -197,6 +258,7 @@ struct ProfilePickerView: View {
     model.clearProfileSelectionError()
     guard ProfilePIN.isValid(pin) else {
       validationError = ProfilePIN.problem(pin) ?? "Enter 4–8 digits."
+      failedAttempts += 1
       pinFocused = true
       return
     }
@@ -215,6 +277,7 @@ struct ProfilePickerView: View {
       unlockTask = nil
       pin = ""
       if !selected, choice?.id == profile.id {
+        failedAttempts += 1
         await Task.yield()
         pinFocused = true
       }
@@ -279,27 +342,63 @@ private struct ProfileAvatar: View {
   let profile: WatchingProfile
 
   var body: some View {
-    Image(systemName: "person.crop.circle.fill")
-      .font(.system(size: 88)).symbolRenderingMode(.hierarchical)
-      .foregroundStyle(.white.opacity(0.9)).frame(width: 88, height: 88)
-      .overlay(alignment: .bottomTrailing) {
-        if profile.pinProtectionEnabled || profile.needsPinSetup {
-          Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.85)).frame(width: 24, height: 24)
-            .background(Color(red: 32 / 255, green: 35 / 255, blue: 38 / 255), in: Circle())
-        }
-      }
+    AureliaProfileAvatar(id: profile.id, name: profile.name, size: 112)
+      .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
       .accessibilityHidden(true)
   }
 }
 
+/// Profiles lift with a white ring on hover, like Apple's profile pickers.
 private struct ProfileAvatarButtonStyle: ButtonStyle {
   @State private var hovering = false
+  @Environment(\.isEnabled) private var isEnabled
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .opacity(configuration.isPressed ? 0.65 : (hovering ? 1 : 0.85))
+      .overlay(alignment: .top) {
+        Circle()
+          .strokeBorder(.white.opacity(hovering && isEnabled ? 0.9 : 0), lineWidth: 3)
+          .frame(width: 124, height: 124)
+          .offset(y: -6)
+          .allowsHitTesting(false)
+      }
+      .scaleEffect(
+        reduceMotion ? 1 : (configuration.isPressed ? 0.96 : (hovering && isEnabled ? 1.05 : 1))
+      )
+      .opacity(isEnabled ? 1 : 0.55)
+      .animation(
+        reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: hovering
+      )
+      .animation(
+        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.7),
+        value: configuration.isPressed
+      )
       .onHover { hovering = $0 }
+  }
+}
+
+/// A short sideways shake after a wrong PIN, as on the macOS login window.
+private struct PINShake: ViewModifier {
+  let attempts: Int
+  let reduceMotion: Bool
+
+  func body(content: Content) -> some View {
+    if reduceMotion {
+      content
+    } else {
+      content.keyframeAnimator(initialValue: CGFloat.zero, trigger: attempts) { view, offset in
+        view.offset(x: offset)
+      } keyframes: { _ in
+        KeyframeTrack {
+          SpringKeyframe(-12, duration: 0.07)
+          SpringKeyframe(10, duration: 0.07)
+          SpringKeyframe(-7, duration: 0.07)
+          SpringKeyframe(4, duration: 0.07)
+          SpringKeyframe(0, duration: 0.12)
+        }
+      }
+    }
   }
 }
 

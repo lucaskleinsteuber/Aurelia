@@ -2,30 +2,32 @@ import AppKit
 import XCTest
 
 final class CinemaUITests: XCTestCase {
-  @MainActor func testSidebarRemainsSolidAcrossArtworkAndWindowStates() throws {
+  @MainActor func testSidebarStaysDarkAndLegibleAcrossArtworkAndWindowStates() throws {
     let app = launch(heroEdges: true)
     defer { app.terminate() }
 
+    // The sidebar is a blurred panel like the Apple TV app's, so artwork beneath it may tint it.
+    // It must stay a dark, even backdrop for its labels, with no black strip at the top.
     func checkCanvas(_ state: String) throws {
       let window = app.windows.firstMatch
       let sidebar = app.descendants(matching: .any)["primary-sidebar"]
       XCTAssertTrue(sidebar.exists)
       let captured = try XCTUnwrap(NSBitmapImageRep(data: window.screenshot().pngRepresentation))
-      // Screenshot pixels use the display profile. Convert the bitmap before
-      // comparing its stored components with the design's sRGB canvas values.
       let image = try XCTUnwrap(captured.converting(to: .sRGB, renderingIntent: .default))
       let scaleX = CGFloat(image.pixelsWide) / window.frame.width
       let scaleY = CGFloat(image.pixelsHigh) / window.frame.height
-      for fraction in [0.70, 0.82, 0.94] {
+      for fraction in [0.02, 0.70, 0.82, 0.94] {
         let x = Int((sidebar.frame.minX - window.frame.minX + 18) * scaleX)
         let y = Int(
           (sidebar.frame.minY - window.frame.minY + sidebar.frame.height * fraction) * scaleY)
         let color = try XCTUnwrap(image.colorAt(x: x, y: y))
-        XCTAssertEqual(color.redComponent, 32 / 255.0, accuracy: 0.02, state)
-        XCTAssertEqual(color.greenComponent, 35 / 255.0, accuracy: 0.02, state)
-        XCTAssertEqual(color.blueComponent, 38 / 255.0, accuracy: 0.02, state)
+        let luminance =
+          0.2126 * color.redComponent + 0.7152 * color.greenComponent
+          + 0.0722 * color.blueComponent
+        XCTAssertLessThan(luminance, 0.3, "\(state) at \(fraction)")
+        XCTAssertGreaterThan(luminance, 0.04, "\(state) at \(fraction)")
       }
-      shot(app, "Solid Sidebar - \(state)")
+      shot(app, "Sidebar - \(state)")
     }
 
     try checkCanvas("Series Artwork")
@@ -44,6 +46,24 @@ final class CinemaUITests: XCTestCase {
     app.buttons["toggle-sidebar"].click()
     try checkCanvas("Restored Sidebar")
     app.typeKey("f", modifierFlags: [.control, .command])
+  }
+
+  @MainActor func testScrolledDetailShowsCompactHeaderWithTitleAndBack() throws {
+    let app = launch()
+    defer { app.terminate() }
+    let hero = app.descendants(matching: .any)["media-hero"]
+    XCTAssertTrue(hero.waitForExistence(timeout: 8))
+    let header = app.descendants(matching: .any)["compact-header"]
+    XCTAssertFalse(header.exists)
+    XCTAssertEqual(app.buttons.matching(identifier: "Back").count, 1)
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6))
+      .scroll(byDeltaX: 0, deltaY: -900)
+    XCTAssertTrue(header.waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["compact-header-title"].exists)
+    shot(app, "Detail - Compact Header After Scrolling")
+    header.buttons.firstMatch.click()
+    XCTAssertTrue(hero.waitForNonExistence(timeout: 5))
+    XCTAssertFalse(header.exists)
   }
 
   @MainActor func testFullscreenSidebarHeaderDoesNotOverlapNavigation() throws {

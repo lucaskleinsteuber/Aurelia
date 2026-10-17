@@ -222,6 +222,19 @@ import Testing
     #expect(cards[1].profile == photo)
   }
 
+  @Test func starringListsLeadActorsInBillingOrderOnce() {
+    let credits = [
+      credit("Third", character: "C", order: 3),
+      credit("Director", department: "Directing", job: "Director", order: 0),
+      credit("First", character: "A", order: 1),
+      credit("First", character: "A2", order: 4),
+      credit("Second", character: "B", order: 2),
+      credit("Fourth", character: "D", order: 5),
+    ]
+    #expect(CreditPresentation.starring(credits) == ["First", "Second", "Third"])
+    #expect(CreditPresentation.starring([]).isEmpty)
+  }
+
   @Test func legacyCreditDocumentsStillDecodeWithoutPersonKeys() throws {
     let data = Data("{\"name\":\"Actor\",\"department\":\"Acting\",\"order\":0}".utf8)
     let value = try JSONDecoder().decode(CreditSummary.self, from: data)

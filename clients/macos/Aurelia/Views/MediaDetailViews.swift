@@ -113,6 +113,9 @@ struct MediaDetailView: View {
     .scrollIndicators(.automatic, axes: .vertical)
     .aureliaOverlayScrollbars()
     .accessibilityIdentifier("media-detail-scroll")
+    .aureliaCompactHeader(
+      title: shownDetail?.metadata.title ?? "", threshold: 440, onBack: onBack
+    )
     // Details prepared while the pointer rested on the title appear in the first frame.
     .onAppear { applyPreparedDetail() }
     .task(
@@ -696,6 +699,32 @@ private struct DetailHero: View {
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.bottom, 16)
+
+      // The leading cast sits at the lower right of the artwork, as in the Apple TV app,
+      // when the hero is wide enough to keep it clear of the overview.
+      let starring = CreditPresentation.starring(detail.metadata.credits)
+      if !starring.isEmpty {
+        GeometryReader { geometry in
+          if geometry.size.width >= 1_040 {
+            Text(
+              "Starring \(Text(starring.joined(separator: ", ")).foregroundStyle(.white.opacity(0.92)))"
+            )
+            .foregroundStyle(.white.opacity(0.6))
+            .font(.callout.weight(.medium))
+            .multilineTextAlignment(.trailing)
+            .lineLimit(2)
+            .frame(maxWidth: 300, alignment: .trailing)
+            .padding(AureliaDesign.pagePadding)
+            .padding(.bottom, 22)
+            .frame(
+              width: geometry.size.width, height: geometry.size.height, alignment: .bottomTrailing
+            )
+            .aureliaRiseIn(5)
+            .accessibilityIdentifier("media-starring")
+          }
+        }
+        .allowsHitTesting(false)
+      }
 
       VStack {
         HStack {
