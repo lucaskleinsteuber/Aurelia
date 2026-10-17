@@ -3,6 +3,9 @@ import Foundation
 
 @MainActor
 final class TVLibraryListing: ObservableObject {
+  /// Fewer, larger pages mean fewer pauses while scrolling. Every server accepts up to 200.
+  static let pageSize = 100
+  static let refreshPageSize = 200
   let section: TVBrowseSection
   var kind: TVMediaKind { section.fixedKind ?? .unknown }
   @Published private(set) var items: [TVCatalogItem] = []
@@ -65,7 +68,7 @@ final class TVLibraryListing: ObservableObject {
       do {
         repeat {
           let page = try await api.browsePage(
-            query: query, search: search, offset: offset, revision: revision)
+            query: query, search: search, offset: offset, limit: Self.pageSize, revision: revision)
           guard generation == run, !Task.isCancelled else { return }
           guard offset == 0 || total == page.total else { throw TVCoreError.invalidResponse }
           var next = page.items
@@ -123,7 +126,8 @@ final class TVLibraryListing: ObservableObject {
     do {
       repeat {
         let page = try await api.browsePage(
-          query: query, search: search, offset: nextOffset, revision: pageRevision)
+          query: query, search: search, offset: nextOffset, limit: Self.refreshPageSize,
+          revision: pageRevision)
         guard generation == run, !Task.isCancelled else { return }
         var next = page.items
         if section == .continueWatching {
