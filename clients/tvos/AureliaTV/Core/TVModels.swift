@@ -371,6 +371,22 @@ struct TVMediaMetadata: Codable, Equatable, Sendable {
   let poster: TVArtwork?
   let backdrop: TVArtwork?
   let still: TVArtwork?
+  // Optional so older servers without these fields still decode.
+  var credits: [TVCredit]? = nil
+  var studios: [String]? = nil
+  var countries: [String]? = nil
+  var fskAge: Int? = nil
+}
+
+struct TVCredit: Codable, Equatable, Sendable {
+  let name: String
+  let department: String
+  let job: String?
+  let character: String?
+  let order: Int
+  let profile: TVArtwork?
+  var id: UUID? = nil
+  var personKey: String? = nil
 }
 
 struct TVEpisode: Codable, Equatable, Sendable {

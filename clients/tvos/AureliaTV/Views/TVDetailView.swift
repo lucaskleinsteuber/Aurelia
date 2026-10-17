@@ -6,7 +6,6 @@ struct TVDetailView: View {
   let initial: TVCatalogItem
   var selectedEpisodeID: UUID? = nil
   @StateObject private var actions = TVLibraryActions()
-  @State private var playingQueue: [TVCatalogItem] = []
   @State private var launching = false
   @State private var launchTask: Task<Void, Never>?
   @State private var navigationID = UUID()
@@ -15,18 +14,21 @@ struct TVDetailView: View {
   @State private var selectedSeason: Int?
   @State private var loading = true
   @State private var error: String?
-  @State private var playing: TVCatalogItem?
+  @State private var playing: TVDetailPlayback?
   @State private var requestID = UUID()
   @State private var focusRequest: FocusRequest?
   @State private var launchOrigin: Focus = .play
   @State private var shelfAnchor: Focus?
   @State private var unavailable: TVCatalogItem?
+  @State private var showingAbout = false
   @FocusState private var focused: Focus?
 
   private enum Focus: Hashable {
     case play
     case season(Int)
     case episode(UUID)
+    case supplement(UUID)
+    case about
   }
   private struct FocusRequest {
     let id = UUID()
@@ -47,7 +49,17 @@ struct TVDetailView: View {
               Button("Try Again") { Task { await load() } }.buttonStyle(TVButtonStyle())
             }.padding(.horizontal, TVDesign.pagePadding)
           }
-          if item.kind == .series && !seasons.isEmpty { episodes }
+          if item.kind == .series && !seasons.isEmpty {
+            episodes
+            if let season, !season.supplements.isEmpty {
+              supplementRails(season.supplements, prefix: "\(seasonName(season.number)) ")
+            }
+          }
+          if let detail {
+            supplementRails(detail.supplements, prefix: "")
+            castAndCrew(detail.metadata.credits ?? [])
+            about(detail)
+          }
         }.padding(.bottom, 80)
       }
       .ignoresSafeArea(edges: .top)
@@ -73,6 +85,9 @@ struct TVDetailView: View {
         // Moving across the season bar switches the shelf at once, like the TV app.
         if case .season(let number) = value, number != selectedSeason { selectSeason(number) }
       }
+      .sheet(isPresented: $showingAbout) {
+        if let detail { TVAboutSheet(detail: detail) }
+      }
       .alert(
         "Not Available",
         isPresented: Binding(get: { unavailable != nil }, set: { if !$0 { unavailable = nil } }),
@@ -90,7 +105,10 @@ struct TVDetailView: View {
       }
       .fullScreenCover(
         item: $playing, onDismiss: playerDismissed,
-        content: { target in
+        content: { request in
+          // Everything the player needs travels with the request, so the cover never
+          // reads a stale view state (such as Start Over) when it is created.
+          let target = request.item
           if let connection = model.connection, let session = model.session {
             TVPlayerView(makeController: {
               TVPlaybackController(
@@ -99,13 +117,13 @@ struct TVDetailView: View {
                 outbox: model.environment.outbox,
                 api: model.makeClient(connection: connection, session: session),
                 runtime: model.environment.makePlaybackRuntime(),
-                queue: playingQueue, preferencesStore: model.environment.preferences,
+                queue: request.queue, preferencesStore: model.environment.preferences,
                 onClose: { playing = nil },
                 onSessionFailure: { failure in
                   guard model.session?.sessionId == session.sessionId else { return }
                   model.handleSessionFailure(failure)
                   playing = nil
-                })
+                }, startOver: request.startOver)
             })
           }
         })
@@ -140,7 +158,9 @@ struct TVDetailView: View {
           Text("No playable media available.").foregroundStyle(.secondary)
         }
         HStack(spacing: 26) {
-          Button(action: playTarget) {
+          Button {
+            playTarget()
+          } label: {
             Label(playLabel, systemImage: "play.fill")
           }.buttonStyle(TVButtonStyle(kind: .primary))
             // Always focusable: loading never moves focus later, and an unavailable
@@ -157,6 +177,11 @@ struct TVDetailView: View {
               .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
           }
           Menu {
+            if plan?.action == .resume, plan?.target?.isPlayable == true {
+              Button("Start Over", systemImage: "arrow.counterclockwise") {
+                playTarget(startOver: true)
+              }
+            }
             TVMediaContextActions(item: item, actions: actions, includeFavorite: false)
             if item.kind == .series, let selectedSeason {
               let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
@@ -225,6 +250,79 @@ struct TVDetailView: View {
     }.id("detail-episodes")
   }
 
+  /// Trailers and Extras as landscape shelves; each card plays its supplement.
+  @ViewBuilder
+  private func supplementRails(_ supplements: [TVSupplement], prefix: String) -> some View {
+    ForEach(TVDetailPresentation.supplementGroups(supplements), id: \.title) { group in
+      VStack(alignment: .leading, spacing: 24) {
+        TVSectionHeader(title: prefix + group.title, count: group.items.count)
+          .padding(.horizontal, TVDesign.pagePadding)
+        ScrollView(.horizontal) {
+          LazyHStack(alignment: .top, spacing: 44) {
+            ForEach(group.items, id: \.item.id) { supplement in
+              let value = model.overlay(supplement.item)
+              Button {
+                playSupplement(value)
+              } label: {
+                TVSupplementCard(item: value, category: supplement.category)
+              }.buttonStyle(.borderless).disabled(launching)
+                .focused($focused, equals: .supplement(value.id))
+                .accessibilityIdentifier("supplement-\(value.id)")
+            }
+          }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
+        }.scrollIndicators(.hidden).scrollClipDisabled().focusSection()
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func castAndCrew(_ credits: [TVCredit]) -> some View {
+    let people = TVDetailPresentation.people(credits)
+    if !people.isEmpty {
+      VStack(alignment: .leading, spacing: 24) {
+        TVSectionHeader(title: "Cast & Crew", count: people.count)
+          .padding(.horizontal, TVDesign.pagePadding)
+        ScrollView(.horizontal) {
+          LazyHStack(alignment: .top, spacing: 40) {
+            ForEach(people) { person in
+              TVPersonCardView(person: person)
+            }
+          }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
+        }.scrollIndicators(.hidden).scrollClipDisabled().focusSection()
+      }.accessibilityIdentifier("cast-and-crew")
+    }
+  }
+
+  /// A focusable About card keeps the bottom of the page reachable with the remote;
+  /// selecting it shows the full text and every information field.
+  private func about(_ detail: TVCatalogDetail) -> some View {
+    let fields = TVDetailPresentation.information(detail)
+    return VStack(alignment: .leading, spacing: 24) {
+      TVSectionHeader(title: "About")
+      Button {
+        showingAbout = true
+      } label: {
+        HStack(alignment: .top, spacing: 60) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text(detail.metadata.title).font(.system(size: 28, weight: .bold))
+            Text(detail.metadata.overview ?? detail.item.overview ?? "No description available.")
+              .font(.system(size: 22)).lineLimit(4).multilineTextAlignment(.leading)
+          }.frame(maxWidth: 860, alignment: .leading)
+          VStack(alignment: .leading, spacing: 14) {
+            ForEach(fields.prefix(4), id: \.title) { field in
+              VStack(alignment: .leading, spacing: 2) {
+                Text(field.title.uppercased()).font(.system(size: 16, weight: .bold)).tracking(1.2)
+                  .opacity(0.6)
+                Text(field.value).font(.system(size: 22, weight: .semibold)).lineLimit(1)
+              }
+            }
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
+      }.buttonStyle(TVButtonStyle(kind: .row)).focused($focused, equals: .about)
+        .accessibilityIdentifier("detail-about")
+    }.padding(.horizontal, TVDesign.pagePadding).focusSection()
+  }
+
   private var shelfEntry: Focus? {
     let episodes = season?.episodes.map(\.item) ?? []
     let target = episodes.first { $0.id == plan?.target?.id } ?? episodes.first
@@ -283,13 +381,20 @@ struct TVDetailView: View {
         item, scope: .season, season: selectedSeason, watched: watched, model: model)
     }
   }
-  private func playTarget() {
+  private func playSupplement(_ supplement: TVCatalogItem) {
+    guard supplement.isPlayable else {
+      unavailable = supplement
+      return
+    }
+    open(supplement, queue: [], origin: .supplement(supplement.id))
+  }
+  private func playTarget(startOver: Bool = false) {
     guard let target = plan?.target else { return }
     guard target.isPlayable else {
       unavailable = target
       return
     }
-    open(target, queue: plan?.queue ?? [], origin: .play)
+    open(target, queue: plan?.queue ?? [], origin: .play, startOver: startOver)
   }
   private func openEpisode(_ episode: TVCatalogItem) async {
     guard episode.isPlayable else {
@@ -313,13 +418,14 @@ struct TVDetailView: View {
       model.handleSessionFailure(error)
     }
   }
-  private func open(_ item: TVCatalogItem, queue: [TVCatalogItem], origin: Focus) {
+  private func open(
+    _ item: TVCatalogItem, queue: [TVCatalogItem], origin: Focus, startOver: Bool = false
+  ) {
     guard item.isPlayable, playing == nil else { return }
-    playingQueue = queue
     launchOrigin = origin
     focusRequest = nil
     model.playerPresented = true
-    playing = item
+    playing = TVDetailPlayback(item: item, queue: queue, startOver: startOver)
   }
   private func load() async {
     guard let api = model.client else { return }
@@ -406,4 +512,105 @@ private struct TVSeasonChipStyle: ButtonStyle {
       .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.06 : 1)
       .animation(.easeOut(duration: 0.12), value: focused)
   }
+}
+
+/// Landscape card for trailers and extras with a play glyph over the artwork.
+private struct TVSupplementCard: View {
+  let item: TVCatalogItem
+  let category: String
+  private let width: CGFloat = 420
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      ZStack {
+        TVArtworkView(artwork: item.backdrop ?? item.poster, width: 1280, symbol: "film.stack")
+        Image(systemName: "play.fill").font(.system(size: 26, weight: .bold))
+          .frame(width: 64, height: 64).background(.ultraThinMaterial, in: Circle())
+      }
+      .frame(width: width, height: width * 9 / 16)
+      .overlay(alignment: .topTrailing) { TVItemBadges(item: item).padding(10) }
+      .overlay(alignment: .bottom) {
+        if let fraction = item.progressFraction {
+          TVProgressBar(fraction: fraction).padding(.horizontal, 14).padding(.bottom, 14)
+        }
+      }
+      .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+      .hoverEffect(.highlight)
+      TVEyebrow(text: category, size: 16)
+      Text(item.title).font(.system(size: 23, weight: .semibold)).lineLimit(2)
+      if let message = item.availabilityMessage {
+        Text(message).font(.system(size: 19, weight: .semibold)).foregroundStyle(.orange)
+      }
+    }.frame(width: width, alignment: .leading).opacity(item.isPlayable ? 1 : 0.55)
+  }
+}
+
+/// Round portrait with name and role; focusable so the row can be browsed. The
+/// portrait grows on focus instead of showing a rectangular platter.
+private struct TVPersonCardView: View {
+  let person: TVPersonCard
+  var body: some View {
+    Button {
+    } label: {
+      VStack(spacing: 14) {
+        TVArtworkView(artwork: person.profile, width: 320, symbol: "person.fill")
+          .frame(width: 150, height: 150).clipShape(Circle())
+          .overlay(Circle().stroke(.white.opacity(0.1), lineWidth: 1))
+        Text(person.name).font(.system(size: 22, weight: .semibold)).lineLimit(1)
+        if let subtitle = person.subtitle {
+          Text(subtitle).font(.system(size: 18)).foregroundStyle(.secondary).lineLimit(2)
+            .multilineTextAlignment(.center)
+        }
+      }.frame(width: 190)
+    }.buttonStyle(TVPortraitButtonStyle()).accessibilityIdentifier("person-\(person.id)")
+  }
+}
+
+private struct TVPortraitButtonStyle: ButtonStyle {
+  @Environment(\.isFocused) private var focused
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .opacity(focused ? 1 : 0.8)
+      .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: 20, y: 12)
+      .scaleEffect(focused ? 1.1 : 1)
+      .animation(.easeOut(duration: 0.14), value: focused)
+  }
+}
+
+/// Full description and all information fields, as on the Mac detail page.
+private struct TVAboutSheet: View {
+  let detail: TVCatalogDetail
+  @Environment(\.dismiss) private var dismiss
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 34) {
+        Text(detail.metadata.title).font(.system(size: 52, weight: .bold))
+        if let original = detail.metadata.originalTitle, original != detail.metadata.title {
+          Text(original).font(.system(size: 24)).foregroundStyle(.secondary)
+        }
+        Text(detail.metadata.overview ?? detail.item.overview ?? "No description available.")
+          .font(.system(size: 26)).frame(maxWidth: 1200, alignment: .leading)
+        LazyVGrid(
+          columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3),
+          alignment: .leading, spacing: 30
+        ) {
+          ForEach(TVDetailPresentation.information(detail), id: \.title) { field in
+            VStack(alignment: .leading, spacing: 6) {
+              Text(field.title.uppercased()).font(.system(size: 18, weight: .bold)).tracking(1.2)
+                .foregroundStyle(.secondary)
+              Text(field.value).font(.system(size: 24, weight: .semibold))
+            }
+          }
+        }
+        Button("Done") { dismiss() }.buttonStyle(TVButtonStyle(kind: .primary))
+          .accessibilityIdentifier("about-done")
+      }.padding(80).frame(maxWidth: .infinity, alignment: .leading)
+    }.background(TVDesign.canvas.ignoresSafeArea())
+  }
+}
+
+private struct TVDetailPlayback: Identifiable {
+  let item: TVCatalogItem
+  let queue: [TVCatalogItem]
+  let startOver: Bool
+  var id: UUID { item.id }
 }

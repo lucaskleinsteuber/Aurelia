@@ -36,7 +36,8 @@ struct TVPlayerView: View {
             "player-wake-surface")
       }
       if controller.controlsVisible || controller.errorMessage != nil { controls }
-      if controller.isLoading && controller.errorMessage == nil {
+      // With controls shown, loading is drawn inside Play instead of behind it.
+      if controller.isLoading && controller.errorMessage == nil && !controller.controlsVisible {
         ProgressView().tint(.white).scaleEffect(1.4).accessibilityIdentifier("player-loading")
       }
       if let menu = controller.trackMenu { menuView(menu) }
@@ -127,9 +128,14 @@ struct TVPlayerView: View {
           Button {
             controller.togglePlayPause()
           } label: {
-            Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(
-              .system(size: 30, weight: .bold)
-            ).frame(width: 78, height: 78)
+            Group {
+              if controller.isLoading && controller.errorMessage == nil {
+                ProgressView().tint(.black).accessibilityIdentifier("player-loading")
+              } else {
+                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(
+                  .system(size: 30, weight: .bold))
+              }
+            }.frame(width: 78, height: 78)
           }.buttonStyle(TVPlayerPrimaryStyle()).focusEffectDisabled().focused($focus, equals: .play)
             .disabled(controller.isLoading).accessibilityIdentifier("player-play")
             .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")

@@ -67,6 +67,7 @@ final class TVPlaybackController: ObservableObject {
   private var finished = false
   private var recoveryBudget = TVPlaybackRecoveryBudget()
   private var wantsPlayback = true
+  private var startOver: Bool
   private var backgroundSave: UIBackgroundTaskIdentifier = .invalid
 
   init(
@@ -76,7 +77,8 @@ final class TVPlaybackController: ObservableObject {
     queue: [TVCatalogItem] = [], preferences: TVPlaybackPreferences? = nil,
     preferencesStore: TVPlaybackPreferencesStore? = nil,
     onClose: @escaping @MainActor () -> Void,
-    onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in }
+    onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in },
+    startOver: Bool = false
   ) {
     self.connection = connection
     self.session = session
@@ -92,6 +94,7 @@ final class TVPlaybackController: ObservableObject {
     self.outbox = outbox
     self.onClose = onClose
     self.onSessionFailure = onSessionFailure
+    self.startOver = startOver
     self.api = api ?? TVAPIClient(connection: connection, session: session)
     let selectedRuntime = runtime ?? .live()
     self.runtime = selectedRuntime
@@ -374,7 +377,9 @@ final class TVPlaybackController: ObservableObject {
       let resolvedPosition = await outbox.resumePosition(scope: scope, server: created.progress)
       let conflict = await outbox.state(scope: scope, mediaID: mediaID) == .conflict
       guard !closed, operation == generation, !Task.isCancelled else { return }
-      let resumePosition = preferences.automaticResume ? resolvedPosition : 0
+      // Start Over applies once; later reconnects resume at the current position.
+      let resumePosition = preferences.automaticResume && !startOver ? resolvedPosition : 0
+      startOver = false
       if conflict {
         progressMessage = "Progress changed on another device. Its newer position has been kept."
       }

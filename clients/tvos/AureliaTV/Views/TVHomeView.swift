@@ -22,10 +22,12 @@ struct TVHomeView: View {
             Text("Home").font(.system(size: 52, weight: .bold))
               .padding(.horizontal, TVDesign.pagePadding).padding(.top, 170)
           }
+          // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
+          ForEach(model.homeGenres) { row in genreShelf(row) }
           shelf("Favorites", items: home.favorites, section: .favorites)
-          shelf("Recently Added", items: home.recentlyAdded, section: .recentlyAdded)
           if !home.collections.isEmpty { collections(home.collections) }
+          shelf("Recently Added", items: home.recentlyAdded, section: .recentlyAdded)
           if home.continueWatching.isEmpty && home.favorites.isEmpty && home.recentlyAdded.isEmpty {
             ContentUnavailableView("Your Library Is Empty", systemImage: "film")
           }
@@ -181,6 +183,27 @@ struct TVHomeView: View {
           }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
         }.scrollIndicators(.hidden).scrollClipDisabled().focusSection()
       }
+    }
+  }
+
+  private func genreShelf(_ row: TVHomeGenreRow) -> some View {
+    VStack(alignment: .leading, spacing: 26) {
+      TVSectionHeader(title: row.genre, count: row.items.count).padding(
+        .horizontal, TVDesign.pagePadding)
+      ScrollView(.horizontal) {
+        LazyHStack(alignment: .top, spacing: 48) {
+          ForEach(row.items) { original in
+            let item = model.overlay(original)
+            NavigationLink {
+              TVDetailView(id: item.detailID, initial: item)
+            } label: {
+              TVPosterLabel(item: item).frame(width: TVDesign.posterWidth)
+            }.buttonStyle(.borderless)
+              .accessibilityIdentifier("home-genre-\(row.genre)-\(item.id)")
+              .contextMenu { TVMediaContextActions(item: item, actions: actions) }
+          }
+        }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
+      }.scrollIndicators(.hidden).scrollClipDisabled().focusSection()
     }
   }
 

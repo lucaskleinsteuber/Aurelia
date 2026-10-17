@@ -16,6 +16,8 @@ final class TVAppModel: ObservableObject {
   @Published var selectedProfile: TVWatchingProfile?
   @Published private(set) var detailRefresh = UUID()
   let browser = TVBonjourBrowser()
+  /// Genre shelves for Home, built from the preloaded Movies and TV Shows pages.
+  @Published private(set) var homeGenres: [TVHomeGenreRow] = []
   let movies = TVLibraryListing(kind: .movie)
   let shows = TVLibraryListing(kind: .series)
   let artwork = TVArtworkPipeline()
@@ -496,6 +498,7 @@ final class TVAppModel: ObservableObject {
     profiles = []
     movies.clear()
     shows.clear()
+    homeGenres = []
     home = nil
     homeError = nil
     homeLoading = false
@@ -570,6 +573,10 @@ final class TVAppModel: ObservableObject {
       await listing.loadNext(api: api, onFailure: handleSessionFailure)
       guard self.session?.sessionId == session.sessionId else { return }
     }
+    let genres = TVDetailPresentation.genreRows(movies.items + shows.items).map {
+      TVHomeGenreRow(genre: $0.genre, items: $0.items)
+    }
+    if homeGenres != genres { homeGenres = genres }
     for listing in [movies, shows] {
       for item in listing.items.prefix(12) {
         guard self.session?.sessionId == session.sessionId else { return }
@@ -697,4 +704,10 @@ final class TVAppModel: ObservableObject {
     guard session?.sessionId == sessionID else { return }
     handleSessionFailure(failure)
   }
+}
+
+struct TVHomeGenreRow: Equatable, Identifiable {
+  let genre: String
+  let items: [TVCatalogItem]
+  var id: String { genre }
 }

@@ -16,6 +16,9 @@
     static let movieID = UUID(uuidString: "00000000-0000-4000-8000-000000000010")!
     static let seriesID = UUID(uuidString: "00000000-0000-4000-8000-000000000020")!
     static let resumeID = episodeID(season: 2, episode: 2)
+    static let trailerID = UUID(uuidString: "00000000-0000-4000-8000-000000000060")!
+    static let extraID = UUID(uuidString: "00000000-0000-4000-8000-000000000061")!
+    static let seasonExtraID = UUID(uuidString: "00000000-0000-4000-8000-000000000062")!
     static let fingerprint = String(repeating: "A", count: 64)
     static let expiry = "2099-01-01T00:00:00Z"
     static let stamp = "2026-01-01T00:00:00Z"
@@ -87,6 +90,28 @@
             title: "Test \(kind == "series" ? "Series" : "Movie") \(index) with a Longer Title")
         }
     }
+    static func supplement(id: UUID, kind: String, title: String, category: String, season: Int?)
+      -> [String: Any]
+    {
+      [
+        "item": item(id: id, kind: kind, title: title), "category": category,
+        "seasonNumber": season.map { $0 as Any } ?? NSNull(),
+      ]
+    }
+    static func credits() -> [[String: Any]] {
+      let rows: [[Any]] = [
+        ["Lead Actor", "Acting", NSNull(), "Main Character", 0, "lead"],
+        ["Support Actor", "Acting", NSNull(), "Best Friend", 1, "support"],
+        ["Lead Actor", "Writing", "Writer", NSNull(), 4, "lead"],
+        ["Synthetic Director", "Directing", "Director", NSNull(), 9, "director"],
+      ]
+      return rows.map { value in
+        [
+          "name": value[0], "department": value[1], "job": value[2], "character": value[3],
+          "order": value[4], "profile": NSNull(), "personKey": value[5],
+        ]
+      }
+    }
     static func detail(id: UUID, offline: Bool) -> [String: Any] {
       let isSeries = id == seriesID
       let selected = isSeries ? series() : movie()
@@ -100,7 +125,13 @@
                 "item": episode(season: season, number: number, offline: offline),
                 "seasonNumber": season, "episodeNumber": number,
               ] as [String: Any]
-            }, "supplements": [],
+            },
+            "supplements": season == 2
+              ? [
+                supplement(
+                  id: seasonExtraID, kind: "extra", title: "Season Two Recap",
+                  category: "Featurette", season: 2)
+              ] : [],
           ]
         } : []
       return [
@@ -108,8 +139,17 @@
         "metadata": [
           "mediaId": id.uuidString,
           "title": selected["title"]!, "overview": selected["overview"]!, "year": 2026,
-          "runtimeMinutes": 90, "genres": ["Drama"],
-        ], "seasons": seasons, "supplements": [],
+          "runtimeMinutes": 90, "genres": ["Drama"], "credits": credits(),
+          "studios": ["Synthetic Studio"], "countries": ["US"], "fskAge": 12,
+        ], "seasons": seasons,
+        "supplements": [
+          supplement(
+            id: trailerID, kind: "trailer", title: "Official Trailer", category: "Trailer",
+            season: nil),
+          supplement(
+            id: extraID, kind: "extra", title: "Behind the Scenes", category: "Featurette",
+            season: nil),
+        ],
       ]
     }
   }

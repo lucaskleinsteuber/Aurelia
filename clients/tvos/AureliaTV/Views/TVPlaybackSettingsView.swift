@@ -14,36 +14,44 @@ struct TVPlaybackSettingsView: View {
         Text("These settings apply to this profile on this Apple TV.")
           .font(.system(size: 24)).foregroundStyle(.secondary).multilineTextAlignment(.center)
       }.frame(width: 560).padding(.top, 140)
-      Form {
-        Section {
-          Toggle("Automatic Resume", isOn: $value.automaticResume).accessibilityIdentifier(
-            "settings-resume")
-          Toggle("Automatically Play Next Episode", isOn: $value.automaticallyPlayNextEpisode)
-            .accessibilityIdentifier("settings-next")
-        }
-        Section {
-          Picker("Default Playback Rate", selection: $value.defaultPlaybackRate) {
-            ForEach(TVPlaybackPreferences.supportedRates, id: \.self) {
-              Text(String(format: "%gx", $0)).tag($0)
-            }
+      // One row style for every setting, like the player menus: Select toggles a
+      // switch or moves to the next value. No nested system form styling.
+      ScrollView {
+        VStack(spacing: 14) {
+          row(
+            "Automatic Resume", value: value.automaticResume ? "On" : "Off", id: "settings-resume"
+          ) { value.automaticResume.toggle() }
+          row(
+            "Automatically Play Next Episode",
+            value: value.automaticallyPlayNextEpisode ? "On" : "Off",
+            id: "settings-next"
+          ) { value.automaticallyPlayNextEpisode.toggle() }
+          Spacer().frame(height: 18)
+          row(
+            "Default Playback Rate", value: String(format: "%gx", value.defaultPlaybackRate),
+            id: "settings-rate"
+          ) {
+            value.defaultPlaybackRate = Self.next(
+              after: value.defaultPlaybackRate, in: TVPlaybackPreferences.supportedRates)
           }
-          Picker("Controls Auto-Hide Delay", selection: $value.controlsDelay) {
-            ForEach([2.0, 4, 6, 8], id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+          row(
+            "Controls Auto-Hide Delay", value: "\(Int(value.controlsDelay)) seconds",
+            id: "settings-delay"
+          ) { value.controlsDelay = Self.next(after: value.controlsDelay, in: [2.0, 4, 6, 8]) }
+          row("Seek Interval", value: "\(value.seekInterval) seconds", id: "settings-seek") {
+            value.seekInterval = Self.next(after: value.seekInterval, in: [5, 10, 15, 30, 60])
           }
-          Picker("Seek Interval", selection: $value.seekInterval) {
-            ForEach([5, 10, 15, 30, 60], id: \.self) { Text("\($0) seconds").tag($0) }
-          }.accessibilityIdentifier("settings-seek")
-        }
-        Section {
-          Button("Forget Audio & Subtitle Preferences") {
+          Spacer().frame(height: 18)
+          row("Forget Audio & Subtitle Preferences", value: nil, id: "settings-forget-tracks") {
             value.preferredAudioTrack = nil
             value.preferredSubtitleTrack = nil
           }
-          Button("Restore Playback Defaults") { value = .defaultValue }
-        } footer: {
-          if let error { TVErrorText(message: error) }
-        }
-      }.frame(maxWidth: .infinity)
+          row("Restore Playback Defaults", value: nil, id: "settings-defaults") {
+            value = .defaultValue
+          }
+          if let error { TVErrorText(message: error).padding(.top, 10) }
+        }.padding(.vertical, 30).padding(.horizontal, 20)
+      }.frame(maxWidth: .infinity).focusSection()
     }.padding(.horizontal, TVDesign.pagePadding).padding(.top, 20)
       .background(TVDesign.canvas.ignoresSafeArea())
       .onAppear {
@@ -63,5 +71,24 @@ struct TVPlaybackSettingsView: View {
           model.scheduleLibraryRefresh()
         }
       }
+  }
+
+  private func row(_ title: String, value: String?, id: String, action: @escaping () -> Void)
+    -> some View
+  {
+    Button(action: action) {
+      HStack(spacing: 20) {
+        Text(title)
+        Spacer(minLength: 20)
+        if let value { Text(value).opacity(0.7).monospacedDigit() }
+      }.padding(.horizontal, 30).frame(maxWidth: .infinity, minHeight: 72)
+    }
+    .buttonStyle(TVButtonStyle(kind: .row)).accessibilityIdentifier(id)
+    .accessibilityValue(value ?? "")
+  }
+
+  private static func next<Value: Equatable>(after current: Value, in values: [Value]) -> Value {
+    guard let index = values.firstIndex(of: current) else { return values[0] }
+    return values[(index + 1) % values.count]
   }
 }

@@ -41,14 +41,19 @@ final class TVLibraryUITests: XCTestCase {
     for _ in 0..<3 where !hasNativeFocus(hero) { remote.press(.down) }
     expectFocus(hero)
     let resume = app.buttons["home-continueWatching-\(resumeID)"]
-    let recent = app.buttons["home-recentlyAdded-\(movieID)"]
+    // Genre shelves come from the preloaded catalog, after Continue Watching as on the Mac.
+    let genre = app.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH %@", "home-genre-Drama-")
+    ).firstMatch
+    XCTAssertTrue(genre.waitForExistence(timeout: 10))
     let collection = app.buttons["collection-00000000-0000-4000-8000-000000000030"]
-    for target in [resume, recent, collection] {
+    let recent = app.buttons["home-recentlyAdded-\(movieID)"]
+    for target in [resume, genre, collection, recent] {
       remote.press(.down)
       expectFocus(target)
     }
-    capture(app, "Home - Collections Row Focus")
-    for target in [recent, resume, hero] {
+    capture(app, "Home - Recently Added Row Focus")
+    for target in [collection, genre, resume, hero] {
       remote.press(.up)
       expectFocus(target)
     }
@@ -202,8 +207,8 @@ final class TVLibraryUITests: XCTestCase {
     defer { app.terminate() }
     selectTab(app, title: "Test Viewer")
     select(app.buttons["profile-playback-settings"], in: app)
-    let resume = app.switches["settings-resume"]
-    let next = app.switches["settings-next"]
+    let resume = app.buttons["settings-resume"]
+    let next = app.buttons["settings-next"]
     XCTAssertTrue(resume.waitForExistence(timeout: 8))
     XCTAssertTrue(isOn(resume))
     XCTAssertTrue(isOn(next))
@@ -217,7 +222,98 @@ final class TVLibraryUITests: XCTestCase {
     XCTAssertTrue(resume.waitForExistence(timeout: 8))
     XCTAssertFalse(isOn(resume))
     XCTAssertFalse(isOn(next))
-    XCTAssertTrue(app.buttons["Restore Playback Defaults"].exists)
+    let rate = app.buttons["settings-rate"]
+    XCTAssertEqual(rate.value as? String, "1x")
+    select(rate, in: app)
+    let faster = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value == %@", "1.25x"), object: rate)
+    XCTAssertEqual(XCTWaiter.wait(for: [faster], timeout: 3), .completed)
+    select(app.buttons["settings-defaults"], in: app)
+    XCTAssertTrue(isOn(resume))
+    XCTAssertEqual(rate.value as? String, "1x")
+  }
+
+  @MainActor
+  func testMovieTrailersExtrasCastAndAbout() {
+    let app = launch()
+    defer { app.terminate() }
+    openMovie(app)
+    let trailer = app.buttons["supplement-00000000-0000-4000-8000-000000000060"]
+    let extra = app.buttons["supplement-00000000-0000-4000-8000-000000000061"]
+    XCTAssertTrue(trailer.waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Trailers"].firstMatch.exists)
+    remote.press(.down)
+    expectFocus(trailer)
+    capture(app, "Details - Trailers and Extras")
+    // A trailer plays in the normal player and Back returns to it.
+    remote.press(.select)
+    expectFocus(app.buttons["player-play"])
+    XCTAssertTrue(
+      app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Official Trailer"))
+        .firstMatch.exists)
+    XCTAssertTrue(app.progressIndicators["player-loading"].waitForNonExistence(timeout: 8))
+    let surface = app.descendants(matching: .any)["player-surface"]
+    for _ in 0..<3 where surface.exists {
+      remote.press(.menu)
+      if surface.waitForNonExistence(timeout: 3) { break }
+    }
+    expectFocus(trailer)
+    remote.press(.down)
+    expectFocus(extra)
+    remote.press(.down)
+    let lead = app.buttons["person-lead"]
+    expectFocus(lead)
+    XCTAssertTrue(lead.label.contains("Main Character"), "Credits of one person are merged.")
+    capture(app, "Details - Cast and Crew")
+    remote.press(.down)
+    let about = app.buttons["detail-about"]
+    expectFocus(about)
+    remote.press(.select)
+    XCTAssertTrue(app.staticTexts["FSK 12"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["Synthetic Studio"].exists)
+    XCTAssertTrue(app.staticTexts["US"].exists)
+    capture(app, "Details - About Sheet")
+    remote.press(.menu)
+    XCTAssertTrue(app.staticTexts["FSK 12"].waitForNonExistence(timeout: 5))
+    expectFocus(about)
+  }
+
+  @MainActor
+  func testStartOverPlaysFromTheBeginning() {
+    let app = launch()
+    defer { app.terminate() }
+    openSeries(app)
+    openMore(app)
+    // Start Over is the first, initially focused entry of the "…" menu.
+    let startOver = app.buttons.matching(NSPredicate(format: "label == %@", "Start Over"))
+      .firstMatch
+    XCTAssertTrue(startOver.waitForExistence(timeout: 5))
+    remote.press(.up)
+    expectFocus(startOver)
+    remote.press(.select)
+    expectFocus(app.buttons["player-play"])
+    XCTAssertTrue(app.progressIndicators["player-loading"].waitForNonExistence(timeout: 8))
+    remote.press(.playPause)
+    let timeline = app.buttons["player-timeline"]
+    XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+    let time = (timeline.value as? String ?? "").components(separatedBy: " of ")[0]
+    let seconds = time.split(separator: ":").compactMap { Int($0) }.reduce(0) { $0 * 60 + $1 }
+    XCTAssertLessThan(seconds, 30, "Start Over ignores the saved 1:30 position.")
+  }
+
+  @MainActor
+  func testSeasonExtrasFollowTheSelectedSeason() {
+    let app = launch()
+    defer { app.terminate() }
+    openSeries(app)
+    let seasonExtra = app.buttons["supplement-00000000-0000-4000-8000-000000000062"]
+    XCTAssertTrue(seasonExtra.waitForExistence(timeout: 8))
+    XCTAssertTrue(app.staticTexts["Season 2 Extras"].firstMatch.exists)
+    remote.press(.down)
+    expectFocus(app.buttons["season-option-2"])
+    remote.press(.left)
+    expectFocus(app.buttons["season-option-1"])
+    XCTAssertTrue(seasonExtra.waitForNonExistence(timeout: 3), "Season extras follow the season.")
   }
 
   @MainActor
@@ -407,13 +503,22 @@ final class TVLibraryUITests: XCTestCase {
     containing element: XCUIElement, in app: XCUIApplication, focused: Bool = false
   ) -> XCUIElement {
     guard element.exists else { return app.cells.matching(NSPredicate(value: false)).firstMatch }
+    // Menu rows may carry a symbol name as identifier; their text label is stable.
     let identifier = element.identifier
-    let match =
-      identifier.isEmpty
-      ? NSPredicate(
-        format: "elementType == %d AND label == %@", element.elementType.rawValue, element.label)
-      : NSPredicate(
+    let label = element.label
+    let match: NSPredicate
+    switch (identifier.isEmpty, label.isEmpty) {
+    case (false, false):
+      match = NSPredicate(
+        format: "elementType == %d AND (identifier == %@ OR label == %@)",
+        element.elementType.rawValue, identifier, label)
+    case (true, _):
+      match = NSPredicate(
+        format: "elementType == %d AND label == %@", element.elementType.rawValue, label)
+    case (false, true):
+      match = NSPredicate(
         format: "elementType == %d AND identifier == %@", element.elementType.rawValue, identifier)
+    }
     let cells = focused ? app.cells.matching(NSPredicate(format: "hasFocus == true")) : app.cells
     return cells.containing(match).firstMatch
   }
