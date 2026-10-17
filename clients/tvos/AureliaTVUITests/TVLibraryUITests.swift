@@ -21,10 +21,15 @@ final class TVLibraryUITests: XCTestCase {
       "Home rows must not carry header buttons.")
     XCTAssertTrue(app.buttons["home-hero"].exists)
     capture(app, "Home - Hero and Continue Watching")
+    // Selecting a Continue Watching card resumes playback without the detail page.
     select(resume, in: app)
-    expectFocus(app.buttons["detail-play"])
-    XCTAssertEqual(app.buttons["detail-play"].label, "Resume S02 E02")
-    XCTAssertTrue(app.buttons["detail-season"].exists)
+    expectFocus(app.buttons["player-play"])
+    XCTAssertTrue(
+      app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "S02 E02")).firstMatch
+        .exists)
+    XCTAssertFalse(app.buttons["detail-play"].exists)
+    remote.press(.menu)
+    expectFocus(resume)
   }
 
   @MainActor

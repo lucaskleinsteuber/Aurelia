@@ -70,18 +70,21 @@ struct TVArtworkView: View {
       guard let artwork, let api = model.client, key != nil else { return }
       let sessionID = model.session?.sessionId
       do {
-        let decoded = try await model.artwork.image(artwork: artwork, width: width, api: api)
+        let decoded = try await model.artwork.image(artwork: artwork, width: requestWidth, api: api)
         guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
         image = decoded
       } catch {}
     }
   }
 
+  /// The server renders only these widths; any other request is rejected.
+  private var requestWidth: Int { [320, 640, 1280, 1920].first { $0 >= width } ?? 1920 }
+
   private var key: String? {
     guard let artwork, let connection = model.connection, let session = model.session else {
       return nil
     }
     return
-      "\(connection.serverID):\(session.sessionId):\(artwork.id):\(artwork.revision ?? 0):\(width)"
+      "\(connection.serverID):\(session.sessionId):\(artwork.id):\(artwork.revision ?? 0):\(requestWidth)"
   }
 }

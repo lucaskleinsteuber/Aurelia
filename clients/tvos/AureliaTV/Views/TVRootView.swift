@@ -20,7 +20,7 @@ struct TVRootView: View {
           NavigationStack { TVLibraryGrid(listing: model.movies, title: "Movies") }
             .tabItem { Label("Movies", systemImage: "film") }.tag(TVLibraryTab.movies)
           NavigationStack { TVLibraryGrid(listing: model.shows, title: "TV Shows") }
-            .tabItem { Label("TV Shows", systemImage: "tv") }.tag(TVLibraryTab.shows)
+            .tabItem { Label("TV Shows", systemImage: "tv.fill") }.tag(TVLibraryTab.shows)
           NavigationStack { TVBrowseDestination(section: .search) }.tabItem {
             Label("Search", systemImage: "magnifyingglass")
           }.tag(TVLibraryTab.search)

@@ -106,6 +106,8 @@ final class TVLibraryListing: ObservableObject {
   /// pushed details stay in place instead of emptying the grid during a refresh.
   func refresh(api: TVAPIClient, onFailure: (Error) -> Void) async {
     guard !items.isEmpty else {
+      // A cancelled first load may still mark the listing busy; start over.
+      invalidate()
       await loadNext(api: api, onFailure: onFailure)
       return
     }

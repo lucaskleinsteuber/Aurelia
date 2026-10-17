@@ -348,7 +348,7 @@ private struct TVEpisodeCard: View {
   private let width: CGFloat = 420
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      TVArtworkView(artwork: item.backdrop ?? item.poster, width: 800, symbol: "play.rectangle")
+      TVArtworkView(artwork: item.backdrop ?? item.poster, width: 1280, symbol: "play.rectangle")
         .frame(width: width, height: width * 9 / 16)
         .overlay(alignment: .topTrailing) { TVItemBadges(item: item).padding(10) }
         .overlay(alignment: .bottom) {

@@ -317,7 +317,7 @@ struct TVPlayerView: View {
         Text(title).font(.system(size: 24)).lineLimit(2)
         Spacer()
         if selected { Image(systemName: "checkmark") }
-      }.frame(maxWidth: .infinity, minHeight: 56, alignment: .leading).padding(.horizontal, 16)
+      }.frame(maxWidth: .infinity, minHeight: 56, alignment: .leading).padding(.horizontal, 22)
         .padding(.vertical, 8)
     }.buttonStyle(TVButtonStyle(kind: .row)).focusEffectDisabled().focused($focus, equals: id)
       .accessibilityIdentifier("player-\(id)").accessibilityAddTraits(selected ? .isSelected : [])

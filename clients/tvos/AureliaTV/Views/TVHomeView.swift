@@ -5,6 +5,9 @@ import SwiftUI
 struct TVHomeView: View {
   @EnvironmentObject private var model: TVAppModel
   @StateObject private var actions = TVLibraryActions()
+  @State private var playback: TVHomePlayback?
+  @State private var launching = false
+  @State private var detailItem: TVHomeDetail?
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
@@ -13,7 +16,7 @@ struct TVHomeView: View {
       VStack(alignment: .leading, spacing: 54) {
         if let home = model.home {
           if let hero = hero(home) {
-            TVHomeHero(item: model.overlay(hero))
+            TVHomeHero(item: model.overlay(hero), launching: launching) { play($0) }
           } else {
             Text("Home").font(.system(size: 52, weight: .bold))
               .padding(.horizontal, TVDesign.pagePadding).padding(.top, 170)
@@ -42,6 +45,61 @@ struct TVHomeView: View {
     .background(TVDesign.canvas.ignoresSafeArea())
     .task(id: model.libraryRefresh) { await model.loadHome() }
     .modifier(TVLibraryActionPresentation(actions: actions))
+    .navigationDestination(item: $detailItem) { value in
+      TVDetailView(id: value.item.detailID, initial: value.item)
+    }
+    .fullScreenCover(
+      item: $playback,
+      onDismiss: {
+        model.playerPresented = false
+        Task { await model.loadHome() }
+      },
+      content: { request in
+        if let connection = model.connection, let session = model.session {
+          TVPlayerView(makeController: {
+            TVPlaybackController(
+              connection: connection, session: session, mediaID: request.target.id,
+              title: request.title, outbox: model.environment.outbox,
+              api: model.makeClient(connection: connection, session: session),
+              runtime: model.environment.makePlaybackRuntime(),
+              queue: request.queue, preferencesStore: model.environment.preferences,
+              onClose: { playback = nil },
+              onSessionFailure: { failure in
+                guard model.session?.sessionId == session.sessionId else { return }
+                model.handleSessionFailure(failure)
+                playback = nil
+              })
+          })
+        }
+      }
+    )
+    .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
+  }
+
+  /// Continue Watching starts playback right away from the server's resume target.
+  private func play(_ item: TVCatalogItem) {
+    guard !launching, playback == nil, let api = model.client else { return }
+    launching = true
+    let sessionID = model.session?.sessionId
+    Task {
+      defer { launching = false }
+      do {
+        let plan = try await api.playbackPlan(mediaID: item.id)
+        guard model.session?.sessionId == sessionID, playback == nil else { return }
+        guard let target = plan.target, target.isPlayable else {
+          detailItem = TVHomeDetail(item: item)
+          return
+        }
+        let series = target.parentTitle ?? item.parentTitle
+        let title = target.episodeLabel.map { "\(series ?? target.title) · \($0)" } ?? target.title
+        model.playerPresented = true
+        playback = TVHomePlayback(target: target, queue: plan.queue, title: title)
+      } catch {
+        guard model.session?.sessionId == sessionID else { return }
+        actions.error = error.localizedDescription
+        model.handleSessionFailure(error)
+      }
+    }
   }
 
   private func hero(_ home: TVHome) -> TVCatalogItem? {
@@ -60,18 +118,27 @@ struct TVHomeView: View {
           LazyHStack(alignment: .top, spacing: 48) {
             ForEach(items) { original in
               let item = model.overlay(original)
-              NavigationLink {
-                TVDetailView(id: item.detailID, initial: item)
-              } label: {
+              Group {
                 if section == .continueWatching {
-                  TVContinueCard(item: item)
+                  Button {
+                    play(item)
+                  } label: {
+                    TVContinueCard(item: item)
+                  }.disabled(!item.isPlayable)
                 } else {
-                  TVPosterLabel(item: item).frame(width: TVDesign.posterWidth)
+                  NavigationLink {
+                    TVDetailView(id: item.detailID, initial: item)
+                  } label: {
+                    TVPosterLabel(item: item).frame(width: TVDesign.posterWidth)
+                  }
                 }
               }
               .buttonStyle(.borderless)
               .accessibilityIdentifier("home-\(section.rawValue)-\(item.id)")
               .contextMenu {
+                if section == .continueWatching {
+                  Button("Show Details") { detailItem = TVHomeDetail(item: item) }
+                }
                 TVMediaContextActions(
                   item: item, actions: actions, continuation: section == .continueWatching)
               }
@@ -118,6 +185,8 @@ struct TVHomeView: View {
 /// Full-bleed artwork with the Mac hero gradients and one primary action.
 private struct TVHomeHero: View {
   let item: TVCatalogItem
+  let launching: Bool
+  let play: (TVCatalogItem) -> Void
   var body: some View {
     ZStack(alignment: .bottomLeading) {
       TVHeroBackdrop(artwork: item.backdrop ?? item.poster)
@@ -138,10 +207,20 @@ private struct TVHomeHero: View {
           )
           .foregroundStyle(.white.opacity(0.88))
         }
-        NavigationLink {
-          TVDetailView(id: item.detailID, initial: item)
-        } label: {
-          Label(item.progressFraction == nil ? "Open" : "Continue", systemImage: "arrow.right")
+        Group {
+          if item.progressFraction != nil, item.isPlayable {
+            Button {
+              play(item)
+            } label: {
+              Label("Continue", systemImage: "play.fill")
+            }.disabled(launching)
+          } else {
+            NavigationLink {
+              TVDetailView(id: item.detailID, initial: item)
+            } label: {
+              Label("Open", systemImage: "arrow.right")
+            }
+          }
         }.buttonStyle(TVButtonStyle(kind: .primary)).padding(.top, 10)
           .accessibilityIdentifier("home-hero")
       }.padding(.horizontal, TVDesign.pagePadding).padding(.bottom, 60).focusSection()
@@ -180,7 +259,7 @@ struct TVContinueCard: View {
   let item: TVCatalogItem
   var body: some View {
     ZStack(alignment: .bottomLeading) {
-      TVArtworkView(artwork: item.backdrop ?? item.poster, width: 960, symbol: "play.rectangle")
+      TVArtworkView(artwork: item.backdrop ?? item.poster, width: 1280, symbol: nil)
       LinearGradient(
         stops: [
           .init(color: .clear, location: 0.35), .init(color: .black.opacity(0.25), location: 0.55),
@@ -389,4 +468,17 @@ struct TVCollectionView: View {
       model.handleSessionFailure(error)
     }
   }
+}
+
+private struct TVHomeDetail: Hashable {
+  let item: TVCatalogItem
+  static func == (lhs: Self, rhs: Self) -> Bool { lhs.item.id == rhs.item.id }
+  func hash(into hasher: inout Hasher) { hasher.combine(item.id) }
+}
+
+private struct TVHomePlayback: Identifiable {
+  let target: TVCatalogItem
+  let queue: [TVCatalogItem]
+  let title: String
+  var id: UUID { target.id }
 }

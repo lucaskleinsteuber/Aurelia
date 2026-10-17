@@ -93,7 +93,7 @@ struct TVButtonStyle: ButtonStyle {
       .background(background(light: light))
       .opacity(enabled ? 1 : 0.4)
       .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: 18, y: 10)
-      .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.07 : 1)
+      .scaleEffect(configuration.isPressed ? 0.97 : focused ? (kind == .row ? 1.015 : 1.07) : 1)
       .animation(.easeOut(duration: 0.14), value: focused)
   }
 

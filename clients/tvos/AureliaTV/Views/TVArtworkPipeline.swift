@@ -78,7 +78,7 @@ actor TVArtworkPipeline {
     cache.removeAllObjects()
   }
   private func acquire() async {
-    if active < 4 {
+    if active < 6 {
       active += 1
       return
     }
