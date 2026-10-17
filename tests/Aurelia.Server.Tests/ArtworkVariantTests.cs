@@ -82,6 +82,71 @@ public sealed class ArtworkVariantTests
     }
 
     [Fact]
+    public async Task LargeJpegUsesScaledDecodeAndKeepsExactGeometry()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var asset = await SeedAsync(factory, 2000, 1000, false, jpeg: true);
+        foreach (var (width, height) in new[] { (640, 320), (1280, 640), (1920, 960), (320, 160) })
+        {
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/artwork/{asset.Id}?width={width}", owner.Token);
+            using var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            Assert.Equal("image/jpeg", response.Content.Headers.ContentType?.MediaType);
+            using var decoded = SKBitmap.Decode(await response.Content.ReadAsByteArrayAsync());
+            Assert.Equal(width, decoded.Width);
+            Assert.Equal(height, decoded.Height);
+            // The synthetic source is solid red; scaled decoding must not shift colors.
+            var pixel = decoded.GetPixel(width / 2, height / 2);
+            Assert.True(pixel.Red > 200 && pixel.Green < 60 && pixel.Blue < 60);
+        }
+    }
+
+    [Fact]
+    public async Task DifferentVariantsGenerateConcurrentlyWithOneFileEach()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var assets = new List<ArtworkAsset>();
+        for (var index = 0; index < 12; index++) assets.Add(await SeedAsync(factory, 800, 400, index % 3 == 0, jpeg: index % 3 != 0));
+        await Task.WhenAll(assets.SelectMany(asset => Enumerable.Range(0, 2).Select(async _ =>
+        {
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/artwork/{asset.Id}?width=320", owner.Token);
+            using var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            using var decoded = SKBitmap.Decode(await response.Content.ReadAsByteArrayAsync());
+            Assert.Equal(320, decoded.Width);
+            Assert.Equal(160, decoded.Height);
+        })));
+        Assert.Equal(12, Directory.GetFiles(Path.Combine(factory.DataDirectory, "ArtworkVariants")).Length);
+    }
+
+    [Fact]
+    public async Task WarmerPreparesTelevisionWidthsOncePerArtworkKind()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        await ApiTestClient.SetupOwnerAsync(client);
+        var poster = await SeedAsync(factory, 1000, 1500, false, jpeg: true);
+        var backdrop = await SeedAsync(factory, 2400, 1350, false, jpeg: true, kind: ArtworkKind.Backdrop);
+        var profile = await SeedAsync(factory, 600, 900, false, jpeg: true, kind: ArtworkKind.Profile);
+        var variants = factory.Services.GetRequiredService<Aurelia.Server.Services.ArtworkVariantStore>();
+        var warmer = new Aurelia.Server.Services.ArtworkVariantWarmer(
+            factory.Services.GetRequiredService<IServiceScopeFactory>(),
+            factory.Services.GetRequiredService<Aurelia.Server.Services.ArtworkStore>(), variants,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Aurelia.Server.Services.ArtworkVariantWarmer>.Instance);
+        Assert.Equal(4, await warmer.WarmAsync(TimeSpan.Zero, CancellationToken.None));
+        Assert.True(variants.IsCached(poster.Id, poster.Revision, 640));
+        Assert.True(variants.IsCached(backdrop.Id, backdrop.Revision, 1280));
+        Assert.True(variants.IsCached(backdrop.Id, backdrop.Revision, 1920));
+        Assert.True(variants.IsCached(profile.Id, profile.Revision, 320));
+        Assert.False(variants.IsCached(poster.Id, poster.Revision, 1920));
+        Assert.Equal(0, await warmer.WarmAsync(TimeSpan.Zero, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task CacheEvictsOldFilesAndIsNotBackupState()
     {
         using var factory = new AureliaServerFactory();
@@ -100,29 +165,33 @@ public sealed class ArtworkVariantTests
         Assert.False(Aurelia.Server.Services.EncryptedBackupContainer.AllowedName("ArtworkVariants/test.jpg"));
     }
 
-    private static async Task<ArtworkAsset> SeedAsync(AureliaServerFactory factory, int width, int height, bool alpha)
+    private static async Task<ArtworkAsset> SeedAsync(AureliaServerFactory factory, int width, int height, bool alpha,
+        bool jpeg = false, ArtworkKind kind = ArtworkKind.Poster)
     {
-        var bytes = Image(width, height, alpha, SKColors.Red);
+        var bytes = Image(width, height, alpha, SKColors.Red, jpeg);
         var id = Guid.NewGuid();
+        var extension = jpeg ? "jpg" : "png";
         Directory.CreateDirectory(Path.Combine(factory.DataDirectory, "Artwork"));
-        await File.WriteAllBytesAsync(Path.Combine(factory.DataDirectory, "Artwork", $"{id:N}.png"), bytes);
+        await File.WriteAllBytesAsync(Path.Combine(factory.DataDirectory, "Artwork", $"{id:N}.{extension}"), bytes);
         await using var scope = factory.Services.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", Path = "/synthetic/artwork", NormalizedPath = "/synthetic/artwork", Kind = LibraryKind.Movies, MonitoringEnabled = false };
-        var movie = new MediaItem { Id = Guid.NewGuid(), LibraryRoot = library, Kind = MediaKind.Movie, SourcePath = "/synthetic/artwork/title.mkv", NormalizedSourcePath = "/synthetic/artwork/title.mkv", DetectedTitle = "Synthetic" };
+        // Unique synthetic paths, so one test can seed several titles.
+        var root = $"/synthetic/artwork-{id:N}";
+        var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", Path = root, NormalizedPath = root, Kind = LibraryKind.Movies, MonitoringEnabled = false };
+        var movie = new MediaItem { Id = Guid.NewGuid(), LibraryRoot = library, Kind = MediaKind.Movie, SourcePath = root + "/title.mkv", NormalizedSourcePath = root + "/title.mkv", DetectedTitle = "Synthetic" };
         var metadata = new MediaMetadata { MediaItem = movie, MediaItemId = movie.Id };
-        var artwork = new ArtworkAsset { Id = id, Metadata = metadata, MediaItemId = movie.Id, Kind = ArtworkKind.Poster, RelativeFilePath = $"{id:N}.png", ContentType = "image/png", ContentLength = bytes.Length, CreatedAt = DateTimeOffset.UtcNow };
+        var artwork = new ArtworkAsset { Id = id, Metadata = metadata, MediaItemId = movie.Id, Kind = kind, RelativeFilePath = $"{id:N}.{extension}", ContentType = jpeg ? "image/jpeg" : "image/png", ContentLength = bytes.Length, CreatedAt = DateTimeOffset.UtcNow };
         database.ArtworkAssets.Add(artwork);
         await database.SaveChangesAsync();
         return artwork;
     }
 
-    private static byte[] Image(int width, int height, bool alpha, SKColor color)
+    private static byte[] Image(int width, int height, bool alpha, SKColor color, bool jpeg = false)
     {
         using var bitmap = new SKBitmap(new SKImageInfo(width, height));
         using (var canvas = new SKCanvas(bitmap)) canvas.Clear(alpha ? color.WithAlpha(100) : color);
         using var image = SKImage.FromBitmap(bitmap);
-        using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
+        using var encoded = image.Encode(jpeg ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png, jpeg ? 90 : 100);
         return encoded.ToArray();
     }
 }

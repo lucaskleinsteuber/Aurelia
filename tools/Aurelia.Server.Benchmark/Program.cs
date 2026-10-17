@@ -31,10 +31,13 @@ try
         formatVersion = 1,
         createdAt = DateTimeOffset.UtcNow,
         entries = 10000,
+        series = 50,
+        episodesPerSeries = 30,
+        progressRows = 300,
         creditsPerEntry = 8,
         clients = 2,
         requestsPerEndpoint = 20,
-        methodology = "Same synthetic SQLite snapshot, 3 warmups, then 20 requests per endpoint in two concurrent clients. No videos, personal data, or artwork files. CPU is process CPU during measurement; RSS sampled every 20 ms. SQL counts use EF command logs (raw FTS commands are excluded). One local Mac run; not a throughput or production guarantee.",
+        methodology = "Same synthetic SQLite snapshot, PIN-unlocked owner profile session, 3 warmups, then 20 requests per endpoint in two concurrent clients. No videos, personal data, or artwork files. CPU is process CPU during measurement; RSS sampled every 20 ms. SQL counts use EF command logs (raw FTS commands are excluded). One local Mac run; not a throughput or production guarantee.",
         baseline = before,
         candidate = after,
     };
@@ -55,6 +58,8 @@ static async Task SeedAsync(string directory)
     var now = DateTimeOffset.UtcNow;
     var owner = new ServerUser { Id = Guid.NewGuid(), Username = "benchmark-owner", NormalizedUsername = "BENCHMARK-OWNER", PasswordHash = "", Role = UserRole.Owner, CreatedAt = now };
     owner.PasswordHash = new PasswordHasher<ServerUser>().HashPassword(owner, "synthetic-benchmark-password");
+    owner.PinHash = new PasswordHasher<ServerUser>().HashPassword(owner, "5682");
+    database.AdministrationCredentials.Add(new ServerAdministrationCredential { PasswordHash = owner.PasswordHash });
     var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic", Path = Path.Combine(directory, "Storage"), NormalizedPath = Path.Combine(directory, "Storage"), Kind = LibraryKind.Movies, Availability = LibraryAvailability.Available, MonitoringEnabled = false, CreatedAt = now };
     Directory.CreateDirectory(library.Path);
     database.Users.Add(owner);
@@ -76,8 +81,76 @@ static async Task SeedAsync(string directory)
         await database.SaveChangesAsync();
         database.ChangeTracker.Clear();
     }
-    // Both versions start at the previous schema, with identical data and FTS.
-    await database.GetService<IMigrator>().MigrateAsync("20260923135149_Build18TrailerImportReview");
+    // Series with episodes and in-progress titles, as browsed from the Apple TV.
+    var shows = new LibraryRoot { Id = Guid.NewGuid(), Name = "Synthetic Shows", Path = Path.Combine(directory, "Shows"), NormalizedPath = Path.Combine(directory, "Shows"), Kind = LibraryKind.TvShows, Availability = LibraryAvailability.Available, MonitoringEnabled = false, CreatedAt = now };
+    Directory.CreateDirectory(shows.Path);
+    database.LibraryRoots.Add(shows);
+    var progressTargets = new List<Guid>();
+    for (var show = 0; show < 50; show++)
+    {
+        var name = "Synthetic Show " + show.ToString("D3", CultureInfo.InvariantCulture);
+        var folder = Path.Combine(shows.Path, name);
+        var series = new MediaItem { Id = Guid.NewGuid(), LibraryRootId = shows.Id, Kind = MediaKind.Series, DetectedTitle = name, Year = 2018, Availability = MediaAvailability.Available, SourcePath = folder, NormalizedSourcePath = folder, Extension = "", CreatedAt = now.AddSeconds(20000 + show), UpdatedAt = now };
+        series.Metadata = new MediaMetadata { MediaItemId = series.Id, MediaItem = series, ProviderTitle = name, ProviderOverview = "Synthetic series.", ProviderGenresJson = "[\"Crime\"]", UpdatedAt = now, ReviewState = MetadataReviewState.Matched };
+        database.MediaItems.Add(series);
+        for (var season = 1; season <= 3; season++)
+        {
+            for (var number = 1; number <= 10; number++)
+            {
+                var title = $"{name} S{season:D2}E{number:D2}";
+                var path = Path.Combine(folder, title + ".mkv");
+                var episode = new MediaItem { Id = Guid.NewGuid(), LibraryRootId = shows.Id, ParentId = series.Id, Kind = MediaKind.Episode, DetectedTitle = title, SeasonNumber = season, EpisodeNumber = number, Year = 2018, Availability = MediaAvailability.Available, SourcePath = path, NormalizedSourcePath = path, Extension = ".mkv", CreatedAt = now.AddSeconds(30000 + show * 30 + season * 10 + number), UpdatedAt = now };
+                episode.Metadata = new MediaMetadata { MediaItemId = episode.Id, MediaItem = episode, ProviderTitle = title, ProviderOverview = "Synthetic episode.", ProviderGenresJson = "[]", UpdatedAt = now, ReviewState = MetadataReviewState.Matched };
+                database.MediaItems.Add(episode);
+                if (season == 2 && number == 3) progressTargets.Add(episode.Id);
+            }
+        }
+    }
+    await database.SaveChangesAsync();
+    progressTargets.AddRange(await database.MediaItems.Where(item => item.Kind == MediaKind.Movie).OrderBy(item => item.CreatedAt).Take(250).Select(item => item.Id).ToListAsync());
+    var ownerEntity = await database.Users.SingleAsync(user => user.Id == owner.Id);
+    var played = 0;
+    foreach (var target in progressTargets)
+    {
+        var media = await database.MediaItems.SingleAsync(item => item.Id == target);
+        database.Add(new PlaybackProgress { Id = Guid.NewGuid(), MediaItemId = target, MediaItem = media, UserId = owner.Id, User = ownerEntity, PositionMilliseconds = 600_000, DurationMilliseconds = 2_700_000, LastPlayedAt = now.AddMinutes(-played), UpdatedAt = now, Revision = 1 });
+        played++;
+    }
+    await database.SaveChangesAsync();
+    database.ChangeTracker.Clear();
+    // Synthetic provider-size posters (2000x3000 JPEG with gradient and noise) for
+    // the artwork scenario. They live beside the database like the real cache.
+    var artworkDirectory = Path.Combine(directory, "Artwork");
+    PrivateFilePermissions.CreatePrivateDirectory(artworkDirectory);
+    var random = new Random(42);
+    var posterTargets = await database.MediaItems.Where(item => item.Kind == MediaKind.Movie)
+        .OrderBy(item => item.CreatedAt).Take(48).Select(item => item.Id).ToListAsync();
+    foreach (var mediaId in posterTargets)
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(2000, 3000);
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+        {
+            using var paint = new SkiaSharp.SKPaint
+            {
+                Shader = SkiaSharp.SKShader.CreateLinearGradient(new SkiaSharp.SKPoint(0, 0), new SkiaSharp.SKPoint(2000, 3000),
+                    [new SkiaSharp.SKColor((byte)random.Next(256), 40, 90), new SkiaSharp.SKColor(20, (byte)random.Next(256), 160)], SkiaSharp.SKShaderTileMode.Clamp),
+            };
+            canvas.DrawRect(0, 0, 2000, 3000, paint);
+            using var noise = new SkiaSharp.SKPaint();
+            for (var dot = 0; dot < 40_000; dot++)
+            {
+                noise.Color = new SkiaSharp.SKColor((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256));
+                canvas.DrawRect(random.Next(2000), random.Next(3000), 6, 6, noise);
+            }
+        }
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 90);
+        var fileName = Guid.NewGuid().ToString("N") + ".jpg";
+        await File.WriteAllBytesAsync(Path.Combine(artworkDirectory, fileName), encoded.ToArray());
+        database.ArtworkAssets.Add(new ArtworkAsset { Id = Guid.NewGuid(), MediaItemId = mediaId, Kind = ArtworkKind.Poster, ProviderPath = "/synthetic/" + fileName, RelativeFilePath = fileName, ContentType = "image/jpeg", ContentLength = encoded.Size, CreatedAt = now });
+    }
+    await database.SaveChangesAsync();
+    database.ChangeTracker.Clear();
     await new MediaSearchIndexService(database).RebuildAsync(CancellationToken.None);
     await database.Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(TRUNCATE);");
 }
@@ -86,6 +159,9 @@ static async Task<object> MeasureAsync(string executable, string seed, string di
 {
     PrivateFilePermissions.CreatePrivateDirectory(directory);
     File.Copy(Path.Combine(seed, "aurelia.db"), Path.Combine(directory, "aurelia.db"));
+    PrivateFilePermissions.CreatePrivateDirectory(Path.Combine(directory, "Artwork"));
+    foreach (var file in Directory.EnumerateFiles(Path.Combine(seed, "Artwork")))
+        File.Copy(file, Path.Combine(directory, "Artwork", Path.GetFileName(file)));
     using var reservation = new TcpListener(IPAddress.Loopback, 0);
     reservation.Start();
     var port = ((IPEndPoint)reservation.LocalEndpoint).Port;
@@ -98,7 +174,24 @@ static async Task<object> MeasureAsync(string executable, string seed, string di
     process.StartInfo.Environment["Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command"] = "Information";
     var commands = 0L;
     var logTail = new Queue<string>();
-    process.OutputDataReceived += (_, entry) => { if (entry.Data?.Contains("Executed DbCommand", StringComparison.Ordinal) == true) Interlocked.Increment(ref commands); };
+    // Optional diagnostics: AURELIA_BENCHMARK_SQL_LOG names a file that receives the
+    // timed EF command lines (synthetic data only) for investigating slow endpoints.
+    var sqlLog = Environment.GetEnvironmentVariable("AURELIA_BENCHMARK_SQL_LOG");
+    var sqlLines = new System.Collections.Concurrent.ConcurrentQueue<string>();
+    string? pendingCommand = null;
+    process.OutputDataReceived += (_, entry) =>
+    {
+        if (entry.Data?.Contains("Executed DbCommand", StringComparison.Ordinal) == true)
+        {
+            Interlocked.Increment(ref commands);
+            pendingCommand = entry.Data;
+        }
+        else if (sqlLog is not null && pendingCommand is not null && entry.Data is { } text && text.TrimStart().StartsWith("SELECT", StringComparison.Ordinal))
+        {
+            sqlLines.Enqueue(pendingCommand.Trim() + " :: " + text.Trim()[..Math.Min(text.Trim().Length, 160)]);
+            pendingCommand = null;
+        }
+    };
     process.ErrorDataReceived += (_, entry) => { lock (logTail) { if (entry.Data is { } text) logTail.Enqueue(text); while (logTail.Count > 10) logTail.Dequeue(); } };
     process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
     try
@@ -117,8 +210,25 @@ static async Task<object> MeasureAsync(string executable, string seed, string di
         login.EnsureSuccessStatusCode();
         using var authentication = JsonDocument.Parse(await login.Content.ReadAsStringAsync());
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authentication.RootElement.GetProperty("token").GetString());
+        // Viewing endpoints require an unlocked profile session, as on the Apple TV.
+        using var picker = JsonDocument.Parse(await client.GetStringAsync("/api/v1/profiles"));
+        var profileId = picker.RootElement.GetProperty("profiles")[0].GetProperty("id").GetString();
+        using var unlock = await client.PostAsJsonAsync($"/api/v1/profiles/{profileId}/unlock", new { pin = "5682" });
+        unlock.EnsureSuccessStatusCode();
+        using var profile = JsonDocument.Parse(await unlock.Content.ReadAsStringAsync());
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", profile.RootElement.GetProperty("token").GetString());
+        using var seriesPage = JsonDocument.Parse(await client.GetStringAsync("/api/v1/catalog/items?kind=series&offset=0&limit=1"));
+        var seriesId = seriesPage.RootElement.GetProperty("items")[0].GetProperty("id").GetString();
+        using var moviePage = JsonDocument.Parse(await client.GetStringAsync("/api/v1/catalog/items?kind=movie&offset=0&limit=1"));
+        var movieId = moviePage.RootElement.GetProperty("items")[0].GetProperty("id").GetString();
         var measurements = new List<object>();
-        foreach (var path in new[] { "/api/v1/catalog/items?kind=movie&offset=0&limit=100", "/api/v1/catalog/search?query=Synthetic&offset=0&limit=100", "/api/v1/home" })
+        foreach (var path in new[]
+        {
+            "/api/v1/catalog/items?kind=movie&offset=0&limit=60", "/api/v1/catalog/items?kind=series&offset=0&limit=60",
+            "/api/v1/catalog/search?query=Synthetic&offset=0&limit=60", "/api/v1/home",
+            $"/api/v1/catalog/items/{seriesId}", $"/api/v1/media/{seriesId}/playback-plan",
+            $"/api/v1/catalog/items/{movieId}/summary",
+        })
         {
             for (var warmup = 0; warmup < 3; warmup++) { using var response = await client.GetAsync(path); response.EnsureSuccessStatusCode(); }
             process.Refresh(); var cpuStart = process.TotalProcessorTime; var queryStart = Interlocked.Read(ref commands);
@@ -143,6 +253,36 @@ static async Task<object> MeasureAsync(string executable, string seed, string di
             process.Refresh(); var ordered = timings.SelectMany(value => value).Order().ToArray();
             measurements.Add(new { endpoint = path, p50Ms = ordered[9], p95Ms = ordered[18], wallMs = watch.Elapsed.TotalMilliseconds, cpuMs = (process.TotalProcessorTime - cpuStart).TotalMilliseconds, peakRssBytes = peakRss, efCommands = Interlocked.Read(ref commands) - queryStart });
         }
+        // Artwork: 48 posters at the TV's poster width, six requests in flight like the
+        // Apple TV pipeline. Cold generates every variant; warm serves cached files.
+        var artworkIds = new List<string>();
+        using (var posters = JsonDocument.Parse(await client.GetStringAsync("/api/v1/catalog/items?kind=movie&offset=0&limit=200&sort=dateAdded")))
+            foreach (var item in posters.RootElement.GetProperty("items").EnumerateArray())
+                if (item.TryGetProperty("poster", out var poster) && poster.ValueKind == JsonValueKind.Object)
+                    artworkIds.Add(poster.GetProperty("id").GetString()!);
+        if (artworkIds.Count != 48) throw new InvalidOperationException($"Expected 48 synthetic posters, found {artworkIds.Count}.");
+        foreach (var phase in new[] { "artwork-640-cold", "artwork-640-warm" })
+        {
+            process.Refresh(); var cpuStart = process.TotalProcessorTime;
+            var queue = new System.Collections.Concurrent.ConcurrentQueue<string>(artworkIds);
+            var times = new System.Collections.Concurrent.ConcurrentBag<double>();
+            var watch = Stopwatch.StartNew();
+            await Task.WhenAll(Enumerable.Range(0, 6).Select(async _ =>
+            {
+                while (queue.TryDequeue(out var id))
+                {
+                    var elapsed = Stopwatch.StartNew();
+                    using var response = await client.GetAsync($"/api/v1/artwork/{id}?width=640");
+                    response.EnsureSuccessStatusCode();
+                    await response.Content.ReadAsByteArrayAsync();
+                    times.Add(elapsed.Elapsed.TotalMilliseconds);
+                }
+            }));
+            watch.Stop(); process.Refresh();
+            var ordered = times.Order().ToArray();
+            measurements.Add(new { endpoint = phase, p50Ms = ordered[ordered.Length / 2], p95Ms = ordered[(int)(ordered.Length * 0.95)], wallMs = watch.Elapsed.TotalMilliseconds, cpuMs = (process.TotalProcessorTime - cpuStart).TotalMilliseconds, peakRssBytes = process.WorkingSet64, efCommands = 0L });
+        }
+        if (sqlLog is not null) await File.AppendAllLinesAsync(sqlLog, sqlLines);
         using var information = JsonDocument.Parse(await client.GetStringAsync("/api/v1/server/info"));
         await using var binary = File.OpenRead(executable);
         var binaryHash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(binary));

@@ -155,6 +155,8 @@ builder.Services.AddScoped<MediaSearchIndexService>();
 builder.Services.AddSingleton<MetadataProviderSettingsStore>();
 builder.Services.AddSingleton<ArtworkStore>();
 builder.Services.AddSingleton<ArtworkVariantStore>();
+// Prepares common artwork widths in the background; tests drive it explicitly.
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<ArtworkVariantWarmer>();
 builder.Services.AddSingleton<MetadataJobScheduler>();
 builder.Services.AddHttpClient<ITmdbClient, TmdbClient>(client =>
 {

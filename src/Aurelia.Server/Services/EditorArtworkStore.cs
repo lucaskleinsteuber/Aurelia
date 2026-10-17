@@ -144,9 +144,12 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
         finally { decodeGate.Release(); }
     }
 
-    internal sealed record DecodedImage(SKBitmap Image, SKEncodedOrigin Origin) : IDisposable
+    internal sealed record DecodedImage(SKBitmap Image, SKEncodedOrigin Origin, bool IsJpeg = false) : IDisposable
     { public void Dispose() => Image.Dispose(); }
-    internal static DecodedImage Decode(byte[] bytes, bool allowProviderWebP = false)
+    /// <param name="minimumWidth">When set, a JPEG is decoded at the smallest DCT scale
+    /// (1/2, 1/4 or 1/8) whose displayed width still covers it; other formats and
+    /// smaller sources decode at full size.</param>
+    internal static DecodedImage Decode(byte[] bytes, bool allowProviderWebP = false, int? minimumWidth = null)
     {
         using var stream = new SKMemoryStream(bytes);
         using var codec = SKCodec.Create(stream);
@@ -155,10 +158,22 @@ public sealed class EditorArtworkStore(ServerRuntimeOptions runtime) : IDisposab
             || codec.Info.Width < 1 || codec.Info.Height < 1 || (long)codec.Info.Width * codec.Info.Height > MaximumPixels
             || codec.FrameCount > 1)
             throw new AccountException("invalid_image", "Use a valid, non-animated JPEG or PNG image of at most 24 megapixels.", 400);
-        var bitmap = new SKBitmap(new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Premul));
+        var isJpeg = codec.EncodedFormat == SKEncodedImageFormat.Jpeg;
+        var size = new SKSizeI(codec.Info.Width, codec.Info.Height);
+        if (isJpeg && minimumWidth is > 0)
+        {
+            var swapped = codec.EncodedOrigin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
+                or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
+            foreach (var scale in new[] { 0.125f, 0.25f, 0.5f })
+            {
+                var scaled = codec.GetScaledDimensions(scale);
+                if ((swapped ? scaled.Height : scaled.Width) >= minimumWidth) { size = scaled; break; }
+            }
+        }
+        var bitmap = new SKBitmap(new SKImageInfo(size.Width, size.Height, SKColorType.Rgba8888, SKAlphaType.Premul));
         if (codec.GetPixels(bitmap.Info, bitmap.GetPixels()) != SKCodecResult.Success)
         { bitmap.Dispose(); throw new AccountException("invalid_image", "The image could not be decoded completely.", 400); }
-        return new(bitmap, codec.EncodedOrigin);
+        return new(bitmap, codec.EncodedOrigin, isJpeg);
     }
     internal static void ValidateStoredImage(string path)
     {
