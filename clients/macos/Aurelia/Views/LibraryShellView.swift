@@ -419,10 +419,17 @@ private struct HomePage: View {
 }
 
 private struct HomeHero: View {
+  @EnvironmentObject private var model: AppModel
   let item: CatalogItemSummary
   let action: () -> Void
 
   var body: some View {
+    heroContent
+      // The hero leads to its detail page; prepare it while Home is shown.
+      .task(id: item.id) { model.prepareDetail(for: item) }
+  }
+
+  private var heroContent: some View {
     ZStack(alignment: .bottomLeading) {
       AuthenticatedArtwork(
         artwork: item.backdrop ?? item.poster,

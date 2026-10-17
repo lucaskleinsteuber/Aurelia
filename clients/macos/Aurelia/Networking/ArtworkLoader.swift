@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @MainActor
@@ -12,6 +13,7 @@ final class ArtworkLoader {
   }
 
   private let cache = NSCache<NSString, NSData>()
+  private let images = NSCache<NSString, NSImage>()
   private var flights: [String: Flight] = [:]
   private let fetcher: Fetcher
   private let diskCache: ArtworkDiskCache?
@@ -26,8 +28,33 @@ final class ArtworkLoader {
   ) {
     cache.totalCostLimit = memoryLimit
     cache.countLimit = itemLimit
+    images.countLimit = itemLimit
     self.diskCache = diskCache
     self.fetcher = fetcher
+  }
+
+  /// Artwork already in memory, for drawing it in a view's first frame. A larger prepared
+  /// variant of the same revision is used when the requested width is not loaded yet.
+  func cachedImage(for artwork: ArtworkSummary, profile: StoredServerProfile, width: Int?)
+    -> NSImage?
+  {
+    let widths: [Int?] =
+      if let width { [width] + [640, 1280, 1920].filter { $0 > width } } else { [nil] }
+    for candidate in widths {
+      let key =
+        Self.cacheKey(
+          ArtworkVariantRequest.artwork(artwork, width: candidate), profile: profile) as NSString
+      if let image = images.object(forKey: key) { return image }
+      if let data = cache.object(forKey: key), let image = NSImage(data: data as Data) {
+        images.setObject(image, forKey: key)
+        return image
+      }
+    }
+    return nil
+  }
+
+  private static func cacheKey(_ artwork: ArtworkSummary, profile: StoredServerProfile) -> String {
+    "\(profile.serverId.uuidString):\(profile.sessionId.uuidString):\(artwork.path):r\(artwork.revision ?? 0)"
   }
 
   func data(for artwork: ArtworkSummary, profile: StoredServerProfile, width: Int? = nil)
@@ -37,8 +64,7 @@ final class ArtworkLoader {
     guard APIClient.isValidArtworkPath(artwork.path) else {
       throw APIClientError.invalidResponse
     }
-    let flightKey =
-      "\(profile.serverId.uuidString):\(profile.sessionId.uuidString):\(artwork.path):r\(artwork.revision ?? 0)"
+    let flightKey = Self.cacheKey(artwork, profile: profile)
     let cacheKey = flightKey as NSString
     if let cached = cache.object(forKey: cacheKey) {
       return cached as Data
@@ -68,6 +94,7 @@ final class ArtworkLoader {
 
   func removeAll() {
     cache.removeAllObjects()
+    images.removeAllObjects()
     for flight in flights.values { flight.task.cancel() }
     let pending = flights.values.flatMap(\.continuations.values)
     flights.removeAll()

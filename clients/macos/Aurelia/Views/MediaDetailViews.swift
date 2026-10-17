@@ -17,6 +17,7 @@ struct MediaDetailView: View {
   @State private var loadedProfile: StoredServerProfile?
   @State private var primarySeasonApplied = false
   @State private var playbackTask: Task<Void, Never>?
+  @State private var usedPreparedDetail = false
   @StateObject private var watchActions = MediaWatchActionController()
 
   var body: some View {
@@ -85,6 +86,8 @@ struct MediaDetailView: View {
     .scrollIndicators(.automatic, axes: .vertical)
     .aureliaOverlayScrollbars()
     .accessibilityIdentifier("media-detail-scroll")
+    // Details prepared while the pointer rested on the title appear in the first frame.
+    .onAppear { applyPreparedDetail() }
     .task(
       id: DetailRefreshKey(
         mediaId: mediaId, revision: model.catalogVisibilityRevision,
@@ -146,19 +149,55 @@ struct MediaDetailView: View {
     }
   }
 
+  private func applyPreparedDetail() {
+    guard detail == nil, let prepared = model.preparedDetail(id: mediaId) else { return }
+    loadedProfile = model.profile
+    detail = prepared.detail
+    selectedSeason = prepared.detail.seasons.first?.number
+    errorMessage = nil
+    if model.supportsLibraryState, let plan = prepared.plan {
+      apply(plan, to: prepared.detail)
+    }
+    isLoadingPlaybackPlan = false
+    usedPreparedDetail = true
+  }
+
+  private func apply(_ plan: PlaybackPlanResponse, to detail: CatalogDetailPresentation) {
+    playbackPlan = plan
+    if !primarySeasonApplied, let targetSeason = plan.target?.seasonNumber,
+      detail.seasons.contains(where: { $0.number == targetSeason })
+    {
+      selectedSeason = targetSeason
+    }
+    primarySeasonApplied = true
+  }
+
   private func load() async {
+    // The prepared detail is at most 30 seconds old and from this session and catalog revision.
+    if usedPreparedDetail {
+      usedPreparedDetail = false
+      if detail?.item.id == mediaId, model.preparedDetail(id: mediaId) != nil { return }
+    }
     let request = UUID()
     loadGeneration = request
     let profile = model.profile
     if detail?.item.id != mediaId || loadedProfile != profile {
       detail = nil
+      playbackPlan = nil
       selectedSeason = nil
       primarySeasonApplied = false
+      // Start the hero artwork together with the details instead of after them.
+      if let summary = model.catalogItems.first(where: { $0.id == mediaId }),
+        let backdrop = summary.backdrop
+      {
+        model.prefetchHeroArtwork(backdrop)
+      }
     }
     loadedProfile = profile
-    playbackPlan = nil
     isLoadingPlaybackPlan = model.supportsLibraryState
     do {
+      // Details and the playback plan load in parallel; the details appear first.
+      async let loadedPlan = model.optionalPlaybackPlan(mediaId: mediaId)
       let loadedDetail = try await model.catalogDetail(id: mediaId)
       guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
       detail = loadedDetail
@@ -166,16 +205,9 @@ struct MediaDetailView: View {
         selectedSeason = loadedDetail.seasons.first?.number
       }
       errorMessage = nil
-      if model.supportsLibraryState {
-        let plan = try await model.playbackPlan(mediaId: mediaId)
+      if let plan = try await loadedPlan {
         guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
-        playbackPlan = plan
-        if !primarySeasonApplied, let targetSeason = plan.target?.seasonNumber,
-          loadedDetail.seasons.contains(where: { $0.number == targetSeason })
-        {
-          selectedSeason = targetSeason
-        }
-        primarySeasonApplied = true
+        apply(plan, to: loadedDetail)
       }
       isLoadingPlaybackPlan = false
     } catch {
@@ -548,7 +580,7 @@ private struct DetailHero: View {
   var body: some View {
     ZStack(alignment: .bottomLeading) {
       AuthenticatedArtwork(
-        artwork: detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop,
+        artwork: AppModel.heroArtwork(detail),
         symbol: detail.item.kind == .movie ? "film.fill" : "tv.fill",
         contentMode: .fill,
         placeholderSymbolSize: 64

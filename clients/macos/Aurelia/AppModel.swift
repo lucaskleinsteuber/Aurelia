@@ -112,6 +112,17 @@ final class AppModel: ObservableObject {
   private let serverHost: NativeServerHost
   private let syncController: LibrarySyncController
   private let homeRefresher = HomeRefreshCoordinator()
+  private struct PreparedDetail {
+    let detail: CatalogDetailPresentation
+    let plan: PlaybackPlanResponse?
+    let sessionID: UUID
+    let revision: UInt64
+    let preparedAt: Date
+  }
+  /// Details prepared while the pointer rested on a title; valid for one session and revision.
+  private var preparedDetails: [UUID: PreparedDetail] = [:]
+  private var detailPreparations: [UUID: Task<Void, Never>] = [:]
+  private static let preparedDetailLifetime: TimeInterval = 30
   private var hasStarted = false
   private var hostPollTask: Task<Void, Never>?
   private var homeRefreshTask: Task<Void, Never>?
@@ -1607,6 +1618,62 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// Prepares a title's detail page while the pointer rests on it: details, the playback plan
+  /// and the hero artwork. Each title is prepared at most once per 30 seconds.
+  func prepareDetail(for item: CatalogItemSummary) {
+    guard item.kind == .movie || item.kind == .series, let profile,
+      detailPreparations[item.id] == nil, preparedDetail(id: item.id) == nil
+    else { return }
+    let revision = catalogVisibilityRevision
+    if let backdrop = item.backdrop { prefetchHeroArtwork(backdrop) }
+    detailPreparations[item.id] = Task { [weak self] in
+      defer { self?.detailPreparations[item.id] = nil }
+      guard let self else { return }
+      do {
+        async let loadedPlan = optionalPlaybackPlan(mediaId: item.id)
+        let detail = try await catalogDetail(id: item.id)
+        if let hero = Self.heroArtwork(detail), hero.id != item.backdrop?.id {
+          prefetchHeroArtwork(hero)
+        }
+        let plan = try await loadedPlan
+        guard self.profile?.sessionId == profile.sessionId, catalogVisibilityRevision == revision
+        else { return }
+        preparedDetails = preparedDetails.filter {
+          Date().timeIntervalSince($0.value.preparedAt) < Self.preparedDetailLifetime
+        }
+        preparedDetails[item.id] = PreparedDetail(
+          detail: detail, plan: plan, sessionID: profile.sessionId, revision: revision,
+          preparedAt: Date())
+      } catch {}
+    }
+  }
+
+  /// A detail prepared in the last 30 seconds for this session and catalog revision.
+  func preparedDetail(id: UUID) -> (detail: CatalogDetailPresentation, plan: PlaybackPlanResponse?)?
+  {
+    guard let entry = preparedDetails[id], entry.sessionID == profile?.sessionId,
+      entry.revision == catalogVisibilityRevision,
+      Date().timeIntervalSince(entry.preparedAt) < Self.preparedDetailLifetime
+    else { return nil }
+    return (entry.detail, entry.plan)
+  }
+
+  /// The artwork a detail page shows full width at the top.
+  static func heroArtwork(_ detail: CatalogDetailPresentation) -> ArtworkSummary? {
+    detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop
+  }
+
+  /// Starts loading hero artwork at the widest prepared size, which serves every window size.
+  func prefetchHeroArtwork(_ artwork: ArtworkSummary) {
+    guard let profile else { return }
+    let width = libraryCapabilities.contains("artwork-variants-v1") ? 1920 : nil
+    Task { _ = try? await artworkLoader.data(for: artwork, profile: profile, width: width) }
+  }
+
+  func optionalPlaybackPlan(mediaId: UUID) async throws -> PlaybackPlanResponse? {
+    supportsLibraryState ? try await playbackPlan(mediaId: mediaId) : nil
+  }
+
   func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin",
@@ -2244,6 +2311,9 @@ final class AppModel: ObservableObject {
   }
 
   private func clearPersonalViewState() {
+    for preparation in detailPreparations.values { preparation.cancel() }
+    detailPreparations.removeAll()
+    preparedDetails.removeAll()
     movies = []
     series = []
     catalogItems = []

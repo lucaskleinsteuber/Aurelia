@@ -462,13 +462,15 @@ struct AuthenticatedArtwork: View {
   var body: some View {
     GeometryReader { geometry in
       let width = ArtworkVariantRequest.width(for: geometry.size.width, scale: displayScale)
+      // Artwork already in memory is drawn in the first frame, without a placeholder.
+      let shown = cachedImage(width: width) ?? image
       ZStack {
         MediaArtworkPlaceholder(symbol: symbol, symbolSize: placeholderSymbolSize)
           .accessibilityElement(children: .ignore)
           .accessibilityLabel("Artwork placeholder")
           .accessibilityIdentifier("artwork-placeholder")
-        if let image {
-          Image(nsImage: image)
+        if let shown {
+          Image(nsImage: shown)
             .resizable()
             .aspectRatio(contentMode: contentMode)
             .transition(.opacity)
@@ -477,6 +479,10 @@ struct AuthenticatedArtwork: View {
       .frame(width: geometry.size.width, height: geometry.size.height)
       .clipped()
       .task(id: taskID(width: width)) {
+        if let cached = cachedImage(width: width) {
+          image = cached
+          return
+        }
         image = nil
         guard let artwork, let profile = model.profile else { return }
         do {
@@ -493,6 +499,13 @@ struct AuthenticatedArtwork: View {
       }
     }
     .accessibilityElement(children: .contain)
+  }
+
+  private func cachedImage(width: Int) -> NSImage? {
+    guard let artwork, let profile = model.profile else { return nil }
+    return model.artworkLoader.cachedImage(
+      for: artwork, profile: profile,
+      width: model.libraryCapabilities.contains("artwork-variants-v1") ? width : nil)
   }
 
   private func taskID(width: Int) -> String {
@@ -522,6 +535,7 @@ struct MediaArtworkPlaceholder: View {
 }
 
 struct MediaPosterCard: View {
+  @EnvironmentObject private var model: AppModel
   let item: CatalogItemSummary
   var width: CGFloat = 154
   @State private var hovering = false
@@ -595,6 +609,13 @@ struct MediaPosterCard: View {
     .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
     .animation(reduceMotion ? nil : AureliaDesign.responsiveSpring, value: hovering)
     .onHover { hovering = $0 }
+    .task(id: hovering) {
+      // Once the pointer rests on a title, prepare its detail page so it opens complete.
+      guard hovering else { return }
+      try? await Task.sleep(for: .milliseconds(250))
+      guard !Task.isCancelled else { return }
+      model.prepareDetail(for: item)
+    }
   }
 
   private var secondaryLine: String {

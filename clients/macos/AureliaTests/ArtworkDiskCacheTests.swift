@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -79,6 +80,39 @@ struct ArtworkDiskCacheTests {
     _ = try await ArtworkLoader(diskCache: cache, fetcher: fetcher).data(
       for: legacy, profile: profile)
     #expect(requests == 3)
+  }
+
+  @Test
+  func loadedArtworkIsAvailableSynchronouslyIncludingLargerVariants() async throws {
+    let png = try #require(Self.syntheticPNG())
+    let loader = ArtworkLoader(diskCache: nil) { _, _ in png }
+    let profile = StoredServerProfile(
+      serverId: UUID(), name: "Synthetic", baseURL: URL(string: "https://fixture.invalid")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64), token: "test-only",
+      sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z")
+    let artwork = ArtworkSummary(
+      id: UUID(), kind: .backdrop, path: "/api/v1/artwork/\(UUID().uuidString.lowercased())",
+      contentType: "image/png", contentLength: Int64(png.count), revision: 2)
+    #expect(loader.cachedImage(for: artwork, profile: profile, width: 1280) == nil)
+    _ = try await loader.data(for: artwork, profile: profile, width: 1920)
+    // A detail page that needs 1280 pixels draws the prepared 1920 variant at once.
+    #expect(loader.cachedImage(for: artwork, profile: profile, width: 1920) != nil)
+    #expect(loader.cachedImage(for: artwork, profile: profile, width: 1280) != nil)
+    var revised = artwork
+    revised.revision = 3
+    #expect(loader.cachedImage(for: revised, profile: profile, width: 1280) == nil)
+    loader.removeAll()
+    #expect(loader.cachedImage(for: artwork, profile: profile, width: 1920) == nil)
+  }
+
+  private static func syntheticPNG() -> Data? {
+    guard
+      let bitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 2, bitsPerSample: 8,
+        samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+        bytesPerRow: 0, bitsPerPixel: 0)
+    else { return nil }
+    return bitmap.representation(using: .png, properties: [:])
   }
 
   @Test
