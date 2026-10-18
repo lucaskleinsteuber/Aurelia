@@ -48,6 +48,8 @@ struct TVPlaybackRuntime {
   let engine: any TVPlaybackEngine
   let makeRelay: (URL, String, String) throws -> any TVPlaybackRelay
   let managesAudioSession: Bool
+  /// A second relay for timeline previews; nil keeps previews off, as in the UI tests.
+  var makePreviewRelay: ((URL, String, String) throws -> any TVPlaybackRelay)? = nil
 
   static func live() -> Self {
     Self(
@@ -55,6 +57,11 @@ struct TVPlaybackRuntime {
       makeRelay: { url, fingerprint, token in
         try TVStreamRelay(
           sourceURL: url, publicKeyFingerprint: fingerprint, authorizationToken: token)
-      }, managesAudioSession: true)
+      }, managesAudioSession: true,
+      makePreviewRelay: { url, fingerprint, token in
+        try TVStreamRelay(
+          sourceURL: url, publicKeyFingerprint: fingerprint, authorizationToken: token,
+          streamPurpose: "preview")
+      })
   }
 }

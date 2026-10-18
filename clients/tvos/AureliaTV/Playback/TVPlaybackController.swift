@@ -29,6 +29,16 @@ final class TVPlaybackController: ObservableObject {
   @Published private(set) var errorMessage: String?
   @Published private(set) var progressMessage: String?
   @Published private(set) var controlsVisible = true
+  /// From Play until the picture moves, for each title: the player shows only a loading ring.
+  @Published private(set) var isStarting = true
+  /// While the timeline is scrubbed, the position the viewer is choosing; Select jumps there.
+  @Published private(set) var scrubPosition: Int64?
+  @Published private(set) var upNext: TVUpNext?
+  /// A separate local relay for timeline previews; its reads are marked as previews, which
+  /// the server counts apart from playback, and its failures never touch playback.
+  @Published private(set) var previewSourceURL: URL?
+  @Published private(set) var previewsParallel = false
+  @Published private(set) var currentMediaID: UUID
   @Published var trackMenu: TrackMenu? {
     didSet { userInteracted() }
   }
@@ -55,6 +65,12 @@ final class TVPlaybackController: ObservableObject {
   private let onSessionFailure: @MainActor (Error) -> Void
   private let outbox: TVProgressOutbox
   private var relay: (any TVPlaybackRelay)?
+  private var previewRelay: (any TVPlaybackRelay)?
+  private var previewRelayTask: Task<Void, Never>?
+  private var scrubRepeats = 0
+  private var lastScrubAt: TimeInterval = 0
+  private var upNextDismissed = false
+  private var autoplayCancelled = false
   private var ticket: TVPlaybackTicket?
   private var baselineRevision: Int64?
   private var openingTask: Task<Void, Never>?
@@ -87,6 +103,7 @@ final class TVPlaybackController: ObservableObject {
     self.connection = connection
     self.session = session
     self.mediaID = mediaID
+    self.currentMediaID = mediaID
     self.seriesID = seriesID
     self.queue = queue
     let store = preferencesStore ?? .shared
@@ -125,6 +142,10 @@ final class TVPlaybackController: ObservableObject {
       guard !Task.isCancelled, operation == generation, !closed else { return }
       await open(resumeAt: nil, operation: operation)
     }
+    Task { [weak self, api] in
+      let features = (try? await api.capabilities())?.capabilities ?? []
+      self?.previewsParallel = features.contains(TVScrubPreviewPlan.serverFeature)
+    }
     progressTask = Task { [weak self] in
       while !Task.isCancelled {
         do { try await Task.sleep(for: .seconds(TVPlayerPolicy.progressInterval)) } catch { return }
@@ -137,6 +158,7 @@ final class TVPlaybackController: ObservableObject {
   func togglePlayPause() {
     guard !closed, errorMessage == nil else { return }
     wantsPlayback.toggle()
+    if !wantsPlayback { isStarting = false }
     if wantsPlayback { engine.play() } else { engine.pause() }
     if !wantsPlayback { Task { await saveProgress(finished: false) } }
     userInteracted()
@@ -320,8 +342,55 @@ final class TVPlaybackController: ObservableObject {
     userInteracted()
   }
 
+  /// Moves the scrub position; quick repeated presses move further. Playback continues until
+  /// Select jumps there.
+  func scrub(forward: Bool) {
+    guard canSeek, !closed else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    scrubRepeats = now - lastScrubAt < 0.45 ? scrubRepeats + 1 : 0
+    lastScrubAt = now
+    let step = TVPlayerPolicy.scrubStep(base: seekInterval, repeats: scrubRepeats)
+    scrubPosition = TVPlayerPolicy.seekPosition(
+      current: scrubPosition ?? position, offset: forward ? step : -step, duration: duration)
+    userInteracted()
+  }
+
+  /// Jumps to the scrub position; false when nothing was being scrubbed.
+  @discardableResult
+  func commitScrub() -> Bool {
+    guard let target = scrubPosition else { return false }
+    scrubPosition = nil
+    seek(to: target)
+    return true
+  }
+
+  func cancelScrub() {
+    guard scrubPosition != nil else { return }
+    scrubPosition = nil
+    userInteracted()
+  }
+
+  /// Starts the next episode now from the Up Next card.
+  func playNextNow() {
+    guard !closed, !finished, let next = queue.first else { return }
+    finished = true
+    upNext = nil
+    advanceTask = Task { [weak self] in await self?.advance(to: next) }
+  }
+
+  /// Hides the Up Next card; the player then stops at the end instead of continuing.
+  func dismissUpNext() {
+    upNextDismissed = true
+    autoplayCancelled = true
+    upNext = nil
+  }
+
   func back() {
-    if trackMenu != nil {
+    if scrubPosition != nil {
+      cancelScrub()
+    } else if upNext != nil, !controlsVisible {
+      dismissUpNext()
+    } else if trackMenu != nil {
       trackMenu = nil
       userInteracted()
     } else {
@@ -409,6 +478,7 @@ final class TVPlaybackController: ObservableObject {
       }
       relay?.stop()
       relay = secureRelay
+      startPreviewRelay(sourceURL: url)
       if let previous = ticket?.id { Task { [api] in try? await api.revokeTicket(id: previous) } }
       ticket = created
       unclaimedRelay = nil
@@ -478,8 +548,61 @@ final class TVPlaybackController: ObservableObject {
     // bring the controls back while the viewer keeps skipping.
     let quietSkip = wantsPlayback && ProcessInfo.processInfo.systemUptime < quietSkipUntil
     if quietSkip { return }
+    if isStarting, engine.hasObservedPlayback {
+      // The picture moves: the ring gives way to a clear picture without controls.
+      isStarting = false
+      if trackMenu == nil, errorMessage == nil {
+        controlsTask?.cancel()
+        controlsVisible = false
+        return
+      }
+    }
+    updateUpNext()
     if wasPlaying != isPlaying || wasLoading != isLoading { userInteracted() }
     if !isPlaying { controlsVisible = true }
+  }
+
+  private func updateUpNext() {
+    let next = queue.first
+    let shown = TVPlayerPolicy.showsUpNext(
+      position: position, duration: duration, hasNext: next?.isPlayable == true,
+      autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,
+      dismissed: upNextDismissed || finished)
+    let card = next.flatMap { next in
+      shown
+        ? TVUpNext(
+          title: next.episodeLabel.map { "\($0) · \(next.title)" } ?? next.title,
+          seconds: TVPlayerPolicy.upNextSeconds(position: position, duration: duration))
+        : nil
+    }
+    assignIfChanged(&upNext, card)
+  }
+
+  /// Starts the preview relay beside the playing one without delaying playback; previews
+  /// simply stay unavailable when it cannot start.
+  private func startPreviewRelay(sourceURL: URL) {
+    stopPreviewRelay()
+    guard
+      let preview = try? runtime.makePreviewRelay?(
+        sourceURL, connection.fingerprint, session.token)
+    else { return }
+    previewRelay = preview
+    previewRelayTask = Task { [weak self] in
+      let url = try? await preview.start()
+      guard let self, let url, !Task.isCancelled, previewRelay === preview else {
+        preview.stop()
+        return
+      }
+      previewSourceURL = url
+    }
+  }
+
+  private func stopPreviewRelay() {
+    previewRelayTask?.cancel()
+    previewRelayTask = nil
+    previewRelay?.stop()
+    previewRelay = nil
+    previewSourceURL = nil
   }
 
   private func engineTerminated(_ terminal: TVVideoEngine.Terminal) {
@@ -491,8 +614,9 @@ final class TVPlaybackController: ObservableObject {
         observedPlayback: engine.hasObservedPlayback, transportFailed: transportFailed)
     {
       finished = true
+      upNext = nil
       if sleepTimer != .endOfEpisode, preferences.automaticallyPlayNextEpisode,
-        let next = queue.first
+        !autoplayCancelled, let next = queue.first
       {
         advanceTask = Task { [weak self] in await self?.advance(to: next) }
       } else {
@@ -538,6 +662,7 @@ final class TVPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopPreviewRelay()
     isPlaying = false
     isLoading = true
     errorMessage = nil
@@ -597,6 +722,7 @@ final class TVPlaybackController: ObservableObject {
         }
         let url = try api.validatedStreamURL(path: renewed.streamPath)
         relay?.updateSourceURL(url)
+        previewRelay?.updateSourceURL(url)
         ticket = renewed
         Task { [api] in try? await api.revokeTicket(id: current.id) }
         scheduleRenewal(renewed, operation: operation)
@@ -645,10 +771,17 @@ final class TVPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopPreviewRelay()
     if let id = ticket?.id { Task { [api] in try? await api.revokeTicket(id: id) } }
     ticket = nil
     queue.removeFirst()
     mediaID = next.id
+    currentMediaID = next.id
+    isStarting = true
+    scrubPosition = nil
+    upNext = nil
+    upNextDismissed = false
+    autoplayCancelled = false
     title = next.parentTitle.map { "\($0) · \(next.episodeLabel ?? next.title)" } ?? next.title
     baselineRevision = nil
     position = 0
@@ -703,6 +836,7 @@ final class TVPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopPreviewRelay()
     if let id = ticket?.id { Task { [api] in try? await api.revokeTicket(id: id) } }
     ticket = nil
     if runtime.managesAudioSession {
@@ -710,6 +844,8 @@ final class TVPlaybackController: ObservableObject {
     }
     isLoading = false
     isPlaying = false
+    isStarting = false
+    scrubPosition = nil
     errorMessage = message
     progressMessage = nil
     controlsVisible = true
@@ -726,7 +862,7 @@ final class TVPlaybackController: ObservableObject {
       playing: isPlaying, menuOpen: trackMenu != nil,
       // Timeline focus alone does not pin the controls: every skip restarts the
       // auto-hide delay, and an idle timeline hides like the transport buttons.
-      interacting: false, loading: isLoading, hasError: errorMessage != nil)
+      interacting: scrubPosition != nil, loading: isLoading, hasError: errorMessage != nil)
   }
 
   private func endBackgroundSave() {
@@ -749,10 +885,16 @@ final class TVPlaybackController: ObservableObject {
     engine.stop()
     relay?.stop()
     relay = nil
+    stopPreviewRelay()
     engine.onUpdate = nil
     engine.onTerminal = nil
     if runtime.managesAudioSession {
       try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
   }
+}
+
+struct TVUpNext: Equatable {
+  let title: String
+  let seconds: Int
 }

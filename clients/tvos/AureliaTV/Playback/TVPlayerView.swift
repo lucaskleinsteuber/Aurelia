@@ -4,6 +4,7 @@ import UIKit
 @MainActor
 struct TVPlayerView: View {
   @StateObject private var controller: TVPlaybackController
+  @StateObject private var previews = TVScrubPreviews()
   @Environment(\.scenePhase) private var scenePhase
   @FocusState private var focus: Control?
   @State private var lastTransport: Control = .play
@@ -12,7 +13,7 @@ struct TVPlayerView: View {
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, retry,
-      closeMenu, nightMode
+      closeMenu, nightMode, upNextPlay, upNextCancel
     case audioTrack(Int32)
     case subtitleTrack(Int32)
     case rateOption(Double)
@@ -29,7 +30,10 @@ struct TVPlayerView: View {
       Color.black.ignoresSafeArea()
       TVVideoSurface(engine: controller.engine).ignoresSafeArea().accessibilityIdentifier(
         "player-surface")
-      if !controller.controlsVisible {
+      if controller.isStarting && controller.errorMessage == nil {
+        startScreen.transition(.opacity)
+      }
+      if !controller.controlsVisible || controller.isStarting {
         Color.clear.contentShape(Rectangle()).focusable().focusEffectDisabled()
           .focused($focus, equals: .surface)
           .onTapGesture { controller.userInteracted() }
@@ -44,22 +48,48 @@ struct TVPlayerView: View {
           .accessibilityLabel("Show playback controls").accessibilityIdentifier(
             "player-wake-surface")
       }
-      if controller.controlsVisible || controller.errorMessage != nil { controls }
+      if (controller.controlsVisible && !controller.isStarting) || controller.errorMessage != nil {
+        controls
+      }
       if let skip, !controller.controlsVisible { skipIndicator(skip) }
       // With controls shown, loading is drawn inside Play instead of behind it.
-      if controller.isLoading && controller.errorMessage == nil && !controller.controlsVisible {
+      if controller.isLoading && controller.errorMessage == nil && !controller.controlsVisible
+        && !controller.isStarting
+      {
         ProgressView().tint(.white).scaleEffect(1.4).accessibilityIdentifier("player-loading")
+      }
+      if let upNext = controller.upNext, !controller.controlsVisible, controller.trackMenu == nil {
+        upNextCard(upNext)
       }
       if let menu = controller.trackMenu { menuView(menu) }
     }
+    .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
     .preferredColorScheme(.dark)
-    .onAppear { controller.start() }.onDisappear { controller.close() }
+    .onAppear {
+      controller.start()
+      configurePreviews()
+    }
+    .onDisappear {
+      previews.reset()
+      controller.close()
+    }
+    .onChange(of: controller.previewSourceURL) { _, _ in configurePreviews() }
+    .onChange(of: controller.duration) { _, _ in configurePreviews() }
+    .onChange(of: controller.currentMediaID) { _, _ in configurePreviews() }
+    .onChange(of: controller.previewsParallel) { _, _ in configurePreviews() }
+    .onChange(of: controller.scrubPosition) { _, position in
+      if let position { previews.request(at: position) }
+    }
+    .onChange(of: controller.upNext != nil) { _, shown in
+      if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .upNextPlay }
+    }
     .onPlayPauseCommand { controller.togglePlayPause() }.onExitCommand { controller.back() }
     .onChange(of: focus) { _, value in
       if let value, value.isTransport { lastTransport = value }
       if controller.controlsVisible, value != .surface {
         controller.setScrubbing(value == .timeline)
       }
+      if value != .timeline { controller.cancelScrub() }
     }
     .task(id: controller.controlsVisible) {
       let visible = controller.controlsVisible
@@ -232,7 +262,8 @@ struct TVPlayerView: View {
 
   private var timeline: some View {
     Button {
-      controller.togglePlayPause()
+      // Select jumps to a scrubbed position; otherwise it plays or pauses.
+      if !controller.commitScrub() { controller.togglePlayPause() }
     } label: {
       VStack(spacing: 12) {
         GeometryReader { geometry in
@@ -240,10 +271,22 @@ struct TVPlayerView: View {
             Capsule().fill(.white.opacity(0.25))
             Capsule().fill(.white.opacity(focus == .timeline ? 1 : 0.75)).frame(
               width: geometry.size.width * fraction)
+            if controller.scrubPosition != nil {
+              // Where playback is now, while the bar shows where Select would jump.
+              Capsule().fill(.white.opacity(0.45))
+                .frame(width: 4, height: 18)
+                .offset(x: geometry.size.width * playedFraction - 2)
+            }
+          }
+          .overlay(alignment: .bottomLeading) {
+            if let scrub = controller.scrubPosition {
+              scrubPreview(at: scrub, width: geometry.size.width)
+            }
           }
         }.frame(height: focus == .timeline ? 8 : 5)
         HStack {
-          Text(TVPlayerPolicy.timeLabel(milliseconds: controller.position))
+          Text(
+            TVPlayerPolicy.timeLabel(milliseconds: controller.scrubPosition ?? controller.position))
           Spacer()
           if let endsAt = TVPlayerPolicy.endTimeLabel(
             position: controller.position, duration: controller.duration,
@@ -259,8 +302,8 @@ struct TVPlayerView: View {
       .disabled(!controller.canSeek)
       .onMoveCommand { direction in
         switch direction {
-        case .left: controller.seek(by: -controller.seekInterval)
-        case .right: controller.seek(by: controller.seekInterval)
+        case .left: controller.scrub(forward: false)
+        case .right: controller.scrub(forward: true)
         case .up, .down: focus = lastTransport
         default: break
         }
@@ -280,7 +323,97 @@ struct TVPlayerView: View {
 
   private var fraction: Double {
     controller.duration > 0
+      ? min(
+        1,
+        max(
+          0, Double(controller.scrubPosition ?? controller.position) / Double(controller.duration)))
+      : 0
+  }
+
+  private var playedFraction: Double {
+    controller.duration > 0
       ? min(1, max(0, Double(controller.position) / Double(controller.duration))) : 0
+  }
+
+  private func configurePreviews() {
+    previews.configure(
+      mediaID: controller.currentMediaID, source: controller.previewSourceURL,
+      duration: controller.duration, parallel: controller.previewsParallel)
+  }
+
+  /// The frame at the scrub position above the timeline; it never leaves memory.
+  private func scrubPreview(at position: Int64, width: CGFloat) -> some View {
+    let size = CGSize(width: 384, height: 216)
+    let center =
+      controller.duration > 0 ? width * Double(position) / Double(controller.duration) : 0
+    let x = min(max(center - size.width / 2, 0), max(width - size.width, 0))
+    return VStack(spacing: 10) {
+      ZStack {
+        Color.black
+        if previews.imageBucket == previews.bucket(for: position), let image = previews.image {
+          Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit)
+        } else {
+          ProgressView().tint(.white)
+        }
+      }
+      .frame(width: size.width, height: size.height)
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(
+          .white.opacity(0.35), lineWidth: 2)
+      }
+      .shadow(color: .black.opacity(0.5), radius: 16, y: 6)
+      Text(TVPlayerPolicy.timeLabel(milliseconds: position))
+        .font(.system(size: 24, weight: .semibold).monospacedDigit())
+    }
+    .offset(x: x, y: -40)
+    .allowsHitTesting(false)
+    .accessibilityElement(children: .ignore)
+    .accessibilityIdentifier("player-scrub-preview")
+    .accessibilityLabel("Jump to \(TVPlayerPolicy.timeLabel(milliseconds: position))")
+  }
+
+  /// Black with a turning ring until the picture moves; reconnecting still explains itself.
+  private var startScreen: some View {
+    ZStack {
+      Color.black.ignoresSafeArea()
+      VStack(spacing: 28) {
+        TVStartRing().frame(width: 72, height: 72)
+        if let message = controller.progressMessage {
+          Text(message).font(.system(size: 24)).foregroundStyle(.secondary)
+        }
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(controller.progressMessage ?? "Loading")
+    .accessibilityIdentifier("player-start-screen")
+  }
+
+  private func upNextCard(_ upNext: TVUpNext) -> some View {
+    VStack(alignment: .leading, spacing: 18) {
+      Text("UP NEXT").font(.system(size: 20, weight: .bold)).tracking(1.2)
+        .foregroundStyle(.secondary)
+      Text(upNext.title).font(.system(size: 28, weight: .semibold)).lineLimit(2)
+      HStack(spacing: 18) {
+        Button {
+          controller.playNextNow()
+        } label: {
+          Label("Play Now · \(upNext.seconds)", systemImage: "play.fill").monospacedDigit()
+        }
+        .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .upNextPlay)
+        .accessibilityIdentifier("player-up-next-play")
+        Button("Cancel") { controller.dismissUpNext() }
+          .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .upNextCancel)
+          .accessibilityIdentifier("player-up-next-cancel")
+      }
+    }
+    .padding(30)
+    .frame(width: 620, alignment: .leading)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+    .padding(.trailing, 80).padding(.bottom, 70)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    .focusSection()
+    .accessibilityIdentifier("player-up-next")
   }
   private var sleepValue: Int {
     switch controller.sleepTimer {
@@ -415,4 +548,22 @@ private struct TVVideoSurface: UIViewRepresentable {
 private struct TVSkipIndicator {
   let id = UUID()
   let offset: Int64
+}
+
+/// A white arc that turns and gently grows and shrinks while a title starts.
+private struct TVStartRing: View {
+  var body: some View {
+    TimelineView(.animation) { context in
+      let time = context.date.timeIntervalSinceReferenceDate
+      let rotation = time.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360
+      let length = 0.42 + 0.26 * sin(time * 2 * .pi / 1.8)
+      ZStack {
+        Circle().stroke(.white.opacity(0.12), lineWidth: 5)
+        Circle()
+          .trim(from: 0, to: length)
+          .stroke(.white, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+          .rotationEffect(.degrees(rotation - 90))
+      }
+    }
+  }
 }

@@ -73,6 +73,8 @@ final class TVVideoEngine: TVPlaybackEngine {
     appliedAudioPreference = false
     appliedSubtitlePreference = false
     machine.reset(at: now)
+    // The decoder opens at the resume position; its first clock there is not watched time.
+    if resumeAt > 0 { machine.seek(to: resumeAt, at: now) }
     let operation = generation
     for name in [VLCMediaPlayerTimeChanged, VLCMediaPlayerStateChanged] {
       let observer = NotificationCenter.default.addObserver(
@@ -90,6 +92,10 @@ final class TVVideoEngine: TVPlaybackEngine {
     // authentication is performed by TVStreamRelay, with no video disk cache.
     // Half a second of prebuffer keeps seeks quick on a local network.
     media.addOption(":network-caching=500")
+    if resumeAt > 0 {
+      // Opening at the resume position avoids buffering the beginning only to seek away.
+      media.addOption(":start-time=\(String(format: "%.3f", Double(resumeAt) / 1_000))")
+    }
     player.media = media
     player.play()
     player.rate = Float(requestedRate)
@@ -205,7 +211,11 @@ final class TVVideoEngine: TVPlaybackEngine {
     guard let resume = pendingResume, player.isSeekable,
       decoderState == .playing || decoderState == .paused || decoderState == .buffering
     else { return }
+    // Wait for the first clock: near the resume position the decoder opened there; a clock
+    // far from it means the container ignored the start position, so seek as before.
+    guard let clock = player.time.value?.int64Value, clock > 0 else { return }
     pendingResume = nil
+    guard !TVPlayerPolicy.openedAtResume(clock: clock, resume: resume) else { return }
     let target = TVPlayerPolicy.seekPosition(current: 0, offset: resume, duration: duration)
     machine.seek(to: target, at: now)
     player.time = VLCTime(number: NSNumber(value: target))
@@ -270,6 +280,11 @@ final class TVVideoEngine: TVPlaybackEngine {
     "--compressor-threshold=-24", "--compressor-ratio=4", "--compressor-knee=6",
     "--compressor-makeup-gain=12",
   ]
+
+  /// Loads VLC's modules once after launch, so the first Play does not pay for it.
+  static func warmUp() {
+    _ = makePlayer().state
+  }
 
   private static func makePlayer(nightMode: Bool = false) -> VLCMediaPlayer {
     let player = VLCMediaPlayer(

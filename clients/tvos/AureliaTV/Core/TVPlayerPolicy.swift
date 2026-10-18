@@ -53,6 +53,38 @@ enum TVPlayerPolicy {
     return "Ends at \(now.addingTimeInterval(remaining).formatted(style))"
   }
 
+  /// The decoder opened at the resume position when its first clock lands near it.
+  static func openedAtResume(clock: Int64, resume: Int64) -> Bool {
+    abs(clock - resume) <= 5_000
+  }
+
+  /// How far one scrub press moves: the skip interval, larger while presses follow quickly.
+  static func scrubStep(base: Int64, repeats: Int) -> Int64 {
+    switch repeats {
+    case ..<4: base
+    case ..<10: base * 3
+    default: base * 6
+    }
+  }
+
+  /// "Up Next" appears in the last seconds of an episode-length title when the next episode
+  /// will start on its own.
+  static let upNextLead: Int64 = 20_000
+
+  static func showsUpNext(
+    position: Int64, duration: Int64, hasNext: Bool, autoplay: Bool, stopsAtEnd: Bool,
+    dismissed: Bool
+  ) -> Bool {
+    guard hasNext, autoplay, !stopsAtEnd, !dismissed, duration >= 300_000, position > 0 else {
+      return false
+    }
+    return duration - position <= upNextLead
+  }
+
+  static func upNextSeconds(position: Int64, duration: Int64) -> Int {
+    Int((max(0, duration - position) + 999) / 1_000)
+  }
+
   static func timeLabel(milliseconds: Int64) -> String {
     let seconds = max(0, milliseconds) / 1_000
     return seconds >= 3_600
