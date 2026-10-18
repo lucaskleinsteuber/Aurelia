@@ -82,6 +82,32 @@ struct SkipSegmentLogicTests {
         == 40_000)
   }
 
+  @Test func anUnnamedClosingChapterCountsAsCreditsOnlyWhenNeighboursAgree() {
+    func chapters(_ starts: [Int64]) -> [PlaybackChapter] {
+      starts.enumerated().map {
+        PlaybackChapter(
+          index: Int32($0.offset), title: "Disc 1", timeOffsetMilliseconds: $0.element,
+          durationMilliseconds: 0)
+      }
+    }
+    // Like a disc release: a 45 s credits chapter and a two-second sliver at the very end.
+    let own = chapters([0, 332_000, 1_386_000, 2_848_000, 2_891_000])
+    let neighbour = chapters([0, 200_000, 2_846_000, 2_890_000])
+    #expect(
+      SkipSegmentLogic.closingChapter(
+        own, duration: 2_893_000, neighbours: [(neighbour, 2_892_000)]) == 2_848_000)
+    // A story chapter of a different length in the neighbour does not confirm it.
+    let story = chapters([0, 200_000, 2_700_000])
+    #expect(
+      SkipSegmentLogic.closingChapter(own, duration: 2_893_000, neighbours: [(story, 2_892_000)])
+        == nil)
+    // Nor does a long final chapter count.
+    let long = chapters([0, 2_400_000])
+    #expect(
+      SkipSegmentLogic.closingChapter(long, duration: 2_893_000, neighbours: [(long, 2_893_000)])
+        == nil)
+  }
+
   @Test func promptsAppearOnlyInsideTheirParts() {
     let segments = SkipSegments(introStart: 60_000, introEnd: 90_000, creditsStart: 2_600_000)
     let duration: Int64 = 2_700_000
@@ -236,43 +262,107 @@ struct VLCAudioSampleReaderTests {
     }
   }
 
-  /// The ranged stream feeds VLC like a local file: fast, with seeking, and only partial
-  /// requests. A URL protocol stands in for the server and serves a synthetic file.
-  @Test func readsThroughRangedStreamQuicklyAndSeeks() async throws {
+  /// Real episodes are mostly Matroska files. With video and compressed sound, VLC's own
+  /// Matroska reader ignored the start time, so the credits window held the opening. This
+  /// synthetic file cannot carry video, but the reader now in use must still start each window
+  /// where it was asked to.
+  @Test func readsAMatroskaWindowFromWhereItWasAsked() async throws {
     var generator = SyntheticAudio(seed: 9)
     let samples =
       generator.noise(seconds: 40) + SyntheticAudio.theme(seconds: 15)
       + generator.noise(seconds: 20)
     let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("AureliaRangedTests-\(UUID().uuidString)")
+      .appendingPathComponent("AureliaMatroskaTests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
-    let file = directory.appendingPathComponent("synthetic.wav")
-    try Self.writeWAV(Self.upsample(samples, to: 48_000), channels: 2, rate: 48_000, to: file)
-    let data = try Data(contentsOf: file)
-    RangedFileProtocol.payload = data
-    RangedFileProtocol.fullRequests = 0
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [RangedFileProtocol.self]
-    let session = URLSession(configuration: configuration)
-    let url = URL(string: "https://synthetic.invalid/api/v1/streams/ticket")!
+    let file = directory.appendingPathComponent("synthetic.mkv")
+    try Self.writeMatroska(Self.upsample(samples, to: 48_000), rate: 48_000, to: file)
 
     let reader = VLCAudioSampleReader()
     let started = Date()
-    let output = try await reader.read(
-      stream: RangedStreamInput(
-        url: url, session: session, token: "synthetic", length: Int64(data.count)),
-      start: 30, length: 30, timeout: .seconds(60))
-    let elapsed = Date().timeIntervalSince(started)
+    let output = try await reader.read(url: file, start: 30, length: 30, timeout: .seconds(60))
     let seconds = Double(output.samples.count) / AudioFingerprint.sampleRate
     #expect(seconds > 28 && seconds < 32)
-    #expect(elapsed < 15, "30 s of stereo 48 kHz should decode far faster than real time")
-    #expect(RangedFileProtocol.fullRequests == 0)
+    #expect(Date().timeIntervalSince(started) < 15, "decoding must be faster than real time")
     let match = SegmentMatcher.longestCommon(
       AudioFingerprint.compute(output.samples),
       AudioFingerprint.compute(SyntheticAudio.theme(seconds: 15)), minimum: 8, maximum: 60)
     let found = try #require(match)
     #expect(abs(found.firstStart - 10) < 1)
+  }
+
+  /// A minimal Matroska file: 16-bit stereo PCM in one-second clusters with a cue index.
+  private static func writeMatroska(_ samples: [Float], rate: Int, to url: URL) throws {
+    func element(_ id: [UInt8], _ payload: [UInt8]) -> [UInt8] {
+      // An eight-byte size keeps every element's length predictable.
+      let size = UInt64(payload.count)
+      return id + [0x01] + (0..<7).reversed().map { UInt8(truncatingIfNeeded: size >> (8 * $0)) }
+        + payload
+    }
+    func unsigned(_ id: [UInt8], _ value: UInt64) -> [UInt8] {
+      element(id, (0..<8).reversed().map { UInt8(truncatingIfNeeded: value >> (8 * $0)) })
+    }
+    func float(_ id: [UInt8], _ value: Double) -> [UInt8] {
+      unsigned(id, value.bitPattern)
+    }
+    func text(_ id: [UInt8], _ value: String) -> [UInt8] { element(id, Array(value.utf8)) }
+
+    let header = element(
+      [0x1A, 0x45, 0xDF, 0xA3],
+      unsigned([0x42, 0x86], 1) + unsigned([0x42, 0xF7], 1) + unsigned([0x42, 0xF2], 4)
+        + unsigned([0x42, 0xF3], 8) + text([0x42, 0x82], "matroska")
+        + unsigned([0x42, 0x87], 4) + unsigned([0x42, 0x85], 2))
+    let durationMilliseconds = Double(samples.count) / Double(rate) * 1_000
+    let info = element(
+      [0x15, 0x49, 0xA9, 0x66],
+      unsigned([0x2A, 0xD7, 0xB1], 1_000_000) + float([0x44, 0x89], durationMilliseconds)
+        + text([0x4D, 0x80], "AureliaTests") + text([0x57, 0x41], "AureliaTests"))
+    let tracks = element(
+      [0x16, 0x54, 0xAE, 0x6B],
+      element(
+        [0xAE],
+        unsigned([0xD7], 1) + unsigned([0x73, 0xC5], 1) + unsigned([0x83], 2)
+          + text([0x86], "A_PCM/INT/LIT")
+          + element(
+            [0xE1],
+            float([0xB5], Double(rate)) + unsigned([0x9F], 2) + unsigned([0x62, 0x64], 16))))
+    var clusters: [[UInt8]] = []
+    let block = rate / 10
+    for second in 0..<((samples.count + rate - 1) / rate) {
+      var payload = unsigned([0xE7], UInt64(second * 1_000))
+      for part in 0..<10 {
+        let low = second * rate + part * block
+        guard low < samples.count else { break }
+        var bytes: [UInt8] = [0x81, UInt8(part * 100 >> 8), UInt8(part * 100 & 0xFF), 0x80]
+        for sample in samples[low..<min(samples.count, low + block)] {
+          let value = UInt16(bitPattern: Int16(max(-1, min(1, sample)) * 32_767))
+          let pair = [UInt8(value & 0xFF), UInt8(value >> 8)]
+          bytes += pair + pair
+        }
+        payload += element([0xA3], bytes)
+      }
+      clusters.append(element([0x1F, 0x43, 0xB6, 0x75], payload))
+    }
+    func cues(_ positions: [UInt64]) -> [UInt8] {
+      element(
+        [0x1C, 0x53, 0xBB, 0x6B],
+        positions.enumerated().flatMap { index, position in
+          element(
+            [0xBB],
+            unsigned([0xB3], UInt64(index * 1_000))
+              + element([0xB7], unsigned([0xF7], 1) + unsigned([0xF1], position)))
+        })
+    }
+    // Cue positions count from the start of the segment's content.
+    var position = UInt64(info.count + tracks.count + cues(clusters.map { _ in 0 }).count)
+    var positions: [UInt64] = []
+    for cluster in clusters {
+      positions.append(position)
+      position += UInt64(cluster.count)
+    }
+    let segment = element(
+      [0x18, 0x53, 0x80, 0x67], info + tracks + cues(positions) + clusters.flatMap { $0 })
+    try Data(header + segment).write(to: url)
   }
 
   /// Linear interpolation from the fingerprint rate to `rate`.
@@ -312,78 +402,4 @@ struct VLCAudioSampleReaderTests {
     }
     try data.write(to: url)
   }
-}
-
-/// Serves byte ranges of a synthetic payload, like the server's stream endpoint.
-/// The read-ahead must hand over exactly the requested bytes, also after a seek.
-struct RangedStreamInputTests {
-  @Test func returnsExactBytesAcrossChunksAndSeeks() throws {
-    let size = RangedStreamInput.chunkSize * 2 + 12_345
-    var state: UInt32 = 3
-    let data = Data(
-      (0..<size).map { _ in
-        state = state &* 1_103_515_245 &+ 12_345
-        return UInt8(truncatingIfNeeded: state >> 16)
-      })
-    RangedFileProtocol.bytePayload = data
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [RangedFileProtocol.self]
-    let input = RangedStreamInput(
-      url: URL(string: "https://bytes.invalid/api/v1/streams/ticket")!,
-      session: URLSession(configuration: configuration), token: nil, length: Int64(size))
-    input.open()
-    defer { input.close() }
-
-    func read(_ count: Int) -> Data {
-      var result = Data()
-      var chunk = [UInt8](repeating: 0, count: 100_000)
-      while result.count < count {
-        let got = input.read(&chunk, maxLength: min(chunk.count, count - result.count))
-        if got <= 0 { break }
-        result.append(contentsOf: chunk[0..<got])
-      }
-      return result
-    }
-    // Straight through the first chunk boundary, where the read-ahead takes over.
-    let first = RangedStreamInput.chunkSize + 50_000
-    #expect(read(first) == data.subdata(in: 0..<first))
-    // Back to the start, then near the end.
-    #expect(input.setProperty(NSNumber(value: 10), forKey: .fileCurrentOffsetKey))
-    #expect(read(1_000) == data.subdata(in: 10..<1_010))
-    let late = size - 20_000
-    #expect(input.setProperty(NSNumber(value: late), forKey: .fileCurrentOffsetKey))
-    #expect(read(size) == data.subdata(in: late..<size))
-    #expect(!input.hasBytesAvailable)
-  }
-}
-
-private final class RangedFileProtocol: URLProtocol, @unchecked Sendable {
-  nonisolated(unsafe) static var payload = Data()
-  nonisolated(unsafe) static var fullRequests = 0
-  /// Served for `bytes.invalid`, so the byte test never shares a payload with the VLC test.
-  nonisolated(unsafe) static var bytePayload = Data()
-
-  override class func canInit(with request: URLRequest) -> Bool { true }
-  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-  override func startLoading() {
-    let data = request.url?.host == "bytes.invalid" ? Self.bytePayload : Self.payload
-    guard let range = request.value(forHTTPHeaderField: "Range"),
-      let bounds = range.split(separator: "=").last?.split(separator: "-"),
-      bounds.count == 2, let low = Int(bounds[0]), let high = Int(bounds[1]), low <= high
-    else {
-      Self.fullRequests += 1
-      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-      return
-    }
-    let upper = min(high, data.count - 1)
-    let response = HTTPURLResponse(
-      url: request.url!, statusCode: 206, httpVersion: "HTTP/1.1",
-      headerFields: ["Content-Range": "bytes \(low)-\(upper)/\(data.count)"])!
-    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    client?.urlProtocol(self, didLoad: data.subdata(in: low..<(upper + 1)))
-    client?.urlProtocolDidFinishLoading(self)
-  }
-
-  override func stopLoading() {}
 }

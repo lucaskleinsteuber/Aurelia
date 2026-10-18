@@ -36,20 +36,8 @@ final class VLCAudioSampleReader: NSObject {
   func read(url: URL, start: Double, length: Double, timeout: Duration = .seconds(240))
     async throws -> Output
   {
-    try await read(media: VLCMedia(url: url), start: start, length: length, timeout: timeout)
-  }
-
-  /// Reads from a stream this process feeds, which VLC decodes as fast as a local file.
-  func read(
-    stream: InputStream, start: Double, length: Double, timeout: Duration = .seconds(240)
-  ) async throws -> Output {
-    try await read(media: VLCMedia(stream: stream), start: start, length: length, timeout: timeout)
-  }
-
-  private func read(media: VLCMedia, start: Double, length: Double, timeout: Duration)
-    async throws -> Output
-  {
     precondition(player == nil, "One read at a time")
+    let media = VLCMedia(url: url)
     durationMilliseconds = 0
     chapters = []
     let pipe = try SamplePipe(
@@ -61,6 +49,9 @@ final class VLCAudioSampleReader: NSObject {
     media.addOption(
       ":sout=#transcode{acodec=s16l,channels=1,samplerate=\(rate)}"
         + ":std{access=file,mux=wav,dst=\"\(pipe.path)\"}")
+    // VLC's own Matroska reader ignores the start time and decodes from the beginning, so the
+    // credits window would hold the opening instead. FFmpeg's reader seeks reliably.
+    media.addOption(":demux=avformat")
     media.addOption(":no-sout-video")
     media.addOption(":no-sout-spu")
     media.addOption(String(format: ":start-time=%.3f", max(0, start)))

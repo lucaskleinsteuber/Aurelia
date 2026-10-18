@@ -95,6 +95,30 @@ enum SkipSegmentLogic {
     return result
   }
 
+  /// Disc releases often give the end credits a chapter of their own without naming it. The
+  /// final chapter counts as credits only when it is short and lasts about as long in a
+  /// neighbouring episode; a story chapter's length varies from episode to episode.
+  static func closingChapter(
+    _ chapters: [PlaybackChapter], duration: Int64, neighbours: [([PlaybackChapter], Int64)]
+  ) -> Int64? {
+    func closing(_ chapters: [PlaybackChapter], _ duration: Int64) -> (start: Int64, length: Int64)?
+    {
+      // A sliver of a few seconds after the credits is ignored.
+      guard duration > 0,
+        let start = chapters.map(\.timeOffsetMilliseconds)
+          .filter({ $0 > duration * 60 / 100 && duration - $0 >= 15_000 }).max()
+      else { return nil }
+      let length = duration - start
+      return (20_000...180_000).contains(length) ? (start, length) : nil
+    }
+    guard let own = closing(chapters, duration) else { return nil }
+    let agrees = neighbours.contains { neighbour in
+      guard let other = closing(neighbour.0, neighbour.1) else { return false }
+      return abs(other.length - own.length) <= 12_000
+    }
+    return agrees ? own.start : nil
+  }
+
   /// Server times win; an analyzed title without times has nothing to skip. Otherwise the
   /// file's own chapters are used.
   static func resolve(

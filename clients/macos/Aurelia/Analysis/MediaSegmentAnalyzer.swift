@@ -8,7 +8,8 @@ import os
 @MainActor
 final class MediaSegmentAnalyzer: ObservableObject {
   /// 2: streams are converted to mono 11 kHz from their real layout (1.7.3).
-  static let analysisVersion = 2
+  /// 3: the credits window is really read from the end of the title (1.7.8).
+  static let analysisVersion = 3
   static let introWindow: Double = 420
   static let creditsWindow: Double = 240
 
@@ -162,21 +163,16 @@ final class MediaSegmentAnalyzer: ObservableObject {
   {
     let source = try await client.createPlayback(mediaId: mediaId)
     defer { Task { try? await client.revokePlayback(id: source.id) } }
-    let streamURL = try client.streamURL(path: source.streamPath)
-    let session = PinnedSessionPool.shared.lease(
-      host: profile.baseURL.host ?? "", port: profile.baseURL.port,
-      fingerprint: profile.publicKeyFingerprint
-    ).session
-    // A stream this process feeds is decoded as fast as a file; a network address is read at
-    // playback speed.
-    let makeStream = {
-      RangedStreamInput(
-        url: streamURL, session: session, token: profile.token, length: source.contentLength)
-    }
+    // The player's local relay hands VLC a plain address for the pinned server, so VLC can
+    // seek straight to the credits instead of decoding the whole title.
+    let relay = try LoopbackStreamRelay(
+      sourceURL: try client.streamURL(path: source.streamPath),
+      publicKeyFingerprint: profile.publicKeyFingerprint, authorizationToken: profile.token)
+    defer { relay.stop() }
+    let url = try await relay.start()
     let reader = VLCAudioSampleReader()
     let started = Date()
-    let opening = try await reader.read(
-      stream: makeStream(), start: 0, length: Self.introWindow)
+    let opening = try await reader.read(url: url, start: 0, length: Self.introWindow)
     Self.logger.info(
       "Read \(Double(opening.samples.count) / AudioFingerprint.sampleRate, format: .fixed(precision: 0)) s of audio in \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) s (\(opening.sourceLayout, privacy: .public))"
     )
@@ -192,7 +188,7 @@ final class MediaSegmentAnalyzer: ObservableObject {
     if seconds > Self.creditsWindow * 2 {
       creditsOffset = max(seconds * 0.6, seconds - Self.creditsWindow)
       let ending = try await reader.read(
-        stream: makeStream(), start: creditsOffset, length: seconds - creditsOffset)
+        url: url, start: creditsOffset, length: seconds - creditsOffset)
       credits = AudioFingerprint.compute(ending.samples)
     }
     return Prints(
@@ -236,6 +232,14 @@ final class MediaSegmentAnalyzer: ObservableObject {
         result.creditsStart = Int64((own.creditsOffset + credits.start) * 1_000)
         result.source = .detected
       }
+    }
+    if result.creditsStart == nil,
+      let chapter = SkipSegmentLogic.closingChapter(
+        own.chapters, duration: own.duration,
+        neighbours: neighbours.map { ($0.chapters, $0.duration) })
+    {
+      result.creditsStart = chapter
+      if result.source == .none { result.source = .chapters }
     }
     return result
   }
