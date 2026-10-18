@@ -15,6 +15,13 @@ public sealed class ServerRequestGuard
     /// pairing attempts keep their own much stricter limits.
     /// </summary>
     public const int RequestsPerMinute = 3_000;
+    /// <summary>
+    /// Timeline preview reads come in short bursts of a few thousand range requests while a
+    /// device prepares a title's frames on several cores. They count in their own, larger
+    /// bucket so a burst never locks the device out of browsing or playback; the stream
+    /// registry still caps how many run at once.
+    /// </summary>
+    public const int PreviewRequestsPerMinute = 12_000;
     private readonly object gate = new();
     private readonly Dictionary<string, (int Count, DateTimeOffset Window)> addresses = [];
     private static readonly IPNetwork[] PrivateNetworks = [IPNetwork.Parse("10.0.0.0/8"), IPNetwork.Parse("172.16.0.0/12"),
@@ -28,9 +35,10 @@ public sealed class ServerRequestGuard
         return PrivateNetworks.Any(network => network.Contains(ip))
             && (restrictions is not { Length: > 0 } || restrictions.Any(network => IPNetwork.Parse(network).Contains(ip)));
     }
-    public bool Admit(IPAddress? address)
+    public bool Admit(IPAddress? address, bool preview = false)
     {
-        var key = address?.ToString() ?? "local";
+        var key = (preview ? "preview:" : "") + (address?.ToString() ?? "local");
+        var limit = preview ? PreviewRequestsPerMinute : RequestsPerMinute;
         var now = DateTimeOffset.UtcNow;
         lock (gate)
         {
@@ -39,7 +47,7 @@ public sealed class ServerRequestGuard
                     addresses.Remove(stale);
             if (addresses.TryGetValue(key, out var entry) && now - entry.Window < TimeSpan.FromMinutes(1))
             {
-                if (entry.Count >= RequestsPerMinute) return false;
+                if (entry.Count >= limit) return false;
                 addresses[key] = (entry.Count + 1, entry.Window);
             }
             else
@@ -50,6 +58,11 @@ public sealed class ServerRequestGuard
             return true;
         }
     }
+
+    /// <summary>A stream read that a client marked as a timeline preview.</summary>
+    public static bool IsPreviewStream(HttpRequest request) =>
+        request.Path.StartsWithSegments("/api/v1/streams")
+        && string.Equals(request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase);
 
     public static bool RequiresApproval(HttpRequest request)
     {

@@ -25,7 +25,10 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   @Published private(set) var preparedCount = 0
 
   private(set) var interval = minimumInterval
-  private let prefetchWorkers: Int
+  private let workerOverride: Int?
+  /// Whether the server gives previews their own budget ("preview-streams-v1").
+  private var parallel = false
+  private var restingUntil: ContinuousClock.Instant?
   private let prefetchDelay: Duration
   private let prefetchPause: Duration
   private let prefetchBackoff: Duration
@@ -58,15 +61,25 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     let timeout: Task<Void, Never>
   }
 
-  /// One background decoder beside the pointer's own, a short pause after each frame, a long
-  /// rest after repeated failures (a busy server) and the low-power check keep playback smooth.
-  /// Two decoders at most match the server's preview budget per device.
+  /// Decoders for the background work, beside the pointer's own. Where the server gives
+  /// previews their own budget, several cores work briefly so a whole episode is ready in
+  /// seconds; older servers would count previews as playback streams, so they get one.
+  static var parallelWorkers: Int {
+    min(6, max(2, ProcessInfo.processInfo.activeProcessorCount - 4))
+  }
+
+  static let serverFeature = "preview-streams-v1"
+
+  var backgroundWorkers: Int { workerOverride ?? (parallel ? Self.parallelWorkers : 1) }
+
+  /// A long rest after repeated failures (a busy server) and the low-power check keep
+  /// playback smooth.
   init(
-    prefetchWorkers: Int = 1, prefetchDelay: Duration = .seconds(4),
-    prefetchPause: Duration = .milliseconds(250), prefetchBackoff: Duration = .seconds(60),
+    prefetchWorkers: Int? = nil, prefetchDelay: Duration = .seconds(4),
+    prefetchPause: Duration = .zero, prefetchBackoff: Duration = .seconds(60),
     prefetchAllowed: @escaping () -> Bool = { !ProcessInfo.processInfo.isLowPowerModeEnabled }
   ) {
-    self.prefetchWorkers = prefetchWorkers
+    self.workerOverride = prefetchWorkers
     self.prefetchDelay = prefetchDelay
     self.prefetchPause = prefetchPause
     self.prefetchBackoff = prefetchBackoff
@@ -75,10 +88,14 @@ final class ScrubPreviewController: NSObject, ObservableObject {
 
   /// Frames belong to `mediaID`. A new source for the same title, after a reconnect, keeps
   /// them; another title starts over.
-  func configure(mediaID: UUID?, source: URL?, duration: Int64) {
+  func configure(mediaID: UUID?, source: URL?, duration: Int64, parallel: Bool = false) {
     if mediaID != self.mediaID {
       reset()
       self.mediaID = mediaID
+    }
+    if parallel != self.parallel {
+      self.parallel = parallel
+      fillPrefetchSlots()
     }
     let duration = max(0, duration)
     if duration != self.duration {
@@ -186,6 +203,7 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     jobs = [:]
     // Resting background slots belong to the cancelled work.
     prefetchBusy = 0
+    restingUntil = nil
     slotEpoch += 1
   }
 
@@ -230,8 +248,8 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
 
   private func fillPrefetchSlots() {
-    guard prefetchReady, source != nil, prefetchAllowed() else { return }
-    while prefetchBusy < prefetchWorkers, let bucket = nextPrefetchBucket() {
+    guard prefetchReady, source != nil, restingUntil == nil, prefetchAllowed() else { return }
+    while prefetchBusy < backgroundWorkers, let bucket = nextPrefetchBucket() {
       prefetchBusy += 1
       start(bucket: bucket, interactive: false)
     }
@@ -259,7 +277,7 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     // The thumbnailer keeps the source's aspect ratio inside this box.
     thumbnailer.thumbnailWidth = 320
     thumbnailer.thumbnailHeight = 320
-    let middle = min(duration - 1, bucket + interval / 2)
+    let middle = Self.snapshotPosition(bucket: bucket, interval: interval, duration: duration)
     thumbnailer.snapshotPosition = Float(Double(middle) / Double(duration))
     let key = ObjectIdentifier(thumbnailer)
     let expected = generation
@@ -289,11 +307,20 @@ final class ScrubPreviewController: NSObject, ObservableObject {
       startInteractiveIfIdle()
     } else {
       prefetchFailures = frames[job.bucket] == nil ? prefetchFailures + 1 : 0
-      let rest = prefetchFailures >= Self.failuresBeforeBackoff ? prefetchBackoff : prefetchPause
-      if prefetchFailures >= Self.failuresBeforeBackoff { prefetchFailures = 0 }
       let epoch = slotEpoch
-      Task { [weak self] in
-        try? await Task.sleep(for: rest)
+      if prefetchFailures >= Self.failuresBeforeBackoff, restingUntil == nil {
+        // All background decoders rest together; hovering keeps working.
+        prefetchFailures = 0
+        restingUntil = .now + prefetchBackoff
+        Task { [weak self, prefetchBackoff] in
+          try? await Task.sleep(for: prefetchBackoff)
+          guard let self, self.slotEpoch == epoch else { return }
+          self.restingUntil = nil
+          self.fillPrefetchSlots()
+        }
+      }
+      Task { [weak self, prefetchPause] in
+        try? await Task.sleep(for: prefetchPause)
         guard let self, self.slotEpoch == epoch, self.prefetchBusy > 0 else { return }
         self.prefetchBusy -= 1
         self.fillPrefetchSlots()
@@ -305,7 +332,14 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     finish(ObjectIdentifier(thumbnailer), image: image)
   }
 
-  /// About 10 KB per frame instead of 230 KB decoded, so a whole film fits in a few MB.
+  /// Where a step's frame is taken: its middle, but never in the last seconds, where VLC finds
+  /// no frame to decode after the seek.
+  static func snapshotPosition(bucket: Int64, interval: Int64, duration: Int64) -> Int64 {
+    max(0, min(bucket + interval / 2, duration - endMargin))
+  }
+  static let endMargin: Int64 = 3_000
+
+  /// About 45 KB per frame instead of 230 KB decoded: an hour-long episode needs about 16 MB.
   static func encode(_ image: CGImage) -> Data? {
     let data = NSMutableData()
     guard

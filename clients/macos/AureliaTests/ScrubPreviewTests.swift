@@ -19,6 +19,30 @@ struct ScrubPreviewTests {
     #expect(steps <= Int64(ScrubPreviewController.maximumFrames))
   }
 
+  @Test func severalDecodersOnlyWhereTheServerKeepsPreviewsApart() {
+    let previews = ScrubPreviewController()
+    previews.configure(mediaID: UUID(), source: nil, duration: 60_000)
+    #expect(previews.backgroundWorkers == 1)
+    previews.configure(mediaID: nil, source: nil, duration: 60_000, parallel: true)
+    #expect(previews.backgroundWorkers == ScrubPreviewController.parallelWorkers)
+    #expect((2...6).contains(ScrubPreviewController.parallelWorkers))
+    // With the pointer's own decoder this stays within the server's 8 per device.
+    #expect(ScrubPreviewController.parallelWorkers + 1 <= 8)
+  }
+
+  @Test func framesAreTakenMidStepButNotAtTheVeryEnd() {
+    #expect(
+      ScrubPreviewController.snapshotPosition(bucket: 20_000, interval: 10_000, duration: 60_000)
+        == 25_000)
+    // A last step that ends 1.5 s after it starts (a real 60 min episode) is taken 3 s
+    // before the end, where VLC still finds a frame.
+    #expect(
+      ScrubPreviewController.snapshotPosition(
+        bucket: 3_610_000, interval: 10_000, duration: 3_611_480) == 3_608_480)
+    #expect(
+      ScrubPreviewController.snapshotPosition(bucket: 0, interval: 10_000, duration: 1_000) == 0)
+  }
+
   @Test func backgroundOrderCoversTheTimelineCoarseFirstAndEveryStepOnce() {
     let order = ScrubPreviewController.prefetchOrder(duration: 265_000, interval: 10_000)
     #expect(order.count == 27)
@@ -39,9 +63,9 @@ struct ScrubPreviewTests {
     let levels: [UInt8] = [20, 90, 160, 235]
     try await Self.writeVideo(levels: levels, secondsPerLevel: 10, to: video)
 
-    let previews = ScrubPreviewController(prefetchDelay: .zero, prefetchPause: .zero)
+    let previews = ScrubPreviewController(prefetchDelay: .zero)
     let started = Date()
-    previews.configure(mediaID: UUID(), source: video, duration: 40_000)
+    previews.configure(mediaID: UUID(), source: video, duration: 40_000, parallel: true)
     try await Self.waitUntil { previews.preparedCount == 4 }
     print("Prepared 4 preview frames in \(Date().timeIntervalSince(started)) s")
 

@@ -212,10 +212,11 @@ public sealed class ServerAccessFoundationTests
         var registry = new ActiveStreamRegistry();
         var user = Guid.NewGuid();
         var session = Guid.NewGuid();
-        using var first = registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true);
-        using var second = registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true);
-        var third = Assert.Throws<AccountException>(() => registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true));
-        Assert.Equal("stream_limit", third.Code);
+        var previews = Enumerable.Range(0, ActiveStreamRegistry.PreviewStreamsPerSession)
+            .Select(_ => registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true)).ToList();
+        var first = previews[0];
+        var extra = Assert.Throws<AccountException>(() => registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true));
+        Assert.Equal("stream_limit", extra.Code);
         // Another device of the same user still gets its own preview slots.
         using var otherDevice = registry.Enter(user, Guid.NewGuid(), 32, 4, CancellationToken.None, preview: true);
 
@@ -226,6 +227,7 @@ public sealed class ServerAccessFoundationTests
         Assert.True(first.Token.IsCancellationRequested);
         Assert.All(playback, lease => Assert.True(lease.Token.IsCancellationRequested));
         playback.ForEach(lease => lease.Dispose());
+        previews.ForEach(lease => lease.Dispose());
     }
 
     [Fact]

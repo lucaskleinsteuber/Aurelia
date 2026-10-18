@@ -63,7 +63,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac preview-stream fix release is 1.7.13 (77); the
+  changing them. The approved Mac fast-preview release is 1.7.14 (78); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   player-comfort update is 0.3.2 (13).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

@@ -20,6 +20,7 @@ public sealed class ServerEfficiencyTests
         using var capabilities = await client.GetAsync("/api/v1/capabilities");
         var features = (await ApiTestClient.ReadAsync<ClientCapabilitiesResponse>(capabilities)).Capabilities;
         Assert.Contains("catalog-pages-500-v1", features);
+        Assert.Contains("preview-streams-v1", features);
 
         foreach (var path in new[] { "/api/v1/catalog/items", "/api/v1/catalog/movies", "/api/v1/catalog/series" })
         {
@@ -79,6 +80,27 @@ public sealed class ServerEfficiencyTests
             Assert.True(guard.Admit(address));
         Assert.False(guard.Admit(address));
         Assert.True(guard.Admit(System.Net.IPAddress.Parse("192.168.1.21")));
+    }
+
+    [Fact]
+    public void PreviewBurstsCountApartAndStillHaveALimit()
+    {
+        var guard = new Aurelia.Server.Services.ServerRequestGuard();
+        var address = System.Net.IPAddress.Parse("192.168.1.30");
+        for (var request = 0; request < Aurelia.Server.Services.ServerRequestGuard.PreviewRequestsPerMinute; request++)
+            Assert.True(guard.Admit(address, preview: true));
+        Assert.False(guard.Admit(address, preview: true));
+        // Browsing and playback from the same device are unaffected by the burst.
+        Assert.True(guard.Admit(address));
+
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Request.Path = "/api/v1/streams/ticket";
+        Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        context.Request.Headers["X-Aurelia-Stream-Purpose"] = "Preview";
+        Assert.True(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
+        // The marker means nothing outside stream reads.
+        context.Request.Path = "/api/v1/media";
+        Assert.False(Aurelia.Server.Services.ServerRequestGuard.IsPreviewStream(context.Request));
     }
 
     private static HttpRequestMessage Request(string path, string token)

@@ -26,6 +26,12 @@ Since 1.6.0, `catalog-pages-500-v1` means catalog lists (`/api/v1/catalog/items`
 accept up to 200. Catalog, Home and collection GET responses are compressed with
 Brotli or gzip when the request sends `Accept-Encoding`; other responses are not.
 
+Since 1.7.14, `preview-streams-v1` means stream reads sent with
+`X-Aurelia-Stream-Purpose: preview` count apart from playback: up to 8 at once per device
+session (32 per server) and their own per-address request budget, never against the stream
+limits. Clients prepare timeline previews on several decoders only when it is advertised;
+against older servers they keep to one, because previews would otherwise take playback slots.
+
 Servers 1.7.0 to 1.7.8 offered intro and credits times under `media-segments-v1`
 (`/api/v1/media/{id}/segments`). The feature was removed in 1.7.9, together with its stored
 times; those routes now return 404, and clients must treat that as "no times".

@@ -166,6 +166,7 @@ struct PlayerView: View {
     .onAppear { configurePreviews() }
     .onChange(of: controller.previewSourceURL) { configurePreviews() }
     .onChange(of: controller.durationMilliseconds) { configurePreviews() }
+    .onChange(of: model.libraryCapabilities) { configurePreviews() }
     .onChange(of: previewPosition.map { previews.bucket(for: Int64($0)) }) {
       if let position = previewPosition { previews.request(at: Int64(position)) }
     }
@@ -647,7 +648,8 @@ struct PlayerView: View {
   private func configurePreviews() {
     previews.configure(
       mediaID: controller.presentation.mediaId, source: controller.previewSourceURL,
-      duration: controller.durationMilliseconds)
+      duration: controller.durationMilliseconds,
+      parallel: model.libraryCapabilities.contains(ScrubPreviewController.serverFeature))
   }
 
   private var displayedPosition: Double {

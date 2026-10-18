@@ -8,8 +8,8 @@ public sealed class ActiveStreamRegistry
     /// Timeline preview frames are short reads beside a playing stream. They have their own small
     /// budget so they never take a slot that playback, a seek or another device needs.
     /// </summary>
-    public const int PreviewStreamsPerSession = 2;
-    public const int PreviewStreamsGlobal = 16;
+    public const int PreviewStreamsPerSession = 8;
+    public const int PreviewStreamsGlobal = 32;
     private readonly object gate = new();
     private readonly HashSet<Lease> streams = [];
     public int Count { get { lock (gate) return streams.Count; } }
