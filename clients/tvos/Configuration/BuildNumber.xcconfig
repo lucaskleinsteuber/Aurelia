@@ -1,5 +1,5 @@
 // The TV client has its own release lifecycle, independent of the Mac/server.
-MARKETING_VERSION = 0.2.0
-CURRENT_PROJECT_VERSION = 10
+MARKETING_VERSION = 0.3.0
+CURRENT_PROJECT_VERSION = 11
 TVOS_DEPLOYMENT_TARGET = 26.0
 TVVLCKIT_ROOT = $(SRCROOT)/Dependencies

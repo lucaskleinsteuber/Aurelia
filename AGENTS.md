@@ -66,7 +66,7 @@ These rules apply to every task in this repository.
   counters. Confirm product names and intended versions with the user before
   changing them. The approved Mac intro-skipping release is 1.7.0 (64); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
-  artwork-cache update is 0.2.0 (10).
+  intro-skipping update is 0.3.0 (11).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - For tvOS, run warning-free device/simulator builds, host-executable logic tests
@@ -139,7 +139,7 @@ These rules apply to every task in this repository.
   results.
 - Use a short English description of the completed change as the commit subject,
   without a version/build number. The approved subject for the current TV update
-  is `Cache tvOS artwork and load larger pages`. Push to `origin/main`
+  is `Release tvOS intro and credits skipping`. Push to `origin/main`
   and verify the remote hash after each independent completed change.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
