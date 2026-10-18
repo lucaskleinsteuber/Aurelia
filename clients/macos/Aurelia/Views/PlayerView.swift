@@ -161,17 +161,12 @@ struct PlayerView: View {
     .onChange(of: controller.navigationRevision) { advanceSceneNotes() }
     .onChange(of: controller.presentation.mediaId) {
       sceneNotes.changeMedia(controller.presentation.mediaId)
-      previews.reset()
+      configurePreviews()
     }
-    .onChange(of: controller.previewSourceURL) {
-      previews.configure(
-        source: controller.previewSourceURL, duration: controller.durationMilliseconds)
-    }
-    .onChange(of: controller.durationMilliseconds) {
-      previews.configure(
-        source: controller.previewSourceURL, duration: controller.durationMilliseconds)
-    }
-    .onChange(of: previewPosition.map { ScrubPreviewController.bucket(for: Int64($0)) }) {
+    .onAppear { configurePreviews() }
+    .onChange(of: controller.previewSourceURL) { configurePreviews() }
+    .onChange(of: controller.durationMilliseconds) { configurePreviews() }
+    .onChange(of: previewPosition.map { previews.bucket(for: Int64($0)) }) {
       if let position = previewPosition { previews.request(at: Int64(position)) }
     }
     .onReceive(model.$sceneNotesVersion.dropFirst()) { _ in sceneNotes.reload() }
@@ -477,7 +472,7 @@ struct PlayerView: View {
           preview: previewPosition.map { position in
             PlayerTimelinePreview(
               position: position, label: formatTime(position),
-              image: previews.imageBucket == ScrubPreviewController.bucket(for: Int64(position))
+              image: previews.imageBucket == previews.bucket(for: Int64(position))
                 ? previews.image : nil)
           },
           onEditingChanged: timelineEditingChanged)
@@ -646,6 +641,13 @@ struct PlayerView: View {
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
     .accessibilityLabel(title)
+  }
+
+  /// Previews belong to the open title; the next one discards them from memory.
+  private func configurePreviews() {
+    previews.configure(
+      mediaID: controller.presentation.mediaId, source: controller.previewSourceURL,
+      duration: controller.durationMilliseconds)
   }
 
   private var displayedPosition: Double {

@@ -18,7 +18,8 @@ These rules apply to every task in this repository.
   transcode, hash, or store video content. Media remains at its original
   user-selected path; scans read only filesystem metadata and directory
   structure. One user-approved exception reads content without keeping it:
-  scrub previews decoded live during playback and held only in memory.
+  scrub previews decoded live during playback, also ahead in the background,
+  held only in memory and discarded when another title opens.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,
@@ -62,7 +63,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac watch-state fix release is 1.7.11 (75); the
+  changing them. The approved Mac scrub-preview release is 1.7.12 (76); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   player-comfort update is 0.3.2 (13).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
