@@ -728,17 +728,21 @@ struct PlaybackPresentation: Identifiable, Equatable, Sendable {
   let title: String
   let subtitle: String?
   let queue: [PlaybackQueueItem]
+  /// The series whose episodes share audio and subtitle choices; nil for a movie.
+  let trackScope: UUID?
 
   init(
     mediaId: UUID,
     title: String,
     subtitle: String?,
-    queue: [PlaybackQueueItem] = []
+    queue: [PlaybackQueueItem] = [],
+    trackScope: UUID? = nil
   ) {
     self.mediaId = mediaId
     self.title = title
     self.subtitle = subtitle
     self.queue = queue
+    self.trackScope = trackScope
   }
 
   var id: UUID { mediaId }

@@ -2031,7 +2031,8 @@ final class AppModel: ObservableObject {
     mediaId: UUID,
     title: String,
     subtitle: String? = nil,
-    queue: [PlaybackQueueItem] = []
+    queue: [PlaybackQueueItem] = [],
+    trackScope: UUID? = nil
   ) {
     guard profile != nil else { return }
     beginPlaybackIntent()
@@ -2039,7 +2040,8 @@ final class AppModel: ObservableObject {
       mediaId: mediaId,
       title: title,
       subtitle: subtitle,
-      queue: queue)
+      queue: queue,
+      trackScope: trackScope)
   }
 
   func startPlayback(item: CatalogItemSummary) {

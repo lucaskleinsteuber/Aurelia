@@ -27,7 +27,7 @@ struct PlaybackPlanResponse: Codable, Equatable, Sendable {
       queue: queue.map {
         PlaybackQueueItem(
           mediaId: $0.id, title: $0.title, subtitle: CatalogPlaybackLogic.subtitle(for: $0))
-      })
+      }, trackScope: seriesId)
   }
 }
 

@@ -28,6 +28,43 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertEqual(normalized.preferences.seekInterval, 60)
   }
 
+  /// Night mode is applied by opening the title again; playback continues where it was, with the
+  /// series' track choices, and no progress at zero is saved in between.
+  func testReopeningForNightModeResumesAtTheSamePosition() async throws {
+    let mediaID = UUID()
+    let seriesID = UUID()
+    let source = PlaybackSourceResponse(
+      id: UUID(), mediaId: mediaID, streamPath: "/api/v1/streams/test-ticket",
+      contentType: "video/x-matroska", contentLength: 4_096, expiresAt: "2099-01-01T12:00:00Z",
+      progress: PlaybackProgressResponse(
+        mediaId: mediaID, positionMilliseconds: 30_000, durationMilliseconds: 120_000,
+        isCompleted: false, lastPlayedAt: nil, updatedAt: nil))
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: mediaID, title: "Pilot", subtitle: "Breaking Bad · S01 E01",
+        trackScope: seriesID),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+
+    await controller.start()
+    controller.seek(to: 45_000)
+    let savedBefore = client.updates.count
+    controller.reopenForAudioChange()
+
+    XCTAssertEqual(engine.loadedScopes, [seriesID, seriesID])
+    XCTAssertEqual(engine.loadedURL, relay.localURL)
+    XCTAssertTrue(engine.isPlaying)
+    XCTAssertEqual(engine.currentTimeMilliseconds, 45_000)
+    XCTAssertEqual(controller.currentTimeMilliseconds, 45_000)
+    XCTAssertFalse(client.updates.dropFirst(savedBefore).contains { $0.position == 0 })
+    await controller.shutdown()
+    XCTAssertEqual(client.updates.last?.position, 45_000)
+  }
+
   func testResumePauseSeekTrackSelectionAndShutdownSave() async throws {
     let mediaID = UUID()
     let playbackID = UUID()
@@ -252,7 +289,8 @@ final class PlaybackControllerTests: XCTestCase {
       controlsAutoHideDelay: 5,
       seekInterval: 15,
       preventSleepDuringPlayback: false,
-      automaticallyPlayNextEpisode: false)
+      automaticallyPlayNextEpisode: false,
+      nightMode: false)
     let controller = PlaybackController(
       client: client,
       presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
@@ -608,6 +646,8 @@ final class FakePlaybackEngine: PlaybackEngine {
   var selectedAudioTrackID: Int32?
   var selectedSubtitleTrackID: Int32?
   var loadedURL: URL?
+  var trackScope: UUID?
+  private(set) var loadedScopes: [UUID?] = []
   var didStop = false
   var playCalls = 0
   var pauseCalls = 0
@@ -619,6 +659,7 @@ final class FakePlaybackEngine: PlaybackEngine {
   func attach(to view: NSView) {}
   func load(url: URL) {
     loadedURL = url
+    loadedScopes.append(trackScope)
     currentTimeMilliseconds = 0
     isPlaying = false
     pendingSeekTarget = nil

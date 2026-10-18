@@ -291,7 +291,8 @@ struct MediaDetailView: View {
       title: episode.item.title,
       subtitle:
         "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))",
-      queue: queue
+      queue: queue,
+      trackScope: episode.item.parentId
     )
   }
 

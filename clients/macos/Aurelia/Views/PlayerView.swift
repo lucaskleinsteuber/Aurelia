@@ -334,8 +334,7 @@ struct PlayerView: View {
 
       trackedMenu(
         "Audio", id: "audio",
-        options:
-          controller.audioTracks.isEmpty
+        options: (controller.audioTracks.isEmpty
           ? [PlayerMenuOption(title: "No audio tracks available", enabled: false)]
           : controller.audioTracks.map { track in
             PlayerMenuOption(
@@ -344,7 +343,17 @@ struct PlayerView: View {
               controller.selectAudioTrack(track.id)
               revealControls()
             }
-          }
+          })
+          + [
+            .divider,
+            PlayerMenuOption(
+              title: "Night Mode", selected: preferencesStore.preferences.nightMode
+            ) {
+              preferencesStore.preferences.nightMode.toggle()
+              controller.reopenForAudioChange()
+              revealControls()
+            },
+          ]
       ) {
         PlayerControlLabel { Image(systemName: "waveform") }
       }
@@ -476,6 +485,18 @@ struct PlayerView: View {
           .monospacedDigit().frame(minWidth: 44, alignment: .leading)
       }
       .font(.caption)
+
+      if let endsAt = PlaybackEndTime.text(
+        position: Int64(displayedPosition), duration: controller.durationMilliseconds,
+        rate: controller.playbackRate, now: Date())
+      {
+        Text(endsAt)
+          .font(.caption2.weight(.medium))
+          .foregroundStyle(.white.opacity(0.62))
+          .monospacedDigit()
+          .frame(maxWidth: .infinity, alignment: .trailing)
+          .accessibilityIdentifier("player-ends-at")
+      }
     }
     .frame(maxWidth: .infinity)
     .onHover { interaction("bottom-hover", active: $0) }

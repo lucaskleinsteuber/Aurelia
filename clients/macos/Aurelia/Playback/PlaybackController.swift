@@ -527,6 +527,28 @@ final class PlaybackController: ObservableObject {
     enqueueProgressSave(isFinished: false)
   }
 
+  /// Opens the current title again at the same position, for example after night mode changed:
+  /// the audio processing of a VLC player is fixed when it opens a title.
+  func reopenForAudioChange() {
+    guard !stopped, !authorizationFailed, !terminalFailure, !recovering, !endHandled,
+      !isPreparing, activePlayback != nil, let url = previewSourceURL
+    else { return }
+    let position = currentTimeMilliseconds
+    navigationRevision &+= 1
+    resumePositionMilliseconds = position
+    appliedResumePosition = position == 0
+    observedPosition = position
+    awaitingFirstMovement = true
+    stableMovementStartedAt = nil
+    lastMovementAt = recoveryClock()
+    engine.trackScope = presentation.trackScope
+    engine.load(url: url)
+    engine.volume = volume
+    engine.isMuted = isMuted
+    engine.playbackRate = playbackRate
+    if wantsPlayback { engine.play() }
+  }
+
   func setVolume(_ value: Double) {
     volume = min(max(value, 0), 1)
     engine.volume = volume
@@ -726,8 +748,10 @@ final class PlaybackController: ObservableObject {
       queuedItems.removeFirst()
       presentation = PlaybackPresentation(
         mediaId: presentation.mediaId, title: presentation.title,
-        subtitle: presentation.subtitle, queue: queuedItems)
+        subtitle: presentation.subtitle, queue: queuedItems,
+        trackScope: presentation.trackScope)
     }
+    engine.trackScope = presentation.trackScope
     engine.load(url: localURL)
     previewSourceURL = localURL
     engine.volume = volume
@@ -907,7 +931,8 @@ final class PlaybackController: ObservableObject {
       mediaId: item.mediaId,
       title: item.title,
       subtitle: item.subtitle,
-      queue: queuedItems)
+      queue: queuedItems,
+      trackScope: presentation.trackScope)
     isPreparing = true
     incidentStartedAt = recoveryClock()
     incidentPausedAt = nil

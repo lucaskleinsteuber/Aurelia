@@ -48,7 +48,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     controlsAutoHideDelay: 2,
     seekInterval: 10,
     preventSleepDuringPlayback: true,
-    automaticallyPlayNextEpisode: true)
+    automaticallyPlayNextEpisode: true,
+    nightMode: false)
 
   var automaticResume: Bool
   var defaultPlaybackRate: Double
@@ -57,6 +58,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var seekInterval: Int
   var preventSleepDuringPlayback: Bool
   var automaticallyPlayNextEpisode: Bool
+  /// Softens loud scenes and lifts quiet dialogue.
+  var nightMode: Bool
 
   var normalized: PlaybackPreferences {
     var value = self
@@ -67,6 +70,29 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     value.controlsAutoHideDelay = min(max(value.controlsAutoHideDelay, 1), 10)
     value.seekInterval = min(max(value.seekInterval, 5), 60)
     return value
+  }
+}
+
+extension PlaybackPreferences {
+  private enum CodingKeys: String, CodingKey {
+    case automaticResume, defaultPlaybackRate, defaultVolume, controlsAutoHideDelay
+    case seekInterval, preventSleepDuringPlayback, automaticallyPlayNextEpisode, nightMode
+  }
+
+  /// Settings saved before a newer option existed keep their values; the new option starts off.
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      automaticResume: try container.decode(Bool.self, forKey: .automaticResume),
+      defaultPlaybackRate: try container.decode(Double.self, forKey: .defaultPlaybackRate),
+      defaultVolume: try container.decode(Double.self, forKey: .defaultVolume),
+      controlsAutoHideDelay: try container.decode(Double.self, forKey: .controlsAutoHideDelay),
+      seekInterval: try container.decode(Int.self, forKey: .seekInterval),
+      preventSleepDuringPlayback: try container.decode(
+        Bool.self, forKey: .preventSleepDuringPlayback),
+      automaticallyPlayNextEpisode: try container.decode(
+        Bool.self, forKey: .automaticallyPlayNextEpisode),
+      nightMode: try container.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false)
   }
 }
 
@@ -87,6 +113,8 @@ protocol PlaybackEngine: AnyObject {
   var currentChapterIndex: Int32? { get }
   var selectedAudioTrackID: Int32? { get }
   var selectedSubtitleTrackID: Int32? { get }
+  /// The series whose audio and subtitle choices apply; set before `load(url:)`.
+  var trackScope: UUID? { get set }
 
   func attach(to view: NSView)
   func load(url: URL)
@@ -97,6 +125,13 @@ protocol PlaybackEngine: AnyObject {
   func selectAudioTrack(id: Int32)
   func selectSubtitleTrack(id: Int32?)
   func selectChapter(index: Int32)
+}
+
+extension PlaybackEngine {
+  var trackScope: UUID? {
+    get { nil }
+    set {}
+  }
 }
 
 @MainActor
@@ -110,6 +145,32 @@ final class VLCPlaybackEngine: PlaybackEngine {
     // event that drives progress completion and the next episode.
     "--no-play-and-pause",
   ]
+
+  /// Night mode compresses the soundtrack: peaks above -24 dB are reduced 4:1 and the result is
+  /// raised by 12 dB, so explosions stay calmer and quiet speech becomes easier to hear. The
+  /// compressor itself is switched on by `makePlayer(nightMode:output:)`.
+  static let nightModeOptions = [
+    "--compressor-rms-peak=0.2",
+    "--compressor-attack=15",
+    "--compressor-release=300",
+    "--compressor-threshold=-24",
+    "--compressor-ratio=4",
+    "--compressor-knee=6",
+    "--compressor-makeup-gain=12",
+  ]
+
+  static func playerOptions(nightMode: Bool) -> [String] {
+    defaultPlayerOptions + (nightMode ? nightModeOptions : [])
+  }
+
+  /// A player for one title; `output` is the audio output module, Core Audio by default.
+  static func makePlayer(nightMode: Bool, output: String = "auhal", extraOptions: [String] = [])
+    -> VLCMediaPlayer
+  {
+    let player = VLCMediaPlayer(options: playerOptions(nightMode: nightMode) + extraOptions)
+    if nightMode { VLCAudioFilter.enable("compressor", on: player, output: output) }
+    return player
+  }
 
   var onUpdate: (() -> Void)?
   var onEnded: (() -> Void)?
@@ -129,10 +190,13 @@ final class VLCPlaybackEngine: PlaybackEngine {
   private var requestedVolume: Double = 1
   private var requestedMuted = false
   private var requestedRate: Double = 1
+  var trackScope: UUID?
 
   init(
     playerFactory: @escaping @MainActor () -> VLCMediaPlayer = {
-      VLCMediaPlayer(options: VLCPlaybackEngine.defaultPlayerOptions)
+      // A player is created for every title, so a changed night mode applies to the next load.
+      VLCPlaybackEngine.makePlayer(
+        nightMode: PlaybackPreferencesStore.shared.preferences.nightMode)
     }
   ) {
     self.playerFactory = playerFactory
@@ -323,16 +387,17 @@ final class VLCPlaybackEngine: PlaybackEngine {
   func selectAudioTrack(id: Int32) {
     player.currentAudioTrackIndex = id
     if let track = audioTracks.first(where: { $0.id == id }) {
-      PlaybackTrackPreferenceStore.shared.audio = track.preference
+      PlaybackTrackPreferenceStore.shared.rememberAudio(track.preference, scope: trackScope)
     }
     onUpdate?()
   }
 
   func selectSubtitleTrack(id: Int32?) {
     player.currentVideoSubTitleIndex = id ?? -1
-    PlaybackTrackPreferenceStore.shared.subtitle = id.flatMap { selected in
-      subtitleTracks.first(where: { $0.id == selected })?.preference
-    }
+    PlaybackTrackPreferenceStore.shared.rememberSubtitle(
+      id.flatMap { selected in
+        subtitleTracks.first(where: { $0.id == selected })?.preference
+      }, scope: trackScope)
     onUpdate?()
   }
 
@@ -391,12 +456,13 @@ final class VLCPlaybackEngine: PlaybackEngine {
     }
     appliedTrackPreferences = true
 
-    if let preference = PlaybackTrackPreferenceStore.shared.audio,
+    let store = PlaybackTrackPreferenceStore.shared
+    if let preference = store.audio(scope: trackScope),
       let track = bestMatch(preference, tracks: audioTracks)
     {
       player.currentAudioTrackIndex = track.id
     }
-    if let preference = PlaybackTrackPreferenceStore.shared.subtitle,
+    if let preference = store.subtitle(scope: trackScope),
       let track = bestMatch(preference, tracks: subtitleTracks)
     {
       player.currentVideoSubTitleIndex = track.id
@@ -470,13 +536,84 @@ final class PlaybackPreferencesStore: ObservableObject {
   }
 }
 
+/// Audio and subtitle choices made in one series. `subtitleChosen` tells "subtitles off" apart
+/// from "never chosen here".
+struct SeriesTrackChoice: Codable, Equatable, Sendable {
+  var audio: PlaybackTrackPreference?
+  var subtitle: PlaybackTrackPreference?
+  var subtitleChosen = false
+  var updatedAt: Date
+}
+
 @MainActor
 final class PlaybackTrackPreferenceStore {
   static let shared = PlaybackTrackPreferenceStore()
+  /// The most recently used series are kept; older choices fall back to the last global choice.
+  static let seriesLimit = 300
 
-  private let defaults = UserDefaults.standard
+  private let defaults: UserDefaults
   private let audioKey = "playback.preferredAudioTrack"
   private let subtitleKey = "playback.preferredSubtitleTrack"
+  private let seriesKey = "playback.seriesTrackChoices.v1"
+
+  init(defaults: UserDefaults = .standard) {
+    self.defaults = defaults
+  }
+
+  /// The series' own choice, or else the last choice made anywhere.
+  func audio(scope: UUID?) -> PlaybackTrackPreference? {
+    scope.flatMap { seriesChoices()[$0.uuidString]?.audio } ?? audio
+  }
+
+  /// nil means subtitles off.
+  func subtitle(scope: UUID?) -> PlaybackTrackPreference? {
+    if let scope, let choice = seriesChoices()[scope.uuidString], choice.subtitleChosen {
+      return choice.subtitle
+    }
+    return subtitle
+  }
+
+  func rememberAudio(_ preference: PlaybackTrackPreference, scope: UUID?) {
+    audio = preference
+    updateSeries(scope) { $0.audio = preference }
+  }
+
+  func rememberSubtitle(_ preference: PlaybackTrackPreference?, scope: UUID?) {
+    subtitle = preference
+    updateSeries(scope) {
+      $0.subtitle = preference
+      $0.subtitleChosen = true
+    }
+  }
+
+  func forgetAll() {
+    audio = nil
+    subtitle = nil
+    defaults.removeObject(forKey: seriesKey)
+  }
+
+  private func updateSeries(_ scope: UUID?, _ change: (inout SeriesTrackChoice) -> Void) {
+    guard let scope else { return }
+    var choices = seriesChoices()
+    var choice = choices[scope.uuidString] ?? SeriesTrackChoice(updatedAt: Date())
+    change(&choice)
+    choice.updatedAt = Date()
+    choices[scope.uuidString] = choice
+    if choices.count > Self.seriesLimit {
+      for key in choices.sorted(by: { $0.value.updatedAt < $1.value.updatedAt })
+        .prefix(choices.count - Self.seriesLimit).map(\.key)
+      {
+        choices.removeValue(forKey: key)
+      }
+    }
+    if let data = try? JSONEncoder().encode(choices) { defaults.set(data, forKey: seriesKey) }
+  }
+
+  private func seriesChoices() -> [String: SeriesTrackChoice] {
+    defaults.data(forKey: seriesKey).flatMap {
+      try? JSONDecoder().decode([String: SeriesTrackChoice].self, from: $0)
+    } ?? [:]
+  }
 
   var audio: PlaybackTrackPreference? {
     get { load(key: audioKey) }

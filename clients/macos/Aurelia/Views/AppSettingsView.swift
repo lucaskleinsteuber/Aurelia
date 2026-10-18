@@ -217,6 +217,13 @@ struct AppSettingsView: View {
           isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
         )
         .accessibilityIdentifier("playback-prevent-sleep")
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle("Night Mode", isOn: $playbackPreferences.preferences.nightMode)
+            .accessibilityIdentifier("playback-night-mode")
+          Text("Softens loud scenes and makes quiet dialogue easier to hear.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
         Divider()
         LabeledContent("Default Playback Rate") {
           Picker(
@@ -269,14 +276,13 @@ struct AppSettingsView: View {
         HStack {
           VStack(alignment: .leading, spacing: 2) {
             Text("Audio and Subtitles")
-            Text("Aurelia remembers the tracks you choose in the player.")
+            Text("Aurelia remembers the tracks you choose, separately for each series.")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
           Spacer()
           Button("Forget Track Choices") {
-            PlaybackTrackPreferenceStore.shared.audio = nil
-            PlaybackTrackPreferenceStore.shared.subtitle = nil
+            PlaybackTrackPreferenceStore.shared.forgetAll()
           }
           .accessibilityIdentifier("playback-forget-tracks")
         }

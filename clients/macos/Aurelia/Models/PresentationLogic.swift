@@ -99,3 +99,18 @@ enum HomeRefreshPolicy {
     return max(date.timeIntervalSince(now), 0.25)
   }
 }
+
+/// "Ends at 21:43": when the title finishes if it plays on from `position` at `rate`.
+enum PlaybackEndTime {
+  static func text(
+    position: Int64, duration: Int64, rate: Double, now: Date, locale: Locale = .current,
+    timeZone: TimeZone = .current
+  ) -> String? {
+    guard duration > 0, rate > 0 else { return nil }
+    let remaining = Double(max(0, duration - position)) / 1_000 / rate
+    var style = Date.FormatStyle(date: .omitted, time: .shortened)
+    style.locale = locale
+    style.timeZone = timeZone
+    return "Ends at \(now.addingTimeInterval(remaining).formatted(style))"
+  }
+}
