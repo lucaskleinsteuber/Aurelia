@@ -198,6 +198,45 @@ struct VLCAudioSampleReaderTests {
     }
   }
 
+  /// The ranged stream feeds VLC like a local file: fast, with seeking, and only partial
+  /// requests. A URL protocol stands in for the server and serves a synthetic file.
+  @Test func readsThroughRangedStreamQuicklyAndSeeks() async throws {
+    var generator = SyntheticAudio(seed: 9)
+    let samples =
+      generator.noise(seconds: 40) + SyntheticAudio.theme(seconds: 15)
+      + generator.noise(seconds: 20)
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("AureliaRangedTests-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("synthetic.wav")
+    try Self.writeWAV(Self.upsample(samples, to: 48_000), channels: 2, rate: 48_000, to: file)
+    let data = try Data(contentsOf: file)
+    RangedFileProtocol.payload = data
+    RangedFileProtocol.fullRequests = 0
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [RangedFileProtocol.self]
+    let session = URLSession(configuration: configuration)
+    let url = URL(string: "https://synthetic.invalid/api/v1/streams/ticket")!
+
+    let reader = VLCAudioSampleReader()
+    let started = Date()
+    let output = try await reader.read(
+      stream: RangedStreamInput(
+        url: url, session: session, token: "synthetic", length: Int64(data.count)),
+      start: 30, length: 30, timeout: .seconds(60))
+    let elapsed = Date().timeIntervalSince(started)
+    let seconds = Double(output.samples.count) / AudioFingerprint.sampleRate
+    #expect(seconds > 28 && seconds < 32)
+    #expect(elapsed < 15, "30 s of stereo 48 kHz should decode far faster than real time")
+    #expect(RangedFileProtocol.fullRequests == 0)
+    let match = SegmentMatcher.longestCommon(
+      AudioFingerprint.compute(output.samples),
+      AudioFingerprint.compute(SyntheticAudio.theme(seconds: 15)), minimum: 8, maximum: 60)
+    let found = try #require(match)
+    #expect(abs(found.firstStart - 10) < 1)
+  }
+
   /// Linear interpolation from the fingerprint rate to `rate`.
   private static func upsample(_ samples: [Float], to rate: Int) -> [Float] {
     guard rate != Int(AudioFingerprint.sampleRate) else { return samples }
@@ -235,4 +274,34 @@ struct VLCAudioSampleReaderTests {
     }
     try data.write(to: url)
   }
+}
+
+/// Serves byte ranges of a synthetic payload, like the server's stream endpoint.
+private final class RangedFileProtocol: URLProtocol, @unchecked Sendable {
+  nonisolated(unsafe) static var payload = Data()
+  nonisolated(unsafe) static var fullRequests = 0
+
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+  override func startLoading() {
+    let data = Self.payload
+    guard let range = request.value(forHTTPHeaderField: "Range"),
+      let bounds = range.split(separator: "=").last?.split(separator: "-"),
+      bounds.count == 2, let low = Int(bounds[0]), let high = Int(bounds[1]), low <= high
+    else {
+      Self.fullRequests += 1
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+      return
+    }
+    let upper = min(high, data.count - 1)
+    let response = HTTPURLResponse(
+      url: request.url!, statusCode: 206, httpVersion: "HTTP/1.1",
+      headerFields: ["Content-Range": "bytes \(low)-\(upper)/\(data.count)"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: data.subdata(in: low..<(upper + 1)))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+
+  override func stopLoading() {}
 }

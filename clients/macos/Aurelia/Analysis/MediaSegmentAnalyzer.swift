@@ -161,18 +161,22 @@ final class MediaSegmentAnalyzer: ObservableObject {
     -> Prints
   {
     let source = try await client.createPlayback(mediaId: mediaId)
-    let relay = try LoopbackStreamRelay(
-      sourceURL: client.streamURL(path: source.streamPath),
-      publicKeyFingerprint: profile.publicKeyFingerprint,
-      authorizationToken: profile.token)
-    defer {
-      relay.stop()
-      Task { try? await client.revokePlayback(id: source.id) }
+    defer { Task { try? await client.revokePlayback(id: source.id) } }
+    let streamURL = try client.streamURL(path: source.streamPath)
+    let session = PinnedSessionPool.shared.lease(
+      host: profile.baseURL.host ?? "", port: profile.baseURL.port,
+      fingerprint: profile.publicKeyFingerprint
+    ).session
+    // A stream this process feeds is decoded as fast as a file; a network address is read at
+    // playback speed.
+    let makeStream = {
+      RangedStreamInput(
+        url: streamURL, session: session, token: profile.token, length: source.contentLength)
     }
-    let url = try await relay.start()
     let reader = VLCAudioSampleReader()
     let started = Date()
-    let opening = try await reader.read(url: url, start: 0, length: Self.introWindow)
+    let opening = try await reader.read(
+      stream: makeStream(), start: 0, length: Self.introWindow)
     Self.logger.info(
       "Read \(Double(opening.samples.count) / AudioFingerprint.sampleRate, format: .fixed(precision: 0)) s of audio in \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) s (\(opening.sourceLayout, privacy: .public))"
     )
@@ -188,7 +192,7 @@ final class MediaSegmentAnalyzer: ObservableObject {
     if seconds > Self.creditsWindow * 2 {
       creditsOffset = max(seconds * 0.6, seconds - Self.creditsWindow)
       let ending = try await reader.read(
-        url: url, start: creditsOffset, length: seconds - creditsOffset)
+        stream: makeStream(), start: creditsOffset, length: seconds - creditsOffset)
       credits = AudioFingerprint.compute(ending.samples)
     }
     return Prints(

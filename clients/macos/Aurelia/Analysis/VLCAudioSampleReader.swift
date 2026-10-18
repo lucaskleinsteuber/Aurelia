@@ -36,6 +36,19 @@ final class VLCAudioSampleReader: NSObject {
   func read(url: URL, start: Double, length: Double, timeout: Duration = .seconds(240))
     async throws -> Output
   {
+    try await read(media: VLCMedia(url: url), start: start, length: length, timeout: timeout)
+  }
+
+  /// Reads from a stream this process feeds, which VLC decodes as fast as a local file.
+  func read(
+    stream: InputStream, start: Double, length: Double, timeout: Duration = .seconds(240)
+  ) async throws -> Output {
+    try await read(media: VLCMedia(stream: stream), start: start, length: length, timeout: timeout)
+  }
+
+  private func read(media: VLCMedia, start: Double, length: Double, timeout: Duration)
+    async throws -> Output
+  {
     precondition(player == nil, "One read at a time")
     durationMilliseconds = 0
     chapters = []
@@ -44,7 +57,6 @@ final class VLCAudioSampleReader: NSObject {
     defer { pipe.close() }
     pipe.startReading()
 
-    let media = VLCMedia(url: url)
     let rate = Int(AudioFingerprint.sampleRate)
     media.addOption(
       ":sout=#transcode{acodec=s16l,channels=1,samplerate=\(rate)}"
