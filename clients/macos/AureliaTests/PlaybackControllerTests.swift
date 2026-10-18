@@ -454,6 +454,74 @@ final class PlaybackControllerTests: XCTestCase {
     await controller.shutdown()
   }
 
+  private func upNextController(
+    engine: FakePlaybackEngine, client: FakePlaybackClient, nextID: UUID
+  ) -> PlaybackController {
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    let relay = FakePlaybackRelay()
+    engine.durationMilliseconds = 2_700_000
+    return PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: client.source.mediaId, title: "Episode 1", subtitle: "Series · S01 E01",
+        queue: [
+          PlaybackQueueItem(mediaId: nextID, title: "Episode 2", subtitle: "Series · S01 E02")
+        ]),
+      engine: engine, preferences: preferences, relayFactory: { _, _ in relay })
+  }
+
+  func testUpNextCountsDownInTheLastSecondsAndPlaysNow() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let nextID = UUID()
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = upNextController(engine: engine, client: client, nextID: nextID)
+    await controller.start()
+
+    engine.currentTimeMilliseconds = 2_600_000
+    engine.onUpdate?()
+    XCTAssertNil(controller.upNext)
+    engine.currentTimeMilliseconds = 2_685_000
+    engine.onUpdate?()
+    XCTAssertEqual(
+      controller.upNext,
+      PlaybackUpNext(title: "Episode 2", subtitle: "Series · S01 E02", seconds: 15))
+
+    controller.playNextNow()
+    XCTAssertNil(controller.upNext)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while controller.presentation.mediaId != nextID && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    XCTAssertEqual(controller.presentation.mediaId, nextID)
+    // The episode left early counts as watched.
+    XCTAssertEqual(client.updates.last(where: { $0.finished })?.position, 2_685_000)
+    await controller.shutdown()
+  }
+
+  func testCancellingUpNextStopsAtTheEnd() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = upNextController(engine: engine, client: client, nextID: UUID())
+    await controller.start()
+    engine.currentTimeMilliseconds = 2_690_000
+    engine.onUpdate?()
+    XCTAssertNotNil(controller.upNext)
+
+    controller.dismissUpNext()
+    engine.onUpdate?()
+    XCTAssertNil(controller.upNext)
+    engine.currentTimeMilliseconds = engine.durationMilliseconds
+    engine.isPlaying = false
+    engine.onEnded?()
+    for _ in 0..<3 { await Task.yield() }
+    XCTAssertEqual(controller.presentation.mediaId, source.mediaId)
+    XCTAssertEqual(client.createdMediaIDs, [source.mediaId])
+    await controller.shutdown()
+  }
+
   func testEndOfEpisodeSleepTimerStopsQueueAdvance() async throws {
     let source = Self.source(position: 0, completed: false)
     let client = FakePlaybackClient(source: source)

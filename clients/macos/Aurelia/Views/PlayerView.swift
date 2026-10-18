@@ -72,6 +72,14 @@ struct PlayerView: View {
             .transition(.opacity)
         }
 
+        if let upNext = controller.upNext, controller.errorMessage == nil {
+          upNextCard(upNext)
+            .padding(.trailing, 28)
+            .padding(.bottom, controlsVisible ? 150 : 40)
+            .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
+            .transition(.opacity)
+        }
+
         if let note = sceneNotes.cueText {
           VStack {
             HStack {
@@ -98,6 +106,7 @@ struct PlayerView: View {
       }
       .frame(width: viewport.width, height: viewport.height)
       .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: startScreenVisible)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.upNext != nil)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .ignoresSafeArea()
@@ -654,6 +663,44 @@ struct PlayerView: View {
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
     .accessibilityLabel(title)
+  }
+
+  /// The next episode with a countdown in this title's last seconds.
+  private func upNextCard(_ upNext: PlaybackUpNext) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("UP NEXT").font(.caption.weight(.bold)).tracking(1.2).foregroundStyle(.secondary)
+      Text(upNext.title).font(.title3.weight(.semibold)).lineLimit(2)
+      if let subtitle = upNext.subtitle {
+        Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+      }
+      HStack(spacing: 10) {
+        Button {
+          controller.playNextNow()
+        } label: {
+          Label("Play Now · \(upNext.seconds)", systemImage: "play.fill")
+            .monospacedDigit()
+            .frame(minWidth: 120)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.white)
+        .foregroundStyle(.black)
+        .accessibilityIdentifier("player-up-next-play")
+        Button("Cancel") { controller.dismissUpNext() }
+          .buttonStyle(.bordered)
+          .accessibilityIdentifier("player-up-next-cancel")
+      }
+      .controlSize(.large)
+      .padding(.top, 4)
+    }
+    .padding(18)
+    .frame(width: 320, alignment: .leading)
+    .playerMaterial(
+      reduceTransparency: reduceTransparency,
+      shape: RoundedRectangle(cornerRadius: 18, style: .continuous)
+    )
+    .onHover { interaction("up-next-hover", active: $0) }
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("player-up-next")
   }
 
   private var startScreenVisible: Bool {

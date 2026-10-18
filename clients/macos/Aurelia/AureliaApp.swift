@@ -12,6 +12,7 @@ struct AureliaApp: App {
         .environmentObject(model)
         .task {
           await model.start()
+          VLCPlaybackEngine.warmUp()
         }
         .onChange(of: scenePhase) { _, phase in
           Task { await model.setApplicationActive(phase == .active) }

@@ -172,6 +172,12 @@ final class VLCPlaybackEngine: PlaybackEngine {
     defaultPlayerOptions + (nightMode ? nightModeOptions : [])
   }
 
+  /// Loads VLC's modules once, shortly after launch, so the first Play does not pay for it
+  /// (about 40 ms); later players are created in about a millisecond.
+  static func warmUp() {
+    _ = makePlayer(nightMode: false).state
+  }
+
   /// A player for one title; `output` is the audio output module, Core Audio by default.
   static func makePlayer(nightMode: Bool, output: String = "auhal", extraOptions: [String] = [])
     -> VLCMediaPlayer

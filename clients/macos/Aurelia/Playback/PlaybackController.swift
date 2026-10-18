@@ -121,6 +121,8 @@ final class PlaybackController: ObservableObject {
   /// The start screen covers the player from Play until the picture moves, for the first title
   /// and each next episode; pausing, an error or closing ends it.
   @Published private(set) var showsStartScreen = true
+  /// The next episode's card in a title's last seconds.
+  @Published private(set) var upNext: PlaybackUpNext?
   @Published private(set) var isPlaying = false
   @Published private(set) var currentTimeMilliseconds: Int64 = 0
   @Published private(set) var navigationRevision: UInt64 = 0
@@ -172,6 +174,9 @@ final class PlaybackController: ObservableObject {
   private var appliedResumePosition = false
   /// The engine was asked to open at the resume position, so it usually needs no seek.
   private var openedAtResume = false
+  private var upNextDismissed = false
+  /// Cancel on the Up Next card: this title stops at its end instead of continuing.
+  private var autoplayCancelled = false
   private var resumePositionMilliseconds: Int64 = 0
   private var lastPeriodicSave = Date.distantPast
   private var queuedItems: [PlaybackQueueItem]
@@ -855,6 +860,7 @@ final class PlaybackController: ObservableObject {
     assignIfChanged(&chapters, engine.chapters)
     assignIfChanged(&currentChapterIndex, engine.currentChapterIndex)
     assignIfChanged(&isPreparing, wantsPlayback && durationMilliseconds <= 0 && !isPlaying)
+    updateUpNext()
 
     // Buffering or an external decoder pause breaks continuous stable playback,
     // even if the next position notification arrives within the normal tick gap.
@@ -943,8 +949,10 @@ final class PlaybackController: ObservableObject {
     showsStartScreen = false
     record(.ended)
     enqueueProgressSave(isFinished: true)
+    upNext = nil
     guard sleepTimer != .endOfEpisode,
       preferences.automaticallyPlayNextEpisode,
+      !autoplayCancelled,
       let next = queuedItems.first
     else {
       sleepTimer = .off
@@ -952,6 +960,46 @@ final class PlaybackController: ObservableObject {
       return
     }
     nextItemTask = Task { [weak self] in await self?.advance(to: next) }
+  }
+
+  /// Starts the next episode now from the Up Next card; this title counts as finished.
+  func playNextNow() {
+    guard !stopped, !authorizationFailed, !terminalFailure, !recovering, !endHandled,
+      let next = queuedItems.first
+    else { return }
+    endHandled = true
+    loadID = UUID()
+    watchdogTask?.cancel()
+    watchdogTask = nil
+    isPlaying = false
+    upNext = nil
+    record(.ended)
+    enqueueProgressSave(isFinished: true)
+    nextItemTask = Task { [weak self] in await self?.advance(to: next) }
+  }
+
+  /// Hides the Up Next card; the player then stops at the end instead of continuing.
+  func dismissUpNext() {
+    upNextDismissed = true
+    autoplayCancelled = true
+    upNext = nil
+  }
+
+  private func updateUpNext() {
+    let next = queuedItems.first
+    let shown = UpNextPolicy.shows(
+      position: currentTimeMilliseconds, duration: durationMilliseconds, hasNext: next != nil,
+      autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,
+      dismissed: upNextDismissed)
+    let card = next.flatMap { next in
+      shown
+        ? PlaybackUpNext(
+          title: next.title, subtitle: next.subtitle,
+          seconds: UpNextPolicy.seconds(
+            position: currentTimeMilliseconds, duration: durationMilliseconds))
+        : nil
+    }
+    assignIfChanged(&upNext, card)
   }
 
   private func engineFailed(_ message: String) {
@@ -1009,6 +1057,9 @@ final class PlaybackController: ObservableObject {
       trackScope: presentation.trackScope)
     isPreparing = true
     showsStartScreen = true
+    upNext = nil
+    upNextDismissed = false
+    autoplayCancelled = false
     incidentStartedAt = recoveryClock()
     incidentPausedAt = nil
     opaqueTicketRetryUsed = false

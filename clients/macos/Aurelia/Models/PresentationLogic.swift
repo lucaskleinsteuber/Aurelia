@@ -114,3 +114,29 @@ enum PlaybackEndTime {
     return "Ends at \(now.addingTimeInterval(remaining).formatted(style))"
   }
 }
+
+/// "Up Next" appears in the last seconds of an episode-length title when the next episode
+/// will start on its own; the countdown is simply the time left.
+enum UpNextPolicy {
+  static let lead: Int64 = 20_000
+
+  static func shows(
+    position: Int64, duration: Int64, hasNext: Bool, autoplay: Bool, stopsAtEnd: Bool,
+    dismissed: Bool
+  ) -> Bool {
+    guard hasNext, autoplay, !stopsAtEnd, !dismissed, duration >= 300_000, position > 0 else {
+      return false
+    }
+    return duration - position <= lead
+  }
+
+  static func seconds(position: Int64, duration: Int64) -> Int {
+    Int((max(0, duration - position) + 999) / 1_000)
+  }
+}
+
+struct PlaybackUpNext: Equatable {
+  let title: String
+  let subtitle: String?
+  let seconds: Int
+}
