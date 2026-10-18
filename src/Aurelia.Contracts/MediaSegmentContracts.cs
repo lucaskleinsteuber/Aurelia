@@ -28,4 +28,7 @@ public sealed record MediaSegmentAnalysisItem(Guid MediaId, int? EpisodeNumber, 
 public sealed record MediaSegmentAnalysisGroup(
     Guid? SeriesId, int? SeasonNumber, IReadOnlyList<MediaSegmentAnalysisItem> Items);
 
-public sealed record MediaSegmentAnalysisQueueResponse(IReadOnlyList<MediaSegmentAnalysisGroup> Groups);
+/// <param name="TotalTitles">Available episodes and movies that can be analyzed.</param>
+/// <param name="AnalyzedTitles">Of those, titles already analyzed at the requested version or set by hand.</param>
+public sealed record MediaSegmentAnalysisQueueResponse(
+    IReadOnlyList<MediaSegmentAnalysisGroup> Groups, int TotalTitles = 0, int AnalyzedTitles = 0);

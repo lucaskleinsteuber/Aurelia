@@ -30,7 +30,7 @@ Since 1.7.0, `media-segments-v1` means `GET /api/v1/media/{id}/segments` returns
 intro and credits times (`analyzed`, `introStartMilliseconds`, `introEndMilliseconds`,
 `creditsStartMilliseconds`, `source`, `analysisVersion`). Administrators set them with `PUT`
 and clear them with `DELETE`; `GET /api/v1/media/segment-analysis` lists seasons and movies
-still to be analyzed. Only timestamps are stored. Times set by hand (`source: manual`) are
+still to be analyzed and, since 1.7.4, `totalTitles` and `analyzedTitles` for progress. Only timestamps are stored. Times set by hand (`source: manual`) are
 never replaced by automatic results.
 
 `GET /api/v1/health/live` (also HEAD) indicates HTTP liveness without a database

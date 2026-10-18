@@ -12,9 +12,21 @@ final class MediaSegmentAnalyzer: ObservableObject {
   static let introWindow: Double = 420
   static let creditsWindow: Double = 240
 
+  /// How far detection is, for the settings view.
+  struct Progress: Equatable {
+    /// Titles finished on the server, out of all titles that can be analyzed.
+    var done: Int
+    var total: Int
+    /// The season or movie being read, for example "Breaking Bad · Season 2".
+    var title: String?
+    /// The title being read within that season, counting from 1.
+    var step: Int
+    var steps: Int
+  }
+
   enum Status: Equatable {
     case idle
-    case analyzing(title: String?, completed: Int)
+    case analyzing(Progress)
     case waiting
     case upToDate
     case failed(String)
@@ -24,7 +36,10 @@ final class MediaSegmentAnalyzer: ObservableObject {
   private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "Segments")
   private var task: Task<Void, Never>?
   private var profileKey: String?
-  private var completed = 0
+  /// Names a season or movie for the progress line; set by the app model.
+  var titleResolver: (@MainActor (MediaSegmentAnalysisGroup) -> String?)?
+  private var done = 0
+  private var total = 0
   /// Titles that could not be read in this session; they are retried in a later pass.
   private var failed: Set<UUID> = []
 
@@ -61,6 +76,8 @@ final class MediaSegmentAnalyzer: ObservableObject {
       do {
         let queue = try await client.mediaSegmentAnalysisQueue(
           analysisVersion: Self.analysisVersion, limit: 50)
+        done = queue.analyzedTitles ?? 0
+        total = queue.totalTitles ?? 0
         let groups = queue.groups.filter { group in
           group.items.contains { $0.needsAnalysis && !failed.contains($0.mediaId) }
         }
@@ -103,12 +120,17 @@ final class MediaSegmentAnalyzer: ObservableObject {
         group.items[$0].needsAnalysis && !failed.contains(group.items[$0].mediaId)
       }
       .flatMap { ($0 - 2)...($0 + 2) })
+    let title = titleResolver?(group)
+    let reading = group.items.indices.filter { needed.contains($0) }
     for (index, item) in group.items.enumerated() where needed.contains(index) {
       while !canRun() {
         status = .waiting
         try await Task.sleep(for: .seconds(20))
       }
-      status = .analyzing(title: nil, completed: completed)
+      status = .analyzing(
+        Progress(
+          done: done, total: total, title: title,
+          step: (reading.firstIndex(of: index) ?? 0) + 1, steps: reading.count))
       do {
         prints[item.mediaId] = try await read(item.mediaId, client: client, profile: profile)
       } catch is CancellationError {
@@ -131,7 +153,7 @@ final class MediaSegmentAnalyzer: ObservableObject {
         mediaId: id, introStart: result.introStart, introEnd: result.introEnd,
         creditsStart: result.creditsStart, source: result.source,
         analysisVersion: Self.analysisVersion)
-      completed += 1
+      done += 1
     }
   }
 

@@ -105,6 +105,8 @@ public sealed class MediaSegmentTests
         await SetAsync(client, owner.Token, first.Id, new(1_000, 31_000, null, MediaSegmentSource.Detected, 1));
 
         var queue = await QueueAsync(client, owner.Token, 1);
+        // Two available episodes and one movie; one episode is done.
+        Assert.Equal((3, 1), (queue.TotalTitles, queue.AnalyzedTitles));
         var season = Assert.Single(queue.Groups, group => group.SeriesId == series.Id);
         Assert.Equal([first.Id, second.Id], season.Items.Select(item => item.MediaId));
         Assert.Equal([false, true], season.Items.Select(item => item.NeedsAnalysis));
@@ -113,7 +115,9 @@ public sealed class MediaSegmentTests
 
         await SetAsync(client, owner.Token, second.Id, new(null, null, null, MediaSegmentSource.None, 1));
         await SetAsync(client, owner.Token, movie.Id, new(null, null, 5_400_000, MediaSegmentSource.Chapters, 1));
-        Assert.Empty((await QueueAsync(client, owner.Token, 1)).Groups);
+        var finished = await QueueAsync(client, owner.Token, 1);
+        Assert.Empty(finished.Groups);
+        Assert.Equal((3, 3), (finished.TotalTitles, finished.AnalyzedTitles));
 
         // A newer analysis repeats automatic results, never manual ones.
         await SetAsync(client, owner.Token, first.Id, new(2_000, 32_000, null, MediaSegmentSource.Manual, 1));

@@ -64,7 +64,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac detection-format release is 1.7.3 (67); the
+  changing them. The approved Mac detection-progress release is 1.7.4 (68); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   intro-skipping update is 0.3.0 (11).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

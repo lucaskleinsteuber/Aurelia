@@ -611,13 +611,22 @@ private struct IntroDetectionSetting: View {
   let onChange: () -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
+    VStack(alignment: .leading, spacing: 6) {
       Toggle("Detect Intros and Credits", isOn: $enabled)
         .accessibilityIdentifier("playback-detect-segments")
         .onChange(of: enabled) { onChange() }
+      if enabled, case .analyzing(let progress) = analyzer.status, progress.total > 0 {
+        ProgressView(
+          value: Double(min(progress.done, progress.total)), total: Double(progress.total)
+        )
+        .progressViewStyle(.linear)
+        .frame(maxWidth: 360)
+        .accessibilityIdentifier("playback-detect-progress")
+      }
       Text(statusText)
         .font(.caption)
         .foregroundStyle(.secondary)
+        .monospacedDigit()
         .fixedSize(horizontal: false, vertical: true)
     }
   }
@@ -629,10 +638,17 @@ private struct IntroDetectionSetting: View {
     switch analyzer.status {
     case .idle:
       return "Compares the soundtrack of episodes in the background. Only the times are kept."
-    case .analyzing(_, let completed):
-      return completed == 0
-        ? "Looking for intros and credits…"
-        : "Looking for intros and credits… \(completed) titles done."
+    case .analyzing(let progress):
+      var lines: [String] = []
+      if let title = progress.title {
+        lines.append("Reading \(title) · \(progress.step) of \(progress.steps)")
+      } else {
+        lines.append("Looking for intros and credits…")
+      }
+      if progress.total > 0 {
+        lines.append("\(min(progress.done, progress.total)) of \(progress.total) titles checked")
+      }
+      return lines.joined(separator: "\n")
     case .waiting:
       return "Paused while something plays."
     case .upToDate:

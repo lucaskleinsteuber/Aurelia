@@ -1481,7 +1481,19 @@ final class AppModel: ObservableObject {
       segmentAnalyzer.stop()
       return
     }
+    segmentAnalyzer.titleResolver = { [weak self] group in self?.segmentGroupTitle(group) }
     segmentAnalyzer.start(profile: profile) { [weak self] in self?.playback == nil }
+  }
+
+  /// "Breaking Bad · Season 2" for a season, or the movie's title.
+  private func segmentGroupTitle(_ group: MediaSegmentAnalysisGroup) -> String? {
+    if let seriesId = group.seriesId {
+      let name = catalogItems.first { $0.id == seriesId }?.title
+      guard let name else { return nil }
+      guard let season = group.seasonNumber else { return name }
+      return season == 0 ? "\(name) · Specials" : "\(name) · Season \(season)"
+    }
+    return group.items.first.flatMap { item in catalogItems.first { $0.id == item.mediaId }?.title }
   }
 
   /// Loads every library page's current list in the background after a refresh, so switching

@@ -29,6 +29,9 @@ struct MediaSegmentAnalysisGroup: Codable, Equatable, Sendable {
 
 struct MediaSegmentAnalysisQueue: Codable, Equatable, Sendable {
   let groups: [MediaSegmentAnalysisGroup]
+  /// Progress totals; servers before 1.7.4 leave them out.
+  var totalTitles: Int?
+  var analyzedTitles: Int?
 }
 
 /// The parts of a title that can be skipped, in milliseconds.

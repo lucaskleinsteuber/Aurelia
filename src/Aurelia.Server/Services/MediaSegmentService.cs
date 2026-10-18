@@ -76,7 +76,9 @@ public sealed class MediaSegmentService(AureliaDbContext database, CatalogMutati
                     .Select(item => new MediaSegmentAnalysisItem(item.Id, item.EpisodeNumber, Needs(item.Id))).ToList()));
         var movies = playable.Where(item => item.Kind == MediaKind.Movie).OrderBy(item => item.Id)
             .Select(item => new MediaSegmentAnalysisGroup(null, null, [new MediaSegmentAnalysisItem(item.Id, null, Needs(item.Id))]));
-        return new(seasons.Concat(movies).Where(group => group.Items.Any(item => item.NeedsAnalysis)).Take(limit).ToList());
+        var analyzed = playable.Count(item => !Needs(item.Id));
+        return new(seasons.Concat(movies).Where(group => group.Items.Any(item => item.NeedsAnalysis)).Take(limit).ToList(),
+            playable.Count, analyzed);
     }
 
     private static void Validate(SetMediaSegmentsRequest request)
