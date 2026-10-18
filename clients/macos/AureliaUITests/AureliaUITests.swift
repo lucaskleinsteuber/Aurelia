@@ -624,8 +624,23 @@ final class AureliaUITests: XCTestCase {
     let movie = app.buttons["media-10000000-0000-0000-0000-000000000001"]
     XCTAssertTrue(movie.waitForExistence(timeout: 8))
     movie.click()
+    // Editing is one visible click away, and the More Actions circle is a full-size target.
+    let editButton = app.buttons["media-edit-metadata"]
+    XCTAssertTrue(editButton.waitForExistence(timeout: 5))
+    XCTAssertGreaterThanOrEqual(editButton.frame.width, 40)
     let actions = app.descendants(matching: .any)["media-actions"]
     XCTAssertTrue(actions.waitForExistence(timeout: 5))
+    XCTAssertGreaterThanOrEqual(actions.frame.width, 40)
+    XCTAssertGreaterThanOrEqual(actions.frame.height, 40)
+    // The editor opens only once the full details have loaded.
+    let enabled = expectation(
+      for: NSPredicate(format: "isEnabled == true"), evaluatedWith: editButton)
+    wait(for: [enabled], timeout: 8)
+    editButton.click()
+    XCTAssertTrue(app.descendants(matching: .any)["metadata-editor"].waitForExistence(timeout: 5))
+    app.buttons["Cancel"].click()
+    XCTAssertTrue(
+      app.descendants(matching: .any)["metadata-editor"].waitForNonExistence(timeout: 5))
     actions.click()
     let editMetadata = app.menuItems["Edit Metadata"]
     XCTAssertTrue(editMetadata.waitForExistence(timeout: 5))

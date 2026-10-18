@@ -373,7 +373,10 @@ final class CinemaUITests: XCTestCase {
     defer { app.terminate() }
     shot(app, "Cinema - Hero - Reference Size")
     let scroll = detailScroll(app)
-    scroll.scroll(byDeltaX: 0, deltaY: -340)
+    // Scroll the page from above the rails: synthesized wheel events have no gesture phase, so
+    // their tail would otherwise land on the episode rail that just moved under the pointer.
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.15))
+      .scroll(byDeltaX: 0, deltaY: -340)
     let first = app.buttons["episode-1-1"]
     XCTAssertTrue(first.waitForExistence(timeout: 5))
     first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()

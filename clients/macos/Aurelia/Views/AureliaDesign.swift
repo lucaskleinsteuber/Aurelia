@@ -430,6 +430,7 @@ struct AureliaSearchField: View {
 
 struct AureliaIconControl: View {
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+  @Environment(\.isEnabled) private var isEnabled
   let symbol: String
   let label: String
   var selected = false
@@ -450,8 +451,40 @@ struct AureliaIconControl: View {
         .overlay {
           Circle().stroke(selected ? .white.opacity(0.24) : AureliaDesign.hairline, lineWidth: 1)
         }
+        .opacity(isEnabled ? 1 : 0.45)
     }
     .buttonStyle(.plain)
+    .accessibilityLabel(label)
+  }
+}
+
+/// A round glass menu button. `.button` with a plain style draws the full circle and keeps the
+/// whole 44 pt circle clickable; the borderless style shrinks custom labels to the bare glyph.
+struct AureliaIconMenu<Content: View>: View {
+  @Environment(\.aureliaReduceTransparency) private var reduceTransparency
+  let symbol: String
+  let label: String
+  @ViewBuilder let content: () -> Content
+
+  var body: some View {
+    Menu(content: content) {
+      Image(systemName: symbol)
+        .font(.system(size: 15, weight: .semibold))
+        .frame(width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
+        .background {
+          if reduceTransparency {
+            Circle().fill(AureliaDesign.raisedSurface)
+          } else {
+            Circle().fill(.ultraThinMaterial)
+          }
+        }
+        .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
+        .contentShape(Circle())
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .menuIndicator(.hidden)
+    .fixedSize()
     .accessibilityLabel(label)
   }
 }

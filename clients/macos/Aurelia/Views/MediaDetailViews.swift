@@ -61,6 +61,8 @@ struct MediaDetailView: View {
                 }
               }
             },
+            // Editing waits for the full details; a list entry shown first is incomplete.
+            metadataReady: self.detail != nil,
             onEdit: model.canManageMedia
               ? { showingMetadataEditor = true } : nil,
             onMatch: model.canManageMedia
@@ -608,6 +610,7 @@ private struct DetailHero: View {
   let onBack: () -> Void
   let onPlay: () -> Void
   let onFavorite: () -> Void
+  let metadataReady: Bool
   let onEdit: (() -> Void)?
   let onMatch: (() -> Void)?
   let onRemove: (() -> Void)?
@@ -735,23 +738,30 @@ private struct DetailHero: View {
           }
           .buttonStyle(.plain).accessibilityLabel("Back")
           Spacer()
-          Menu {
-            MediaWatchMenuItems(item: detail.item, controller: watchActions)
-            if onEdit != nil || onMatch != nil { Divider() }
-            if let onEdit { Button("Edit Metadata", action: onEdit) }
-            if let onMatch { Button("Find Metadata Match", action: onMatch) }
-            if let onRemove {
-              Divider()
-              Button("Remove from Library…", role: .destructive, action: onRemove)
+          HStack(spacing: 10) {
+            if let onEdit {
+              AureliaIconControl(symbol: "pencil", label: "Edit Metadata", action: onEdit)
+                .disabled(!metadataReady)
+                .help("Edit Metadata")
+                .accessibilityIdentifier("media-edit-metadata")
             }
-          } label: {
-            Image(systemName: "ellipsis").font(.headline).frame(width: 44, height: 44)
-              .background(.ultraThinMaterial, in: Circle())
-              .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
+            AureliaIconMenu(symbol: "ellipsis", label: "More Actions") {
+              MediaWatchMenuItems(item: detail.item, controller: watchActions)
+              if onEdit != nil || onMatch != nil { Divider() }
+              if let onEdit {
+                Button("Edit Metadata", action: onEdit).disabled(!metadataReady)
+              }
+              if let onMatch {
+                Button("Find Metadata Match", action: onMatch).disabled(!metadataReady)
+              }
+              if let onRemove {
+                Divider()
+                Button("Remove from Library…", role: .destructive, action: onRemove)
+              }
+            }
+            .help("More Actions")
+            .accessibilityIdentifier("media-actions")
           }
-          .menuStyle(.borderlessButton)
-          .accessibilityLabel("More Actions")
-          .accessibilityIdentifier("media-actions")
         }
         .padding(AureliaDesign.pagePadding)
         Spacer()
