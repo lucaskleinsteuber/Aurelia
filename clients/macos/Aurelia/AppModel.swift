@@ -260,6 +260,9 @@ final class AppModel: ObservableObject {
   private static let operatingModeSelectionVersionKey = "AureliaOperatingModeSelectionVersion"
 
   var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true && managementUnlocked }
+  /// Finds intros and credits in the background on administrators' Macs.
+  let segmentAnalyzer = MediaSegmentAnalyzer()
+  static let segmentAnalysisKey = "AureliaDetectIntrosAndCredits"
   var canManageStorage: Bool {
     canManageMedia
       && (profile?.user?.role == .owner || profile?.user?.accessMode != .selectedTitles)
@@ -1363,6 +1366,7 @@ final class AppModel: ObservableObject {
     home = newHome
     scheduleHomeRefresh()
     warmLibraryBrowsing()
+    updateSegmentAnalysis()
     if !Self.isTestProcess, !NativePreflightIsolation.isRequested, let current = self.profile {
       PlaybackProgressOutbox.shared.activate(profile: current)
       PlaybackProgressOutbox.shared.retryAfterReconnect()
@@ -1458,6 +1462,20 @@ final class AppModel: ObservableObject {
     guard let key = browseKey(section: section, query: query, search: search) else { return }
     if browseResults.count >= 24, browseResults[key] == nil { browseResults.removeAll() }
     browseResults[key] = items
+  }
+
+  /// Runs intro and credits detection while an administrator is signed in and it is enabled.
+  /// It waits whenever something plays.
+  func updateSegmentAnalysis() {
+    guard !Self.isTestProcess, !NativePreflightIsolation.isRequested,
+      ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil,
+      let profile, canManageMedia, libraryCapabilities.contains("media-segments-v1"),
+      UserDefaults.standard.object(forKey: Self.segmentAnalysisKey) as? Bool ?? true
+    else {
+      segmentAnalyzer.stop()
+      return
+    }
+    segmentAnalyzer.start(profile: profile) { [weak self] in self?.playback == nil }
   }
 
   /// Loads every library page's current list in the background after a refresh, so switching
@@ -2474,6 +2492,7 @@ final class AppModel: ObservableObject {
     let paired = deviceConnection
     let retiredGeneration = connectionGeneration
     inspectionGeneration = UUID()
+    segmentAnalyzer.stop()
     profile = nil
     deviceConnection = nil
     isSwitchingProfile = false
@@ -2849,6 +2868,7 @@ final class AppModel: ObservableObject {
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
     clearPersonalViewState()
+    segmentAnalyzer.stop()
     profile = nil
     deviceConnection = nil
     watchingProfiles = []

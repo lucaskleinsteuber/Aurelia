@@ -14,9 +14,13 @@ These rules apply to every task in this repository.
 - Keep all user-facing text in English until localization is an explicit task.
 - Preserve the native macOS design direction, but keep infrastructure
   milestones focused and functional.
-- Never copy, convert, remux, transcode, hash, analyse, or cache video content.
-  Media remains at its original user-selected path; scans read only filesystem
-  metadata and directory structure.
+- Media files are only ever read: never modify, copy, convert, remux,
+  transcode, hash, or store video content. Media remains at its original
+  user-selected path; scans read only filesystem metadata and directory
+  structure. Two user-approved exceptions read content without keeping it:
+  scrub previews decoded live during playback and held only in memory, and a
+  one-time audio comparison of episodes for intro and credits detection that
+  stores only the resulting timestamps, never audio, images, or fingerprints.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,
@@ -60,7 +64,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac interface release is 1.6.7 (63); the
+  changing them. The approved Mac intro-skipping release is 1.7.0 (64); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   artwork-cache update is 0.2.0 (10).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

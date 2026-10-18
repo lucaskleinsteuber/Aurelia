@@ -346,3 +346,132 @@ private func values(_ value: String) -> [String] {
   value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
     .filter { !$0.isEmpty }
 }
+
+/// Sets the intro and credits of one title by hand. Hand-set times always win over detection.
+struct MediaSegmentsEditorSheet: View {
+  @EnvironmentObject private var model: AppModel
+  @Environment(\.dismiss) private var dismiss
+  let item: CatalogItemSummary
+  @State private var introStart = ""
+  @State private var introEnd = ""
+  @State private var creditsStart = ""
+  @State private var source: MediaSegmentSource?
+  @State private var isLoading = true
+  @State private var errorMessage: String?
+
+  var body: some View {
+    VStack(spacing: 0) {
+      sheetHeader(
+        "Intro & Credits", subtitle: item.title, symbol: "forward.end.alt")
+      Divider()
+      VStack(alignment: .leading, spacing: 16) {
+        Text(
+          "Enter times as minutes:seconds, for example 1:24. Leave a field empty when there is nothing to skip."
+        )
+        .font(.callout).foregroundStyle(.secondary)
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
+          GridRow {
+            Text("Intro Starts")
+            TextField("0:00", text: $introStart).textFieldStyle(.roundedBorder).frame(width: 120)
+              .accessibilityIdentifier("segments-intro-start")
+          }
+          GridRow {
+            Text("Intro Ends")
+            TextField("1:30", text: $introEnd).textFieldStyle(.roundedBorder).frame(width: 120)
+              .accessibilityIdentifier("segments-intro-end")
+          }
+          GridRow {
+            Text("Credits Start")
+            TextField("42:10", text: $creditsStart).textFieldStyle(.roundedBorder)
+              .frame(width: 120)
+              .accessibilityIdentifier("segments-credits-start")
+          }
+        }
+        .disabled(isLoading)
+        if let source {
+          Text(sourceDescription(source)).font(.caption).foregroundStyle(.secondary)
+        }
+        if let errorMessage {
+          Text(errorMessage).font(.callout).foregroundStyle(.orange)
+        }
+      }
+      .padding(24)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      Divider()
+      HStack {
+        Button("Use Automatic Detection") { Task { await reset() } }
+          .disabled(isLoading)
+          .help("Removes these times so chapters or detection decide again")
+        Spacer()
+        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button("Save") { Task { await save() } }
+          .buttonStyle(AureliaPrimaryActionButtonStyle()).keyboardShortcut(.defaultAction)
+          .disabled(isLoading)
+      }
+      .padding(16)
+    }
+    .frame(width: 460)
+    .background(AureliaBackdrop())
+    .task { await load() }
+    .accessibilityIdentifier("segments-editor")
+  }
+
+  private func sourceDescription(_ source: MediaSegmentSource) -> String {
+    switch source {
+    case .manual: "These times were set by hand."
+    case .detected: "These times were found by comparing episodes."
+    case .chapters: "These times come from the file's chapters."
+    case .none: "No intro or credits were found."
+    }
+  }
+
+  private func load() async {
+    guard let profile = model.profile else { return }
+    do {
+      let segments = try await APIClient(profile: profile).mediaSegments(mediaId: item.id)
+      introStart = segments.introStartMilliseconds.map(SceneNoteTime.format) ?? ""
+      introEnd = segments.introEndMilliseconds.map(SceneNoteTime.format) ?? ""
+      creditsStart = segments.creditsStartMilliseconds.map(SceneNoteTime.format) ?? ""
+      source = segments.analyzed ? segments.source : nil
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+    isLoading = false
+  }
+
+  private func parse(_ text: String) -> Int64?? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return .some(nil) }
+    return SceneNoteTime.parse(trimmed).map { .some($0) }
+  }
+
+  private func save() async {
+    guard let profile = model.profile else { return }
+    guard let start = parse(introStart), let end = parse(introEnd),
+      let credits = parse(creditsStart)
+    else {
+      errorMessage = "Enter times like 1:24 or 1:02:30."
+      return
+    }
+    // An intro without a start begins at the very beginning.
+    let introStart = end == nil ? nil : (start ?? 0)
+    do {
+      _ = try await APIClient(profile: profile).saveMediaSegments(
+        mediaId: item.id, introStart: introStart, introEnd: end, creditsStart: credits,
+        source: .manual, analysisVersion: 0)
+      dismiss()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  private func reset() async {
+    guard let profile = model.profile else { return }
+    do {
+      try await APIClient(profile: profile).clearMediaSegments(mediaId: item.id)
+      dismiss()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+}

@@ -12,7 +12,7 @@ struct TVPlayerView: View {
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, retry,
-      closeMenu
+      closeMenu, skipSegment
     case audioTrack(Int32)
     case subtitleTrack(Int32)
     case rateOption(Double)
@@ -46,6 +46,10 @@ struct TVPlayerView: View {
       }
       if controller.controlsVisible || controller.errorMessage != nil { controls }
       if let skip, !controller.controlsVisible { skipIndicator(skip) }
+      if let prompt = controller.skipPrompt, controller.trackMenu == nil {
+        skipSegmentButton(prompt)
+          .transition(.opacity.combined(with: .move(edge: .trailing)))
+      }
       // With controls shown, loading is drawn inside Play instead of behind it.
       if controller.isLoading && controller.errorMessage == nil && !controller.controlsVisible {
         ProgressView().tint(.white).scaleEffect(1.4).accessibilityIdentifier("player-loading")
@@ -99,6 +103,44 @@ struct TVPlayerView: View {
       }
     }
     .onChange(of: scenePhase) { _, phase in if phase == .background { controller.background() } }
+    .animation(.smooth(duration: 0.3), value: controller.skipPrompt)
+    // Like the Apple TV app, an appearing Skip button takes focus while the picture is clear,
+    // so a single click skips.
+    .onChange(of: controller.skipPrompt) { previous, prompt in
+      if prompt != nil, previous == nil, !controller.controlsVisible || focus == .surface {
+        focus = .skipSegment
+      } else if prompt == nil, focus == .skipSegment {
+        focus = controller.controlsVisible ? .play : .surface
+      }
+    }
+  }
+
+  private func skipSegmentButton(_ prompt: TVSkipPrompt) -> some View {
+    let title: String
+    switch prompt {
+    case .intro: title = "Skip Intro"
+    case .credits: title = "Skip Credits"
+    }
+    return Button {
+      controller.skipSegment()
+    } label: {
+      Label(title, systemImage: "forward.end.fill")
+        .font(.system(size: 26, weight: .semibold))
+        .padding(.horizontal, 10)
+    }
+    .buttonStyle(TVSkipButtonStyle())
+    .focusEffectDisabled()
+    .focused($focus, equals: .skipSegment)
+    .onMoveCommand { direction in
+      // Moving away returns to the picture or the controls without skipping.
+      if direction == .left || direction == .up {
+        focus = controller.controlsVisible ? .play : .surface
+      }
+    }
+    .padding(.trailing, 80)
+    .padding(.bottom, controller.controlsVisible ? 230 : 80)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    .accessibilityIdentifier("player-skip-segment")
   }
 
   private var controls: some View {
@@ -387,6 +429,26 @@ private struct TVPlayerPrimaryStyle: ButtonStyle {
     configuration.label.foregroundStyle(.black).background(.white, in: Circle())
       .overlay(Circle().stroke(.white.opacity(focused ? 1 : 0), lineWidth: 3))
       .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.025 : 1)
+  }
+}
+
+/// A capsule that turns white when focused, like the Apple TV app's Skip Intro button.
+private struct TVSkipButtonStyle: ButtonStyle {
+  @Environment(\.isFocused) private var focused
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .foregroundStyle(focused ? Color.black : Color.white)
+      .padding(.horizontal, 22).padding(.vertical, 16)
+      .background {
+        if focused {
+          Capsule().fill(.white)
+        } else {
+          Capsule().fill(.ultraThinMaterial)
+        }
+      }
+      .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.06 : 1)
+      .shadow(color: .black.opacity(focused ? 0.4 : 0.2), radius: focused ? 18 : 8, y: 6)
+      .animation(.smooth(duration: 0.2), value: focused)
   }
 }
 

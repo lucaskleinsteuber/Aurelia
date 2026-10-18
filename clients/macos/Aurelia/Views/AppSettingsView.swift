@@ -217,6 +217,9 @@ struct AppSettingsView: View {
           isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
         )
         .accessibilityIdentifier("playback-prevent-sleep")
+        if model.canManageMedia {
+          IntroDetectionSetting(analyzer: model.segmentAnalyzer) { model.updateSegmentAnalysis() }
+        }
         Divider()
         LabeledContent("Default Playback Rate") {
           Picker(
@@ -597,6 +600,45 @@ struct DiscoveryDecisionCard: View {
       Task { await model.classifyDiscovery(discovery, as: decision) }
     } label: {
       Label(title, systemImage: symbol)
+    }
+  }
+}
+
+/// Turns background intro and credits detection on or off and shows how far it is.
+private struct IntroDetectionSetting: View {
+  @ObservedObject var analyzer: MediaSegmentAnalyzer
+  @AppStorage(AppModel.segmentAnalysisKey) private var enabled = true
+  let onChange: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Toggle("Detect Intros and Credits", isOn: $enabled)
+        .accessibilityIdentifier("playback-detect-segments")
+        .onChange(of: enabled) { onChange() }
+      Text(statusText)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private var statusText: String {
+    guard enabled else {
+      return "Skip buttons still use chapters and times you set by hand."
+    }
+    switch analyzer.status {
+    case .idle:
+      return "Compares the soundtrack of episodes in the background. Only the times are kept."
+    case .analyzing(_, let completed):
+      return completed == 0
+        ? "Looking for intros and credits…"
+        : "Looking for intros and credits… \(completed) titles done."
+    case .waiting:
+      return "Paused while something plays."
+    case .upToDate:
+      return "All titles have been checked."
+    case .failed(let message):
+      return "Will try again later: \(message)"
     }
   }
 }

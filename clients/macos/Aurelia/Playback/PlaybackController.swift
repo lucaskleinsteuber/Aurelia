@@ -137,6 +137,8 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var recoveryCause: PlaybackRecoveryCause?
   @Published private(set) var progressMessage: String?
   @Published private(set) var hasProgressConflict = false
+  /// The local relay address of the current source, used to decode scrub previews live.
+  @Published private(set) var previewSourceURL: URL?
   let diagnostics = PlaybackDiagnostics()
 
   @Published private(set) var presentation: PlaybackPresentation
@@ -641,6 +643,7 @@ final class PlaybackController: ObservableObject {
     // or an old recovery task running after its window has closed.
     relay?.stop()
     relay = nil
+    previewSourceURL = nil
     engine.stop()
     // Terminal callbacks are ignored once stopped. Publish the terminal state
     // explicitly, preserving the last position/duration for the progress save.
@@ -726,6 +729,7 @@ final class PlaybackController: ObservableObject {
         subtitle: presentation.subtitle, queue: queuedItems)
     }
     engine.load(url: localURL)
+    previewSourceURL = localURL
     engine.volume = volume
     engine.isMuted = isMuted
     engine.playbackRate = playbackRate
@@ -893,6 +897,7 @@ final class PlaybackController: ObservableObject {
     endPlaybackActivity()
     relay?.stop()
     relay = nil
+    previewSourceURL = nil
     engine.stop()
     await revokeTickets(playbackIDs)
     guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
@@ -1044,6 +1049,7 @@ final class PlaybackController: ObservableObject {
     nextItemTask = nil
     relay?.stop()
     relay = nil
+    previewSourceURL = nil
     engine.stop()
     isPlaying = false
     isPreparing = false
@@ -1154,6 +1160,7 @@ final class PlaybackController: ObservableObject {
     enqueueProgressSave(isFinished: false)
     relay?.stop()
     relay = nil
+    previewSourceURL = nil
     engine.stop()
     activePlayback = nil
     let retiredIDs = playbackIDs
@@ -1235,6 +1242,7 @@ final class PlaybackController: ObservableObject {
     loadID = UUID()
     relay?.stop()
     relay = nil
+    previewSourceURL = nil
     endPlaybackActivity()
     errorMessage = "Playback recovery stopped. Choose Try Again when the media is available."
   }
@@ -1268,6 +1276,7 @@ final class PlaybackController: ObservableObject {
     renewalTask = nil
     relay?.stop()
     relay = nil
+    previewSourceURL = nil
     engine.stop()
     activePlayback = nil
     isPlaying = false

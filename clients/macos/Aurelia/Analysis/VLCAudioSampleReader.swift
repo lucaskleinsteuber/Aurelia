@@ -1,0 +1,280 @@
+@preconcurrency import Foundation
+@preconcurrency import VLCKit
+
+/// Decodes a stretch of a title's soundtrack to mono samples with VLC, as fast as the Mac can
+/// decode. VLC writes the samples into a pipe that this process reads at once; a pipe is only a
+/// small kernel buffer, so no audio is ever stored on disk. The samples are dropped once their
+/// fingerprint has been computed.
+@MainActor
+final class VLCAudioSampleReader: NSObject {
+  struct Output: Sendable {
+    let samples: [Float]
+    let durationMilliseconds: Int64
+    let chapters: [PlaybackChapter]
+  }
+
+  enum ReadError: Error, LocalizedError {
+    case failed
+    case timedOut
+
+    var errorDescription: String? {
+      switch self {
+      case .failed: "The soundtrack could not be read."
+      case .timedOut: "Reading the soundtrack took too long."
+      }
+    }
+  }
+
+  private var player: VLCMediaPlayer?
+  private var continuation: CheckedContinuation<Void, Error>?
+  private var durationMilliseconds: Int64 = 0
+  private var chapters: [PlaybackChapter] = []
+
+  /// Reads `length` seconds starting at `start`. VLC stops on its own at the end of the stretch.
+  func read(url: URL, start: Double, length: Double, timeout: Duration = .seconds(240))
+    async throws -> Output
+  {
+    precondition(player == nil, "One read at a time")
+    durationMilliseconds = 0
+    chapters = []
+    let pipe = try SamplePipe(
+      limit: Int(length * AudioFingerprint.sampleRate) + Int(AudioFingerprint.sampleRate))
+    defer { pipe.close() }
+    pipe.startReading()
+
+    let media = VLCMedia(url: url)
+    let rate = Int(AudioFingerprint.sampleRate)
+    media.addOption(
+      ":sout=#transcode{acodec=s16l,channels=1,samplerate=\(rate)}"
+        + ":std{access=file,mux=wav,dst=\"\(pipe.path)\"}")
+    media.addOption(":no-sout-video")
+    media.addOption(":no-sout-spu")
+    media.addOption(String(format: ":start-time=%.3f", max(0, start)))
+    media.addOption(String(format: ":stop-time=%.3f", max(0, start) + length))
+    let player = VLCMediaPlayer(options: [
+      "--no-video", "--no-play-and-pause", "--quiet", "--no-stats",
+    ])
+    player.delegate = self
+    player.media = media
+    self.player = player
+
+    let timeoutTask = Task { [weak self] in
+      try? await Task.sleep(for: timeout)
+      guard !Task.isCancelled else { return }
+      self?.finish(.failure(ReadError.timedOut))
+    }
+    defer { timeoutTask.cancel() }
+    do {
+      try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+          self.continuation = continuation
+          player.play()
+        }
+      } onCancel: {
+        Task { @MainActor [weak self] in self?.finish(.failure(CancellationError())) }
+      }
+    } catch {
+      cleanUp()
+      throw error
+    }
+    cleanUp()
+    // VLC has closed its end of the pipe; collect what remains in the buffer.
+    let samples = await pipe.finish()
+    return Output(samples: samples, durationMilliseconds: durationMilliseconds, chapters: chapters)
+  }
+
+  private func finish(_ result: Result<Void, Error>) {
+    guard let continuation else { return }
+    self.continuation = nil
+    captureMediaFacts()
+    continuation.resume(with: result)
+  }
+
+  private func cleanUp() {
+    player?.delegate = nil
+    player?.stop()
+    player = nil
+  }
+
+  private func captureMediaFacts() {
+    guard let player else { return }
+    if let length = player.media?.length.value?.int64Value, length > 0 {
+      durationMilliseconds = length
+    }
+    let titleIndex = player.currentTitleIndex
+    guard chapters.isEmpty, titleIndex >= 0 else { return }
+    chapters = player.chapterDescriptions(ofTitle: titleIndex).enumerated().compactMap {
+      offset, raw in
+      guard let values = raw as? [AnyHashable: Any] else { return nil }
+      return PlaybackChapter(
+        index: Int32(offset),
+        title: (values[VLCChapterDescriptionName] as? String) ?? "",
+        timeOffsetMilliseconds: Self.milliseconds(values[VLCChapterDescriptionTimeOffset]),
+        durationMilliseconds: Self.milliseconds(values[VLCChapterDescriptionDuration]))
+    }
+  }
+
+  private static func milliseconds(_ value: Any?) -> Int64 {
+    if let value = value as? NSNumber { return max(0, value.int64Value) }
+    if let value = value as? VLCTime { return max(0, value.value?.int64Value ?? 0) }
+    return 0
+  }
+
+  fileprivate func stateChanged(_ state: VLCMediaPlayerState) {
+    switch state {
+    case .playing, .esAdded, .buffering:
+      captureMediaFacts()
+    case .ended, .stopped, .paused:
+      finish(.success(()))
+    case .error:
+      finish(.failure(ReadError.failed))
+    default:
+      break
+    }
+  }
+}
+
+extension VLCAudioSampleReader: VLCMediaPlayerDelegate {
+  nonisolated func mediaPlayerStateChanged(_ notification: Notification) {
+    guard let player = notification.object as? VLCMediaPlayer else { return }
+    let state = player.state
+    Task { @MainActor [weak self] in self?.stateChanged(state) }
+  }
+}
+
+/// A private named pipe that VLC writes a WAV stream into. A background thread turns the 16-bit
+/// mono samples into floats as they arrive. The pipe stores nothing; it is removed afterwards.
+final class SamplePipe: @unchecked Sendable {
+  let path: String
+  private let directory: URL
+  private let limit: Int
+  private let lock = NSLock()
+  private var samples: [Float] = []
+  private var finished = false
+  private var closed = false
+  private var started = false
+  private var descriptor: Int32 = -1
+  private let done = DispatchSemaphore(value: 0)
+
+  init(limit: Int) throws {
+    self.limit = limit
+    directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("Aurelia-Segments-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: directory, withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700])
+    path = directory.appendingPathComponent("audio.wav").path
+    guard mkfifo(path, 0o600) == 0 else {
+      try? FileManager.default.removeItem(at: directory)
+      throw VLCAudioSampleReader.ReadError.failed
+    }
+    // Opening for reading and writing never blocks and keeps the pipe open until VLC connects.
+    descriptor = open(path, O_RDWR | O_NONBLOCK)
+    guard descriptor >= 0 else {
+      try? FileManager.default.removeItem(at: directory)
+      throw VLCAudioSampleReader.ReadError.failed
+    }
+  }
+
+  func startReading() {
+    started = true
+    let thread = Thread { [self] in readLoop() }
+    thread.qualityOfService = .utility
+    thread.start()
+  }
+
+  /// Stops after draining what VLC has written and returns the samples.
+  func finish() async -> [Float] {
+    lock.withLock { finished = true }
+    await withCheckedContinuation { continuation in
+      DispatchQueue.global(qos: .utility).async { [done] in
+        done.wait()
+        // Leave the signal for close(), which waits for the thread as well.
+        done.signal()
+        continuation.resume()
+      }
+    }
+    return lock.withLock { samples }
+  }
+
+  /// Ends the reading thread first, then removes the pipe.
+  func close() {
+    lock.withLock {
+      finished = true
+      closed = true
+    }
+    if started {
+      done.wait()
+      done.signal()
+    }
+    if descriptor >= 0 {
+      Darwin.close(descriptor)
+      descriptor = -1
+    }
+    try? FileManager.default.removeItem(at: directory)
+  }
+
+  private func readLoop() {
+    defer { done.signal() }
+    var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+    var pending: [UInt8] = []
+    var headerParsed = false
+    var idleAfterFinish = 0
+    while true {
+      if lock.withLock({ closed }) { return }
+      var poller = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+      let ready = poll(&poller, 1, 100)
+      if ready < 0 && errno != EINTR { return }
+      let count = ready > 0 ? read(descriptor, &buffer, buffer.count) : 0
+      if count > 0 {
+        pending.append(contentsOf: buffer[0..<count])
+        if !headerParsed, let offset = Self.dataOffset(in: pending) {
+          pending.removeFirst(offset)
+          headerParsed = true
+        }
+        if headerParsed { consume(&pending) }
+        idleAfterFinish = 0
+        continue
+      }
+      lock.lock()
+      let isFinished = finished
+      let isFull = samples.count >= limit
+      lock.unlock()
+      if isFull { return }
+      if isFinished {
+        idleAfterFinish += 1
+        // Nothing more arrives once VLC has stopped; allow a moment for the last block.
+        if idleAfterFinish >= 3 { return }
+      }
+    }
+  }
+
+  private func consume(_ pending: inout [UInt8]) {
+    let usable = pending.count / 2 * 2
+    guard usable > 0 else { return }
+    lock.lock()
+    let room = max(0, limit - samples.count)
+    let frames = min(usable / 2, room)
+    for index in 0..<frames {
+      let value = Int16(
+        bitPattern: UInt16(pending[index * 2]) | UInt16(pending[index * 2 + 1]) << 8)
+      samples.append(Float(value) / 32_768)
+    }
+    lock.unlock()
+    pending.removeFirst(usable)
+  }
+
+  /// The byte offset after the WAV header's "data" chunk header.
+  static func dataOffset(in bytes: [UInt8]) -> Int? {
+    guard bytes.count >= 12, bytes[0..<4].elementsEqual("RIFF".utf8) else { return nil }
+    var offset = 12
+    while offset + 8 <= bytes.count {
+      let size =
+        Int(bytes[offset + 4]) | Int(bytes[offset + 5]) << 8 | Int(bytes[offset + 6]) << 16
+        | Int(bytes[offset + 7]) << 24
+      if bytes[offset..<offset + 4].elementsEqual("data".utf8) { return offset + 8 }
+      offset += 8 + size + (size & 1)
+    }
+    return nil
+  }
+}

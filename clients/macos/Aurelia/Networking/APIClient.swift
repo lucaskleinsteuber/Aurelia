@@ -331,6 +331,43 @@ struct APIClient: Sendable {
       method: "DELETE")
   }
 
+  func mediaSegments(mediaId: UUID) async throws -> MediaSegments {
+    try await get("/api/v1/media/\(mediaId.uuidString)/segments")
+  }
+
+  func saveMediaSegments(
+    mediaId: UUID, introStart: Int64?, introEnd: Int64?, creditsStart: Int64?,
+    source: MediaSegmentSource, analysisVersion: Int
+  ) async throws -> MediaSegments {
+    struct Payload: Encodable {
+      let introStartMilliseconds: Int64?
+      let introEndMilliseconds: Int64?
+      let creditsStartMilliseconds: Int64?
+      let source: MediaSegmentSource
+      let analysisVersion: Int
+    }
+    return try Self.decode(
+      MediaSegments.self,
+      from: await perform(
+        path: "/api/v1/media/\(mediaId.uuidString)/segments", method: "PUT",
+        body: JSONEncoder().encode(
+          Payload(
+            introStartMilliseconds: introStart, introEndMilliseconds: introEnd,
+            creditsStartMilliseconds: creditsStart, source: source,
+            analysisVersion: analysisVersion))))
+  }
+
+  func clearMediaSegments(mediaId: UUID) async throws {
+    _ = try await perform(path: "/api/v1/media/\(mediaId.uuidString)/segments", method: "DELETE")
+  }
+
+  func mediaSegmentAnalysisQueue(analysisVersion: Int, limit: Int) async throws
+    -> MediaSegmentAnalysisQueue
+  {
+    try await get(
+      "/api/v1/media/segment-analysis?analysisVersion=\(analysisVersion)&limit=\(limit)")
+  }
+
   func serverSettings() async throws -> ServerConfigurationResponse {
     try await get("/api/v1/server/settings")
   }

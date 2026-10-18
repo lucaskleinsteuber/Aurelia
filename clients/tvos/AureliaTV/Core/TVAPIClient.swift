@@ -277,6 +277,13 @@ struct TVAPIClient: Sendable {
     _ = try validatedStreamURL(path: ticket.streamPath)
     return ticket
   }
+  /// Intro and credits times; servers before 1.7 have none.
+  func mediaSegments(mediaID: UUID) async throws -> TVMediaSegments {
+    let segments: TVMediaSegments = try await get(
+      "/api/v1/media/\(mediaID.uuidString)/segments")
+    guard segments.mediaId == mediaID else { throw TVCoreError.invalidResponse }
+    return segments
+  }
   func revokeTicket(id: UUID) async throws {
     _ = try await send("/api/v1/playback/\(id.uuidString)", method: "DELETE")
   }

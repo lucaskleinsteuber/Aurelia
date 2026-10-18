@@ -26,6 +26,13 @@ Since 1.6.0, `catalog-pages-500-v1` means catalog lists (`/api/v1/catalog/items`
 accept up to 200. Catalog, Home and collection GET responses are compressed with
 Brotli or gzip when the request sends `Accept-Encoding`; other responses are not.
 
+Since 1.7.0, `media-segments-v1` means `GET /api/v1/media/{id}/segments` returns a title's
+intro and credits times (`analyzed`, `introStartMilliseconds`, `introEndMilliseconds`,
+`creditsStartMilliseconds`, `source`, `analysisVersion`). Administrators set them with `PUT`
+and clear them with `DELETE`; `GET /api/v1/media/segment-analysis` lists seasons and movies
+still to be analyzed. Only timestamps are stored. Times set by hand (`source: manual`) are
+never replaced by automatic results.
+
 `GET /api/v1/health/live` (also HEAD) indicates HTTP liveness without a database
 read. `GET /api/v1/health/ready` reports a coarse cached state. Component details
 and bounded recovery history require the Owner management endpoint

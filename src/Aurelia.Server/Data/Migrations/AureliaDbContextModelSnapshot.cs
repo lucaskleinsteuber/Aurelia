@@ -1031,6 +1031,36 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("MediaMetadata");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.MediaSegment", b =>
+                {
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AnalysisVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CreditsStartMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("IntroEndMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("IntroStartMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MediaItemId");
+
+                    b.ToTable("MediaSegments");
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.MetadataJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1747,6 +1777,17 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
                         .WithOne("Metadata")
                         .HasForeignKey("Aurelia.Server.Data.MediaMetadata", "MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaSegment", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
+                        .WithOne()
+                        .HasForeignKey("Aurelia.Server.Data.MediaSegment", "MediaItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

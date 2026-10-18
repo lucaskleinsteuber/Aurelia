@@ -44,6 +44,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<ContinueWatchingState> ContinueWatchingStates => Set<ContinueWatchingState>();
     public DbSet<LibraryStateMutation> LibraryStateMutations => Set<LibraryStateMutation>();
     public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
+    public DbSet<MediaSegment> MediaSegments => Set<MediaSegment>();
 
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
     public DbSet<MediaCredit> MediaCredits => Set<MediaCredit>();
@@ -291,6 +292,15 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasOne(note => note.User).WithMany().HasForeignKey(note => note.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(note => note.MediaItem).WithMany().HasForeignKey(note => note.MediaItemId).OnDelete(DeleteBehavior.Cascade);
         });
+        modelBuilder.Entity<MediaSegment>().HasQueryFilter(segment => AccessUserId == null || AccessWholeCatalog
+            || MediaItems.Any(media => media.Id == segment.MediaItemId));
+        modelBuilder.Entity<MediaSegment>(entity =>
+        {
+            entity.HasKey(segment => segment.MediaItemId);
+            entity.Property(segment => segment.Source).HasConversion<string>().HasMaxLength(16);
+            entity.HasOne(segment => segment.MediaItem).WithOne().HasForeignKey<MediaSegment>(segment => segment.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<UserFavorite>().HasQueryFilter(favorite => AccessUserId == null
             || (favorite.UserId == AccessUserId && MediaItems.Any(media => media.Id == favorite.MediaItemId)));
         modelBuilder.Entity<SyncChange>().HasQueryFilter(change => AccessUserId == null || AccessWholeCatalog
@@ -302,6 +312,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         var nullableDateTimeOffsetConverter = new ValueConverter<DateTimeOffset?, long?>(
             value => value.HasValue ? value.Value.ToUnixTimeMilliseconds() : null,
             value => value.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(value.Value) : null);
+        modelBuilder.Entity<MediaSegment>().Property(segment => segment.UpdatedAt).HasConversion(dateTimeOffsetConverter);
 
         modelBuilder.Entity<ServerUser>(entity =>
         {

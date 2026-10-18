@@ -154,6 +154,7 @@ builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<PlaybackService>();
 builder.Services.AddScoped<PlaybackProgressService>();
 builder.Services.AddScoped<SceneNoteService>();
+builder.Services.AddScoped<MediaSegmentService>();
 builder.Services.AddScoped<MetadataService>();
 builder.Services.AddScoped<MetadataJobStore>();
 builder.Services.AddScoped<PresentationService>();
@@ -365,6 +366,7 @@ app.MapServerReadiness();
 app.MapMediaEditing();
 app.MapImportPlanning();
 app.MapSceneNotes();
+app.MapMediaSegments();
 app.MapProfiles();
 app.MapDeviceAuthorization();
 

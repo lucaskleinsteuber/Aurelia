@@ -54,7 +54,9 @@ struct LibraryShellView: View {
 
   var body: some View {
     GeometryReader { geometry in
-      ZStack(alignment: .leading) {
+      // Top-aligned: a vertically centred sidebar would sink below the window by half the
+      // title bar height and cut off the profile at its foot.
+      ZStack(alignment: .topLeading) {
         AureliaDesign.canvas
           .ignoresSafeArea()
         content
@@ -79,7 +81,10 @@ struct LibraryShellView: View {
             .contentShape(Rectangle())
             .onTapGesture {}  // Obscured cards must never receive navigation clicks.
           sidebar
-            .padding(.top, max(0, 44 - geometry.safeAreaInsets.top))
+            // Same top position as before the stack was top-aligned.
+            .padding(
+              .top, max(0, 44 - geometry.safeAreaInsets.top) + geometry.safeAreaInsets.top / 2
+            )
             .frame(width: sidebarWidth, height: geometry.size.height)
             .clipped()
           Color.clear
@@ -188,8 +193,9 @@ struct LibraryShellView: View {
           .contentShape(Rectangle())
         }
         .buttonStyle(SidebarFooterButtonStyle())
-        .padding(.horizontal, 10)
-        .padding(.bottom, 12)
+        // Clears the window's rounded bottom corner.
+        .padding(.horizontal, 12)
+        .padding(.bottom, 16)
         .disabled(model.isSelectingProfile)
         .help("Switch Profile")
         .accessibilityLabel("Switch Profile, \(model.profile?.user?.username ?? "")")
@@ -225,8 +231,10 @@ struct LibraryShellView: View {
       Label {
         Text(item.title).font(.body.weight(destination == item ? .semibold : .regular))
       } icon: {
-        // Tinted symbols, as in the Apple TV app's sidebar.
-        Image(systemName: item.symbol).foregroundStyle(.tint)
+        // Tinted symbols, as in the Apple TV app's sidebar; on the selection they turn white
+        // so they stay visible on the accent highlight.
+        Image(systemName: item.symbol)
+          .foregroundStyle(destination == item ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
       }
       .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
       .contentShape(Rectangle())
