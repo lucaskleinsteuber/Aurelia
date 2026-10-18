@@ -31,7 +31,9 @@ intro and credits times (`analyzed`, `introStartMilliseconds`, `introEndMillisec
 `creditsStartMilliseconds`, `source`, `analysisVersion`). Administrators set them with `PUT`
 and clear them with `DELETE`; `GET /api/v1/media/segment-analysis` lists seasons and movies
 still to be analyzed and, since 1.7.4, `totalTitles` and `analyzedTitles` for progress. Only timestamps are stored. Times set by hand (`source: manual`) are
-never replaced by automatic results.
+never replaced by automatic results. Since 1.7.7, administrators save automatic results with
+`PUT /api/v1/media/{id}/segments/detected`, which needs no management unlock and rejects
+`source: manual`; setting or clearing times by hand still requires it.
 
 `GET /api/v1/health/live` (also HEAD) indicates HTTP liveness without a database
 read. `GET /api/v1/health/ready` reports a coarse cached state. Component details

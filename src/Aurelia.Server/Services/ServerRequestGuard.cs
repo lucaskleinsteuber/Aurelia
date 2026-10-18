@@ -89,7 +89,8 @@ public sealed class ServerRequestGuard
                 || path.Contains("/metadata/search", StringComparison.Ordinal) || (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)
                     && !path.EndsWith("/playback", StringComparison.Ordinal) && !path.EndsWith("/progress", StringComparison.Ordinal)
                     && !path.EndsWith("/watch-state", StringComparison.Ordinal) && !path.EndsWith("/continue-watching", StringComparison.Ordinal)
-                    && !path.EndsWith("/favorite", StringComparison.Ordinal) && !path.Contains("/notes", StringComparison.Ordinal))));
+                    && !path.EndsWith("/favorite", StringComparison.Ordinal) && !path.Contains("/notes", StringComparison.Ordinal)
+                    && !(HttpMethods.IsPut(request.Method) && path.EndsWith("/segments/detected", StringComparison.Ordinal)))));
     }
 
     public static string ApprovalAction(HttpRequest request)

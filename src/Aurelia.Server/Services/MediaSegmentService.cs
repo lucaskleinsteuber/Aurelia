@@ -44,6 +44,13 @@ public sealed class MediaSegmentService(AureliaDbContext database, CatalogMutati
         return Response(mediaId, segment);
     }
 
+    public Task<MediaSegmentsResponse> SetDetectedAsync(Guid mediaId, SetMediaSegmentsRequest request, CancellationToken token)
+    {
+        if (request.Source == MediaSegmentSource.Manual)
+            throw new AccountException("invalid_media_segments", "Hand corrections are saved through the segment editor.", 400);
+        return SetAsync(mediaId, request, token);
+    }
+
     public async Task ClearAsync(Guid mediaId, CancellationToken token)
     {
         using var lease = await mutations.EnterAsync(token);

@@ -346,15 +346,17 @@ struct APIClient: Sendable {
       let source: MediaSegmentSource
       let analysisVersion: Int
     }
+    let body = try JSONEncoder().encode(
+      Payload(
+        introStartMilliseconds: introStart, introEndMilliseconds: introEnd,
+        creditsStartMilliseconds: creditsStart, source: source,
+        analysisVersion: analysisVersion))
+    let path = "/api/v1/media/\(mediaId.uuidString)/segments"
+    // Automatic results use their own route, which needs no management unlock.
     return try Self.decode(
       MediaSegments.self,
       from: await perform(
-        path: "/api/v1/media/\(mediaId.uuidString)/segments", method: "PUT",
-        body: JSONEncoder().encode(
-          Payload(
-            introStartMilliseconds: introStart, introEndMilliseconds: introEnd,
-            creditsStartMilliseconds: creditsStart, source: source,
-            analysisVersion: analysisVersion))))
+        path: source == .manual ? path : path + "/detected", method: "PUT", body: body))
   }
 
   func clearMediaSegments(mediaId: UUID) async throws {

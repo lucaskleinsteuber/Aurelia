@@ -58,6 +58,41 @@ public sealed class MediaSegmentTests
             Assert.False((await ApiTestClient.ReadAsync<MediaSegmentsResponse>(after)).Analyzed);
     }
 
+    [Fact]
+    public async Task BackgroundDetectionSavesWithoutAManagementUnlockButNeverByHand()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var episode = await SeedAsync(factory, MediaKind.Episode, season: 1, episode: 1);
+        var route = $"/api/v1/media/{episode.Id}/segments";
+        var user = await CreateViewerAsync(client, owner.Token, "detection-viewer", ProfileAccessMode.EntireLibrary);
+        using (var locking = await SendAsync(client, owner.Token, HttpMethod.Post, "/api/v1/management/lock"))
+            locking.EnsureSuccessStatusCode();
+
+        // Hand corrections stay behind the management unlock.
+        using (var manual = await SendAsync(client, owner.Token, HttpMethod.Put, route,
+            new SetMediaSegmentsRequest(30_000, 90_000, null, MediaSegmentSource.Manual, 0)))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, manual.StatusCode);
+            Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(manual)).Code);
+        }
+        using (var detected = await SendAsync(client, owner.Token, HttpMethod.Put, route + "/detected",
+            new SetMediaSegmentsRequest(161_000, 182_000, 2_600_000, MediaSegmentSource.Detected, 2)))
+        {
+            var value = await ApiTestClient.ReadAsync<MediaSegmentsResponse>(detected);
+            Assert.Equal((MediaSegmentSource.Detected, 161_000L), (value.Source, value.IntroStartMilliseconds!.Value));
+        }
+        using (var disguised = await SendAsync(client, owner.Token, HttpMethod.Put, route + "/detected",
+            new SetMediaSegmentsRequest(1_000, 2_000, null, MediaSegmentSource.Manual, 0)))
+            Assert.Equal(HttpStatusCode.BadRequest, disguised.StatusCode);
+
+        // Viewers still cannot save results.
+        using (var forbidden = await SendAsync(client, user.Token, HttpMethod.Put, route + "/detected",
+            new SetMediaSegmentsRequest(null, null, null, MediaSegmentSource.None, 2)))
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+    }
+
     [Theory]
     [InlineData(10_000L, null, null, MediaSegmentSource.Detected)]
     [InlineData(20_000L, 10_000L, null, MediaSegmentSource.Detected)]

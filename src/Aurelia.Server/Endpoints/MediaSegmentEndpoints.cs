@@ -12,6 +12,10 @@ public static class MediaSegmentEndpoints
             service.GetAsync(mediaId, token));
         segments.MapPut(string.Empty, (Guid mediaId, SetMediaSegmentsRequest request, MediaSegmentService service, CancellationToken token) =>
             service.SetAsync(mediaId, request, token)).RequireAuthorization("Administrator");
+        // Automatic results need no management unlock, so detection can run in the background.
+        // They never replace or create a hand correction.
+        segments.MapPut("/detected", (Guid mediaId, SetMediaSegmentsRequest request, MediaSegmentService service, CancellationToken token) =>
+            service.SetDetectedAsync(mediaId, request, token)).RequireAuthorization("Administrator");
         segments.MapDelete(string.Empty, async (Guid mediaId, MediaSegmentService service, CancellationToken token) =>
         {
             await service.ClearAsync(mediaId, token);
