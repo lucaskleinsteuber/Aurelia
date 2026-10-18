@@ -150,6 +150,34 @@ public sealed class LibraryStateTests
         Assert.Empty((await fixture.Get<HomeResponse>("/api/v1/home")).ContinueWatching);
     }
 
+    /// The Mac and Apple TV send the scope in lower case, as the server writes it in its answers.
+    [Fact]
+    public async Task WatchStateAcceptsTheScopeInAnyCaseAndRejectsUnknownScopes()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.Progress(fixture.Episodes[2], 45_000);
+        foreach (var scope in new[] { "title", "Title", "SERIES" })
+        {
+            using var response = await fixture.Send(HttpMethod.Get, $"/api/v1/media/{fixture.Series.Id}/watch-state?scope={scope}");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+        using (var season = await fixture.Send(HttpMethod.Get, $"/api/v1/media/{fixture.Series.Id}/watch-state?scope=season&seasonNumber=1"))
+            Assert.Equal(HttpStatusCode.OK, season.StatusCode);
+        foreach (var scope in new[] { "episode", "1" })
+        {
+            using var unknown = await fixture.Send(HttpMethod.Get, $"/api/v1/media/{fixture.Series.Id}/watch-state?scope={scope}");
+            Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+            Assert.Equal("invalid_watch_scope", (await ApiTestClient.ReadAsync<ApiProblem>(unknown)).Code);
+        }
+
+        // The whole Continue Watching removal as the clients perform it.
+        var state = await fixture.Get<WatchStateResponse>($"/api/v1/media/{fixture.Series.Id}/watch-state?scope=title");
+        var hidden = await fixture.Put<WatchStateResponse>($"/api/v1/media/{fixture.Series.Id}/continue-watching",
+            new SetContinueWatchingRequest(true, state.StateToken, Guid.NewGuid()));
+        Assert.True(hidden.ContinueWatchingHidden);
+        Assert.Empty((await fixture.Get<HomeResponse>("/api/v1/home")).ContinueWatching);
+    }
+
     [Fact]
     public async Task HidePreservesProgressGuardsOldWritesAndOnlyRealProgressUnhides()
     {

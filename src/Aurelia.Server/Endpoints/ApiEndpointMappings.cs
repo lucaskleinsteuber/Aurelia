@@ -109,8 +109,10 @@ public static class ApiEndpointMappings
             var queue = await presentation.SummariesAsync(userId, plan.Queue.Select(item => item.Id).ToList(), token);
             return new PlaybackPlanResponse(target, plan.SeriesId, queue, plan.Action, plan.ContinueWatchingEligible);
         }, token)));
-        media.MapGet("/{mediaId:guid}/watch-state", (HttpContext context, Guid mediaId, WatchStateScope? scope, int? seasonNumber, LibraryStateService states, CancellationToken token) =>
-            states.GetAsync(context.User.RequireUserId(), mediaId, scope ?? WatchStateScope.Title, seasonNumber, token));
+        // Clients send the scope as the server writes it ("title"); query binding alone would only
+        // accept "Title".
+        media.MapGet("/{mediaId:guid}/watch-state", (HttpContext context, Guid mediaId, string? scope, int? seasonNumber, LibraryStateService states, CancellationToken token) =>
+            states.GetAsync(context.User.RequireUserId(), mediaId, ParseWatchScope(scope), seasonNumber, token));
         media.MapPut("/{mediaId:guid}/watch-state", (HttpContext context, Guid mediaId, SetWatchStateRequest request, LibraryStateService states, CancellationToken token) =>
             states.SetAsync(context.User.RequireUserId(), mediaId, request, token));
         media.MapPut("/{mediaId:guid}/continue-watching", (HttpContext context, Guid mediaId, SetContinueWatchingRequest request, LibraryStateService states, CancellationToken token) =>
@@ -980,6 +982,15 @@ public static class ApiEndpointMappings
         {
             return Problem(exception.Code, exception.Message, exception.StatusCode);
         }
+    }
+
+    /// The scope by name in any case; a missing scope means the title itself. Numbers are rejected.
+    private static WatchStateScope ParseWatchScope(string? scope)
+    {
+        if (string.IsNullOrEmpty(scope)) return WatchStateScope.Title;
+        foreach (var value in Enum.GetValues<WatchStateScope>())
+            if (string.Equals(value.ToString(), scope, StringComparison.OrdinalIgnoreCase)) return value;
+        throw new AccountException("invalid_watch_scope", "Choose a valid title, season or series scope.", 400);
     }
 
     private static IResult Problem(string code, string message, int statusCode)
