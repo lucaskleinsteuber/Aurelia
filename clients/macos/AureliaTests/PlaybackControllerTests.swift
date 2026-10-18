@@ -89,7 +89,6 @@ final class PlaybackControllerTests: XCTestCase {
 
     await controller.start()
     XCTAssertEqual(engine.startPositions, [30_000])
-    XCTAssertEqual(controller.startResumeMilliseconds, 30_000)
     // The title is known but its clock has not arrived yet: no seek back to the beginning.
     engine.onUpdate?()
     engine.currentTimeMilliseconds = 30_040

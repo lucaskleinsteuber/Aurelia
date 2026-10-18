@@ -61,17 +61,9 @@ struct PlayerView: View {
         .frame(width: viewport.width, height: viewport.height)
 
         if startScreenVisible {
-          PlayerStartScreen(
-            title: controller.presentation.title,
-            subtitle: controller.presentation.subtitle,
-            artwork: model.playbackArtwork(for: controller.presentation),
-            resumeLabel: controller.startResumeMilliseconds > 0
-              ? "Resuming at \(formatTime(Double(controller.startResumeMilliseconds)))" : nil,
-            reduceMotion: reduceMotion
-          )
-          .frame(width: viewport.width, height: viewport.height)
-          .transition(.opacity)
-          .id(controller.presentation.mediaId)
+          PlayerStartScreen(reduceMotion: reduceMotion)
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
         }
 
         if controlsVisible || controller.isPreparing || controller.errorMessage != nil {
@@ -271,7 +263,7 @@ struct PlayerView: View {
         .position(x: viewport.width / 2, y: viewport.height - bottomInset - 142)
       }
 
-      if !controller.isPreparing, controller.errorMessage == nil {
+      if !controller.isPreparing, !startScreenVisible, controller.errorMessage == nil {
         HStack(spacing: 4) {
           seekButton(forward: false)
           Button {
@@ -297,7 +289,7 @@ struct PlayerView: View {
         .position(x: viewport.width / 2, y: viewport.height / 2)
       }
 
-      // The start screen has its own indicator; reconnecting still explains itself here.
+      // The start screen has its own ring; reconnecting still explains itself here.
       if controller.isPreparing, controller.errorMessage == nil,
         !startScreenVisible || controller.recoveryMessage != nil
       {

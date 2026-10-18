@@ -121,8 +121,6 @@ final class PlaybackController: ObservableObject {
   /// The start screen covers the player from Play until the picture moves, for the first title
   /// and each next episode; pausing, an error or closing ends it.
   @Published private(set) var showsStartScreen = true
-  /// Where the title being started resumes, for the start screen.
-  @Published private(set) var startResumeMilliseconds: Int64 = 0
   @Published private(set) var isPlaying = false
   @Published private(set) var currentTimeMilliseconds: Int64 = 0
   @Published private(set) var navigationRevision: UInt64 = 0
@@ -819,7 +817,6 @@ final class PlaybackController: ObservableObject {
     engine.trackScope = presentation.trackScope
     engine.load(url: localURL, startAt: resumePositionMilliseconds)
     openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
-    if showsStartScreen { startResumeMilliseconds = resumePositionMilliseconds }
     playbackURL = localURL
     startPreviewRelay(from: sourceURL)
     engine.volume = volume
@@ -1012,7 +1009,6 @@ final class PlaybackController: ObservableObject {
       trackScope: presentation.trackScope)
     isPreparing = true
     showsStartScreen = true
-    startResumeMilliseconds = 0
     incidentStartedAt = recoveryClock()
     incidentPausedAt = nil
     opaqueTicketRetryUsed = false

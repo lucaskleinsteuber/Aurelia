@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <AureliaBuildNumber>79</AureliaBuildNumber>
+    <AureliaBuildNumber>80</AureliaBuildNumber>
     <Version>1.7.15</Version>
     <FileVersion>1.7.15.$(AureliaBuildNumber)</FileVersion>
     <InformationalVersion>1.7.15+build.$(AureliaBuildNumber)</InformationalVersion>
