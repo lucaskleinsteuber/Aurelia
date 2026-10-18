@@ -137,7 +137,8 @@ struct AudioFingerprintMatchingTests {
 /// A writer that delivers far more than the reader needs must never block: VLC blocked on a
 /// full pipe made stopping it wait forever and froze the app in 1.7.0.
 struct SamplePipeTests {
-  @Test(.timeLimit(.minutes(1))) func keepsDrainingPastTheLimitSoTheWriterNeverBlocks() async throws {
+  @Test(.timeLimit(.minutes(1))) func keepsDrainingPastTheLimitSoTheWriterNeverBlocks() async throws
+  {
     let pipe = try SamplePipe(limit: 1_000)
     pipe.startReading()
     let path = pipe.path
@@ -178,43 +179,59 @@ struct VLCAudioSampleReaderTests {
     let samples =
       generator.noise(seconds: 20) + SyntheticAudio.theme(seconds: 15)
       + generator.noise(seconds: 10)
-    let url = directory.appendingPathComponent("synthetic.wav")
-    try Self.writeWAV(samples, to: url)
-
-    let reader = VLCAudioSampleReader()
-    let output = try await reader.read(url: url, start: 5, length: 30, timeout: .seconds(60))
-    let seconds = Double(output.samples.count) / AudioFingerprint.sampleRate
-    #expect(seconds > 28 && seconds < 32)
-    #expect(output.durationMilliseconds > 40_000)
-    // The theme decoded from the file matches the generated theme at 15 s into the read.
-    let match = SegmentMatcher.longestCommon(
-      AudioFingerprint.compute(output.samples),
-      AudioFingerprint.compute(SyntheticAudio.theme(seconds: 15)), minimum: 8, maximum: 60)
-    let found = try #require(match)
-    #expect(abs(found.firstStart - 15) < 1)
+    // Mono at the fingerprint rate, and stereo at 48 kHz as in real films: VLC may hand either
+    // through unchanged, and both must end up as the same mono 11 kHz samples.
+    for (channels, rate) in [(1, 11_025), (2, 48_000)] {
+      let url = directory.appendingPathComponent("synthetic-\(channels)-\(rate).wav")
+      try Self.writeWAV(Self.upsample(samples, to: rate), channels: channels, rate: rate, to: url)
+      let reader = VLCAudioSampleReader()
+      let output = try await reader.read(url: url, start: 5, length: 30, timeout: .seconds(60))
+      let seconds = Double(output.samples.count) / AudioFingerprint.sampleRate
+      #expect(seconds > 28 && seconds < 32, "\(channels) channels at \(rate) Hz")
+      #expect(output.durationMilliseconds > 40_000)
+      // The theme decoded from the file matches the generated theme at 15 s into the read.
+      let match = SegmentMatcher.longestCommon(
+        AudioFingerprint.compute(output.samples),
+        AudioFingerprint.compute(SyntheticAudio.theme(seconds: 15)), minimum: 8, maximum: 60)
+      let found = try #require(match, "\(channels) channels at \(rate) Hz")
+      #expect(abs(found.firstStart - 15) < 1)
+    }
   }
 
-  private static func writeWAV(_ samples: [Float], to url: URL) throws {
+  /// Linear interpolation from the fingerprint rate to `rate`.
+  private static func upsample(_ samples: [Float], to rate: Int) -> [Float] {
+    guard rate != Int(AudioFingerprint.sampleRate) else { return samples }
+    let ratio = AudioFingerprint.sampleRate / Double(rate)
+    let count = Int(Double(samples.count) / ratio)
+    return (0..<count).map { index in
+      let position = Double(index) * ratio
+      let low = min(Int(position), samples.count - 1)
+      let high = min(low + 1, samples.count - 1)
+      let fraction = Float(position - Double(low))
+      return samples[low] * (1 - fraction) + samples[high] * fraction
+    }
+  }
+
+  private static func writeWAV(_ samples: [Float], channels: Int, rate: Int, to url: URL) throws {
     var data = Data()
     func append<T: FixedWidthInteger>(_ value: T) {
       withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
     }
-    let rate = UInt32(AudioFingerprint.sampleRate)
-    let byteCount = UInt32(samples.count * 2)
+    let byteCount = UInt32(samples.count * 2 * channels)
     data.append(contentsOf: Array("RIFF".utf8))
     append(UInt32(36) + byteCount)
     data.append(contentsOf: Array("WAVEfmt ".utf8))
     append(UInt32(16))
     append(UInt16(1))
-    append(UInt16(1))
-    append(rate)
-    append(rate * 2)
-    append(UInt16(2))
+    append(UInt16(channels))
+    append(UInt32(rate))
+    append(UInt32(rate * 2 * channels))
+    append(UInt16(2 * channels))
     append(UInt16(16))
     data.append(contentsOf: Array("data".utf8))
     append(byteCount)
     for sample in samples {
-      append(Int16(max(-1, min(1, sample)) * 32_767))
+      for _ in 0..<channels { append(Int16(max(-1, min(1, sample)) * 32_767)) }
     }
     try data.write(to: url)
   }

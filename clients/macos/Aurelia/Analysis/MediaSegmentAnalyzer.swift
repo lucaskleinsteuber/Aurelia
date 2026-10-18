@@ -1,14 +1,16 @@
 import Combine
 import Foundation
+import os
 
 /// Finds intros and credits in the background on an administrator's Mac and stores only the
 /// resulting times on the server. Files are read through the normal authorized stream; no audio,
 /// fingerprint or image is ever written. Work pauses while something plays.
 @MainActor
 final class MediaSegmentAnalyzer: ObservableObject {
-  static let analysisVersion = 1
-  static let introWindow: Double = 600
-  static let creditsWindow: Double = 360
+  /// 2: streams are converted to mono 11 kHz from their real layout (1.7.3).
+  static let analysisVersion = 2
+  static let introWindow: Double = 420
+  static let creditsWindow: Double = 240
 
   enum Status: Equatable {
     case idle
@@ -19,6 +21,7 @@ final class MediaSegmentAnalyzer: ObservableObject {
   }
 
   @Published private(set) var status: Status = .idle
+  private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "Segments")
   private var task: Task<Void, Never>?
   private var profileKey: String?
   private var completed = 0
@@ -146,7 +149,11 @@ final class MediaSegmentAnalyzer: ObservableObject {
     }
     let url = try await relay.start()
     let reader = VLCAudioSampleReader()
+    let started = Date()
     let opening = try await reader.read(url: url, start: 0, length: Self.introWindow)
+    Self.logger.info(
+      "Read \(Double(opening.samples.count) / AudioFingerprint.sampleRate, format: .fixed(precision: 0)) s of audio in \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) s (\(opening.sourceLayout, privacy: .public))"
+    )
     let duration = opening.durationMilliseconds
     let seconds = Double(duration) / 1_000
     // An intro sits in the first third; credits in the last part of the title.

@@ -11,6 +11,8 @@ final class VLCAudioSampleReader: NSObject {
     let samples: [Float]
     let durationMilliseconds: Int64
     let chapters: [PlaybackChapter]
+    /// The layout VLC delivered, for diagnostics.
+    let sourceLayout: String
   }
 
   enum ReadError: Error, LocalizedError {
@@ -80,7 +82,9 @@ final class VLCAudioSampleReader: NSObject {
     await stopPlayer()
     // VLC has closed its end of the pipe; collect what remains in the buffer.
     let samples = await pipe.finish()
-    return Output(samples: samples, durationMilliseconds: durationMilliseconds, chapters: chapters)
+    return Output(
+      samples: samples, durationMilliseconds: durationMilliseconds, chapters: chapters,
+      sourceLayout: pipe.layoutDescription)
   }
 
   private func finish(_ result: Result<Void, Error>) {
@@ -160,6 +164,13 @@ final class SamplePipe: @unchecked Sendable {
   private let limit: Int
   private let lock = NSLock()
   private var samples: [Float] = []
+  /// The stream's real layout. VLC does not always downmix or resample as asked, so every
+  /// stream is converted here to mono at the fingerprint rate.
+  private var format = WAVFormat(
+    channels: 1, sampleRate: Int(AudioFingerprint.sampleRate), bits: 16)
+  private var phase = 0
+  private var accumulated: Float = 0
+  private var accumulatedCount = 0
   private var finished = false
   private var closed = false
   private var started = false
@@ -184,6 +195,10 @@ final class SamplePipe: @unchecked Sendable {
       try? FileManager.default.removeItem(at: directory)
       throw VLCAudioSampleReader.ReadError.failed
     }
+  }
+
+  var layoutDescription: String {
+    lock.withLock { "\(format.channels) ch, \(format.sampleRate) Hz, \(format.bits) bit" }
   }
 
   func startReading() {
@@ -237,8 +252,9 @@ final class SamplePipe: @unchecked Sendable {
       let count = read(descriptor, &buffer, buffer.count)
       if count > 0 {
         pending.append(contentsOf: buffer[0..<count])
-        if !headerParsed, let offset = Self.dataOffset(in: pending) {
-          pending.removeFirst(offset)
+        if !headerParsed, let header = Self.header(in: pending) {
+          pending.removeFirst(header.dataOffset)
+          format = header.format
           headerParsed = true
         }
         // Even with enough samples the pipe keeps being drained: VLC must never block on a
@@ -258,31 +274,87 @@ final class SamplePipe: @unchecked Sendable {
   }
 
   private func consume(_ pending: inout [UInt8]) {
-    let usable = pending.count / 2 * 2
-    guard usable > 0 else { return }
+    let bytesPerSample = max(1, format.bits / 8)
+    let frameBytes = bytesPerSample * max(1, format.channels)
+    let frames = pending.count / frameBytes
+    guard frames > 0 else { return }
+    let target = Int(AudioFingerprint.sampleRate)
+    let source = max(1, format.sampleRate)
     lock.lock()
-    let room = max(0, limit - samples.count)
-    let frames = min(usable / 2, room)
-    for index in 0..<frames {
-      let value = Int16(
-        bitPattern: UInt16(pending[index * 2]) | UInt16(pending[index * 2 + 1]) << 8)
-      samples.append(Float(value) / 32_768)
+    pending.withUnsafeBufferPointer { bytes in
+      for frame in 0..<frames {
+        guard samples.count < limit else { break }
+        var sum: Float = 0
+        for channel in 0..<format.channels {
+          let offset = frame * frameBytes + channel * bytesPerSample
+          sum += Self.sample(bytes, at: offset, bits: format.bits)
+        }
+        // Box-filter resampling: average the source frames that fall into each output sample.
+        accumulated += sum / Float(max(1, format.channels))
+        accumulatedCount += 1
+        phase += target
+        if phase >= source {
+          phase -= source
+          samples.append(accumulated / Float(accumulatedCount))
+          accumulated = 0
+          accumulatedCount = 0
+        }
+      }
     }
     lock.unlock()
-    pending.removeFirst(usable)
+    pending.removeFirst(frames * frameBytes)
   }
 
-  /// The byte offset after the WAV header's "data" chunk header.
-  static func dataOffset(in bytes: [UInt8]) -> Int? {
+  private static func sample(_ bytes: UnsafeBufferPointer<UInt8>, at offset: Int, bits: Int)
+    -> Float
+  {
+    switch bits {
+    case 32:
+      let raw =
+        UInt32(bytes[offset]) | UInt32(bytes[offset + 1]) << 8 | UInt32(bytes[offset + 2]) << 16
+        | UInt32(bytes[offset + 3]) << 24
+      return Float(bitPattern: raw)
+    case 24:
+      let raw =
+        Int32(bytes[offset]) << 8 | Int32(bytes[offset + 1]) << 16 | Int32(bytes[offset + 2]) << 24
+      return Float(raw >> 8) / 8_388_608
+    default:
+      let raw = Int16(bitPattern: UInt16(bytes[offset]) | UInt16(bytes[offset + 1]) << 8)
+      return Float(raw) / 32_768
+    }
+  }
+
+  struct WAVFormat: Equatable {
+    let channels: Int
+    let sampleRate: Int
+    let bits: Int
+  }
+
+  /// The stream layout and the byte offset after the "data" chunk header.
+  static func header(in bytes: [UInt8]) -> (format: WAVFormat, dataOffset: Int)? {
     guard bytes.count >= 12, bytes[0..<4].elementsEqual("RIFF".utf8) else { return nil }
+    func value(_ at: Int, _ length: Int) -> Int {
+      (0..<length).reduce(0) { $0 | Int(bytes[at + $1]) << (8 * $1) }
+    }
+    var format = WAVFormat(channels: 1, sampleRate: Int(AudioFingerprint.sampleRate), bits: 16)
     var offset = 12
     while offset + 8 <= bytes.count {
-      let size =
-        Int(bytes[offset + 4]) | Int(bytes[offset + 5]) << 8 | Int(bytes[offset + 6]) << 16
-        | Int(bytes[offset + 7]) << 24
-      if bytes[offset..<offset + 4].elementsEqual("data".utf8) { return offset + 8 }
+      let size = value(offset + 4, 4)
+      if bytes[offset..<offset + 4].elementsEqual("data".utf8) { return (format, offset + 8) }
+      if bytes[offset..<offset + 4].elementsEqual("fmt ".utf8) {
+        guard offset + 8 + 16 <= bytes.count else { return nil }
+        let channels = value(offset + 10, 2)
+        let rate = value(offset + 12, 4)
+        let bits = value(offset + 22, 2)
+        if (1...16).contains(channels), (4_000...384_000).contains(rate),
+          [16, 24, 32].contains(bits)
+        {
+          format = WAVFormat(channels: channels, sampleRate: rate, bits: bits)
+        }
+      }
       offset += 8 + size + (size & 1)
     }
     return nil
   }
+
 }
