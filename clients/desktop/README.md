@@ -2,9 +2,19 @@
 
 A native desktop client written in C# with [Avalonia](https://avaloniaui.net), designed
 like the Aurelia Mac app. The same code runs on Windows (x64 and ARM64), on Linux and on
-macOS, so everyday development and testing happen on a Mac. Version 0.0.1 is the app
-shell only: the window, sidebar and the connection screen. Connecting, the library,
-playback and the built-in server follow in later versions.
+macOS, so everyday development and testing happen on a Mac.
+
+Version 0.0.2 connects to an Aurelia server:
+
+- Finds servers on the local network, or takes a typed address
+- Shows the server's fingerprint to compare with the Mac before trusting it, and from
+  then on only talks to a server presenting exactly that key
+- Pairs with an 8-digit code approved on the Mac (Settings › General › Devices ›
+  Approve Device…)
+- Shows the profiles, asks for a PIN where one is set, and remembers the connection;
+  on Windows the credential is encrypted for the signed-in Windows user
+
+The library, playback and the built-in server follow in later versions.
 
 ## On a Mac
 
@@ -17,7 +27,9 @@ scripts/build-desktop.sh   # Windows x64 and ARM64 builds, plus a Mac build
 ```
 
 `test-desktop.sh` renders the real windows off screen; no window appears. Set
-`AURELIA_DESKTOP_RENDER=/path/to/shell.png` to save the rendered main window.
+`AURELIA_DESKTOP_RENDER_DIR=/path/to/folder` to save each rendered step as an image. It
+also builds the server and runs the connection end to end against it: a temporary server
+with synthetic accounts, reachable only on this computer, which stops after the test.
 
 `build-desktop.sh` writes `Aurelia.exe` for each Windows architecture, plus a zip of it,
 to `Build/Desktop/<version>-<build>/` in the external workspace. Each `Aurelia.exe` is

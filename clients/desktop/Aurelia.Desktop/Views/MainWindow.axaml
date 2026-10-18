@@ -1,48 +1,157 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:Aurelia.Desktop.Core;assembly=Aurelia.Desktop.Core"
+        xmlns:contracts="clr-namespace:Aurelia.Contracts;assembly=Aurelia.Contracts"
+        xmlns:design="clr-namespace:Aurelia.Desktop.Design"
         x:Class="Aurelia.Desktop.Views.MainWindow"
+        x:DataType="core:ConnectionFlow"
         Title="Aurelia"
         Width="1280" Height="800" MinWidth="900" MinHeight="560"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource AureliaCanvas}">
-  <Grid ColumnDefinitions="232,*">
-    <!-- Sidebar -->
-    <Border Grid.Column="0" Background="{StaticResource AureliaSidebar}"
-            BorderBrush="{StaticResource AureliaHairline}" BorderThickness="0,0,1,0">
-      <DockPanel Margin="14,22,14,18">
-        <TextBlock DockPanel.Dock="Top" Text="Aurelia" FontSize="22" FontWeight="Bold"
-                   Margin="12,0,0,22" />
-        <TextBlock x:Name="VersionLabel" DockPanel.Dock="Bottom" FontSize="11"
-                   Foreground="{StaticResource AureliaSecondaryText}" Margin="12,0,0,0" />
-        <ListBox x:Name="Navigation" Classes="sidebar" SelectedIndex="0">
-          <ListBoxItem Content="Home" />
-          <ListBoxItem Content="Movies" />
-          <ListBoxItem Content="TV Shows" />
-          <ListBoxItem Content="Search" />
-        </ListBox>
-      </DockPanel>
-    </Border>
-
-    <!-- Until a server is connected, every section shows how to connect. -->
-    <Grid Grid.Column="1">
+  <Panel>
+    <!-- Until a profile is open: one centered card for each step, like the Mac and Apple TV apps. -->
+    <Grid IsVisible="{Binding ShowsWelcome}">
       <Border Background="{StaticResource AureliaSurface}" CornerRadius="18" Padding="36,32"
-              Width="480" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Width="520" HorizontalAlignment="Center" VerticalAlignment="Center"
               BoxShadow="0 18 48 0 #66000000">
         <StackPanel Spacing="14">
-          <TextBlock x:Name="ConnectTitle" Text="Connect to your Aurelia server" FontSize="24"
-                     FontWeight="Bold" TextWrapping="Wrap" />
-          <TextBlock Text="Enter the address shown in Aurelia on your Mac, under Settings › Server."
-                     Foreground="{StaticResource AureliaSecondaryText}" TextWrapping="Wrap" />
-          <TextBox x:Name="ServerAddress" PlaceholderText="Server address, for example 192.168.1.20"
-                   Margin="0,6,0,0" />
-          <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
-            <Button x:Name="ConnectButton" Classes="primary" Content="Connect" IsEnabled="False" />
-            <TextBlock Text="Connecting arrives in the next version."
-                       Foreground="{StaticResource AureliaSecondaryText}" FontSize="12"
-                       VerticalAlignment="Center" />
+          <TextBlock Text="Aurelia" FontSize="13" FontWeight="Bold" LetterSpacing="1.2"
+                     Foreground="{StaticResource AureliaSecondaryText}" />
+
+          <!-- Starting -->
+          <StackPanel Spacing="14" IsVisible="{Binding ShowsStarting}">
+            <TextBlock Classes="title" Text="Opening your server…" />
+            <ProgressBar IsIndeterminate="True" />
           </StackPanel>
+
+          <!-- Connect -->
+          <StackPanel x:Name="ConnectStep" Spacing="14" IsVisible="{Binding ShowsConnect}">
+            <TextBlock x:Name="ConnectTitle" Classes="title" Text="Connect to your Aurelia server" />
+            <TextBlock Classes="secondary"
+                       Text="Choose a server on your network, or enter the network address of the Mac running Aurelia." />
+            <ItemsControl x:Name="DiscoveredServers" ItemsSource="{Binding Servers}" IsVisible="{Binding HasServers}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="core:DiscoveredServer">
+                  <Button Classes="row" Click="ChooseServer" HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="2">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding Address.Authority}" Classes="secondary" FontSize="12" />
+                    </StackPanel>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBox x:Name="ServerAddress" Text="{Binding Address}"
+                     PlaceholderText="Server address, for example 192.168.1.20" KeyDown="AddressKeyDown" />
+            <Button x:Name="ConnectButton" Classes="primary" Content="Continue" Click="Connect"
+                    IsEnabled="{Binding !IsBusy}" />
+          </StackPanel>
+
+          <!-- Trust -->
+          <StackPanel x:Name="TrustStep" Spacing="14" IsVisible="{Binding ShowsTrust}">
+            <TextBlock Classes="title" Text="{Binding ServerName, StringFormat='Is this {0}?'}" />
+            <TextBlock Classes="secondary"
+                       Text="Compare this code with the fingerprint in Aurelia on your Mac under Settings › Server › Connection. Continue only if they match." />
+            <Border Background="#14FFFFFF" CornerRadius="10" Padding="16,12">
+              <TextBlock x:Name="Fingerprint" Text="{Binding FingerprintDisplay}" FontFamily="monospace"
+                         FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
+            </Border>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Button x:Name="TrustButton" Classes="primary" Content="They Match" Click="Trust"
+                      IsEnabled="{Binding !IsBusy}" />
+              <Button Classes="secondary" Content="Back" Click="Back" />
+            </StackPanel>
+          </StackPanel>
+
+          <!-- Pairing -->
+          <StackPanel x:Name="PairingStep" Spacing="14" IsVisible="{Binding ShowsPairing}">
+            <TextBlock Classes="title" Text="Approve this computer on your Mac" />
+            <TextBlock Classes="secondary"
+                       Text="In Aurelia on your Mac, open Settings › General › Devices, choose Approve Device… and enter this code." />
+            <TextBlock x:Name="PairingCode" Text="{Binding PairingCode}" FontFamily="monospace" FontSize="40"
+                       FontWeight="Bold" LetterSpacing="4" HorizontalAlignment="Center" Margin="0,6" />
+            <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+              <ProgressBar IsIndeterminate="True" Width="120" VerticalAlignment="Center" />
+              <TextBlock Classes="secondary" Text="Waiting for approval…" VerticalAlignment="Center" />
+            </StackPanel>
+            <Button Classes="secondary" Content="Cancel" Click="CancelPairing" HorizontalAlignment="Center" />
+          </StackPanel>
+
+          <!-- Profiles -->
+          <StackPanel x:Name="ProfilesStep" Spacing="16" IsVisible="{Binding ShowsProfiles}">
+            <TextBlock Classes="title" Text="Who's watching?" HorizontalAlignment="Center" />
+            <ItemsControl x:Name="ProfileList" ItemsSource="{Binding Profiles}" HorizontalAlignment="Center">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel HorizontalAlignment="Center" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="contracts:WatchingProfile">
+                  <Button Classes="profile" Click="ChooseProfile" Margin="8" VerticalAlignment="Top">
+                    <StackPanel Spacing="8" Width="104">
+                      <Border Width="76" Height="76" CornerRadius="38" Background="#2EFFFFFF" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Name, Converter={x:Static design:InitialsConverter.Instance}}" FontSize="30"
+                                   FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                      </Border>
+                      <TextBlock Text="{Binding Name}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="PIN" Classes="secondary" FontSize="11" HorizontalAlignment="Center"
+                                 IsVisible="{Binding PinProtectionEnabled}" />
+                    </StackPanel>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+              <Button Classes="secondary" Content="Try Again" Click="Refresh" IsVisible="{Binding HasError}" />
+              <Button Classes="secondary" Content="Disconnect This Computer" Click="Disconnect" />
+            </StackPanel>
+          </StackPanel>
+
+          <!-- PIN -->
+          <StackPanel x:Name="PinStep" Spacing="14" IsVisible="{Binding ShowsPin}">
+            <TextBlock Classes="title" Text="{Binding PinPrompt}" />
+            <TextBox x:Name="PinBox" PasswordChar="•" MaxLength="8" PlaceholderText="4–8 digits"
+                     KeyDown="PinKeyDown" FontSize="22" HorizontalContentAlignment="Center" />
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Button x:Name="PinButton" Classes="primary" Content="Continue" Click="SubmitPin" IsEnabled="{Binding !IsBusy}" />
+              <Button Classes="secondary" Content="Back" Click="Back" />
+            </StackPanel>
+          </StackPanel>
+
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+          <TextBlock x:Name="ErrorText" Text="{Binding Error}" IsVisible="{Binding HasError}"
+                     Foreground="#FF8A80" TextWrapping="Wrap" />
         </StackPanel>
       </Border>
     </Grid>
-  </Grid>
+
+    <!-- With a profile open: the library shell. The library itself arrives in the next version. -->
+    <Grid x:Name="LibraryShell" ColumnDefinitions="232,*" IsVisible="{Binding ShowsLibrary}">
+      <Border Grid.Column="0" Background="{StaticResource AureliaSidebar}"
+              BorderBrush="{StaticResource AureliaHairline}" BorderThickness="0,0,1,0">
+        <DockPanel Margin="14,22,14,18">
+          <TextBlock DockPanel.Dock="Top" Text="Aurelia" FontSize="22" FontWeight="Bold" Margin="12,0,0,22" />
+          <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="12,0,0,0">
+            <TextBlock Text="{Binding SignedInName}" FontWeight="SemiBold" />
+            <Button Classes="link" Content="Switch Profile" Click="SwitchProfile" />
+            <TextBlock x:Name="VersionLabel" FontSize="11" Foreground="{StaticResource AureliaSecondaryText}" />
+          </StackPanel>
+          <ListBox x:Name="Navigation" Classes="sidebar" SelectedIndex="0">
+            <ListBoxItem Content="Home" />
+            <ListBoxItem Content="Movies" />
+            <ListBoxItem Content="TV Shows" />
+            <ListBoxItem Content="Search" />
+          </ListBox>
+        </DockPanel>
+      </Border>
+      <StackPanel Grid.Column="1" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
+        <TextBlock x:Name="WelcomeTitle" Classes="title" Text="{Binding SignedInName, StringFormat='Welcome, {0}'}"
+                   HorizontalAlignment="Center" />
+        <TextBlock Classes="secondary" TextAlignment="Center"
+                   Text="This computer is connected. Your movies and shows arrive in the next version." />
+      </StackPanel>
+    </Grid>
+  </Panel>
 </Window>

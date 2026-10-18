@@ -11,6 +11,7 @@
     <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.1.3" />
     <PackageVersion Include="Avalonia.Skia" Version="12.1.3" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
     <!-- Avalonia's headless test runner is built on xUnit v3; the server tests stay on v2. -->
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="Haukcode.Mdns" Version="1.0.18" />

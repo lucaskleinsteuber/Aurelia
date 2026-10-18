@@ -30,6 +30,40 @@
     <Setter Property="Background" Value="#14FFFFFF" />
   </Style>
 
+  <!-- Text styles shared by every step. -->
+  <Style Selector="TextBlock.title">
+    <Setter Property="FontSize" Value="24" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="TextBlock.secondary">
+    <Setter Property="Foreground" Value="{StaticResource AureliaSecondaryText}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+
+  <!-- Quiet buttons: a soft capsule, a plain link, a list row and a profile tile. -->
+  <Style Selector="Button.secondary">
+    <Setter Property="Background" Value="#1FFFFFFF" />
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Padding" Value="18,9" />
+  </Style>
+  <Style Selector="Button.link">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaSecondaryText}" />
+  </Style>
+  <Style Selector="Button.row">
+    <Setter Property="Background" Value="#14FFFFFF" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="14,10" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.profile">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="8,12" />
+  </Style>
+
   <!-- The white capsule primary button of the Mac app. -->
   <Style Selector="Button.primary">
     <Setter Property="Background" Value="White" />

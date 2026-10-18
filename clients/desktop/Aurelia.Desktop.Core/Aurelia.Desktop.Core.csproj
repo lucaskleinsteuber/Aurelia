@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Connection logic without any UI, shared by the app and its tests. -->
+  <PropertyGroup>
+    <RootNamespace>Aurelia.Desktop.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Haukcode.Mdns" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aurelia.Desktop.Tests" />
+  </ItemGroup>
+</Project>
