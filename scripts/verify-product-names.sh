@@ -5,7 +5,7 @@ repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository_root"
 matches=$(rg --no-heading --with-filename --only-matching \
   'Aurelia Home Server|Aurelia Home|AureliaHome|aurelia-home|aureliahome|AURELIA_HOME' \
-  --glob '!scripts/verify-product-names.sh' --glob '!docs/LEGACY_COMPATIBILITY.md' . || test "$?" -eq 1)
+  --glob '!scripts/verify-product-names.sh' . || test "$?" -eq 1)
 printf '%s\n' "$matches" | awk -F: '
   BEGIN {
     allow["./src/Aurelia.Server/Services/BonjourAdvertisementService.cs:aurelia-home"] = 1

@@ -17,14 +17,41 @@ to load `/api/v1/profiles` and open the chosen profile. Verify its PIN when
 `pinProtectionEnabled` is true; missing fields default to protected. Keep the resulting
 viewing token in memory and send that token for personal and stream requests.
 End it when switching profiles or quitting; never auto-enter the last profile.
-See [profiles and notes](PROFILES_AND_NOTES.md) for the separated management
-unlock, title permissions and version requirements. Keep accounts/sessions isolated
+Keep accounts/sessions isolated
 when caching artwork, catalog, progress or synchronization state. A revoked or
 expired session must stop authenticated work, not be treated as a network outage.
 
 The server enforces roles and library grants on every supported route. Hiding a
 button is not an access control. Owner-only host settings are optional client
 features; a normal user must not need them just to browse or watch.
+
+Normal profiles may have no PIN; owners and administrators always require one.
+Viewing sessions expire after at most twelve hours and are invalidated by server
+restart. A device credential never substitutes for an expired viewing token.
+Check `/api/v1/capabilities` for minimum client version and feature support.
+
+Administration additionally requires the shared Server Password through
+`/api/v1/management/unlock`. Its ten-minute window does not extend with activity.
+On `403 approval_required`, obtain a single-use proof through
+`/api/v1/management/approval` and retry once with `X-Aurelia-Approval`.
+Proofs bind the action, exact request bytes, session and unlock generation and
+expire within two minutes or at the unlock deadline. `403 management_locked`
+ends management work without ending viewing. Locking or switching profiles must
+cancel pending administration work and discard old proofs.
+
+Profile editors use `GET/PUT /api/v1/users/{id}/profile` and a revision; stale
+saves return `409 profile_conflict` without partial changes. Omitted access
+preserves existing storage grants. Whole-library and selected-title rights
+apply before counts, paging, artwork and streaming; series grants include their
+descendants. Selected-title administrators cannot run storage-wide operations.
+Retain persistent identifiers across cosmetic product renames so stored
+connections and data remain available; never migrate Aurelia Classic data.
+
+Personal scene notes use `GET /api/v1/media/{id}/notes` and revisioned
+`PUT/DELETE .../notes/{noteId}`. New notes use a client UUID and revision zero;
+stale changes return `409 scene_note_conflict`. Preserve the draft on conflict.
+Notes belong only to the active profile and retain stable media identity when
+storage is offline. They are database records, never embedded video edits.
 
 ## Stable catalog loading
 

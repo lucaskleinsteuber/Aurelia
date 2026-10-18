@@ -35,11 +35,8 @@ GitHub, not the App Store.
 
 ## More information
 
-- [Editing metadata and managing your library](MEDIA_EDITING.md)
-- [Server settings and access](SERVER_MANAGEMENT.md)
-- [Profiles and scene notes](docs/PROFILES_AND_NOTES.md)
-- [Backups and recovery](DATABASE_RECOVERY.md)
-- [Building and testing](DEVELOPMENT.md)
+- [Backups and recovery](docs/DATABASE_RECOVERY.md)
+- [Build and playback verification](docs/TRANSPORT_TESTING.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 Aurelia is currently in development. The app's interface is in English.

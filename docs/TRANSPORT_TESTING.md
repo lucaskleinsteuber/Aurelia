@@ -1,4 +1,38 @@
-# Real-socket transport and soak verification
+# Build and playback verification
+
+## Build prerequisites and basic checks
+
+Use the .NET SDK pinned in `global.json` and Xcode with the macOS 26 SDK.
+Generated output belongs outside the checkout; `scripts/workspace-paths.sh`
+selects the user cache by default, or the existing `AURELIA_OTHER_ROOT` workspace.
+Run server verification from the repository root:
+
+```sh
+dotnet tool restore
+dotnet restore Aurelia.slnx
+dotnet format Aurelia.slnx --verify-no-changes --no-restore
+dotnet build Aurelia.slnx --configuration Release --no-restore
+dotnet test Aurelia.slnx --configuration Release --no-build
+```
+
+For the Mac client, use the `Aurelia` scheme in
+`clients/macos/Aurelia.xcodeproj` and run:
+
+```sh
+scripts/prepare-vlckit.sh
+scripts/verify-build-number.sh
+sh scripts/verify-product-names.sh
+scripts/test-macos.sh
+```
+
+Native-host, Intel execution, autostart and disk-full recovery checks use
+`test-native-host.sh`, `test-server-x64.sh`, `test-release-app-autostart.sh`
+and `test-recovery-disk-full.sh` in `scripts/`. Use isolated synthetic data;
+UI tests need an unlocked GUI session. A cross-build is not an execution pass.
+Follow `AGENTS.md` for versioning, installation and data preservation, and
+[free distribution](FREE_DISTRIBUTION.md) for signing and public-download limits.
+
+## Real-socket transport and soak verification
 
 Run `sh scripts/test-server-transport.sh` with the pinned .NET SDK available.
 The default is a two-hour, four-client run. A quick diagnostic run is

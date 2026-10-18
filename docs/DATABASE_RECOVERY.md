@@ -59,12 +59,18 @@ devices and consumes old pairing codes/playback tickets. Normal updates do not.
 
 ## Encrypted full-server recovery
 
-The Server settings tab also provides a management-unlocked, encrypted export
+The Server settings tab also provides an encrypted export during an active
+Server Password management unlock
 and guided full-server restore. It includes configuration and server identity,
 and manually imported artwork originals/crops (full-server format 2), but excludes
 video files and provider artwork caches. Version 1 backups remain readable.
 Restoring requires confirmation that all
 devices will be signed out and a separate confirmation for another server's
 identity. Validation and rollback preparation happen before active files are
-replaced. See [SERVER_MANAGEMENT.md](SERVER_MANAGEMENT.md) for format, limits,
-hosting requirements, and verification.
+replaced. Full-server backups use authenticated AES-256-GCM containers and a
+passphrase of 12–1,024 characters; media paths are retained rather than copied.
+Validation checks database compatibility, enabled owner, configuration and
+server identity before activation. The native helper stages the state and uses
+a recovery journal; interrupted activation recovers the previous state.
+Provider artwork can be downloaded again. Mac Keychain connections and Login
+Items permissions are not included in the backup.
