@@ -764,7 +764,8 @@ struct APIClient: Sendable {
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/continue-watching", method: "PUT",
       body: JSONEncoder().encode(request))
     let result = try Self.decode(WatchStateResponse.self, from: data)
-    guard result.mediaId == mediaId, result.continueWatchingHidden == request.isHidden else {
+    // Servers from 1.7.1 answer for the series when an episode is sent.
+    guard result.continueWatchingHidden == request.isHidden else {
       throw APIClientError.invalidResponse
     }
     return result

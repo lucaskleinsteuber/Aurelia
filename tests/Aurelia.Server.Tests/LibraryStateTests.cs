@@ -134,6 +134,23 @@ public sealed class LibraryStateTests
     }
 
     [Fact]
+    public async Task HidingAnEpisodeHidesItsSeriesAndChecksTheEpisodeToken()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.Progress(fixture.Episodes[2], 45_000);
+        Assert.Single((await fixture.Get<HomeResponse>("/api/v1/home")).ContinueWatching);
+        var episodeState = await fixture.State(fixture.Episodes[2].Id);
+        using (var stale = await fixture.Send(HttpMethod.Put, $"/api/v1/media/{fixture.Episodes[2].Id}/continue-watching",
+            new SetContinueWatchingRequest(true, new string('0', 64), Guid.NewGuid())))
+            Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var hidden = await fixture.Put<WatchStateResponse>($"/api/v1/media/{fixture.Episodes[2].Id}/continue-watching",
+            new SetContinueWatchingRequest(true, episodeState.StateToken, Guid.NewGuid()));
+        Assert.Equal(fixture.Series.Id, hidden.MediaId);
+        Assert.True(hidden.ContinueWatchingHidden);
+        Assert.Empty((await fixture.Get<HomeResponse>("/api/v1/home")).ContinueWatching);
+    }
+
+    [Fact]
     public async Task HidePreservesProgressGuardsOldWritesAndOnlyRealProgressUnhides()
     {
         using var fixture = await Fixture.CreateAsync();

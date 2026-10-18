@@ -57,9 +57,27 @@ public sealed class LibraryStateService(AureliaDbContext database)
         MutateAsync(userId, mediaId, request.Scope, request.SeasonNumber, request.StateToken, request.ClientMutationId,
             $"watch:{request.IsWatched}", request.IsWatched, null, cancellationToken);
 
-    public Task<WatchStateResponse> SetHiddenAsync(Guid userId, Guid mediaId, SetContinueWatchingRequest request, CancellationToken cancellationToken) =>
-        MutateAsync(userId, mediaId, WatchStateScope.Title, null, request.StateToken, request.ClientMutationId,
+    /// <summary>
+    /// Continue Watching belongs to a movie or series. An episode or extra is accepted too and
+    /// applies to its series, after checking the token the client read for that episode.
+    /// </summary>
+    public async Task<WatchStateResponse> SetHiddenAsync(Guid userId, Guid mediaId, SetContinueWatchingRequest request, CancellationToken cancellationToken)
+    {
+        var target = await database.MediaItems.AsNoTracking().Where(item => item.Id == mediaId)
+            .Select(item => new { item.Kind, item.ParentId }).SingleOrDefaultAsync(cancellationToken);
+        if (target is { Kind: not MediaKind.Movie and not MediaKind.Series, ParentId: { } parentId })
+        {
+            var own = await GetAsync(userId, mediaId, WatchStateScope.Title, null, cancellationToken);
+            if (string.IsNullOrEmpty(request.StateToken)
+                || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(request.StateToken), Encoding.UTF8.GetBytes(own.StateToken)))
+                throw new AccountException("library_state_conflict", "The library state changed. Reload before saving.", 409);
+            var parent = await GetAsync(userId, parentId, WatchStateScope.Title, null, cancellationToken);
+            return await MutateAsync(userId, parentId, WatchStateScope.Title, null, parent.StateToken, request.ClientMutationId,
+                $"hidden:{request.IsHidden}", null, request.IsHidden, cancellationToken);
+        }
+        return await MutateAsync(userId, mediaId, WatchStateScope.Title, null, request.StateToken, request.ClientMutationId,
             $"hidden:{request.IsHidden}", null, request.IsHidden, cancellationToken);
+    }
 
     private async Task<WatchStateResponse> MutateAsync(Guid userId, Guid mediaId, WatchStateScope scope, int? season,
         string token, Guid mutationId, string operation, bool? watched, bool? hidden, CancellationToken cancellationToken)

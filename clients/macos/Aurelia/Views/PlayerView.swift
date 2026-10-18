@@ -1084,6 +1084,7 @@ private final class PlayerWindowPresentation {
   private var originalLevel: NSWindow.Level?
   private var originalCollectionBehavior: NSWindow.CollectionBehavior?
   private var originalAspectRatio: NSSize?
+  private var originalMinSize: NSSize?
   private var pictureInPictureFrame: NSRect?
   private var fullscreenExitObserver: NSObjectProtocol?
   private(set) var isPictureInPicture = false
@@ -1117,10 +1118,11 @@ private final class PlayerWindowPresentation {
     if isPictureInPicture {
       if let originalLevel { window.level = originalLevel }
       if let originalCollectionBehavior { window.collectionBehavior = originalCollectionBehavior }
-      if let originalAspectRatio { window.contentAspectRatio = originalAspectRatio }
+      restoreAspectRatio(of: window)
       if let pictureInPictureFrame {
         window.setFrame(pictureInPictureFrame, display: true, animate: true)
       }
+      if let originalMinSize { window.contentMinSize = originalMinSize }
       isPictureInPicture = false
       return false
     }
@@ -1136,10 +1138,24 @@ private final class PlayerWindowPresentation {
       height: height)
     window.level = .floating
     window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary])
+    // The minimum must fit the 16:9 ratio, or resizing the small window has no valid size.
+    originalMinSize = window.contentMinSize
+    window.contentMinSize = NSSize(width: 320, height: 180)
     window.contentAspectRatio = NSSize(width: 16, height: 9)
     window.setFrame(frame, display: true, animate: true)
     isPictureInPicture = true
     return true
+  }
+
+  /// Undoes the 16:9 picture-in-picture ratio. A zero ratio is not "no ratio": assigning it made
+  /// every later edge drag compute an invalid frame and abort, so free resizing is restored
+  /// through the resize increments, as AppKit documents.
+  private func restoreAspectRatio(of window: NSWindow) {
+    if let originalAspectRatio, originalAspectRatio.width > 0, originalAspectRatio.height > 0 {
+      window.contentAspectRatio = originalAspectRatio
+    } else {
+      window.contentResizeIncrements = NSSize(width: 1, height: 1)
+    }
   }
 
   func restore() {
@@ -1176,7 +1192,6 @@ private final class PlayerWindowPresentation {
     if let originalToolbarVisibility { window.toolbar?.isVisible = originalToolbarVisibility }
     if let originalLevel { window.level = originalLevel }
     if let originalCollectionBehavior { window.collectionBehavior = originalCollectionBehavior }
-    if let originalAspectRatio { window.contentAspectRatio = originalAspectRatio }
     if let originalFrame {
       window.setFrame(originalFrame, display: true)
       DispatchQueue.main.async { [weak window] in window?.setFrame(originalFrame, display: true) }

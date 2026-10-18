@@ -1590,12 +1590,10 @@ final class AppModel: ObservableObject {
     let generation = connectionGeneration
     let item =
       catalogItems.first { $0.id == mediaId } ?? home?.continueWatching.first { $0.id == mediaId }
-    var target = item?.kind == .episode ? item?.parentId ?? mediaId : mediaId
-    if target == mediaId, item?.kind == .episode, let profile {
-      let summary = try await currentConnection {
-        try await APIClient(profile: profile).catalogSummary(id: mediaId)
-      }
-      guard let parent = summary.parentId else { throw APIClientError.invalidResponse }
+    // Continue Watching belongs to the movie or series. A known episode maps to its series here;
+    // any other title is sent as it is, and the server maps it to its series.
+    var target = mediaId
+    if let item, item.kind != .movie, item.kind != .series, let parent = item.parentId {
       target = parent
     }
     let snapshot = try await watchState(mediaId: target)

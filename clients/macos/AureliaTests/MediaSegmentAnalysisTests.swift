@@ -134,6 +134,38 @@ struct AudioFingerprintMatchingTests {
   }
 }
 
+/// A writer that delivers far more than the reader needs must never block: VLC blocked on a
+/// full pipe made stopping it wait forever and froze the app in 1.7.0.
+struct SamplePipeTests {
+  @Test(.timeLimit(.minutes(1))) func keepsDrainingPastTheLimitSoTheWriterNeverBlocks() async throws {
+    let pipe = try SamplePipe(limit: 1_000)
+    pipe.startReading()
+    let path = pipe.path
+    let wrote = await withCheckedContinuation { (continuation: CheckedContinuation<Int, Never>) in
+      DispatchQueue.global().async {
+        let descriptor = open(path, O_WRONLY)
+        var header = [UInt8](repeating: 0, count: 44)
+        header.replaceSubrange(0..<4, with: Array("RIFF".utf8))
+        header.replaceSubrange(8..<16, with: Array("WAVEfmt ".utf8))
+        header[16] = 16
+        header.replaceSubrange(36..<40, with: Array("data".utf8))
+        var total = header.withUnsafeBytes { write(descriptor, $0.baseAddress, 44) }
+        // About 4 MB: far more than a pipe holds, so this only finishes if it keeps draining.
+        let block = [UInt8](repeating: 1, count: 65_536)
+        for _ in 0..<64 {
+          total += block.withUnsafeBytes { write(descriptor, $0.baseAddress, block.count) }
+        }
+        close(descriptor)
+        continuation.resume(returning: total)
+      }
+    }
+    #expect(wrote == 44 + 64 * 65_536)
+    let samples = await pipe.finish()
+    pipe.close()
+    #expect(samples.count == 1_000)
+  }
+}
+
 /// Runs VLC's in-memory audio output on a synthetic file written for this test only.
 @MainActor
 struct VLCAudioSampleReaderTests {

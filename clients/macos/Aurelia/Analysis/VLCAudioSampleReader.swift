@@ -74,10 +74,10 @@ final class VLCAudioSampleReader: NSObject {
         Task { @MainActor [weak self] in self?.finish(.failure(CancellationError())) }
       }
     } catch {
-      cleanUp()
+      await stopPlayer()
       throw error
     }
-    cleanUp()
+    await stopPlayer()
     // VLC has closed its end of the pipe; collect what remains in the buffer.
     let samples = await pipe.finish()
     return Output(samples: samples, durationMilliseconds: durationMilliseconds, chapters: chapters)
@@ -90,10 +90,18 @@ final class VLCAudioSampleReader: NSObject {
     continuation.resume(with: result)
   }
 
-  private func cleanUp() {
-    player?.delegate = nil
-    player?.stop()
-    player = nil
+  /// Stops VLC away from the main thread; stopping waits for VLC's own threads to finish.
+  private func stopPlayer() async {
+    guard let player else { return }
+    self.player = nil
+    player.delegate = nil
+    let box = UncheckedPlayer(value: player)
+    await withCheckedContinuation { continuation in
+      DispatchQueue.global(qos: .utility).async {
+        box.value.stop()
+        continuation.resume()
+      }
+    }
   }
 
   private func captureMediaFacts() {
@@ -141,6 +149,8 @@ extension VLCAudioSampleReader: VLCMediaPlayerDelegate {
     Task { @MainActor [weak self] in self?.stateChanged(state) }
   }
 }
+
+private struct UncheckedPlayer: @unchecked Sendable { let value: VLCMediaPlayer }
 
 /// A private named pipe that VLC writes a WAV stream into. A background thread turns the 16-bit
 /// mono samples into floats as they arrive. The pipe stores nothing; it is removed afterwards.
@@ -222,30 +232,28 @@ final class SamplePipe: @unchecked Sendable {
     var idleAfterFinish = 0
     while true {
       if lock.withLock({ closed }) { return }
-      var poller = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-      let ready = poll(&poller, 1, 100)
-      if ready < 0 && errno != EINTR { return }
-      let count = ready > 0 ? read(descriptor, &buffer, buffer.count) : 0
+      // poll() does not reliably wake for pipes on macOS, so read without blocking and rest
+      // for a moment only when the pipe is empty.
+      let count = read(descriptor, &buffer, buffer.count)
       if count > 0 {
         pending.append(contentsOf: buffer[0..<count])
         if !headerParsed, let offset = Self.dataOffset(in: pending) {
           pending.removeFirst(offset)
           headerParsed = true
         }
+        // Even with enough samples the pipe keeps being drained: VLC must never block on a
+        // full pipe, or stopping it would wait forever.
         if headerParsed { consume(&pending) }
         idleAfterFinish = 0
         continue
       }
-      lock.lock()
-      let isFinished = finished
-      let isFull = samples.count >= limit
-      lock.unlock()
-      if isFull { return }
-      if isFinished {
+      if count < 0, errno != EAGAIN, errno != EINTR { return }
+      if lock.withLock({ finished }) {
         idleAfterFinish += 1
         // Nothing more arrives once VLC has stopped; allow a moment for the last block.
-        if idleAfterFinish >= 3 { return }
+        if idleAfterFinish >= 100 { return }
       }
+      usleep(2_000)
     }
   }
 

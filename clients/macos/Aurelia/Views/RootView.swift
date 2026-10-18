@@ -60,7 +60,11 @@ struct RootView: View {
     .aureliaRemoveEmptyWindowToolbar()
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.playback)
     .preferredColorScheme(.dark)
-    .frame(minWidth: 760, minHeight: 560)
+    // While playing, the window may shrink to a 16:9 picture-in-picture size; a library minimum
+    // combined with the 16:9 ratio would leave macOS no valid size when the edge is dragged.
+    .frame(
+      minWidth: model.playback == nil ? 760 : 320, minHeight: model.playback == nil ? 560 : 180
+    )
     .sheet(isPresented: $model.isMediaManagerPresented) {
       MediaManagerView().environmentObject(model)
     }
