@@ -1,6 +1,6 @@
 name: Verify server
 
-# macOS runner minutes are billed at a multiple, so client-only changes skip this server job.
+# macOS runner minutes are billed at a multiple, so client-only changes skip this workflow.
 # The Mac version file stays included because the build-number check compares it with the server.
 on:
   push:
@@ -42,7 +42,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  checks:
+    # Linux minutes cost a tenth of macOS ones: version and name checks run here, and the
+    # macOS server job runs only when server code or its build settings changed. A release
+    # that only raises the version numbers needs no server build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      server: ${{ steps.changes.outputs.server }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+        with:
+          fetch-depth: 0
+      - name: Verify version and product names
+        run: |
+          scripts/verify-build-number.sh
+          sh scripts/verify-product-names.sh
+      - name: Decide whether the server must be verified
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base=$BEFORE
+          if [ "$EVENT" = pull_request ]; then base=$BASE; fi
+          if [ "$EVENT" = workflow_dispatch ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "server=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          server=false
+          if git diff --name-only "$base" HEAD | grep -E '^(src/|tests/|tools/|\.config/|\.github/workflows/verify\.yml$|Aurelia\.slnx$|Directory\.Packages\.props$|NuGet\.Config$|global\.json$|scripts/test-server-transport\.sh$)' >/dev/null; then
+            server=true
+          fi
+          # Directory.Build.props also carries build settings; only version lines may skip the server job.
+          if git diff -U0 "$base" HEAD -- Directory.Build.props | grep -E '^[+-][^+-]' \
+            | grep -vE '<(AureliaBuildNumber|Version|FileVersion|InformationalVersion)>' >/dev/null; then
+            server=true
+          fi
+          echo "server=$server" | tee -a "$GITHUB_OUTPUT"
+
   server:
+    needs: checks
+    if: needs.checks.outputs.server == 'true'
     # Exercise the bundled Skia/macOS image processing dependencies too.
     runs-on: macos-26
     timeout-minutes: 20
@@ -51,16 +93,8 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
-      - name: Install verification prerequisites
+      - name: Verify formatting, build, and tests
         run: |
-          if ! command -v rg >/dev/null 2>&1; then
-            brew install ripgrep
-          fi
-          rg --version
-      - name: Verify version, formatting, build, and tests
-        run: |
-          scripts/verify-build-number.sh
-          sh scripts/verify-product-names.sh
           dotnet tool restore
           dotnet restore Aurelia.slnx
           dotnet format Aurelia.slnx --verify-no-changes --no-restore
