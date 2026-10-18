@@ -65,7 +65,25 @@ final class LoopbackStreamRelayTests: XCTestCase {
     XCTAssertEqual(
       RelayURLProtocol.authorizationRecorder.latestValue,
       "Bearer test-device-token")
+    // Playback reads are ordinary streams on the server.
+    XCTAssertNil(RelayURLProtocol.purposeRecorder.latestValue)
     XCTAssertTrue(failures.values.isEmpty)
+  }
+
+  func testPreviewRelayMarksItsReadsAsPreviews() async throws {
+    let relay = try LoopbackStreamRelay(
+      sourceURL: URL(string: "https://relay.test/old")!,
+      publicKeyFingerprint: String(repeating: "A", count: 64),
+      authorizationToken: "test-device-token",
+      streamPurpose: "preview",
+      sessionFactory: Self.stubSession)
+    let localURL = try await relay.start()
+    defer { relay.stop() }
+    let (data, _) = try await Self.range("bytes=0-3", from: localURL)
+    XCTAssertEqual(data, Data(RelayURLProtocol.oldPayload[0...3]))
+    XCTAssertEqual(RelayURLProtocol.purposeRecorder.latestValue, "preview")
+    XCTAssertEqual(
+      RelayURLProtocol.authorizationRecorder.latestValue, "Bearer test-device-token")
   }
 
   func testSequentialRangeRequestsReuseOneVerifiedUpstreamSession() async throws {
@@ -653,6 +671,7 @@ private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
   static let oldPayload = Data("0123456789ABCDEF".utf8)
   static let newPayload = Data("renewed-ticket".utf8)
   static let authorizationRecorder = AuthorizationRecorder()
+  static let purposeRecorder = AuthorizationRecorder()
   static let cancellationRecorder = RelayCancellationRecorder()
   static let requestRecorder = RelayRequestRecorder()
 
@@ -665,6 +684,7 @@ private final class RelayURLProtocol: URLProtocol, @unchecked Sendable {
   override func startLoading() {
     Self.requestRecorder.record(request.url?.path ?? "")
     Self.authorizationRecorder.record(request.value(forHTTPHeaderField: "Authorization"))
+    Self.purposeRecorder.record(request.value(forHTTPHeaderField: "X-Aurelia-Stream-Purpose"))
     let path = request.url?.path ?? ""
     if ["/offline", "/unsafe", "/busy", "/unlisted", "/hugeproblem"].contains(path) {
       let status = path == "/unsafe" ? 409 : path == "/busy" ? 429 : 503

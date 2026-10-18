@@ -207,6 +207,28 @@ public sealed class ServerAccessFoundationTests
     }
 
     [Fact]
+    public void PreviewStreamsHaveTheirOwnBudgetAndNeverTakePlaybackSlots()
+    {
+        var registry = new ActiveStreamRegistry();
+        var user = Guid.NewGuid();
+        var session = Guid.NewGuid();
+        using var first = registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true);
+        using var second = registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true);
+        var third = Assert.Throws<AccountException>(() => registry.Enter(user, session, 32, 4, CancellationToken.None, preview: true));
+        Assert.Equal("stream_limit", third.Code);
+        // Another device of the same user still gets its own preview slots.
+        using var otherDevice = registry.Enter(user, Guid.NewGuid(), 32, 4, CancellationToken.None, preview: true);
+
+        // All four playback slots stay free while previews run.
+        var playback = Enumerable.Range(0, 4).Select(_ => registry.Enter(user, session, 32, 4, CancellationToken.None)).ToList();
+        Assert.Throws<AccountException>(() => registry.Enter(user, session, 32, 4, CancellationToken.None));
+        registry.RevokeSession(session);
+        Assert.True(first.Token.IsCancellationRequested);
+        Assert.All(playback, lease => Assert.True(lease.Token.IsCancellationRequested));
+        playback.ForEach(lease => lease.Dispose());
+    }
+
+    [Fact]
     public void ApprovalRejectsExpiryWrongDeviceWrongActionAndChangedPayload()
     {
         var clock = new ApprovalClock();

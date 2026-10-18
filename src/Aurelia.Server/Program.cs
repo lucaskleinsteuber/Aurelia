@@ -320,7 +320,8 @@ app.Use(async (context, next) =>
         {
             var limits = context.RequestServices.GetRequiredService<ServerConfigurationStore>().Current;
             using var lease = context.RequestServices.GetRequiredService<ActiveStreamRegistry>().Enter(
-                context.User.RequireUserId(), context.User.RequireProfileSessionId(), limits.GlobalStreamLimit, limits.UserStreamLimit, context.RequestAborted);
+                context.User.RequireUserId(), context.User.RequireProfileSessionId(), limits.GlobalStreamLimit, limits.UserStreamLimit, context.RequestAborted,
+                preview: string.Equals(context.Request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase));
             context.RequestAborted = lease.Token;
             context.Items["Aurelia.StreamLease"] = lease;
             await next(context);

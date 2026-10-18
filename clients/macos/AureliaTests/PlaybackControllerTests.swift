@@ -65,6 +65,48 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertEqual(client.updates.last?.position, 45_000)
   }
 
+  func testPreviewsUseTheirOwnRelayThatCannotFailPlayback() async throws {
+    let mediaID = UUID()
+    let source = PlaybackSourceResponse(
+      id: UUID(), mediaId: mediaID, streamPath: "/api/v1/streams/test-ticket",
+      contentType: "video/x-matroska", contentLength: 4_096, expiresAt: "2099-01-01T12:00:00Z",
+      progress: PlaybackProgressResponse(
+        mediaId: mediaID, positionMilliseconds: 0, durationMilliseconds: 120_000,
+        isCompleted: false, lastPlayedAt: nil, updatedAt: nil))
+    let engine = FakePlaybackEngine()
+    let relay = FakePlaybackRelay()
+    let preview = FakePlaybackRelay(localURL: URL(string: "http://127.0.0.1:54322/stream/p")!)
+    var previewSources: [URL] = []
+    let controller = PlaybackController(
+      client: FakePlaybackClient(source: source),
+      presentation: PlaybackPresentation(mediaId: mediaID, title: "Pilot", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay },
+      previewRelayFactory: { url, _ in
+        previewSources.append(url)
+        return preview
+      })
+
+    await controller.start()
+    for _ in 0..<50 where controller.previewSourceURL == nil { await Task.yield() }
+
+    XCTAssertEqual(engine.loadedURL, relay.localURL)
+    XCTAssertEqual(controller.previewSourceURL, preview.localURL)
+    XCTAssertEqual(previewSources.count, 1)
+    XCTAssertTrue(relay.hasFailureHandler)
+    // A busy or failing preview read is never reported to playback.
+    XCTAssertFalse(preview.hasFailureHandler)
+
+    // Night mode reopens the player on its own relay, never the preview one.
+    controller.reopenForAudioChange()
+    XCTAssertEqual(engine.loadedURL, relay.localURL)
+
+    await controller.shutdown()
+    XCTAssertTrue(relay.didStop)
+    XCTAssertTrue(preview.didStop)
+    XCTAssertNil(controller.previewSourceURL)
+  }
+
   func testResumePauseSeekTrackSelectionAndShutdownSave() async throws {
     let mediaID = UUID()
     let playbackID = UUID()
@@ -615,11 +657,22 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
 
 @MainActor
 final class FakePlaybackRelay: PlaybackRelayProtocol {
-  let localURL = URL(string: "http://127.0.0.1:54321/stream/local-secret")!
+  let localURL: URL
   var didStop = false
+  private(set) var sourceURLs: [URL] = []
+  private(set) var hasFailureHandler = false
+
+  init(localURL: URL = URL(string: "http://127.0.0.1:54321/stream/local-secret")!) {
+    self.localURL = localURL
+  }
 
   func start() async throws -> URL { localURL }
-  func updateSourceURL(_ url: URL) {}
+  func updateSourceURL(_ url: URL) { sourceURLs.append(url) }
+  func setFailureHandler(
+    _ handler: @escaping @MainActor @Sendable (PlaybackStreamFailure) -> Void
+  ) {
+    hasFailureHandler = true
+  }
   func stop() { didStop = true }
 }
 

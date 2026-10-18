@@ -28,6 +28,9 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   private let prefetchWorkers: Int
   private let prefetchDelay: Duration
   private let prefetchPause: Duration
+  private let prefetchBackoff: Duration
+  private var prefetchFailures = 0
+  static let failuresBeforeBackoff = 3
   private let prefetchAllowed: () -> Bool
 
   private var mediaID: UUID?
@@ -55,16 +58,18 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     let timeout: Task<Void, Never>
   }
 
-  /// Two background decoders, a short pause after each frame and the low-power check keep
-  /// playback smooth and the server's per-address request budget untouched.
+  /// One background decoder beside the pointer's own, a short pause after each frame, a long
+  /// rest after repeated failures (a busy server) and the low-power check keep playback smooth.
+  /// Two decoders at most match the server's preview budget per device.
   init(
-    prefetchWorkers: Int = 2, prefetchDelay: Duration = .seconds(4),
-    prefetchPause: Duration = .milliseconds(250),
+    prefetchWorkers: Int = 1, prefetchDelay: Duration = .seconds(4),
+    prefetchPause: Duration = .milliseconds(250), prefetchBackoff: Duration = .seconds(60),
     prefetchAllowed: @escaping () -> Bool = { !ProcessInfo.processInfo.isLowPowerModeEnabled }
   ) {
     self.prefetchWorkers = prefetchWorkers
     self.prefetchDelay = prefetchDelay
     self.prefetchPause = prefetchPause
+    self.prefetchBackoff = prefetchBackoff
     self.prefetchAllowed = prefetchAllowed
   }
 
@@ -283,9 +288,12 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     if job.interactive {
       startInteractiveIfIdle()
     } else {
+      prefetchFailures = frames[job.bucket] == nil ? prefetchFailures + 1 : 0
+      let rest = prefetchFailures >= Self.failuresBeforeBackoff ? prefetchBackoff : prefetchPause
+      if prefetchFailures >= Self.failuresBeforeBackoff { prefetchFailures = 0 }
       let epoch = slotEpoch
-      Task { [weak self, prefetchPause] in
-        try? await Task.sleep(for: prefetchPause)
+      Task { [weak self] in
+        try? await Task.sleep(for: rest)
         guard let self, self.slotEpoch == epoch, self.prefetchBusy > 0 else { return }
         self.prefetchBusy -= 1
         self.fillPrefetchSlots()

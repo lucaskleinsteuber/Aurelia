@@ -42,6 +42,8 @@ final class LoopbackStreamRelay: @unchecked Sendable {
   private let secret: String
   private let publicKeyFingerprint: String
   private let authorizationToken: String?
+  /// "preview" for timeline frames, which the server counts apart from playback streams.
+  private let streamPurpose: String?
   private let sessionFactory: SessionFactory
   private var sourceURL: URL
   private var listener: NWListener?
@@ -62,11 +64,13 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     sourceURL: URL,
     publicKeyFingerprint: String,
     authorizationToken: String? = nil,
+    streamPurpose: String? = nil,
     sessionFactory: @escaping SessionFactory = LoopbackStreamRelay.productionSession
   ) throws {
     self.sourceURL = sourceURL
     self.publicKeyFingerprint = publicKeyFingerprint
     self.authorizationToken = authorizationToken
+    self.streamPurpose = streamPurpose
     self.sessionFactory = sessionFactory
     self.secret = try Self.makeSecret()
   }
@@ -316,6 +320,9 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     if let authorizationToken {
       request.setValue("Bearer \(authorizationToken)", forHTTPHeaderField: "Authorization")
+    }
+    if let streamPurpose {
+      request.setValue(streamPurpose, forHTTPHeaderField: "X-Aurelia-Stream-Purpose")
     }
     if let range = relayRequest.range {
       request.setValue(range, forHTTPHeaderField: "Range")

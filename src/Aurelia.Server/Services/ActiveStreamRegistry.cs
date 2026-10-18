@@ -4,17 +4,28 @@ namespace Aurelia.Server.Services;
 
 public sealed class ActiveStreamRegistry
 {
+    /// <summary>
+    /// Timeline preview frames are short reads beside a playing stream. They have their own small
+    /// budget so they never take a slot that playback, a seek or another device needs.
+    /// </summary>
+    public const int PreviewStreamsPerSession = 2;
+    public const int PreviewStreamsGlobal = 16;
     private readonly object gate = new();
     private readonly HashSet<Lease> streams = [];
     public int Count { get { lock (gate) return streams.Count; } }
 
-    public Lease Enter(Guid userId, Guid sessionId, int globalLimit, int userLimit, CancellationToken request)
+    public Lease Enter(Guid userId, Guid sessionId, int globalLimit, int userLimit, CancellationToken request, bool preview = false)
     {
         lock (gate)
         {
-            if (streams.Count >= globalLimit || streams.Count(stream => stream.UserId == userId) >= userLimit)
+            var full = preview
+                ? streams.Count(stream => stream.IsPreview) >= PreviewStreamsGlobal
+                    || streams.Count(stream => stream.IsPreview && stream.SessionId == sessionId) >= PreviewStreamsPerSession
+                : streams.Count(stream => !stream.IsPreview) >= globalLimit
+                    || streams.Count(stream => !stream.IsPreview && stream.UserId == userId) >= userLimit;
+            if (full)
                 throw new AccountException("stream_limit", "Too many simultaneous stream requests. Try again shortly.", 429);
-            var lease = new Lease(this, userId, sessionId, request);
+            var lease = new Lease(this, userId, sessionId, preview, request);
             streams.Add(lease);
             return lease;
         }
@@ -38,15 +49,17 @@ public sealed class ActiveStreamRegistry
         private readonly CancellationTokenSource source;
         private readonly object gate = new();
         private bool disposed;
-        internal Lease(ActiveStreamRegistry registry, Guid userId, Guid sessionId, CancellationToken request)
+        internal Lease(ActiveStreamRegistry registry, Guid userId, Guid sessionId, bool preview, CancellationToken request)
         {
             this.registry = registry;
             UserId = userId;
             SessionId = sessionId;
+            IsPreview = preview;
             source = CancellationTokenSource.CreateLinkedTokenSource(request);
         }
         public Guid UserId { get; }
         public Guid SessionId { get; }
+        public bool IsPreview { get; }
         public Guid? MediaId { get; private set; }
         public void BindMedia(Guid id) { lock (registry.gate) MediaId = id; }
         public CancellationToken Token => source.Token;

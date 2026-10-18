@@ -137,8 +137,11 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var recoveryCause: PlaybackRecoveryCause?
   @Published private(set) var progressMessage: String?
   @Published private(set) var hasProgressConflict = false
-  /// The local relay address of the current source, used to decode scrub previews live.
+  /// A separate local relay for decoding scrub previews live. Its reads are marked as previews,
+  /// which the server counts apart from playback, and its failures never touch playback.
   @Published private(set) var previewSourceURL: URL?
+  /// The local relay address the player reads.
+  private var playbackURL: URL?
   let diagnostics = PlaybackDiagnostics()
 
   @Published private(set) var presentation: PlaybackPresentation
@@ -147,7 +150,12 @@ final class PlaybackController: ObservableObject {
   private let engine: PlaybackEngine
   private let preferences: PlaybackPreferences
   private let relayFactory: (URL, String) throws -> any PlaybackRelayProtocol
-  private var relay: (any PlaybackRelayProtocol)?
+  private let previewRelayFactory: ((URL, String) throws -> any PlaybackRelayProtocol)?
+  private var relay: (any PlaybackRelayProtocol)? {
+    didSet { if relay !== oldValue { stopPreviewRelay() } }
+  }
+  private var previewRelay: (any PlaybackRelayProtocol)?
+  private var previewRelayTask: Task<Void, Never>?
   private var activePlayback: PlaybackSourceResponse?
   private var playbackIDs: Set<UUID> = []
   private var renewalTask: Task<Void, Never>?
@@ -224,6 +232,13 @@ final class PlaybackController: ObservableObject {
         publicKeyFingerprint: fingerprint,
         authorizationToken: profile.token)
     }
+    self.previewRelayFactory = { url, fingerprint in
+      try LoopbackStreamRelay(
+        sourceURL: url,
+        publicKeyFingerprint: fingerprint,
+        authorizationToken: profile.token,
+        streamPurpose: "preview")
+    }
     connectEngineCallbacks()
     connectProgressOutbox()
   }
@@ -234,6 +249,7 @@ final class PlaybackController: ObservableObject {
     engine: PlaybackEngine,
     preferences: PlaybackPreferences = .defaultValue,
     relayFactory: @escaping (URL, String) throws -> any PlaybackRelayProtocol,
+    previewRelayFactory: ((URL, String) throws -> any PlaybackRelayProtocol)? = nil,
     renewalClock: @escaping @MainActor () -> Date = { Date() },
     renewalSleep: @escaping @MainActor (TimeInterval) async throws -> Void = { delay in
       try await Task.sleep(for: .seconds(delay))
@@ -262,6 +278,7 @@ final class PlaybackController: ObservableObject {
     self.volume = preferences.normalized.defaultVolume
     self.queuedItems = presentation.queue
     self.relayFactory = relayFactory
+    self.previewRelayFactory = previewRelayFactory
     self.renewalClock = renewalClock
     self.renewalSleep = renewalSleep
     self.recoveryClock = recoveryClock
@@ -531,7 +548,7 @@ final class PlaybackController: ObservableObject {
   /// the audio processing of a VLC player is fixed when it opens a title.
   func reopenForAudioChange() {
     guard !stopped, !authorizationFailed, !terminalFailure, !recovering, !endHandled,
-      !isPreparing, activePlayback != nil, let url = previewSourceURL
+      !isPreparing, activePlayback != nil, let url = playbackURL
     else { return }
     let position = currentTimeMilliseconds
     navigationRevision &+= 1
@@ -547,6 +564,34 @@ final class PlaybackController: ObservableObject {
     engine.isMuted = isMuted
     engine.playbackRate = playbackRate
     if wantsPlayback { engine.play() }
+  }
+
+  /// Starts the preview relay beside the playing one without delaying playback; previews simply
+  /// stay unavailable when it cannot start.
+  private func startPreviewRelay(from sourceURL: URL) {
+    stopPreviewRelay()
+    guard let previewRelayFactory, let owner = relay,
+      let preview = try? previewRelayFactory(sourceURL, client.profile.publicKeyFingerprint)
+    else { return }
+    previewRelay = preview
+    previewRelayTask = Task { [weak self] in
+      let url = try? await preview.start()
+      guard let self, let url, !Task.isCancelled, self.previewRelay === preview,
+        self.relay === owner
+      else {
+        preview.stop()
+        return
+      }
+      self.previewSourceURL = url
+    }
+  }
+
+  private func stopPreviewRelay() {
+    previewRelayTask?.cancel()
+    previewRelayTask = nil
+    previewRelay?.stop()
+    previewRelay = nil
+    previewSourceURL = nil
   }
 
   func setVolume(_ value: Double) {
@@ -665,7 +710,7 @@ final class PlaybackController: ObservableObject {
     // or an old recovery task running after its window has closed.
     relay?.stop()
     relay = nil
-    previewSourceURL = nil
+    playbackURL = nil
     engine.stop()
     // Terminal callbacks are ignored once stopped. Publish the terminal state
     // explicitly, preserving the last position/duration for the progress save.
@@ -690,8 +735,9 @@ final class PlaybackController: ObservableObject {
   ) async throws {
     guard !stopped, !Task.isCancelled else { throw CancellationError() }
     let relay: any PlaybackRelayProtocol
+    let sourceURL: URL
     do {
-      let sourceURL = try client.streamURL(path: source.streamPath)
+      sourceURL = try client.streamURL(path: source.streamPath)
       relay = try relayFactory(sourceURL, client.profile.publicKeyFingerprint)
     } catch {
       await revokeTickets([source.id])
@@ -753,7 +799,8 @@ final class PlaybackController: ObservableObject {
     }
     engine.trackScope = presentation.trackScope
     engine.load(url: localURL)
-    previewSourceURL = localURL
+    playbackURL = localURL
+    startPreviewRelay(from: sourceURL)
     engine.volume = volume
     engine.isMuted = isMuted
     engine.playbackRate = playbackRate
@@ -921,7 +968,7 @@ final class PlaybackController: ObservableObject {
     endPlaybackActivity()
     relay?.stop()
     relay = nil
-    previewSourceURL = nil
+    playbackURL = nil
     engine.stop()
     await revokeTickets(playbackIDs)
     guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
@@ -1006,6 +1053,7 @@ final class PlaybackController: ObservableObject {
           throw error
         }
         relay?.updateSourceURL(renewedURL)
+        previewRelay?.updateSourceURL(renewedURL)
         activePlayback = renewed
         playbackIDs.insert(renewed.id)
         await revokeTickets([old.id])
@@ -1074,7 +1122,7 @@ final class PlaybackController: ObservableObject {
     nextItemTask = nil
     relay?.stop()
     relay = nil
-    previewSourceURL = nil
+    playbackURL = nil
     engine.stop()
     isPlaying = false
     isPreparing = false
@@ -1185,7 +1233,7 @@ final class PlaybackController: ObservableObject {
     enqueueProgressSave(isFinished: false)
     relay?.stop()
     relay = nil
-    previewSourceURL = nil
+    playbackURL = nil
     engine.stop()
     activePlayback = nil
     let retiredIDs = playbackIDs
@@ -1267,7 +1315,7 @@ final class PlaybackController: ObservableObject {
     loadID = UUID()
     relay?.stop()
     relay = nil
-    previewSourceURL = nil
+    playbackURL = nil
     endPlaybackActivity()
     errorMessage = "Playback recovery stopped. Choose Try Again when the media is available."
   }
@@ -1301,7 +1349,7 @@ final class PlaybackController: ObservableObject {
     renewalTask = nil
     relay?.stop()
     relay = nil
-    previewSourceURL = nil
+    playbackURL = nil
     engine.stop()
     activePlayback = nil
     isPlaying = false
