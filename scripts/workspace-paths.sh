@@ -1,5 +1,11 @@
 #!/bin/sh
 # Shared by build/test scripts. Generated files never belong in the checkout.
+# The workspace is AURELIA_OTHER_ROOT, else an existing "Aurelia Other" folder next to the
+# checkout, else the per-user cache.
+if [ -z "${AURELIA_OTHER_ROOT:-}" ] && [ -n "${repository_root:-}" ] \
+  && [ -d "$(dirname -- "$repository_root")/Aurelia Other" ]; then
+  AURELIA_OTHER_ROOT="$(dirname -- "$repository_root")/Aurelia Other"
+fi
 if [ -z "${AURELIA_OTHER_ROOT:-}" ]; then
   if [ "$(uname -s)" = Darwin ]; then
     AURELIA_OTHER_ROOT="$HOME/Library/Caches/Aurelia/Artifacts"

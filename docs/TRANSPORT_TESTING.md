@@ -4,7 +4,8 @@
 
 Use the .NET SDK pinned in `global.json` and Xcode with the macOS 26 SDK.
 Generated output belongs outside the checkout; `scripts/workspace-paths.sh`
-selects the user cache by default, or the existing `AURELIA_OTHER_ROOT` workspace.
+selects the existing `AURELIA_OTHER_ROOT` workspace, else an existing `Aurelia Other`
+folder next to the checkout, else the user cache.
 Run server verification from the repository root:
 
 ```sh

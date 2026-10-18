@@ -48,7 +48,8 @@ These rules apply to every task in this repository.
 - Never commit build products, result bundles, logs, caches, runtime data,
   SQLite files, artwork, media, credentials, tokens, or signing material.
 - Generated output belongs outside the checkout. `AURELIA_OTHER_ROOT` may select
-  an existing external workspace; never rename or move that workspace. Otherwise
+  an existing external workspace; an existing `Aurelia Other` folder next to the
+  checkout is used when it is unset. Never rename or move that workspace. Otherwise
   use the per-user cache defaults in `scripts/workspace-paths.sh`. Standard
   subdirectories are `Build/`, `Package Cache/`, `Test Results/`, and `Logs/`.
 - Runnable Mac test products must be staged under a unique
