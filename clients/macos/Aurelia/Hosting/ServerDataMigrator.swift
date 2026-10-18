@@ -1,5 +1,5 @@
-import Foundation
 import Darwin
+import Foundation
 
 enum ServerDataMigrationError: Error, Equatable {
   case invalidSource
@@ -56,7 +56,8 @@ enum ServerDataMigrator {
         guard !item.lastPathComponent.hasPrefix(legacyDatabaseName) else { continue }
         let values = try item.resourceValues(forKeys: [.isSymbolicLinkKey])
         guard values.isSymbolicLink != true else { throw ServerDataMigrationError.invalidSource }
-        try fileManager.copyItem(at: item, to: staging.appendingPathComponent(item.lastPathComponent))
+        try fileManager.copyItem(
+          at: item, to: staging.appendingPathComponent(item.lastPathComponent))
       }
 
       let migratedDatabase = staging.appendingPathComponent(databaseName)
@@ -125,9 +126,10 @@ enum ServerDataMigrator {
   private static func applyPrivatePermissions(to root: URL) throws {
     let fileManager = FileManager.default
     try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
-    guard let enumerator = fileManager.enumerator(
-      at: root,
-      includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+    guard
+      let enumerator = fileManager.enumerator(
+        at: root,
+        includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
     else { throw ServerDataMigrationError.activationFailed }
     for case let item as URL in enumerator {
       let values = try item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
