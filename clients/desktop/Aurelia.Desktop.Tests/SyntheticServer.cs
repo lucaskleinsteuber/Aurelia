@@ -107,6 +107,28 @@ internal sealed class SyntheticServer : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// What the owner does on the Mac: add a movie library at `folder` and scan it. The folder holds
+    /// only synthetic media made by the test.
+    /// </summary>
+    public async Task AddMovieLibraryAsync(string folder)
+    {
+        var library = await SendAsync<LibrarySummary>(HttpMethod.Post, "/api/v1/libraries",
+            new CreateLibraryRequest("Synthetic Movies", folder, LibraryKind.Movies), approve: true);
+        var scan = await SendAsync<LibraryScanSummary>(HttpMethod.Post, $"/api/v1/libraries/{library.Id}/scans", null);
+        for (var attempt = 0; attempt < 400; attempt++)
+        {
+            var current = await SendAsync<LibraryScanSummary>(HttpMethod.Get, $"/api/v1/scans/{scan.Id}", null);
+            if (current.State is not (LibraryScanState.Queued or LibraryScanState.Running))
+            {
+                if (current.State != LibraryScanState.Completed) throw new InvalidOperationException("The synthetic scan did not complete.");
+                return;
+            }
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("The synthetic scan did not finish.");
+    }
+
     /// <summary>What the owner does on the Mac: look up the code shown by the new device and approve it.</summary>
     public async Task ApproveAsync(string code)
     {

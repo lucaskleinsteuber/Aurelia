@@ -17,13 +17,14 @@ public sealed class MainWindowTests
     public async Task EachConnectionStepShowsItsOwnScreen()
     {
         var (flow, _, _) = ConnectionFlowTests.Create();
-        var window = new MainWindow(flow, startOnOpen: false);
+        var window = new MainWindow(flow, _ => new FakeLibraryApi(), _ => new FakeEngineFactory(), TemporarySettings(), startOnOpen: false,
+            artworkCache: _ => null);
         window.Show();
         await flow.StartAsync();
         Settle(window, "connect");
         Assert.True(window.FindControl<StackPanel>("ConnectStep")!.IsVisible);
         Assert.Equal("Connect to your Aurelia server", window.FindControl<TextBlock>("ConnectTitle")!.Text);
-        Assert.False(window.FindControl<Grid>("LibraryShell")!.IsVisible);
+        Assert.False(window.FindControl<LibraryView>("Library")!.IsVisible);
 
         // Typing an address and pressing Continue reads the server's identity.
         window.FindControl<TextBox>("ServerAddress")!.Text = "192.168.1.20";
@@ -48,9 +49,8 @@ public sealed class MainWindowTests
 
         await flow.SubmitPinAsync("5682");
         Settle(window, "library");
-        Assert.True(window.FindControl<Grid>("LibraryShell")!.IsVisible);
-        Assert.Equal("Welcome, Alex", window.FindControl<TextBlock>("WelcomeTitle")!.Text);
-        Assert.StartsWith("Version ", window.FindControl<TextBlock>("VersionLabel")!.Text);
+        Assert.True(window.FindControl<LibraryView>("Library")!.IsVisible);
+        Assert.False(window.FindControl<PlayerView>("Player")!.IsVisible);
     }
 
     [AvaloniaFact]
@@ -90,7 +90,10 @@ public sealed class MainWindowTests
     public void VersionLabelReadsTheBuildNumber(string? informational, string expected) =>
         Assert.Equal(expected, AppInfo.Label(informational));
 
-    private static void Settle(Window window, string name)
+    internal static PlaybackSettingsStore TemporarySettings() =>
+        new(Path.Combine(Path.GetTempPath(), "aurelia-desktop-settings-" + Guid.NewGuid().ToString("N"), "playback.json"));
+
+    internal static void Settle(Window window, string name)
     {
         Dispatcher.UIThread.RunJobs();
         var frame = window.CaptureRenderedFrame();
@@ -102,7 +105,7 @@ public sealed class MainWindowTests
         }
     }
 
-    private static async Task WaitFor(Func<bool> condition)
+    internal static async Task WaitFor(Func<bool> condition)
     {
         for (var attempt = 0; attempt < 200 && !condition(); attempt++)
         {

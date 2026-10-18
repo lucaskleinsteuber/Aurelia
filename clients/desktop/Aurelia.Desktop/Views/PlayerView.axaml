@@ -1,0 +1,126 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:core="clr-namespace:Aurelia.Desktop.Core;assembly=Aurelia.Desktop.Core"
+             xmlns:controls="clr-namespace:Aurelia.Desktop.Controls"
+             x:Class="Aurelia.Desktop.Views.PlayerView"
+             x:DataType="core:PlayerModel"
+             Background="Black" Focusable="True"
+             KeyDown="KeyPressed" PointerMoved="PointerActivity" PointerPressed="PointerPressedActivity">
+  <Panel>
+    <controls:VideoSurface x:Name="Surface" />
+
+    <!-- Black with a turning ring until the picture moves; reconnecting still explains itself. -->
+    <Panel x:Name="StartScreen" Background="Black" IsVisible="{Binding IsStarting}">
+      <StackPanel Spacing="22" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Panel Width="46" Height="46">
+          <Ellipse Stroke="#1FFFFFFF" StrokeThickness="3" />
+          <Arc Classes="spinner" StartAngle="-90" SweepAngle="110" Stroke="White" StrokeThickness="3" StrokeLineCap="Round" />
+        </Panel>
+        <TextBlock Text="{Binding Message}" IsVisible="{Binding Message, Converter={x:Static ObjectConverters.IsNotNull}}"
+                   Foreground="#B3FFFFFF" HorizontalAlignment="Center" />
+      </StackPanel>
+    </Panel>
+
+    <!-- Controls fade away while playing and come back with the pointer or a key. -->
+    <Panel x:Name="Overlay">
+      <Border IsHitTestVisible="False">
+        <Border.Background>
+          <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+            <GradientStop Color="#99000000" Offset="0" />
+            <GradientStop Color="#00000000" Offset="0.25" />
+            <GradientStop Color="#00000000" Offset="0.6" />
+            <GradientStop Color="#D9000000" Offset="1" />
+          </LinearGradientBrush>
+        </Border.Background>
+      </Border>
+
+      <!-- Top: back, title and menus -->
+      <Grid ColumnDefinitions="Auto,*,Auto" Margin="24,20,24,0" VerticalAlignment="Top">
+        <Button x:Name="BackButton" Classes="round" Content="‹" Click="Back" ToolTip.Tip="Back (Esc)" />
+        <StackPanel Grid.Column="1" Margin="16,0" VerticalAlignment="Center">
+          <TextBlock x:Name="PlayerTitle" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding Subtitle}" Foreground="#B3FFFFFF" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+          <Button Classes="pill" Content="{Binding RateLabel}" Click="ShowRateMenu" ToolTip.Tip="Playback Speed" />
+          <Button Classes="pill" Content="Audio" Click="ShowAudioMenu" ToolTip.Tip="Audio and Night Mode" />
+          <Button Classes="pill" Content="Subtitles" Click="ShowSubtitleMenu" ToolTip.Tip="Subtitles" />
+          <Button Classes="pill" Content="Sleep" Click="ShowSleepMenu" ToolTip.Tip="Sleep Timer" />
+        </StackPanel>
+      </Grid>
+
+      <!-- Centre: skip back, play/pause, skip forward -->
+      <StackPanel x:Name="Transport" Orientation="Horizontal" Spacing="18" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  IsVisible="{Binding !IsStarting}">
+        <Button Classes="round" Content="↺" Click="SkipBack" ToolTip.Tip="Back 10 Seconds (←)" />
+        <Button x:Name="PlayPauseButton" Classes="play" Click="TogglePlay" ToolTip.Tip="Play or Pause (Space)">
+          <TextBlock x:Name="PlayPauseGlyph" Text="❚❚" FontSize="20" FontWeight="Bold" />
+        </Button>
+        <Button Classes="round" Content="↻" Click="SkipForward" ToolTip.Tip="Forward 10 Seconds (→)" />
+      </StackPanel>
+
+      <!-- Bottom: timeline with preview, times, volume and fullscreen -->
+      <StackPanel x:Name="BottomBar" Spacing="6" Margin="32,0,32,26" VerticalAlignment="Bottom" IsVisible="{Binding !IsStarting}">
+        <Panel>
+          <Slider x:Name="Timeline" Classes="timeline" Minimum="0" Maximum="1"
+                  PointerMoved="TimelineHover" PointerExited="TimelineLeft" />
+          <Canvas x:Name="PreviewLayer" IsHitTestVisible="False" ClipToBounds="False">
+            <Border x:Name="PreviewBubble" IsVisible="False" Background="#E6000000" CornerRadius="10" Padding="6"
+                    BorderBrush="#59FFFFFF" BorderThickness="1">
+              <StackPanel Spacing="6">
+                <Panel Width="192" Height="108" Background="Black">
+                  <Image x:Name="PreviewImage" Stretch="Uniform" />
+                </Panel>
+                <TextBlock x:Name="PreviewTime" HorizontalAlignment="Center" FontWeight="SemiBold" />
+              </StackPanel>
+            </Border>
+          </Canvas>
+        </Panel>
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+          <TextBlock x:Name="PositionText" Text="{Binding PositionLabel}" FontFeatures="tnum" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" Text="{Binding EndsAtLabel}" Foreground="#99FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="2" Text="{Binding DurationLabel}" FontFeatures="tnum" VerticalAlignment="Center" Margin="0,0,18,0" />
+          <Button Grid.Column="3" Classes="pill" Content="{Binding MuteLabel}"
+                  Click="ToggleMute" ToolTip.Tip="Mute (M)" />
+          <Slider Grid.Column="4" x:Name="VolumeSlider" Minimum="0" Maximum="125" Width="120" Margin="10,0" />
+          <Button Grid.Column="5" Classes="pill" Content="Full Screen" Click="ToggleFullScreen" ToolTip.Tip="Full Screen (F)" />
+        </Grid>
+      </StackPanel>
+    </Panel>
+
+    <!-- Up Next in the title's last seconds -->
+    <Border x:Name="UpNextCard" IsVisible="{Binding HasUpNext}" Background="#E6202326" CornerRadius="18" Padding="18"
+            Width="340" Margin="0,0,32,140" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="eyebrow" Text="UP NEXT" />
+        <TextBlock x:Name="UpNextTitle" Text="{Binding UpNext.Title, FallbackValue=''}" FontSize="17" FontWeight="SemiBold"
+                   TextWrapping="Wrap" MaxLines="2" />
+        <TextBlock Classes="caption" Text="{Binding UpNext.Subtitle, FallbackValue=''}" />
+        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
+          <Button x:Name="PlayNextButton" Classes="primary" Click="PlayNext">
+            <TextBlock Text="{Binding UpNext.Seconds, FallbackValue=0, StringFormat='▶  Play Now · {0}'}" />
+          </Button>
+          <Button Classes="secondary" Content="Cancel" Click="DismissUpNext" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- A message that stays out of the way -->
+    <Border IsVisible="{Binding Message, Converter={x:Static ObjectConverters.IsNotNull}}" Background="#CC000000" CornerRadius="12"
+            Padding="14,8" Margin="0,84,0,0" HorizontalAlignment="Center" VerticalAlignment="Top">
+      <TextBlock Text="{Binding Message}" />
+    </Border>
+
+    <!-- When playback cannot continue -->
+    <Border x:Name="ErrorPanel" IsVisible="{Binding HasError}" Background="#F0202326" CornerRadius="18" Padding="28,24"
+            MaxWidth="520" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <StackPanel Spacing="16">
+        <TextBlock x:Name="ErrorText" Text="{Binding Error}" TextWrapping="Wrap" FontSize="16" />
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <Button Classes="primary" Content="Try Again" Click="Retry" />
+          <Button Classes="secondary" Content="Back to Library" Click="Back" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </Panel>
+</UserControl>

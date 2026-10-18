@@ -3,7 +3,7 @@
 - The desktop client is named **Aurelia** and targets Windows 10/11 on x64 and ARM64 first,
   Linux later. It is a separate product with its own version and build counter in
   `clients/desktop/Directory.Build.props` (`Version`, `AureliaDesktopBuildNumber`). The
-  approved version is **0.0.2**, build **2** (server connection). Confirm versions with the
+  approved version is **0.0.3**, build **3** (library and player). Confirm versions with the
   user before changing them.
 - It uses C# and Avalonia; package versions are pinned in the root
   `Directory.Packages.props`. Its tests use xUnit v3 (required by Avalonia's headless
@@ -17,6 +17,13 @@
   `Aurelia.Contracts`; the Avalonia app only presents it. Credentials go to Windows DPAPI
   (current user) or, on macOS/Linux development builds, a private file in the app's own
   data folder (`Aurelia Desktop` on macOS), never the Mac app's keychain or data.
+- Playback uses VLC through LibVLCSharp. Each build carries only its own VLC (Windows x64
+  or ARM64, or the Mac's for development). VLC decodes into memory and the picture is drawn by
+  Avalonia, so controls sit on top of it everywhere. VLC reads streams through
+  `LoopbackStreamRelay` on 127.0.0.1; it never talks to the server directly. Never call VLC
+  from its own event threads; `VlcVideoEngine` passes events on from the thread pool.
+- Timeline previews follow the Mac rule: decoded live, kept only in memory, discarded with the
+  title, read through a relay that marks them as previews.
 - Verify with `scripts/test-desktop.sh` (headless; no window takes over the screen). Its
   end-to-end tests start the real server from the build output with synthetic accounts, a
   test TLS identity, loopback-only HTTPS and no Bonjour. Build with

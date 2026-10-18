@@ -3,6 +3,7 @@
         xmlns:core="clr-namespace:Aurelia.Desktop.Core;assembly=Aurelia.Desktop.Core"
         xmlns:contracts="clr-namespace:Aurelia.Contracts;assembly=Aurelia.Contracts"
         xmlns:design="clr-namespace:Aurelia.Desktop.Design"
+        xmlns:views="clr-namespace:Aurelia.Desktop.Views"
         x:Class="Aurelia.Desktop.Views.MainWindow"
         x:DataType="core:ConnectionFlow"
         Title="Aurelia"
@@ -127,31 +128,8 @@
       </Border>
     </Grid>
 
-    <!-- With a profile open: the library shell. The library itself arrives in the next version. -->
-    <Grid x:Name="LibraryShell" ColumnDefinitions="232,*" IsVisible="{Binding ShowsLibrary}">
-      <Border Grid.Column="0" Background="{StaticResource AureliaSidebar}"
-              BorderBrush="{StaticResource AureliaHairline}" BorderThickness="0,0,1,0">
-        <DockPanel Margin="14,22,14,18">
-          <TextBlock DockPanel.Dock="Top" Text="Aurelia" FontSize="22" FontWeight="Bold" Margin="12,0,0,22" />
-          <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="12,0,0,0">
-            <TextBlock Text="{Binding SignedInName}" FontWeight="SemiBold" />
-            <Button Classes="link" Content="Switch Profile" Click="SwitchProfile" />
-            <TextBlock x:Name="VersionLabel" FontSize="11" Foreground="{StaticResource AureliaSecondaryText}" />
-          </StackPanel>
-          <ListBox x:Name="Navigation" Classes="sidebar" SelectedIndex="0">
-            <ListBoxItem Content="Home" />
-            <ListBoxItem Content="Movies" />
-            <ListBoxItem Content="TV Shows" />
-            <ListBoxItem Content="Search" />
-          </ListBox>
-        </DockPanel>
-      </Border>
-      <StackPanel Grid.Column="1" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
-        <TextBlock x:Name="WelcomeTitle" Classes="title" Text="{Binding SignedInName, StringFormat='Welcome, {0}'}"
-                   HorizontalAlignment="Center" />
-        <TextBlock Classes="secondary" TextAlignment="Center"
-                   Text="This computer is connected. Your movies and shows arrive in the next version." />
-      </StackPanel>
-    </Grid>
+    <!-- With a profile open: the library, and the player over it while something plays. -->
+    <views:LibraryView x:Name="Library" IsVisible="False" />
+    <views:PlayerView x:Name="Player" IsVisible="False" />
   </Panel>
 </Window>

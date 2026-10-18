@@ -6,17 +6,38 @@
     <Product>Aurelia</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Video frames are copied row by row from VLC's memory. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="LibVLCSharp" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" />
+    <PackageReference Include="VideoLAN.LibVLC.Mac" />
   </ItemGroup>
+  <!-- Each build carries only its own VLC: Windows x64 or ARM64, or this Mac's for development. -->
+  <PropertyGroup>
+    <VlcWindowsX86Enabled>false</VlcWindowsX86Enabled>
+    <VlcWindowsX64Enabled Condition="'$(RuntimeIdentifier)' != 'win-x64' And !('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Windows')))">false</VlcWindowsX64Enabled>
+    <VlcWindowsArm64Enabled Condition="'$(RuntimeIdentifier)' != 'win-arm64' And !('$(RuntimeIdentifier)' == '' And $([MSBuild]::IsOSPlatform('Windows')))">false</VlcWindowsArm64Enabled>
+    <VlcMacEnabled Condition="$(RuntimeIdentifier.StartsWith('win')) Or $(RuntimeIdentifier.StartsWith('linux'))">false</VlcMacEnabled>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Aurelia.Desktop.Core/Aurelia.Desktop.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Aurelia.Desktop.Tests" />
   </ItemGroup>
+  <!-- VLC loads its modules from the libvlc folder beside the app, so it stays out of the single-file bundle. -->
+  <Target Name="AureliaKeepVlcBesideTheApp" AfterTargets="CollectVlcFilesToCopyWindows" BeforeTargets="PrepareForPublish">
+    <ItemGroup>
+      <Content Condition="'%(Content.Link)' != '' And $([System.String]::Copy('%(Content.Link)').StartsWith('libvlc'))">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+    </ItemGroup>
+  </Target>
 </Project>

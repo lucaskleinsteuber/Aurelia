@@ -123,7 +123,7 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
     }
 
     /// <summary>One long-lived client per trusted server, so connections and TLS handshakes are reused.</summary>
-    private HttpClient Pinned(Uri address, string fingerprint)
+    internal HttpClient Pinned(Uri address, string fingerprint)
     {
         if (!ServerAddress.IsValid(address) || !ServerIdentity.IsValidFingerprint(fingerprint))
             throw AureliaApiException.IdentityMismatch();
@@ -140,7 +140,8 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
         }
     }
 
-    private static HttpClient CreateClient(Uri address, string? expectedFingerprint, CapturedFingerprint? captured)
+    internal static HttpClient CreateClient(Uri address, string? expectedFingerprint, CapturedFingerprint? captured,
+        TimeSpan? timeout = null)
     {
         var handler = new SocketsHttpHandler
         {
@@ -160,10 +161,10 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
             captured?.Set(fingerprint);
             return expectedFingerprint is null || ServerIdentity.Matches(expectedFingerprint, fingerprint);
         };
-        return new HttpClient(handler) { BaseAddress = address, Timeout = TimeSpan.FromSeconds(20) };
+        return new HttpClient(handler) { BaseAddress = address, Timeout = timeout ?? TimeSpan.FromSeconds(20) };
     }
 
-    private static async Task<T> SendAsync<T>(HttpClient client, HttpMethod method, string path, string? token, object? body,
+    internal static async Task<T> SendAsync<T>(HttpClient client, HttpMethod method, string path, string? token, object? body,
         bool inspecting, CancellationToken cancellation)
     {
         using var request = new HttpRequestMessage(method, path);
@@ -193,6 +194,7 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
         {
             if (!response.IsSuccessStatusCode) throw await ProblemAsync(response, cancellation);
             if (typeof(T) == typeof(NoContent)) return default!;
+            if (typeof(T) == typeof(byte[])) return (T)(object)await response.Content.ReadAsByteArrayAsync(cancellation);
             try
             {
                 return await response.Content.ReadFromJsonAsync<T>(Json, cancellation) ?? throw AureliaApiException.InvalidResponse();
@@ -239,14 +241,14 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
     private static bool IsValidSecret(string? value) =>
         value is { Length: >= 32 and <= 256 } && !value.Any(char.IsWhiteSpace);
 
-    private sealed class CapturedFingerprint
+    internal sealed class CapturedFingerprint
     {
         private string? value;
         public string? Value => Volatile.Read(ref value);
         public void Set(string fingerprint) => Volatile.Write(ref value, fingerprint);
     }
 
-    private sealed record NoContent;
+    internal sealed record NoContent;
 }
 
 /// <summary>Profile PINs are four to eight digits on every Aurelia client.</summary>

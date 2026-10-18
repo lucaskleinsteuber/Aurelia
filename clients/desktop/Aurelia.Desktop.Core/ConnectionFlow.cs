@@ -51,6 +51,8 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
     public IReadOnlyList<WatchingProfile> Profiles { get; private set => Set(ref field, value); } = [];
     public WatchingProfile? SelectedProfile { get; private set => Set(ref field, value, nameof(SelectedProfile), [nameof(PinPrompt)]); }
     public ProfileSessionResponse? Session { get; private set => Set(ref field, value, nameof(Session), [nameof(SignedInName)]); }
+    /// <summary>The paired server, once there is one.</summary>
+    public StoredConnection? Connection => connection;
     public string SignedInName => Session?.User.Username ?? "";
     public string PinPrompt => SelectedProfile is null ? "" : $"Enter the PIN for {SelectedProfile.Name}";
 
