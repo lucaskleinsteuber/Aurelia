@@ -262,6 +262,12 @@ final class AppModel: ObservableObject {
   var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true && managementUnlocked }
   /// Finds intros and credits in the background on administrators' Macs.
   let segmentAnalyzer = MediaSegmentAnalyzer()
+  /// Detection needs an owner or administrator profile, not the Server Password: the server
+  /// accepts the times from such a profile, and management unlocks expire.
+  var canDetectSegments: Bool {
+    profile?.user?.role.canManageLibraries == true
+      && (!usesProfileSelection || profile?.isViewingSession == true)
+  }
   static let segmentAnalysisKey = "AureliaDetectIntrosAndCredits"
   var canManageStorage: Bool {
     canManageMedia
@@ -1469,7 +1475,7 @@ final class AppModel: ObservableObject {
   func updateSegmentAnalysis() {
     guard !Self.isTestProcess, !NativePreflightIsolation.isRequested,
       ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil,
-      let profile, canManageMedia, libraryCapabilities.contains("media-segments-v1"),
+      let profile, canDetectSegments, libraryCapabilities.contains("media-segments-v1"),
       UserDefaults.standard.object(forKey: Self.segmentAnalysisKey) as? Bool ?? true
     else {
       segmentAnalyzer.stop()

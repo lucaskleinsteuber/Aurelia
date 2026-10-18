@@ -217,7 +217,7 @@ struct AppSettingsView: View {
           isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
         )
         .accessibilityIdentifier("playback-prevent-sleep")
-        if model.canManageMedia {
+        if model.canDetectSegments {
           IntroDetectionSetting(analyzer: model.segmentAnalyzer) { model.updateSegmentAnalysis() }
         }
         Divider()
