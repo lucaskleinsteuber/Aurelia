@@ -256,7 +256,13 @@ struct MediaDetailView: View {
     return episodes(in: detail).first?.item
   }
 
+  /// The player's start screen shows this page's hero artwork.
+  private func rememberHeroArtwork() {
+    model.rememberHeroArtwork(shownDetail.flatMap(AppModel.heroArtwork), for: mediaId)
+  }
+
   private func playPrimary(_ detail: CatalogDetailPresentation) {
+    rememberHeroArtwork()
     if model.supportsLibraryState {
       requestPlannedPlayback(mediaId: detail.item.id)
     } else if detail.item.kind == .movie {
@@ -274,6 +280,7 @@ struct MediaDetailView: View {
     seriesTitle: String,
     allEpisodes: [EpisodePresentation]
   ) {
+    rememberHeroArtwork()
     if model.supportsLibraryState {
       requestPlannedPlayback(mediaId: episode.id)
       return
@@ -298,6 +305,7 @@ struct MediaDetailView: View {
 
   private func requestPlannedPlayback(mediaId: UUID) {
     guard !isStartingPlayback else { return }
+    rememberHeroArtwork()
     isStartingPlayback = true
     let profile = model.profile
     playbackTask = Task {

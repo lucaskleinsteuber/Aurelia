@@ -124,6 +124,8 @@ final class AppModel: ObservableObject {
   }
   /// Details prepared while the pointer rested on a title; valid for one session and revision.
   private var preparedDetails: [UUID: PreparedDetail] = [:]
+  /// Hero artwork of detail pages played from in this session, for the player's start screen.
+  private var heroArtworkByTitle: [UUID: ArtworkSummary] = [:]
   private var detailPreparations: [UUID: Task<Void, Never>] = [:]
   private static let preparedDetailLifetime: TimeInterval = 30
   private var hasStarted = false
@@ -1734,6 +1736,28 @@ final class AppModel: ObservableObject {
     detail.metadata.backdrop ?? detail.metadata.still ?? detail.item.backdrop
   }
 
+  func rememberHeroArtwork(_ artwork: ArtworkSummary?, for id: UUID) {
+    guard let artwork else { return }
+    if heroArtworkByTitle.count >= 200 { heroArtworkByTitle.removeAll() }
+    heroArtworkByTitle[id] = artwork
+  }
+
+  /// The backdrop for the player's start screen: the title's own, else its series'.
+  func playbackArtwork(for presentation: PlaybackPresentation) -> ArtworkSummary? {
+    for id in [presentation.mediaId, presentation.trackScope].compactMap({ $0 }) {
+      if let artwork = heroArtworkByTitle[id] { return artwork }
+      if let entry = preparedDetails[id], entry.sessionID == profile?.sessionId,
+        let artwork = Self.heroArtwork(entry.detail)
+      {
+        return artwork
+      }
+      if let artwork = listedItem(id: id)?.backdrop { return artwork }
+    }
+    // A poster still beats a black screen; the start screen dims and softens it.
+    return [presentation.mediaId, presentation.trackScope].compactMap { $0 }.lazy
+      .compactMap { self.listedItem(id: $0)?.poster }.first
+  }
+
   /// Starts loading hero artwork at the widest prepared size, which serves every window size.
   func prefetchHeroArtwork(_ artwork: ArtworkSummary) {
     guard let profile else { return }
@@ -2390,6 +2414,7 @@ final class AppModel: ObservableObject {
     for preparation in detailPreparations.values { preparation.cancel() }
     detailPreparations.removeAll()
     preparedDetails.removeAll()
+    heroArtworkByTitle.removeAll()
     movies = []
     series = []
     catalogItems = []

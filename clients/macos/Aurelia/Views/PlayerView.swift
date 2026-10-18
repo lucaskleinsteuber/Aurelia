@@ -60,6 +60,20 @@ struct PlayerView: View {
         )
         .frame(width: viewport.width, height: viewport.height)
 
+        if startScreenVisible {
+          PlayerStartScreen(
+            title: controller.presentation.title,
+            subtitle: controller.presentation.subtitle,
+            artwork: model.playbackArtwork(for: controller.presentation),
+            resumeLabel: controller.startResumeMilliseconds > 0
+              ? "Resuming at \(formatTime(Double(controller.startResumeMilliseconds)))" : nil,
+            reduceMotion: reduceMotion
+          )
+          .frame(width: viewport.width, height: viewport.height)
+          .transition(.opacity)
+          .id(controller.presentation.mediaId)
+        }
+
         if controlsVisible || controller.isPreparing || controller.errorMessage != nil {
           controls(in: viewport)
             .frame(width: viewport.width, height: viewport.height)
@@ -91,6 +105,7 @@ struct PlayerView: View {
           .accessibilityIdentifier("native-player")
       }
       .frame(width: viewport.width, height: viewport.height)
+      .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: startScreenVisible)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .ignoresSafeArea()
@@ -230,12 +245,14 @@ struct PlayerView: View {
       .frame(width: viewport.width - 36, height: 52)
       .position(x: viewport.width / 2, y: topInset + 26)
 
-      bottomControls
-        .frame(width: controlWidth, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .position(
-          x: viewport.width / 2,
-          y: viewport.height - bottomInset - 56)
+      if !startScreenVisible {
+        bottomControls
+          .frame(width: controlWidth, alignment: .leading)
+          .fixedSize(horizontal: false, vertical: true)
+          .position(
+            x: viewport.width / 2,
+            y: viewport.height - bottomInset - 56)
+      }
 
       if let message = controller.progressMessage {
         HStack(spacing: 10) {
@@ -280,7 +297,10 @@ struct PlayerView: View {
         .position(x: viewport.width / 2, y: viewport.height / 2)
       }
 
-      if controller.isPreparing, controller.errorMessage == nil {
+      // The start screen has its own indicator; reconnecting still explains itself here.
+      if controller.isPreparing, controller.errorMessage == nil,
+        !startScreenVisible || controller.recoveryMessage != nil
+      {
         VStack(spacing: 12) {
           ProgressView(controller.recoveryMessage ?? "Preparing playback…")
             .controlSize(.large)
@@ -642,6 +662,10 @@ struct PlayerView: View {
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
     .accessibilityLabel(title)
+  }
+
+  private var startScreenVisible: Bool {
+    controller.showsStartScreen && controller.errorMessage == nil
   }
 
   /// Previews belong to the open title; the next one discards them from memory.

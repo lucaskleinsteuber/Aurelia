@@ -65,6 +65,69 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertEqual(client.updates.last?.position, 45_000)
   }
 
+  private func resumingController(engine: FakePlaybackEngine) -> PlaybackController {
+    let mediaID = UUID()
+    let source = PlaybackSourceResponse(
+      id: UUID(), mediaId: mediaID, streamPath: "/api/v1/streams/test-ticket",
+      contentType: "video/mp4", contentLength: 4_096, expiresAt: "2099-01-01T12:00:00Z",
+      progress: PlaybackProgressResponse(
+        mediaId: mediaID, positionMilliseconds: 30_000, durationMilliseconds: 120_000,
+        isCompleted: false, lastPlayedAt: nil, updatedAt: nil))
+    let relay = FakePlaybackRelay()
+    return PlaybackController(
+      client: FakePlaybackClient(source: source),
+      presentation: PlaybackPresentation(mediaId: mediaID, title: "Pilot", subtitle: nil),
+      engine: engine,
+      relayFactory: { _, _ in relay })
+  }
+
+  func testResumeOpensAtThePositionAndKeepsTheStartScreenUntilThePictureMoves() async {
+    let engine = FakePlaybackEngine()
+    engine.opensAtStartPosition = true
+    let controller = resumingController(engine: engine)
+    XCTAssertTrue(controller.showsStartScreen)
+
+    await controller.start()
+    XCTAssertEqual(engine.startPositions, [30_000])
+    XCTAssertEqual(controller.startResumeMilliseconds, 30_000)
+    // The title is known but its clock has not arrived yet: no seek back to the beginning.
+    engine.onUpdate?()
+    engine.currentTimeMilliseconds = 30_040
+    engine.onUpdate?()
+    XCTAssertTrue(engine.seekTargets.isEmpty)
+    XCTAssertTrue(controller.showsStartScreen)
+
+    engine.currentTimeMilliseconds = 30_600
+    engine.onUpdate?()
+    XCTAssertFalse(controller.showsStartScreen)
+    XCTAssertEqual(controller.currentTimeMilliseconds, 30_600)
+    await controller.shutdown()
+  }
+
+  func testAContainerThatIgnoresTheStartPositionStillResumes() async {
+    let engine = FakePlaybackEngine()
+    engine.opensAtStartPosition = true
+    let controller = resumingController(engine: engine)
+    await controller.start()
+    // The clock starts at the beginning instead of the resume position.
+    engine.currentTimeMilliseconds = 400
+    engine.onUpdate?()
+    XCTAssertEqual(engine.seekTargets, [30_000])
+    XCTAssertEqual(controller.currentTimeMilliseconds, 30_000)
+    await controller.shutdown()
+  }
+
+  func testEnginesWithoutAStartPositionSeekAsBefore() async {
+    let engine = FakePlaybackEngine()
+    let controller = resumingController(engine: engine)
+    await controller.start()
+    XCTAssertEqual(engine.seekTargets, [30_000])
+    controller.pause()
+    // Pausing before the picture moves shows the paused player instead of the start screen.
+    XCTAssertFalse(controller.showsStartScreen)
+    await controller.shutdown()
+  }
+
   func testPreviewsUseTheirOwnRelayThatCannotFailPlayback() async throws {
     let mediaID = UUID()
     let source = PlaybackSourceResponse(
@@ -708,8 +771,15 @@ final class FakePlaybackEngine: PlaybackEngine {
   var deferPauseStateChange = false
   var deferSeekStateChange = false
   private(set) var pendingSeekTarget: Int64?
+  var opensAtStartPosition = false
+  private(set) var startPositions: [Int64] = []
+  private(set) var seekTargets: [Int64] = []
 
   func attach(to view: NSView) {}
+  func load(url: URL, startAt milliseconds: Int64) {
+    startPositions.append(milliseconds)
+    load(url: url)
+  }
   func load(url: URL) {
     loadedURL = url
     loadedScopes.append(trackScope)
@@ -743,6 +813,7 @@ final class FakePlaybackEngine: PlaybackEngine {
     pendingSeekTarget = nil
   }
   func seek(to milliseconds: Int64) {
+    seekTargets.append(milliseconds)
     if deferSeekStateChange {
       pendingSeekTarget = milliseconds
       return

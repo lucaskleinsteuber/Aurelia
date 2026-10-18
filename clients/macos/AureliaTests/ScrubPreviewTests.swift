@@ -125,7 +125,7 @@ struct ScrubPreviewTests {
   }
 
   /// One gray frame per second, each a key frame, so every position decodes exactly.
-  private static func writeVideo(levels: [UInt8], secondsPerLevel: Int, to url: URL) async throws {
+  static func writeVideo(levels: [UInt8], secondsPerLevel: Int, to url: URL) async throws {
     let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
     let input = AVAssetWriterInput(
       mediaType: .video,

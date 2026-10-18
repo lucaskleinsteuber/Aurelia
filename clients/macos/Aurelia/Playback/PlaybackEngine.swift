@@ -118,6 +118,11 @@ protocol PlaybackEngine: AnyObject {
 
   func attach(to view: NSView)
   func load(url: URL)
+  /// Opens `url` directly at `milliseconds`, where the engine can, instead of starting at the
+  /// beginning and seeking once the title is known.
+  func load(url: URL, startAt milliseconds: Int64)
+  /// Whether `load(url:startAt:)` can open at the position; otherwise the caller seeks.
+  var opensAtStartPosition: Bool { get }
   func play()
   func pause()
   func stop()
@@ -128,6 +133,9 @@ protocol PlaybackEngine: AnyObject {
 }
 
 extension PlaybackEngine {
+  func load(url: URL, startAt milliseconds: Int64) { load(url: url) }
+  var opensAtStartPosition: Bool { false }
+
   var trackScope: UUID? {
     get { nil }
     set {}
@@ -138,7 +146,8 @@ extension PlaybackEngine {
 final class VLCPlaybackEngine: PlaybackEngine {
   static let defaultPlayerOptions = [
     "--no-video-title-show",
-    // Half a second of prebuffering after a seek, as on the Apple TV.
+    // Half a second of prebuffering after a seek, as on the Apple TV. A server on this Mac
+    // needs less; see `networkCachingMilliseconds`.
     "--network-caching=500",
     "--no-metadata-network-access",
     // VLCKit's macOS defaults pause at EOF, suppressing the completion
@@ -191,6 +200,10 @@ final class VLCPlaybackEngine: PlaybackEngine {
   private var requestedMuted = false
   private var requestedRate: Double = 1
   var trackScope: UUID?
+  /// Prebuffering before the picture starts and after a seek. The local relay reads a server
+  /// on this Mac fast enough for 300 ms; remote servers keep the default 500 ms.
+  var networkCachingMilliseconds: Int?
+  var opensAtStartPosition: Bool { true }
 
   init(
     playerFactory: @escaping @MainActor () -> VLCMediaPlayer = {
@@ -335,6 +348,10 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   func load(url: URL) {
+    load(url: url, startAt: 0)
+  }
+
+  func load(url: URL, startAt milliseconds: Int64) {
     retireCurrentPlayer()
     // A separate player prevents delayed terminal events from a previous input
     // from being interpreted as the end of a retry or the next episode.
@@ -348,6 +365,13 @@ final class VLCPlaybackEngine: PlaybackEngine {
     observeCurrentPlayer()
     let media = VLCMedia(url: url)
     media.addOption(":http-reconnect")
+    if let networkCachingMilliseconds {
+      media.addOption(":network-caching=\(networkCachingMilliseconds)")
+    }
+    if milliseconds > 0 {
+      // Opening at the resume position avoids buffering the beginning only to seek away.
+      media.addOption(":start-time=\(String(format: "%.3f", Double(milliseconds) / 1_000))")
+    }
     player.media = media
     volume = requestedVolume
     isMuted = requestedMuted

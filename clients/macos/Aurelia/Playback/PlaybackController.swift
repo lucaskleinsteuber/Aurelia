@@ -118,6 +118,11 @@ enum PlaybackSleepTimer: Equatable, Sendable {
 @MainActor
 final class PlaybackController: ObservableObject {
   @Published private(set) var isPreparing = true
+  /// The start screen covers the player from Play until the picture moves, for the first title
+  /// and each next episode; pausing, an error or closing ends it.
+  @Published private(set) var showsStartScreen = true
+  /// Where the title being started resumes, for the start screen.
+  @Published private(set) var startResumeMilliseconds: Int64 = 0
   @Published private(set) var isPlaying = false
   @Published private(set) var currentTimeMilliseconds: Int64 = 0
   @Published private(set) var navigationRevision: UInt64 = 0
@@ -167,6 +172,8 @@ final class PlaybackController: ObservableObject {
   private var authorizationFailed = false
   private var terminalFailure = false
   private var appliedResumePosition = false
+  /// The engine was asked to open at the resume position, so it usually needs no seek.
+  private var openedAtResume = false
   private var resumePositionMilliseconds: Int64 = 0
   private var lastPeriodicSave = Date.distantPast
   private var queuedItems: [PlaybackQueueItem]
@@ -219,6 +226,9 @@ final class PlaybackController: ObservableObject {
     preferences: PlaybackPreferences = PlaybackPreferencesStore.shared.preferences
   ) {
     self.client = APIPlaybackClient(profile: profile)
+    if let engine = engine as? VLCPlaybackEngine, Self.isLocalServer(profile.baseURL) {
+      engine.networkCachingMilliseconds = 300
+    }
     self.progressOutbox = .shared
     self.presentation = presentation
     self.engine = engine
@@ -488,6 +498,7 @@ final class PlaybackController: ObservableObject {
     wantsPlayback = false
     stableMovementStartedAt = nil
     applyPausedIntentIfNeeded()
+    showsStartScreen = false
     isPlaying = false
     if activePlayback != nil, !recovering { isPreparing = false }
     if activePlayback != nil, !recovering, nextItemTask == nil, incidentPausedAt == nil {
@@ -559,11 +570,18 @@ final class PlaybackController: ObservableObject {
     stableMovementStartedAt = nil
     lastMovementAt = recoveryClock()
     engine.trackScope = presentation.trackScope
-    engine.load(url: url)
+    engine.load(url: url, startAt: position)
+    openedAtResume = engine.opensAtStartPosition && position > 0
     engine.volume = volume
     engine.isMuted = isMuted
     engine.playbackRate = playbackRate
     if wantsPlayback { engine.play() }
+  }
+
+  /// A server on this Mac, reached over loopback.
+  static func isLocalServer(_ url: URL) -> Bool {
+    guard let host = url.host?.lowercased() else { return false }
+    return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]"
   }
 
   /// Starts the preview relay beside the playing one without delaying playback; previews simply
@@ -706,6 +724,7 @@ final class PlaybackController: ObservableObject {
     nextItemTask = nil
     endPlaybackActivity()
 
+    showsStartScreen = false
     // Stop reads immediately; a slow progress save must not leave the player
     // or an old recovery task running after its window has closed.
     relay?.stop()
@@ -798,7 +817,9 @@ final class PlaybackController: ObservableObject {
         trackScope: presentation.trackScope)
     }
     engine.trackScope = presentation.trackScope
-    engine.load(url: localURL)
+    engine.load(url: localURL, startAt: resumePositionMilliseconds)
+    openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
+    if showsStartScreen { startResumeMilliseconds = resumePositionMilliseconds }
     playbackURL = localURL
     startPreviewRelay(from: sourceURL)
     engine.volume = volume
@@ -843,9 +864,16 @@ final class PlaybackController: ObservableObject {
     if !wantsPlayback || !isPlaying { stableMovementStartedAt = nil }
 
     if !appliedResumePosition, durationMilliseconds > 0 {
-      appliedResumePosition = true
-      engine.seek(to: min(resumePositionMilliseconds, durationMilliseconds))
-      currentTimeMilliseconds = min(resumePositionMilliseconds, durationMilliseconds)
+      let target = min(resumePositionMilliseconds, durationMilliseconds)
+      let reported = engine.currentTimeMilliseconds
+      // An engine that opened at the resume position reports a clock near it; wait for that
+      // first clock. Some containers ignore the start position, so a clock far from it still
+      // seeks as before.
+      if !(openedAtResume && reported == 0) {
+        appliedResumePosition = true
+        if !(openedAtResume && abs(reported - target) <= 5_000) { engine.seek(to: target) }
+        currentTimeMilliseconds = target
+      }
     }
 
     // A native seek is asynchronous: a final old-clock callback can arrive
@@ -864,6 +892,7 @@ final class PlaybackController: ObservableObject {
       if wantsPlayback, isPlaying {
         if awaitingFirstMovement {
           awaitingFirstMovement = false
+          assignIfChanged(&showsStartScreen, false)
           if awaitingRecoveryMovement { record(.recovered, cause: recoveryCause, phase: .playback) }
           awaitingRecoveryMovement = false
         }
@@ -914,6 +943,7 @@ final class PlaybackController: ObservableObject {
     isPlaying = false
     currentTimeMilliseconds = duration
     durationMilliseconds = duration
+    showsStartScreen = false
     record(.ended)
     enqueueProgressSave(isFinished: true)
     guard sleepTimer != .endOfEpisode,
@@ -981,6 +1011,8 @@ final class PlaybackController: ObservableObject {
       queue: queuedItems,
       trackScope: presentation.trackScope)
     isPreparing = true
+    showsStartScreen = true
+    startResumeMilliseconds = 0
     incidentStartedAt = recoveryClock()
     incidentPausedAt = nil
     opaqueTicketRetryUsed = false
