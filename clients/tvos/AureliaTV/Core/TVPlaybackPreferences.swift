@@ -47,6 +47,8 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
   var preferredAudioTrack: TVPlaybackTrackPreference?
   // nil explicitly means Off, matching the default on the Mac.
   var preferredSubtitleTrack: TVPlaybackTrackPreference?
+  /// Softens loud scenes and lifts quiet dialogue.
+  var nightMode = false
 
   var normalized: Self {
     var value = self
@@ -66,7 +68,7 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case automaticResume, automaticallyPlayNextEpisode, defaultPlaybackRate, controlsDelay
-    case seekInterval, preferredAudioTrack, preferredSubtitleTrack
+    case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode
   }
 
   init(from decoder: Decoder) throws {
@@ -81,7 +83,26 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
       TVPlaybackTrackPreference.self, forKey: .preferredAudioTrack)
     preferredSubtitleTrack = try values.decodeIfPresent(
       TVPlaybackTrackPreference.self, forKey: .preferredSubtitleTrack)
+    nightMode = try values.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false
   }
+
+  /// These preferences with a series' own track choices, where it has them.
+  func applying(_ choice: TVSeriesTrackChoice?) -> Self {
+    guard let choice else { return self }
+    var value = self
+    if let audio = choice.audio { value.preferredAudioTrack = audio }
+    if choice.subtitleChosen { value.preferredSubtitleTrack = choice.subtitle }
+    return value
+  }
+}
+
+/// Audio and subtitle choices made in one series. `subtitleChosen` tells "subtitles off" apart
+/// from "never chosen here".
+struct TVSeriesTrackChoice: Codable, Equatable, Sendable {
+  var audio: TVPlaybackTrackPreference?
+  var subtitle: TVPlaybackTrackPreference?
+  var subtitleChosen = false
+  var updatedAt: Date
 }
 
 @MainActor
@@ -109,7 +130,48 @@ final class TVPlaybackPreferencesStore {
     return defaults.data(forKey: storageKey) == data
   }
 
+  /// The most recently used series are kept; older ones fall back to the profile's last choice.
+  static let seriesLimit = 200
+
+  func seriesChoice(seriesID: UUID, serverID: UUID, profileID: UUID) -> TVSeriesTrackChoice? {
+    seriesChoices(serverID: serverID, profileID: profileID)[seriesID.uuidString]
+  }
+
+  func updateSeriesChoice(
+    seriesID: UUID, serverID: UUID, profileID: UUID, _ change: (inout TVSeriesTrackChoice) -> Void
+  ) {
+    var choices = seriesChoices(serverID: serverID, profileID: profileID)
+    var choice = choices[seriesID.uuidString] ?? TVSeriesTrackChoice(updatedAt: Date())
+    change(&choice)
+    choice.updatedAt = Date()
+    choices[seriesID.uuidString] = choice
+    if choices.count > Self.seriesLimit {
+      for key in choices.sorted(by: { $0.value.updatedAt < $1.value.updatedAt })
+        .prefix(choices.count - Self.seriesLimit).map(\.key)
+      {
+        choices.removeValue(forKey: key)
+      }
+    }
+    if let data = try? JSONEncoder().encode(choices) {
+      defaults.set(data, forKey: seriesKey(serverID: serverID, profileID: profileID))
+    }
+  }
+
+  func forgetSeriesChoices(serverID: UUID, profileID: UUID) {
+    defaults.removeObject(forKey: seriesKey(serverID: serverID, profileID: profileID))
+  }
+
+  private func seriesChoices(serverID: UUID, profileID: UUID) -> [String: TVSeriesTrackChoice] {
+    defaults.data(forKey: seriesKey(serverID: serverID, profileID: profileID)).flatMap {
+      try? JSONDecoder().decode([String: TVSeriesTrackChoice].self, from: $0)
+    } ?? [:]
+  }
+
   private func key(serverID: UUID, profileID: UUID) -> String {
     "tv.playback.preferences.v1.\(serverID.uuidString).\(profileID.uuidString)"
+  }
+
+  private func seriesKey(serverID: UUID, profileID: UUID) -> String {
+    "tv.playback.seriesTracks.v1.\(serverID.uuidString).\(profileID.uuidString)"
   }
 }

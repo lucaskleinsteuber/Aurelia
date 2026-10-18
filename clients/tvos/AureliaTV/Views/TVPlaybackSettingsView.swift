@@ -26,6 +26,9 @@ struct TVPlaybackSettingsView: View {
             value: value.automaticallyPlayNextEpisode ? "On" : "Off",
             id: "settings-next"
           ) { value.automaticallyPlayNextEpisode.toggle() }
+          row("Night Mode", value: value.nightMode ? "On" : "Off", id: "settings-night-mode") {
+            value.nightMode.toggle()
+          }
           Spacer().frame(height: 18)
           row(
             "Default Playback Rate", value: String(format: "%gx", value.defaultPlaybackRate),
@@ -45,6 +48,10 @@ struct TVPlaybackSettingsView: View {
           row("Forget Audio & Subtitle Preferences", value: nil, id: "settings-forget-tracks") {
             value.preferredAudioTrack = nil
             value.preferredSubtitleTrack = nil
+            if let server = model.connection?.serverID, let profile = model.session?.user.id {
+              model.environment.preferences.forgetSeriesChoices(
+                serverID: server, profileID: profile)
+            }
           }
           row("Restore Playback Defaults", value: nil, id: "settings-defaults") {
             value = .defaultValue

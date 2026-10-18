@@ -64,7 +64,7 @@ final class TVVideoEngine: TVPlaybackEngine {
 
   func load(url: URL, resumeAt: Int64) {
     stop()
-    player = Self.makePlayer()
+    player = Self.makePlayer(nightMode: preferences.nightMode)
     player.drawable = videoView
     generation = UUID()
     acceptsEvents = true
@@ -263,9 +263,20 @@ final class TVVideoEngine: TVPlaybackEngine {
     }
   }
 
-  private static func makePlayer() -> VLCMediaPlayer {
-    VLCMediaPlayer(options: [
-      "--quiet", "--no-video-title-show", "--no-play-and-pause", "--no-metadata-network-access",
-    ])
+  /// Night mode compresses the soundtrack: peaks above -24 dB are reduced 4:1 and the result is
+  /// raised by 12 dB, so explosions stay calmer and quiet speech becomes easier to hear.
+  static let nightModeOptions = [
+    "--compressor-rms-peak=0.2", "--compressor-attack=15", "--compressor-release=300",
+    "--compressor-threshold=-24", "--compressor-ratio=4", "--compressor-knee=6",
+    "--compressor-makeup-gain=12",
+  ]
+
+  private static func makePlayer(nightMode: Bool = false) -> VLCMediaPlayer {
+    let player = VLCMediaPlayer(
+      options: [
+        "--quiet", "--no-video-title-show", "--no-play-and-pause", "--no-metadata-network-access",
+      ] + (nightMode ? nightModeOptions : []))
+    if nightMode { TVAudioFilter.enable("compressor", on: player, output: "audiounit_ios") }
+    return player
   }
 }

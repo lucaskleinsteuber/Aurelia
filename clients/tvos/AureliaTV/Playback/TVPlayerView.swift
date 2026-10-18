@@ -12,7 +12,7 @@ struct TVPlayerView: View {
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, retry,
-      closeMenu
+      closeMenu, nightMode
     case audioTrack(Int32)
     case subtitleTrack(Int32)
     case rateOption(Double)
@@ -245,6 +245,13 @@ struct TVPlayerView: View {
         HStack {
           Text(TVPlayerPolicy.timeLabel(milliseconds: controller.position))
           Spacer()
+          if let endsAt = TVPlayerPolicy.endTimeLabel(
+            position: controller.position, duration: controller.duration,
+            rate: controller.playbackRate, now: Date())
+          {
+            Text(endsAt).accessibilityIdentifier("player-ends-at")
+            Spacer()
+          }
           Text(TVPlayerPolicy.timeLabel(milliseconds: controller.duration))
         }.font(.system(size: 22).monospacedDigit()).foregroundStyle(.secondary)
       }.padding(.vertical, 16).contentShape(Rectangle())
@@ -312,6 +319,9 @@ struct TVPlayerView: View {
                     track.title, selected: controller.selectedAudio == track.id,
                     id: .audioTrack(track.id)
                   ) { controller.selectAudio(track.id) }.id(track.id)
+                }
+                option("Night Mode", selected: controller.nightMode, id: .nightMode) {
+                  controller.setNightMode(!controller.nightMode)
                 }
               case .subtitles:
                 option("Off", selected: controller.selectedSubtitle < 0, id: .subtitleTrack(-1)) {

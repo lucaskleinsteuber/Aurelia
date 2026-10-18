@@ -40,6 +40,19 @@ enum TVPlayerPolicy {
     playing && !menuOpen && !interacting && !loading && !hasError
   }
 
+  /// "Ends at 21:43": when the title finishes if it plays on from `position` at `rate`.
+  static func endTimeLabel(
+    position: Int64, duration: Int64, rate: Double, now: Date, locale: Locale = .current,
+    timeZone: TimeZone = .current
+  ) -> String? {
+    guard duration > 0, rate > 0 else { return nil }
+    let remaining = Double(max(0, duration - position)) / 1_000 / rate
+    var style = Date.FormatStyle(date: .omitted, time: .shortened)
+    style.locale = locale
+    style.timeZone = timeZone
+    return "Ends at \(now.addingTimeInterval(remaining).formatted(style))"
+  }
+
   static func timeLabel(milliseconds: Int64) -> String {
     let seconds = max(0, milliseconds) / 1_000
     return seconds >= 3_600

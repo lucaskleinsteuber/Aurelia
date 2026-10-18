@@ -68,7 +68,9 @@ struct TVHomeView: View {
               title: request.title, outbox: model.environment.outbox,
               api: model.makeClient(connection: connection, session: session),
               runtime: model.environment.makePlaybackRuntime(),
-              queue: request.queue, preferencesStore: model.environment.preferences,
+              queue: request.queue,
+              seriesID: request.target.kind == .episode ? request.target.parentId : nil,
+              preferencesStore: model.environment.preferences,
               onClose: { playback = nil },
               onSessionFailure: { failure in
                 guard model.session?.sessionId == session.sessionId else { return }

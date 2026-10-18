@@ -37,6 +37,8 @@ final class TVPlaybackController: ObservableObject {
   private let connection: TVStoredConnection
   private let session: TVProfileSession
   private var mediaID: UUID
+  /// The series whose episodes share audio and subtitle choices; nil for a movie.
+  private let seriesID: UUID?
   private var queue: [TVCatalogItem]
   private var preferences: TVPlaybackPreferences
   private let preferencesStore: TVPlaybackPreferencesStore
@@ -75,7 +77,8 @@ final class TVPlaybackController: ObservableObject {
     connection: TVStoredConnection, session: TVProfileSession, mediaID: UUID, title: String,
     outbox: TVProgressOutbox = .shared,
     api: TVAPIClient? = nil, runtime: TVPlaybackRuntime? = nil,
-    queue: [TVCatalogItem] = [], preferences: TVPlaybackPreferences? = nil,
+    queue: [TVCatalogItem] = [], seriesID: UUID? = nil,
+    preferences: TVPlaybackPreferences? = nil,
     preferencesStore: TVPlaybackPreferencesStore? = nil,
     onClose: @escaping @MainActor () -> Void,
     onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in },
@@ -84,6 +87,7 @@ final class TVPlaybackController: ObservableObject {
     self.connection = connection
     self.session = session
     self.mediaID = mediaID
+    self.seriesID = seriesID
     self.queue = queue
     let store = preferencesStore ?? .shared
     self.preferencesStore = store
@@ -101,7 +105,12 @@ final class TVPlaybackController: ObservableObject {
     self.runtime = selectedRuntime
     engine = selectedRuntime.engine
     playbackRate = self.preferences.defaultPlaybackRate
-    engine.applyPreferences(self.preferences)
+    engine.applyPreferences(
+      self.preferences.applying(
+        seriesID.flatMap {
+          store.seriesChoice(
+            seriesID: $0, serverID: connection.serverID, profileID: session.user.id)
+        }))
     scope = TVProgressScope(connection: connection, session: session)
     engine.onUpdate = { [weak self] in self?.updateFromEngine() }
     engine.onTerminal = { [weak self] terminal in self?.engineTerminated(terminal) }
@@ -198,6 +207,18 @@ final class TVPlaybackController: ObservableObject {
             preferences.preferredSubtitleTrack = preference
           }
           persistPreferences()
+          if let seriesID {
+            preferencesStore.updateSeriesChoice(
+              seriesID: seriesID, serverID: connection.serverID, profileID: session.user.id
+            ) { choice in
+              if audio {
+                choice.audio = preference
+              } else {
+                choice.subtitle = preference
+                choice.subtitleChosen = true
+              }
+            }
+          }
           return
         }
         if ContinuousClock.now >= deadline {
@@ -248,6 +269,29 @@ final class TVPlaybackController: ObservableObject {
       }
     }
     userInteracted()
+  }
+
+  var nightMode: Bool { preferences.nightMode }
+
+  /// The player's audio processing is fixed when a title opens, so night mode reconnects and
+  /// continues at the current position.
+  func setNightMode(_ enabled: Bool) {
+    guard !closed, preferences.nightMode != enabled else { return }
+    preferences.nightMode = enabled
+    persistPreferences()
+    trackMenu = nil
+    guard started, errorMessage == nil else { return }
+    recoveryBudget = TVPlaybackRecoveryBudget()
+    recover(message: enabled ? "Turning on Night Mode…" : "Turning off Night Mode…")
+  }
+
+  /// The profile's preferences with this series' own track choices.
+  private var effectivePreferences: TVPlaybackPreferences {
+    preferences.applying(
+      seriesID.flatMap {
+        preferencesStore.seriesChoice(
+          seriesID: $0, serverID: connection.serverID, profileID: session.user.id)
+      })
   }
 
   private func persistPreferences() {
@@ -389,7 +433,7 @@ final class TVPlaybackController: ObservableObject {
         progressMessage = "Progress changed on another device. Its newer position has been kept."
       }
       let desiredRate = playbackRate
-      engine.applyPreferences(preferences)
+      engine.applyPreferences(effectivePreferences)
       engine.playbackRate = desiredRate
       engine.load(url: localURL, resumeAt: resumeAt ?? resumePosition)
       startWatchdog(operation: operation)

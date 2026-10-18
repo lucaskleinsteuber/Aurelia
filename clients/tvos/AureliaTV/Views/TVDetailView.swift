@@ -118,7 +118,9 @@ struct TVDetailView: View {
                 outbox: model.environment.outbox,
                 api: model.makeClient(connection: connection, session: session),
                 runtime: model.environment.makePlaybackRuntime(),
-                queue: request.queue, preferencesStore: model.environment.preferences,
+                queue: request.queue,
+                seriesID: target.kind == .episode ? target.parentId : nil,
+                preferencesStore: model.environment.preferences,
                 onClose: { playing = nil },
                 onSessionFailure: { failure in
                   guard model.session?.sessionId == session.sessionId else { return }
