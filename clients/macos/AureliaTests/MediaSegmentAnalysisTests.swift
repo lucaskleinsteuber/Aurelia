@@ -165,6 +165,44 @@ struct SamplePipeTests {
     pipe.close()
     #expect(samples.count == 1_000)
   }
+
+  /// A pipe holds only a few kilobytes, so the reader must take data as soon as it arrives.
+  /// Waiting between reads once limited analysis to playback speed.
+  @Test(.timeLimit(.minutes(1))) func drainsFasterThanPlaybackOnABackgroundThread() async throws {
+    let pipe = try SamplePipe(limit: 1_000)
+    pipe.startReading()
+    let path = pipe.path
+    let start = ContinuousClock.now
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      DispatchQueue.global(qos: .utility).async {
+        let descriptor = open(path, O_WRONLY)
+        var header = [UInt8](repeating: 0, count: 44)
+        header.replaceSubrange(0..<4, with: Array("RIFF".utf8))
+        header.replaceSubrange(8..<16, with: Array("WAVEfmt ".utf8))
+        header[16] = 16
+        header.replaceSubrange(36..<40, with: Array("data".utf8))
+        _ = header.withUnsafeBytes { write(descriptor, $0.baseAddress, 44) }
+        // 16 MB is about 87 seconds of 48 kHz stereo audio.
+        let block = [UInt8](repeating: 1, count: 65_536)
+        for _ in 0..<256 {
+          _ = block.withUnsafeBytes { write(descriptor, $0.baseAddress, block.count) }
+        }
+        close(descriptor)
+        continuation.resume()
+      }
+    }
+    _ = await pipe.finish()
+    pipe.close()
+    #expect(ContinuousClock.now - start < .seconds(8))
+  }
+
+  @Test(.timeLimit(.minutes(1))) func endsWhenNoWriterEverConnects() async throws {
+    let pipe = try SamplePipe(limit: 1_000)
+    pipe.startReading()
+    let samples = await pipe.finish()
+    pipe.close()
+    #expect(samples.isEmpty)
+  }
 }
 
 /// Runs VLC's in-memory audio output on a synthetic file written for this test only.
@@ -277,15 +315,59 @@ struct VLCAudioSampleReaderTests {
 }
 
 /// Serves byte ranges of a synthetic payload, like the server's stream endpoint.
+/// The read-ahead must hand over exactly the requested bytes, also after a seek.
+struct RangedStreamInputTests {
+  @Test func returnsExactBytesAcrossChunksAndSeeks() throws {
+    let size = RangedStreamInput.chunkSize * 2 + 12_345
+    var state: UInt32 = 3
+    let data = Data(
+      (0..<size).map { _ in
+        state = state &* 1_103_515_245 &+ 12_345
+        return UInt8(truncatingIfNeeded: state >> 16)
+      })
+    RangedFileProtocol.bytePayload = data
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [RangedFileProtocol.self]
+    let input = RangedStreamInput(
+      url: URL(string: "https://bytes.invalid/api/v1/streams/ticket")!,
+      session: URLSession(configuration: configuration), token: nil, length: Int64(size))
+    input.open()
+    defer { input.close() }
+
+    func read(_ count: Int) -> Data {
+      var result = Data()
+      var chunk = [UInt8](repeating: 0, count: 100_000)
+      while result.count < count {
+        let got = input.read(&chunk, maxLength: min(chunk.count, count - result.count))
+        if got <= 0 { break }
+        result.append(contentsOf: chunk[0..<got])
+      }
+      return result
+    }
+    // Straight through the first chunk boundary, where the read-ahead takes over.
+    let first = RangedStreamInput.chunkSize + 50_000
+    #expect(read(first) == data.subdata(in: 0..<first))
+    // Back to the start, then near the end.
+    #expect(input.setProperty(NSNumber(value: 10), forKey: .fileCurrentOffsetKey))
+    #expect(read(1_000) == data.subdata(in: 10..<1_010))
+    let late = size - 20_000
+    #expect(input.setProperty(NSNumber(value: late), forKey: .fileCurrentOffsetKey))
+    #expect(read(size) == data.subdata(in: late..<size))
+    #expect(!input.hasBytesAvailable)
+  }
+}
+
 private final class RangedFileProtocol: URLProtocol, @unchecked Sendable {
   nonisolated(unsafe) static var payload = Data()
   nonisolated(unsafe) static var fullRequests = 0
+  /// Served for `bytes.invalid`, so the byte test never shares a payload with the VLC test.
+  nonisolated(unsafe) static var bytePayload = Data()
 
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
-    let data = Self.payload
+    let data = request.url?.host == "bytes.invalid" ? Self.bytePayload : Self.payload
     guard let range = request.value(forHTTPHeaderField: "Range"),
       let bounds = range.split(separator: "=").last?.split(separator: "-"),
       bounds.count == 2, let low = Int(bounds[0]), let high = Int(bounds[1]), low <= high

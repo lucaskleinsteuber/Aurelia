@@ -2,7 +2,8 @@ import Foundation
 
 /// Hands VLC a title's bytes fetched from the server in large ranged requests. VLC treats such a
 /// stream like a local file and reads it as fast as it can decode, whereas a network address is
-/// read at playback speed. Bytes pass through memory only; nothing is written to disk.
+/// read at playback speed. The next chunk is requested while VLC decodes the current one. Bytes
+/// pass through memory only; nothing is written to disk.
 final class RangedStreamInput: InputStream, @unchecked Sendable {
   static let chunkSize = 4 * 1_024 * 1_024
 
@@ -15,6 +16,8 @@ final class RangedStreamInput: InputStream, @unchecked Sendable {
   private var bufferStart: Int64 = 0
   private var status: Stream.Status = .notOpen
   private var failure: Error?
+  /// The next chunk, requested while VLC decodes the current one.
+  private var readAhead: Fetch?
 
   init(url: URL, session: URLSession, token: String?, length: Int64) {
     self.url = url
@@ -25,7 +28,11 @@ final class RangedStreamInput: InputStream, @unchecked Sendable {
   }
 
   override func open() { status = .open }
-  override func close() { status = .closed }
+  override func close() {
+    status = .closed
+    readAhead?.task.cancel()
+    readAhead = nil
+  }
   override var streamStatus: Stream.Status { status }
   override var streamError: Error? { failure }
   override var hasBytesAvailable: Bool { offset < length && failure == nil }
@@ -71,36 +78,55 @@ final class RangedStreamInput: InputStream, @unchecked Sendable {
   }
 
   private func fill() -> Bool {
-    let end = min(offset + Int64(Self.chunkSize), length) - 1
-    var request = URLRequest(url: url, timeoutInterval: 30)
-    request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
-    if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-    let done = DispatchSemaphore(value: 0)
-    let result = FetchResult()
-    let expectedStart = offset
-    session.dataTask(with: request) { data, response, error in
-      defer { done.signal() }
-      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-      // Only a ranged answer is accepted, so a whole file is never pulled into memory.
-      if let data, error == nil, status == 206 {
-        result.data = data
-      } else {
-        result.error = error ?? URLError(.badServerResponse)
-      }
-    }.resume()
-    done.wait()
-    guard let data = result.data, !data.isEmpty else {
-      failure = result.error ?? URLError(.zeroByteResource)
+    let fetch: Fetch
+    if let readAhead, readAhead.start == offset {
+      fetch = readAhead
+    } else {
+      // A seek leaves the requested chunk behind.
+      readAhead?.task.cancel()
+      fetch = request(from: offset)
+    }
+    readAhead = nil
+    fetch.done.wait()
+    guard let data = fetch.data, !data.isEmpty else {
+      failure = fetch.error ?? URLError(.zeroByteResource)
       status = .error
       return false
     }
     buffer = data
-    bufferStart = expectedStart
+    bufferStart = fetch.start
+    let next = fetch.start + Int64(data.count)
+    if next < length { readAhead = request(from: next) }
     return true
   }
 
-  private final class FetchResult: @unchecked Sendable {
+  private func request(from start: Int64) -> Fetch {
+    let end = min(start + Int64(Self.chunkSize), length) - 1
+    var request = URLRequest(url: url, timeoutInterval: 30)
+    request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
+    if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+    let fetch = Fetch(start: start)
+    fetch.task = session.dataTask(with: request) { data, response, error in
+      defer { fetch.done.signal() }
+      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+      // Only a ranged answer is accepted, so a whole file is never pulled into memory.
+      if let data, error == nil, status == 206 {
+        fetch.data = data
+      } else {
+        fetch.error = error ?? URLError(.badServerResponse)
+      }
+    }
+    fetch.task.resume()
+    return fetch
+  }
+
+  private final class Fetch: @unchecked Sendable {
+    let start: Int64
+    let done = DispatchSemaphore(value: 0)
+    var task: URLSessionDataTask!
     var data: Data?
     var error: Error?
+
+    init(start: Int64) { self.start = start }
   }
 }

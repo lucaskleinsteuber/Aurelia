@@ -201,8 +201,8 @@ final class SamplePipe: @unchecked Sendable {
       try? FileManager.default.removeItem(at: directory)
       throw VLCAudioSampleReader.ReadError.failed
     }
-    // Opening for reading and writing never blocks and keeps the pipe open until VLC connects.
-    descriptor = open(path, O_RDWR | O_NONBLOCK)
+    // A non-blocking open returns at once; reads switch to blocking once VLC has connected.
+    descriptor = open(path, O_RDONLY | O_NONBLOCK)
     guard descriptor >= 0 else {
       try? FileManager.default.removeItem(at: directory)
       throw VLCAudioSampleReader.ReadError.failed
@@ -224,10 +224,8 @@ final class SamplePipe: @unchecked Sendable {
   func finish() async -> [Float] {
     lock.withLock { finished = true }
     await withCheckedContinuation { continuation in
-      DispatchQueue.global(qos: .utility).async { [done] in
-        done.wait()
-        // Leave the signal for close(), which waits for the thread as well.
-        done.signal()
+      DispatchQueue.global(qos: .utility).async { [self] in
+        waitForReader()
         continuation.resume()
       }
     }
@@ -241,28 +239,42 @@ final class SamplePipe: @unchecked Sendable {
       closed = true
     }
     if started {
-      done.wait()
-      done.signal()
-    }
-    if descriptor >= 0 {
+      waitForReader()
+    } else if descriptor >= 0 {
       Darwin.close(descriptor)
       descriptor = -1
     }
     try? FileManager.default.removeItem(at: directory)
   }
 
+  /// The reader ends when VLC closes its end. Should VLC keep it open, the wait is bounded and
+  /// the thread closes the pipe itself once it ends.
+  private func waitForReader() {
+    // Leave the signal for the next caller, which waits for the thread as well.
+    if done.wait(timeout: .now() + .seconds(10)) == .success { done.signal() }
+  }
+
   private func readLoop() {
-    defer { done.signal() }
+    defer {
+      Darwin.close(descriptor)
+      done.signal()
+    }
     var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
     var pending: [UInt8] = []
     var headerParsed = false
+    var connected = false
     var idleAfterFinish = 0
     while true {
       if lock.withLock({ closed }) { return }
-      // poll() does not reliably wake for pipes on macOS, so read without blocking and rest
-      // for a moment only when the pipe is empty.
       let count = read(descriptor, &buffer, buffer.count)
       if count > 0 {
+        if !connected {
+          // From VLC's first bytes on, wait inside read(). Short sleeps between non-blocking
+          // reads are stretched by macOS on background threads, which limited VLC to playback
+          // speed because a pipe holds only a few kilobytes.
+          connected = true
+          _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) & ~O_NONBLOCK)
+        }
         pending.append(contentsOf: buffer[0..<count])
         if !headerParsed, let header = Self.header(in: pending) {
           pending.removeFirst(header.dataOffset)
@@ -272,13 +284,15 @@ final class SamplePipe: @unchecked Sendable {
         // Even with enough samples the pipe keeps being drained: VLC must never block on a
         // full pipe, or stopping it would wait forever.
         if headerParsed { consume(&pending) }
-        idleAfterFinish = 0
         continue
       }
-      if count < 0, errno != EAGAIN, errno != EINTR { return }
+      // Once connected, an empty read means VLC has closed its end.
+      if count == 0, connected { return }
+      if count < 0, errno == EINTR { continue }
+      if count < 0, errno != EAGAIN { return }
+      // VLC has not connected or written yet.
       if lock.withLock({ finished }) {
         idleAfterFinish += 1
-        // Nothing more arrives once VLC has stopped; allow a moment for the last block.
         if idleAfterFinish >= 100 { return }
       }
       usleep(2_000)
