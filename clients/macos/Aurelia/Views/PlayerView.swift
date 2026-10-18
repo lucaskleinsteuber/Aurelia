@@ -6,7 +6,6 @@ struct PlayerView: View {
   @EnvironmentObject private var model: AppModel
   @StateObject private var controller: PlaybackController
   @StateObject private var sceneNotes: SceneNotesController
-  @StateObject private var segments: PlayerSegmentsController
   @StateObject private var previews = ScrubPreviewController()
   @State private var hoverPosition: Double?
   @State private var notesPresented = false
@@ -31,8 +30,6 @@ struct PlayerView: View {
   init(profile: StoredServerProfile, presentation: PlaybackPresentation) {
     _sceneNotes = StateObject(
       wrappedValue: SceneNotesController(profile: profile, mediaId: presentation.mediaId))
-    _segments = StateObject(
-      wrappedValue: PlayerSegmentsController(profile: profile, mediaId: presentation.mediaId))
     #if DEBUG
       if CinemaUITestFixture.enabled {
         _controller = StateObject(
@@ -69,12 +66,6 @@ struct PlayerView: View {
             .transition(.opacity)
         }
 
-        if let prompt = skipPrompt {
-          skipButton(prompt)
-            .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
-            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
-        }
-
         if let note = sceneNotes.cueText {
           VStack {
             HStack {
@@ -100,7 +91,6 @@ struct PlayerView: View {
           .accessibilityIdentifier("native-player")
       }
       .frame(width: viewport.width, height: viewport.height)
-      .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: skipPrompt)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .ignoresSafeArea()
@@ -130,13 +120,11 @@ struct PlayerView: View {
       }
       revealControls()
       sceneNotes.reload()
-      segments.load()
       await controller.start()
     }
     .onDisappear {
       hideTask?.cancel()
       sceneNotes.stop()
-      segments.stop()
       previews.reset()
       cursor.retire()
       fullScreenKeyboard.retire()
@@ -173,7 +161,6 @@ struct PlayerView: View {
     .onChange(of: controller.navigationRevision) { advanceSceneNotes() }
     .onChange(of: controller.presentation.mediaId) {
       sceneNotes.changeMedia(controller.presentation.mediaId)
-      segments.changeMedia(controller.presentation.mediaId)
       previews.reset()
     }
     .onChange(of: controller.previewSourceURL) {
@@ -652,42 +639,6 @@ struct PlayerView: View {
     return isScrubbing ? scrubPosition : hoverPosition
   }
 
-  private var skipPrompt: SkipPrompt? {
-    guard !controller.isPreparing, controller.errorMessage == nil, !isScrubbing else { return nil }
-    let duration = controller.durationMilliseconds
-    let resolved = SkipSegmentLogic.resolve(
-      server: segments.segments, chapters: controller.chapters, duration: duration)
-    return SkipSegmentLogic.prompt(
-      position: controller.currentTimeMilliseconds, duration: duration, segments: resolved)
-  }
-
-  private func skipButton(_ prompt: SkipPrompt) -> some View {
-    let nextEpisode =
-      if case .credits = prompt {
-        !controller.presentation.queue.isEmpty
-          && preferencesStore.preferences.automaticallyPlayNextEpisode
-      } else { false }
-    return Button {
-      skip(prompt)
-    } label: {
-      Label(nextEpisode ? "Next Episode" : prompt.title, systemImage: "forward.end.fill")
-        .font(.headline)
-        .padding(.horizontal, 6)
-    }
-    .buttonStyle(AureliaPrimaryActionButtonStyle())
-    .help("\(nextEpisode ? "Next Episode" : prompt.title) (S)")
-    .shadow(color: .black.opacity(0.35), radius: 12, y: 4)
-    .onHover { interaction("skip-hover", active: $0) }
-    .padding(.trailing, 48)
-    .padding(.bottom, controlsVisible ? 156 : 48)
-    .accessibilityIdentifier("player-skip-segment")
-  }
-
-  private func skip(_ prompt: SkipPrompt) {
-    controller.seek(to: prompt.target)
-    revealControls()
-  }
-
   private func advanceSceneNotes() {
     if notesNavigationRevision != controller.navigationRevision {
       notesNavigationRevision = controller.navigationRevision
@@ -721,9 +672,6 @@ struct PlayerView: View {
       controller.skip(seconds: Int64(preferencesStore.preferences.seekInterval))
     case 46:
       controller.toggleMute()
-    case 1:
-      guard let prompt = skipPrompt else { return false }
-      skip(prompt)
     case 53:
       if isPictureInPicture {
         togglePictureInPicture()

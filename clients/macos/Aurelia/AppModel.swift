@@ -260,15 +260,6 @@ final class AppModel: ObservableObject {
   private static let operatingModeSelectionVersionKey = "AureliaOperatingModeSelectionVersion"
 
   var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true && managementUnlocked }
-  /// Finds intros and credits in the background on administrators' Macs.
-  let segmentAnalyzer = MediaSegmentAnalyzer()
-  /// Detection needs an owner or administrator profile, not the Server Password: the server
-  /// accepts the times from such a profile, and management unlocks expire.
-  var canDetectSegments: Bool {
-    profile?.user?.role.canManageLibraries == true
-      && (!usesProfileSelection || profile?.isViewingSession == true)
-  }
-  static let segmentAnalysisKey = "AureliaDetectIntrosAndCredits"
   var canManageStorage: Bool {
     canManageMedia
       && (profile?.user?.role == .owner || profile?.user?.accessMode != .selectedTitles)
@@ -1372,7 +1363,6 @@ final class AppModel: ObservableObject {
     home = newHome
     scheduleHomeRefresh()
     warmLibraryBrowsing()
-    updateSegmentAnalysis()
     if !Self.isTestProcess, !NativePreflightIsolation.isRequested, let current = self.profile {
       PlaybackProgressOutbox.shared.activate(profile: current)
       PlaybackProgressOutbox.shared.retryAfterReconnect()
@@ -1468,32 +1458,6 @@ final class AppModel: ObservableObject {
     guard let key = browseKey(section: section, query: query, search: search) else { return }
     if browseResults.count >= 24, browseResults[key] == nil { browseResults.removeAll() }
     browseResults[key] = items
-  }
-
-  /// Runs intro and credits detection while an administrator is signed in and it is enabled.
-  /// It waits whenever something plays.
-  func updateSegmentAnalysis() {
-    guard !Self.isTestProcess, !NativePreflightIsolation.isRequested,
-      ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil,
-      let profile, canDetectSegments, libraryCapabilities.contains("media-segments-v1"),
-      UserDefaults.standard.object(forKey: Self.segmentAnalysisKey) as? Bool ?? true
-    else {
-      segmentAnalyzer.stop()
-      return
-    }
-    segmentAnalyzer.titleResolver = { [weak self] group in self?.segmentGroupTitle(group) }
-    segmentAnalyzer.start(profile: profile) { [weak self] in self?.playback == nil }
-  }
-
-  /// "Breaking Bad · Season 2" for a season, or the movie's title.
-  private func segmentGroupTitle(_ group: MediaSegmentAnalysisGroup) -> String? {
-    if let seriesId = group.seriesId {
-      let name = catalogItems.first { $0.id == seriesId }?.title
-      guard let name else { return nil }
-      guard let season = group.seasonNumber else { return name }
-      return season == 0 ? "\(name) · Specials" : "\(name) · Season \(season)"
-    }
-    return group.items.first.flatMap { item in catalogItems.first { $0.id == item.mediaId }?.title }
   }
 
   /// Loads every library page's current list in the background after a refresh, so switching
@@ -2508,7 +2472,6 @@ final class AppModel: ObservableObject {
     let paired = deviceConnection
     let retiredGeneration = connectionGeneration
     inspectionGeneration = UUID()
-    segmentAnalyzer.stop()
     profile = nil
     deviceConnection = nil
     isSwitchingProfile = false
@@ -2884,7 +2847,6 @@ final class AppModel: ObservableObject {
     managementExpiryTask?.cancel()
     managementExpiresAt = nil
     clearPersonalViewState()
-    segmentAnalyzer.stop()
     profile = nil
     deviceConnection = nil
     watchingProfiles = []

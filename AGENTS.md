@@ -17,10 +17,8 @@ These rules apply to every task in this repository.
 - Media files are only ever read: never modify, copy, convert, remux,
   transcode, hash, or store video content. Media remains at its original
   user-selected path; scans read only filesystem metadata and directory
-  structure. Two user-approved exceptions read content without keeping it:
-  scrub previews decoded live during playback and held only in memory, and a
-  one-time audio comparison of episodes for intro and credits detection that
-  stores only the resulting timestamps, never audio, images, or fingerprints.
+  structure. One user-approved exception reads content without keeping it:
+  scrub previews decoded live during playback and held only in memory.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,
@@ -64,7 +62,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac credits-detection release is 1.7.8 (72); the
+  changing them. The approved Mac release removing intro and credits skipping is 1.7.9 (73); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   intro-skipping update is 0.3.0 (11).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

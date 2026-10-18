@@ -217,9 +217,6 @@ struct AppSettingsView: View {
           isOn: $playbackPreferences.preferences.preventSleepDuringPlayback
         )
         .accessibilityIdentifier("playback-prevent-sleep")
-        if model.canDetectSegments {
-          IntroDetectionSetting(analyzer: model.segmentAnalyzer) { model.updateSegmentAnalysis() }
-        }
         Divider()
         LabeledContent("Default Playback Rate") {
           Picker(
@@ -600,61 +597,6 @@ struct DiscoveryDecisionCard: View {
       Task { await model.classifyDiscovery(discovery, as: decision) }
     } label: {
       Label(title, systemImage: symbol)
-    }
-  }
-}
-
-/// Turns background intro and credits detection on or off and shows how far it is.
-private struct IntroDetectionSetting: View {
-  @ObservedObject var analyzer: MediaSegmentAnalyzer
-  @AppStorage(AppModel.segmentAnalysisKey) private var enabled = true
-  let onChange: () -> Void
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Toggle("Detect Intros and Credits", isOn: $enabled)
-        .accessibilityIdentifier("playback-detect-segments")
-        .onChange(of: enabled) { onChange() }
-      if enabled, case .analyzing(let progress) = analyzer.status, progress.total > 0 {
-        ProgressView(
-          value: Double(min(progress.done, progress.total)), total: Double(progress.total)
-        )
-        .progressViewStyle(.linear)
-        .frame(maxWidth: 360)
-        .accessibilityIdentifier("playback-detect-progress")
-      }
-      Text(statusText)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .monospacedDigit()
-        .fixedSize(horizontal: false, vertical: true)
-    }
-  }
-
-  private var statusText: String {
-    guard enabled else {
-      return "Skip buttons still use chapters and times you set by hand."
-    }
-    switch analyzer.status {
-    case .idle:
-      return "Compares the soundtrack of episodes in the background. Only the times are kept."
-    case .analyzing(let progress):
-      var lines: [String] = []
-      if let title = progress.title {
-        lines.append("Reading \(title) · \(progress.step) of \(progress.steps)")
-      } else {
-        lines.append("Looking for intros and credits…")
-      }
-      if progress.total > 0 {
-        lines.append("\(min(progress.done, progress.total)) of \(progress.total) titles checked")
-      }
-      return lines.joined(separator: "\n")
-    case .waiting:
-      return "Paused while something plays."
-    case .upToDate:
-      return "All titles have been checked."
-    case .failed(let message):
-      return "Will try again later: \(message)"
     }
   }
 }

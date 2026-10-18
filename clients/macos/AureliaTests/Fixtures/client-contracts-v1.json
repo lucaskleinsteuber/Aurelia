@@ -67,8 +67,7 @@
       "server-readiness-v1",
       "device-authorization-v1",
       "artwork-variants-v1",
-      "catalog-pages-500-v1",
-      "media-segments-v1"
+      "catalog-pages-500-v1"
     ]
   },
   "problem": {

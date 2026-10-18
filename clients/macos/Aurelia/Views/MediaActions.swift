@@ -5,7 +5,6 @@ struct MediaActionsModifier: ViewModifier {
   let item: CatalogItemSummary
   var onRemoved: (() -> Void)?
   @State private var editing: MediaMetadataSummary?
-  @State private var editingSegments: CatalogItemSummary?
   @State private var removing = false
   @State private var error: String?
   @StateObject private var watchActions = MediaWatchActionController()
@@ -28,11 +27,6 @@ struct MediaActionsModifier: ViewModifier {
             { self.error = error.localizedDescription }
           }
         }
-        if item.kind == .episode || item.kind == .movie {
-          Button("Edit Intro & Credits…", systemImage: "forward.end.alt") {
-            editingSegments = item
-          }
-        }
         Divider()
         Button("Remove from Library…", systemImage: "trash", role: .destructive) { removing = true }
       }
@@ -41,9 +35,6 @@ struct MediaActionsModifier: ViewModifier {
     .sheet(item: $editing) { metadata in
       MetadataEditorSheet(metadata: metadata) { try? await model.refresh() }.environmentObject(
         model)
-    }
-    .sheet(item: $editingSegments) { item in
-      MediaSegmentsEditorSheet(item: item).environmentObject(model)
     }
     .confirmationDialog("Remove \(item.title)?", isPresented: $removing, titleVisibility: .visible)
     {
