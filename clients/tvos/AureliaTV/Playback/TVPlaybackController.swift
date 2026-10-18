@@ -29,9 +29,6 @@ final class TVPlaybackController: ObservableObject {
   @Published private(set) var errorMessage: String?
   @Published private(set) var progressMessage: String?
   @Published private(set) var controlsVisible = true
-  /// Intro and credits times for the current title, when the server has them.
-  @Published private(set) var segments: TVMediaSegments?
-  private var segmentsTask: Task<Void, Never>?
   @Published var trackMenu: TrackMenu? {
     didSet { userInteracted() }
   }
@@ -370,7 +367,6 @@ final class TVPlaybackController: ObservableObject {
       relay = secureRelay
       if let previous = ticket?.id { Task { [api] in try? await api.revokeTicket(id: previous) } }
       ticket = created
-      loadSegments(for: mediaID)
       unclaimedRelay = nil
       unclaimedTicketID = nil
       baselineRevision = created.progress.revision
@@ -409,28 +405,6 @@ final class TVPlaybackController: ObservableObject {
       } else {
         fail("This title could not be opened. Try again or return to the library.")
       }
-    }
-  }
-
-  /// The skip button for the current position, if the title has an intro or credits here.
-  var skipPrompt: TVSkipPrompt? {
-    guard !isLoading, errorMessage == nil, canSeek else { return nil }
-    return TVSkipLogic.prompt(position: position, duration: duration, segments: segments)
-  }
-
-  func skipSegment() {
-    guard let prompt = skipPrompt else { return }
-    seek(to: prompt.target)
-  }
-
-  private func loadSegments(for id: UUID) {
-    guard segments?.mediaId != id else { return }
-    segments = nil
-    segmentsTask?.cancel()
-    segmentsTask = Task { [weak self, api] in
-      let loaded = try? await api.mediaSegments(mediaID: id)
-      guard let self, !Task.isCancelled, mediaID == id else { return }
-      segments = loaded
     }
   }
 
@@ -720,7 +694,6 @@ final class TVPlaybackController: ObservableObject {
 
   private func stopResources() {
     openingTask?.cancel()
-    segmentsTask?.cancel()
     renewalTask?.cancel()
     sleepTask?.cancel()
     advanceTask?.cancel()
