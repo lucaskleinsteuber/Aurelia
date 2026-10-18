@@ -1,0 +1,11 @@
+<Project>
+  <!-- Shared .NET settings and output locations come from the repository root. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+  <PropertyGroup>
+    <!-- The desktop client (Windows first, Linux later) has its own version, like the Apple TV app. -->
+    <AureliaDesktopBuildNumber>1</AureliaDesktopBuildNumber>
+    <Version>0.0.1</Version>
+    <FileVersion>0.0.1.$(AureliaDesktopBuildNumber)</FileVersion>
+    <InformationalVersion>0.0.1+build.$(AureliaDesktopBuildNumber)</InformationalVersion>
+  </PropertyGroup>
+</Project>

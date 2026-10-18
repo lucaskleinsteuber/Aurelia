@@ -1,0 +1,45 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- The Mac app's design tokens: canvas, raised surface, sidebar and accent. -->
+  <Styles.Resources>
+    <Color x:Key="AureliaCanvasColor">#202326</Color>
+    <Color x:Key="AureliaSurfaceColor">#282C2F</Color>
+    <Color x:Key="AureliaSidebarColor">#17191B</Color>
+    <SolidColorBrush x:Key="AureliaCanvas" Color="{StaticResource AureliaCanvasColor}" />
+    <SolidColorBrush x:Key="AureliaSurface" Color="{StaticResource AureliaSurfaceColor}" />
+    <SolidColorBrush x:Key="AureliaSidebar" Color="{StaticResource AureliaSidebarColor}" />
+    <SolidColorBrush x:Key="AureliaSecondaryText" Color="#99FFFFFF" />
+    <SolidColorBrush x:Key="AureliaHairline" Color="#1FFFFFFF" />
+  </Styles.Resources>
+
+  <!-- Sidebar entries: quiet text, a soft pill when selected, like the Mac sidebar. -->
+  <Style Selector="ListBox.sidebar">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem">
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Foreground" Value="#D9FFFFFF" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#24FFFFFF" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#14FFFFFF" />
+  </Style>
+
+  <!-- The white capsule primary button of the Mac app. -->
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="White" />
+    <Setter Property="Foreground" Value="Black" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Padding" Value="22,9" />
+  </Style>
+  <Style Selector="Button.primary:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#61FFFFFF" />
+    <Setter Property="Foreground" Value="#99000000" />
+  </Style>
+</Styles>

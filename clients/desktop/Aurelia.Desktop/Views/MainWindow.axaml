@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Aurelia.Desktop.Views.MainWindow"
+        Title="Aurelia"
+        Width="1280" Height="800" MinWidth="900" MinHeight="560"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource AureliaCanvas}">
+  <Grid ColumnDefinitions="232,*">
+    <!-- Sidebar -->
+    <Border Grid.Column="0" Background="{StaticResource AureliaSidebar}"
+            BorderBrush="{StaticResource AureliaHairline}" BorderThickness="0,0,1,0">
+      <DockPanel Margin="14,22,14,18">
+        <TextBlock DockPanel.Dock="Top" Text="Aurelia" FontSize="22" FontWeight="Bold"
+                   Margin="12,0,0,22" />
+        <TextBlock x:Name="VersionLabel" DockPanel.Dock="Bottom" FontSize="11"
+                   Foreground="{StaticResource AureliaSecondaryText}" Margin="12,0,0,0" />
+        <ListBox x:Name="Navigation" Classes="sidebar" SelectedIndex="0">
+          <ListBoxItem Content="Home" />
+          <ListBoxItem Content="Movies" />
+          <ListBoxItem Content="TV Shows" />
+          <ListBoxItem Content="Search" />
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- Until a server is connected, every section shows how to connect. -->
+    <Grid Grid.Column="1">
+      <Border Background="{StaticResource AureliaSurface}" CornerRadius="18" Padding="36,32"
+              Width="480" HorizontalAlignment="Center" VerticalAlignment="Center"
+              BoxShadow="0 18 48 0 #66000000">
+        <StackPanel Spacing="14">
+          <TextBlock x:Name="ConnectTitle" Text="Connect to your Aurelia server" FontSize="24"
+                     FontWeight="Bold" TextWrapping="Wrap" />
+          <TextBlock Text="Enter the address shown in Aurelia on your Mac, under Settings › Server."
+                     Foreground="{StaticResource AureliaSecondaryText}" TextWrapping="Wrap" />
+          <TextBox x:Name="ServerAddress" PlaceholderText="Server address, for example 192.168.1.20"
+                   Margin="0,6,0,0" />
+          <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
+            <Button x:Name="ConnectButton" Classes="primary" Content="Connect" IsEnabled="False" />
+            <TextBlock Text="Connecting arrives in the next version."
+                       Foreground="{StaticResource AureliaSecondaryText}" FontSize="12"
+                       VerticalAlignment="Center" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

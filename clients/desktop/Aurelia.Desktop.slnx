@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Aurelia.Desktop/Aurelia.Desktop.csproj" />
+  <Project Path="Aurelia.Desktop.Tests/Aurelia.Desktop.Tests.csproj" />
+</Solution>
