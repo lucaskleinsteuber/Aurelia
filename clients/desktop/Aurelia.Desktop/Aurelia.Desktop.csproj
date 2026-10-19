@@ -5,6 +5,7 @@
     <RootNamespace>Aurelia.Desktop</RootNamespace>
     <Product>Aurelia</Product>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\aurelia.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Video frames are copied row by row from VLC's memory. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -26,11 +27,23 @@
     <VlcMacEnabled Condition="$(RuntimeIdentifier.StartsWith('win')) Or $(RuntimeIdentifier.StartsWith('linux'))">false</VlcMacEnabled>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The app icon, made from the Mac icon by scripts/make-desktop-icon.sh. -->
+    <AvaloniaResource Include="Assets\aurelia.ico" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Aurelia.Desktop.Core/Aurelia.Desktop.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Aurelia.Desktop.Tests" />
   </ItemGroup>
+  <!-- LibVLCSharp (LGPL) stays a separate file beside the app, so it can be replaced like VLC itself. -->
+  <Target Name="AureliaKeepLibVlcSharpBesideTheApp" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Condition="'%(ResolvedFileToPublish.Filename)' == 'LibVLCSharp'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
   <!-- VLC loads its modules from the libvlc folder beside the app, so it stays out of the single-file bundle. -->
   <Target Name="AureliaKeepVlcBesideTheApp" AfterTargets="CollectVlcFilesToCopyWindows" BeforeTargets="PrepareForPublish">
     <ItemGroup>

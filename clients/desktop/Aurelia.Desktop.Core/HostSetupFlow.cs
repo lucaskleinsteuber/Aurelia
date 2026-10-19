@@ -83,6 +83,9 @@ public sealed class HostSetupFlow : INotifyPropertyChanged
     public string StatusTitle { get; private set => Set(ref field, value); } = "Starting your server…";
     public string? StatusMessage { get; private set => Set(ref field, value); }
     public string ScanProgress { get; private set => Set(ref field, value); } = "";
+    /// <summary>Tells a new owner that the server keeps running when the window closes, where that applies.</summary>
+    public string? BackgroundNote { get; set => Set(ref field, value, nameof(BackgroundNote), [nameof(HasBackgroundNote)]); }
+    public bool HasBackgroundNote => BackgroundNote is not null;
     public ObservableCollection<StorageDraft> Locations { get; } = [];
     public bool HasLocations => Locations.Count > 0;
     /// <summary>The PIN step after a restart needs the password again; right after setup it is still known.</summary>

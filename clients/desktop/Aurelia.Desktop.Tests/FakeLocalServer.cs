@@ -183,3 +183,18 @@ internal sealed class FakeManagement : IServerManagement
         new(Guid.NewGuid(), name, path, kind, available ? LibraryAvailability.Available : LibraryAvailability.Unavailable,
             DateTimeOffset.UtcNow.AddDays(-10), scanned ? DateTimeOffset.UtcNow.AddHours(-3) : null, scanned ? DateTimeOffset.UtcNow.AddHours(-3) : null, null);
 }
+
+/// <summary>Start at sign-in and keeping awake as Windows would record them, without touching this computer.</summary>
+internal sealed class FakeSystemHosting : ISystemHosting
+{
+    public bool CanStartAtSignIn => true;
+    public SignInStart StartAtSignIn { get; private set; } = SignInStart.Off;
+    public bool CanKeepAwake => true;
+    public bool Awake { get; private set; }
+
+    public void SetStartAtSignIn(bool enabled) => StartAtSignIn = enabled ? SignInStart.On : SignInStart.Off;
+    public void KeepAwake(bool enabled) => Awake = enabled;
+
+    /// <summary>The person turned Aurelia off in Task Manager's Startup apps.</summary>
+    public void TurnOffInWindows() => StartAtSignIn = SignInStart.TurnedOffInWindows;
+}

@@ -187,7 +187,8 @@ public sealed class LocalServerHostTests : IAsyncDisposable
             if (name != "Synthetic Desktop Host") await Task.Delay(200, cancellation);
         }
         Assert.Equal("Synthetic Desktop Host", name);
-        Assert.Equal(LocalServerState.Running, host.State);
+        // The server may answer a moment before the host has read its info and reports it running.
+        await WaitForAsync(() => host.State == LocalServerState.Running, cancellation, TimeSpan.FromSeconds(10));
     }
 
     [Fact]
@@ -212,6 +213,12 @@ public sealed class LocalServerHostTests : IAsyncDisposable
         var status = await client.GetAsync($"/{host.ControlSecret}/hosting-status", cancellation);
         Assert.Equal(HttpStatusCode.OK, status.StatusCode);
         Assert.Contains("\"backgroundEnabled\":false", await status.Content.ReadAsStringAsync(cancellation), StringComparison.Ordinal);
+        // Owners on other devices see how this computer runs its server.
+        host.Hosting = () => new HostingPreferences(KeepRunning: true, StartAtSignIn: true, KeepAwake: false);
+        var hosting = await (await client.GetAsync($"/{host.ControlSecret}/hosting-status", cancellation)).Content.ReadAsStringAsync(cancellation);
+        Assert.Contains("\"backgroundEnabled\":true", hosting, StringComparison.Ordinal);
+        Assert.Contains("\"startAtLogin\":true", hosting, StringComparison.Ordinal);
+        Assert.Contains("\"preventIdleSleep\":false", hosting, StringComparison.Ordinal);
         // A trial the server did not record is refused.
         using var trial = new StringContent($"{{\"id\":\"{Guid.NewGuid()}\"}}", System.Text.Encoding.UTF8, "application/json");
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/{host.ControlSecret}/network-trial", trial, cancellation)).StatusCode);

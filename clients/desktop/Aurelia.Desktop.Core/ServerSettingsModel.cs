@@ -45,6 +45,7 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
     private readonly StoredConnection connection;
     private readonly Func<ProfileSessionResponse, IServerManagement> managementFor;
     private readonly Action<Action> dispatch;
+    private readonly Func<bool> publicNetwork;
     private readonly CancellationTokenSource closing = new();
     private ProfileSessionResponse session;
     private IServerManagement management;
@@ -55,9 +56,12 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
     private volatile bool trialStarting;
 
     public ServerSettingsModel(ILocalServerHost host, IAureliaServerApi api, StoredConnection connection, ProfileSessionResponse session,
-        Func<ProfileSessionResponse, IServerManagement> managementFor, Action<Action> dispatch)
+        Func<ProfileSessionResponse, IServerManagement> managementFor, Action<Action> dispatch, HostingController? hosting = null,
+        Func<bool>? publicNetwork = null)
     {
         this.host = host;
+        Hosting = hosting;
+        this.publicNetwork = publicNetwork ?? (() => false);
         this.api = api;
         this.connection = connection;
         this.session = session;
@@ -113,6 +117,18 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
     public string Addresses { get; private set => Set(ref field, value); } = "";
     public string Fingerprint => ServerIdentity.Display(connection.Fingerprint);
     public bool NetworkActive => settings?.LanAccessEnabled == true;
+    /// <summary>Windows marks the current network Public, so devices cannot reach the server until it is Private.</summary>
+    public bool OnPublicNetwork { get; private set => Set(ref field, value); }
+
+    /// <summary>When the server runs: keep running when the window closes, start at sign-in, keep awake.</summary>
+    public HostingController? Hosting { get; }
+    public bool HasHosting => Hosting is not null;
+    public static string KeepRunningText => OperatingSystem.IsWindows()
+        ? "Keep the server running in the notification area when Aurelia is closed"
+        : "Keep the server running in the menu bar when Aurelia is closed";
+    public static string SleepCaption => OperatingSystem.IsWindows()
+        ? "Other devices can't reach the server while this PC is asleep or turned off."
+        : "Other devices can't reach the server while this computer is asleep or turned off.";
 
     public ObservableCollection<StorageRow> Storage { get; } = [];
     public bool HasStorage => Storage.Count > 0;
@@ -282,6 +298,7 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
             ? string.Join("\n", status.NetworkAddresses.Select(address => address.Contains(':', StringComparison.Ordinal)
                 ? $"https://[{address}]:{settings.LanHttpsPort}" : $"https://{address}:{settings.LanHttpsPort}"))
             : "Only this computer";
+        OnPublicNetwork = settings.LanAccessEnabled && publicNetwork();
         Changed(nameof(HasNetworkChange), nameof(TurnsNetworkOff), nameof(NetworkActive));
         await LoadStorageAsync(token);
         await LoadDevicesAsync(token);

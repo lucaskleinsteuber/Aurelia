@@ -66,6 +66,14 @@ public sealed partial class ServerSettingsWindow : Window
         ConfirmPassword.Text = "";
     }
 
+    /// <summary>Windows Settings, where the network profile is changed from Public to Private.</summary>
+    private void OpenNetworkSettings(object? sender, RoutedEventArgs e)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:network-status") { UseShellExecute = true })?.Dispose(); }
+        catch (System.ComponentModel.Win32Exception) { }
+    }
+
     private async void Restart(object? sender, RoutedEventArgs e)
     {
         if (Model is { } model) await model.RestartAsync();

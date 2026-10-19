@@ -8,6 +8,7 @@
         x:DataType="core:ConnectionFlow"
         Title="Aurelia"
         Width="1280" Height="800" MinWidth="900" MinHeight="560"
+        Icon="avares://Aurelia/Assets/aurelia.ico"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource AureliaCanvas}">
   <Panel>

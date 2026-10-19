@@ -21,11 +21,13 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly AppModeStore? modes;
     private readonly ConnectionStore? store;
     private readonly Func<StoredConnection, ProfileSessionResponse, ServerSettingsModel>? serverSettings;
+    private readonly HostingController? hosting;
     private LibraryModel? library;
     private ArtworkLoader? artwork;
     private PlayerModel? player;
     private ServerSettingsWindow? settingsWindow;
-    private bool serverStopped;
+    private bool quitting;
+    private bool started;
 
     /// <summary>The app as installed: real network, the platform's secret store, local discovery, VLC and its own server.</summary>
     public MainWindow()
@@ -40,14 +42,17 @@ public sealed partial class MainWindow : Window, IDisposable
             connection => new VlcVideoEngineFactory(Aurelia.Desktop.Core.ServerAddress.IsLoopback(connection.Address)), PlaybackSettingsStore.Default,
             host: production.Host, modes: AppModeStore.Default, store: production.Store,
             serverSettings: (connection, session) => new ServerSettingsModel(production.Host.Host, production.Api, connection, session,
-                replacement => new ServerManagementClient(production.Api, connection, replacement.Token), Production.Post))
+                replacement => new ServerManagementClient(production.Api, connection, replacement.Token), Production.Post,
+                production.Hosting, NetworkProfile.PublicNetworkCheck),
+            hosting: production.Hosting)
     {
     }
 
     internal MainWindow(ConnectionFlow flow, Func<ConnectionFlow, ILibraryApi?>? libraries = null,
         Func<StoredConnection, IVideoEngineFactory>? engines = null, PlaybackSettingsStore? settings = null, bool startOnOpen = true,
         Func<Guid, ArtworkDiskCache?>? artworkCache = null, HostSetupFlow? host = null, AppModeStore? modes = null,
-        ConnectionStore? store = null, Func<StoredConnection, ProfileSessionResponse, ServerSettingsModel>? serverSettings = null)
+        ConnectionStore? store = null, Func<StoredConnection, ProfileSessionResponse, ServerSettingsModel>? serverSettings = null,
+        HostingController? hosting = null)
     {
         this.artworkCache = artworkCache ?? ArtworkDiskCache.ForServer;
         this.flow = flow;
@@ -58,6 +63,7 @@ public sealed partial class MainWindow : Window, IDisposable
         this.modes = modes;
         this.store = store;
         this.serverSettings = serverSettings;
+        this.hosting = hosting;
         InitializeComponent();
         DataContext = flow;
         // Each view gets its own model when it is shown, never the connection flow.
@@ -71,7 +77,16 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             host.PropertyChanged += HostChanged;
             host.Ready += async (connection, session) => await flow.OpenLocalAsync(connection, session);
-            host.ClientModeChosen += async () => await flow.StartAsync();
+            host.ClientModeChosen += async () =>
+            {
+                // Windows no longer needs to start this computer's server at sign-in.
+                hosting?.HostingEnded();
+                await flow.StartAsync();
+            };
+            if (hosting?.KeepRunning == true)
+                host.BackgroundNote = OperatingSystem.IsWindows()
+                    ? "When you close Aurelia, your server keeps running in the notification area and starts when you sign in to Windows. You can change this in Server Settings."
+                    : "When you close Aurelia, your server keeps running in the menu bar. You can change this in Server Settings.";
             host.ServerInterrupted += () =>
             {
                 // A network trial is confirmed in Server Settings after the restart; any other
@@ -87,18 +102,22 @@ public sealed partial class MainWindow : Window, IDisposable
         if (startOnOpen) Opened += async (_, _) => await StartAsync();
         Closing += async (_, e) =>
         {
-            if (serverStopped || host is null)
+            // Signing out or shutting down Windows does not wait for the window; the server ends with the app.
+            if (quitting || host is null || e.CloseReason == WindowCloseReason.OSShutdown)
             {
                 await ClosePlayerAsync();
                 return;
             }
-            // The server stops cleanly with the app; it keeps its data for the next start.
             e.Cancel = true;
-            serverStopped = true;
-            await ClosePlayerAsync();
-            settingsWindow?.Close();
-            await host.Host.StopAsync();
-            Close();
+            if (hosting?.RunsInBackground == true && e.CloseReason != WindowCloseReason.ApplicationShutdown)
+            {
+                // The server keeps running in the notification area, where the window opens again.
+                await ClosePlayerAsync();
+                settingsWindow?.Close();
+                Hide();
+                return;
+            }
+            await QuitAsync();
         };
         Closed += async (_, _) =>
         {
@@ -115,10 +134,28 @@ public sealed partial class MainWindow : Window, IDisposable
     internal LibraryModel? LibraryModel => library;
     internal PlayerModel? PlayerModel => player;
     internal ServerSettingsWindow? SettingsWindow => settingsWindow;
+    internal HostingController? Hosting => hosting;
+
+    /// <summary>Whether this computer runs its own server, as chosen on the welcome screen.</summary>
+    internal bool HostsThisComputer => host is not null && modes?.Load() == AppMode.Host;
+
+    /// <summary>Quit Aurelia: playback ends, the server stops cleanly and keeps its data for the next start.</summary>
+    internal async Task QuitAsync()
+    {
+        if (quitting) return;
+        quitting = true;
+        await ClosePlayerAsync();
+        settingsWindow?.Close();
+        if (host is not null) await host.Host.StopAsync();
+        Close();
+    }
 
     /// <summary>Opens this computer's server, a server elsewhere, or the choice between them on first start.</summary>
     internal async Task StartAsync()
     {
+        // The window may open again from the notification area; the server is already running then.
+        if (started) return;
+        started = true;
         if (host is null || modes is null)
         {
             await flow.StartAsync();
@@ -140,7 +177,7 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
-    private sealed record Production(AureliaServerApi Api, ConnectionStore Store, ConnectionFlow Flow, HostSetupFlow Host)
+    private sealed record Production(AureliaServerApi Api, ConnectionStore Store, ConnectionFlow Flow, HostSetupFlow Host, HostingController Hosting)
     {
         public static void Post(Action action) => Dispatcher.UIThread.Post(action);
 
@@ -150,9 +187,12 @@ public sealed partial class MainWindow : Window, IDisposable
             var store = new ConnectionStore(DesktopPaths.CreateSecretStore());
             var flow = new ConnectionFlow(api, store, new MdnsServerDiscovery(), Environment.MachineName, Post);
             var server = new LocalServerHost(LocalServerOptions.ForThisComputer());
+            var hosting = new HostingController(server, HostingPreferencesStore.Default, SystemHosting.ForThisComputer(),
+                HostingPreferences.ForThisComputer, Post);
+            server.Hosting = () => hosting.Current;
             var host = new HostSetupFlow(server, api, store, AppModeStore.Default,
                 (connection, session) => new ServerManagementClient(api, connection, session.Token), Environment.MachineName, Post);
-            return new Production(api, store, flow, host);
+            return new Production(api, store, flow, host, hosting);
         }
     }
 

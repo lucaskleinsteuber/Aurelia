@@ -5,6 +5,7 @@
         x:DataType="core:ServerSettingsModel"
         Title="Server Settings"
         Width="900" Height="640" MinWidth="760" MinHeight="520"
+        Icon="avares://Aurelia/Assets/aurelia.ico"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource AureliaCanvas}">
   <Panel>
@@ -62,6 +63,12 @@
                           Content="Allow devices on this network to connect, such as your Apple TV and Mac" />
                 <TextBlock Classes="secondary" FontSize="12"
                            Text="Connections are encrypted and need an approved device. Public Internet addresses are always blocked." />
+                <!-- Windows Firewall lets devices in only on networks marked Private. -->
+                <StackPanel x:Name="PublicNetworkHint" Spacing="8" IsVisible="{Binding OnPublicNetwork}">
+                  <TextBlock TextWrapping="Wrap" Foreground="#FFD180"
+                             Text="Windows treats the network this PC is on as public, so other devices can't connect. If this is your home network, set its network profile to Private." />
+                  <Button Classes="secondary" Content="Open Network Settings" Click="OpenNetworkSettings" />
+                </StackPanel>
                 <CheckBox x:Name="DisconnectConfirmation" IsChecked="{Binding ConfirmDisconnect}" IsVisible="{Binding TurnsNetworkOff}"
                           Content="I understand that other devices lose access" />
                 <Button x:Name="ApplyNetworkButton" Classes="primary" Content="Try New Settings" Click="ApplyNetwork"
@@ -74,6 +81,22 @@
                   <TextBox x:Name="ConfirmPassword" PasswordChar="•" PlaceholderText="Server Password" />
                   <Button x:Name="ConfirmButton" Classes="primary" Content="Keep New Settings" Click="ConfirmNetwork" IsEnabled="{Binding !IsBusy}" />
                 </StackPanel>
+              </StackPanel>
+            </Border>
+            <TextBlock Classes="section" Text="When the Server Runs" IsVisible="{Binding HasHosting}" />
+            <Border x:Name="HostingGroup" Classes="group" IsVisible="{Binding HasHosting}">
+              <StackPanel Spacing="12">
+                <CheckBox x:Name="KeepRunningToggle" IsChecked="{Binding Hosting.KeepRunning}"
+                          Content="{x:Static core:ServerSettingsModel.KeepRunningText}" />
+                <CheckBox x:Name="StartAtSignInToggle" IsChecked="{Binding Hosting.StartAtSignIn}" IsEnabled="{Binding Hosting.KeepRunning}"
+                          IsVisible="{Binding Hosting.CanStartAtSignIn}" Content="Start automatically when you sign in to Windows" />
+                <CheckBox x:Name="KeepAwakeToggle" IsChecked="{Binding Hosting.KeepAwake}" IsVisible="{Binding Hosting.CanKeepAwake}"
+                          Content="Keep this PC awake while the server runs" />
+                <StackPanel Spacing="2">
+                  <TextBlock x:Name="HostingExplanation" Classes="secondary" FontSize="12" TextWrapping="Wrap" Text="{Binding Hosting.Explanation}" />
+                  <TextBlock Classes="secondary" FontSize="12" TextWrapping="Wrap" Text="{x:Static core:ServerSettingsModel.SleepCaption}" />
+                </StackPanel>
+                <TextBlock Text="{Binding Hosting.Error}" IsVisible="{Binding Hosting.HasError}" Foreground="#FF8A80" TextWrapping="Wrap" />
               </StackPanel>
             </Border>
             <Button Classes="secondary" Content="Restart Server" Click="Restart" IsEnabled="{Binding !IsBusy}" />

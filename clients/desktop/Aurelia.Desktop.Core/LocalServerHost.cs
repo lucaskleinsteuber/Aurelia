@@ -108,6 +108,8 @@ public sealed class LocalServerHost : ILocalServerHost
     public ServerInfoResponse? Info { get; private set; }
     public LocalServerSettings Settings => ReadSettings();
     public Uri SecureAddress => new($"https://127.0.0.1:{Settings.LanHttpsPort}");
+    /// <summary>The hosting choices the server reports to owners on other devices.</summary>
+    public Func<HostingPreferences>? Hosting { get; set; }
     internal string ControlSecret => secret;
     /// <summary>The running server process, for tests that end it unexpectedly.</summary>
     internal int? ProcessId
@@ -613,15 +615,18 @@ public sealed class LocalServerHost : ILocalServerHost
         switch (method, action)
         {
             case ("GET", "hosting-status"):
-                // Background hosting and start at login are not offered by this app yet.
-                return (200, JsonSerializer.Serialize(new
                 {
-                    backgroundEnabled = false,
-                    backgroundRequested = false,
-                    startAtLogin = false,
-                    preventIdleSleep = false,
-                    state = "unchanged"
-                }));
+                    // The server runs inside this app either way; it keeps running in the notification area when asked to.
+                    var hosting = Hosting?.Invoke() ?? new HostingPreferences(false, false, false);
+                    return (200, JsonSerializer.Serialize(new
+                    {
+                        backgroundEnabled = hosting.KeepRunning,
+                        backgroundRequested = hosting.KeepRunning,
+                        startAtLogin = hosting.StartAtSignIn,
+                        preventIdleSleep = hosting.KeepAwake,
+                        state = "unchanged"
+                    }));
+                }
             case ("POST", "restart"):
                 Later(RestartAsync);
                 return (202, "");

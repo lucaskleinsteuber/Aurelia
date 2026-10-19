@@ -6,8 +6,10 @@ repository_root=${0:A:h:h}
 deps=${1:?Provide the published Aurelia.Server.deps.json.}
 assets=${2:?Provide the matching project.assets.json.}
 destination=${3:?Provide an external notices directory.}
+# The desktop client passes its own overview; the Mac app's is the default.
+overview=${4:-$repository_root/THIRD_PARTY_NOTICES.md}
 mkdir -p "$destination"
-cp "$repository_root/THIRD_PARTY_NOTICES.md" "$destination/README.md"
+cp "$overview" "$destination/README.md"
 while IFS= read -r dependency; do
   package=${dependency%/*}
   version=${dependency##*/}

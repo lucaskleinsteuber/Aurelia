@@ -2,6 +2,8 @@
   <!-- Connection logic without any UI, shared by the app and its tests. -->
   <PropertyGroup>
     <RootNamespace>Aurelia.Desktop.Core</RootNamespace>
+    <!-- Windows power requests are declared with LibraryImport. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />

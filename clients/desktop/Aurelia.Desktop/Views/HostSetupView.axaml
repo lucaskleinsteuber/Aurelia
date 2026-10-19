@@ -152,6 +152,8 @@
                     IsEnabled="{Binding HasLocations}" />
             <Button Classes="secondary" Content="Skip for Now" Click="SkipStorage" />
           </StackPanel>
+          <TextBlock x:Name="BackgroundNote" Classes="secondary" FontSize="12" TextWrapping="Wrap"
+                     Text="{Binding BackgroundNote}" IsVisible="{Binding HasBackgroundNote}" />
         </StackPanel>
 
         <!-- The first scan -->

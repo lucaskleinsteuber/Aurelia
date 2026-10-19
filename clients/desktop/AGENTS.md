@@ -3,8 +3,8 @@
 - The desktop client is named **Aurelia** and targets Windows 10/11 on x64 and ARM64 first,
   Linux later. It is a separate product with its own version and build counter in
   `clients/desktop/Directory.Build.props` (`Version`, `AureliaDesktopBuildNumber`). The
-  approved version is **0.0.4**, build **4** (bundled server). Confirm versions with the
-  user before changing them.
+  approved version is **0.1.0**, build **5** (installer and background hosting). Confirm
+  versions with the user before changing them.
 - It uses C# and Avalonia; package versions are pinned in the root
   `Directory.Packages.props`. Its tests use xUnit v3 (required by Avalonia's headless
   runner); the server tests stay on xUnit v2.
@@ -17,6 +17,16 @@
   (`%LOCALAPPDATA%\Aurelia Server`) and ports 43110/43111. On macOS the desktop app is a
   development build: its server keeps `Aurelia Desktop/Server`, ports 43120/43121 and network
   access off by default, and never uses the Mac app's `Aurelia Server` data, ports or Bonjour.
+- Closing the window keeps a set-up server running behind the notification-area icon when the
+  person chose that (the Windows default, with start at sign-in through the person's own Run
+  entry); Quit Aurelia stops it. One Aurelia runs per person (`AppInstance`: the mutex
+  `AureliaDesktopRunning`, which the installer checks, and a pipe only this account can open for
+  "open" and "quit"). Keep the PC awake only through a power request while the server runs.
+- The installer (`clients/desktop/Installer/Aurelia.iss`, built by `scripts/build-desktop.sh`) installs
+  for all users, opens Windows Firewall for the server on Private networks and the local subnet
+  only, quits a running Aurelia with `--quit` before replacing it, and on uninstall removes the
+  firewall rule and the Run entry but keeps the person's server data unless they answer Yes.
+  Never delete media or anything outside `%LOCALAPPDATA%\Aurelia` and `%LOCALAPPDATA%\Aurelia Server`.
 - Windows-specific server code (handle-checked media opens, file identities, the TLS key) is
   exercised under CrossOver's Wine with `scripts/test-server-wine.sh` and synthetic data only;
   state clearly that this is not a run on Windows.
