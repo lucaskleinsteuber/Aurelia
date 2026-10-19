@@ -19,7 +19,7 @@ export CX_ROOT="$crossover" WINEPREFIX="$cache/prefix" WINEDEBUG=-all WINESERVER
 # No browser engine, menu entries or crash debugger windows.
 export WINEDLLOVERRIDES="mshtml=;winemenubuilder.exe=d;winedbg.exe=d"
 compiler="$WINEPREFIX/drive_c/InnoSetup/ISCC.exe"
-cleanup() { "$crossover/bin/wineserver" -k 2>/dev/null || true; }
+cleanup() { "$crossover/bin/wineserver" -k 2>/dev/null || true; [ -z "${icons:-}" ] || rm -rf "$icons"; }
 trap cleanup EXIT
 
 if [ ! -f "$compiler" ]; then
@@ -39,7 +39,16 @@ if [ ! -f "$compiler" ]; then
 fi
 
 to_windows() { printf 'Z:%s' "$1" | tr '/' '\\'; }
-icons="$repository_root/clients/macos/Aurelia/Assets.xcassets/AppIcon.appiconset"
+# The wizard shows the app icon; its 128 and 256 pixel images come from the app's .ico.
+icons=$(mktemp -d)
+python3 -I - "$repository_root/clients/desktop/Aurelia.Desktop/Assets/aurelia.ico" "$icons" <<'PYTHON'
+import struct, sys, pathlib
+data = pathlib.Path(sys.argv[1]).read_bytes()
+for index in range(struct.unpack("<HHH", data[:6])[2]):
+    width, _, _, _, _, _, length, offset = struct.unpack("<BBBBHHII", data[6 + 16 * index:22 + 16 * index])
+    if (width or 256) in (128, 256):
+        pathlib.Path(sys.argv[2], f"aurelia-icon-{width or 256}.png").write_bytes(data[offset:offset + length])
+PYTHON
 for arch in x64 arm64; do
   [ -f "$output_root/win-$arch/Aurelia.exe" ] || { echo "Build win-$arch first with scripts/build-desktop.sh." >&2; exit 1; }
   "$crossover/bin/wineloader" "$compiler" -q \

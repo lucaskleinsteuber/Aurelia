@@ -70,7 +70,8 @@ for each (`Aurelia-<version>-<build>-Setup-x64.exe` and `-arm64.exe`), to
 Setup 7.1.0 under CrossOver's Wine (`scripts/make-desktop-installer.sh` downloads it once,
 checks its pinned checksum and keeps it in its own Wine prefix in the workspace). The app is
 self-contained and needs no .NET or VLC installation on Windows. `make-desktop-icon.sh`
-makes the Windows icon from the Mac app icon.
+makes the Windows icon from the Aurelia app icon the Mac app also uses
+(`clients/macos/Aurelia/AureliaAppIcon.icon`).
 
 ## On Windows
 

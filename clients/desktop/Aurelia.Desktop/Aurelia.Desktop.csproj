@@ -27,7 +27,7 @@
     <VlcMacEnabled Condition="$(RuntimeIdentifier.StartsWith('win')) Or $(RuntimeIdentifier.StartsWith('linux'))">false</VlcMacEnabled>
   </PropertyGroup>
   <ItemGroup>
-    <!-- The app icon, made from the Mac icon by scripts/make-desktop-icon.sh. -->
+    <!-- The app icon, made from the Mac app's AureliaAppIcon.icon by scripts/make-desktop-icon.sh. -->
     <AvaloniaResource Include="Assets\aurelia.ico" />
   </ItemGroup>
   <ItemGroup>
