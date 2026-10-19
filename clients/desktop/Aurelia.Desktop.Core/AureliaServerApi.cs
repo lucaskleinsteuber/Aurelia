@@ -79,6 +79,13 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
         await SendAsync<ProfilePickerResponse>(Pinned(connection.Address, connection.Fingerprint), HttpMethod.Get,
             "/api/v1/profiles", connection.DeviceToken, null, inspecting: false, cancellation);
 
+    public Task InitializeProfilesAsync(StoredConnection connection, string password, string pin, CancellationToken cancellation)
+    {
+        if (!ProfilePin.IsValid(pin)) throw new AureliaApiException(400, "invalid_profile_pin", "Enter a PIN with four to eight digits.");
+        return SendAsync<NoContent>(Pinned(connection.Address, connection.Fingerprint), HttpMethod.Post, "/api/v1/profiles/initialize",
+            connection.DeviceToken, new InitializeProfilesRequest(password, pin), inspecting: false, cancellation);
+    }
+
     public async Task<ProfileSessionResponse> UnlockProfileAsync(StoredConnection connection, Guid profileId, string? pin, CancellationToken cancellation)
     {
         if (!string.IsNullOrEmpty(pin) && !ProfilePin.IsValid(pin))
@@ -168,9 +175,15 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
         bool inspecting, CancellationToken cancellation)
     {
         using var request = new HttpRequestMessage(method, path);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         if (body is not null) request.Content = JsonContent.Create(body, body.GetType(), options: Json);
+        return await SendRequestAsync<T>(client, request, inspecting, cancellation);
+    }
+
+    /// <summary>Sends a prepared request and turns the answer, or the server's problem, into a result.</summary>
+    internal static async Task<T> SendRequestAsync<T>(HttpClient client, HttpRequestMessage request, bool inspecting, CancellationToken cancellation)
+    {
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         HttpResponseMessage response;
         try
         {

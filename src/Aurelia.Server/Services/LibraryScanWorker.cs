@@ -331,7 +331,7 @@ public sealed partial class LibraryScanWorker(
         var exclusions = await database.MediaExclusions.Where(value => value.LibraryRootId == library.Id).ToArrayAsync(cancellationToken);
         bool Excluded(string path, string? identity = null) => exclusions.Any(value =>
             value.NormalizedSourcePath == MediaPath.Normalize(path)
-            || value.IsDirectory && MediaPath.Normalize(path).StartsWith(value.NormalizedSourcePath.TrimEnd('/') + "/", StringComparison.Ordinal)
+            || value.IsDirectory && MediaPath.IsSameOrDescendant(MediaPath.Normalize(path), value.NormalizedSourcePath)
             || identity is not null && value.FileSystemIdentity == identity);
         var bindings = await database.MediaItems.Include(item => item.Parent).Where(item => item.LibraryRootId == library.Id && item.ManualSourceBinding).ToDictionaryAsync(item => item.NormalizedSourcePath, cancellationToken);
         discovery = discovery with
@@ -356,7 +356,7 @@ public sealed partial class LibraryScanWorker(
         bool Ignored(DiscoveredScanFile file)
         {
             if (Excluded(file.SourcePath, file.FileSystemIdentity)) return true;
-            var relative = NormalizeRelativePath(Path.GetRelativePath(library.Path, file.SourcePath));
+            var relative = AssignmentKey(NormalizeRelativePath(Path.GetRelativePath(library.Path, file.SourcePath)));
             var assignment = savedAssignments.OrderByDescending(value => !value.IsDirectory).ThenByDescending(value => value.RelativePath.Length)
                 .FirstOrDefault(value => value.NormalizedRelativePath == relative || value.IsDirectory &&
                     (value.NormalizedRelativePath.Length == 0 || relative.StartsWith(value.NormalizedRelativePath + "/", StringComparison.Ordinal)));
@@ -733,7 +733,7 @@ public sealed partial class LibraryScanWorker(
                 review.State = LibraryImportReviewState.Assigned;
                 review.UpdatedAt = now;
             }
-            else if (rules.Any(rule => rule.Kind == null && (rule.NormalizedRelativePath == review.NormalizedRelativePath || rule.IsDirectory && review.NormalizedRelativePath.StartsWith(rule.NormalizedRelativePath + "/", StringComparison.Ordinal))))
+            else if (rules.Any(rule => rule.Kind == null && (rule.NormalizedRelativePath == AssignmentKey(review.NormalizedRelativePath) || rule.IsDirectory && AssignmentKey(review.NormalizedRelativePath).StartsWith(rule.NormalizedRelativePath + "/", StringComparison.Ordinal))))
             {
                 database.LibraryImportReviews.Remove(review);
             }
@@ -897,6 +897,10 @@ public sealed partial class LibraryScanWorker(
         return candidate == parent
             || candidate.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
+
+    /// <summary>Saved import assignments always use '/', also on Windows, where scans use backslashes.</summary>
+    private static string AssignmentKey(string normalizedRelativePath) =>
+        Path.DirectorySeparatorChar == '/' ? normalizedRelativePath : normalizedRelativePath.Replace(Path.DirectorySeparatorChar, '/');
 
     private static string NormalizeRelativePath(string path)
     {

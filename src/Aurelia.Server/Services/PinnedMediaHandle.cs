@@ -12,10 +12,13 @@ internal static partial class PinnedMediaHandle
     // openat pins each directory, so replacing a parent with a symlink between
     // validation and open cannot redirect the file descriptor outside the root.
     public static FileStream Open(string libraryPath, string sourcePath)
-        => new(OpenHandle(libraryPath, sourcePath, false), FileAccess.Read, 128 * 1024, isAsync: false);
+        => OperatingSystem.IsWindows()
+            ? WindowsMediaHandle.Open(libraryPath, sourcePath)
+            : new(OpenHandle(libraryPath, sourcePath, false), FileAccess.Read, 128 * 1024, isAsync: false);
 
     public static IReadOnlyList<(string Name, bool Directory)> ListDirectory(string libraryPath, string path)
     {
+        if (OperatingSystem.IsWindows()) return WindowsMediaHandle.ListDirectory(libraryPath, path);
         using var handle = OpenHandle(libraryPath, path, true);
         var descriptor = Dup(handle.DangerousGetHandle().ToInt32());
         if (descriptor < 0) throw new IOException("The directory could not be opened.");
@@ -42,7 +45,7 @@ internal static partial class PinnedMediaHandle
     private static SafeFileHandle OpenHandle(string libraryPath, string sourcePath, bool isDirectory)
     {
         if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
-            throw new NotSupportedException("Handle-pinned direct play requires macOS or Linux.");
+            throw new NotSupportedException("Handle-pinned direct play requires Windows, macOS or Linux.");
         var root = Path.GetFullPath(libraryPath);
         if (OperatingSystem.IsMacOS())
         {

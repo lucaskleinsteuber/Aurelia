@@ -184,7 +184,8 @@ public sealed class MediaEditorService(AureliaDbContext database, CatalogMutatio
         if (Path.IsPathRooted(relative) || relative.Contains('\0')) throw Invalid("Select a file within this storage location.");
         var path = Path.GetFullPath(Path.Combine(root, relative));
         var check = Path.GetRelativePath(Path.GetFullPath(root), path);
-        if (check == ".." || check.StartsWith("../", StringComparison.Ordinal)) throw Invalid("Select a file within this storage location.");
+        if (check == ".." || check.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || Path.IsPathRooted(check))
+            throw Invalid("Select a file within this storage location.");
         return path;
     }
 

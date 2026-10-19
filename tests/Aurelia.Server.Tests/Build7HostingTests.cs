@@ -116,6 +116,31 @@ public sealed class Build7HostingTests
         }
     }
 
+    [Fact]
+    public void ANativeHostCanAskForHttpsOnThisComputerWithoutNetworkAccess()
+    {
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        try
+        {
+            Directory.CreateDirectory(dataDirectory);
+            var configuration = new ConfigurationBuilder().Build();
+            var closed = ServerRuntimeOptions.Resolve(configuration, ["run", "--data-dir", dataDirectory, "--lan-port", "45112"]);
+            Assert.False(closed.LocalHttpsEnabled);
+            Assert.DoesNotContain("https://", closed.ListenUrl, StringComparison.Ordinal);
+
+            // The desktop app reaches its own server over pinned HTTPS on 127.0.0.1, never on other addresses.
+            var local = ServerRuntimeOptions.Resolve(configuration, ["run", "--data-dir", dataDirectory, "--lan-port", "45112", "--local-https"]);
+            Assert.True(local.LocalHttpsEnabled);
+            Assert.False(local.LanAccessEnabled);
+            Assert.EndsWith(";https://127.0.0.1:45112", local.ListenUrl, StringComparison.Ordinal);
+            Assert.DoesNotContain("https://*", local.ListenUrl, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dataDirectory, recursive: true);
+        }
+    }
+
     private sealed class TestApplicationLifetime : IHostApplicationLifetime, IDisposable
     {
         private readonly CancellationTokenSource started = new();

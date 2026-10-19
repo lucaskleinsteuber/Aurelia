@@ -32,7 +32,7 @@ public sealed class ServerTlsIdentity : IDisposable
 
     public static ServerTlsIdentity LoadOrCreate(ServerRuntimeOptions runtime)
     {
-        if (!runtime.LanAccessEnabled && !File.Exists(runtime.CertificatePath))
+        if (!runtime.LanAccessEnabled && !runtime.LocalHttpsEnabled && !File.Exists(runtime.CertificatePath))
         {
             return Disabled;
         }
@@ -70,9 +70,23 @@ public sealed class ServerTlsIdentity : IDisposable
             SHA256.HashData(publicKey.ExportSubjectPublicKeyInfo()));
         return new ServerTlsIdentity(
             true,
-            certificate,
+            UsableForTls(certificate),
             fingerprint,
             FormatDisplayFingerprint(fingerprint));
+    }
+
+    /// <summary>
+    /// Windows TLS (SChannel) cannot sign with a key that exists only in memory, which is what
+    /// loading PEM files gives. A PKCS#12 round trip stores the same key where SChannel can use it,
+    /// as Kestrel does for its own PEM certificates; the key and fingerprint are unchanged.
+    /// </summary>
+    private static X509Certificate2 UsableForTls(X509Certificate2 certificate)
+    {
+        if (!OperatingSystem.IsWindows()) return certificate;
+        using (certificate)
+        {
+            return X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pkcs12), null, X509KeyStorageFlags.DefaultKeySet);
+        }
     }
 
     public void Dispose()

@@ -169,7 +169,7 @@ public sealed class ImportPlanningService(
         var bindings = existing.Where(item => item.ManualSourceBinding).ToDictionary(item => item.NormalizedSourcePath, StringComparer.Ordinal);
         bool Excluded(string path, string? identity = null) => excluded.Any(value =>
             value.NormalizedSourcePath == MediaPath.Normalize(path)
-            || value.IsDirectory && MediaPath.Normalize(path).StartsWith(value.NormalizedSourcePath.TrimEnd('/') + "/", StringComparison.Ordinal)
+            || value.IsDirectory && MediaPath.IsSameOrDescendant(MediaPath.Normalize(path), value.NormalizedSourcePath)
             || identity is not null && value.FileSystemIdentity == identity);
         return discovered with
         {

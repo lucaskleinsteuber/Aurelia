@@ -12,7 +12,7 @@
         Background="{StaticResource AureliaCanvas}">
   <Panel>
     <!-- Until a profile is open: one centered card for each step, like the Mac and Apple TV apps. -->
-    <Grid IsVisible="{Binding ShowsWelcome}">
+    <Grid x:Name="Welcome">
       <Border Background="{StaticResource AureliaSurface}" CornerRadius="18" Padding="36,32"
               Width="520" HorizontalAlignment="Center" VerticalAlignment="Center"
               BoxShadow="0 18 48 0 #66000000">
@@ -45,15 +45,19 @@
             </ItemsControl>
             <TextBox x:Name="ServerAddress" Text="{Binding Address}"
                      PlaceholderText="Server address, for example 192.168.1.20" KeyDown="AddressKeyDown" />
-            <Button x:Name="ConnectButton" Classes="primary" Content="Continue" Click="Connect"
-                    IsEnabled="{Binding !IsBusy}" />
+            <StackPanel Orientation="Horizontal" Spacing="16">
+              <Button x:Name="ConnectButton" Classes="primary" Content="Continue" Click="Connect"
+                      IsEnabled="{Binding !IsBusy}" />
+              <Button x:Name="SetUpHereButton" Classes="link" Content="Set Up This PC Instead" Click="SetUpHere"
+                      VerticalAlignment="Center" IsVisible="False" />
+            </StackPanel>
           </StackPanel>
 
           <!-- Trust -->
           <StackPanel x:Name="TrustStep" Spacing="14" IsVisible="{Binding ShowsTrust}">
             <TextBlock Classes="title" Text="{Binding ServerName, StringFormat='Is this {0}?'}" />
             <TextBlock Classes="secondary"
-                       Text="Compare this code with the fingerprint in Aurelia on your Mac under Settings › Server › Connection. Continue only if they match." />
+                       Text="Compare this code with the fingerprint in Aurelia on the server computer: on a Mac under Settings › Server › Connection, on a PC in Server Settings › General. Continue only if they match." />
             <Border Background="#14FFFFFF" CornerRadius="10" Padding="16,12">
               <TextBlock x:Name="Fingerprint" Text="{Binding FingerprintDisplay}" FontFamily="monospace"
                          FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
@@ -67,9 +71,9 @@
 
           <!-- Pairing -->
           <StackPanel x:Name="PairingStep" Spacing="14" IsVisible="{Binding ShowsPairing}">
-            <TextBlock Classes="title" Text="Approve this computer on your Mac" />
+            <TextBlock Classes="title" Text="Approve this computer on your server" />
             <TextBlock Classes="secondary"
-                       Text="In Aurelia on your Mac, open Settings › General › Devices, choose Approve Device… and enter this code." />
+                       Text="In Aurelia on the server computer, choose Approve Device… and enter this code. On a Mac it is in Settings › General › Devices, on a PC in Server Settings › Devices." />
             <TextBlock x:Name="PairingCode" Text="{Binding PairingCode}" FontFamily="monospace" FontSize="40"
                        FontWeight="Bold" LetterSpacing="4" HorizontalAlignment="Center" Margin="0,6" />
             <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
@@ -106,7 +110,9 @@
             </ItemsControl>
             <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
               <Button Classes="secondary" Content="Try Again" Click="Refresh" IsVisible="{Binding HasError}" />
-              <Button Classes="secondary" Content="Disconnect This Computer" Click="Disconnect" />
+              <Button Classes="secondary" Content="Disconnect This Computer" Click="Disconnect" IsVisible="{Binding CanDisconnect}" />
+              <Button x:Name="AnotherServerButton" Classes="secondary" Content="Connect to Another Server" Click="UseAnotherServer"
+                      IsVisible="{Binding IsLocalHost}" />
             </StackPanel>
           </StackPanel>
 
@@ -118,6 +124,8 @@
             <StackPanel Orientation="Horizontal" Spacing="12">
               <Button x:Name="PinButton" Classes="primary" Content="Continue" Click="SubmitPin" IsEnabled="{Binding !IsBusy}" />
               <Button Classes="secondary" Content="Back" Click="Back" />
+              <Button x:Name="ForgotPinButton" Classes="link" Content="Forgot PIN?" Click="ForgotPin" VerticalAlignment="Center"
+                      IsVisible="{Binding CanResetPin}" />
             </StackPanel>
           </StackPanel>
 
@@ -127,6 +135,9 @@
         </StackPanel>
       </Border>
     </Grid>
+
+    <!-- This computer's own server: setup, sign-in, PIN and its state while it starts. -->
+    <views:HostSetupView x:Name="HostSetup" IsVisible="False" />
 
     <!-- With a profile open: the library, and the player over it while something plays. -->
     <views:LibraryView x:Name="Library" IsVisible="False" />

@@ -63,7 +63,16 @@ internal sealed class FakeServerApi : IAureliaServerApi
     public Task<ProfilePickerResponse> ProfilesAsync(StoredConnection connection, CancellationToken cancellation)
     {
         Calls.Add("profiles");
-        return Task.FromResult(new ProfilePickerResponse(2, "1.5.1", false, [Owner, Guest]));
+        return Task.FromResult(new ProfilePickerResponse(2, "1.5.1", ManagementSetupRequired, [Owner, Guest]));
+    }
+
+    public bool ManagementSetupRequired { get; set; }
+
+    public Task InitializeProfilesAsync(StoredConnection connection, string password, string pin, CancellationToken cancellation)
+    {
+        Calls.Add("initialize " + pin);
+        ManagementSetupRequired = false;
+        return Task.CompletedTask;
     }
 
     public Task<ProfileSessionResponse> UnlockProfileAsync(StoredConnection connection, Guid profileId, string? pin, CancellationToken cancellation)

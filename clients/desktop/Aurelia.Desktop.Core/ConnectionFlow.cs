@@ -49,11 +49,16 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
     public string FingerprintDisplay { get; private set => Set(ref field, value); } = "";
     public string PairingCode { get; private set => Set(ref field, value); } = "";
     public IReadOnlyList<WatchingProfile> Profiles { get; private set => Set(ref field, value); } = [];
-    public WatchingProfile? SelectedProfile { get; private set => Set(ref field, value, nameof(SelectedProfile), [nameof(PinPrompt)]); }
+    public WatchingProfile? SelectedProfile { get; private set => Set(ref field, value, nameof(SelectedProfile), [nameof(PinPrompt), nameof(CanResetPin)]); }
     public ProfileSessionResponse? Session { get; private set => Set(ref field, value, nameof(Session), [nameof(SignedInName)]); }
     /// <summary>The paired server, once there is one.</summary>
     public StoredConnection? Connection => connection;
     public string SignedInName => Session?.User.Username ?? "";
+    /// <summary>This computer's own server, set up through "Set Up This PC".</summary>
+    public bool IsLocalHost => connection?.LocalHost == true;
+    public bool CanDisconnect => !IsLocalHost;
+    /// <summary>A forgotten owner PIN can be reset with the Server Password on the server's own computer.</summary>
+    public bool CanResetPin => IsLocalHost && SelectedProfile?.Role == UserRole.Owner;
     public string PinPrompt => SelectedProfile is null ? "" : $"Enter the PIN for {SelectedProfile.Name}";
 
     public bool ShowsStarting => Phase == ConnectionPhase.Starting;
@@ -73,7 +78,8 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
     public async Task StartAsync()
     {
         var saved = store.Load();
-        if (saved is null)
+        // This computer's own server is opened by the host flow, never as a remote server.
+        if (saved is null or { LocalHost: true })
         {
             ShowConnect();
             return;
@@ -105,6 +111,41 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
                 Error = $"{saved.ServerName} could not be reached. {error.Message}";
             }
         });
+    }
+
+    /// <summary>Opens this computer's own server, with the owner's profile already open right after setup.</summary>
+    public Task OpenLocalAsync(StoredConnection local, ProfileSessionResponse? opened)
+    {
+        CancelWork();
+        discovery.Halt();
+        connection = local;
+        ServerName = local.ServerName;
+        Changed(nameof(IsLocalHost), nameof(CanDisconnect), nameof(CanResetPin));
+        if (opened is null) return RunAsync(LoadProfilesAsync);
+        SelectedProfile = null;
+        Error = null;
+        Session = opened;
+        Phase = ConnectionPhase.Connected;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The server restarted: every profile session ended with it, so the profiles come back after it.</summary>
+    public void ServerInterrupted()
+    {
+        CancelWork();
+        Session = null;
+        SelectedProfile = null;
+        Error = null;
+        Phase = ConnectionPhase.Starting;
+    }
+
+    /// <summary>A new profile session for the same profile, for example after confirming a network change.</summary>
+    public void AdoptSession(ProfileSessionResponse replacement)
+    {
+        if (connection is null) return;
+        Error = null;
+        Session = replacement;
+        Phase = ConnectionPhase.Connected;
     }
 
     /// <summary>Reads the identity of the typed or chosen server so the person can compare it.</summary>
@@ -182,7 +223,7 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
         Error = null;
         if (profile.NeedsPinSetup)
         {
-            Error = $"{profile.Name} needs a PIN first. Set it up in Aurelia on your Mac.";
+            Error = $"{profile.Name} needs a PIN first. Set it up in Aurelia on the server computer.";
             return Task.CompletedTask;
         }
         SelectedProfile = profile;
@@ -298,7 +339,7 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
                     await LoadProfilesAsync(token);
                     return;
                 case DeviceAuthorizationState.Denied:
-                    throw new AureliaApiException(403, "pairing_denied", "This computer was not approved on your Mac.");
+                    throw new AureliaApiException(403, "pairing_denied", "This computer was not approved on the server.");
                 default:
                     throw new AureliaApiException(409, "pairing_expired", "The code is no longer valid. Start again for a new one.");
             }
@@ -310,7 +351,9 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
         if (connection is not { } current) return;
         var picker = await api.ProfilesAsync(current, token);
         if (picker.ManagementSetupRequired)
-            throw new AureliaApiException(409, "management_setup_required", "Finish setting up profiles in Aurelia on your Mac first.");
+            throw new AureliaApiException(409, "management_setup_required", current.LocalHost
+                ? "Finish setting up this server first."
+                : "Finish setting up profiles in Aurelia on the server computer first.");
         Profiles = picker.Profiles;
         SelectedProfile = null;
         Error = null;
@@ -328,6 +371,7 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
     {
         store.Clear();
         connection = null;
+        Changed(nameof(IsLocalHost), nameof(CanDisconnect), nameof(CanResetPin));
         Session = null;
         SelectedProfile = null;
         Profiles = [];
@@ -376,6 +420,11 @@ public sealed class ConnectionFlow : INotifyPropertyChanged, IDisposable
         work = null;
         current?.Cancel();
         IsBusy = false;
+    }
+
+    private void Changed(params string[] names)
+    {
+        foreach (var name in names) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string name = "", string[]? also = null)

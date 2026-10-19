@@ -11,6 +11,10 @@
     <Color x:Key="SystemAccentColorDark1">#FFE6E6E6</Color>
     <Color x:Key="SystemAccentColorDark2">#FFCCCCCC</Color>
     <Color x:Key="SystemAccentColorDark3">#FFB3B3B3</Color>
+    <!-- On a white check box the check mark is black, so it stays visible. -->
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="Black" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="Black" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="Black" />
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />

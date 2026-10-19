@@ -17,9 +17,17 @@ public sealed partial class LibraryView : UserControl
     /// <summary>Raised when the person chooses Switch Profile in the sidebar.</summary>
     public event Action? SwitchProfileRequested;
 
+    /// <summary>Raised when the owner of this computer's server opens its settings.</summary>
+    public event Action? ServerSettingsRequested;
+
     private LibraryModel? Model => DataContext as LibraryModel;
 
     public void ShowProfile(string name) => ProfileName.Text = name;
+
+    /// <summary>Server Settings appear only for the owner of the server running on this computer.</summary>
+    public void ShowServerSettings(bool available) => ServerSettingsButton.IsVisible = available;
+
+    private void OpenServerSettings(object? sender, RoutedEventArgs e) => ServerSettingsRequested?.Invoke();
 
     private async void SectionChanged(object? sender, SelectionChangedEventArgs e)
     {

@@ -81,7 +81,7 @@ public sealed class ConnectionFlowTests
         await flow.ConnectAsync();
         await flow.TrustAndPairAsync();
         Assert.Equal(ConnectionPhase.Trust, flow.Phase);
-        Assert.Equal("This computer was not approved on your Mac.", flow.Error);
+        Assert.Equal("This computer was not approved on the server.", flow.Error);
         Assert.Null(secrets.Value);
     }
 

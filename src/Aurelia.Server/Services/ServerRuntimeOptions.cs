@@ -11,7 +11,8 @@ public sealed record ServerRuntimeOptions(
     int LanHttpsPort,
     string CertificatePath,
     string PrivateKeyPath,
-    int? HostParentProcessId)
+    int? HostParentProcessId,
+    bool LocalHttpsEnabled = false)
 {
     public const int DefaultLanHttpsPort = 43111;
 
@@ -55,9 +56,13 @@ public sealed record ServerRuntimeOptions(
             OptionValue(arguments, "--host-parent-pid"),
             Environment.GetEnvironmentVariable("AURELIA_HOST_PARENT_PID")));
 
+        // A native host may ask for HTTPS on this computer even without network access, so its own
+        // app always connects through the same pinned identity, whatever the network setting.
+        var localHttpsEnabled = HasFlag(arguments, "--local-https")
+            || bool.TryParse(Environment.GetEnvironmentVariable("AURELIA_LOCAL_HTTPS"), out var localHttps) && localHttps;
         var listenUrl = lanAccessEnabled
             ? $"{localListenUrl};https://*:{lanHttpsPort}"
-            : File.Exists(Path.Combine(dataDirectory, "server-certificate.pem"))
+            : localHttpsEnabled || File.Exists(Path.Combine(dataDirectory, "server-certificate.pem"))
                 ? $"{localListenUrl};https://127.0.0.1:{lanHttpsPort}" : localListenUrl;
 
         return new ServerRuntimeOptions(
@@ -69,7 +74,8 @@ public sealed record ServerRuntimeOptions(
             lanHttpsPort,
             Path.Combine(dataDirectory, "server-certificate.pem"),
             Path.Combine(dataDirectory, "server-private-key.pem"),
-            hostParentProcessId);
+            hostParentProcessId,
+            localHttpsEnabled);
     }
 
     private static string? FirstNonEmpty(params string?[] values)

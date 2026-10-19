@@ -1,0 +1,176 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:Aurelia.Desktop.Core;assembly=Aurelia.Desktop.Core"
+        x:Class="Aurelia.Desktop.Views.ServerSettingsWindow"
+        x:DataType="core:ServerSettingsModel"
+        Title="Server Settings"
+        Width="900" Height="640" MinWidth="760" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AureliaCanvas}">
+  <Panel>
+    <Grid ColumnDefinitions="200,*" IsVisible="{Binding IsUnlocked}">
+      <!-- Sections -->
+      <Border Background="{StaticResource AureliaSidebar}" BorderBrush="{StaticResource AureliaHairline}" BorderThickness="0,0,1,0">
+        <StackPanel Margin="14,22,14,18" Spacing="16">
+          <TextBlock Text="Server" FontSize="20" FontWeight="Bold" Margin="12,0,0,0" />
+          <ListBox x:Name="Sections" Classes="sidebar" SelectedIndex="0" SelectionChanged="SectionChanged">
+            <ListBoxItem Content="General" />
+            <ListBoxItem Content="Storage" />
+            <ListBoxItem Content="Devices" />
+          </ListBox>
+        </StackPanel>
+      </Border>
+
+      <ScrollViewer Grid.Column="1">
+        <StackPanel Margin="32,26,32,32" Spacing="18" MaxWidth="640" HorizontalAlignment="Left">
+          <Border Classes="group" IsVisible="{Binding HasNotice}">
+            <TextBlock x:Name="NoticeText" Text="{Binding Notice}" TextWrapping="Wrap" />
+          </Border>
+          <TextBlock x:Name="ErrorText" Text="{Binding Error}" IsVisible="{Binding HasError}" Foreground="#FF8A80" TextWrapping="Wrap" />
+
+          <!-- General -->
+          <StackPanel x:Name="GeneralSection" Spacing="18" IsVisible="{Binding ShowsGeneral}">
+            <TextBlock Classes="page" Text="General" />
+            <Border Classes="group">
+              <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
+                <TextBlock Text="Status" Classes="secondary" />
+                <StackPanel Grid.Column="1" Spacing="2">
+                  <TextBlock x:Name="StateText" Text="{Binding StateText}" FontWeight="SemiBold" />
+                  <TextBlock Classes="secondary" FontSize="12" Text="{Binding Attention}" IsVisible="{Binding HasAttention}" />
+                </StackPanel>
+                <TextBlock Grid.Row="1" Text="Version" Classes="secondary" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Version}" />
+                <TextBlock Grid.Row="2" Text="Reachable at" Classes="secondary" />
+                <SelectableTextBlock x:Name="AddressText" Grid.Row="2" Grid.Column="1" Text="{Binding Addresses}" TextWrapping="Wrap" />
+                <TextBlock Grid.Row="3" Text="Fingerprint" Classes="secondary" />
+                <StackPanel Grid.Row="3" Grid.Column="1" Spacing="2">
+                  <SelectableTextBlock x:Name="FingerprintText" Text="{Binding Fingerprint}" FontFamily="monospace" FontWeight="SemiBold" />
+                  <TextBlock Classes="secondary" FontSize="12"
+                             Text="Other devices show this code when they connect. It must match before you trust them." />
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <TextBlock Classes="section" Text="Name and Network" />
+            <Border Classes="group">
+              <StackPanel Spacing="12">
+                <Grid ColumnDefinitions="150,*">
+                  <TextBlock Text="Server Name" VerticalAlignment="Center" />
+                  <TextBox x:Name="ServerNameBox" Grid.Column="1" Text="{Binding ServerName}" MaxLength="128" />
+                </Grid>
+                <CheckBox x:Name="NetworkToggle" IsChecked="{Binding LanAccessEnabled}"
+                          Content="Allow devices on this network to connect, such as your Apple TV and Mac" />
+                <TextBlock Classes="secondary" FontSize="12"
+                           Text="Connections are encrypted and need an approved device. Public Internet addresses are always blocked." />
+                <CheckBox x:Name="DisconnectConfirmation" IsChecked="{Binding ConfirmDisconnect}" IsVisible="{Binding TurnsNetworkOff}"
+                          Content="I understand that other devices lose access" />
+                <Button x:Name="ApplyNetworkButton" Classes="primary" Content="Try New Settings" Click="ApplyNetwork"
+                        IsVisible="{Binding HasNetworkChange}" IsEnabled="{Binding !IsBusy}" />
+                <!-- A trial must be confirmed on the restarted server, or it returns on its own. -->
+                <StackPanel x:Name="ConfirmPanel" Spacing="10" IsVisible="{Binding IsTrialPending}">
+                  <TextBlock TextWrapping="Wrap" Foreground="#FFD180"
+                             Text="{Binding TrialDeadline, StringFormat='The server restarts with the new settings. Confirm them before {0}, otherwise the previous settings return.'}" />
+                  <TextBox x:Name="ConfirmPin" PasswordChar="•" MaxLength="8" PlaceholderText="Your viewing PIN" IsVisible="{Binding NeedsPinToConfirm}" />
+                  <TextBox x:Name="ConfirmPassword" PasswordChar="•" PlaceholderText="Server Password" />
+                  <Button x:Name="ConfirmButton" Classes="primary" Content="Keep New Settings" Click="ConfirmNetwork" IsEnabled="{Binding !IsBusy}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            <Button Classes="secondary" Content="Restart Server" Click="Restart" IsEnabled="{Binding !IsBusy}" />
+          </StackPanel>
+
+          <!-- Storage -->
+          <StackPanel x:Name="StorageSection" Spacing="18" IsVisible="{Binding ShowsStorage}">
+            <TextBlock Classes="page" Text="Storage" />
+            <TextBlock Classes="secondary"
+                       Text="Folders and drives Aurelia reads movies and TV shows from. Files are never changed, moved or copied." />
+            <TextBlock Classes="secondary" Text="No storage locations yet." IsVisible="{Binding !HasStorage}" />
+            <ItemsControl x:Name="StorageList" ItemsSource="{Binding Storage}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="core:StorageRow">
+                  <Border Classes="group" Margin="0,0,0,10">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Spacing="3">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                        <TextBlock Classes="caption" Text="{Binding Path}" />
+                        <TextBlock Classes="caption" Text="{Binding KindName}" />
+                        <TextBlock Classes="secondary" FontSize="12" Text="{Binding Status}" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <Button Classes="secondary" Content="Scan" Click="Scan" IsEnabled="{Binding !IsScanning}" />
+                        <Button Classes="link" Content="Remove…" Click="Remove" />
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Button x:Name="AddStorageButton" Classes="primary" Content="Add Storage Location…" Click="AddStorage" IsEnabled="{Binding !IsBusy}" />
+              <ComboBox x:Name="NewKind" SelectedIndex="0" Width="200" VerticalAlignment="Center">
+                <ComboBoxItem Content="Movies and TV Shows" />
+                <ComboBoxItem Content="Movies" />
+                <ComboBoxItem Content="TV Shows" />
+              </ComboBox>
+            </StackPanel>
+          </StackPanel>
+
+          <!-- Devices -->
+          <StackPanel x:Name="DevicesSection" Spacing="18" IsVisible="{Binding ShowsDevices}">
+            <TextBlock Classes="page" Text="Devices" />
+            <TextBlock Classes="section" Text="Approve a Device" />
+            <Border Classes="group">
+              <StackPanel Spacing="12">
+                <TextBlock Classes="secondary"
+                           Text="A new Apple TV, Mac or PC shows an eight-digit code when it connects. Enter it here to let it in." />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <TextBox x:Name="DeviceCode" Text="{Binding DeviceCode}" PlaceholderText="1234 5678" Width="180" MaxLength="9"
+                           FontFamily="monospace" FontSize="18" KeyDown="DeviceCodeKeyDown" />
+                  <Button x:Name="LookUpButton" Classes="secondary" Content="Look Up" Click="LookUp" IsEnabled="{Binding !IsBusy}" />
+                </StackPanel>
+                <StackPanel Spacing="10" IsVisible="{Binding HasPendingDevice}">
+                  <TextBlock x:Name="PendingDevice" FontWeight="SemiBold"
+                             Text="{Binding PendingDevice, StringFormat='{}{0} wants to connect to this server.'}" />
+                  <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button x:Name="ApproveButton" Classes="primary" Content="Approve" Click="Approve" IsEnabled="{Binding !IsBusy}" />
+                    <Button Classes="secondary" Content="Deny" Click="Deny" IsEnabled="{Binding !IsBusy}" />
+                  </StackPanel>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            <TextBlock Classes="section" Text="Paired Devices" />
+            <ItemsControl x:Name="DeviceList" ItemsSource="{Binding Devices}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="core:DeviceRow">
+                  <Border Classes="group" Margin="0,0,0,10">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                        <TextBlock Classes="caption" Text="{Binding LastSeen}" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Classes="link" Content="Remove…" Click="RemoveDevice" IsVisible="{Binding CanRemove}"
+                              VerticalAlignment="Center" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+
+    <!-- Management opens with the Server Password for ten minutes. -->
+    <Border x:Name="UnlockCard" IsVisible="{Binding IsLocked}" Background="{StaticResource AureliaSurface}" CornerRadius="18"
+            Padding="32,28" Width="440" HorizontalAlignment="Center" VerticalAlignment="Center" BoxShadow="0 18 48 0 #66000000">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="title" Text="Server Settings" />
+        <TextBlock Classes="secondary" Text="Enter the Server Password to manage this server. Access lasts ten minutes." />
+        <TextBox x:Name="UnlockPassword" PasswordChar="•" PlaceholderText="Server Password" KeyDown="UnlockKeyDown" />
+        <Button x:Name="UnlockButton" Classes="primary" Content="Unlock" Click="Unlock" IsEnabled="{Binding !IsBusy}" />
+        <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Foreground="#FF8A80" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+  </Panel>
+</Window>

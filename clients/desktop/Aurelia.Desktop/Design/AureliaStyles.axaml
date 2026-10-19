@@ -163,6 +163,28 @@
     </Style.Animations>
   </Style>
 
+  <!-- Setup choices: a raised card for the recommended way, a quieter one for the other. -->
+  <Style Selector="Button.choice">
+    <Setter Property="Background" Value="#2EFFFFFF" />
+    <Setter Property="BorderBrush" Value="#2EFFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Padding" Value="18,16" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+  </Style>
+  <Style Selector="Button.choice.quiet">
+    <Setter Property="Background" Value="#12FFFFFF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaHairline}" />
+  </Style>
+  <!-- Settings: a grouped surface like the Mac's settings sections. -->
+  <Style Selector="Border.group">
+    <Setter Property="Background" Value="#12FFFFFF" />
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaHairline}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="18,14" />
+  </Style>
+
   <!-- The white capsule primary button of the Mac app. -->
   <Style Selector="Button.primary">
     <Setter Property="Background" Value="White" />

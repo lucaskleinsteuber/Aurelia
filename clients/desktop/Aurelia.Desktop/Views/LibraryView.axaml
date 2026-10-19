@@ -59,6 +59,7 @@
       <DockPanel Margin="14,22,14,18">
         <TextBlock DockPanel.Dock="Top" Text="Aurelia" FontSize="22" FontWeight="Bold" Margin="12,0,0,22" />
         <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="12,0,0,0">
+          <Button x:Name="ServerSettingsButton" Classes="link" Content="Server Settings…" Click="OpenServerSettings" IsVisible="False" />
           <TextBlock x:Name="ProfileName" FontWeight="SemiBold" />
           <Button Classes="link" Content="Switch Profile" Click="SwitchProfile" />
           <TextBlock x:Name="VersionLabel" FontSize="11" Foreground="{StaticResource AureliaSecondaryText}" />

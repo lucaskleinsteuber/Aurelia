@@ -1,11 +1,13 @@
 #!/bin/sh
 # Builds the desktop client for Windows x64 and ARM64 (and this Mac) without a Windows PC.
-# Each Windows build is one self-contained Aurelia.exe that needs no .NET installation.
+# Each build is a self-contained Aurelia.exe with its VLC and, in server/, the bundled Aurelia
+# Server it hosts, so neither .NET nor VLC needs to be installed.
 set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
 export DOTNET_ROOT="${DOTNET_ROOT:-$(dirname -- "$DOTNET_BIN")}"
 project="$repository_root/clients/desktop/Aurelia.Desktop/Aurelia.Desktop.csproj"
+server_project="$repository_root/src/Aurelia.Server/Aurelia.Server.csproj"
 props="$repository_root/clients/desktop/Directory.Build.props"
 version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' "$props")
 build=$(sed -n 's:.*<AureliaDesktopBuildNumber>\([0-9]*\)</AureliaDesktopBuildNumber>.*:\1:p' "$props")
@@ -16,6 +18,9 @@ for rid in win-x64 win-arm64 osx-arm64; do
   "$DOTNET_BIN" publish "$project" --configuration Release --runtime "$rid" --self-contained true \
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
     -p:DebugType=none --output "$output_root/$rid"
+  # The same server the Mac app bundles, published for this platform beside the app.
+  "$DOTNET_BIN" publish "$server_project" --configuration Release --runtime "$rid" --self-contained true \
+    -p:DebugType=none --output "$output_root/$rid/server"
 done
 # Graphics packages ship native debug symbols; the app does not need them.
 find "$output_root" -name '*.pdb' -delete

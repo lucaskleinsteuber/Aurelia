@@ -11,7 +11,14 @@ internal static partial class FileSystemIdentity
     {
         if (OperatingSystem.IsWindows())
         {
-            return null;
+            try
+            {
+                return WindowsMediaHandle.TryReadIdentity(path);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
         }
 
         var buffer = new byte[StatBufferLength];

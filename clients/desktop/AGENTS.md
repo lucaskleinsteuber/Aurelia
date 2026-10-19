@@ -3,13 +3,23 @@
 - The desktop client is named **Aurelia** and targets Windows 10/11 on x64 and ARM64 first,
   Linux later. It is a separate product with its own version and build counter in
   `clients/desktop/Directory.Build.props` (`Version`, `AureliaDesktopBuildNumber`). The
-  approved version is **0.0.3**, build **3** (library and player). Confirm versions with the
+  approved version is **0.0.4**, build **4** (bundled server). Confirm versions with the
   user before changing them.
 - It uses C# and Avalonia; package versions are pinned in the root
   `Directory.Packages.props`. Its tests use xUnit v3 (required by Avalonia's headless
   runner); the server tests stay on xUnit v2.
-- Like the Mac app, it will bundle and host its own Aurelia server, and it can also connect
-  to another server. Keep that server the shared .NET server in `src/`, never a fork.
+- Like the Mac app, it bundles and hosts its own Aurelia server (`server/` beside the app) and
+  can also connect to another server. Keep that server the shared .NET server in `src/`,
+  never a fork. `LocalServerHost` follows the Mac server host: a lifeline pipe, a private
+  control channel on 127.0.0.1 with a secret path, HTTPS on 127.0.0.1 for the app itself,
+  bounded automatic restarts and network trials that roll back unless confirmed.
+- On Windows the hosted server uses the standalone server's data folder
+  (`%LOCALAPPDATA%\Aurelia Server`) and ports 43110/43111. On macOS the desktop app is a
+  development build: its server keeps `Aurelia Desktop/Server`, ports 43120/43121 and network
+  access off by default, and never uses the Mac app's `Aurelia Server` data, ports or Bonjour.
+- Windows-specific server code (handle-checked media opens, file identities, the TLS key) is
+  exercised under CrossOver's Wine with `scripts/test-server-wine.sh` and synthetic data only;
+  state clearly that this is not a run on Windows.
 - Follow the Mac app's design: canvas `#202326`, surface `#282C2F`, dark sidebar, white
   capsule primary button. Do not show controls for features that do not work yet as if
   they did.
