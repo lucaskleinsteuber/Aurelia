@@ -8,6 +8,7 @@
         Width="920" Height="760" MinWidth="780" MinHeight="560"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource AureliaCanvas}">
+  <Panel x:Name="Root">
   <DockPanel>
     <!-- Save and cancel stay at the bottom, as in the Mac editor. -->
     <Border DockPanel.Dock="Bottom" Background="{StaticResource AureliaSidebar}" BorderBrush="{StaticResource AureliaHairline}"
@@ -23,7 +24,7 @@
     </Border>
 
     <ScrollViewer>
-      <Grid ColumnDefinitions="260,*" Margin="28,24,28,28">
+      <Grid x:Name="EditorContent" ColumnDefinitions="260,*" Margin="28,24,28,28">
         <!-- Pictures -->
         <StackPanel Spacing="12">
           <Border Width="240" Height="360" CornerRadius="10" ClipToBounds="True" Background="#14FFFFFF" HorizontalAlignment="Left">
@@ -119,4 +120,5 @@
       </Grid>
     </ScrollViewer>
   </DockPanel>
+  </Panel>
 </Window>

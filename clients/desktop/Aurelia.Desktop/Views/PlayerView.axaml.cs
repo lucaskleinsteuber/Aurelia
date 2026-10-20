@@ -22,6 +22,9 @@ public sealed partial class PlayerView : UserControl
     private bool menuOpen;
     private bool updatingSliders;
 
+    /// <summary>Keeps the top controls clear of the window's title bar while the window is not full screen.</summary>
+    public void SetTitleBarInset(double top) => TopBar.Margin = new Avalonia.Thickness(24, 20 + top, 24, 0);
+
     public PlayerView()
     {
         InitializeComponent();
@@ -191,7 +194,8 @@ public sealed partial class PlayerView : UserControl
 
     private void KeyPressed(object? sender, KeyEventArgs e)
     {
-        if (model is null) return;
+        // Typing a scene note is not a shortcut.
+        if (model is null || e.Source is TextBox) return;
         switch (e.Key)
         {
             case Key.Space or Key.K: model.TogglePlay(); break;
@@ -260,6 +264,50 @@ public sealed partial class PlayerView : UserControl
             ("45 Minutes", 45), ("60 Minutes", 60), ("90 Minutes", 90)];
         ShowMenu(sender, choices.Select(choice => Item(choice.Title, current.SleepMinutes == choice.Minutes,
             () => current.SetSleepTimer(choice.Minutes))));
+    }
+
+    private async void NotesOpened(object? sender, EventArgs e)
+    {
+        menuOpen = true;
+        if (model is null) return;
+        NotesPanel.DataContext = model.Notes;
+        await model.Notes.LoadAsync();
+    }
+
+    private void NotesClosed(object? sender, EventArgs e)
+    {
+        menuOpen = false;
+        model?.Notes.Cancel();
+        RestartHideTimer();
+        Focus();
+    }
+
+    private void MarkScene(object? sender, RoutedEventArgs e)
+    {
+        model?.Notes.Create();
+        SceneText.Focus();
+    }
+
+    private async void SaveScene(object? sender, RoutedEventArgs e)
+    {
+        if (model is not null) await model.Notes.SaveAsync();
+    }
+
+    private void CancelScene(object? sender, RoutedEventArgs e) => model?.Notes.Cancel();
+
+    private void JumpToScene(object? sender, RoutedEventArgs e)
+    {
+        if (model is not null && (sender as Control)?.DataContext is SceneNoteRow row) model.Notes.Jump(row);
+    }
+
+    private void EditScene(object? sender, RoutedEventArgs e)
+    {
+        if (model is not null && (sender as Control)?.DataContext is SceneNoteRow row) model.Notes.Edit(row);
+    }
+
+    private async void RemoveScene(object? sender, RoutedEventArgs e)
+    {
+        if (model is not null && (sender as Control)?.DataContext is SceneNoteRow row) await model.Notes.RemoveAsync(row);
     }
 
     private void ShowMenu(object? sender, IEnumerable<MenuItem> items)

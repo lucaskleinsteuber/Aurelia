@@ -14,6 +14,7 @@ public sealed partial class ServerSettingsWindow : Window
     public ServerSettingsWindow()
     {
         InitializeComponent();
+        TitleBar.Extend(this, Root, top => SettingsSidebar.Margin = new Avalonia.Thickness(14, 22 + (OperatingSystem.IsMacOS() ? top : 0), 14, 18));
     }
 
     internal ServerSettingsWindow(ServerSettingsModel model) : this()

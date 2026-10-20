@@ -172,6 +172,29 @@ internal sealed class FakeLibraryApi : ILibraryApi
     public Task<IReadOnlyList<string>> CapabilitiesAsync(CancellationToken cancellation) =>
         Task.FromResult<IReadOnlyList<string>>(["library-state-v1", "preview-streams-v1"]);
 
+    /// <summary>The profile's scene notes, kept in memory.</summary>
+    public List<SceneNoteSummary> SceneNotes { get; } = [];
+
+    public Task<IReadOnlyList<SceneNoteSummary>> SceneNotesAsync(Guid mediaId, CancellationToken cancellation) =>
+        Task.FromResult<IReadOnlyList<SceneNoteSummary>>([.. SceneNotes.Where(note => note.MediaId == mediaId)]);
+
+    public Task<SceneNoteSummary> SaveSceneNoteAsync(Guid mediaId, Guid noteId, SaveSceneNoteRequest request, CancellationToken cancellation)
+    {
+        var existing = SceneNotes.FindIndex(note => note.Id == noteId);
+        if (existing >= 0 && SceneNotes[existing].Revision != request.Revision)
+            return Task.FromException<SceneNoteSummary>(new AureliaApiException(409, "scene_note_conflict", "Changed."));
+        var saved = new SceneNoteSummary(noteId, mediaId, request.StartMilliseconds, request.EndMilliseconds, request.Text, request.Revision + 1);
+        if (existing >= 0) SceneNotes[existing] = saved;
+        else SceneNotes.Add(saved);
+        return Task.FromResult(saved);
+    }
+
+    public Task RemoveSceneNoteAsync(Guid mediaId, Guid noteId, long revision, CancellationToken cancellation)
+    {
+        SceneNotes.RemoveAll(note => note.Id == noteId && note.Revision == revision);
+        return Task.CompletedTask;
+    }
+
     public StreamSource StreamSource(PlaybackSourceResponse ticket) =>
         new(new Uri("https://192.168.1.20:43111" + ticket.StreamPath), new HttpClient(), "synthetic-profile-token");
 

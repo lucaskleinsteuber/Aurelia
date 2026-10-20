@@ -174,6 +174,14 @@ public sealed class LocalServerHostTests : IAsyncDisposable
                 Assert.Null(editor.Error);
                 Assert.Equal("Synthetic Movie", (await titles.DetailAsync(movie.Id, cancellation)).Metadata.Title);
 
+                // Scene notes, private to the profile.
+                var noteId = Guid.NewGuid();
+                await titles.SaveSceneNoteAsync(movie.Id, noteId, new SaveSceneNoteRequest(60_000, 90_000, "Synthetic scene", 0), cancellation);
+                var note = Assert.Single(await titles.SceneNotesAsync(movie.Id, cancellation));
+                Assert.Equal("Synthetic scene", note.Text);
+                await titles.RemoveSceneNoteAsync(movie.Id, noteId, note.Revision, cancellation);
+                Assert.Empty(await titles.SceneNotesAsync(movie.Id, cancellation));
+
                 var model = new LibraryModel(titles) { Management = access };
                 await model.OpenDetailAsync(movie.Id);
                 await model.RemoveDetailAsync();

@@ -11,7 +11,7 @@
         Icon="avares://Aurelia/Assets/aurelia.ico"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource AureliaCanvas}">
-  <Panel>
+  <Panel x:Name="Root">
     <!-- Until a profile is open: one centered card for each step, like the Mac and Apple TV apps. -->
     <Grid x:Name="Welcome">
       <Border Background="{StaticResource AureliaSurface}" CornerRadius="18" Padding="36,32"

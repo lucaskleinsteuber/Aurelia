@@ -69,6 +69,11 @@ public sealed partial class MainWindow : Window, IDisposable
         this.hosting = hosting;
         this.administration = administration;
         InitializeComponent();
+        TitleBar.Extend(this, Root, top =>
+        {
+            Library.SetTitleBarInset(top);
+            Player.SetTitleBarInset(top);
+        });
         PasswordPrompt = problem => new ServerPasswordDialog(problem).ShowDialog<string?>(this);
         DataContext = flow;
         // Each view gets its own model when it is shown, never the connection flow.

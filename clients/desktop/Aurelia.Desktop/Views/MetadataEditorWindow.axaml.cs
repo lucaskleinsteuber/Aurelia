@@ -16,6 +16,7 @@ public sealed partial class MetadataEditorWindow : Window
     public MetadataEditorWindow()
     {
         InitializeComponent();
+        TitleBar.Extend(this, Root, top => EditorContent.Margin = new Avalonia.Thickness(28, 24 + top, 28, 28));
     }
 
     internal MetadataEditorWindow(MetadataEditorModel model) : this()

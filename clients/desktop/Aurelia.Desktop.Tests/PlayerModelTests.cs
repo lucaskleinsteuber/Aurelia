@@ -238,4 +238,48 @@ public sealed class PlayerModelTests : IDisposable
         Assert.InRange(ScrubPreviewPlan.Workers(parallel: true, cores: 64), 2, 6);
         Assert.Equal(new TrackChoice("German", "Deutsch - [German]"), TrackChoice.From("Deutsch - [German]"));
     }
+
+    [Fact]
+    public async Task SceneNotesMarkMomentsAndRangesAndJumpBack()
+    {
+        Assert.Equal(750_000, SceneNotesModel.ParseTime("12:30"));
+        Assert.Equal(3_765_000, SceneNotesModel.ParseTime("1:02:45"));
+        Assert.Null(SceneNotesModel.ParseTime("12:75"));
+        Assert.Null(SceneNotesModel.ParseTime("soon"));
+        var api = new FakeLibraryApi();
+        long position = 754_000;
+        var seeks = new List<long>();
+        var notes = new SceneNotesModel(api, () => FakeLibraryApi.MovieId, () => position, seeks.Add);
+        await notes.LoadAsync();
+        Assert.False(notes.HasNotes);
+
+        notes.Create();
+        Assert.Equal("12:34", notes.Start);
+        notes.Text = "The reveal";
+        await notes.SaveAsync();
+        Assert.Null(notes.Error);
+        var moment = Assert.Single(notes.Notes);
+        Assert.Equal("12:34", moment.TimeLabel);
+        Assert.Equal("The reveal", moment.Text);
+
+        position = 60_000;
+        notes.Create();
+        notes.IsRange = true;
+        notes.End = "0:30";
+        await notes.SaveAsync();
+        Assert.Equal("The end must come after the start.", notes.Error);
+        notes.End = "2:00";
+        await notes.SaveAsync();
+        Assert.Equal(["1:00 – 2:00", "12:34"], notes.Notes.Select(note => note.TimeLabel));
+        Assert.Equal("Marked scene", notes.Notes[0].Text);
+
+        notes.Edit(notes.Notes[1]);
+        notes.Text = "The big reveal";
+        await notes.SaveAsync();
+        Assert.Equal("The big reveal", notes.Notes[1].Text);
+        notes.Jump(notes.Notes[1]);
+        Assert.Equal([754_000L], seeks);
+        await notes.RemoveAsync(notes.Notes[0]);
+        Assert.Single(notes.Notes);
+    }
 }

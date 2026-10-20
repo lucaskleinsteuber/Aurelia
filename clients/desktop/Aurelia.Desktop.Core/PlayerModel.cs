@@ -67,6 +67,10 @@ public sealed class PlayerModel : INotifyPropertyChanged, IAsyncDisposable
     public event Action? CloseRequested;
 
     public IVideoEngine Engine { get; private set => Set(ref field, value); }
+    /// <summary>Scene Notes for the title that is playing.</summary>
+    public SceneNotesModel Notes => notes ??= new SceneNotesModel(api, () => MediaId, () => Position, Seek);
+    private SceneNotesModel? notes;
+
     public string Title { get; private set => Set(ref field, value); } = "";
     public string? Subtitle { get; private set => Set(ref field, value); }
     public Guid MediaId => current.Id;

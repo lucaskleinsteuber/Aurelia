@@ -23,6 +23,10 @@ public interface ILibraryApi
     Task<PlaybackProgressResponse> SaveProgressAsync(Guid mediaId, long position, long duration, bool finished,
         long expectedRevision, Guid mutationId, CancellationToken cancellation);
     Task<IReadOnlyList<string>> CapabilitiesAsync(CancellationToken cancellation);
+    /// <summary>The profile's private notes on a title.</summary>
+    Task<IReadOnlyList<SceneNoteSummary>> SceneNotesAsync(Guid mediaId, CancellationToken cancellation);
+    Task<SceneNoteSummary> SaveSceneNoteAsync(Guid mediaId, Guid noteId, SaveSceneNoteRequest request, CancellationToken cancellation);
+    Task RemoveSceneNoteAsync(Guid mediaId, Guid noteId, long revision, CancellationToken cancellation);
     /// <summary>Where the stream relay reads a ticket's media from, with the profile's token.</summary>
     StreamSource StreamSource(PlaybackSourceResponse ticket);
 }
@@ -147,6 +151,18 @@ public sealed class LibraryClient(AureliaServerApi api, StoredConnection connect
         capabilities = response.Capabilities;
         return capabilities;
     }
+
+    public Task<IReadOnlyList<SceneNoteSummary>> SceneNotesAsync(Guid mediaId, CancellationToken cancellation) =>
+        GetAsync<IReadOnlyList<SceneNoteSummary>>($"/api/v1/media/{mediaId}/notes", cancellation);
+
+    public Task<SceneNoteSummary> SaveSceneNoteAsync(Guid mediaId, Guid noteId, SaveSceneNoteRequest request, CancellationToken cancellation) =>
+        AureliaServerApi.SendAsync<SceneNoteSummary>(client, HttpMethod.Put, $"/api/v1/media/{mediaId}/notes/{noteId}", session.Token, request,
+            inspecting: false, cancellation);
+
+    public Task RemoveSceneNoteAsync(Guid mediaId, Guid noteId, long revision, CancellationToken cancellation) =>
+        AureliaServerApi.SendAsync<AureliaServerApi.NoContent>(client, HttpMethod.Delete,
+            $"/api/v1/media/{mediaId}/notes/{noteId}?revision={revision.ToString(CultureInfo.InvariantCulture)}", session.Token, null,
+            inspecting: false, cancellation);
 
     public StreamSource StreamSource(PlaybackSourceResponse ticket)
     {

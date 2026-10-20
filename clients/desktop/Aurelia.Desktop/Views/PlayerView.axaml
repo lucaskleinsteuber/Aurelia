@@ -35,7 +35,7 @@
       </Border>
 
       <!-- Top: back, title and menus -->
-      <Grid ColumnDefinitions="Auto,*,Auto" Margin="24,20,24,0" VerticalAlignment="Top">
+      <Grid x:Name="TopBar" ColumnDefinitions="Auto,*,Auto" Margin="24,20,24,0" VerticalAlignment="Top">
         <Button x:Name="BackButton" Classes="round" Content="‹" Click="Back" ToolTip.Tip="Back (Esc)" />
         <StackPanel Grid.Column="1" Margin="16,0" VerticalAlignment="Center">
           <TextBlock x:Name="PlayerTitle" Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -46,6 +46,54 @@
           <Button Classes="pill" Content="Audio" Click="ShowAudioMenu" ToolTip.Tip="Audio and Night Mode" />
           <Button Classes="pill" Content="Subtitles" Click="ShowSubtitleMenu" ToolTip.Tip="Subtitles" />
           <Button Classes="pill" Content="Sleep" Click="ShowSleepMenu" ToolTip.Tip="Sleep Timer" />
+          <!-- Scene Notes: private moments and ranges, as on the Mac. -->
+          <Button x:Name="NotesButton" Classes="pill" Content="Notes" ToolTip.Tip="Scene Notes">
+            <Button.Flyout>
+              <Flyout Placement="BottomEdgeAlignedRight" Opened="NotesOpened" Closed="NotesClosed">
+                <StackPanel x:Name="NotesPanel" Width="340" Spacing="10" x:DataType="core:SceneNotesModel">
+                  <TextBlock Text="Scene Notes" FontWeight="Bold" FontSize="16" />
+                  <Button x:Name="MarkSceneButton" Classes="secondary" Content="Mark Current Position" Click="MarkScene"
+                          IsVisible="{Binding ShowsCreate}" />
+                  <StackPanel Spacing="8" IsVisible="{Binding IsEditing}">
+                    <CheckBox x:Name="SceneRange" IsChecked="{Binding IsRange}" Content="Time range" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBox x:Name="SceneStart" Text="{Binding Start}" Width="100" PlaceholderText="Start" />
+                      <TextBox x:Name="SceneEnd" Text="{Binding End}" Width="100" PlaceholderText="End" IsVisible="{Binding IsRange}" />
+                    </StackPanel>
+                    <TextBox x:Name="SceneText" Text="{Binding Text}" PlaceholderText="Note (optional)" AcceptsReturn="True"
+                             TextWrapping="Wrap" MaxLength="2000" MinHeight="60" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                      <Button x:Name="SaveSceneButton" Classes="primary" Content="Save" Click="SaveScene" IsEnabled="{Binding !IsBusy}" />
+                      <Button Classes="secondary" Content="Cancel" Click="CancelScene" />
+                    </StackPanel>
+                  </StackPanel>
+                  <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Foreground="#FF8A80" TextWrapping="Wrap" />
+                  <TextBlock Classes="secondary" Text="No scene notes yet." IsVisible="{Binding !HasNotes}" />
+                  <ScrollViewer MaxHeight="220">
+                    <ItemsControl x:Name="SceneNoteList" ItemsSource="{Binding Notes}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="core:SceneNoteRow">
+                          <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                            <Button Classes="episode" Click="JumpToScene" HorizontalAlignment="Stretch" ToolTip.Tip="Jump to this scene">
+                              <StackPanel Spacing="2">
+                                <TextBlock Classes="caption" Text="{Binding TimeLabel}" />
+                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" MaxLines="3" />
+                              </StackPanel>
+                            </Button>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                              <Button Classes="link" Content="Edit" Click="EditScene" />
+                              <Button Classes="link" Content="Remove" Click="RemoveScene" />
+                            </StackPanel>
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                  <TextBlock Classes="caption" Text="Private to your profile. Playback keeps running." />
+                </StackPanel>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
         </StackPanel>
       </Grid>
 

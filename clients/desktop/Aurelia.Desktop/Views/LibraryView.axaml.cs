@@ -24,6 +24,13 @@ public sealed partial class LibraryView : UserControl
 
     public void ShowProfile(string name) => ProfileName.Text = name;
 
+    /// <summary>Room for the title bar the content reaches under; on a Mac its window buttons sit above the sidebar.</summary>
+    public void SetTitleBarInset(double top)
+    {
+        SidebarContent.Margin = new Avalonia.Thickness(14, 22 + (OperatingSystem.IsMacOS() ? top : 0), 14, 18);
+        BackButton.Margin = new Avalonia.Thickness(32, 28 + top, 0, 0);
+    }
+
     /// <summary>Server Settings appear only for the owner of the server running on this computer.</summary>
     public void ShowServerSettings(bool available) => ServerSettingsButton.IsVisible = available;
 
