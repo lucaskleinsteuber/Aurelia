@@ -62,7 +62,7 @@ public sealed partial class LibraryMonitoringService(
         }
     }
 
-    private async Task RefreshLibrariesAsync(
+    internal async Task RefreshLibrariesAsync(
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
@@ -113,6 +113,11 @@ public sealed partial class LibraryMonitoringService(
                 {
                     await EnsureWaitingScanAsync(service, library, cancellationToken);
                 }
+                else if (reachable)
+                {
+                    // A scan that waited for this drive continues even where the location is not watched.
+                    await service.ResumeWaitingForStorageAsync(library.Id, cancellationToken);
+                }
 
                 continue;
             }
@@ -131,8 +136,9 @@ public sealed partial class LibraryMonitoringService(
                 }
             }
 
-            if (library.Availability == LibraryAvailability.Unavailable
-                && await service.ResumeWaitingForStorageAsync(library.Id, cancellationToken))
+            // The reachability probe often marks a reconnected drive available before this refresh
+            // sees it, so a scan that waited for the drive resumes whatever the recorded availability.
+            if (await service.ResumeWaitingForStorageAsync(library.Id, cancellationToken))
             {
                 continue;
             }

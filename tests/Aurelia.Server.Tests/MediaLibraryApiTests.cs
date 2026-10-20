@@ -161,6 +161,53 @@ public sealed class MediaLibraryApiTests
     }
 
     [Fact]
+    public async Task AScanWaitingForADriveResumesWhenTheDriveReturns()
+    {
+        var root = CreateDirectory("Reconnected Drive");
+        Touch(root, "Arrival (2016)/Arrival (2016).mkv");
+        var offlinePath = root + "-offline";
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.Movies);
+            await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+
+            Directory.Move(root, offlinePath);
+            var waiting = await StartAndWaitForScanAsync(client, owner.Token, library.Id);
+            Assert.Equal(LibraryScanState.WaitingForStorage, waiting.State);
+            Directory.Move(offlinePath, root);
+
+            // The quick probe of missing drives notices it first and records it as available.
+            using (var scope = factory.Services.CreateScope())
+                await scope.ServiceProvider.GetRequiredService<LibraryReachabilityService>().RefreshAsync(missingOnly: true, CancellationToken.None);
+            Assert.Equal(LibraryAvailability.Available, Assert.Single(await ListLibrariesAsync(client, owner.Token)).Availability);
+
+            // The waiting scan must still continue instead of waiting forever.
+            var monitor = factory.Services.GetServices<Microsoft.Extensions.Hosting.IHostedService>().OfType<LibraryMonitoringService>().Single();
+            await monitor.RefreshLibrariesAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+            LibraryScan? resumed = null;
+            for (var attempt = 0; attempt < 100; attempt++)
+            {
+                using var scope = factory.Services.CreateScope();
+                resumed = await scope.ServiceProvider.GetRequiredService<AureliaDbContext>().LibraryScans.AsNoTracking()
+                    .SingleAsync(scan => scan.Id == waiting.Id);
+                if (resumed.State == LibraryScanState.Completed) break;
+                await Task.Delay(100);
+            }
+            Assert.NotNull(resumed);
+            Assert.Equal(LibraryScanState.Completed, resumed.State);
+            Assert.Equal(LibraryScanTrigger.StorageReconnected, resumed.Trigger);
+        }
+        finally
+        {
+            if (Directory.Exists(offlinePath)) Directory.Move(offlinePath, root);
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
     public async Task MovieCatalogContainsItsExtrasAndNeverReturnsAPath()
     {
         var root = CreateDirectory("El Camino - A Breaking Bad Movie");
