@@ -188,6 +188,7 @@ internal sealed class FakeManagement : IServerManagement
         ["Drama"], [], null, [], new EditorArtwork(AssetId: Guid.Parse("00000000-0000-0000-0000-0000000000f1")), null);
     public List<string> EditorOverrides { get; private set; } = [];
     public List<Guid> DiscardedUploads { get; } = [];
+    public ImportPreviewSummary? ImportSummary { get; set; }
 
     /// <summary>The generic management requests the library, the editor and Profiles send, answered from memory.</summary>
     public Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation)
@@ -247,6 +248,48 @@ internal sealed class FakeManagement : IServerManagement
             result = Png();
         else if (method == HttpMethod.Delete && parts is ["api", "v1", "media", _, "editor", "uploads", var upload])
             DiscardedUploads.Add(Guid.Parse(upload));
+        else if (parts is ["api", "v1", "libraries", _, "import-preview", ..])
+        {
+            ImportSummary ??= new ImportPreviewSummary(Guid.NewGuid(), Libraries[0].Id, "r1", "ready",
+                new ImportPreviewCounts(3, 1, 1, 1, 0, 0, 1, 0, 0), [],
+                [new ImportPreviewTarget("Synthetic Series", "Synthetic Series", MediaKind.Series, [1])]);
+            if (body is ImportAssignmentsRequest assign)
+            {
+                Calls.Add($"assign {string.Join(",", assign.Assignments.Select(change => $"{change.RelativePath}={change.Kind}"))}");
+                ImportSummary = ImportSummary with { Revision = assign.Revision + "+", Counts = ImportSummary.Counts with { Pending = 0, Ignored = 1 } };
+            }
+            result = parts[^1] switch
+            {
+                "items" => new ImportPreviewPage(ImportSummary,
+                [
+                    new ImportPreviewItem("Synthetic Movie (2020)/Synthetic Movie (2020).mkv", "Synthetic Movie", MediaKind.Movie, null, null, null, null,
+                        ImportPreviewItemStatus.Recognized, "Recognized from the folder name."),
+                    new ImportPreviewItem("Synthetic Series/S01E01.mkv", "Pilot", MediaKind.Episode, "Synthetic Series", 1, 1, null,
+                        ImportPreviewItemStatus.Recognized, "Season and episode in the file name."),
+                    new ImportPreviewItem("Odd Things/clip0001.mkv", "clip0001", null, null, null, null, null,
+                        ImportSummary.Counts.Pending > 0 ? ImportPreviewItemStatus.Pending : ImportPreviewItemStatus.Ignored,
+                        "Aurelia could not tell what this is."),
+                ], 3, 0, 200),
+                "confirm" => new LibraryScanSummary(Guid.NewGuid(), Libraries[0].Id, LibraryScanState.Queued, DateTimeOffset.UtcNow, null, null,
+                    0, 0, 0, 0, 0, 0, null, []),
+                _ => (object)ImportSummary,
+            };
+        }
+        else if (method == HttpMethod.Get && parts is ["api", "v1", "libraries", var library, "exclusions"])
+            result = Guid.Parse(library) == Libraries[0].Id
+                ? new List<ExcludedMediaSummary> { new(Guid.NewGuid(), Libraries[0].Id, "Old Cuts/Removed Movie (1999).mkv", false) }
+                : new List<ExcludedMediaSummary>();
+        else if (route == "/api/v1/libraries/reset/preview")
+            result = new ResetLibraryPreview([Libraries[0].Id], "reset-1", 42, 40, 120, 1);
+        else if (method == HttpMethod.Post && route == "/api/v1/libraries")
+        {
+            var location = (CreateLibraryRequest)body!;
+            Calls.Add($"add {location.Path} {location.Kind}" + (location.RequireImportPreview || location.CombineExisting
+                ? $" review={location.RequireImportPreview} combine={location.CombineExisting}" : ""));
+            var added = Library(Path.GetFileName(location.Path), location.Path, location.Kind, scanned: false) with { ImportPreviewRequired = location.RequireImportPreview };
+            Libraries.Add(added);
+            result = added;
+        }
         else if (method == HttpMethod.Delete && parts is ["api", "v1", "media", var title])
             result = new LibraryMutationResult(Guid.NewGuid(), "pending", 1, null);
         else

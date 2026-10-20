@@ -173,4 +173,57 @@ public sealed class ManagementScreenTests
         Assert.Equal(["Alex", "Sam"], profiles.Profiles.Select(row => row.Name).OrderBy(name => name));
         window.Close();
     }
+
+    [AvaloniaFact]
+    public async Task StorageIsReviewedInImportPreviewAndMaintainedInServerSettings()
+    {
+        var connection = FakeServerApi.Saved() with { Address = new Uri("https://127.0.0.1:43111"), LocalHost = true };
+        var server = new FakeLocalServerHost { SetUp = true };
+        server.Move(LocalServerState.Running);
+        var management = new FakeManagement();
+        var session = new ProfileSessionResponse(new UserSummary(FakeServerApi.Owner.Id, "Alex", UserRole.Owner, DateTimeOffset.UtcNow),
+            Guid.NewGuid(), "synthetic-profile-token-0123456789-abcdef", DateTimeOffset.UtcNow.AddHours(12));
+        var model = new ServerSettingsModel(server, new FakeServerApi(), connection, session, _ => management,
+            action => Dispatcher.UIThread.Post(action));
+        var window = new ServerSettingsWindow(model) { Width = 900, Height = 1100 };
+        window.Show();
+        await MainWindowTests.WaitFor(() => model.IsUnlocked && !model.IsBusy);
+        model.Section = SettingsSection.Storage;
+        await MainWindowTests.WaitFor(() => model.Maintenance.HasExclusions);
+        MainWindowTests.Settle(window, "settings-storage-maintenance");
+        Assert.Equal("Old Cuts/Removed Movie (1999).mkv", Assert.Single(model.Maintenance.Exclusions).RelativePath);
+
+        // Reviewed before adding: the preview opens in its own window.
+        model.ReviewNewStorage = true;
+        window.FolderSource = () => Task.FromResult<string?>(@"G:\New Arrivals");
+        Click(window, "AddStorageButton");
+        await MainWindowTests.WaitFor(() => window.PreviewWindow?.DataContext is ImportPreviewModel { IsAnalyzed: true, IsBusy: false });
+        Assert.Contains(@"add G:\New Arrivals Automatic review=True combine=False", management.Calls);
+        var previewWindow = window.PreviewWindow!;
+        var preview = (ImportPreviewModel)previewWindow.DataContext!;
+        MainWindowTests.Settle(previewWindow, "import-preview");
+        Assert.Equal("1 item needs review.", preview.ReviewText);
+        preview.FilterIndex = 1;
+        var odd = Assert.Single(preview.Items);
+        odd.IsSelected = true;
+        Assert.True(preview.HasSelection);
+        preview.ChoiceIndex = 2;
+        Assert.Equal(["Synthetic Series"], preview.Parents);
+        await preview.AssignAsync();
+        Assert.Equal("Choose the movie or show these belong to.", preview.Error);
+        preview.ChoiceIndex = 5;
+        await preview.AssignAsync();
+        Assert.Contains("assign Odd Things/clip0001.mkv=", management.Calls);
+        Assert.False(preview.HasPending);
+        Click(previewWindow, "ConfirmButton");
+        await MainWindowTests.WaitFor(() => window.PreviewWindow is null);
+
+        // A reset is reviewed first and then confirmed.
+        model.Maintenance.BeginReset();
+        model.Maintenance.ResetChoices[0].IsSelected = true;
+        await model.Maintenance.ReviewResetAsync();
+        MainWindowTests.Settle(window, "settings-storage-reset");
+        Assert.Equal("42 catalog entries · 120 images · 1 storage locations", model.Maintenance.ResetSummary);
+        window.Close();
+    }
 }

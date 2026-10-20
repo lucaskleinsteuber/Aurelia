@@ -265,6 +265,94 @@ public sealed class LocalServerHostTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task StorageIsReviewedBeforeAddingAndExcludedSourcesComeBack()
+    {
+        Assert.SkipWhen(SyntheticServer.Executable is null, "Run scripts/test-desktop.sh, which builds the server for this test.");
+        var cancellation = TestContext.Current.CancellationToken;
+        var media = Path.Combine(root, "Review");
+        Directory.CreateDirectory(Path.Combine(media, "Synthetic Movie (2020)"));
+        Directory.CreateDirectory(Path.Combine(media, "Odd Things"));
+        SyntheticMedia.WriteAvi(Path.Combine(media, "Synthetic Movie (2020)", "Synthetic Movie (2020).avi"), [40, 200], secondsPerLevel: 5);
+        SyntheticMedia.WriteAvi(Path.Combine(media, "Odd Things", "clip0001.avi"), [90], secondsPerLevel: 5);
+        using var api = new AureliaServerApi();
+        var store = new ConnectionStore(new MemorySecretStore());
+        await using var host = new LocalServerHost(options);
+        var flow = new HostSetupFlow(host, api, store, new AppModeStore(Path.Combine(root, "app-mode.json")),
+            (connection, session) => new ServerManagementClient(api, connection, session.Token), "Synthetic PC", action => action());
+        var ready = new TaskCompletionSource<ProfileSessionResponse?>();
+        flow.Ready += (_, session) => ready.TrySetResult(session);
+        await flow.ChooseHostAsync();
+        flow.OwnerName = "Synthetic Owner";
+        await flow.SetUpAsync(Password, Password);
+        await flow.CreatePinAsync("5682", "5682", null);
+        flow.SkipStorage();
+        var session = (await ready.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellation))!;
+        var connection = store.Load()!;
+        using var settings = new ServerSettingsModel(host, api, connection, session,
+            replacement => new ServerManagementClient(api, connection, replacement.Token), action => action());
+        await settings.OpenAsync();
+        Assert.False(settings.IsLocked);
+
+        // Reviewed first: nothing reaches the library until the preview is confirmed.
+        LibrarySummary? waiting = null;
+        settings.ImportPreviewRequested += library => waiting = library;
+        settings.ReviewNewStorage = true;
+        await settings.AddStorageAsync(media, LibraryKind.Movies);
+        Assert.Null(settings.Error);
+        Assert.NotNull(waiting);
+        Assert.True(Assert.Single(settings.Storage).WaitsForReview);
+        var preview = new ImportPreviewModel(() => settings.Administration, waiting);
+        await preview.AnalyzeAsync();
+        Assert.Null(preview.Error);
+        Assert.True(preview.IsAnalyzed);
+        Assert.Contains(preview.Items, row => row.Title == "Synthetic Movie");
+        var odd = preview.Items.Single(row => row.Path.Contains("clip0001", StringComparison.Ordinal));
+        odd.IsSelected = true;
+        preview.ChoiceIndex = 5;
+        await preview.AssignAsync();
+        Assert.Null(preview.Error);
+        Assert.Equal("Ignored", preview.Items.Single(row => row.Path.Contains("clip0001", StringComparison.Ordinal)).StatusText);
+        var confirmed = false;
+        preview.Confirmed += () => confirmed = true;
+        await preview.ConfirmAsync();
+        Assert.Null(preview.Error);
+        Assert.True(confirmed);
+        using var titles = new LibraryClient(api, connection, session);
+        CatalogItemSummary? movie = null;
+        await WaitForAsync(() =>
+        {
+            movie = titles.BrowseAsync(MediaKind.Movie, new CatalogFilter(), 0, 50, cancellation).GetAwaiter().GetResult().Items.SingleOrDefault();
+            return movie is not null;
+        }, cancellation);
+        Assert.Equal("Synthetic Movie", movie!.Title);
+
+        // Removed titles stay out of scans until reimported.
+        var model = new LibraryModel(titles) { Management = new ManagementAccess(settings.Administration, _ => Task.FromResult<string?>(Password)) };
+        await model.OpenDetailAsync(movie.Id);
+        await model.RemoveDetailAsync();
+        Assert.Null(model.Error);
+        await settings.RefreshStorageAsync();
+        await settings.Maintenance.LoadExclusionsAsync();
+        Assert.Equal(settings.Maintenance.Exclusions.Count, settings.Maintenance.Exclusions.Select(item => item.Id).Distinct().Count());
+        var excluded = Assert.Single(settings.Maintenance.Exclusions, item => item.RelativePath.Contains("Synthetic Movie", StringComparison.Ordinal));
+        await settings.Maintenance.ReimportAsync(excluded);
+        Assert.Null(settings.Maintenance.Error);
+        await WaitForAsync(() => titles.BrowseAsync(MediaKind.Movie, new CatalogFilter(), 0, 50, cancellation).GetAwaiter().GetResult().Items.Count == 1,
+            cancellation);
+
+        // A reset is reviewed before it removes the location and its catalog; the files stay.
+        settings.Maintenance.BeginReset();
+        settings.Maintenance.ResetChoices.Single().IsSelected = true;
+        await settings.Maintenance.ReviewResetAsync();
+        Assert.Null(settings.Maintenance.Error);
+        Assert.StartsWith("1 catalog entries", settings.Maintenance.ResetSummary, StringComparison.Ordinal);
+        await settings.Maintenance.ResetAsync();
+        Assert.Null(settings.Maintenance.Error);
+        await WaitForAsync(() => settings.Storage.Count == 0, cancellation);
+        Assert.True(File.Exists(Path.Combine(media, "Synthetic Movie (2020)", "Synthetic Movie (2020).avi")));
+    }
+
+    [Fact]
     public async Task AMissingServerIsReportedInsteadOfStarted()
     {
         await using var host = new LocalServerHost(options with { Executable = Path.Combine(root, "missing", "Aurelia.Server") });

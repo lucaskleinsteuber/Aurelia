@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:core="clr-namespace:Aurelia.Desktop.Core;assembly=Aurelia.Desktop.Core"
+        xmlns:contracts="clr-namespace:Aurelia.Contracts;assembly=Aurelia.Contracts"
         x:Class="Aurelia.Desktop.Views.ServerSettingsWindow"
         x:DataType="core:ServerSettingsModel"
         Title="Server Settings"
@@ -121,7 +122,8 @@
                         <TextBlock Classes="secondary" FontSize="12" Text="{Binding Status}" />
                       </StackPanel>
                       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                        <Button Classes="secondary" Content="Scan" Click="Scan" IsEnabled="{Binding !IsScanning}" />
+                        <Button Classes="secondary" Content="Review Import…" Click="ReviewImport" IsVisible="{Binding WaitsForReview}" />
+                        <Button Classes="secondary" Content="Scan" Click="Scan" IsEnabled="{Binding !IsScanning}" IsVisible="{Binding !WaitsForReview}" />
                         <Button Classes="link" Content="Remove…" Click="Remove" />
                       </StackPanel>
                     </Grid>
@@ -136,6 +138,62 @@
                 <ComboBoxItem Content="Movies" />
                 <ComboBoxItem Content="TV Shows" />
               </ComboBox>
+            </StackPanel>
+            <CheckBox x:Name="ReviewNewStorage" IsChecked="{Binding ReviewNewStorage}"
+                      Content="Review in Import Preview before adding" />
+            <CheckBox x:Name="CombineNewStorage" IsChecked="{Binding CombineNewStorage}"
+                      Content="Take over storage locations inside the new one, with their titles" />
+
+            <!-- Excluded sources and reset, as in the Mac's library maintenance. -->
+            <StackPanel x:Name="MaintenanceSection" Spacing="12" DataContext="{Binding Maintenance}" x:DataType="core:LibraryMaintenanceModel">
+              <TextBlock Classes="section" Text="Excluded Sources" />
+              <TextBlock Classes="secondary" FontSize="12" TextWrapping="Wrap"
+                         Text="Titles removed from Aurelia stay out of scans until you reimport them." />
+              <Border Classes="group" IsVisible="{Binding HasNotice}">
+                <TextBlock x:Name="MaintenanceNotice" Text="{Binding Notice}" TextWrapping="Wrap" />
+              </Border>
+              <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Foreground="#FF8A80" TextWrapping="Wrap" />
+              <ComboBox x:Name="ExclusionLibrary" ItemsSource="{Binding Libraries}" SelectedItem="{Binding ExclusionLibrary}" MinWidth="240">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate x:DataType="contracts:LibrarySummary">
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Classes="secondary" Text="No excluded sources." IsVisible="{Binding !HasExclusions}" />
+              <ItemsControl x:Name="ExclusionList" ItemsSource="{Binding Exclusions}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="contracts:ExcludedMediaSummary">
+                    <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                      <TextBlock Text="{Binding RelativePath}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="link" Content="Reimport…" Click="Reimport" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
+              <Button x:Name="ResetLibraryButton" Classes="link" Content="Reset Library…" Click="BeginReset" IsVisible="{Binding !ShowsReset}" />
+              <Border x:Name="ResetPanel" Classes="group" IsVisible="{Binding ShowsReset}">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="Reset Library" FontSize="18" FontWeight="Bold" />
+                  <TextBlock Classes="secondary" TextWrapping="Wrap" Text="{x:Static core:LibraryMaintenanceModel.ResetExplanation}" />
+                  <ItemsControl x:Name="ResetChoices" ItemsSource="{Binding ResetChoices}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="core:ResetChoice">
+                        <CheckBox IsChecked="{Binding IsSelected}" Content="{Binding Name}" />
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <TextBlock x:Name="ResetSummary" Text="{Binding ResetSummary}" IsVisible="{Binding IsResetReviewed}" FontWeight="SemiBold" />
+                  <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button x:Name="ReviewResetButton" Classes="secondary" Content="Review Reset" Click="ReviewReset"
+                            IsVisible="{Binding !IsResetReviewed}" IsEnabled="{Binding !IsBusy}" />
+                    <Button x:Name="ResetButton" Classes="primary" Content="Reset Selected Locations…" Click="ConfirmReset"
+                            IsVisible="{Binding IsResetReviewed}" IsEnabled="{Binding !IsBusy}" />
+                    <Button Classes="secondary" Content="Cancel" Click="CancelReset" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
             </StackPanel>
           </StackPanel>
 

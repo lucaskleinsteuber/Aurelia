@@ -14,7 +14,8 @@ public sealed record StorageRow(LibrarySummary Library, LibraryScanSummary? Scan
     public string Name => Library.Name;
     public string Path => Library.Path;
     public string KindName => Library.Kind switch { LibraryKind.Movies => "Movies", LibraryKind.TvShows => "TV Shows", _ => "Movies and TV Shows" };
-    public string Status => Scan is { } scan
+    public string Status => Library.ImportPreviewRequired ? "Waiting for your review in Import Preview before it is added."
+        : Scan is { } scan
         ? scan.FilesDiscovered == 0 ? "Scanning…" : $"Scanning… {scan.FilesProcessed} of {scan.FilesDiscovered} files"
         : Library.Availability switch
         {
@@ -23,6 +24,7 @@ public sealed record StorageRow(LibrarySummary Library, LibraryScanSummary? Scan
             _ => Library.LastScanCompletedAt is { } done ? $"Scanned {done.ToLocalTime():g}" : "Not scanned yet",
         };
     public bool IsScanning => Scan is not null;
+    public bool WaitsForReview => Library.ImportPreviewRequired;
 }
 
 /// <summary>A paired device as the settings list shows it.</summary>
@@ -70,6 +72,8 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         management = managementFor(session);
         Profiles = new ProfilesModel(() => management);
         Profiles.Locked += () => IsLocked = true;
+        Maintenance = new LibraryMaintenanceModel(() => management);
+        Maintenance.LibraryChanged += () => _ = RefreshStorageAsync();
         host.Changed += () =>
         {
             if (host.State != LocalServerState.Running) restartSeen = true;
@@ -95,6 +99,21 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
     public bool ShowsStorage => Section == SettingsSection.Storage;
     public bool ShowsDevices => Section == SettingsSection.Devices;
     public bool ShowsProfiles => Section == SettingsSection.Profiles;
+    /// <summary>Management for the windows Server Settings opens, such as Import Preview.</summary>
+    public IAdministrationClient Administration => management;
+
+    /// <summary>Excluded sources and resetting storage locations.</summary>
+    public LibraryMaintenanceModel Maintenance { get; }
+    /// <summary>Review before adding: the location is analyzed and shown in Import Preview first.</summary>
+    public bool ReviewNewStorage { get; set => Set(ref field, value); }
+    /// <summary>A new location that contains existing ones takes them over, with their titles.</summary>
+    public bool CombineNewStorage { get; set => Set(ref field, value); }
+
+    /// <summary>A location waits in Import Preview; the window shows it.</summary>
+    public event Action<LibrarySummary>? ImportPreviewRequested;
+
+    public void ReviewImport(StorageRow row) => ImportPreviewRequested?.Invoke(row.Library);
+
     /// <summary>Who may watch: profiles, roles, PINs and title access.</summary>
     public ProfilesModel Profiles { get; }
     public bool IsLocked { get; private set => Set(ref field, value, nameof(IsLocked), [nameof(IsUnlocked)]); } = true;
@@ -213,10 +232,15 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
 
     public Task AddStorageAsync(string path, LibraryKind kind) => RunAsync(async token =>
     {
-        var library = await management.AddLibraryAsync(null, path, kind, token);
-        await management.ScanAsync(library.Id, token);
+        var review = ReviewNewStorage;
+        var library = await management.SendAsync<LibrarySummary>(HttpMethod.Post, "/api/v1/libraries",
+            new CreateLibraryRequest(null, path, kind, CombineNewStorage, review), token);
+        if (!review) await management.ScanAsync(library.Id, token);
         await LoadStorageAsync(token);
+        if (review) ImportPreviewRequested?.Invoke(library);
     });
+
+    public Task RefreshStorageAsync() => RunAsync(LoadStorageAsync);
 
     public Task ScanAsync(StorageRow row) => RunAsync(async token =>
     {
@@ -316,6 +340,7 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
 
     private void ShowStorage(IReadOnlyList<LibrarySummary> libraries, IReadOnlyList<LibraryScanSummary> scans)
     {
+        Maintenance.Show(libraries);
         Storage.Clear();
         foreach (var library in libraries.OrderBy(value => value.Name, StringComparer.CurrentCultureIgnoreCase))
             Storage.Add(new StorageRow(library, scans.FirstOrDefault(scan => scan.LibraryId == library.Id)));

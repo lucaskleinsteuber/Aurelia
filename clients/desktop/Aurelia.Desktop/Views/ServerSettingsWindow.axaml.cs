@@ -20,6 +20,11 @@ public sealed partial class ServerSettingsWindow : Window
     internal ServerSettingsWindow(ServerSettingsModel model) : this()
     {
         DataContext = model;
+        // The sidebar follows the section, also when it changes from elsewhere.
+        model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ServerSettingsModel.Section)) Sections.SelectedIndex = (int)model.Section;
+        };
         Opened += async (_, _) =>
         {
             await model.OpenAsync();
@@ -27,7 +32,18 @@ public sealed partial class ServerSettingsWindow : Window
             if (model.IsLocked) UnlockPassword.Focus();
         };
         Closed += (_, _) => model.Dispose();
+        model.ImportPreviewRequested += library =>
+        {
+            var preview = new ImportPreviewModel(() => model.Administration, library);
+            preview.Confirmed += () => _ = model.RefreshStorageAsync();
+            PreviewWindow = new ImportPreviewWindow(preview);
+            PreviewWindow.Closed += (_, _) => PreviewWindow = null;
+            PreviewWindow.Show(this);
+        };
     }
+
+    /// <summary>The Import Preview window while one is open.</summary>
+    internal ImportPreviewWindow? PreviewWindow { get; private set; }
 
     /// <summary>Chooses a folder without a dialog, for tests; the app uses the system folder picker.</summary>
     internal Func<Task<string?>>? FolderSource { get; set; }
@@ -131,6 +147,34 @@ public sealed partial class ServerSettingsWindow : Window
         if (Model is not { } model || sender is not Control { DataContext: DeviceRow row } anchor) return;
         Confirm(anchor, $"Remove {row.Session.DeviceName}? It needs a new approval to connect again.", "Remove",
             () => model.RemoveDeviceAsync(row));
+    }
+
+    private void ReviewImport(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model && (sender as Control)?.DataContext is StorageRow row) model.ReviewImport(row);
+    }
+
+    private void Reimport(object? sender, RoutedEventArgs e)
+    {
+        if (Model is not { } model || sender is not Control { DataContext: ExcludedMediaSummary item } anchor) return;
+        Confirm(anchor, $"Reimport {item.RelativePath}? It is scanned again and returns to the library.", "Reimport",
+            () => model.Maintenance.ReimportAsync(item));
+    }
+
+    private void BeginReset(object? sender, RoutedEventArgs e) => Model?.Maintenance.BeginReset();
+
+    private void CancelReset(object? sender, RoutedEventArgs e) => Model?.Maintenance.CancelReset();
+
+    private async void ReviewReset(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Maintenance.ReviewResetAsync();
+    }
+
+    private void ConfirmReset(object? sender, RoutedEventArgs e)
+    {
+        if (Model is not { } model || sender is not Control anchor) return;
+        Confirm(anchor, "Permanently reset the selected storage locations? This cannot be undone. Your video files are not changed.", "Reset",
+            model.Maintenance.ResetAsync);
     }
 
     private async void NewProfile(object? sender, RoutedEventArgs e)

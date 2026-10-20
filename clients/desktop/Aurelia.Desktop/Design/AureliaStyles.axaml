@@ -52,6 +52,15 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="Foreground" Value="{StaticResource AureliaSecondaryText}" />
   </Style>
+  <!-- A link stays a link when it cannot be used: dimmed text, never a grey box. -->
+  <Style Selector="Button.link:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#59FFFFFF" />
+  </Style>
+  <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="White" />
+  </Style>
   <Style Selector="Button.row">
     <Setter Property="Background" Value="#14FFFFFF" />
     <Setter Property="CornerRadius" Value="10" />

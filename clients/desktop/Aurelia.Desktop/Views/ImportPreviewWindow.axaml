@@ -1,0 +1,83 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:Aurelia.Desktop.Core;assembly=Aurelia.Desktop.Core"
+        x:Class="Aurelia.Desktop.Views.ImportPreviewWindow"
+        x:DataType="core:ImportPreviewModel"
+        Title="Import Preview"
+        Icon="avares://Aurelia/Assets/aurelia.ico"
+        Width="980" Height="760" MinWidth="820" MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AureliaCanvas}">
+  <Panel x:Name="Root">
+  <DockPanel x:Name="PreviewContent">
+    <!-- What Aurelia found, as on the Mac: counts first, then every file and folder. -->
+    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="28,24,28,12">
+      <TextBlock Classes="page" Text="Import Preview" />
+      <TextBlock Text="{Binding LibraryName}" FontWeight="SemiBold" />
+      <TextBlock Classes="caption" Text="{Binding LibraryPath}" TextTrimming="CharacterEllipsis" />
+      <TextBlock x:Name="CountsText" Classes="secondary" Text="{Binding CountsText}" Margin="0,8,0,0" />
+      <TextBlock x:Name="ReviewText" Text="{Binding ReviewText}" Foreground="#FFD180" IsVisible="{Binding HasPending}" />
+    </StackPanel>
+
+    <!-- Adding, and the assignment for what is selected -->
+    <Border DockPanel.Dock="Bottom" Background="{StaticResource AureliaSidebar}" BorderBrush="{StaticResource AureliaHairline}"
+            BorderThickness="0,1,0,0" Padding="28,14">
+      <StackPanel Spacing="12">
+        <WrapPanel ItemSpacing="10" LineSpacing="10" IsEnabled="{Binding HasSelection}">
+          <TextBlock Text="{Binding SelectedCount, StringFormat='{}{0} selected:'}" VerticalAlignment="Center" />
+          <ComboBox x:Name="ChoicePicker" ItemsSource="{x:Static core:ImportPreviewModel.Choices}" SelectedIndex="{Binding ChoiceIndex}" MinWidth="200" />
+          <ComboBox x:Name="ParentPicker" ItemsSource="{Binding Parents}" SelectedIndex="{Binding ParentIndex}" MinWidth="220"
+                    PlaceholderText="Belongs to…" IsVisible="{Binding NeedsParent}" />
+          <TextBox x:Name="SeasonBox" Text="{Binding Season}" Width="80" PlaceholderText="Season" IsVisible="{Binding NeedsEpisode}" />
+          <TextBox x:Name="EpisodeBox" Text="{Binding Episode}" Width="90" PlaceholderText="Episode" IsVisible="{Binding NeedsEpisode}" />
+          <TextBox x:Name="CategoryBox" Text="{Binding Category}" Width="160" PlaceholderText="Category (optional)" IsVisible="{Binding NeedsCategory}" />
+          <TextBox x:Name="TitleBox" Text="{Binding DisplayTitle}" Width="200" PlaceholderText="Display title (optional)" />
+          <Button x:Name="AssignButton" Classes="secondary" Content="Apply" Click="Assign" IsEnabled="{Binding !IsBusy}" />
+          <Button x:Name="AutomaticButton" Classes="link" Content="Use Automatic Detection" Click="UseAutomatic" VerticalAlignment="Center" />
+        </WrapPanel>
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock x:Name="ErrorText" Text="{Binding Error}" IsVisible="{Binding HasError}" Foreground="#FF8A80" TextWrapping="Wrap"
+                     VerticalAlignment="Center" Margin="0,0,16,0" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+            <Button Classes="secondary" Content="Analyze Again" Click="Analyze" IsEnabled="{Binding !IsBusy}" />
+            <Button Classes="secondary" Content="Close" Click="CloseWindow" />
+            <Button x:Name="ConfirmButton" Classes="primary" Content="Add to Library" Click="ConfirmImport" IsEnabled="{Binding !IsBusy}" />
+          </StackPanel>
+        </Grid>
+        <TextBlock Classes="caption" TextWrapping="Wrap"
+                   Text="Folder choices apply to everything inside them; a choice for a single file wins. Files are only read, never changed or moved." />
+      </StackPanel>
+    </Border>
+
+    <Grid RowDefinitions="Auto,*" Margin="28,0,28,12">
+      <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,10">
+        <TextBox x:Name="SearchBox" Text="{Binding Search}" Width="320" PlaceholderText="Search titles, folders or files" />
+        <ComboBox x:Name="FilterPicker" ItemsSource="{x:Static core:ImportPreviewModel.Filters}" SelectedIndex="{Binding FilterIndex}" MinWidth="160" />
+        <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Width="120" VerticalAlignment="Center" />
+      </StackPanel>
+      <ScrollViewer Grid.Row="1">
+        <ItemsControl x:Name="PreviewItems" ItemsSource="{Binding Items}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="core:ImportRow">
+              <Border Classes="group" Margin="0,0,0,8" Padding="14,10">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Spacing="2" Margin="6,0,12,0">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="caption" Text="{Binding Path}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="caption" Text="{Binding Reason}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="2" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding KindText}" HorizontalAlignment="Right" />
+                    <TextBlock Classes="caption" Text="{Binding StatusText}" HorizontalAlignment="Right" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Grid>
+  </DockPanel>
+  </Panel>
+</Window>
