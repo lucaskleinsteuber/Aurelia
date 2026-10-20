@@ -185,6 +185,24 @@
     <Setter Property="Padding" Value="18,14" />
   </Style>
 
+  <!-- A watched title: a small white check in the artwork's top right corner, as in the Mac library. -->
+  <Style Selector="Border.watched">
+    <Setter Property="Width" Value="24" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Background" Value="#E6FFFFFF" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="Margin" Value="8" />
+  </Style>
+  <Style Selector="Border.watched > TextBlock">
+    <Setter Property="Foreground" Value="Black" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
   <!-- The white capsule primary button of the Mac app. -->
   <Style Selector="Button.primary">
     <Setter Property="Background" Value="White" />

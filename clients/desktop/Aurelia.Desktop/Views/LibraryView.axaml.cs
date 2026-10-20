@@ -82,6 +82,36 @@ public sealed partial class LibraryView : UserControl
         if (Model is { } model) await model.ToggleFavoriteAsync();
     }
 
+    private async void ToggleWatched(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.ToggleWatchedAsync();
+    }
+
+    private async void ToggleSeasonWatched(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.ToggleSeasonWatchedAsync();
+    }
+
+    private async void ToggleEpisodeWatched(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model && (sender as Control)?.DataContext is EpisodePresentation episode) await model.ToggleEpisodeWatchedAsync(episode);
+    }
+
+    private void EditDetail(object? sender, RoutedEventArgs e) => Model?.EditDetail();
+
+    private void AskRemove(object? sender, RoutedEventArgs e)
+    {
+        if (Model is not { Detail: not null } model) return;
+        Confirmation.Show(MoreButton, model.RemoveQuestion, LibraryModel.RemoveExplanation, "Remove from Library", model.RemoveDetailAsync);
+    }
+
+    private void ToggleDirection(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is CatalogBrowse browse) browse.Descending = !browse.Descending;
+    }
+
+    private void ClearFilters(object? sender, RoutedEventArgs e) => ((sender as Control)?.DataContext as CatalogBrowse)?.ClearFilters();
+
     private void SwitchProfile(object? sender, RoutedEventArgs e) => SwitchProfileRequested?.Invoke();
 
     private async void Retry(object? sender, RoutedEventArgs e)

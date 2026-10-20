@@ -171,6 +171,16 @@ internal static class SyntheticMedia
     }
 
     /// <summary>Average green value of a BGRA frame.</summary>
+    /// <summary>A plain synthetic picture for image uploads.</summary>
+    public static byte[] Png(int width, int height)
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(width, height);
+        bitmap.Erase(new SkiaSharp.SKColor(60, 90, 160));
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+        return data.ToArray();
+    }
+
     public static double Brightness(byte[] bgra)
     {
         long total = 0;

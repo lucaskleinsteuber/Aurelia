@@ -22,10 +22,12 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly ConnectionStore? store;
     private readonly Func<StoredConnection, ProfileSessionResponse, ServerSettingsModel>? serverSettings;
     private readonly HostingController? hosting;
+    private readonly Func<StoredConnection, ProfileSessionResponse, IAdministrationClient>? administration;
     private LibraryModel? library;
     private ArtworkLoader? artwork;
     private PlayerModel? player;
     private ServerSettingsWindow? settingsWindow;
+    private MetadataEditorWindow? editorWindow;
     private bool quitting;
     private bool started;
 
@@ -44,7 +46,8 @@ public sealed partial class MainWindow : Window, IDisposable
             serverSettings: (connection, session) => new ServerSettingsModel(production.Host.Host, production.Api, connection, session,
                 replacement => new ServerManagementClient(production.Api, connection, replacement.Token), Production.Post,
                 production.Hosting, NetworkProfile.PublicNetworkCheck),
-            hosting: production.Hosting)
+            hosting: production.Hosting,
+            administration: (connection, session) => new ServerManagementClient(production.Api, connection, session.Token))
     {
     }
 
@@ -52,7 +55,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Func<StoredConnection, IVideoEngineFactory>? engines = null, PlaybackSettingsStore? settings = null, bool startOnOpen = true,
         Func<Guid, ArtworkDiskCache?>? artworkCache = null, HostSetupFlow? host = null, AppModeStore? modes = null,
         ConnectionStore? store = null, Func<StoredConnection, ProfileSessionResponse, ServerSettingsModel>? serverSettings = null,
-        HostingController? hosting = null)
+        HostingController? hosting = null, Func<StoredConnection, ProfileSessionResponse, IAdministrationClient>? administration = null)
     {
         this.artworkCache = artworkCache ?? ArtworkDiskCache.ForServer;
         this.flow = flow;
@@ -64,7 +67,9 @@ public sealed partial class MainWindow : Window, IDisposable
         this.store = store;
         this.serverSettings = serverSettings;
         this.hosting = hosting;
+        this.administration = administration;
         InitializeComponent();
+        PasswordPrompt = problem => new ServerPasswordDialog(problem).ShowDialog<string?>(this);
         DataContext = flow;
         // Each view gets its own model when it is shown, never the connection flow.
         Library.DataContext = null;
@@ -134,7 +139,13 @@ public sealed partial class MainWindow : Window, IDisposable
     internal LibraryModel? LibraryModel => library;
     internal PlayerModel? PlayerModel => player;
     internal ServerSettingsWindow? SettingsWindow => settingsWindow;
+    internal MetadataEditorWindow? EditorWindow => editorWindow;
     internal HostingController? Hosting => hosting;
+
+    /// <summary>Asks for the Server Password when management is locked; tests answer it themselves.</summary>
+    internal Func<string?, Task<string?>> PasswordPrompt { get; set; }
+
+    private Task<string?> AskPasswordAsync(string? problem) => PasswordPrompt(problem);
 
     /// <summary>Whether this computer runs its own server, as chosen on the welcome screen.</summary>
     internal bool HostsThisComputer => host is not null && modes?.Load() == AppMode.Host;
@@ -234,8 +245,15 @@ public sealed partial class MainWindow : Window, IDisposable
         if (libraries(flow) is not { } api || flow.Connection is not { } connection) return;
         artwork = new ArtworkLoader(api, artworkCache(connection.ServerId));
         ArtworkImage.Loader = artwork;
-        library = new LibraryModel(api);
+        library = new LibraryModel(api)
+        {
+            // The owner and administrators can edit and remove titles, after the Server Password.
+            Management = administration is not null && flow.Session is { } session && AdministrationRules.CanManage(session.User.Role)
+                ? new ManagementAccess(administration(connection, session), AskPasswordAsync)
+                : null,
+        };
         library.PlayRequested += request => _ = OpenPlayerAsync(request);
+        library.EditRequested += id => _ = OpenEditorAsync(id);
         Library.DataContext = library;
         Library.ShowProfile(flow.SignedInName);
         Library.ShowServerSettings(serverSettings is not null && flow.IsLocalHost && flow.Session?.User.Role == UserRole.Owner);
@@ -254,6 +272,17 @@ public sealed partial class MainWindow : Window, IDisposable
         artwork = null;
         ArtworkImage.Loader = null;
         ArtworkImage.ClearMemory();
+    }
+
+    /// <summary>The metadata editor for one title, in its own window over the library.</summary>
+    private async Task OpenEditorAsync(Guid id)
+    {
+        if (library is not { Management: { } management } current) return;
+        var model = new MetadataEditorModel(management, id);
+        model.Saved += () => _ = current.DetailEditedAsync();
+        editorWindow = new MetadataEditorWindow(model);
+        editorWindow.Closed += (_, _) => editorWindow = null;
+        await editorWindow.ShowDialog(this);
     }
 
     private void OpenServerSettings()

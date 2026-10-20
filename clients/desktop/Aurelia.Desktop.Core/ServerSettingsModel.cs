@@ -6,7 +6,7 @@ using Aurelia.Contracts;
 
 namespace Aurelia.Desktop.Core;
 
-public enum SettingsSection { General, Storage, Devices }
+public enum SettingsSection { General, Storage, Devices, Profiles }
 
 /// <summary>A storage location as the settings list shows it, with its scan when one runs.</summary>
 public sealed record StorageRow(LibrarySummary Library, LibraryScanSummary? Scan)
@@ -68,6 +68,8 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         this.managementFor = managementFor;
         this.dispatch = dispatch;
         management = managementFor(session);
+        Profiles = new ProfilesModel(() => management);
+        Profiles.Locked += () => IsLocked = true;
         host.Changed += () =>
         {
             if (host.State != LocalServerState.Running) restartSeen = true;
@@ -85,12 +87,16 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         set
         {
             if (field != value) Notice = null;
-            Set(ref field, value, nameof(Section), [nameof(ShowsGeneral), nameof(ShowsStorage), nameof(ShowsDevices)]);
+            Set(ref field, value, nameof(Section), [nameof(ShowsGeneral), nameof(ShowsStorage), nameof(ShowsDevices), nameof(ShowsProfiles)]);
+            if (value == SettingsSection.Profiles && IsUnlocked && !Profiles.IsEditing) _ = Profiles.LoadAsync();
         }
     }
     public bool ShowsGeneral => Section == SettingsSection.General;
     public bool ShowsStorage => Section == SettingsSection.Storage;
     public bool ShowsDevices => Section == SettingsSection.Devices;
+    public bool ShowsProfiles => Section == SettingsSection.Profiles;
+    /// <summary>Who may watch: profiles, roles, PINs and title access.</summary>
+    public ProfilesModel Profiles { get; }
     public bool IsLocked { get; private set => Set(ref field, value, nameof(IsLocked), [nameof(IsUnlocked)]); } = true;
     public bool IsUnlocked => !IsLocked;
     public bool IsBusy { get; private set => Set(ref field, value); }
@@ -156,6 +162,7 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         await management.UnlockAsync(password, token);
         IsLocked = false;
         await LoadAsync(token);
+        if (ShowsProfiles) _ = Profiles.LoadAsync();
     }, wrongPassword: true);
 
     public Task RefreshAsync() => RunAsync(LoadAsync);

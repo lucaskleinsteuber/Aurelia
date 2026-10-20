@@ -175,6 +175,100 @@ internal sealed class FakeManagement : IServerManagement
         return Guard(0);
     }
 
+    public static readonly Guid GuestId = Guid.Parse("00000000-0000-0000-0000-0000000000e2");
+    public List<(UserAccessSummary Access, ProfileAccessMode Mode, List<Guid> Titles, long Revision)> Users { get; } =
+    [
+        (new UserAccessSummary(new UserSummary(FakeServerApi.Owner.Id, "Alex", UserRole.Owner, DateTimeOffset.UtcNow), true, []),
+            ProfileAccessMode.EntireLibrary, [], 1),
+        (new UserAccessSummary(new UserSummary(GuestId, "Kim", UserRole.User, DateTimeOffset.UtcNow, ProfileAccessMode.SelectedTitles, false),
+            true, []), ProfileAccessMode.SelectedTitles, [FakeLibraryApi.MovieId], 4),
+    ];
+    public long EditorRevision { get; private set; } = 2;
+    public MediaEditorValues EditorValues { get; private set; } = new("Synthetic Movie", 2020, "A synthetic movie for tests.", 104, 12,
+        ["Drama"], [], null, [], new EditorArtwork(AssetId: Guid.Parse("00000000-0000-0000-0000-0000000000f1")), null);
+    public List<string> EditorOverrides { get; private set; } = [];
+    public List<Guid> DiscardedUploads { get; } = [];
+
+    /// <summary>The generic management requests the library, the editor and Profiles send, answered from memory.</summary>
+    public Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation)
+    {
+        var route = path.Split('?', 2)[0];
+        Calls.Add($"{method.Method} {route}");
+        var parts = route.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        object? result = null;
+        if (method == HttpMethod.Get && route == "/api/v1/server/users")
+            result = Users.Select(user => user.Access with { User = user.Access.User with { AccessMode = user.Mode } }).ToList();
+        else if (route == "/api/v1/users" && body is CreateUserRequest create)
+        {
+            var user = new UserSummary(Guid.NewGuid(), create.Username, create.Role, DateTimeOffset.UtcNow, create.AccessMode ?? ProfileAccessMode.EntireLibrary,
+                create.PinProtectionEnabled ?? true);
+            Users.Add((new UserAccessSummary(user, create.IsEnabled, []), user.AccessMode, [.. create.TitleIds ?? []], 1));
+            Calls.Add($"create {create.Username} {create.Role} {create.Pin} {create.AccessMode} {create.TitleIds?.Count}");
+            result = user;
+        }
+        else if (parts is ["api", "v1", "users", var id, "profile"] && Users.FindIndex(user => user.Access.User.Id == Guid.Parse(id)) is var index and >= 0)
+        {
+            var current = Users[index];
+            if (body is UpdateProfileRequest update)
+            {
+                current = (current.Access with { IsEnabled = update.IsEnabled, User = current.Access.User with { Role = update.Role, PinProtectionEnabled = update.PinProtectionEnabled } },
+                    update.AccessMode ?? current.Mode, [.. update.TitleIds ?? current.Titles], current.Revision + 1);
+                Users[index] = current;
+                Calls.Add($"update {current.Access.User.Username} {update.Role} {update.Pin} {update.AccessMode} {update.TitleIds?.Count}");
+            }
+            result = new ProfileEditorResponse(current.Access.User with { AccessMode = current.Mode }, current.Access.IsEnabled,
+                new ProfileTitleAccessResponse(current.Mode, current.Titles, current.Revision), current.Revision);
+        }
+        else if (method == HttpMethod.Delete && parts is ["api", "v1", "users", var removed])
+            Users.RemoveAll(user => user.Access.User.Id == Guid.Parse(removed));
+        else if (method == HttpMethod.Get && route == "/api/v1/catalog/items")
+        {
+            IReadOnlyList<CatalogItemSummary> items = path.Contains("kind=movie", StringComparison.Ordinal) ? [FakeLibraryApi.Movie, FakeLibraryApi.SecondMovie] : [FakeLibraryApi.Series];
+            result = new PagedResponse<CatalogItemSummary>(items, 0, 200, items.Count);
+        }
+        else if (parts is ["api", "v1", "media", var media, "editor"])
+        {
+            if (body is SaveMediaEditorRequest save)
+            {
+                if (save.Revision != EditorRevision) return Task.FromException<T>(new AureliaApiException(409, "editor_conflict", "Changed."));
+                EditorRevision++;
+                EditorValues = save.Values with
+                {
+                    Poster = save.Values.Poster?.UploadId is not null ? new EditorArtwork(AssetId: Guid.NewGuid()) : save.Values.Poster,
+                };
+                EditorOverrides = [.. save.OverrideFields];
+            }
+            result = new MediaEditorDocument(Guid.Parse(media), Guid.NewGuid(), MediaKind.Movie, EditorRevision, EditorValues, EditorOverrides,
+                "/Volumes/Synthetic/Movies/Synthetic Movie (2020).mkv", "Synthetic Movie (2020).mkv",
+                new MediaEditorValues("Synthetic Movie", 2020, "A synthetic movie for tests.", 104, 12, ["Drama"], [], null, [],
+                    new EditorArtwork(AssetId: Guid.Parse("00000000-0000-0000-0000-0000000000f1")), null));
+        }
+        else if (method == HttpMethod.Get && parts is ["api", "v1", "media", _, "editor", "uploads" or "artwork", _])
+            result = Png();
+        else if (method == HttpMethod.Delete && parts is ["api", "v1", "media", _, "editor", "uploads", var upload])
+            DiscardedUploads.Add(Guid.Parse(upload));
+        else if (method == HttpMethod.Delete && parts is ["api", "v1", "media", var title])
+            result = new LibraryMutationResult(Guid.NewGuid(), "pending", 1, null);
+        else
+            return Task.FromException<T>(new AureliaApiException(404, "not_found", "No fake route for " + route));
+        return Guard((T)result!);
+    }
+
+    public Task<T> SendBytesAsync<T>(HttpMethod method, string path, byte[] content, string contentType, CancellationToken cancellation)
+    {
+        Calls.Add($"upload {content.Length}");
+        object result = new EditorUploadSummary(Guid.NewGuid(), path, 400, 600);
+        return Guard((T)result);
+    }
+
+    private static byte[] Png()
+    {
+        using var bitmap = new SkiaSharp.SKBitmap(40, 60);
+        bitmap.Erase(new SkiaSharp.SKColor(90, 120, 200));
+        using var data = SkiaSharp.SKImage.FromBitmap(bitmap).Encode(SkiaSharp.SKEncodedImageFormat.Png, 90);
+        return data.ToArray();
+    }
+
     private Task<T> Guard<T>(T value) => Locked
         ? Task.FromException<T>(new AureliaApiException(403, "management_locked", "Unlock server management."))
         : Task.FromResult(value);

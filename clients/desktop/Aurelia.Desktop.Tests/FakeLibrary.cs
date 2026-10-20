@@ -19,6 +19,8 @@ internal sealed class FakeLibraryApi : ILibraryApi
     public List<Guid> Revoked { get; } = [];
     public Dictionary<Guid, long> ResumePositions { get; } = [];
     public bool FailSaveWithConflict { get; set; }
+    /// <summary>Titles marked as watched, as the server would record them for this profile.</summary>
+    public HashSet<Guid> Watched { get; } = [];
     public long Revision { get; set; } = 3;
     public int TicketCount { get; private set; }
 
@@ -48,12 +50,51 @@ internal sealed class FakeLibraryApi : ILibraryApi
             [new CollectionSummary(Guid.NewGuid(), "Synthetic Collection", null, [Movie])], Added));
     }
 
-    public Task<PagedResponse<CatalogItemSummary>> BrowseAsync(MediaKind kind, int offset, int limit, CancellationToken cancellation)
+    public Task<PagedResponse<CatalogItemSummary>> BrowseAsync(MediaKind kind, CatalogFilter filter, int offset, int limit,
+        CancellationToken cancellation)
     {
-        Calls.Add($"browse {kind} {offset}");
-        IReadOnlyList<CatalogItemSummary> all = kind == MediaKind.Movie ? [Movie, SecondMovie] : [Series];
-        return Task.FromResult(new PagedResponse<CatalogItemSummary>([.. all.Skip(offset).Take(limit)], offset, limit, all.Count));
+        Calls.Add($"browse {kind} {offset} {filter.Query()}");
+        IEnumerable<CatalogItemSummary> all = (kind == MediaKind.Movie ? new[] { Movie, SecondMovie } : [Series]).Select(Marked);
+        if (filter.Genre is { } genre) all = all.Where(item => item.Genres.Contains(genre));
+        if (filter.Watch == WatchFilter.Watched) all = all.Where(item => item.Progress?.IsCompleted == true);
+        if (filter.Watch == WatchFilter.Unwatched) all = all.Where(item => item.Progress?.IsCompleted != true);
+        if (filter.Sort == CatalogSort.ReleaseYear) all = all.OrderBy(item => item.Year);
+        if (filter.Descending) all = all.Reverse();
+        var list = all.ToList();
+        return Task.FromResult(new PagedResponse<CatalogItemSummary>([.. list.Skip(offset).Take(limit)], offset, limit, list.Count));
     }
+
+    public Task<WatchStateResponse> WatchStateAsync(Guid id, WatchStateScope scope, int? season, CancellationToken cancellation)
+    {
+        Calls.Add($"watch-state {id} {scope} {season}");
+        return Task.FromResult(State(id, scope, season));
+    }
+
+    public Task<WatchStateResponse> SetWatchedAsync(Guid id, bool watched, WatchStateScope scope, int? season, string stateToken,
+        CancellationToken cancellation)
+    {
+        Calls.Add($"watched {id} {scope} {season} {watched}");
+        if (stateToken != State(id, scope, season).StateToken)
+            return Task.FromException<WatchStateResponse>(new AureliaApiException(409, "library_state_conflict", "Changed."));
+        foreach (var affected in Affected(id, scope))
+            if (watched) Watched.Add(affected);
+            else Watched.Remove(affected);
+        return Task.FromResult(State(id, scope, season));
+    }
+
+    private static Guid[] Affected(Guid id, WatchStateScope scope) => scope == WatchStateScope.Title || id != SeriesId ? [id] : [EpisodeOneId, EpisodeTwoId];
+
+    private WatchStateResponse State(Guid id, WatchStateScope scope, int? season)
+    {
+        var affected = Affected(id, scope);
+        var done = affected.All(Watched.Contains);
+        return new WatchStateResponse(id, scope, season, done ? CatalogWatchState.Completed : CatalogWatchState.Unplayed, affected.Length,
+            "token-" + string.Join(",", affected.Where(Watched.Contains)), false);
+    }
+
+    private CatalogItemSummary Marked(CatalogItemSummary item) => Watched.Contains(item.Id)
+        ? item with { Progress = new PlaybackProgressResponse(item.Id, 0, 2_700_000, true, Added, Added, 9) }
+        : item;
 
     public Task<PagedResponse<CatalogItemSummary>> SearchAsync(string term, int offset, int limit, CancellationToken cancellation)
     {
@@ -70,13 +111,13 @@ internal sealed class FakeLibraryApi : ILibraryApi
         var metadata = new MediaMetadataSummary(id, item.Title, null, item.Overview, null, item.Year, id == SeriesId ? null : 104, null,
             "12", item.Genres, [], [], [], item.Poster, item.Backdrop, null, null, null, MetadataReviewState.Matched);
         IReadOnlyList<SeasonPresentation> seasons = id == SeriesId
-            ? [new SeasonPresentation(1, [new EpisodePresentation(Episode(1), 1, 1), new EpisodePresentation(Episode(2), 1, 2)], [])]
+            ? [new SeasonPresentation(1, [new EpisodePresentation(Marked(Episode(1)), 1, 1), new EpisodePresentation(Marked(Episode(2)), 1, 2)], [])]
             : [];
         IReadOnlyList<SupplementPresentation> extras = id == MovieId
             ? [new SupplementPresentation(new CatalogItemSummary(Guid.NewGuid(), MediaKind.Trailer, "Synthetic Trailer", null, null, null, [],
                 null, null, MediaAvailability.Available, false, null, Added), "Trailer", null)]
             : [];
-        return Task.FromResult(new CatalogDetailPresentation(item, metadata, seasons, extras));
+        return Task.FromResult(new CatalogDetailPresentation(Marked(item), metadata, seasons, extras));
     }
 
     public Task<PlaybackPlanResponse> PlaybackPlanAsync(Guid id, CancellationToken cancellation)

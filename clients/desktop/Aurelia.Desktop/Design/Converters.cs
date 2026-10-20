@@ -93,3 +93,25 @@ public sealed class CardTemplateConverter : IValueConverter
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }
+
+/// <summary>An episode's menu entry: "Mark as Unwatched" once it was finished, otherwise "Mark as Watched".</summary>
+public sealed class WatchedMenuConverter : IValueConverter
+{
+    public static readonly WatchedMenuConverter Instance = new();
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is PlaybackProgressResponse { IsCompleted: true } ? "Mark as Unwatched" : "Mark as Watched";
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}
+
+/// <summary>A small check on titles that were watched to the end, as in the Mac library.</summary>
+public sealed class WatchedConverter : IValueConverter
+{
+    public static readonly WatchedConverter Instance = new();
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is PlaybackProgressResponse { IsCompleted: true };
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}

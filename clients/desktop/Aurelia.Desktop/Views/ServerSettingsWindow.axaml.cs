@@ -132,6 +132,30 @@ public sealed partial class ServerSettingsWindow : Window
             () => model.RemoveDeviceAsync(row));
     }
 
+    private async void NewProfile(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Profiles.BeginNewAsync();
+    }
+
+    private async void EditProfile(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model && (sender as Control)?.DataContext is ProfileRow row) await model.Profiles.BeginEditAsync(row);
+    }
+
+    private void RemoveProfile(object? sender, RoutedEventArgs e)
+    {
+        if (Model is not { } model || sender is not Control { DataContext: ProfileRow row } anchor) return;
+        Confirm(anchor, $"Remove {row.Name}? Its progress, favorites and devices go with it. Movies and shows stay.", "Remove",
+            () => model.Profiles.RemoveAsync(row));
+    }
+
+    private async void SaveProfile(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Profiles.SaveAsync();
+    }
+
+    private void CancelProfile(object? sender, RoutedEventArgs e) => Model?.Profiles.CancelEdit();
+
     /// <summary>A small confirmation next to the button, instead of a separate dialog.</summary>
     private static void Confirm(Control anchor, string question, string action, Func<Task> confirmed)
     {

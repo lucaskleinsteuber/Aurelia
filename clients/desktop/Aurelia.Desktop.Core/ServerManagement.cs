@@ -18,9 +18,8 @@ public sealed record ServerSettingsDocument(JsonObject Stored, bool RestartRequi
 }
 
 /// <summary>What the owner manages on their own server; tests replace it with a scripted one.</summary>
-public interface IServerManagement
+public interface IServerManagement : IAdministrationClient
 {
-    Task<DateTimeOffset> UnlockAsync(string password, CancellationToken cancellation);
     Task<ServerStatusResponse> StatusAsync(CancellationToken cancellation);
     Task<ServerSettingsDocument> SettingsAsync(CancellationToken cancellation);
     Task<IReadOnlyList<LibrarySummary>> LibrariesAsync(CancellationToken cancellation);
@@ -46,69 +45,81 @@ public sealed class ServerManagementClient(AureliaServerApi api, StoredConnectio
     private HttpClient Client => api.Pinned(connection.Address, connection.Fingerprint);
 
     public async Task<DateTimeOffset> UnlockAsync(string password, CancellationToken cancellation) =>
-        (await SendAsync<ManagementUnlockResponse>(HttpMethod.Post, "/api/v1/management/unlock", new UnlockManagementRequest(password), false, cancellation)).ExpiresAt;
+        (await SendCoreAsync<ManagementUnlockResponse>(HttpMethod.Post, "/api/v1/management/unlock", new UnlockManagementRequest(password), false, cancellation)).ExpiresAt;
 
     public Task<ServerStatusResponse> StatusAsync(CancellationToken cancellation) =>
-        SendAsync<ServerStatusResponse>(HttpMethod.Get, "/api/v1/server/status", null, false, cancellation);
+        SendCoreAsync<ServerStatusResponse>(HttpMethod.Get, "/api/v1/server/status", null, false, cancellation);
 
     public async Task<ServerSettingsDocument> SettingsAsync(CancellationToken cancellation)
     {
-        var document = await SendAsync<JsonObject>(HttpMethod.Get, "/api/v1/server/settings", null, false, cancellation);
+        var document = await SendCoreAsync<JsonObject>(HttpMethod.Get, "/api/v1/server/settings", null, false, cancellation);
         return document["stored"] is JsonObject stored
             ? new ServerSettingsDocument((JsonObject)stored.DeepClone(), document["restartRequired"]?.GetValue<bool>() ?? false)
             : throw AureliaApiException.InvalidResponse();
     }
 
     public Task<IReadOnlyList<LibrarySummary>> LibrariesAsync(CancellationToken cancellation) =>
-        SendAsync<IReadOnlyList<LibrarySummary>>(HttpMethod.Get, "/api/v1/libraries", null, false, cancellation);
+        SendCoreAsync<IReadOnlyList<LibrarySummary>>(HttpMethod.Get, "/api/v1/libraries", null, false, cancellation);
 
     public Task<IReadOnlyList<LibraryScanSummary>> ActiveScansAsync(CancellationToken cancellation) =>
-        SendAsync<IReadOnlyList<LibraryScanSummary>>(HttpMethod.Get, "/api/v1/libraries/scans", null, false, cancellation);
+        SendCoreAsync<IReadOnlyList<LibraryScanSummary>>(HttpMethod.Get, "/api/v1/libraries/scans", null, false, cancellation);
 
     public Task<LibrarySummary> AddLibraryAsync(string? name, string path, LibraryKind kind, CancellationToken cancellation) =>
-        SendAsync<LibrarySummary>(HttpMethod.Post, "/api/v1/libraries", new CreateLibraryRequest(name, path, kind), true, cancellation);
+        SendCoreAsync<LibrarySummary>(HttpMethod.Post, "/api/v1/libraries", new CreateLibraryRequest(name, path, kind), true, cancellation);
 
     public Task<LibraryScanSummary> ScanAsync(Guid library, CancellationToken cancellation) =>
-        SendAsync<LibraryScanSummary>(HttpMethod.Post, $"/api/v1/libraries/{library}/scans", null, false, cancellation);
+        SendCoreAsync<LibraryScanSummary>(HttpMethod.Post, $"/api/v1/libraries/{library}/scans", null, false, cancellation);
 
     public Task RemoveLibraryAsync(Guid library, CancellationToken cancellation) =>
-        SendAsync<AureliaServerApi.NoContent>(HttpMethod.Delete, $"/api/v1/libraries/{library}", null, true, cancellation);
+        SendCoreAsync<AureliaServerApi.NoContent>(HttpMethod.Delete, $"/api/v1/libraries/{library}", null, true, cancellation);
 
     public Task<DeviceAuthorizationPreview> LookUpDeviceAsync(string code, CancellationToken cancellation) =>
-        SendAsync<DeviceAuthorizationPreview>(HttpMethod.Post, "/api/v1/server/device-pairings/lookup",
+        SendCoreAsync<DeviceAuthorizationPreview>(HttpMethod.Post, "/api/v1/server/device-pairings/lookup",
             new DeviceAuthorizationLookupRequest(new string([.. code.Where(char.IsAsciiDigit)])), false, cancellation);
 
     public Task AnswerDeviceAsync(Guid request, bool approve, CancellationToken cancellation) =>
-        SendAsync<AureliaServerApi.NoContent>(HttpMethod.Post, $"/api/v1/server/device-pairings/{request}/{(approve ? "approve" : "deny")}",
+        SendCoreAsync<AureliaServerApi.NoContent>(HttpMethod.Post, $"/api/v1/server/device-pairings/{request}/{(approve ? "approve" : "deny")}",
             null, true, cancellation);
 
     public Task<IReadOnlyList<DeviceSessionSummary>> DevicesAsync(CancellationToken cancellation) =>
-        SendAsync<IReadOnlyList<DeviceSessionSummary>>(HttpMethod.Get, "/api/v1/auth/sessions", null, false, cancellation);
+        SendCoreAsync<IReadOnlyList<DeviceSessionSummary>>(HttpMethod.Get, "/api/v1/auth/sessions", null, false, cancellation);
 
     public Task RemoveDeviceAsync(Guid session, CancellationToken cancellation) =>
-        SendAsync<AureliaServerApi.NoContent>(HttpMethod.Delete, $"/api/v1/auth/sessions/{session}", null, true, cancellation);
+        SendCoreAsync<AureliaServerApi.NoContent>(HttpMethod.Delete, $"/api/v1/auth/sessions/{session}", null, true, cancellation);
 
     public Task<ServerOperationStatus> TryNetworkAsync(JsonObject settings, bool confirmDisconnect, CancellationToken cancellation) =>
-        SendAsync<ServerOperationStatus>(HttpMethod.Post, "/api/v1/server/operations/network",
+        SendCoreAsync<ServerOperationStatus>(HttpMethod.Post, "/api/v1/server/operations/network",
             new JsonObject { ["settings"] = settings.DeepClone(), ["confirmRemoteAccessDisabled"] = confirmDisconnect }, true, cancellation);
 
     public Task ConfirmNetworkAsync(Guid operation, CancellationToken cancellation) =>
-        SendAsync<AureliaServerApi.NoContent>(HttpMethod.Post, $"/api/v1/server/operations/{operation}/confirm", null, false, cancellation);
+        SendCoreAsync<AureliaServerApi.NoContent>(HttpMethod.Post, $"/api/v1/server/operations/{operation}/confirm", null, false, cancellation);
 
-    private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, bool approve, CancellationToken cancellation)
-    {
+    /// <summary>Any management request; the approval follows the server's rule for it.</summary>
+    public Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation) =>
+        SendCoreAsync<T>(method, path, body, AdministrationRules.RequiresApproval(method, path), cancellation);
+
+    public Task<T> SendBytesAsync<T>(HttpMethod method, string path, byte[] content, string contentType, CancellationToken cancellation) =>
+        SendRawAsync<T>(method, path, content, contentType, AdministrationRules.RequiresApproval(method, path), cancellation);
+
+    private Task<T> SendCoreAsync<T>(HttpMethod method, string path, object? body, bool approve, CancellationToken cancellation) =>
         // The approval covers these exact bytes, so they are serialized once and sent as they are.
-        var payload = body is null ? [] : JsonSerializer.SerializeToUtf8Bytes(body, body.GetType(), AureliaServerApi.Json);
+        SendRawAsync<T>(method, path, body is null ? null : JsonSerializer.SerializeToUtf8Bytes(body, body.GetType(), AureliaServerApi.Json),
+            "application/json", approve, cancellation);
+
+    private async Task<T> SendRawAsync<T>(HttpMethod method, string path, byte[]? content, string contentType, bool approve,
+        CancellationToken cancellation)
+    {
+        var payload = content ?? [];
         using var request = new HttpRequestMessage(method, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", profileToken);
-        if (body is not null)
+        if (content is not null)
         {
             request.Content = new ByteArrayContent(payload);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         }
         if (approve)
         {
-            var grant = await SendAsync<AdministrationApprovalResponse>(HttpMethod.Post, "/api/v1/server/approval",
+            var grant = await SendCoreAsync<AdministrationApprovalResponse>(HttpMethod.Post, "/api/v1/server/approval",
                 new AdministrationApprovalRequest($"{method.Method} {path}", Convert.ToHexStringLower(SHA256.HashData(payload))), false, cancellation);
             request.Headers.Add("X-Aurelia-Approval", grant.Token);
         }

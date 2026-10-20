@@ -85,8 +85,20 @@ public sealed class LocalServerHostTests : IAsyncDisposable
             Assert.NotNull(session);
             using (var library = new LibraryClient(api, connection, session))
             {
-                var movies = await library.BrowseAsync(MediaKind.Movie, 0, 50, cancellation);
-                Assert.Contains(movies.Items, item => item.Title == "Synthetic Movie");
+                var movies = await library.BrowseAsync(MediaKind.Movie, new CatalogFilter(), 0, 50, cancellation);
+                var movie = Assert.Single(movies.Items, item => item.Title == "Synthetic Movie");
+                // Watched and the filters, as the real server understands them.
+                var state = await library.WatchStateAsync(movie.Id, WatchStateScope.Title, null, cancellation);
+                Assert.Equal(CatalogWatchState.Unplayed, state.WatchState);
+                await library.SetWatchedAsync(movie.Id, true, WatchStateScope.Title, null, state.StateToken, cancellation);
+                Assert.Contains((await library.BrowseAsync(MediaKind.Movie, new CatalogFilter(Watch: WatchFilter.Watched), 0, 50, cancellation)).Items,
+                    item => item.Id == movie.Id && item.Progress?.IsCompleted == true);
+                Assert.DoesNotContain((await library.BrowseAsync(MediaKind.Movie, new CatalogFilter(Watch: WatchFilter.Unwatched), 0, 50, cancellation)).Items,
+                    item => item.Id == movie.Id);
+                Assert.Single((await library.BrowseAsync(MediaKind.Movie,
+                    new CatalogFilter(CatalogSort.DateAdded, Descending: true, Year: movie.Year), 0, 50, cancellation)).Items);
+                var stale = library.SetWatchedAsync(movie.Id, false, WatchStateScope.Title, null, state.StateToken, cancellation);
+                Assert.Equal("library_state_conflict", (await Assert.ThrowsAsync<AureliaApiException>(() => stale)).Code);
             }
 
             // Server Settings: management is still unlocked from setup.
@@ -114,6 +126,59 @@ public sealed class LocalServerHostTests : IAsyncDisposable
                 Assert.Equal("Renamed Synthetic Host", settings.ServerName);
                 Assert.Equal("Renamed Synthetic Host", (await api.ServerInfoAsync(connection, cancellation)).Name);
                 session = replaced[0];
+            }
+
+            // Profiles, details and removal, with the real server's management unlock and approvals.
+            var admin = Management(connection, session);
+            var people = new ProfilesModel(() => admin);
+            await people.LoadAsync();
+            Assert.Null(people.Error);
+            Assert.Single(people.Profiles);
+            await people.BeginNewAsync();
+            people.Name = "Synthetic Guest";
+            people.Pin = "2468";
+            people.PinConfirmation = "2468";
+            people.AccessIndex = 1;
+            people.Titles.Single(title => title.Title == "Synthetic Movie").IsSelected = true;
+            await people.SaveAsync();
+            Assert.Null(people.Error);
+            var guest = Assert.Single(people.Profiles, row => row.Name == "Synthetic Guest");
+            Assert.Equal("User · PIN · Selected titles", guest.Details);
+            await people.BeginEditAsync(guest);
+            Assert.True(people.Titles.Single(title => title.Title == "Synthetic Movie").IsSelected);
+            people.AccessIndex = 0;
+            people.PinProtection = false;
+            await people.SaveAsync();
+            Assert.Null(people.Error);
+            Assert.Equal("User · No PIN · Entire library", Assert.Single(people.Profiles, row => row.Name == "Synthetic Guest").Details);
+            await people.RemoveAsync(people.Profiles.Single(row => row.Name == "Synthetic Guest"));
+            Assert.Null(people.Error);
+            Assert.Single(people.Profiles);
+
+            var access = new ManagementAccess(admin, _ => Task.FromResult<string?>(Password));
+            using (var titles = new LibraryClient(api, connection, session))
+            {
+                var movie = (await titles.BrowseAsync(MediaKind.Movie, new CatalogFilter(), 0, 50, cancellation)).Items.Single();
+                var editor = new MetadataEditorModel(access, movie.Id);
+                await editor.LoadAsync();
+                Assert.True(editor.IsLoaded);
+                editor.Title = "Edited Synthetic Movie";
+                await editor.ChooseImageAsync(poster: true, SyntheticMedia.Png(300, 450));
+                Assert.Null(editor.Error);
+                Assert.True(editor.PosterIsManual);
+                await editor.SaveAsync();
+                Assert.Null(editor.Error);
+                Assert.Equal("Edited Synthetic Movie", (await titles.DetailAsync(movie.Id, cancellation)).Metadata.Title);
+                editor.UseAutomatic("title");
+                await editor.SaveAsync();
+                Assert.Null(editor.Error);
+                Assert.Equal("Synthetic Movie", (await titles.DetailAsync(movie.Id, cancellation)).Metadata.Title);
+
+                var model = new LibraryModel(titles) { Management = access };
+                await model.OpenDetailAsync(movie.Id);
+                await model.RemoveDetailAsync();
+                Assert.Null(model.Error);
+                Assert.Empty((await titles.BrowseAsync(MediaKind.Movie, new CatalogFilter(), 0, 50, cancellation)).Items);
             }
 
             // A server that dies is started again on its own.

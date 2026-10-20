@@ -18,6 +18,7 @@
             <ListBoxItem Content="General" />
             <ListBoxItem Content="Storage" />
             <ListBoxItem Content="Devices" />
+            <ListBoxItem Content="Profiles" />
           </ListBox>
         </StackPanel>
       </Border>
@@ -179,6 +180,99 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </StackPanel>
+          <!-- Profiles -->
+          <Panel IsVisible="{Binding ShowsProfiles}">
+          <StackPanel x:Name="ProfilesSection" Spacing="18" DataContext="{Binding Profiles}" x:DataType="core:ProfilesModel">
+            <TextBlock Classes="page" Text="Profiles" />
+            <Border Classes="group" IsVisible="{Binding HasNotice}">
+              <TextBlock x:Name="ProfilesNotice" Text="{Binding Notice}" TextWrapping="Wrap" />
+            </Border>
+            <TextBlock x:Name="ProfilesError" Text="{Binding Error}" IsVisible="{Binding HasError}" Foreground="#FF8A80" TextWrapping="Wrap" />
+
+            <StackPanel Spacing="14" IsVisible="{Binding ShowsList}">
+              <TextBlock Classes="secondary" TextWrapping="Wrap"
+                         Text="Everyone who watches has a profile with their own progress and favorites. Profiles are chosen on each device." />
+              <ItemsControl x:Name="ProfileList" ItemsSource="{Binding Profiles}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="core:ProfileRow">
+                    <Border Classes="group" Margin="0,0,0,10">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                          <TextBlock Classes="caption" Text="{Binding Details}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                          <Button Classes="secondary" Content="Edit…" Click="EditProfile" />
+                          <Button Classes="link" Content="Remove…" Click="RemoveProfile" IsVisible="{Binding !IsOwner}" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button x:Name="NewProfileButton" Classes="primary" Content="New Profile…" Click="NewProfile" IsEnabled="{Binding !IsBusy}" />
+            </StackPanel>
+
+            <!-- One profile, new or existing -->
+            <Border x:Name="ProfileEditor" Classes="group" IsVisible="{Binding IsEditing}">
+              <StackPanel Spacing="12">
+                <TextBlock Text="{Binding EditorTitle}" FontSize="18" FontWeight="Bold" />
+                <StackPanel Spacing="6" IsVisible="{Binding IsNew}">
+                  <TextBlock Classes="secondary" Text="Name" />
+                  <TextBox x:Name="ProfileName" Text="{Binding Name}" MaxLength="64" />
+                </StackPanel>
+                <StackPanel Spacing="6" IsVisible="{Binding CanChooseRole}">
+                  <TextBlock Classes="secondary" Text="Role" />
+                  <ComboBox x:Name="ProfileRole" ItemsSource="{x:Static core:ProfilesModel.Roles}" SelectedIndex="{Binding RoleIndex}" MinWidth="200" />
+                  <TextBlock Classes="caption" TextWrapping="Wrap"
+                             Text="Administrators can manage the library with the Server Password. Users only watch." />
+                </StackPanel>
+                <CheckBox x:Name="ProfileEnabled" IsChecked="{Binding IsEnabled}" IsVisible="{Binding CanChooseRole}"
+                          Content="Profile can be used" />
+                <CheckBox x:Name="ProfilePinProtection" IsChecked="{Binding PinProtection}" IsEnabled="{Binding !PinRequired}"
+                          Content="Ask for a PIN when this profile is opened" />
+                <StackPanel Spacing="8" IsVisible="{Binding AsksForPin}">
+                  <TextBlock Classes="caption" Text="{Binding PinHint}" />
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBox x:Name="ProfilePin" Text="{Binding Pin}" PasswordChar="•" MaxLength="8" Width="160" PlaceholderText="PIN" />
+                    <TextBox x:Name="ProfilePinConfirmation" Text="{Binding PinConfirmation}" PasswordChar="•" MaxLength="8" Width="160"
+                             PlaceholderText="Repeat PIN" />
+                  </StackPanel>
+                </StackPanel>
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="secondary" Text="What this profile can watch" />
+                  <ComboBox x:Name="ProfileAccess" ItemsSource="{x:Static core:ProfilesModel.AccessModes}" SelectedIndex="{Binding AccessIndex}"
+                            MinWidth="200" />
+                  <StackPanel Spacing="8" IsVisible="{Binding ChoosesTitles}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBox x:Name="TitleFilter" Text="{Binding TitleFilter}" PlaceholderText="Find a movie or show" />
+                      <TextBlock Grid.Column="1" Classes="caption" Text="{Binding SelectionText}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                    </Grid>
+                    <ScrollViewer MaxHeight="280">
+                      <ItemsControl x:Name="TitleChoices" ItemsSource="{Binding Titles}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="core:TitleChoice">
+                            <CheckBox IsChecked="{Binding IsSelected}" Margin="0,0,0,4">
+                              <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Title}" />
+                                <TextBlock Classes="caption" Text="{Binding Caption}" VerticalAlignment="Center" />
+                              </StackPanel>
+                            </CheckBox>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
+                  </StackPanel>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <Button x:Name="SaveProfileButton" Classes="primary" Content="Save" Click="SaveProfile" IsEnabled="{Binding !IsBusy}" />
+                  <Button Classes="secondary" Content="Cancel" Click="CancelProfile" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+          </StackPanel>
+          </Panel>
           <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
         </StackPanel>
       </ScrollViewer>

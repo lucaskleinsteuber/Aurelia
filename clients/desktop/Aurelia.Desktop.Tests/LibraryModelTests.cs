@@ -37,6 +37,72 @@ public sealed class LibraryModelTests
     }
 
     [Fact]
+    public async Task FiltersAndSortingReloadTheGridFromTheFirstPage()
+    {
+        var (model, api) = Create();
+        await model.ShowAsync(LibrarySection.Movies);
+        var browse = model.MovieBrowse;
+        Assert.Equal("2 movies", browse.CountText);
+        // Genres and years come from the titles seen in the grid.
+        Assert.Equal([CatalogBrowse.AllGenres, "Comedy", "Drama"], browse.Genres);
+        Assert.Equal([CatalogBrowse.AnyYear, "2024", "2020"], browse.Years);
+        Assert.False(browse.HasFilters);
+
+        browse.SortIndex = 2;
+        browse.Descending = true;
+        await WaitForAsync(() => !model.IsLoading && browse.Items.Count == 2);
+        Assert.Equal(["Second Feature", "Synthetic Movie"], browse.Items.Select(item => item.Title));
+        Assert.Contains("browse Movie 0 sort=releaseYear&direction=descending", api.Calls);
+
+        browse.Genre = "Comedy";
+        await WaitForAsync(() => !model.IsLoading && browse.Items.Count == 1);
+        Assert.True(browse.HasFilters);
+        Assert.Contains(api.Calls, call => call.EndsWith("&genre=Comedy", StringComparison.Ordinal));
+        browse.WatchIndex = (int)WatchFilter.Watched;
+        await WaitForAsync(() => !model.IsLoading && browse.Total == 0);
+        Assert.True(browse.IsEmpty);
+        Assert.Equal("No movies match these filters.", browse.EmptyText);
+
+        browse.ClearFilters();
+        await WaitForAsync(() => !model.IsLoading && browse.Items.Count == 2);
+        Assert.False(browse.HasFilters);
+        Assert.Equal(CatalogBrowse.AllGenres, browse.Genre);
+    }
+
+    [Fact]
+    public async Task TitlesSeasonsAndEpisodesAreMarkedWatchedAndUnwatched()
+    {
+        var (model, api) = Create();
+        await model.OpenDetailAsync(FakeLibraryApi.MovieId);
+        Assert.Equal("Mark as Watched", model.WatchedLabel);
+        await model.ToggleWatchedAsync();
+        Assert.Contains(FakeLibraryApi.MovieId, api.Watched);
+        Assert.Equal("Mark as Unwatched", model.WatchedLabel);
+        Assert.True(model.Detail?.Item.Progress?.IsCompleted);
+        await model.ToggleWatchedAsync();
+        Assert.Empty(api.Watched);
+
+        await model.OpenDetailAsync(FakeLibraryApi.SeriesId);
+        await WaitForAsync(() => model.SeasonWatch is not null);
+        Assert.Equal("Mark Season as Watched", model.SeasonWatchedLabel);
+        await model.ToggleEpisodeWatchedAsync(model.Episodes[0]);
+        Assert.Equal([FakeLibraryApi.EpisodeOneId], api.Watched);
+        Assert.True(model.Episodes[0].Item.Progress?.IsCompleted);
+        await model.ToggleSeasonWatchedAsync();
+        Assert.Equal(2, api.Watched.Count);
+        await WaitForAsync(() => model.SeasonWatchedLabel == "Mark Season as Unwatched");
+        Assert.Equal("Mark as Unwatched", model.WatchedLabel);
+        // The season stays chosen after the page reloads.
+        Assert.Equal(1, model.SelectedSeason?.Number);
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 200 && !condition(); attempt++) await Task.Delay(10, TestContext.Current.CancellationToken);
+        Assert.True(condition());
+    }
+
+    [Fact]
     public async Task SearchWaitsForAPauseAndShowsWhenNothingMatches()
     {
         var api = new FakeLibraryApi();

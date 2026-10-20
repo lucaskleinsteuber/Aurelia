@@ -7,11 +7,15 @@ namespace Aurelia.Desktop.Core;
 public interface ILibraryApi
 {
     Task<HomeResponse> HomeAsync(CancellationToken cancellation);
-    Task<PagedResponse<CatalogItemSummary>> BrowseAsync(MediaKind kind, int offset, int limit, CancellationToken cancellation);
+    Task<PagedResponse<CatalogItemSummary>> BrowseAsync(MediaKind kind, CatalogFilter filter, int offset, int limit, CancellationToken cancellation);
     Task<PagedResponse<CatalogItemSummary>> SearchAsync(string term, int offset, int limit, CancellationToken cancellation);
     Task<CatalogDetailPresentation> DetailAsync(Guid id, CancellationToken cancellation);
     Task<PlaybackPlanResponse> PlaybackPlanAsync(Guid id, CancellationToken cancellation);
     Task<bool> SetFavoriteAsync(Guid id, bool favorite, CancellationToken cancellation);
+    /// <summary>Whether a title, a season or a whole series counts as watched, with the token a change needs.</summary>
+    Task<WatchStateResponse> WatchStateAsync(Guid id, WatchStateScope scope, int? season, CancellationToken cancellation);
+    Task<WatchStateResponse> SetWatchedAsync(Guid id, bool watched, WatchStateScope scope, int? season, string stateToken,
+        CancellationToken cancellation);
     Task<byte[]> ArtworkAsync(ArtworkSummary artwork, int width, CancellationToken cancellation);
     Task<PlaybackSourceResponse> CreatePlaybackAsync(Guid mediaId, CancellationToken cancellation);
     Task RevokePlaybackAsync(Guid ticketId, CancellationToken cancellation);
@@ -42,12 +46,13 @@ public sealed class LibraryClient(AureliaServerApi api, StoredConnection connect
 
     public Task<HomeResponse> HomeAsync(CancellationToken cancellation) => GetAsync<HomeResponse>("/api/v1/home", cancellation);
 
-    public Task<PagedResponse<CatalogItemSummary>> BrowseAsync(MediaKind kind, int offset, int limit, CancellationToken cancellation)
+    public Task<PagedResponse<CatalogItemSummary>> BrowseAsync(MediaKind kind, CatalogFilter filter, int offset, int limit,
+        CancellationToken cancellation)
     {
         if (kind is not (MediaKind.Movie or MediaKind.Series) || offset < 0 || limit is < 1 or > 200)
             throw new ArgumentOutOfRangeException(nameof(kind));
         return GetAsync<PagedResponse<CatalogItemSummary>>(
-            $"/api/v1/catalog/items?kind={Wire(kind)}&sort=title&direction=ascending&offset={offset}&limit={limit}", cancellation);
+            $"/api/v1/catalog/items?kind={Wire(kind)}&{filter.Query()}&offset={offset}&limit={limit}", cancellation);
     }
 
     public Task<PagedResponse<CatalogItemSummary>> SearchAsync(string term, int offset, int limit, CancellationToken cancellation)
@@ -75,6 +80,24 @@ public sealed class LibraryClient(AureliaServerApi api, StoredConnection connect
     public Task<bool> SetFavoriteAsync(Guid id, bool favorite, CancellationToken cancellation) =>
         AureliaServerApi.SendAsync<bool>(client, HttpMethod.Put, $"/api/v1/media/{id}/favorite", session.Token,
             new SetFavoriteRequest(favorite), inspecting: false, cancellation);
+
+    public async Task<WatchStateResponse> WatchStateAsync(Guid id, WatchStateScope scope, int? season, CancellationToken cancellation)
+    {
+        var seasonQuery = season is { } number ? "&seasonNumber=" + number.ToString(CultureInfo.InvariantCulture) : "";
+        var state = await GetAsync<WatchStateResponse>($"/api/v1/media/{id}/watch-state?scope={Wire(scope)}{seasonQuery}", cancellation);
+        if (state.MediaId != id || state.Scope != scope || state.SeasonNumber != season || state.StateToken.Length == 0)
+            throw AureliaApiException.InvalidResponse();
+        return state;
+    }
+
+    public async Task<WatchStateResponse> SetWatchedAsync(Guid id, bool watched, WatchStateScope scope, int? season, string stateToken,
+        CancellationToken cancellation)
+    {
+        var state = await AureliaServerApi.SendAsync<WatchStateResponse>(client, HttpMethod.Put, $"/api/v1/media/{id}/watch-state",
+            session.Token, new SetWatchStateRequest(watched, scope, season, stateToken, Guid.NewGuid()), inspecting: false, cancellation);
+        if (state.MediaId != id || state.Scope != scope || state.SeasonNumber != season) throw AureliaApiException.InvalidResponse();
+        return state;
+    }
 
     public async Task<byte[]> ArtworkAsync(ArtworkSummary artwork, int width, CancellationToken cancellation)
     {
@@ -148,6 +171,7 @@ public sealed class LibraryClient(AureliaServerApi api, StoredConnection connect
         AureliaServerApi.SendAsync<T>(client, HttpMethod.Get, path, session.Token, null, inspecting: false, cancellation);
 
     private static string Wire(MediaKind kind) => JsonNamingPolicyCamel(kind.ToString());
+    private static string Wire(WatchStateScope scope) => JsonNamingPolicyCamel(scope.ToString());
 
     private static string JsonNamingPolicyCamel(string value) =>
         value.Length == 0 ? value : char.ToLower(value[0], CultureInfo.InvariantCulture) + value[1..];
