@@ -9,6 +9,10 @@ public interface IAdministrationClient
     Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation);
     /// <summary>A request with raw bytes, such as an image the person chose.</summary>
     Task<T> SendBytesAsync<T>(HttpMethod method, string path, byte[] content, string contentType, CancellationToken cancellation);
+    /// <summary>Streams a large response, such as an encrypted backup, into a file the person chose.</summary>
+    Task DownloadAsync(string path, Stream destination, CancellationToken cancellation);
+    /// <summary>Streams a large file, such as a backup to restore, without approval (the server asks for none).</summary>
+    Task UploadAsync(string path, Stream content, long length, CancellationToken cancellation);
 }
 
 /// <summary>Which management requests need a one-time approval, the same rule the server applies.</summary>
@@ -56,6 +60,13 @@ public sealed class ManagementAccess(IAdministrationClient client, Func<string?,
 
     public Task<T> SendBytesAsync<T>(HttpMethod method, string path, byte[] content, string contentType, CancellationToken cancellation) =>
         RunAsync(token => client.SendBytesAsync<T>(method, path, content, contentType, token), cancellation);
+
+    public Task DownloadAsync(string path, Stream destination, CancellationToken cancellation) =>
+        RunAsync(async token =>
+        {
+            await client.DownloadAsync(path, destination, token);
+            return true;
+        }, cancellation);
 
     public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellation)
     {

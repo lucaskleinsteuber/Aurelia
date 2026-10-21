@@ -101,6 +101,42 @@ public sealed class ServerManagementClient(AureliaServerApi api, StoredConnectio
     public Task<T> SendBytesAsync<T>(HttpMethod method, string path, byte[] content, string contentType, CancellationToken cancellation) =>
         SendRawAsync<T>(method, path, content, contentType, AdministrationRules.RequiresApproval(method, path), cancellation);
 
+    public async Task DownloadAsync(string path, Stream destination, CancellationToken cancellation)
+    {
+        // Backups can take long and be large: a client without an overall timeout, still pinned to the server's key.
+        using var client = AureliaServerApi.CreateClient(connection.Address, connection.Fingerprint, null, Timeout.InfiniteTimeSpan);
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", profileToken);
+        using var response = await Transfer(() => client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation));
+        if (!response.IsSuccessStatusCode) throw await AureliaServerApi.ProblemAsync(response, cancellation);
+        await using var source = await response.Content.ReadAsStreamAsync(cancellation);
+        await Transfer(async () =>
+        {
+            await source.CopyToAsync(destination, cancellation);
+            return true;
+        });
+    }
+
+    public async Task UploadAsync(string path, Stream content, long length, CancellationToken cancellation)
+    {
+        using var client = AureliaServerApi.CreateClient(connection.Address, connection.Fingerprint, null, Timeout.InfiniteTimeSpan);
+        using var request = new HttpRequestMessage(HttpMethod.Put, path) { Content = new StreamContent(content) };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        request.Content.Headers.ContentLength = length;
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", profileToken);
+        using var response = await Transfer(() => client.SendAsync(request, cancellation));
+        if (!response.IsSuccessStatusCode) throw await AureliaServerApi.ProblemAsync(response, cancellation);
+    }
+
+    /// <summary>Network failures during a transfer read like any other request's.</summary>
+    private static async Task<T> Transfer<T>(Func<Task<T>> operation)
+    {
+        try { return await operation(); }
+        catch (HttpRequestException error) when (error.HttpRequestError == HttpRequestError.SecureConnectionError) { throw AureliaApiException.IdentityMismatch(); }
+        catch (HttpRequestException) { throw AureliaApiException.Unreachable(); }
+        catch (IOException) { throw new AureliaApiException(0, "transfer_interrupted", "The transfer was interrupted. Try again."); }
+    }
+
     private Task<T> SendCoreAsync<T>(HttpMethod method, string path, object? body, bool approve, CancellationToken cancellation) =>
         // The approval covers these exact bytes, so they are serialized once and sent as they are.
         SendRawAsync<T>(method, path, body is null ? null : JsonSerializer.SerializeToUtf8Bytes(body, body.GetType(), AureliaServerApi.Json),

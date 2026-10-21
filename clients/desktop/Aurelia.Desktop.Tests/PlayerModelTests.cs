@@ -282,4 +282,60 @@ public sealed class PlayerModelTests : IDisposable
         await notes.RemoveAsync(notes.Notes[0]);
         Assert.Single(notes.Notes);
     }
+
+    [Fact]
+    public async Task PlaybackSettingsChooseResumeSpeedSkipsAndKeepTheScreenOn()
+    {
+        var preferences = new PlaybackPreferencesModel(Settings);
+        Assert.True(preferences.AutomaticResume);
+        preferences.AutomaticResume = false;
+        preferences.RateIndex = Array.IndexOf(PlayerPolicy.Rates, 1.25);
+        preferences.SeekIndex = 3;
+        preferences.HideIndex = 2;
+        preferences.Volume = 60;
+        Assert.Equal("60%", preferences.VolumeText);
+
+        api.ResumePositions[FakeLibraryApi.EpisodeOneId] = 600_000;
+        var wake = new FakeScreenWake();
+        await using (var player = new PlayerModel(api, engines, Settings, EpisodeOne, action => action(), () => now, (_, purpose) => new FakeRelay(purpose))
+        {
+            ScreenWake = wake,
+        })
+        {
+            await player.StartAsync();
+            // Starts from the beginning, at 1.25×, at the chosen volume.
+            Assert.Equal(0L, Engine.Opened.Single().Item2);
+            Assert.Equal(1.25, player.Rate);
+            Assert.Equal(1.25, Engine.Rate);
+            Assert.Equal(60, player.Volume);
+            Assert.Equal(30_000, player.SkipMilliseconds);
+            Assert.Equal(TimeSpan.FromSeconds(5), player.HideDelay);
+            Engine.Advance(1_000);
+            Assert.True(wake.Holding);
+            player.Pause();
+            Engine.Advance(1_100);
+            Assert.False(wake.Holding);
+            player.TogglePlay();
+            Engine.Advance(1_200);
+            Assert.True(wake.Holding);
+        }
+        Assert.False(wake.Holding);
+
+        // Track choices are forgotten; defaults return without them.
+        Settings.Remember(FakeLibraryApi.SeriesId, audio: new TrackChoice("German", "Deutsch - [German]"));
+        var reloaded = new PlaybackPreferencesModel(Settings);
+        Assert.True(reloaded.HasTrackChoices);
+        reloaded.ForgetTrackChoices();
+        Assert.False(reloaded.HasTrackChoices);
+        reloaded.RestoreDefaults();
+        Assert.True(reloaded.AutomaticResume);
+        Assert.Equal(PlayerPolicy.Rates[Array.IndexOf(PlayerPolicy.Rates, 1.0)], PlayerPolicy.Rates[reloaded.RateIndex]);
+        Assert.Equal(100, reloaded.Volume);
+    }
+
+    private sealed class FakeScreenWake : IScreenWake
+    {
+        public bool Holding { get; private set; }
+        public void Hold(bool playing) => Holding = playing;
+    }
 }

@@ -49,6 +49,7 @@ public sealed partial class PlayerView : UserControl
     {
         model = player;
         DataContext = player;
+        hideTimer.Interval = player.HideDelay;
         player.PropertyChanged += ModelChanged;
         AttachEngine();
         UpdateSliders();
@@ -199,8 +200,8 @@ public sealed partial class PlayerView : UserControl
         switch (e.Key)
         {
             case Key.Space or Key.K: model.TogglePlay(); break;
-            case Key.Left or Key.J: model.SkipBy(-PlayerPolicy.SkipMilliseconds); break;
-            case Key.Right or Key.L: model.SkipBy(PlayerPolicy.SkipMilliseconds); break;
+            case Key.Left or Key.J: model.SkipBy(-model.SkipMilliseconds); break;
+            case Key.Right or Key.L: model.SkipBy(model.SkipMilliseconds); break;
             case Key.Up: model.SetVolume(model.Volume + 5); break;
             case Key.Down: model.SetVolume(model.Volume - 5); break;
             case Key.M: model.ToggleMute(); break;
@@ -218,8 +219,8 @@ public sealed partial class PlayerView : UserControl
 
     private void Back(object? sender, RoutedEventArgs e) => CloseRequested?.Invoke();
     private void TogglePlay(object? sender, RoutedEventArgs e) => model?.TogglePlay();
-    private void SkipBack(object? sender, RoutedEventArgs e) => model?.SkipBy(-PlayerPolicy.SkipMilliseconds);
-    private void SkipForward(object? sender, RoutedEventArgs e) => model?.SkipBy(PlayerPolicy.SkipMilliseconds);
+    private void SkipBack(object? sender, RoutedEventArgs e) => model?.SkipBy(-(model?.SkipMilliseconds ?? PlayerPolicy.SkipMilliseconds));
+    private void SkipForward(object? sender, RoutedEventArgs e) => model?.SkipBy(model?.SkipMilliseconds ?? PlayerPolicy.SkipMilliseconds);
     private void ToggleMute(object? sender, RoutedEventArgs e) => model?.ToggleMute();
     private async void PlayNext(object? sender, RoutedEventArgs e) => await (model?.PlayNextNowAsync() ?? Task.CompletedTask);
     private void DismissUpNext(object? sender, RoutedEventArgs e) => model?.DismissUpNext();

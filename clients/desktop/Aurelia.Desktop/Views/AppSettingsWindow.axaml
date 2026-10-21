@@ -1,0 +1,59 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:Aurelia.Desktop.Core;assembly=Aurelia.Desktop.Core"
+        x:Class="Aurelia.Desktop.Views.AppSettingsWindow"
+        x:DataType="core:PlaybackPreferencesModel"
+        Title="Settings"
+        Icon="avares://Aurelia/Assets/aurelia.ico"
+        Width="640" Height="720" MinWidth="560" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource AureliaCanvas}">
+  <Panel x:Name="Root">
+  <ScrollViewer x:Name="SettingsContent">
+    <StackPanel Margin="32,26,32,32" Spacing="16">
+      <TextBlock Classes="page" Text="Playback" />
+      <TextBlock Classes="secondary" TextWrapping="Wrap" Text="How Aurelia starts, controls and finishes playback on this computer." />
+      <Border Classes="group">
+        <StackPanel Spacing="12">
+          <CheckBox x:Name="AutomaticResume" IsChecked="{Binding AutomaticResume}" Content="Continue where you stopped" />
+          <CheckBox x:Name="AutoplayNext" IsChecked="{Binding AutoplayNext}" Content="Play the next episode automatically" />
+          <CheckBox x:Name="KeepScreenOn" IsChecked="{Binding KeepScreenOn}" Content="Keep the screen on while playing"
+                    IsVisible="{x:Static core:PlaybackPreferencesModel.CanKeepScreenOn}" />
+          <StackPanel Spacing="2">
+            <CheckBox x:Name="NightMode" IsChecked="{Binding NightMode}" Content="Night Mode" />
+            <TextBlock Classes="caption" Text="Softens loud scenes and makes quiet dialogue easier to hear." Margin="28,0,0,0" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+      <Border Classes="group">
+        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="12">
+          <TextBlock Text="Playback speed" VerticalAlignment="Center" />
+          <ComboBox x:Name="RatePicker" Grid.Column="1" ItemsSource="{x:Static core:PlaybackPreferencesModel.RateNames}" SelectedIndex="{Binding RateIndex}" Width="160" />
+          <TextBlock Grid.Row="1" Text="Volume when playback starts" VerticalAlignment="Center" />
+          <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="10">
+            <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Value="{Binding Volume}" Width="160" />
+            <TextBlock Text="{Binding VolumeText}" Width="42" VerticalAlignment="Center" />
+          </StackPanel>
+          <TextBlock Grid.Row="2" Text="Skip back and forward by" VerticalAlignment="Center" />
+          <ComboBox x:Name="SeekPicker" Grid.Row="2" Grid.Column="1" ItemsSource="{x:Static core:PlaybackPreferencesModel.SeekNames}" SelectedIndex="{Binding SeekIndex}" Width="160" />
+          <TextBlock Grid.Row="3" Text="Hide controls after" VerticalAlignment="Center" />
+          <ComboBox x:Name="HidePicker" Grid.Row="3" Grid.Column="1" ItemsSource="{x:Static core:PlaybackPreferencesModel.HideNames}" SelectedIndex="{Binding HideIndex}" Width="160" />
+        </Grid>
+      </Border>
+      <Border Classes="group">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2">
+            <TextBlock Text="Audio and Subtitles" />
+            <TextBlock Classes="caption" TextWrapping="Wrap" Text="Aurelia remembers the tracks you choose, separately for each series." />
+          </StackPanel>
+          <Button x:Name="ForgetTracksButton" Grid.Column="1" Classes="secondary" Content="Forget Track Choices" Click="ForgetTracks"
+                  IsEnabled="{Binding HasTrackChoices}" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+      <Button Classes="link" Content="Restore Playback Defaults" Click="RestoreDefaults" />
+      <TextBlock x:Name="NoticeText" Classes="secondary" Text="{Binding Notice}" TextWrapping="Wrap" />
+      <TextBlock Classes="caption" Text="These settings belong to this computer. Progress and favorites are kept on the server." />
+    </StackPanel>
+  </ScrollViewer>
+  </Panel>
+</Window>

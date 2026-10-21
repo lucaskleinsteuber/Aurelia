@@ -189,6 +189,24 @@ internal sealed class FakeManagement : IServerManagement
     public List<string> EditorOverrides { get; private set; } = [];
     public List<Guid> DiscardedUploads { get; } = [];
     public ImportPreviewSummary? ImportSummary { get; set; }
+    public List<ServerBackupItem> Backups { get; } = [new("aurelia-auto.db", "automatic", DateTimeOffset.UtcNow.AddHours(-6), 3_400_000)];
+    public MetadataProviderStatus Provider { get; set; } = new(false, false, "en-US", 0, 1L << 30, "TMDB",
+        "This product uses the TMDB API but is not endorsed or certified by TMDB.");
+    public List<string> Uploaded { get; } = [];
+
+    public async Task DownloadAsync(string path, Stream destination, CancellationToken cancellation)
+    {
+        Calls.Add("download " + path.Split('/')[^2]);
+        if (Locked) throw new AureliaApiException(403, "management_locked", "Unlock server management.");
+        await destination.WriteAsync("synthetic encrypted backup"u8.ToArray(), cancellation);
+    }
+
+    public async Task UploadAsync(string path, Stream content, long length, CancellationToken cancellation)
+    {
+        using var copy = new MemoryStream();
+        await content.CopyToAsync(copy, cancellation);
+        Uploaded.Add($"{path} {copy.Length}");
+    }
 
     /// <summary>The generic management requests the library, the editor and Profiles send, answered from memory.</summary>
     public Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation)
@@ -290,6 +308,39 @@ internal sealed class FakeManagement : IServerManagement
             Libraries.Add(added);
             result = added;
         }
+        else if (method == HttpMethod.Get && route == "/api/v1/server/backups")
+            result = Backups.ToList();
+        else if (route == "/api/v1/server/backups/database")
+        {
+            Backups.Insert(0, new ServerBackupItem("aurelia-manual.db", "manual", DateTimeOffset.UtcNow, 3_500_000));
+            result = new { name = "aurelia-manual.db" };
+        }
+        else if (parts is ["api", "v1", "server", "backups", _, "verify"])
+            result = new BackupVerification(true, "ok", 12);
+        else if (route == "/api/v1/server/backups/export")
+            result = new BackupExport(Guid.NewGuid(), 4_200_000);
+        else if (method == HttpMethod.Delete && parts is ["api", "v1", "server", "backups", "transfers", _])
+            result = null;
+        else if (route == "/api/v1/server/backups/restore/prepare")
+            result = new PreparedServerRestore(Guid.NewGuid(), FakeServerApi.ServerId, true);
+        else if (parts is ["api", "v1", "server", "backups", "restore", _, "apply"])
+            result = new { state = "restarting" };
+        else if (route == "/api/v1/server/diagnostics")
+            result = new List<ServerEventItem>
+            {
+                new(DateTimeOffset.UtcNow.AddMinutes(-5), "library_unavailable", "warning"),
+                new(DateTimeOffset.UtcNow.AddHours(-1), "server_started", "info"),
+            };
+        else if (route == "/api/v1/metadata/provider")
+        {
+            if (body is UpdateMetadataProviderRequest update)
+                Provider = Provider with { Enabled = update.Enabled, HasToken = Provider.HasToken || update.Token is not null };
+            result = Provider;
+        }
+        else if (route == "/api/v1/metadata/provider/token")
+            result = Provider = Provider with { HasToken = false, Enabled = false };
+        else if (route == "/api/v1/metadata/jobs")
+            result = new MetadataJobSummary(Guid.NewGuid(), null, null, MetadataJobState.Queued, 2, 0, 0, 0, 0, null, DateTimeOffset.UtcNow, null, null);
         else if (method == HttpMethod.Delete && parts is ["api", "v1", "media", var title])
             result = new LibraryMutationResult(Guid.NewGuid(), "pending", 1, null);
         else

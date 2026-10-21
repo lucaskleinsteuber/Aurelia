@@ -6,7 +6,7 @@ using Aurelia.Contracts;
 
 namespace Aurelia.Desktop.Core;
 
-public enum SettingsSection { General, Storage, Devices, Profiles }
+public enum SettingsSection { General, Storage, Devices, Profiles, Backups, Metadata, Diagnostics }
 
 /// <summary>A storage location as the settings list shows it, with its scan when one runs.</summary>
 public sealed record StorageRow(LibrarySummary Library, LibraryScanSummary? Scan)
@@ -73,6 +73,8 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         Profiles = new ProfilesModel(() => management);
         Profiles.Locked += () => IsLocked = true;
         Maintenance = new LibraryMaintenanceModel(() => management);
+        Operations = new ServerOperationsModel(() => management);
+        Operations.Locked += () => IsLocked = true;
         Maintenance.LibraryChanged += () => _ = RefreshStorageAsync();
         host.Changed += () =>
         {
@@ -91,14 +93,21 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         set
         {
             if (field != value) Notice = null;
-            Set(ref field, value, nameof(Section), [nameof(ShowsGeneral), nameof(ShowsStorage), nameof(ShowsDevices), nameof(ShowsProfiles)]);
-            if (value == SettingsSection.Profiles && IsUnlocked && !Profiles.IsEditing) _ = Profiles.LoadAsync();
+            Set(ref field, value, nameof(Section), [nameof(ShowsGeneral), nameof(ShowsStorage), nameof(ShowsDevices), nameof(ShowsProfiles),
+                nameof(ShowsBackups), nameof(ShowsMetadata), nameof(ShowsDiagnostics), nameof(ShowsOperations)]);
+            if (IsUnlocked) _ = LoadSectionAsync(value);
         }
     }
     public bool ShowsGeneral => Section == SettingsSection.General;
     public bool ShowsStorage => Section == SettingsSection.Storage;
     public bool ShowsDevices => Section == SettingsSection.Devices;
     public bool ShowsProfiles => Section == SettingsSection.Profiles;
+    public bool ShowsBackups => Section == SettingsSection.Backups;
+    public bool ShowsMetadata => Section == SettingsSection.Metadata;
+    public bool ShowsDiagnostics => Section == SettingsSection.Diagnostics;
+    public bool ShowsOperations => ShowsBackups || ShowsMetadata || ShowsDiagnostics;
+    /// <summary>Backups, the metadata provider and the event log.</summary>
+    public ServerOperationsModel Operations { get; }
     /// <summary>Management for the windows Server Settings opens, such as Import Preview.</summary>
     public IAdministrationClient Administration => management;
 
@@ -181,7 +190,7 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         await management.UnlockAsync(password, token);
         IsLocked = false;
         await LoadAsync(token);
-        if (ShowsProfiles) _ = Profiles.LoadAsync();
+        _ = LoadSectionAsync(Section);
     }, wrongPassword: true);
 
     public Task RefreshAsync() => RunAsync(LoadAsync);
@@ -284,6 +293,16 @@ public sealed class ServerSettingsModel : INotifyPropertyChanged, IDisposable
         await management.RemoveDeviceAsync(row.Session.Id, token);
         await LoadDevicesAsync(token);
     });
+
+    /// <summary>The sections that load their own lists when they are shown.</summary>
+    private Task LoadSectionAsync(SettingsSection section) => section switch
+    {
+        SettingsSection.Profiles when !Profiles.IsEditing => Profiles.LoadAsync(),
+        SettingsSection.Backups => Operations.LoadBackupsAsync(),
+        SettingsSection.Metadata => Operations.LoadProviderAsync(),
+        SettingsSection.Diagnostics => Operations.LoadEventsAsync(),
+        _ => Task.CompletedTask,
+    };
 
     /// <summary>Keeps the scan states current while the window is open.</summary>
     public void WatchScans() => _ = Task.Run(async () =>

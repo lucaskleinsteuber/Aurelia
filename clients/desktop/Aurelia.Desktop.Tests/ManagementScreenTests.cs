@@ -226,4 +226,108 @@ public sealed class ManagementScreenTests
         Assert.Equal("42 catalog entries · 120 images · 1 storage locations", model.Maintenance.ResetSummary);
         window.Close();
     }
+
+    [AvaloniaFact]
+    public async Task BackupsMetadataAndDiagnosticsWorkFromServerSettings()
+    {
+        var connection = FakeServerApi.Saved() with { Address = new Uri("https://127.0.0.1:43111"), LocalHost = true };
+        var server = new FakeLocalServerHost { SetUp = true };
+        server.Move(LocalServerState.Running);
+        var management = new FakeManagement();
+        var session = new ProfileSessionResponse(new UserSummary(FakeServerApi.Owner.Id, "Alex", UserRole.Owner, DateTimeOffset.UtcNow),
+            Guid.NewGuid(), "synthetic-profile-token-0123456789-abcdef", DateTimeOffset.UtcNow.AddHours(12));
+        var model = new ServerSettingsModel(server, new FakeServerApi(), connection, session, _ => management,
+            action => Dispatcher.UIThread.Post(action));
+        var window = new ServerSettingsWindow(model) { Width = 900, Height = 1100 };
+        window.Show();
+        await MainWindowTests.WaitFor(() => model.IsUnlocked && !model.IsBusy);
+        var operations = model.Operations;
+
+        window.FindControl<ListBox>("Sections")!.SelectedIndex = 4;
+        await MainWindowTests.WaitFor(() => operations.HasBackups && !operations.IsBusy);
+        Assert.Equal("Automatic", operations.Backups[0].KindText);
+        Click(window, "BackUpNowButton");
+        await MainWindowTests.WaitFor(() => operations.Backups.Count == 2 && !operations.IsBusy);
+        await operations.VerifyAsync(operations.Backups[0]);
+        Assert.StartsWith("The backup from", operations.Notice, StringComparison.Ordinal);
+
+        // The encrypted export asks for a passphrase twice before choosing where it goes.
+        using var saved = new MemoryStream();
+        window.SaveTarget = _ => Task.FromResult<Stream?>(new NonClosingStream(saved));
+        operations.ExportPassphrase = "a synthetic passphrase";
+        operations.ExportConfirmation = "another passphrase";
+        Click(window, "ExportButton");
+        await MainWindowTests.WaitFor(() => operations.HasError && !operations.IsBusy);
+        Assert.Equal("The passphrases do not match.", operations.Error);
+        operations.ExportConfirmation = "a synthetic passphrase";
+        Click(window, "ExportButton");
+        await MainWindowTests.WaitFor(() => operations.HasNotice && !operations.IsBusy);
+        Assert.True(saved.Length > 0);
+        Assert.Contains(management.Calls, call => call.StartsWith("DELETE /api/v1/server/backups/transfers/", StringComparison.Ordinal));
+
+        // A restore is checked first and only then confirmed.
+        window.BackupSource = () => Task.FromResult<ChosenFile?>(new ChosenFile(new MemoryStream(new byte[2048]), 2048, "Synthetic.aureliabackup"));
+        operations.RestorePassphrase = "a synthetic passphrase";
+        Click(window, "ChooseRestoreButton");
+        await MainWindowTests.WaitFor(() => operations.AwaitsRestoreConfirmation && !operations.IsBusy);
+        Assert.Contains("2048", Assert.Single(management.Uploaded), StringComparison.Ordinal);
+        MainWindowTests.Settle(window, "settings-backups");
+        await operations.ApplyRestoreAsync();
+        Assert.False(operations.AwaitsRestoreConfirmation);
+        Assert.StartsWith("Restoring the backup.", operations.Notice, StringComparison.Ordinal);
+
+        window.FindControl<ListBox>("Sections")!.SelectedIndex = 5;
+        await MainWindowTests.WaitFor(() => operations.HasProvider && !operations.IsBusy);
+        Assert.Equal("No TMDB token yet. Details come from file and folder names only.", operations.ProviderText);
+        operations.Token = new string('t', 40);
+        operations.ProviderEnabled = true;
+        Click(window, "SaveProviderButton");
+        await MainWindowTests.WaitFor(() => operations.Provider?.Enabled == true && !operations.IsBusy);
+        MainWindowTests.Settle(window, "settings-metadata");
+        Assert.Equal("Aurelia fills in details and artwork from TMDB.", operations.ProviderText);
+        Assert.Equal("", operations.Token);
+        await operations.EnrichAsync();
+        Assert.Equal("Looking up details for 2 titles in the background.", operations.Notice);
+        await operations.RemoveTokenAsync();
+        Assert.False(operations.Provider?.HasToken);
+
+        window.FindControl<ListBox>("Sections")!.SelectedIndex = 6;
+        await MainWindowTests.WaitFor(() => operations.HasEvents && !operations.IsBusy);
+        MainWindowTests.Settle(window, "settings-diagnostics");
+        Assert.Equal("library unavailable", operations.Events[0].Text);
+        window.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task SettingsOpenFromTheLibraryForAnyProfile()
+    {
+        var (window, _, _) = await OpenOwnerLibraryAsync();
+        var library = window.FindControl<LibraryView>("Library")!;
+        Click(library, "AppSettingsButton");
+        var settings = window.OwnedWindows.OfType<AppSettingsWindow>().Single();
+        MainWindowTests.Settle(settings, "app-settings");
+        var model = (PlaybackPreferencesModel)settings.DataContext!;
+        settings.FindControl<CheckBox>("AutoplayNext")!.IsChecked = false;
+        Assert.False(model.AutoplayNext);
+        Click(library, "AppSettingsButton");
+        Assert.Single(window.OwnedWindows.OfType<AppSettingsWindow>());
+        settings.Close();
+    }
+
+    /// <summary>A stream the export may close without losing what the test reads afterwards.</summary>
+    private sealed class NonClosingStream(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.WriteAsync(buffer, cancellationToken);
+    }
 }

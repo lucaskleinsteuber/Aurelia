@@ -2,7 +2,7 @@
 # data only: the server's Windows file probe with a real symbolic link and junction, the desktop
 # tests against the real Windows server build (VLC playback tests left out), and with -Setup the
 # installer check. Exits 1 when anything failed.
-param([string]$Setup)
+param([string]$Setup, [string]$Version, [string]$Build)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $failed = $false
@@ -35,7 +35,7 @@ if ($LASTEXITCODE -ne 0) { $failed = $true }
 
 if ($Setup) {
     Write-Host '== Installer'
-    & (Join-Path $root 'test-installer.ps1') -Setup (Join-Path $root $Setup)
+    & (Join-Path $root 'test-installer.ps1') -Setup (Join-Path $root $Setup) -Version $Version -Build $Build
     if ($LASTEXITCODE -ne 0) { $failed = $true }
 }
 if ($failed) { exit 1 }

@@ -353,6 +353,89 @@ public sealed class LocalServerHostTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task BackupsAreMadeExportedAndRestoredThroughTheHost()
+    {
+        Assert.SkipWhen(SyntheticServer.Executable is null, "Run scripts/test-desktop.sh, which builds the server for this test.");
+        var cancellation = TestContext.Current.CancellationToken;
+        using var api = new AureliaServerApi();
+        var store = new ConnectionStore(new MemorySecretStore());
+        await using var host = new LocalServerHost(options);
+        var flow = new HostSetupFlow(host, api, store, new AppModeStore(Path.Combine(root, "app-mode.json")),
+            (connection, session) => new ServerManagementClient(api, connection, session.Token), "Synthetic PC", action => action());
+        var ready = new TaskCompletionSource<ProfileSessionResponse?>();
+        flow.Ready += (_, session) => ready.TrySetResult(session);
+        await flow.ChooseHostAsync();
+        flow.OwnerName = "Synthetic Owner";
+        await flow.SetUpAsync(Password, Password);
+        await flow.CreatePinAsync("5682", "5682", null);
+        flow.SkipStorage();
+        var session = (await ready.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellation))!;
+        var connection = store.Load()!;
+        var admin = new ServerManagementClient(api, connection, session.Token);
+        var operations = new ServerOperationsModel(() => admin);
+
+        await operations.LoadBackupsAsync();
+        Assert.Null(operations.Error);
+        var before = operations.Backups.Count;
+        await operations.BackUpNowAsync();
+        Assert.Null(operations.Error);
+        Assert.Equal(before + 1, operations.Backups.Count);
+        await operations.VerifyAsync(operations.Backups[0]);
+        Assert.Null(operations.Error);
+
+        // Diagnostics, and the metadata status (saving a token is not tried here: the server checks it with TMDB online).
+        await operations.LoadEventsAsync();
+        Assert.Null(operations.Error);
+        var diagnostics = new MemoryStream();
+        await operations.ExportDiagnosticsAsync(() => Task.FromResult<Stream?>(diagnostics));
+        Assert.Null(operations.Error);
+        Assert.Contains("\"formatVersion\"", System.Text.Encoding.UTF8.GetString(diagnostics.ToArray()), StringComparison.Ordinal);
+        await operations.LoadProviderAsync();
+        Assert.Null(operations.Error);
+        Assert.False(operations.Provider?.HasToken);
+
+        // An encrypted copy of the server as it is now.
+        var exported = new MemoryStream();
+        operations.ExportPassphrase = "a synthetic backup passphrase";
+        operations.ExportConfirmation = "a synthetic backup passphrase";
+        await operations.ExportAsync(() => Task.FromResult<Stream?>(exported));
+        Assert.Null(operations.Error);
+        var backup = exported.ToArray();
+        Assert.True(backup.Length > 1000);
+
+        // A profile added afterwards is gone once the backup is restored.
+        var people = new ProfilesModel(() => admin);
+        await people.BeginNewAsync();
+        people.Name = "Added Later";
+        people.PinProtection = false;
+        await people.SaveAsync();
+        Assert.Null(people.Error);
+        Assert.Equal(2, people.Profiles.Count);
+
+        operations.RestorePassphrase = "the wrong passphrase";
+        await operations.PrepareRestoreAsync(() => Task.FromResult<ChosenFile?>(new ChosenFile(new MemoryStream(backup), backup.Length, "Synthetic.aureliabackup")));
+        Assert.NotNull(operations.Error);
+        Assert.False(operations.AwaitsRestoreConfirmation);
+        operations.RestorePassphrase = "a synthetic backup passphrase";
+        await operations.PrepareRestoreAsync(() => Task.FromResult<ChosenFile?>(new ChosenFile(new MemoryStream(backup), backup.Length, "Synthetic.aureliabackup")));
+        Assert.Null(operations.Error);
+        Assert.True(operations.AwaitsRestoreConfirmation);
+        await operations.ApplyRestoreAsync();
+        Assert.Null(operations.Error);
+
+        // The host stops the server, applies the verified backup and starts it again; every device signs in again.
+        await WaitForAsync(() => host.State == LocalServerState.Restarting, cancellation, TimeSpan.FromSeconds(30));
+        await WaitForAsync(() => host.State == LocalServerState.Running, cancellation, TimeSpan.FromSeconds(120));
+        Assert.True((await Assert.ThrowsAsync<AureliaApiException>(() => api.ProfilesAsync(connection, cancellation))).IsAuthenticationFailure);
+        var owner = await host.SignInAsync("Synthetic Owner", Password, "Synthetic PC", cancellation);
+        var again = connection with { DeviceToken = owner.Token, DeviceSessionId = owner.SessionId };
+        var profiles = await api.ProfilesAsync(again, cancellation);
+        Assert.DoesNotContain(profiles.Profiles, profile => profile.Name == "Added Later");
+        Assert.Single(profiles.Profiles);
+
+    }
+
+    [Fact]
     public async Task AMissingServerIsReportedInsteadOfStarted()
     {
         await using var host = new LocalServerHost(options with { Executable = Path.Combine(root, "missing", "Aurelia.Server") });

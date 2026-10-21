@@ -3,7 +3,7 @@
 - The desktop client is named **Aurelia** and targets Windows 10/11 on x64 and ARM64 first,
   Linux later. It is a separate product with its own version and build counter in
   `clients/desktop/Directory.Build.props` (`Version`, `AureliaDesktopBuildNumber`). The
-  approved version is **0.1.0**, build **5** (installer and background hosting). Confirm
+  approved version is **0.2.0**, build **6** (library tools, management and settings). Confirm
   versions with the user before changing them.
 - It uses C# and Avalonia; package versions are pinned in the root
   `Directory.Packages.props`. Its tests use xUnit v3 (required by Avalonia's headless
@@ -27,6 +27,12 @@
   only, quits a running Aurelia with `--quit` before replacing it, and on uninstall removes the
   firewall rule and the Run entry but keeps the person's server data unless they answer Yes.
   Never delete media or anything outside `%LOCALAPPDATA%\Aurelia` and `%LOCALAPPDATA%\Aurelia Server`.
+- Management (removing or editing titles, profiles, storage, import preview, maintenance,
+  backups, metadata, diagnostics) is for the owner and administrators only. It unlocks with
+  the Server Password (`ManagementAccess`) and asks again when the server answers
+  `management_locked`; changes that the server guards need approval as in
+  `AdministrationRules`, which must mirror the server's `ServerRequestGuard`. Tests never
+  save provider tokens against the real server, because saving a TMDB token is checked online.
 - Windows-specific server code (handle-checked media opens, file identities, the TLS key) is
   exercised under CrossOver's Wine with `scripts/test-server-wine.sh` and synthetic data only;
   state clearly that this is not a run on Windows.

@@ -177,6 +177,94 @@ public sealed partial class ServerSettingsWindow : Window
             model.Maintenance.ResetAsync);
     }
 
+    /// <summary>Saves without a dialog, for tests; the app uses the system save dialog.</summary>
+    internal Func<string, Task<Stream?>>? SaveTarget { get; set; }
+
+    /// <summary>Chooses a backup without a dialog, for tests; the app uses the system file picker.</summary>
+    internal Func<Task<ChosenFile?>>? BackupSource { get; set; }
+
+    private async Task<Stream?> ChooseSaveAsync(string suggestedName, string kind, string pattern)
+    {
+        if (SaveTarget is { } target) return await target(suggestedName);
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save",
+            SuggestedFileName = suggestedName,
+            FileTypeChoices = [new FilePickerFileType(kind) { Patterns = [pattern] }],
+        });
+        return file is null ? null : await file.OpenWriteAsync();
+    }
+
+    private async Task<ChosenFile?> ChooseBackupAsync()
+    {
+        if (BackupSource is { } source) return await source();
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Choose an Aurelia Backup",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("Aurelia Backups") { Patterns = ["*.aureliabackup"] }, FilePickerFileTypes.All],
+        });
+        if (files.Count == 0) return null;
+        var properties = await files[0].GetBasicPropertiesAsync();
+        return new ChosenFile(await files[0].OpenReadAsync(), (long)(properties.Size ?? 0), files[0].Name);
+    }
+
+    private async void BackUpNow(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Operations.BackUpNowAsync();
+    }
+
+    private async void VerifyBackup(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model && (sender as Control)?.DataContext is ServerBackupItem backup) await model.Operations.VerifyAsync(backup);
+    }
+
+    private async void ExportBackup(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model)
+            await model.Operations.ExportAsync(() => ChooseSaveAsync($"Aurelia Server {DateTime.Now:yyyy-MM-dd}.aureliabackup", "Aurelia Backup", "*.aureliabackup"));
+    }
+
+    private async void PrepareRestore(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Operations.PrepareRestoreAsync(ChooseBackupAsync);
+    }
+
+    private void ApplyRestore(object? sender, RoutedEventArgs e)
+    {
+        if (Model is not { } model || sender is not Control anchor) return;
+        Confirm(anchor, "Replace this server with the backup now? This cannot be undone.", "Restore", model.Operations.ApplyRestoreAsync);
+    }
+
+    private void CancelRestore(object? sender, RoutedEventArgs e) => Model?.Operations.CancelRestore();
+
+    private async void SaveProvider(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Operations.SaveProviderAsync();
+    }
+
+    private void RemoveToken(object? sender, RoutedEventArgs e)
+    {
+        if (Model is not { } model || sender is not Control anchor) return;
+        Confirm(anchor, "Remove the TMDB token from the server? Details already found stay.", "Remove", model.Operations.RemoveTokenAsync);
+    }
+
+    private async void Enrich(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Operations.EnrichAsync();
+    }
+
+    private async void RefreshEvents(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model) await model.Operations.LoadEventsAsync();
+    }
+
+    private async void ExportDiagnostics(object? sender, RoutedEventArgs e)
+    {
+        if (Model is { } model)
+            await model.Operations.ExportDiagnosticsAsync(() => ChooseSaveAsync($"Aurelia Diagnostics {DateTime.Now:yyyy-MM-dd}.json", "JSON", "*.json"));
+    }
+
     private async void NewProfile(object? sender, RoutedEventArgs e)
     {
         if (Model is { } model) await model.Profiles.BeginNewAsync();

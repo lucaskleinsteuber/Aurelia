@@ -4,7 +4,7 @@ A native desktop client written in C# with [Avalonia](https://avaloniaui.net), d
 like the Aurelia Mac app. The same code runs on Windows (x64 and ARM64), on Linux and on
 macOS, so everyday development and testing happen on a Mac.
 
-Version 0.1.0 installs with a setup program, runs its own Aurelia server or connects to one
+Version 0.2.0 installs with a setup program, runs its own Aurelia server or connects to one
 elsewhere, and plays your library:
 
 - **Set Up This PC:** the app brings the same server as the Mac app and starts it with
@@ -24,14 +24,21 @@ elsewhere, and plays your library:
   shows the server's fingerprint to compare before trusting it, pairs with an 8-digit code
   approved on the server computer, and asks for a profile's PIN where one is set. On Windows
   the credential is encrypted for the signed-in Windows user.
-- **Library:** Home with a hero, Continue Watching and shelves; Movies and TV Shows; Search;
-  detail pages with seasons, episodes and extras; favorites. Artwork is cached on this
-  computer.
+- **Library:** Home with a hero, Continue Watching and shelves; Movies and TV Shows with sort,
+  genre, year, watched and favorites filters; Search; detail pages with seasons, episodes and
+  extras; favorites and watched state for titles, seasons and episodes. Artwork is cached on
+  this computer. Windows extend under the title bar like the Mac app.
+- **Managing the library** (owner and administrators, unlocked with the Server Password):
+  edit a title's metadata and artwork, remove titles, manage profiles (role, PIN, entire
+  library or selected titles), review new storage in an Import Preview before it is added,
+  bring back excluded sources, reimport or reset the library, make, verify, export and restore
+  backups, set the TMDB token and enrich metadata, and read or export diagnostics.
 - **Player:** VLC playback that resumes where you stopped, with a loading ring, saved
   progress, audio and subtitle tracks remembered per series, playback speed, Night Mode, a
   sleep timer, the end time, timeline preview frames (kept in memory only), an Up Next
   countdown with automatic next episodes, full screen and keyboard shortcuts (Space, ←/→,
-  ↑/↓, F, M, N, Esc).
+  ↑/↓, F, M, N, Esc), and scene notes. **Settings…** in the sidebar sets automatic resume, the
+  default speed, the skip interval, when controls hide and keeping the screen on while playing.
 
 On Windows the server keeps its data in `%LOCALAPPDATA%\Aurelia Server` and uses ports 43110
 (this computer only) and 43111 (HTTPS for other devices). The installer lets it through Windows

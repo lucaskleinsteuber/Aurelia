@@ -77,14 +77,12 @@ internal sealed class NoSystemHosting : ISystemHosting
 /// the PC from sleeping while the server runs, as <c>powercfg /requests</c> shows.
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed partial class WindowsSystemHosting(string executable) : ISystemHosting
+internal sealed class WindowsSystemHosting(string executable) : ISystemHosting
 {
     internal const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     internal const string ApprovedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
     internal const string ValueName = "Aurelia";
-    private readonly Lock gate = new();
     private readonly string command = $"\"{executable}\" --background";
-    private nint request;
 
     public bool CanStartAtSignIn => true;
 
@@ -110,33 +108,64 @@ internal sealed partial class WindowsSystemHosting(string executable) : ISystemH
 
     public bool CanKeepAwake => true;
 
-    public void KeepAwake(bool enabled)
+    private readonly PowerRequest awake = new(PowerRequest.SystemRequired, "Aurelia Server is running so other devices can play from this PC.");
+
+    public void KeepAwake(bool enabled) => awake.Hold(enabled);
+}
+
+/// <summary>Keeps the screen on while something plays, so it does not turn off in the middle of a movie.</summary>
+public interface IScreenWake
+{
+    void Hold(bool playing);
+}
+
+public static class ScreenWake
+{
+    public static IScreenWake? ForThisComputer() => OperatingSystem.IsWindows() ? new WindowsScreenWake() : null;
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class WindowsScreenWake : IScreenWake
+{
+    private readonly PowerRequest display = new(PowerRequest.DisplayRequired, "Aurelia is playing a video.");
+
+    public void Hold(bool playing) => display.Hold(playing);
+}
+
+/// <summary>A Windows power request (system or display required), held while needed; <c>powercfg /requests</c> shows it.</summary>
+[SupportedOSPlatform("windows")]
+internal sealed partial class PowerRequest(int type, string reason)
+{
+    public const int DisplayRequired = 0;
+    public const int SystemRequired = 1;
+    private readonly Lock gate = new();
+    private nint request;
+
+    public void Hold(bool on)
     {
         lock (gate)
         {
-            if (enabled && request == 0)
+            if (on && request == 0)
             {
-                var reason = Marshal.StringToHGlobalUni("Aurelia Server is running so other devices can play from this PC.");
+                var text = Marshal.StringToHGlobalUni(reason);
                 try
                 {
-                    var context = new ReasonContext { Version = 0, Flags = 1, SimpleReasonString = reason };
+                    var context = new ReasonContext { Version = 0, Flags = 1, SimpleReasonString = text };
                     var created = PowerCreateRequest(in context);
                     if (created == -1) return;
-                    if (PowerSetRequest(created, PowerRequestSystemRequired)) request = created;
+                    if (PowerSetRequest(created, type)) request = created;
                     else CloseHandle(created);
                 }
-                finally { Marshal.FreeHGlobal(reason); }
+                finally { Marshal.FreeHGlobal(text); }
             }
-            else if (!enabled && request != 0)
+            else if (!on && request != 0)
             {
-                PowerClearRequest(request, PowerRequestSystemRequired);
+                PowerClearRequest(request, type);
                 CloseHandle(request);
                 request = 0;
             }
         }
     }
-
-    private const int PowerRequestSystemRequired = 1;
 
     /// <summary>REASON_CONTEXT with a simple reason string; the padding covers the larger detailed form.</summary>
     [StructLayout(LayoutKind.Sequential)]

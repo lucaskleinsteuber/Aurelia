@@ -20,6 +20,9 @@
             <ListBoxItem Content="Storage" />
             <ListBoxItem Content="Devices" />
             <ListBoxItem Content="Profiles" />
+            <ListBoxItem Content="Backups" />
+            <ListBoxItem Content="Metadata" />
+            <ListBoxItem Content="Diagnostics" />
           </ListBox>
         </StackPanel>
       </Border>
@@ -331,6 +334,121 @@
             <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
           </StackPanel>
           </Panel>
+
+          <!-- Backups, metadata and diagnostics share one model. -->
+          <Panel IsVisible="{Binding ShowsOperations}">
+          <StackPanel x:Name="OperationsSection" Spacing="18" DataContext="{Binding Operations}" x:DataType="core:ServerOperationsModel">
+            <Border Classes="group" IsVisible="{Binding HasNotice}">
+              <TextBlock x:Name="OperationsNotice" Text="{Binding Notice}" TextWrapping="Wrap" />
+            </Border>
+            <TextBlock x:Name="OperationsError" Text="{Binding Error}" IsVisible="{Binding HasError}" Foreground="#FF8A80" TextWrapping="Wrap" />
+          </StackPanel>
+          </Panel>
+
+          <StackPanel x:Name="BackupsSection" Spacing="18" IsVisible="{Binding ShowsBackups}">
+            <TextBlock Classes="page" Text="Backups" />
+            <StackPanel Spacing="18" DataContext="{Binding Operations}" x:DataType="core:ServerOperationsModel">
+              <TextBlock Classes="section" Text="On the Server" />
+              <TextBlock Classes="secondary" FontSize="12" TextWrapping="Wrap"
+                         Text="The server backs up its database automatically. These copies stay on this PC; they protect against mistakes, not against a failing disk." />
+              <TextBlock Classes="secondary" Text="No backups yet." IsVisible="{Binding !HasBackups}" />
+              <ItemsControl x:Name="BackupList" ItemsSource="{Binding Backups}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="core:ServerBackupItem">
+                    <Border Classes="group" Margin="0,0,0,8">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="{Binding KindText}" FontWeight="SemiBold" />
+                          <TextBlock Classes="caption" Text="{Binding Details}" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="secondary" Content="Verify" Click="VerifyBackup" VerticalAlignment="Center" />
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Button x:Name="BackUpNowButton" Classes="secondary" Content="Back Up Now" Click="BackUpNow" IsEnabled="{Binding !IsBusy}" />
+
+              <TextBlock Classes="section" Text="Encrypted Full Backup" />
+              <Border Classes="group">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="secondary" TextWrapping="Wrap"
+                             Text="A complete copy of the server (library, profiles, settings and its identity), encrypted with a passphrase, to keep on another disk. Video files are not included." />
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBox x:Name="ExportPassphrase" Text="{Binding ExportPassphrase}" PasswordChar="•" Width="220" PlaceholderText="Passphrase" />
+                    <TextBox x:Name="ExportConfirmation" Text="{Binding ExportConfirmation}" PasswordChar="•" Width="220" PlaceholderText="Repeat passphrase" />
+                  </StackPanel>
+                  <Button x:Name="ExportButton" Classes="primary" Content="Save Encrypted Backup…" Click="ExportBackup" IsEnabled="{Binding !IsBusy}" />
+                </StackPanel>
+              </Border>
+
+              <TextBlock Classes="section" Text="Restore" />
+              <Border Classes="group">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="secondary" TextWrapping="Wrap"
+                             Text="Replaces this server with an encrypted backup. It is checked first; nothing changes until you confirm." />
+                  <TextBox x:Name="RestorePassphrase" Text="{Binding RestorePassphrase}" PasswordChar="•" Width="220" HorizontalAlignment="Left"
+                           PlaceholderText="Backup passphrase" />
+                  <Button x:Name="ChooseRestoreButton" Classes="secondary" Content="Choose Backup and Check…" Click="PrepareRestore"
+                          IsEnabled="{Binding !IsBusy}" IsVisible="{Binding !AwaitsRestoreConfirmation}" />
+                  <StackPanel Spacing="10" IsVisible="{Binding AwaitsRestoreConfirmation}">
+                    <TextBlock x:Name="RestoreQuestion" Text="{Binding RestoreQuestion}" TextWrapping="Wrap" Foreground="#FFD180" />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                      <Button x:Name="ApplyRestoreButton" Classes="primary" Content="Restore and Restart" Click="ApplyRestore" IsEnabled="{Binding !IsBusy}" />
+                      <Button Classes="secondary" Content="Cancel" Click="CancelRestore" />
+                    </StackPanel>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="MetadataSection" Spacing="18" IsVisible="{Binding ShowsMetadata}">
+            <TextBlock Classes="page" Text="Metadata" />
+            <StackPanel Spacing="14" DataContext="{Binding Operations}" x:DataType="core:ServerOperationsModel">
+              <TextBlock Classes="secondary" TextWrapping="Wrap"
+                         Text="Aurelia can look up descriptions, cast and artwork in The Movie Database (TMDB). It needs your own free TMDB API Read Access Token." />
+              <Border Classes="group">
+                <StackPanel Spacing="10">
+                  <TextBlock x:Name="ProviderText" Text="{Binding ProviderText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                  <CheckBox x:Name="ProviderEnabled" IsChecked="{Binding ProviderEnabled}" Content="Look up details and artwork" />
+                  <TextBox x:Name="TokenBox" Text="{Binding Token}" PasswordChar="•" PlaceholderText="New TMDB Read Access Token (leave empty to keep the current one)" />
+                  <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button x:Name="SaveProviderButton" Classes="primary" Content="Save" Click="SaveProvider" IsEnabled="{Binding !IsBusy}" />
+                    <Button Classes="link" Content="Remove Token…" Click="RemoveToken" IsVisible="{Binding Provider.HasToken, FallbackValue=False}"
+                            VerticalAlignment="Center" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+              <Button x:Name="EnrichButton" Classes="secondary" Content="Look Up Details for the Library" Click="Enrich" IsEnabled="{Binding !IsBusy}" />
+              <TextBlock Classes="caption" Text="{Binding ProviderAttribution}" TextWrapping="Wrap" />
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="DiagnosticsSection" Spacing="18" IsVisible="{Binding ShowsDiagnostics}">
+            <TextBlock Classes="page" Text="Diagnostics" />
+            <StackPanel Spacing="14" DataContext="{Binding Operations}" x:DataType="core:ServerOperationsModel">
+              <TextBlock Classes="secondary" TextWrapping="Wrap"
+                         Text="What the server noted recently. The export leaves out names, addresses and file paths, for a support request." />
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button Classes="secondary" Content="Refresh" Click="RefreshEvents" IsEnabled="{Binding !IsBusy}" />
+                <Button x:Name="ExportDiagnosticsButton" Classes="secondary" Content="Save Diagnostics…" Click="ExportDiagnostics" IsEnabled="{Binding !IsBusy}" />
+              </StackPanel>
+              <TextBlock Classes="secondary" Text="No events recorded." IsVisible="{Binding !HasEvents}" />
+              <ItemsControl x:Name="EventList" ItemsSource="{Binding Events}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="core:ServerEventItem">
+                    <Grid ColumnDefinitions="150,*,Auto" Margin="0,0,0,6">
+                      <TextBlock Classes="caption" Text="{Binding Time}" />
+                      <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+                      <TextBlock Grid.Column="2" Classes="caption" Text="{Binding Severity}" Margin="12,0,0,0" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </StackPanel>
           <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" />
         </StackPanel>
       </ScrollViewer>

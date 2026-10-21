@@ -35,7 +35,7 @@ if [ "$check_installer" = --installer ]; then
   setup="$other_root/Build/Desktop/$version-$build/Aurelia-$version-$build-Setup-$arch.exe"
   [ -f "$setup" ] || { echo "Build the installer first with scripts/build-desktop.sh." >&2; exit 1; }
   cp "$setup" "$stage/"
-  setup_argument="-Setup $(basename "$setup")"
+  setup_argument="-Setup $(basename "$setup") -Version $version -Build $build"
 fi
 (cd "$stage" && tar -czf "../win-$arch.tgz" .)
 

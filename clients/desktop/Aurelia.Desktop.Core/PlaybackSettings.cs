@@ -32,7 +32,12 @@ public sealed record PlaybackSettings(
     TrackChoice? Audio = null,
     TrackChoice? Subtitle = null,
     bool SubtitleChosen = false,
-    IReadOnlyDictionary<Guid, SeriesTracks>? Series = null);
+    IReadOnlyDictionary<Guid, SeriesTracks>? Series = null,
+    bool AutomaticResume = true,
+    double DefaultRate = 1,
+    int SeekSeconds = 10,
+    int HideSeconds = 3,
+    bool KeepScreenOn = true);
 
 /// <summary>Player preferences in this app's data folder; unreadable files fall back to defaults.</summary>
 public sealed class PlaybackSettingsStore(string path)

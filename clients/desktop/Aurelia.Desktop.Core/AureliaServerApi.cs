@@ -219,7 +219,7 @@ public sealed class AureliaServerApi : IAureliaServerApi, IDisposable
         }
     }
 
-    private static async Task<AureliaApiException> ProblemAsync(HttpResponseMessage response, CancellationToken cancellation)
+    internal static async Task<AureliaApiException> ProblemAsync(HttpResponseMessage response, CancellationToken cancellation)
     {
         ApiProblem? problem = null;
         if (response.Content.Headers.ContentLength is null or <= 16_384)

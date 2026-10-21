@@ -75,7 +75,16 @@ public sealed class PlayerModel : INotifyPropertyChanged, IAsyncDisposable
     public string? Subtitle { get; private set => Set(ref field, value); }
     public Guid MediaId => current.Id;
     public bool IsStarting { get; private set => Set(ref field, value); } = true;
-    public bool IsPlaying { get; private set => Set(ref field, value, nameof(IsPlaying), [nameof(PlayPauseLabel)]); }
+    public bool IsPlaying
+    {
+        get;
+        private set
+        {
+            var changed = field != value;
+            Set(ref field, value, nameof(IsPlaying), [nameof(PlayPauseLabel)]);
+            if (changed) ScreenWake?.Hold(value && settings.KeepScreenOn);
+        }
+    }
     public string PlayPauseLabel => IsPlaying ? "Pause" : "Play";
     public long Position { get; private set => Set(ref field, value, nameof(Position), TimeProperties); }
     public long Duration { get; private set => Set(ref field, value, nameof(Duration), TimeProperties); }
@@ -107,10 +116,18 @@ public sealed class PlayerModel : INotifyPropertyChanged, IAsyncDisposable
     private static readonly string[] TimeProperties =
         [nameof(PositionLabel), nameof(DurationLabel), nameof(EndsAtLabel), nameof(Progress)];
 
+    /// <summary>How far the arrow keys and skip buttons jump, as chosen in Settings.</summary>
+    public long SkipMilliseconds => Math.Clamp(settings.SeekSeconds, 5, 60) * 1000L;
+    /// <summary>How long the controls stay after the last movement, as chosen in Settings.</summary>
+    public TimeSpan HideDelay => TimeSpan.FromSeconds(Math.Clamp(settings.HideSeconds, 2, 8));
+    /// <summary>Keeps the screen on while something plays; the platform decides how.</summary>
+    public IScreenWake? ScreenWake { get; init; }
+
     public async Task StartAsync()
     {
         Volume = settings.Volume;
         Engine.Volume = settings.Volume;
+        if (PlayerPolicy.Rates.Contains(settings.DefaultRate) && settings.DefaultRate != 1) SetRate(settings.DefaultRate);
         try
         {
             var features = await api.CapabilitiesAsync(CancellationToken.None);
@@ -263,6 +280,7 @@ public sealed class PlayerModel : INotifyPropertyChanged, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        ScreenWake?.Hold(false);
         await CloseAsync();
         Engine.Dispose();
         saving.Dispose();
@@ -287,7 +305,7 @@ public sealed class PlayerModel : INotifyPropertyChanged, IAsyncDisposable
             playback.Failed += status => dispatch(() => StreamFailed(status));
             relay = playback;
             localUrl = playback.Start();
-            var start = resumeAt ?? (opened.Progress.IsCompleted ? 0 : opened.Progress.PositionMilliseconds);
+            var start = resumeAt ?? (opened.Progress.IsCompleted || !settings.AutomaticResume ? 0 : opened.Progress.PositionMilliseconds);
             BeginOpen(start);
             Engine.Open(localUrl, start);
             StartPreviewRelay(opened);

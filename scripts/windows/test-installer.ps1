@@ -1,7 +1,7 @@
 # Installs Aurelia silently, checks the files, version, Start menu entry and firewall rule, checks
 # that --quit returns when Aurelia is not running, then uninstalls silently and checks that the
 # rule and the program are gone while the person's data stays. For test machines only.
-param([Parameter(Mandatory)] [string]$Setup)
+param([Parameter(Mandatory)] [string]$Setup, [Parameter(Mandatory)] [string]$Version, [Parameter(Mandatory)] [string]$Build)
 $ErrorActionPreference = 'Stop'
 $failures = 0
 function Check([bool]$passed, [string]$what) {
@@ -18,12 +18,12 @@ foreach ($file in 'Aurelia.exe', 'LibVLCSharp.dll', 'server\Aurelia.Server.exe',
     'Third-Party Notices\LibVLC-LGPL-2.1.txt', 'unins000.exe') {
     Check (Test-Path (Join-Path $app $file)) "installed $file"
 }
-$version = (Get-Item (Join-Path $app 'Aurelia.exe')).VersionInfo
-Check ($version.FileVersion -eq '0.1.0.5') "Aurelia.exe is version $($version.FileVersion)"
+$fileInfo = (Get-Item (Join-Path $app 'Aurelia.exe')).VersionInfo
+Check ($fileInfo.FileVersion -eq "$Version.$Build") "Aurelia.exe is version $($fileInfo.FileVersion)"
 $shortcut = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Aurelia.lnk'
 Check (Test-Path $shortcut) 'the Start menu has Aurelia'
 $uninstall = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{5C492DDE-092C-42C6-9EE4-A7280B31BB37}_is1'
-Check ($uninstall.DisplayName -eq 'Aurelia' -and $uninstall.DisplayVersion -eq '0.1.0') "Settings > Apps lists $($uninstall.DisplayName) $($uninstall.DisplayVersion)"
+Check ($uninstall.DisplayName -eq 'Aurelia' -and $uninstall.DisplayVersion -eq $Version) "Settings > Apps lists $($uninstall.DisplayName) $($uninstall.DisplayVersion)"
 
 $rules = @(Get-NetFirewallRule -DisplayName 'Aurelia Server' -ErrorAction SilentlyContinue)
 Check ($rules.Count -eq 2) "two firewall rules ($($rules.Count))"

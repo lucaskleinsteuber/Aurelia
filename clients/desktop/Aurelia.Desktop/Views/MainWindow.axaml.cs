@@ -23,6 +23,8 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly Func<StoredConnection, ProfileSessionResponse, ServerSettingsModel>? serverSettings;
     private readonly HostingController? hosting;
     private readonly Func<StoredConnection, ProfileSessionResponse, IAdministrationClient>? administration;
+    private readonly IScreenWake? screenWake;
+    private AppSettingsWindow? appSettingsWindow;
     private LibraryModel? library;
     private ArtworkLoader? artwork;
     private PlayerModel? player;
@@ -47,7 +49,8 @@ public sealed partial class MainWindow : Window, IDisposable
                 replacement => new ServerManagementClient(production.Api, connection, replacement.Token), Production.Post,
                 production.Hosting, NetworkProfile.PublicNetworkCheck),
             hosting: production.Hosting,
-            administration: (connection, session) => new ServerManagementClient(production.Api, connection, session.Token))
+            administration: (connection, session) => new ServerManagementClient(production.Api, connection, session.Token),
+            screenWake: ScreenWake.ForThisComputer())
     {
     }
 
@@ -55,7 +58,8 @@ public sealed partial class MainWindow : Window, IDisposable
         Func<StoredConnection, IVideoEngineFactory>? engines = null, PlaybackSettingsStore? settings = null, bool startOnOpen = true,
         Func<Guid, ArtworkDiskCache?>? artworkCache = null, HostSetupFlow? host = null, AppModeStore? modes = null,
         ConnectionStore? store = null, Func<StoredConnection, ProfileSessionResponse, ServerSettingsModel>? serverSettings = null,
-        HostingController? hosting = null, Func<StoredConnection, ProfileSessionResponse, IAdministrationClient>? administration = null)
+        HostingController? hosting = null, Func<StoredConnection, ProfileSessionResponse, IAdministrationClient>? administration = null,
+        IScreenWake? screenWake = null)
     {
         this.artworkCache = artworkCache ?? ArtworkDiskCache.ForServer;
         this.flow = flow;
@@ -68,6 +72,7 @@ public sealed partial class MainWindow : Window, IDisposable
         this.serverSettings = serverSettings;
         this.hosting = hosting;
         this.administration = administration;
+        this.screenWake = screenWake;
         InitializeComponent();
         TitleBar.Extend(this, Root, top =>
         {
@@ -108,6 +113,7 @@ public sealed partial class MainWindow : Window, IDisposable
         UpdateWelcome();
         Library.SwitchProfileRequested += async () => await flow.SwitchProfileAsync();
         Library.ServerSettingsRequested += OpenServerSettings;
+        Library.AppSettingsRequested += OpenAppSettings;
         Player.CloseRequested += async () => await ClosePlayerAsync();
         if (startOnOpen) Opened += async (_, _) => await StartAsync();
         Closing += async (_, e) =>
@@ -279,6 +285,19 @@ public sealed partial class MainWindow : Window, IDisposable
         ArtworkImage.ClearMemory();
     }
 
+    /// <summary>The app's own Settings, one window at a time.</summary>
+    private void OpenAppSettings()
+    {
+        if (appSettingsWindow is not null)
+        {
+            appSettingsWindow.Activate();
+            return;
+        }
+        appSettingsWindow = new AppSettingsWindow(new PlaybackPreferencesModel(settings));
+        appSettingsWindow.Closed += (_, _) => appSettingsWindow = null;
+        appSettingsWindow.Show(this);
+    }
+
     /// <summary>The metadata editor for one title, in its own window over the library.</summary>
     private async Task OpenEditorAsync(Guid id)
     {
@@ -309,7 +328,10 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (library is null || flow.Connection is not { } connection) return;
         await ClosePlayerAsync();
-        var opened = new PlayerModel(library.Api, engines(connection), settings, request, action => Dispatcher.UIThread.Post(action));
+        var opened = new PlayerModel(library.Api, engines(connection), settings, request, action => Dispatcher.UIThread.Post(action))
+        {
+            ScreenWake = screenWake,
+        };
         opened.CloseRequested += () => _ = ClosePlayerAsync();
         player = opened;
         Player.Show(opened);
