@@ -45,6 +45,7 @@ public sealed class LibraryReachabilityService(AureliaDbContext database)
             _ = File.GetAttributes(path);
             var directory = new DirectoryInfo(path);
             if (directory.LinkTarget is not null) return LibraryAvailability.Error;
+            if (StorageMounts.IsDetached(path)) return LibraryAvailability.Unavailable;
             _ = directory.EnumerateFileSystemInfos().Take(1).ToArray();
             return LibraryAvailability.Available;
         }

@@ -1076,7 +1076,7 @@ public sealed partial class LibraryScanWorker(
     private static void EnsureReadableRoot(string path)
     {
         var directory = new DirectoryInfo(path);
-        if (!directory.Exists || directory.LinkTarget is not null)
+        if (!directory.Exists || directory.LinkTarget is not null || StorageMounts.IsDetached(path))
         {
             throw new LibraryException(
                 "library_unavailable",

@@ -1,0 +1,117 @@
+#!/bin/bash
+# The aurelia command on a Linux server: sets it up over SSH, approves devices and passes
+# library, pairing and server commands to the installed Aurelia Server.
+set -euo pipefail
+
+install_root=/opt/aurelia
+server="$install_root/server/Aurelia.Server"
+data_dir=/var/lib/aurelia
+
+require_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Run this with sudo: sudo aurelia $*" >&2
+    exit 1
+  fi
+}
+
+wait_until_ready() {
+  for _ in $(seq 1 60); do
+    if "$server" server identity >/dev/null 2>&1; then return 0; fi
+    sleep 1
+  done
+  echo "Aurelia Server did not start. See: aurelia logs" >&2
+  return 1
+}
+
+usage() {
+  cat <<'USAGE'
+Aurelia Server
+
+  sudo aurelia setup [--name "Server Name"]   Create the owner and turn on network access
+  aurelia approve [CODE]                      Allow an Apple TV that shows a code
+  aurelia pair                                Show a code to enter on a Mac
+  aurelia library add --path PATH [--kind automatic|movies|tv] [--name NAME]
+  aurelia library list | scan --all | remove --id ID --yes
+  aurelia status                              Is the server running, and its fingerprint
+  aurelia logs                                Follow the server log (Ctrl+C ends)
+  sudo aurelia restart | start | stop
+  aurelia version
+  sudo aurelia uninstall [--remove-data]      Server data stays unless --remove-data
+
+Commands that change the server ask for the owner's name, Server Password and PIN.
+USAGE
+}
+
+command=${1:-help}
+[ $# -gt 0 ] && shift
+
+case "$command" in
+  setup)
+    require_root setup
+    name=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name) name=${2:-}; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 2 ;;
+      esac
+    done
+    read -r -p "Owner name (used to sign in): " owner
+    [ -n "$owner" ] || { echo "An owner name is required." >&2; exit 2; }
+    systemctl stop aurelia
+    arguments=(setup-owner --headless --data-dir "$data_dir" --username "$owner" --device-name "$(hostname)")
+    [ -n "$name" ] && arguments+=(--server-name "$name")
+    # The aurelia user may not read the caller's folder, so the server starts in its own.
+    if ! (cd "$data_dir" && runuser -u aurelia -- "$server" "${arguments[@]}"); then
+      systemctl start aurelia
+      exit 1
+    fi
+    systemctl start aurelia
+    wait_until_ready
+    "$server" server identity
+    echo
+    echo "Next, connect your devices. The first one also asks for the owner's new viewing PIN."
+    echo "  Apple TV: choose this server, then run here: aurelia approve CODE"
+    echo "  Mac:      run here: aurelia pair, then enter the code in Aurelia on the Mac"
+    ;;
+  approve)
+    if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
+      code=$1
+      shift
+      exec "$server" pairing approve --code "$code" "$@"
+    fi
+    exec "$server" pairing approve "$@"
+    ;;
+  pair)
+    exec "$server" pairing create "$@"
+    ;;
+  library|pairing|metadata)
+    exec "$server" "$command" "$@"
+    ;;
+  status)
+    systemctl --no-pager status aurelia | head -n 5 || true
+    echo
+    "$server" server identity || true
+    ;;
+  logs)
+    exec journalctl -u aurelia -f -n 50
+    ;;
+  start|stop|restart)
+    require_root "$command"
+    systemctl "$command" aurelia
+    ;;
+  version)
+    cat "$install_root/VERSION"
+    ;;
+  uninstall)
+    require_root uninstall
+    exec "$install_root/install.sh" --uninstall "$@"
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $command" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

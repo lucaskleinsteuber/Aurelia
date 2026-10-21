@@ -1,0 +1,59 @@
+name: Verify Linux server
+
+# The whole server test suite on Linux, then the real package installed as a systemd service on
+# the runner and checked with synthetic data, including an exFAT image mounted through fstab.
+# Linux minutes are the cheapest, so this runs whenever the server or its packaging changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "packaging/linux/**"
+      - "scripts/test-linux-server-install.sh"
+      - ".github/workflows/linux-server.yml"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Verify formatting, build, and tests on Linux
+        run: |
+          dotnet tool restore
+          dotnet restore Aurelia.slnx
+          dotnet format Aurelia.slnx --verify-no-changes --no-restore
+          dotnet build Aurelia.slnx --configuration Release --no-restore
+          dotnet test Aurelia.slnx --configuration Release --no-build
+      - name: Build the linux-x64 package
+        run: |
+          stage="$RUNNER_TEMP/Aurelia-Server-linux-x64"
+          dotnet publish src/Aurelia.Server/Aurelia.Server.csproj --configuration Release --runtime linux-x64 \
+            --self-contained true -p:DebugType=none --output "$stage/server"
+          cp packaging/linux/install.sh packaging/linux/aurelia packaging/linux/aurelia.service "$stage/"
+          mkdir -p "$stage/notices"
+          echo "ci (0)" > "$stage/VERSION"
+          echo x64 > "$stage/ARCHITECTURE"
+          chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/server/Aurelia.Server"
+      - name: Install and check the package as a service
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sqlite3 exfatprogs jq >/dev/null
+          exfat=""
+          if sudo modprobe exfat; then exfat=--exfat; else echo "::warning::No exFAT driver on this runner; the exFAT checks were skipped."; fi
+          sudo bash scripts/test-linux-server-install.sh "$RUNNER_TEMP/Aurelia-Server-linux-x64" $exfat

@@ -30,11 +30,15 @@ to an existing server. On a new host, create an owner account, add your media
 folders, and confirm the import preview. Server settings control network
 access, additional accounts, and optional background hosting.
 
+Aurelia Server can also run on its own on a Linux computer, such as an old PC
+without a screen; see [Aurelia Server on Linux](docs/LINUX_SERVER.md).
+
 A public Mac download is not available yet. Distribution is planned through
 GitHub, not the App Store.
 
 ## More information
 
+- [Aurelia Server on Linux](docs/LINUX_SERVER.md)
 - [Backups and recovery](docs/DATABASE_RECOVERY.md)
 - [Build and playback verification](docs/TRANSPORT_TESTING.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)

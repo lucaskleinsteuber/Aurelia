@@ -29,7 +29,7 @@ var found = discovery.Items.Where(item => item.IsFile).ToArray();
 foreach (var item in found) Console.WriteLine($"  scanned {item.DetectedTitle}: {item.FileSystemIdentity ?? "<no identity>"}");
 var scanned = found.SingleOrDefault(item => item.DetectedTitle == "Synthetic Movie");
 Check(scanned is not null, "the scan finds the synthetic movie");
-var expectedPrefix = OperatingSystem.IsWindows() ? "windows:" : OperatingSystem.IsMacOS() ? "darwin:" : "unix:";
+var expectedPrefix = OperatingSystem.IsWindows() ? "windows:" : OperatingSystem.IsMacOS() ? "darwin:" : OperatingSystem.IsLinux() ? "linux:" : "unix:";
 Check(scanned?.FileSystemIdentity?.StartsWith(expectedPrefix, StringComparison.Ordinal) == true, $"its file identity is a {expectedPrefix} identity");
 Check(found.All(item => item.DetectedTitle != "Secret"), "the scan does not follow the link out of the library");
 

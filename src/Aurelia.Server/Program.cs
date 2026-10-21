@@ -92,6 +92,8 @@ builder.Logging.AddFilter("Microsoft.AspNetCore.Routing", LogLevel.Warning);
 if (commandLine.Command == "setup-owner")
 {
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
+    // A model design note, not a problem with this server; setup over SSH stays readable.
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Model.Validation", LogLevel.Error);
 }
 
 var connectionString = new SqliteConnectionStringBuilder
@@ -399,12 +401,39 @@ try
         var accounts = scope.ServiceProvider.GetRequiredService<AccountService>();
         try
         {
+            // --headless sets up a server without a screen over SSH: the password is typed twice,
+            // network access is turned on for the next start and no session token is printed.
+            var headless = commandLine.HasFlag("--headless");
+            var password = commandLine.ReadPassword();
+            if (headless && !commandLine.PasswordFromStandardInput && !Console.IsInputRedirected
+                && commandLine.ReadSecret("Repeat the Server Password: ") != password)
+            {
+                Console.Error.WriteLine("The passwords do not match. Nothing was changed.");
+                Environment.ExitCode = 1;
+                return;
+            }
+
             var response = await accounts.SetupOwnerAsync(
                 new SetupOwnerRequest(
                     commandLine.Username,
-                    commandLine.ReadPassword(),
+                    password,
                     commandLine.DeviceName),
                 CancellationToken.None);
+            if (headless)
+            {
+                // Nobody keeps the setup session's token, so it is revoked at once.
+                await accounts.RevokeOwnDeviceAsync(response.SessionId, CancellationToken.None);
+                var settings = scope.ServiceProvider.GetRequiredService<ServerConfigurationStore>();
+                var name = commandLine.Option("--server-name")?.Trim();
+                settings.Update(settings.Current with
+                {
+                    LanAccessEnabled = true,
+                    ServerName = string.IsNullOrEmpty(name) ? settings.Current.ServerName : name,
+                }, allowNetworkChange: true);
+                Console.WriteLine($"{response.User.Username} owns this server. Network access starts with the server.");
+                return;
+            }
+
             Console.WriteLine(JsonSerializer.Serialize(response, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

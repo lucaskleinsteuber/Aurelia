@@ -25,6 +25,7 @@
     <InternalsVisibleTo Include="Aurelia.Server.Tests" />
     <ProjectReference Include="../Aurelia.Contracts/Aurelia.Contracts.csproj" />
     <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
     <PackageReference Include="Haukcode.Mdns" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design">

@@ -35,6 +35,58 @@ public sealed class StorageReliabilityTests
         Assert.False(StorageRecovery.IsRecoverable(new InvalidOperationException("programming error")));
     }
 
+    [Theory]
+    [InlineData(0xEF53L, true)] // ext4
+    [InlineData(0x9123683EL, true)] // Btrfs
+    [InlineData(0x2011BAB0L, false)] // exFAT
+    [InlineData(0x4D44L, false)] // FAT
+    [InlineData(0x65735546L, false)] // FUSE
+    public void LinuxIdentitiesOnlyComeFromFileSystemsThatKeepInodeNumbers(long fileSystemType, bool lasting)
+    {
+        var identity = FileSystemIdentity.ForLinux(fileSystemType, 0xAB12, 0x3F);
+        Assert.Equal(lasting ? "linux:ab12:3f" : null, identity);
+        Assert.Null(FileSystemIdentity.ForLinux(0xEF53, 0xAB12, 0));
+    }
+
+    [Fact]
+    public void AnUnpluggedLinuxDriveLeavesItsLocationUnavailableNotEmpty()
+    {
+        var configured = StorageMounts.ParseTargets([
+            "# /etc/fstab: static file system information.",
+            "/dev/disk/by-uuid/root / ext4 defaults 0 1",
+            "UUID=1234-ABCD /mnt/aurelia\\040media exfat ro,nofail 0 0",
+            "/swap.img none swap sw 0 0",
+        ]);
+        Assert.Contains("/mnt/aurelia media", configured);
+        Assert.DoesNotContain("none", configured);
+        var mounted = StorageMounts.ParseTargets(["/dev/mapper/root / ext4 rw 0 0", "proc /proc proc rw 0 0"]);
+
+        Assert.True(StorageMounts.IsDetached("/mnt/aurelia media", configured, mounted));
+        Assert.True(StorageMounts.IsDetached("/mnt/aurelia media/Movies/", configured, mounted));
+        Assert.False(StorageMounts.IsDetached("/srv/movies", configured, mounted));
+        mounted.Add("/mnt/aurelia media");
+        Assert.False(StorageMounts.IsDetached("/mnt/aurelia media/Movies", configured, mounted));
+    }
+
+    [Fact]
+    public void FilesOnThisComputerHaveAnIdentityForItsPlatform()
+    {
+        var directory = Directory.CreateTempSubdirectory("aurelia-identity-");
+        try
+        {
+            var file = Path.Combine(directory.FullName, "Synthetic.mkv");
+            File.WriteAllBytes(file, [1, 2, 3]);
+            var identity = FileSystemIdentity.TryRead(file);
+            var prefix = OperatingSystem.IsWindows() ? "windows:" : OperatingSystem.IsMacOS() ? "darwin:" : OperatingSystem.IsLinux() ? "linux:" : "unix:";
+            Assert.StartsWith(prefix, identity, StringComparison.Ordinal);
+            Assert.Equal(identity, FileSystemIdentity.TryRead(file));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public async Task WorkerBoundaryRetriesUnavailableStorageWithoutDiscardingState()
     {

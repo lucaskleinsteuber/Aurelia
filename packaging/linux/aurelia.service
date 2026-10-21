@@ -1,0 +1,33 @@
+[Unit]
+Description=Aurelia media server
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aurelia
+Group=aurelia
+ExecStart=/opt/aurelia/server/Aurelia.Server run --data-dir /var/lib/aurelia
+WorkingDirectory=/var/lib/aurelia
+Environment=HOME=/var/lib/aurelia
+StateDirectory=aurelia
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+LimitNOFILE=65536
+# Aurelia only reads media: everything outside its own data folder is read-only for it.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

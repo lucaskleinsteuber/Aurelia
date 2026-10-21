@@ -157,7 +157,7 @@ public sealed class ImportPlanningService(
 
     private async Task<MediaScanDiscovery> DiscoverAsync(LibraryRoot root, IReadOnlyList<ImportAssignmentUpdate> rules, CancellationToken token)
     {
-        if (!Directory.Exists(root.Path)) throw new AccountException("library_unavailable", "The storage location is unavailable. Reconnect it and analyze again.", 409);
+        if (!Directory.Exists(root.Path) || StorageMounts.IsDetached(root.Path)) throw new AccountException("library_unavailable", "The storage location is unavailable. Reconnect it and analyze again.", 409);
         var existing = await database.MediaItems.AsNoTracking().Where(item => item.LibraryRootId == root.Id).ToArrayAsync(token);
         var parents = existing.ToDictionary(item => item.Id);
         var episodes = existing.Where(item => item.Kind == MediaKind.Episode && item.ParentId.HasValue && item.SeasonNumber.HasValue && item.EpisodeNumber.HasValue && parents.ContainsKey(item.ParentId.Value))

@@ -23,7 +23,7 @@ public static class PairingCommandClient
                 || commandLine.Action is "help" or "--help" ? 0 : 2;
         }
 
-        if (commandLine.Action != "create")
+        if (commandLine.Action is not ("create" or "approve"))
         {
             Console.Error.WriteLine($"Unknown pairing action '{commandLine.Action}'.");
             return 2;
@@ -59,6 +59,11 @@ public static class PairingCommandClient
             try
             {
                 await CommandClientSecurity.UnlockViewingAndManagementAsync(client, authentication, commandLine, password, cancellationToken);
+                if (commandLine.Action == "approve")
+                {
+                    return await ApproveDeviceAsync(client, commandLine, password, cancellationToken);
+                }
+
                 using var codeResponse = await CommandClientSecurity.SendConfirmedAsync(client, HttpMethod.Post, "/api/v1/auth/pairings", new CreatePairingCodeRequest(), password, cancellationToken);
                 var pairing = await ReadSuccessAsync<PairingCodeResponse>(
                     codeResponse,
@@ -100,6 +105,53 @@ public static class PairingCommandClient
             Console.Error.WriteLine(exception.Message);
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Approves a device that shows an 8-digit code, as Server Settings does on a computer with a
+    /// screen. A server without one is set up this way over SSH.
+    /// </summary>
+    private static async Task<int> ApproveDeviceAsync(
+        HttpClient client,
+        ServerCommandLine commandLine,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        var code = commandLine.Option("--code");
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            Console.Error.Write("Code shown on the device: ");
+            code = Console.ReadLine();
+        }
+
+        using var lookupResponse = await client.PostAsJsonAsync(
+            "/api/v1/server/device-pairings/lookup",
+            new DeviceAuthorizationLookupRequest(code?.Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal) ?? string.Empty),
+            JsonOptions,
+            cancellationToken);
+        var device = await ReadSuccessAsync<DeviceAuthorizationPreview>(lookupResponse, cancellationToken);
+        Console.WriteLine($"Device: {device.DeviceName}");
+        Console.WriteLine($"Server: {device.ServerName}");
+        if (!commandLine.HasFlag("--yes"))
+        {
+            Console.Error.Write("Allow this device to connect? [y/N] ");
+            if (Console.ReadLine()?.Trim().ToLowerInvariant() is not ("y" or "yes"))
+            {
+                Console.WriteLine("The device was not approved.");
+                return 1;
+            }
+        }
+
+        using var approval = await CommandClientSecurity.SendConfirmedAsync(
+            client,
+            HttpMethod.Post,
+            $"/api/v1/server/device-pairings/{device.Id}/approve",
+            null,
+            password,
+            cancellationToken);
+        _ = await ReadSuccessAsync<DeviceAuthorizationPreview>(approval, cancellationToken);
+        Console.WriteLine($"{device.DeviceName} is approved. It finishes connecting on its own.");
+        return 0;
     }
 
     internal static Uri LocalServerAddress(ServerCommandLine commandLine)
@@ -148,6 +200,8 @@ public static class PairingCommandClient
     {
         Console.WriteLine("Aurelia pairing commands:");
         Console.WriteLine("  pairing create [--username USER]");
+        Console.WriteLine("  pairing approve [--code CODE] [--username USER] [--yes]");
+        Console.WriteLine("    Approves an Apple TV that shows an 8-digit code.");
         Console.WriteLine("  Add --server URL to override http://127.0.0.1:43110.");
     }
 }

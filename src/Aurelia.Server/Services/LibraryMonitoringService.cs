@@ -300,6 +300,7 @@ public sealed partial class LibraryMonitoringService(
             var directory = new DirectoryInfo(path);
             return directory.Exists
                 && directory.LinkTarget is null
+                && !StorageMounts.IsDetached(path)
                 && directory.EnumerateFileSystemInfos().Take(1).ToArray() is not null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
