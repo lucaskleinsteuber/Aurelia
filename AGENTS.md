@@ -69,9 +69,9 @@ These rules apply to every task in this repository.
   scrub-preview update is 0.3.3 (14).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
-- The desktop client in `clients/desktop` (Windows first, Linux later) is a third
-  product with its own version counter and rules in `clients/desktop/AGENTS.md`;
-  its approved version is 0.2.0 (6).
+- The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
+  repository in the external workspace's `Aurelia Desktop (archived)` folder. Do not
+  restore, build or test it unless the user asks for it.
 - For tvOS, run warning-free device/simulator builds, host-executable logic tests
   and XCUITest on the dedicated tvOS 26 simulator. UI tests must use synthetic
   data and a simulated engine through the production views/control logic, with

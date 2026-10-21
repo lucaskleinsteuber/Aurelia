@@ -128,7 +128,7 @@ public sealed class Build7HostingTests
             Assert.False(closed.LocalHttpsEnabled);
             Assert.DoesNotContain("https://", closed.ListenUrl, StringComparison.Ordinal);
 
-            // The desktop app reaches its own server over pinned HTTPS on 127.0.0.1, never on other addresses.
+            // A hosting app reaches its own server over pinned HTTPS on 127.0.0.1, never on other addresses.
             var local = ServerRuntimeOptions.Resolve(configuration, ["run", "--data-dir", dataDirectory, "--lan-port", "45112", "--local-https"]);
             Assert.True(local.LocalHttpsEnabled);
             Assert.False(local.LanAccessEnabled);

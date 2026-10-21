@@ -37,7 +37,6 @@ GitHub, not the App Store.
 
 - [Backups and recovery](docs/DATABASE_RECOVERY.md)
 - [Build and playback verification](docs/TRANSPORT_TESTING.md)
-- [Windows app (early development)](clients/desktop/README.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 Aurelia is currently in development. The app's interface is in English.
