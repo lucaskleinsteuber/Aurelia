@@ -816,6 +816,12 @@ final class AppModel: ObservableObject {
     } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
   }
 
+  /// Folders on the connected server, for choosing a storage location on another computer.
+  func serverFolders(at path: String?) async throws -> ServerFolderListing {
+    guard let profile, canManageStorage else { throw APIClientError.invalidResponse }
+    return try await APIClient(profile: profile).serverFolders(path: path)
+  }
+
   func addStorageLocations(
     _ locations: [StorageLocationDraft],
     combineExisting: Bool = false

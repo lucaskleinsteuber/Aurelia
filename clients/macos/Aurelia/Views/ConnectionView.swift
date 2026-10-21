@@ -188,25 +188,40 @@ struct ConnectionView: View {
           .foregroundStyle(.secondary)
       }
 
-      TextField("8-digit pairing code", text: $pairingCode)
-        .textFieldStyle(.roundedBorder)
-        .accessibilityIdentifier("pairing-code")
+      VStack(alignment: .leading, spacing: 8) {
+        Text("1. Check the Verification Fingerprint")
+          .font(.subheadline.weight(.semibold))
+        Text(inspected.displayFingerprint)
+          .font(.system(.title2, design: .monospaced, weight: .semibold))
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.vertical, 10)
+          .padding(.horizontal, 14)
+          .background(
+            .white.opacity(0.06),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+          )
+          .accessibilityIdentifier("server-fingerprint")
+        Text(
+          "It must match the server's fingerprint: Aurelia Settings on a Mac server, or aurelia status on a Linux server."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        Toggle("The fingerprints match", isOn: $fingerprintMatches)
+          .accessibilityIdentifier("fingerprint-matches")
+      }
 
-      DisclosureGroup("Advanced Security Check") {
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Verification Fingerprint")
-            .font(.subheadline.weight(.semibold))
-          Text(inspected.displayFingerprint)
-            .font(.system(.title3, design: .monospaced, weight: .semibold))
-            .textSelection(.enabled)
-            .accessibilityIdentifier("server-fingerprint")
-          Text("Compare this with the fingerprint shown by the server owner.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          Toggle("The fingerprints match", isOn: $fingerprintMatches)
-            .accessibilityIdentifier("fingerprint-matches")
-        }
-        .padding(.top, 8)
+      VStack(alignment: .leading, spacing: 8) {
+        Text("2. Enter a Pairing Code")
+          .font(.subheadline.weight(.semibold))
+        TextField("8-digit pairing code", text: $pairingCode)
+          .textFieldStyle(.roundedBorder)
+          .accessibilityIdentifier("pairing-code")
+        Text(
+          "Create one on the server: Aurelia Settings on a Mac server, or aurelia pair on a Linux server."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
       }
 
       Button {

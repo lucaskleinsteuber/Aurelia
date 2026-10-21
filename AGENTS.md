@@ -64,7 +64,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac release is 1.8.0 (84) (Linux server); the
+  changing them. The approved Mac release is 1.8.1 (85) (server folders from the Mac); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   scrub-preview update is 0.3.3 (14).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

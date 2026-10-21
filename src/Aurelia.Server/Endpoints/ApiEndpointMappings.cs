@@ -46,6 +46,7 @@ public static class ApiEndpointMappings
         var libraries = api.MapGroup("/libraries").RequireAuthorization("Administrator");
         libraries.MapGet(string.Empty, ListLibrariesAsync);
         libraries.MapPost(string.Empty, CreateLibraryAsync);
+        libraries.MapGet("/folders", (string? path) => ExecuteAsync(() => Task.FromResult(ServerFolderBrowser.List(path))));
         libraries.MapDelete("/{libraryId:guid}", RemoveLibraryAsync);
         libraries.MapPut("/{libraryId:guid}/monitoring", UpdateLibraryMonitoringAsync);
         libraries.MapPost("/{libraryId:guid}/scans", StartLibraryScanAsync);

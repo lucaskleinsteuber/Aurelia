@@ -127,6 +127,19 @@ enum LibraryScanTrigger: String, Codable, Sendable {
   case manual, fileChange, startup, scheduled, storageReconnected, classificationChanged
 }
 
+/// A folder on the server computer that can become a storage location.
+struct ServerFolder: Codable, Hashable, Sendable {
+  let name: String
+  let path: String
+}
+
+/// The folders inside one folder on the server; without a path, the usual places for drives.
+struct ServerFolderListing: Codable, Equatable, Sendable {
+  let path: String?
+  let parent: String?
+  let folders: [ServerFolder]
+}
+
 struct CreateLibraryRequest: Encodable, Sendable {
   let name: String?
   let path: String

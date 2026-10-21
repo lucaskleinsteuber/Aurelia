@@ -405,6 +405,11 @@ struct APIClient: Sendable {
     try await get("/api/v1/libraries")
   }
 
+  func serverFolders(path: String?) async throws -> ServerFolderListing {
+    let query = try path.map { "?" + (try Self.query(name: "path", value: $0)) } ?? ""
+    return try await get("/api/v1/libraries/folders\(query)")
+  }
+
   func createLibrary(
     name: String? = nil,
     path: String,

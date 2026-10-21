@@ -162,6 +162,18 @@ public sealed record CreateLibraryRequest(
 
 public sealed record UpdateLibraryMonitoringRequest(bool Enabled);
 
+/// <summary>A folder on the server computer that can become a storage location.</summary>
+public sealed record ServerFolder(string Name, string Path);
+
+/// <summary>
+/// The folders inside one folder on the server, for choosing a storage location from another
+/// computer. Without a path it lists the usual places for drives and media.
+/// </summary>
+public sealed record ServerFolderListing(
+    string? Path,
+    string? Parent,
+    IReadOnlyList<ServerFolder> Folders);
+
 public sealed record LibraryDiscoverySummary(
     Guid Id,
     Guid LibraryId,

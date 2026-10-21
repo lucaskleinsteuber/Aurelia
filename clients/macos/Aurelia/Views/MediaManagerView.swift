@@ -4,6 +4,7 @@ struct MediaManagerView: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.dismiss) private var dismiss
   @State private var drafts: [StorageLocationDraft] = []
+  @State private var choosesServerFolder = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -11,9 +12,7 @@ struct MediaManagerView: View {
       Divider()
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
-          if !model.isLocalHost {
-            remoteNotice
-          } else if model.canManageMedia {
+          if model.canManageStorage {
             addLocations
           }
           configuredLibraries
@@ -38,6 +37,14 @@ struct MediaManagerView: View {
       .padding(.vertical, 16)
     }
     .frame(width: 800, height: 720)
+    .sheet(isPresented: $choosesServerFolder) {
+      ServerFolderPicker { path in
+        if !drafts.contains(where: { $0.path == path }) {
+          drafts.append(StorageLocationDraft(path: path))
+        }
+      }
+      .environmentObject(model)
+    }
     .background(AureliaBackdrop())
     .task { await model.reloadAdministration() }
     .sheet(item: $model.importPreviewLibrary) { library in
@@ -59,20 +66,6 @@ struct MediaManagerView: View {
     }
     .padding(.horizontal, AureliaDesign.pagePadding)
     .padding(.vertical, 22)
-  }
-
-  private var remoteNotice: some View {
-    Label {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Add locations on the server Mac").font(.headline)
-        Text("A local folder on this Mac cannot be sent to a different Aurelia server.")
-          .foregroundStyle(.secondary)
-      }
-    } icon: {
-      Image(systemName: "macstudio")
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .modifier(AureliaSectionSurfaceModifier())
   }
 
   private var addLocations: some View {
@@ -120,9 +113,16 @@ struct MediaManagerView: View {
         }
 
         HStack {
-          Button("Choose Folders or Drives…") { chooseStorageLocations(into: &drafts) }
-            .frame(minHeight: AureliaDesign.minimumControlSize)
-            .accessibilityIdentifier("media-manager-choose-locations")
+          Button(model.isLocalHost ? "Choose Folders or Drives…" : "Choose Folders on the Server…")
+          {
+            if model.isLocalHost {
+              chooseStorageLocations(into: &drafts)
+            } else {
+              choosesServerFolder = true
+            }
+          }
+          .frame(minHeight: AureliaDesign.minimumControlSize)
+          .accessibilityIdentifier("media-manager-choose-locations")
           Spacer()
           Button("Analyze and Preview") {
             let selected = drafts
