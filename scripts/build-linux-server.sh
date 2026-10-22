@@ -27,9 +27,12 @@ for arch in x64 arm64; do
   assets_path=$("$DOTNET_BIN" msbuild "$project" -getProperty:ProjectAssetsFile)
   zsh "$repository_root/scripts/collect-third-party-notices.sh" \
     "$stage/server/Aurelia.Server.deps.json" "$assets_path" "$stage/notices"
-  cp "$repository_root/packaging/linux/install.sh" "$repository_root/packaging/linux/aurelia" \
-    "$repository_root/packaging/linux/aurelia.service" "$stage/"
-  chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/server/Aurelia.Server"
+  for file in install.sh aurelia aurelia.service aurelia-autosleep aurelia-autosleep.service \
+    aurelia-autosleep.timer aurelia-wake-on-lan aurelia-wake-on-lan.service; do
+    cp "$repository_root/packaging/linux/$file" "$stage/"
+  done
+  chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/aurelia-autosleep" "$stage/aurelia-wake-on-lan" \
+    "$stage/server/Aurelia.Server"
   printf '%s (%s)\n' "$version" "$build" > "$stage/VERSION"
   printf '%s\n' "$arch" > "$stage/ARCHITECTURE"
   # No macOS metadata or owner names in the archive; files belong to root after installing.

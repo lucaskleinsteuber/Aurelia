@@ -1322,6 +1322,7 @@ final class AppModel: ObservableObject {
     guard info.serverId == profile.serverId else {
       throw APIClientError.serverIdentityMismatch
     }
+    WakeOnLan.remember(info)
     guard isCurrent(generation)
     else { return }
     if profile.user == nil || profile.isViewingSession {
@@ -1926,6 +1927,13 @@ final class AppModel: ObservableObject {
       if Self.uiTestMode != nil { return }
     #endif
     let canObserve = !isStarting && !isRecoveringLocalHost && !requiresProfileSelection
+    // Opening Aurelia while its server sleeps wakes it now instead of at the next retry.
+    if active, operatingMode != .host, reconnectTask != nil {
+      reconnectTask?.cancel()
+      reconnectTask = nil
+      reconnectCoordinator.cancel()
+      beginReconnectIfNeeded(after: URLError(.networkConnectionLost))
+    }
     if active, canObserve, operatingMode == .host, hostPollTask == nil { startHostPolling() }
     if active, canObserve, !activeScans.isEmpty, scanPollTask == nil { startScanPolling() }
     let generation = connectionGeneration
@@ -2111,6 +2119,7 @@ final class AppModel: ObservableObject {
     let client = APIClient(profile: device)
     let info = try await client.serverInfo()
     guard info.serverId == device.serverId else { throw APIClientError.serverIdentityMismatch }
+    WakeOnLan.remember(info)
     let response: ProfilePickerResponse
     do { response = try await client.watchingProfiles() } catch let error as APIClientError
       where error.httpStatus == 404

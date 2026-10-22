@@ -1,0 +1,11 @@
+[Unit]
+Description=Let Wake-on-LAN wake Aurelia Server from sleep
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aurelia/aurelia-wake-on-lan
+
+[Install]
+WantedBy=multi-user.target

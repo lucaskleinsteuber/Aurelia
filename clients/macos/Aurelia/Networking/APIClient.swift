@@ -962,6 +962,10 @@ struct APIClient: Sendable {
     return "\(encodedName)=\(encodedValue)"
   }
 
+  func sleepTimerEnded() async throws {
+    _ = try await perform(path: "/api/v1/playback/sleep-timer-ended", method: "POST")
+  }
+
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
     let data = try await perform(
       path: "/api/v1/media/\(mediaId.uuidString.lowercased())/playback",

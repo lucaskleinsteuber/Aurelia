@@ -1,0 +1,6 @@
+[Unit]
+Description=Put Aurelia Server to sleep when nobody uses it
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aurelia/aurelia-autosleep

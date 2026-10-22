@@ -38,19 +38,25 @@ extension BonjourBrowser: ServerDiscovery {}
 final class ServerReconnectCoordinator {
   typealias Inspector = @MainActor (URL) async throws -> InspectedServer
   typealias Delay = @MainActor (TimeInterval) async throws -> Void
+  typealias Waker = @MainActor (UUID, URL) -> Void
   private let browser: any ServerDiscovery
   private let inspect: Inspector
   private let delay: Delay
+  private let wake: Waker
   private var generation = UUID()
 
   init(
     browser: any ServerDiscovery = BonjourBrowser(),
     inspect: @escaping Inspector = { try await APIClient.inspect(baseURL: $0) },
-    delay: @escaping Delay = { try await Task.sleep(for: .seconds($0)) }
+    delay: @escaping Delay = { try await Task.sleep(for: .seconds($0)) },
+    wake: @escaping Waker = { serverId, address in
+      if WakeOnLan.userIsPresent { WakeOnLan.wake(serverId: serverId, lastKnown: address) }
+    }
   ) {
     self.browser = browser
     self.inspect = inspect
     self.delay = delay
+    self.wake = wake
   }
 
   func cancel() {
@@ -65,6 +71,9 @@ final class ServerReconnectCoordinator {
     defer { if generation == run { browser.stop() } }
     var attempt = 0
     while generation == run {
+      // A server that sleeps when nobody watches wakes within seconds of this packet, sent
+      // only while someone uses Aurelia.
+      wake(stored.serverId, stored.baseURL)
       try await delay(ServerReconnectPolicy.delay(attempt: attempt))
       try Task.checkCancellation()
       guard generation == run else { throw CancellationError() }

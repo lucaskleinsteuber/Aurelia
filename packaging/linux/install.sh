@@ -32,8 +32,10 @@ firewall() {
 if [ "${1:-}" = --uninstall ]; then
   remove_data=false
   [ "${2:-}" = --remove-data ] && remove_data=true
-  systemctl disable --now aurelia 2>/dev/null || true
-  rm -f "$unit" "$command_path"
+  systemctl disable --now aurelia aurelia-autosleep.timer 2>/dev/null || true
+  systemctl disable aurelia-wake-on-lan.service 2>/dev/null || true
+  rm -f "$unit" "$command_path" /etc/systemd/system/aurelia-autosleep.service \
+    /etc/systemd/system/aurelia-autosleep.timer /etc/systemd/system/aurelia-wake-on-lan.service
   systemctl daemon-reload
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
     ufw delete allow "$lan_port/tcp" >/dev/null 2>&1 || true
@@ -43,7 +45,7 @@ if [ "${1:-}" = --uninstall ]; then
   if $remove_data; then
     read -r -p "Delete the server data in $data_dir (accounts, library, progress)? [y/N] " answer
     case "$answer" in
-      y|Y|yes|YES) rm -rf "$data_dir"; userdel aurelia 2>/dev/null || true; echo "Server data deleted." ;;
+      y|Y|yes|YES) rm -rf "$data_dir" /etc/aurelia-autosleep.conf; userdel aurelia 2>/dev/null || true; echo "Server data deleted." ;;
       *) echo "Server data kept in $data_dir." ;;
     esac
   else
@@ -103,11 +105,19 @@ install -m 0644 "$package_root/VERSION" "$install_root/VERSION"
 install -m 0755 "$package_root/install.sh" "$install_root/install.sh"
 install -m 0755 "$package_root/aurelia" "$command_path"
 install -m 0644 "$package_root/aurelia.service" "$unit"
+# Wake-on-LAN is always allowed; sleep mode stays as it was and only `sudo aurelia sleep on`
+# turns it on.
+install -m 0755 "$package_root/aurelia-autosleep" "$install_root/aurelia-autosleep"
+install -m 0755 "$package_root/aurelia-wake-on-lan" "$install_root/aurelia-wake-on-lan"
+for sleep_unit in aurelia-autosleep.service aurelia-autosleep.timer aurelia-wake-on-lan.service; do
+  install -m 0644 "$package_root/$sleep_unit" "/etc/systemd/system/$sleep_unit"
+done
 chown -R root:root "$install_root/notices" "$install_root/VERSION" "$install_root/install.sh"
 
 systemctl daemon-reload
 systemctl enable aurelia >/dev/null
 systemctl start aurelia
+systemctl enable --now aurelia-wake-on-lan.service >/dev/null 2>&1 || true
 firewall
 
 echo "Aurelia Server $(cat "$install_root/VERSION") is installed and runs as a service."

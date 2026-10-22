@@ -21,7 +21,10 @@ public sealed record ServerInfoResponse(
     int? LanHttpsPort,
     string? PublicKeyFingerprint,
     string? DisplayFingerprint,
-    IReadOnlyList<string>? Capabilities = null);
+    IReadOnlyList<string>? Capabilities = null,
+    // Hardware addresses of the network cards that reach the home network, so a client can wake
+    // a sleeping server with Wake-on-LAN. Only reported while network access is on.
+    IReadOnlyList<string>? WakeOnLanAddresses = null);
 
 public sealed record SetupOwnerRequest(
     string Username,

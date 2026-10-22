@@ -12,7 +12,12 @@ public sealed class ActiveStreamRegistry
     public const int PreviewStreamsGlobal = 32;
     private readonly object gate = new();
     private readonly HashSet<Lease> streams = [];
+    private DateTimeOffset? lastPlayback;
     public int Count { get { lock (gate) return streams.Count; } }
+    /// <summary>Playback reads now open; preview frames do not count.</summary>
+    public int PlaybackCount { get { lock (gate) return streams.Count(stream => !stream.IsPreview); } }
+    /// <summary>When a playback read last started or ended.</summary>
+    public DateTimeOffset? LastPlaybackActivity { get { lock (gate) return lastPlayback; } }
 
     public Lease Enter(Guid userId, Guid sessionId, int globalLimit, int userLimit, CancellationToken request, bool preview = false)
     {
@@ -27,6 +32,7 @@ public sealed class ActiveStreamRegistry
                 throw new AccountException("stream_limit", "Too many simultaneous stream requests. Try again shortly.", 429);
             var lease = new Lease(this, userId, sessionId, preview, request);
             streams.Add(lease);
+            if (!preview) lastPlayback = DateTimeOffset.UtcNow;
             return lease;
         }
     }
@@ -66,7 +72,10 @@ public sealed class ActiveStreamRegistry
         internal void Cancel() { lock (gate) { if (!disposed) source.Cancel(); } }
         public void Dispose()
         {
-            lock (registry.gate) registry.streams.Remove(this);
+            lock (registry.gate)
+            {
+                if (registry.streams.Remove(this) && !IsPreview) registry.lastPlayback = DateTimeOffset.UtcNow;
+            }
             lock (gate) { if (!disposed) { disposed = true; source.Dispose(); } }
         }
     }

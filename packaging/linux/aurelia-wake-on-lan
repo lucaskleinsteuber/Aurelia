@@ -1,0 +1,12 @@
+#!/bin/bash
+# Allows the wired network card that leads to the home network to wake this computer with a
+# Wake-on-LAN packet. Run at every start by aurelia-wake-on-lan.service (`sudo aurelia sleep on`).
+set -euo pipefail
+device=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+[ -n "$device" ] || { echo "No network connection found." >&2; exit 1; }
+if ! ethtool "$device" 2>/dev/null | grep -E 'Supports Wake-on: .*g' >/dev/null; then
+  echo "The network card $device cannot be woken over the network." >&2
+  exit 0
+fi
+ethtool -s "$device" wol g
+echo "Wake-on-LAN is on for $device ($(cat "/sys/class/net/$device/address"))."

@@ -133,6 +133,12 @@ public static class ApiEndpointMappings
 
         var playback = api.MapGroup("/playback").RequireAuthorization();
         playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
+        // A player's sleep timer ended; a server with sleep mode may sleep if nothing else plays.
+        playback.MapPost("/sleep-timer-ended", (ServerSleepSignal sleep) =>
+        {
+            sleep.SleepTimerEnded();
+            return Results.NoContent();
+        });
 
         api.MapMethods("/streams/{ticket}", [HttpMethods.Get, HttpMethods.Head], StreamAsync)
             .RequireAuthorization()
@@ -189,7 +195,8 @@ public static class ApiEndpointMappings
             runtime.LanAccessEnabled ? runtime.LanHttpsPort : null,
             runtime.LanAccessEnabled ? tlsIdentity.PublicKeyFingerprint : null,
             runtime.LanAccessEnabled ? tlsIdentity.DisplayFingerprint : null,
-            ServerFeatures.All));
+            ServerFeatures.All,
+            runtime.LanAccessEnabled ? WakeOnLan.LocalAddresses() : null));
     }
 
     private static async Task<IResult> SetupOwnerAsync(
@@ -785,8 +792,10 @@ public static class ApiEndpointMappings
         HttpContext context,
         Guid mediaId,
         PlaybackService playback,
+        ServerSleepSignal sleep,
         CancellationToken cancellationToken)
     {
+        sleep.PlaybackStarted();
         return ExecuteAsync(() => playback.CreateAsync(
             context.User.RequireUserId(),
             context.User.RequireSessionId(),

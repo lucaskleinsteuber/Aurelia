@@ -1,0 +1,80 @@
+#!/bin/bash
+# Puts this Aurelia server to sleep (suspend to RAM) when nobody uses it, so it saves power:
+# - five minutes after a player's sleep timer ended, if nothing played since (Aurelia Server
+#   leaves its sleep-ready file then), at any time of day;
+# - otherwise after IDLE_MINUTES without a connected device, outside AWAKE_FROM-AWAKE_UNTIL.
+# It wakes itself at AWAKE_FROM, or earlier through Wake-on-LAN (Aurelia on a Mac sends it).
+# Settings: /etc/aurelia-autosleep.conf. Run every few minutes by aurelia-autosleep.timer, which
+# `sudo aurelia sleep on` turns on; `aurelia sleep status` shows the current decision.
+# With AURELIA_AUTOSLEEP_DRY_RUN=1 it only prints its decision.
+set -euo pipefail
+IDLE_MINUTES=30
+AWAKE_FROM=17:00
+AWAKE_UNTIL=23:30
+[ -r /etc/aurelia-autosleep.conf ] && . /etc/aurelia-autosleep.conf
+dry_run=${AURELIA_AUTOSLEEP_DRY_RUN:-0}
+state=${AURELIA_AUTOSLEEP_STATE:-/run/aurelia-autosleep}
+ready=${AURELIA_DATA_DIR:-/var/lib/aurelia}/sleep-ready
+
+mkdir -p "$state"
+now=$(date +%s)
+[ -f "$state/last-active" ] || echo "$now" > "$state/last-active"
+
+say() { if [ "$dry_run" = 1 ]; then echo "$1"; fi; }
+minutes() { echo $(( 10#${1%%:*} * 60 + 10#${1##*:} )); }
+
+sleep_now() {
+  local wake
+  wake=$(date -d "today $AWAKE_FROM" +%s)
+  (( wake <= now )) && wake=$(date -d "tomorrow $AWAKE_FROM" +%s)
+  if [ "$dry_run" = 1 ]; then echo "sleep until $(date -d "@$wake" '+%a %H:%M'): $1"; exit 0; fi
+  rm -f "$ready"
+  logger -t aurelia-autosleep "$1: sleeping until $(date -d "@$wake" '+%a %H:%M') or a Wake-on-LAN call."
+  # After waking, devices get a fresh idle period to connect.
+  echo "$wake" > "$state/last-active"
+  rtcwake -m mem -t "$wake" >/dev/null
+  date +%s > "$state/last-active"
+  exit 0
+}
+
+# Someone signed in over SSH is working on the server: never sleep under them.
+if ss -Htn state established '( sport = :22 )' | grep -q .; then
+  echo "$now" > "$state/last-active"
+  say "awake: signed in over SSH"
+  exit 0
+fi
+
+# A sleep timer ended five minutes ago and nothing played since. A signal older than a quarter of
+# an hour is stale (sleep mode was off then) and is ignored.
+if [ -f "$ready" ]; then
+  if (( now - $(stat -c %Y "$ready") < 900 )); then sleep_now "A sleep timer ended"; fi
+  [ "$dry_run" = 1 ] || rm -f "$ready"
+fi
+
+# In use: a device connected to Aurelia, or the computer is working (a scan, an update).
+busy=false
+if ss -Htn state established '( sport = :43111 )' | grep -q .; then busy=true; fi
+if awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
+if $busy; then
+  echo "$now" > "$state/last-active"
+  say "awake: in use"
+  exit 0
+fi
+
+current=$(minutes "$(date +%H:%M)")
+from=$(minutes "$AWAKE_FROM")
+until=$(minutes "$AWAKE_UNTIL")
+in_window=false
+if (( from < until )); then
+  (( current >= from && current < until )) && in_window=true
+else
+  (( current >= from || current < until )) && in_window=true
+fi
+if $in_window; then say "awake: $AWAKE_FROM-$AWAKE_UNTIL"; exit 0; fi
+
+last=$(cat "$state/last-active")
+if (( now - last < IDLE_MINUTES * 60 )); then
+  say "awake: used $(( (now - last) / 60 )) minutes ago"
+  exit 0
+fi
+sleep_now "Unused for $IDLE_MINUTES minutes"

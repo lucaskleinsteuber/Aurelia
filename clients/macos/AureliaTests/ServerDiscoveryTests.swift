@@ -71,6 +71,44 @@ struct ServerDiscoveryTests {
     #expect(browser.stops == 2)
   }
 
+  @Test func reconnectingWakesTheSleepingServerBeforeEachAttempt() async throws {
+    let stored = profile()
+    var wakes: [UUID] = []
+    var attempts = 0
+    let coordinator = ServerReconnectCoordinator(
+      browser: SyntheticDiscovery(servers: []),
+      inspect: { url in
+        attempts += 1
+        if attempts < 2 { throw URLError(.cannotConnectToHost) }
+        return inspected(stored, at: url)
+      }, delay: { _ in }, wake: { serverId, _ in wakes.append(serverId) })
+    _ = try await coordinator.reconnect(stored)
+    #expect(wakes == [stored.serverId, stored.serverId])
+  }
+
+  @Test func wakeAddressesAreRememberedPerServerAndFormMagicPackets() throws {
+    let suite = "AureliaWakeOnLanTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let serverId = UUID()
+    var info = ServerInfoResponse(
+      serverId: serverId, name: "Linux", version: "1.8.2", isSetup: true, lanAccessEnabled: true,
+      lanHttpsPort: 43111, publicKeyFingerprint: nil, displayFingerprint: nil)
+    info.wakeOnLanAddresses = ["02:00:5E:10:00:01", "not-an-address", "00:00:00:00:00:00"]
+    WakeOnLan.remember(info, defaults: defaults)
+    #expect(
+      WakeOnLan.addresses(for: serverId, defaults: defaults) == [
+        [0x02, 0x00, 0x5E, 0x10, 0x00, 0x01]
+      ])
+    #expect(WakeOnLan.addresses(for: UUID(), defaults: defaults).isEmpty)
+    #expect(WakeOnLan.hardwareAddress("02-00-5e-10-00-01") != nil)
+    #expect(WakeOnLan.hardwareAddress("02:00:5e:10:00") == nil)
+    let packet = WakeOnLan.magicPacket([0x02, 0x00, 0x5E, 0x10, 0x00, 0x01])
+    #expect(packet.count == 102)
+    #expect(packet.prefix(6).allSatisfy { $0 == 0xFF })
+    #expect(Array(packet[96..<102]) == [0x02, 0x00, 0x5E, 0x10, 0x00, 0x01])
+  }
+
   @Test(arguments: [true, false])
   func contradictoryIdentityCannotBeSelected(replaceID: Bool) async throws {
     let stored = profile()

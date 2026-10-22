@@ -288,6 +288,8 @@ final class TVPlaybackController: ObservableObject {
         sleepTimer = .off
         await saveProgress(finished: false)
         userInteracted()
+        // Servers before 1.8.2 do not know the signal; nothing else depends on it.
+        try? await api.sleepTimerEnded()
       }
     }
     userInteracted()
@@ -620,6 +622,10 @@ final class TVPlaybackController: ObservableObject {
       {
         advanceTask = Task { [weak self] in await self?.advance(to: next) }
       } else {
+        if sleepTimer == .endOfEpisode {
+          let api = api
+          Task { try? await api.sleepTimerEnded() }
+        }
         close()
       }
     } else {

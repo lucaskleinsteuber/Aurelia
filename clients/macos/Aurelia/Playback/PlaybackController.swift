@@ -19,10 +19,13 @@ protocol PlaybackClientProtocol: AnyObject {
   ) async throws -> PlaybackProgressResponse
   func revokePlayback(id: UUID) async throws
   func streamURL(path: String) throws -> URL
+  /// Tells the server a sleep timer ended, so a server in sleep mode can sleep if nothing plays.
+  func sleepTimerEnded() async
 }
 
 extension PlaybackClientProtocol {
   var requiresProgressRevision: Bool { false }
+  func sleepTimerEnded() async {}
   func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
     throw APIClientError.invalidResponse
   }
@@ -44,6 +47,11 @@ final class APIPlaybackClient: PlaybackClientProtocol {
 
   init(profile: StoredServerProfile) {
     api = APIClient(profile: profile)
+  }
+
+  func sleepTimerEnded() async {
+    // Servers before 1.8.2 do not know the signal; playback is not affected either way.
+    try? await api.sleepTimerEnded()
   }
 
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
@@ -692,6 +700,7 @@ final class PlaybackController: ObservableObject {
       self.engineUpdated()
       self.sleepTimer = .off
       self.enqueueProgressSave(isFinished: false)
+      await self.client.sleepTimerEnded()
     }
   }
 
@@ -950,6 +959,10 @@ final class PlaybackController: ObservableObject {
     record(.ended)
     enqueueProgressSave(isFinished: true)
     upNext = nil
+    if sleepTimer == .endOfEpisode {
+      let client = client
+      Task { await client.sleepTimerEnded() }
+    }
     guard sleepTimer != .endOfEpisode,
       preferences.automaticallyPlayNextEpisode,
       !autoplayCancelled,

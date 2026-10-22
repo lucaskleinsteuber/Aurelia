@@ -631,6 +631,11 @@ final class PlaybackControllerTests: XCTestCase {
       await Task.yield()
     }
     XCTAssertEqual(controller.sleepTimer, .off)
+    for _ in 0..<1_000 {
+      if client.sleepTimerSignals > 0 { break }
+      await Task.yield()
+    }
+    XCTAssertEqual(client.sleepTimerSignals, 1, "The server learns that the sleep timer ended.")
     XCTAssertEqual(engine.pauseCalls, 1)
     XCTAssertTrue(engine.isPlaying)
     XCTAssertFalse(controller.isPlaying)
@@ -671,6 +676,7 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertTrue(engine.didStop)
     XCTAssertFalse(controller.isPlaying)
     XCTAssertFalse(controller.isPreparing)
+    XCTAssertEqual(client.sleepTimerSignals, 0)
   }
 
   private static func source(
@@ -732,6 +738,9 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
   var updates: [Update] = []
   var revokedIDs: [UUID] = []
   var createdMediaIDs: [UUID] = []
+  var sleepTimerSignals = 0
+
+  func sleepTimerEnded() async { sleepTimerSignals += 1 }
 
   init(source: PlaybackSourceResponse) {
     self.source = source

@@ -89,6 +89,9 @@ if (tlsIdentity.Certificate is not null)
 }
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Routing", LogLevel.Warning);
+// Every database command at the default level would fill a Linux journal with hundreds of
+// thousands of lines an hour; warnings and errors still appear.
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
 if (commandLine.Command == "setup-owner")
 {
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
@@ -143,6 +146,8 @@ builder.Services.AddHostedService<LibraryCleanupWorker>();
 builder.Services.AddSingleton<ServerConfigurationStore>();
 builder.Services.AddSingleton<CredentialAttemptGuard>();
 builder.Services.AddSingleton<ActiveStreamRegistry>();
+builder.Services.AddSingleton<ServerSleepSignal>();
+builder.Services.AddHostedService<ServerSleepWorker>();
 builder.Services.AddSingleton<AdministrationApprovalStore>();
 builder.Services.AddSingleton<ServerRequestGuard>();
 builder.Services.AddSingleton<NativeHostOperations>();

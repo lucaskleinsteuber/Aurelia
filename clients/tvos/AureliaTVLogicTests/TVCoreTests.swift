@@ -289,6 +289,19 @@ struct TVCoreTests {
     #expect(query.first { $0.name == "sort" }?.value == "title")
   }
 
+  @Test func anEndedSleepTimerIsReportedToTheServer() async throws {
+    let transport = TVCoreFakeTransport(responses: [
+      TVHTTPResponse(statusCode: 204, headers: [:], body: Data(), fingerprint: Self.fingerprint)
+    ])
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
+    try await client.sleepTimerEnded()
+    let captured = try #require(await transport.requests.first)
+    #expect(captured.request.httpMethod == "POST")
+    #expect(captured.request.url?.path == "/api/v1/playback/sleep-timer-ended")
+    #expect(captured.trust == .pinned(Self.fingerprint))
+  }
+
   @Test func unavailableDriveDisablesTheConcreteTarget() throws {
     let item = try decode(
       TVCatalogItem.self,

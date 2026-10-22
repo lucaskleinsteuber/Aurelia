@@ -120,6 +120,21 @@ if $exfat; then
     || fail "the reconnected drive did not come back"
 fi
 
+step "Sleep mode decisions (without sleeping)"
+aurelia sleep on --idle 5 --awake 17:00-23:30 >/dev/null
+systemctl is-enabled --quiet aurelia-autosleep.timer || fail "sleep mode did not turn on"
+grep -F 'IDLE_MINUTES=5' /etc/aurelia-autosleep.conf >/dev/null || fail "sleep settings were not saved"
+dry() { AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$media/sleep-state" /opt/aurelia/aurelia-autosleep; }
+dry | has 'awake: signed in over SSH' || [ -z "${SSH_CONNECTION:-}" ] || fail "an SSH session must keep the server awake"
+if [ -z "${SSH_CONNECTION:-}" ]; then
+  date +%s > /var/lib/aurelia/sleep-ready
+  dry | has 'sleep until' || fail "an ended sleep timer did not lead to sleep"
+  rm -f /var/lib/aurelia/sleep-ready
+fi
+aurelia sleep off >/dev/null
+! systemctl is-enabled --quiet aurelia-autosleep.timer || fail "sleep mode did not turn off"
+[ "$(systemctl is-enabled aurelia-wake-on-lan.service 2>/dev/null)" = enabled ] || fail "Wake-on-LAN must stay allowed"
+
 step "Restart keeps everything"
 systemctl restart aurelia
 for _ in $(seq 1 60); do aurelia status 2>/dev/null | has 'LAN access: enabled' && break; sleep 1; done
@@ -134,6 +149,7 @@ as_owner aurelia library list | has 'Linux Test Movies' || fail "the update lost
 step "Uninstall"
 printf 'y\n' | aurelia uninstall --remove-data | has 'deleted' || fail "uninstall did not remove the test data"
 [ ! -e /opt/aurelia ] && [ ! -e /var/lib/aurelia ] && [ ! -e /etc/systemd/system/aurelia.service ] \
+  && [ ! -e /etc/systemd/system/aurelia-autosleep.timer ] && [ ! -e /etc/aurelia-autosleep.conf ] \
   || fail "uninstall left files behind"
 ! id aurelia >/dev/null 2>&1 || fail "uninstall left the aurelia user behind"
 echo

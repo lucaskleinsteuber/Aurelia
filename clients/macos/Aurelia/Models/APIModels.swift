@@ -10,6 +10,7 @@ struct ServerInfoResponse: Codable, Equatable, Sendable {
   let publicKeyFingerprint: String?
   let displayFingerprint: String?
   var capabilities: [String]? = nil
+  var wakeOnLanAddresses: [String]? = nil
 }
 
 struct RedeemPairingCodeRequest: Encodable, Sendable {

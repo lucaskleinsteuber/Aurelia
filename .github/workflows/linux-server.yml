@@ -45,11 +45,15 @@ jobs:
           stage="$RUNNER_TEMP/Aurelia-Server-linux-x64"
           dotnet publish src/Aurelia.Server/Aurelia.Server.csproj --configuration Release --runtime linux-x64 \
             --self-contained true -p:DebugType=none --output "$stage/server"
-          cp packaging/linux/install.sh packaging/linux/aurelia packaging/linux/aurelia.service "$stage/"
+          cp packaging/linux/install.sh packaging/linux/aurelia packaging/linux/aurelia.service \
+            packaging/linux/aurelia-autosleep packaging/linux/aurelia-autosleep.service \
+            packaging/linux/aurelia-autosleep.timer packaging/linux/aurelia-wake-on-lan \
+            packaging/linux/aurelia-wake-on-lan.service "$stage/"
           mkdir -p "$stage/notices"
           echo "ci (0)" > "$stage/VERSION"
           echo x64 > "$stage/ARCHITECTURE"
-          chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/server/Aurelia.Server"
+          chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/aurelia-autosleep" "$stage/aurelia-wake-on-lan" \
+            "$stage/server/Aurelia.Server"
       - name: Install and check the package as a service
         run: |
           sudo apt-get update -qq
