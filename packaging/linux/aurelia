@@ -67,6 +67,19 @@ github_failed() {
   exit 1
 }
 
+# The published release with the highest build that has a package for this computer ($arch) and
+# a checksum list, as build, version, file name, file and checksum addresses; drafts and
+# pre-releases are skipped. Prints nothing when there is none.
+newest_package() {
+  jq -r --arg arch "$arch" '
+    [ .[] | select((.draft | not) and (.prerelease | not))
+      | first(.assets[] | select(.name == "SHA256SUMS") | .url) as $sums
+      | .assets[]
+      | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
+      | [($found.build | tonumber), $found.version, .name, .url, $sums] ]
+    | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$1"
+}
+
 usage() {
   cat <<'USAGE'
 Aurelia Server
@@ -284,22 +297,30 @@ case "$command" in
     fi
 
     [ -r "$token_file" ] && update_token=$(cat "$token_file")
-    status=$(github_fetch "$releases?per_page=30" "$work/releases.json")
-    [ "$status" = 200 ] || github_failed "$status" "the releases of $update_repository"
     case "$(uname -m)" in
       x86_64|amd64) arch=x64 ;;
       aarch64|arm64) arch=arm64 ;;
       *) arch=$(uname -m) ;;
     esac
-    # The published release with the highest build that has a package for this computer and a
-    # checksum list; drafts and pre-releases are skipped.
-    newest=$(jq -r --arg arch "$arch" '
-      [ .[] | select((.draft | not) and (.prerelease | not))
-        | first(.assets[] | select(.name == "SHA256SUMS") | .url) as $sums
-        | .assets[]
-        | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
-        | [($found.build | tonumber), $found.version, .name, .url, $sums] ]
-      | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$work/releases.json")
+    # The latest release answers reliably. GitHub's list of releases often comes back empty
+    # although they exist, so it is only asked when the latest release has no package for this
+    # computer, and an empty answer is asked again a few times before it counts.
+    newest=""
+    status=$(github_fetch "$releases/latest" "$work/latest.json")
+    if [ "$status" = 200 ]; then
+      jq '[.]' "$work/latest.json" > "$work/releases.json"
+      newest=$(newest_package "$work/releases.json")
+    elif [ "$status" != 404 ]; then
+      github_failed "$status" "the releases of $update_repository"
+    fi
+    attempt=0
+    while [ -z "$newest" ] && [ "$attempt" -lt 4 ]; do
+      if [ "$attempt" -gt 0 ]; then sleep 2; fi
+      attempt=$(( attempt + 1 ))
+      status=$(github_fetch "$releases?per_page=30" "$work/releases.json")
+      [ "$status" = 200 ] || github_failed "$status" "the releases of $update_repository"
+      newest=$(newest_package "$work/releases.json")
+    done
     if [ -z "$newest" ]; then
       echo "No release of $update_repository has a Linux server package for $arch yet."
       exit 0
