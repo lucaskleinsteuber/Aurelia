@@ -3,7 +3,7 @@
 # its installer, systemd service, aurelia command and third-party notices, packed as
 # Aurelia-Server-<version>-<build>-linux-<arch>.tar.gz in Build/Linux/<version>-<build>/ of the
 # external workspace. Each package names the GitHub repository of `origin`, from whose releases
-# `sudo aurelia update` installs newer versions (see scripts/publish-linux-server-release.sh).
+# `sudo aurelia update` installs newer versions (see scripts/publish-release.sh).
 set -euo pipefail
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
