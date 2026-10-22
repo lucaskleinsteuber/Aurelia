@@ -2,15 +2,17 @@
 # Puts this Aurelia server to sleep (suspend to RAM) when nobody uses it, so it saves power:
 # - five minutes after a player's sleep timer ended, if nothing played since (Aurelia Server
 #   leaves its sleep-ready file then), at any time of day;
-# - otherwise after IDLE_MINUTES without a connected device, outside AWAKE_FROM-AWAKE_UNTIL.
-# It wakes itself at AWAKE_FROM, or earlier through Wake-on-LAN (Aurelia on a Mac sends it).
+# - otherwise after IDLE_MINUTES without a connected device, outside AWAKE_FROM-AWAKE_UNTIL when
+#   those hours are set.
+# Wake-on-LAN wakes it (Aurelia on a Mac sends it); with awake hours it also wakes itself at
+# AWAKE_FROM.
 # Settings: /etc/aurelia-autosleep.conf. Run every few minutes by aurelia-autosleep.timer, which
 # `sudo aurelia sleep on` turns on; `aurelia sleep status` shows the current decision.
 # With AURELIA_AUTOSLEEP_DRY_RUN=1 it only prints its decision.
 set -euo pipefail
-IDLE_MINUTES=30
-AWAKE_FROM=17:00
-AWAKE_UNTIL=23:30
+IDLE_MINUTES=15
+AWAKE_FROM=
+AWAKE_UNTIL=
 [ -r /etc/aurelia-autosleep.conf ] && . /etc/aurelia-autosleep.conf
 dry_run=${AURELIA_AUTOSLEEP_DRY_RUN:-0}
 state=${AURELIA_AUTOSLEEP_STATE:-/run/aurelia-autosleep}
@@ -24,15 +26,24 @@ say() { if [ "$dry_run" = 1 ]; then echo "$1"; fi; }
 minutes() { echo $(( 10#${1%%:*} * 60 + 10#${1##*:} )); }
 
 sleep_now() {
-  local wake
-  wake=$(date -d "today $AWAKE_FROM" +%s)
-  (( wake <= now )) && wake=$(date -d "tomorrow $AWAKE_FROM" +%s)
-  if [ "$dry_run" = 1 ]; then echo "sleep until $(date -d "@$wake" '+%a %H:%M'): $1"; exit 0; fi
+  local wake="" until="a Wake-on-LAN call"
+  if [ -n "$AWAKE_FROM" ]; then
+    wake=$(date -d "today $AWAKE_FROM" +%s)
+    (( wake <= now )) && wake=$(date -d "tomorrow $AWAKE_FROM" +%s)
+    until="$(date -d "@$wake" '+%a %H:%M') or a Wake-on-LAN call"
+  fi
+  if [ "$dry_run" = 1 ]; then echo "sleep until $until: $1"; exit 0; fi
   rm -f "$ready"
-  logger -t aurelia-autosleep "$1: sleeping until $(date -d "@$wake" '+%a %H:%M') or a Wake-on-LAN call."
+  logger -t aurelia-autosleep "$1: sleeping until $until."
   # After waking, devices get a fresh idle period to connect.
-  echo "$wake" > "$state/last-active"
-  rtcwake -m mem -t "$wake" >/dev/null
+  echo "$now" > "$state/last-active"
+  if [ -n "$wake" ]; then
+    rtcwake -m mem -t "$wake" >/dev/null
+  else
+    # A wake time left from earlier awake hours must not wake it now.
+    rtcwake -m disable >/dev/null 2>&1 || true
+    echo mem > /sys/power/state
+  fi
   date +%s > "$state/last-active"
   exit 0
 }
@@ -61,16 +72,18 @@ if $busy; then
   exit 0
 fi
 
-current=$(minutes "$(date +%H:%M)")
-from=$(minutes "$AWAKE_FROM")
-until=$(minutes "$AWAKE_UNTIL")
-in_window=false
-if (( from < until )); then
-  (( current >= from && current < until )) && in_window=true
-else
-  (( current >= from || current < until )) && in_window=true
+if [ -n "$AWAKE_FROM" ] && [ -n "$AWAKE_UNTIL" ]; then
+  current=$(minutes "$(date +%H:%M)")
+  from=$(minutes "$AWAKE_FROM")
+  until=$(minutes "$AWAKE_UNTIL")
+  in_window=false
+  if (( from < until )); then
+    (( current >= from && current < until )) && in_window=true
+  else
+    (( current >= from || current < until )) && in_window=true
+  fi
+  if $in_window; then say "awake: $AWAKE_FROM-$AWAKE_UNTIL"; exit 0; fi
 fi
-if $in_window; then say "awake: $AWAKE_FROM-$AWAKE_UNTIL"; exit 0; fi
 
 last=$(cat "$state/last-active")
 if (( now - last < IDLE_MINUTES * 60 )); then

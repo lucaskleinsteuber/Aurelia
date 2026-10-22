@@ -124,11 +124,15 @@ step "Sleep mode decisions (without sleeping)"
 aurelia sleep on --idle 5 --awake 17:00-23:30 >/dev/null
 systemctl is-enabled --quiet aurelia-autosleep.timer || fail "sleep mode did not turn on"
 grep -F 'IDLE_MINUTES=5' /etc/aurelia-autosleep.conf >/dev/null || fail "sleep settings were not saved"
+grep -F 'AWAKE_FROM=17:00' /etc/aurelia-autosleep.conf >/dev/null || fail "awake hours were not saved"
+aurelia sleep on --awake off >/dev/null
+grep -Fx 'AWAKE_FROM=' /etc/aurelia-autosleep.conf >/dev/null || fail "awake hours were not removed"
+grep -F 'IDLE_MINUTES=5' /etc/aurelia-autosleep.conf >/dev/null || fail "removing awake hours lost the idle time"
 dry() { AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$media/sleep-state" /opt/aurelia/aurelia-autosleep; }
 dry | has 'awake: signed in over SSH' || [ -z "${SSH_CONNECTION:-}" ] || fail "an SSH session must keep the server awake"
 if [ -z "${SSH_CONNECTION:-}" ]; then
   date +%s > /var/lib/aurelia/sleep-ready
-  dry | has 'sleep until' || fail "an ended sleep timer did not lead to sleep"
+  dry | has 'sleep until a Wake-on-LAN call' || fail "an ended sleep timer did not lead to sleep"
   rm -f /var/lib/aurelia/sleep-ready
 fi
 aurelia sleep off >/dev/null

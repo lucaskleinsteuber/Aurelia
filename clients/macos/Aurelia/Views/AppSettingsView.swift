@@ -13,6 +13,7 @@ struct AppSettingsView: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject private var playbackPreferences = PlaybackPreferencesStore.shared
+  @AppStorage(WindowClosePreference.quitsKey) private var quitsWhenWindowCloses = true
   @State private var selectedPage: SettingsPage = .general
   @State private var libraryToRemove: LibrarySummary?
   @State private var showingSwitchConfirmation = false
@@ -298,9 +299,21 @@ struct AppSettingsView: View {
     AureliaSettingsSection(
       "Interface",
       symbol: "macwindow",
-      description: "Aurelia follows your Mac accessibility settings automatically."
+      description: "Choose what closing the window does. Aurelia follows your Mac accessibility settings."
     ) {
       VStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle("Quit When the Window Closes", isOn: $quitsWhenWindowCloses)
+            .accessibilityIdentifier("interface-quit-on-close")
+          Text(
+            model.isLocalHost
+              ? "Ends the connection to the server. A server that runs only while Aurelia is open stops too."
+              : "Ends the connection to the server, so a server in sleep mode can go to sleep."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
         LabeledContent("Appearance", value: "Dark Cinema")
         LabeledContent("Reduced Motion", value: "Follows System Settings")
         LabeledContent("Reduced Transparency", value: "Follows System Settings")

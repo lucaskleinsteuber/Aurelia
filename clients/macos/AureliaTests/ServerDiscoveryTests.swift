@@ -109,6 +109,15 @@ struct ServerDiscoveryTests {
     #expect(Array(packet[96..<102]) == [0x02, 0x00, 0x5E, 0x10, 0x00, 0x01])
   }
 
+  @Test func closingTheWindowQuitsUnlessTurnedOff() throws {
+    let suite = "AureliaWindowCloseTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    #expect(WindowClosePreference.quits(defaults: defaults))
+    defaults.set(false, forKey: WindowClosePreference.quitsKey)
+    #expect(!WindowClosePreference.quits(defaults: defaults))
+  }
+
   @Test(arguments: [true, false])
   func contradictoryIdentityCannotBeSelected(replaceID: Bool) async throws {
     let stored = profile()

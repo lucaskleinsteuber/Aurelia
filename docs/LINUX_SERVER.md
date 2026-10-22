@@ -69,22 +69,23 @@ renamed or moved on such a drive is added again rather than followed.
 
 ## Sleep mode
 
-An always-on PC uses a lot of power for a server that is only watched in the evening. Sleep mode
-lets it sleep (suspend to RAM, a few watts) when nobody uses it:
+An always-on PC uses a lot of power for a server that is only watched now and then. Sleep mode
+lets it sleep (suspend to RAM, a few watts) when nobody uses it, and Aurelia on a Mac wakes it
+again (Wake-on-LAN):
 
 ```sh
-sudo aurelia sleep on --idle 30 --awake 17:00-23:30
+sudo aurelia sleep on --idle 15
 aurelia sleep status
 sudo aurelia sleep off
 ```
 
 - Five minutes after a player's sleep timer ends on a Mac or Apple TV, and nothing played since
   on any device, the server sleeps, at any time of day and even if the app is still open.
-- Otherwise it sleeps after `--idle` minutes without a connected device, but never during the
-  `--awake` hours, so an Apple TV finds it then without waking it.
-- It wakes itself at the start of the awake hours. Aurelia on a Mac wakes it at any time when it
-  does not answer (Wake-on-LAN), and a router such as a Fritzbox can wake it too. An Apple TV cannot
-  send Wake-on-LAN packets.
+- Otherwise it sleeps after `--idle` minutes (15 by default) without a connected device.
+- Aurelia on a Mac wakes it at any time when it does not answer, and a router such as a Fritzbox
+  can wake it too. An Apple TV cannot send Wake-on-LAN packets: open Aurelia on a Mac first, or
+  keep it awake for the evening with awake hours, for example `--awake 17:00-23:30`. It then never
+  sleeps during those hours and wakes itself at their start. `--awake off` removes them again.
 - Someone signed in over SSH keeps it awake. Settings are in `/etc/aurelia-autosleep.conf`.
 
 Wake-on-LAN is allowed by the installer for the network card that leads to the home network.

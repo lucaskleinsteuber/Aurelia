@@ -45,6 +45,16 @@ struct AureliaApp: App {
   }
 }
 
+/// Quitting when the window closes ends the connection, so a sleeping Linux server is not kept
+/// awake by an app left running without a window.
+enum WindowClosePreference {
+  static let quitsKey = "AureliaQuitsWhenWindowCloses"
+
+  static func quits(defaults: UserDefaults = .standard) -> Bool {
+    defaults.object(forKey: quitsKey) as? Bool ?? true
+  }
+}
+
 @MainActor
 final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -62,6 +72,10 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
     sender.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
     sender.activate()
     return true
+  }
+
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    WindowClosePreference.quits()
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
