@@ -55,12 +55,17 @@ struct TVConnectionView: View {
   var body: some View {
     ScrollView {
       VStack(spacing: 30) {
-        Image(systemName: "play.rectangle.fill").font(.system(size: 64)).foregroundStyle(.secondary)
-        Text("Aurelia").font(.system(size: 54, weight: .bold))
-        Text("Connect to your server").font(.title2)
-        if let error = model.error { TVErrorText(message: error) }
-        if model.connection != nil {
-          Button("Reconnect") { Task { await model.reconnect() } }.disabled(model.isBusy)
+        if model.savedServerUnreachable, let saved = model.connection {
+          TVServerAsleepNotice(name: saved.name)
+        } else {
+          Image(systemName: "play.rectangle.fill").font(.system(size: 64)).foregroundStyle(
+            .secondary)
+          Text("Aurelia").font(.system(size: 54, weight: .bold))
+          Text("Connect to your server").font(.title2)
+          if let error = model.error { TVErrorText(message: error) }
+          if model.connection != nil {
+            Button("Reconnect") { Task { await model.reconnect() } }.disabled(model.isBusy)
+          }
         }
         ForEach(browser.servers) { server in
           Button {
@@ -82,6 +87,41 @@ struct TVConnectionView: View {
         }.frame(width: 700).padding(.top, 18)
         if model.isBusy { ProgressView("Connecting…") }
       }.padding(70).frame(maxWidth: .infinity)
+    }
+  }
+}
+
+/// The saved server is silent, most likely asleep. This Apple TV keeps trying while the hint shows,
+/// so waking the server with Aurelia on a Mac is enough.
+struct TVServerAsleepNotice: View {
+  @EnvironmentObject private var model: TVAppModel
+  let name: String
+
+  var body: some View {
+    VStack(spacing: 26) {
+      Image(systemName: "moon.zzz.fill").font(.system(size: 64)).foregroundStyle(.secondary)
+      Text("\(name) Isn’t Answering").font(.system(size: 48, weight: .bold))
+        .multilineTextAlignment(.center)
+      Text(
+        "The server may be asleep. Open Aurelia on your Mac to wake it. This Apple TV connects again by itself."
+      )
+      .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      .frame(maxWidth: 1100)
+      if model.isBusy {
+        ProgressView("Connecting to \(name)…")
+      } else {
+        Button("Try Again") { Task { await model.reconnect() } }
+          .accessibilityIdentifier("tv-server-retry")
+      }
+    }
+    .padding(.bottom, 20)
+    .accessibilityIdentifier("tv-server-asleep")
+    .task {
+      // Tries again every half minute while the hint is shown.
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        if !model.isBusy { await model.reconnect() }
+      }
     }
   }
 }

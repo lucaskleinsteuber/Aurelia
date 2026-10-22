@@ -52,6 +52,18 @@ enum TVServerDate {
   }
 }
 
+/// A saved server that answers not at all, as when its computer sleeps, unlike one that answers with
+/// an error. An Apple TV cannot wake a server; Aurelia on a Mac can.
+enum TVServerReachability {
+  static func isUnreachable(_ error: Error) -> Bool {
+    guard let error = error as? URLError else { return false }
+    return [
+      .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed,
+      .notConnectedToInternet, .secureConnectionFailed,
+    ].contains(error.code)
+  }
+}
+
 struct TVStoredConnection: Codable, Equatable, Sendable {
   let serverID: UUID
   let name: String

@@ -15,6 +15,17 @@ struct TVCoreTests {
     #expect(pool.lease(host: "tv.local", fingerprint: "aa").session !== first.session)
   }
 
+  @Test func onlyASilentServerCountsAsAsleep() {
+    #expect(TVServerReachability.isUnreachable(URLError(.cannotConnectToHost)))
+    #expect(TVServerReachability.isUnreachable(URLError(.timedOut)))
+    // A server that answers with an error, or another failure, is not asleep.
+    #expect(
+      !TVServerReachability.isUnreachable(
+        TVCoreError.server(status: 503, code: nil, message: nil, retryAfter: nil)))
+    #expect(!TVServerReachability.isUnreachable(TVCoreError.identityMismatch))
+    #expect(!TVServerReachability.isUnreachable(URLError(.cancelled)))
+  }
+
   private static let fingerprint = String(repeating: "A", count: 64)
   private static let serverID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
   private static let profileID = UUID(uuidString: "20000000-0000-0000-0000-000000000001")!

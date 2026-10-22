@@ -13,6 +13,8 @@ final class TVAppModel: ObservableObject {
   @Published private(set) var profiles: [TVWatchingProfile] = []
   @Published private(set) var isBusy = false
   @Published private(set) var error: String?
+  /// The saved server did not answer at all, probably asleep: shown as a hint, not as an error.
+  @Published private(set) var savedServerUnreachable = false
   @Published var selectedProfile: TVWatchingProfile?
   @Published private(set) var detailRefresh = UUID()
   let browser = TVBonjourBrowser()
@@ -127,9 +129,16 @@ final class TVAppModel: ObservableObject {
       guard current(run) else { return }
       try saveCredentials(relocated)
       connection = relocated
+      savedServerUnreachable = false
       try await loadProfiles(run: run)
     } catch {
-      show(error, run: run)
+      if current(run), TVServerReachability.isUnreachable(error) {
+        savedServerUnreachable = true
+        self.error = nil
+      } else {
+        savedServerUnreachable = false
+        show(error, run: run)
+      }
       if current(run) {
         phase = .connection
         startDiscovery()
@@ -363,6 +372,8 @@ final class TVAppModel: ObservableObject {
     isForeground = true
     scheduleLibraryRefresh()
     if phase == .connection { startDiscovery() }
+    // The server may have been woken meanwhile, for example by opening Aurelia on a Mac.
+    if phase == .connection, savedServerUnreachable { Task { await reconnect() } }
     if phase == .profiles, selectedProfile == nil { Task { await refreshProfiles() } }
     if let session, let date = TVServerDate.parse(session.expiresAt), date <= Date() {
       Task { await switchProfile() }
