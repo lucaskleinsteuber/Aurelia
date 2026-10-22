@@ -21,7 +21,11 @@ struct ProfilePickerView: View {
     GeometryReader { geometry in
       ScrollView {
         VStack(spacing: 34) {
-          if model.managementSetupRequired {
+          if model.connectionStatus != nil
+            || (model.serverUnreachable && model.watchingProfiles.isEmpty)
+          {
+            ServerUnreachableView()
+          } else if model.managementSetupRequired {
             Text("Set Up Viewing Profiles").font(.largeTitle.weight(.semibold))
             firstSetup
             selectionFeedback

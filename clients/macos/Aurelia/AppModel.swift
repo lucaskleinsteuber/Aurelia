@@ -95,6 +95,11 @@ final class AppModel: ObservableObject {
   @Published private(set) var metadataJob: MetadataJobSummary?
   @Published private(set) var needsInitialLibrarySetup = false
   @Published private(set) var isStarting = true
+  /// What connecting to a remote server is doing right now, shown instead of a bare spinner.
+  @Published private(set) var connectionStatus: ServerConnectionStatus?
+  /// The server stayed silent even after being woken: shown as a calm hint with Try Again.
+  @Published private(set) var serverUnreachable = false
+  var serverWakeUp = ServerWakeUp()
   @Published private(set) var isWorking = false
   @Published private(set) var isRecoveringLocalHost = false
   @Published var errorMessage: String?
@@ -556,17 +561,50 @@ final class AppModel: ObservableObject {
       )
       if operatingMode == .host {
         await startNativeHost()
-      } else if profile != nil {
+      } else if let profile {
+        await wakeServerIfAsleep(profile)
         try await refresh(requireCompleteSnapshot: true)
         startSync()
       }
     } catch {
       if !handleSessionFailure(error) {
+        serverUnreachable = ServerReconnectPolicy.isConnectivityFailure(error)
         errorMessage = error.localizedDescription
         beginReconnectIfNeeded(after: error)
       }
     }
+    connectionStatus = nil
     isStarting = false
+  }
+
+  /// Wakes a sleeping server before the first request, so opening Aurelia shows its progress
+  /// instead of waiting for a request to time out. Opening the app counts as someone present.
+  private func wakeServerIfAsleep(_ profile: StoredServerProfile) async {
+    connectionStatus = .connecting
+    let answers = await serverWakeUp.run(serverId: profile.serverId, address: profile.baseURL) {
+      connectionStatus = .waking(since: Date())
+    }
+    connectionStatus = answers ? .loading : nil
+  }
+
+  /// Try Again after the server stayed silent: wake it once more and reload what was showing.
+  func retryConnection() async {
+    guard operatingMode != .host, let device = deviceConnection ?? profile,
+      connectionStatus == nil
+    else { return }
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
+    serverUnreachable = false
+    errorMessage = nil
+    profileSelectionError = nil
+    await wakeServerIfAsleep(device)
+    defer { connectionStatus = nil }
+    if requiresProfileSelection {
+      await reloadWatchingProfiles()
+    } else {
+      await refreshFromUI()
+    }
   }
 
   func selectClientMode() {
@@ -2137,6 +2175,7 @@ final class AppModel: ObservableObject {
     watchingProfiles = response.profiles
     managementSetupRequired = response.managementSetupRequired
     profileSelectionError = nil
+    serverUnreachable = false
   }
 
   func reloadWatchingProfiles() async {
@@ -2145,6 +2184,7 @@ final class AppModel: ObservableObject {
       guard selection == profileSelectionGeneration, profile?.isViewingSession != true else {
         return
       }
+      serverUnreachable = ServerReconnectPolicy.isConnectivityFailure(error)
       profileSelectionError = error.localizedDescription
       if !handleSessionFailure(error) { beginReconnectIfNeeded(after: error) }
     }
@@ -2815,6 +2855,7 @@ final class AppModel: ObservableObject {
           guard self.isCurrent(resumedGeneration) else { return }
           self.errorMessage = nil
           self.profileSelectionError = nil
+          self.serverUnreachable = false
           self.synchronizationErrorMessage = nil
           self.startSync()
         } catch let failure as APIClientError where failure.httpStatus == 401 {

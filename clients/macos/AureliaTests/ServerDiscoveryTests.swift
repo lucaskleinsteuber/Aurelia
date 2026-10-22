@@ -109,6 +109,74 @@ struct ServerDiscoveryTests {
     #expect(Array(packet[96..<102]) == [0x02, 0x00, 0x5E, 0x10, 0x00, 0x01])
   }
 
+  @Test func openingAureliaWakesASleepingServerAndWaitsForIt() async {
+    let serverId = UUID()
+    let address = URL(string: "https://192.0.2.10:43111")!
+    var clock = Date(timeIntervalSince1970: 0)
+    var probes = 0
+    var wakes: [Date] = []
+    var waking = 0
+    var wakeUp = ServerWakeUp()
+    wakeUp.probe = { _ in
+      probes += 1
+      return probes > 8
+    }
+    wakeUp.canWake = { $0 == serverId }
+    wakeUp.wake = { _, _ in wakes.append(clock) }
+    wakeUp.delay = { clock += $0 }
+    wakeUp.now = { clock }
+    let answers = await wakeUp.run(serverId: serverId, address: address) { waking += 1 }
+    #expect(answers)
+    #expect(waking == 1)
+    // Packets go out at once and again every ten seconds while it starts.
+    #expect(wakes.map(\.timeIntervalSince1970) == [0, 10])
+  }
+
+  @Test func anAwakeServerIsNotWokenAndOneWithoutWakeAddressIsOnlyAwaitedBriefly() async {
+    var clock = Date(timeIntervalSince1970: 0)
+    var wakeUp = ServerWakeUp()
+    var delays = 0
+    wakeUp.delay = {
+      delays += 1
+      clock += $0
+    }
+    wakeUp.now = { clock }
+    wakeUp.wake = { _, _ in Issue.record("this server must not be woken") }
+    wakeUp.probe = { _ in true }
+    let address = URL(string: "https://192.0.2.10:43111")!
+    #expect(await wakeUp.run(serverId: UUID(), address: address) {})
+    #expect(delays == 0)
+    // A server that stopped only Aurelia starts it again by itself; it is awaited, not woken.
+    var probes = 0
+    wakeUp.probe = { _ in
+      probes += 1
+      return probes > 3
+    }
+    wakeUp.canWake = { _ in false }
+    var waking = false
+    #expect(await wakeUp.run(serverId: UUID(), address: address) { waking = true })
+    #expect(!waking)
+    wakeUp.probe = { _ in false }
+    clock = Date(timeIntervalSince1970: 0)
+    #expect(!(await wakeUp.run(serverId: UUID(), address: address) {}))
+    #expect(clock.timeIntervalSince1970 == wakeUp.startLimit)
+  }
+
+  @Test func aServerThatNeverWakesIsGivenUpAfterTheLimit() async {
+    var clock = Date(timeIntervalSince1970: 0)
+    var wakeUp = ServerWakeUp()
+    wakeUp.probe = { _ in false }
+    wakeUp.canWake = { _ in true }
+    wakeUp.wake = { _, _ in }
+    wakeUp.delay = { clock += $0 }
+    wakeUp.now = { clock }
+    let answers = await wakeUp.run(
+      serverId: UUID(), address: URL(string: "https://192.0.2.10:43111")!
+    ) {}
+    #expect(!answers)
+    #expect(clock.timeIntervalSince1970 == wakeUp.limit)
+  }
+
   @Test func closingTheWindowQuitsUnlessTurnedOff() throws {
     let suite = "AureliaWindowCloseTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))

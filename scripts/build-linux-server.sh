@@ -27,8 +27,9 @@ for arch in x64 arm64; do
   assets_path=$("$DOTNET_BIN" msbuild "$project" -getProperty:ProjectAssetsFile)
   zsh "$repository_root/scripts/collect-third-party-notices.sh" \
     "$stage/server/Aurelia.Server.deps.json" "$assets_path" "$stage/notices"
-  for file in install.sh aurelia aurelia.service aurelia-autosleep aurelia-autosleep.service \
-    aurelia-autosleep.timer aurelia-wake-on-lan aurelia-wake-on-lan.service; do
+  for file in install.sh aurelia aurelia.service aurelia-autosleep aurelia-sleep-settings aurelia-autosleep.service \
+    aurelia-autosleep.timer aurelia-wake-on-lan aurelia-wake-on-lan.service aurelia-start.socket \
+    aurelia-start.service; do
     cp "$repository_root/packaging/linux/$file" "$stage/"
   done
   chmod 0755 "$stage/install.sh" "$stage/aurelia" "$stage/aurelia-autosleep" "$stage/aurelia-wake-on-lan" \

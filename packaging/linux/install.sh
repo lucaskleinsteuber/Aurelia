@@ -32,10 +32,11 @@ firewall() {
 if [ "${1:-}" = --uninstall ]; then
   remove_data=false
   [ "${2:-}" = --remove-data ] && remove_data=true
-  systemctl disable --now aurelia aurelia-autosleep.timer 2>/dev/null || true
+  systemctl disable --now aurelia aurelia-autosleep.timer aurelia-start.socket 2>/dev/null || true
   systemctl disable aurelia-wake-on-lan.service 2>/dev/null || true
-  rm -f "$unit" "$command_path" /etc/systemd/system/aurelia-autosleep.service \
-    /etc/systemd/system/aurelia-autosleep.timer /etc/systemd/system/aurelia-wake-on-lan.service
+  rm -f "$unit" "$command_path" /etc/aurelia-autosleep.conf /etc/systemd/system/aurelia-autosleep.service \
+    /etc/systemd/system/aurelia-autosleep.timer /etc/systemd/system/aurelia-wake-on-lan.service \
+    /etc/systemd/system/aurelia-start.socket /etc/systemd/system/aurelia-start.service
   systemctl daemon-reload
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
     ufw delete allow "$lan_port/tcp" >/dev/null 2>&1 || true
@@ -45,7 +46,7 @@ if [ "${1:-}" = --uninstall ]; then
   if $remove_data; then
     read -r -p "Delete the server data in $data_dir (accounts, library, progress)? [y/N] " answer
     case "$answer" in
-      y|Y|yes|YES) rm -rf "$data_dir" /etc/aurelia-autosleep.conf; userdel aurelia 2>/dev/null || true; echo "Server data deleted." ;;
+      y|Y|yes|YES) rm -rf "$data_dir"; userdel aurelia 2>/dev/null || true; echo "Server data deleted." ;;
       *) echo "Server data kept in $data_dir." ;;
     esac
   else
@@ -85,7 +86,8 @@ install -d -o aurelia -g aurelia -m 0700 "$data_dir"
 
 updating=false
 [ -d "$install_root/server" ] && updating=true
-systemctl stop aurelia 2>/dev/null || true
+# A device connecting meanwhile must not start the program while it is replaced.
+systemctl stop aurelia-start.socket aurelia 2>/dev/null || true
 
 # The new program is copied next to the old one first, so a failed copy leaves the old one whole.
 install -d -m 0755 "$install_root"
@@ -105,19 +107,34 @@ install -m 0644 "$package_root/VERSION" "$install_root/VERSION"
 install -m 0755 "$package_root/install.sh" "$install_root/install.sh"
 install -m 0755 "$package_root/aurelia" "$command_path"
 install -m 0644 "$package_root/aurelia.service" "$unit"
-# Wake-on-LAN is always allowed; sleep mode stays as it was and only `sudo aurelia sleep on`
-# turns it on.
+# Wake-on-LAN is always allowed. Power saving stays as it was; it is turned on in the app's server
+# settings or with `sudo aurelia sleep`.
 install -m 0755 "$package_root/aurelia-autosleep" "$install_root/aurelia-autosleep"
+install -m 0644 "$package_root/aurelia-sleep-settings" "$install_root/aurelia-sleep-settings"
 install -m 0755 "$package_root/aurelia-wake-on-lan" "$install_root/aurelia-wake-on-lan"
-for sleep_unit in aurelia-autosleep.service aurelia-autosleep.timer aurelia-wake-on-lan.service; do
+for sleep_unit in aurelia-autosleep.service aurelia-autosleep.timer aurelia-wake-on-lan.service \
+  aurelia-start.socket aurelia-start.service; do
   install -m 0644 "$package_root/$sleep_unit" "/etc/systemd/system/$sleep_unit"
 done
 chown -R root:root "$install_root/notices" "$install_root/VERSION" "$install_root/install.sh"
+
+# Sleep settings used to be in /etc (1.8.2-1.8.3), with the timer's state as on/off. They move
+# to the data folder, where the app can change them; the timer then runs always.
+settings="$data_dir/sleep-settings"
+if [ ! -e "$settings" ]; then
+  . "$install_root/aurelia-sleep-settings"
+  read_sleep_settings /etc/aurelia-autosleep.conf
+  MODE=off
+  systemctl is-enabled --quiet aurelia-autosleep.timer 2>/dev/null && MODE=sleep
+  write_sleep_settings "$settings"
+fi
+rm -f /etc/aurelia-autosleep.conf
 
 systemctl daemon-reload
 systemctl enable aurelia >/dev/null
 systemctl start aurelia
 systemctl enable --now aurelia-wake-on-lan.service >/dev/null 2>&1 || true
+systemctl enable --now aurelia-autosleep.timer >/dev/null
 firewall
 
 echo "Aurelia Server $(cat "$install_root/VERSION") is installed and runs as a service."

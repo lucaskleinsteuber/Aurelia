@@ -1,0 +1,8 @@
+[Unit]
+Description=Start Aurelia Server for a connecting device
+
+[Service]
+Type=oneshot
+# Not waiting lets this job end before starting Aurelia closes the socket that started it. The
+# device's first attempt is dropped; Aurelia apps try again until the server answers.
+ExecStart=/bin/systemctl --no-block start aurelia.service

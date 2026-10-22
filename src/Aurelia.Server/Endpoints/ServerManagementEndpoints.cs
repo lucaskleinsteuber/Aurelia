@@ -22,6 +22,8 @@ public static class ServerManagementEndpoints
         server.MapPost("/operations/{id:guid}/confirm", async (HttpContext context, Guid id, NativeHostOperations operations) =>
         { await operations.ConfirmAsync(id, context.User.RequireSessionId(), context.RequestAborted); return Results.NoContent(); });
         server.MapGet("/diagnostics", (ServerDiagnosticsStore diagnostics) => diagnostics.Read());
+        server.MapGet("/power", (ServerPowerSettingsStore power) => power.Read());
+        server.MapPut("/power", (UpdateServerPowerSettingsRequest request, ServerPowerSettingsStore power) => power.Update(request));
         server.MapGet("/jobs", async (LibraryService libraries, MetadataService metadata, CancellationToken token) => new
         { scans = await libraries.ListScansAsync(null, false, 100, token), metadata = await metadata.ListJobsAsync(false, 100, token) });
         app.MapPost("/api/v1/metadata/jobs/{id:guid}/retry", (Guid id, MetadataService metadata, CancellationToken token) => metadata.RetryJobAsync(id, token))

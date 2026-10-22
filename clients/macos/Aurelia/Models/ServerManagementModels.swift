@@ -146,3 +146,14 @@ struct UserAccessSummary: Codable, Identifiable, Sendable {
   let isEnabled: Bool
   let libraryIds: [UUID]
 }
+
+/// What a Linux server installed from the package does when unused: "off" keeps it running,
+/// "stop" stops only Aurelia Server until a device connects, "sleep" puts the computer to sleep.
+/// Times are 24-hour "HH:MM", and both are nil when the server has no awake hours.
+struct ServerPowerSettings: Codable, Equatable, Sendable {
+  var available: Bool
+  var mode: String
+  var idleMinutes: Int
+  var awakeFrom: String?
+  var awakeUntil: String?
+}

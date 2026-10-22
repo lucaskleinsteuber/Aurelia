@@ -67,26 +67,33 @@ favorites; they come back when the drive does. On exFAT, FAT and FUSE drives Lin
 file numbers at every mount, so Aurelia recognizes files there by their path only: a file that is
 renamed or moved on such a drive is added again rather than followed.
 
-## Sleep mode
+## Saving power
 
-An always-on PC uses a lot of power for a server that is only watched now and then. Sleep mode
-lets it sleep (suspend to RAM, a few watts) when nobody uses it, and Aurelia on a Mac wakes it
-again (Wake-on-LAN):
+When nobody uses Aurelia, the server can save power. Choose it in Aurelia on a Mac under
+Settings › Server › Power, or over SSH:
 
 ```sh
-sudo aurelia sleep on --idle 15
-aurelia sleep status
-sudo aurelia sleep off
+sudo aurelia sleep server --idle 15   # stop only Aurelia Server; the computer stays on
+sudo aurelia sleep on --idle 15       # put the whole computer to sleep
+sudo aurelia sleep off                # keep running (the default)
+sudo aurelia sleep status
 ```
 
-- Five minutes after a player's sleep timer ends on a Mac or Apple TV, and nothing played since
-  on any device, the server sleeps, at any time of day and even if the app is still open.
-- Otherwise it sleeps after `--idle` minutes (15 by default) without a connected device.
-- Aurelia on a Mac wakes it at any time when it does not answer, and a router such as a Fritzbox
-  can wake it too. An Apple TV cannot send Wake-on-LAN packets: open Aurelia on a Mac first, or
-  keep it awake for the evening with awake hours, for example `--awake 17:00-23:30`. It then never
-  sleeps during those hours and wakes itself at their start. `--awake off` removes them again.
-- Someone signed in over SSH keeps it awake. Settings are in `/etc/aurelia-autosleep.conf`.
+- **Stop Aurelia Server** suits a computer that also does other work, such as a NAS. Aurelia
+  Server stops and systemd listens on its port instead (`aurelia-start.socket`). When a Mac or
+  Apple TV connects, Aurelia starts again within seconds; the app's first attempt is dropped and
+  it tries again by itself.
+- **Put the computer to sleep** suspends it to RAM, using a few watts. Aurelia on a Mac wakes it
+  when you open it (Wake-on-LAN), and a router such as a Fritzbox can wake it too. An Apple TV
+  cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH keeps
+  the computer awake.
+- Either happens after `--idle` minutes (15 by default) without a connected device, and five
+  minutes after a player's sleep timer ends on a Mac or Apple TV if nothing played since on any
+  device, at any time of day and even if the app is still open.
+- Optional awake hours, for example `--awake 17:00-23:30`, keep it running during those hours; a
+  sleeping computer then also wakes itself at their start. `--awake off` removes them.
+- The settings are in `/var/lib/aurelia/sleep-settings`; `aurelia-autosleep.timer` checks them
+  every five minutes.
 
 Wake-on-LAN is allowed by the installer for the network card that leads to the home network.
 Some computers also need it allowed in the BIOS (often "Power On By PCI-E" on, "ErP" off), and a

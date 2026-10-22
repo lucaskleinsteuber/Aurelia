@@ -1,0 +1,11 @@
+[Unit]
+Description=Start Aurelia Server when a device connects
+# Listens only while Aurelia Server is stopped to save power; starting Aurelia closes it.
+Conflicts=aurelia.service
+# Ordering makes systemd stop one completely before the other takes the port, in both directions.
+After=aurelia.service
+
+[Socket]
+ListenStream=43111
+ListenStream=127.0.0.1:43110
+Service=aurelia-start.service

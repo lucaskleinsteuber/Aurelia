@@ -46,6 +46,7 @@ struct ServerManagementView: View {
             }
             .id("essentials-\(configuration.stored.revision)")
           }
+          if let client { ServerPowerEditor(client: client) }
           profiles
           ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
             if let status { ServerDetailsBox(status: status) }

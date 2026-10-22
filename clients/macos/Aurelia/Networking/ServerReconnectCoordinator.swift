@@ -47,7 +47,8 @@ final class ServerReconnectCoordinator {
 
   init(
     browser: any ServerDiscovery = BonjourBrowser(),
-    inspect: @escaping Inspector = { try await APIClient.inspect(baseURL: $0) },
+    // A server on the home network answers within moments; a sleeping one never does.
+    inspect: @escaping Inspector = { try await APIClient.inspect(baseURL: $0, timeout: 4) },
     delay: @escaping Delay = { try await Task.sleep(for: .seconds($0)) },
     wake: @escaping Waker = { serverId, address in
       if WakeOnLan.userIsPresent { WakeOnLan.wake(serverId: serverId, lastKnown: address) }

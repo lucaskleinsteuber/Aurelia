@@ -64,7 +64,7 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac release is 1.8.3 (87) (Wake-on-LAN only, quit when the window closes); the
+  changing them. The approved Mac release is 1.8.4 (88) (waking at startup, power settings in the app); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
   sleep-timer update is 0.3.4 (15).
 - Keep tvOS in its own Xcode project with no Mac source references or shared

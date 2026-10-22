@@ -1,7 +1,8 @@
 #!/bin/bash
 # Checks an unpacked Linux server package on this Linux computer with synthetic data only:
-# installation as a service, headless setup, approving a device, a library with a scan,
-# restart, update over the existing installation and uninstalling. With --exfat it also mounts
+# installation as a service, headless setup, approving a device, a library with a scan, power
+# saving decisions, stopping Aurelia and starting it on a connection, restart, update over the
+# existing installation and uninstalling. With --exfat it also mounts
 # a synthetic exFAT image through /etc/fstab (restored afterwards) to check that its files get
 # no unstable identity and that the unplugged drive counts as unavailable. Everything it adds,
 # including the server data, is removed at the end. It refuses to run where Aurelia is set up.
@@ -120,23 +121,45 @@ if $exfat; then
     || fail "the reconnected drive did not come back"
 fi
 
-step "Sleep mode decisions (without sleeping)"
+step "Power saving decisions (without sleeping)"
+settings=/var/lib/aurelia/sleep-settings
+systemctl is-enabled --quiet aurelia-autosleep.timer || fail "the power check must run after installing"
+grep -Fx 'MODE=off' "$settings" >/dev/null || fail "power saving must start off"
 aurelia sleep on --idle 5 --awake 17:00-23:30 >/dev/null
-systemctl is-enabled --quiet aurelia-autosleep.timer || fail "sleep mode did not turn on"
-grep -F 'IDLE_MINUTES=5' /etc/aurelia-autosleep.conf >/dev/null || fail "sleep settings were not saved"
-grep -F 'AWAKE_FROM=17:00' /etc/aurelia-autosleep.conf >/dev/null || fail "awake hours were not saved"
+grep -Fx 'MODE=sleep' "$settings" >/dev/null || fail "sleep mode did not turn on"
+grep -Fx 'IDLE_MINUTES=5' "$settings" >/dev/null || fail "sleep settings were not saved"
+grep -Fx 'AWAKE_FROM=17:00' "$settings" >/dev/null || fail "awake hours were not saved"
+[ "$(stat -c %U:%a "$settings")" = aurelia:600 ] || fail "the server must own its power settings"
 aurelia sleep on --awake off >/dev/null
-grep -Fx 'AWAKE_FROM=' /etc/aurelia-autosleep.conf >/dev/null || fail "awake hours were not removed"
-grep -F 'IDLE_MINUTES=5' /etc/aurelia-autosleep.conf >/dev/null || fail "removing awake hours lost the idle time"
+grep -Fx 'AWAKE_FROM=' "$settings" >/dev/null || fail "awake hours were not removed"
+grep -Fx 'IDLE_MINUTES=5' "$settings" >/dev/null || fail "removing awake hours lost the idle time"
 dry() { AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$media/sleep-state" /opt/aurelia/aurelia-autosleep; }
-dry | has 'awake: signed in over SSH' || [ -z "${SSH_CONNECTION:-}" ] || fail "an SSH session must keep the server awake"
+dry | has 'awake: signed in over SSH' || [ -z "${SSH_CONNECTION:-}" ] || fail "an SSH session must keep the computer awake"
 if [ -z "${SSH_CONNECTION:-}" ]; then
   date +%s > /var/lib/aurelia/sleep-ready
   dry | has 'sleep until a Wake-on-LAN call' || fail "an ended sleep timer did not lead to sleep"
   rm -f /var/lib/aurelia/sleep-ready
 fi
+# A line the server's user could write must never run as root.
+printf 'MODE=sleep\nIDLE_MINUTES=$(touch /tmp/aurelia-injected)\n' > "$settings"
+dry >/dev/null
+[ ! -e /tmp/aurelia-injected ] || fail "power settings were run as a script"
+
+step "Stop only Aurelia and start it again when a device connects"
+aurelia sleep server --idle 5 >/dev/null
+grep -Fx 'MODE=stop' "$settings" >/dev/null || fail "stopping only Aurelia was not saved"
+date +%s > /var/lib/aurelia/sleep-ready
+/opt/aurelia/aurelia-autosleep
+! systemctl is-active --quiet aurelia || fail "Aurelia did not stop after a sleep timer"
+systemctl is-active --quiet aurelia-start.socket || fail "nothing waits for devices while Aurelia is stopped"
+aurelia status | has 'stopped to save power' || fail "the status does not say that Aurelia is stopped"
+curl -ks --max-time 3 https://127.0.0.1:43111/api/v1/server/info >/dev/null || true
+for _ in $(seq 1 30); do aurelia status 2>/dev/null | has 'LAN access: enabled' && break; sleep 1; done
+aurelia status | has 'LAN access: enabled' || fail "a connecting device did not start Aurelia"
+! systemctl is-active --quiet aurelia-start.socket || fail "the start socket stayed open next to Aurelia"
 aurelia sleep off >/dev/null
-! systemctl is-enabled --quiet aurelia-autosleep.timer || fail "sleep mode did not turn off"
+grep -Fx 'MODE=off' "$settings" >/dev/null || fail "power saving did not turn off"
+dry | has 'power saving is off' || fail "the power check ignored that it is off"
 [ "$(systemctl is-enabled aurelia-wake-on-lan.service 2>/dev/null)" = enabled ] || fail "Wake-on-LAN must stay allowed"
 
 step "Restart keeps everything"

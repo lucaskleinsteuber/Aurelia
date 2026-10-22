@@ -106,14 +106,15 @@ struct APIClient: Sendable {
     return url
   }
 
-  static func inspect(baseURL: URL) async throws -> InspectedServer {
+  static func inspect(baseURL: URL, timeout: TimeInterval = 15) async throws -> InspectedServer {
     let (data, _, delegate) = try await request(
       baseURL: baseURL,
       path: "/api/v1/server/info",
       method: "GET",
       token: nil,
       body: nil,
-      trustMode: .inspect)
+      trustMode: .inspect,
+      timeout: timeout)
     let info = try decode(ServerInfoResponse.self, from: data)
     guard let fingerprint = delegate.capturedFingerprint,
       fingerprint.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame,
@@ -1216,6 +1217,22 @@ struct APIClient: Sendable {
   }
   func serverBackups() async throws -> [ServerBackupSummary] {
     try Self.decode([ServerBackupSummary].self, from: await perform(path: "/api/v1/server/backups"))
+  }
+  func serverPower() async throws -> ServerPowerSettings { try await get("/api/v1/server/power") }
+  func saveServerPower(_ settings: ServerPowerSettings) async throws -> ServerPowerSettings {
+    struct Request: Encodable {
+      let mode: String
+      let idleMinutes: Int
+      let awakeFrom: String?
+      let awakeUntil: String?
+    }
+    let data = try await perform(
+      path: "/api/v1/server/power", method: "PUT",
+      body: JSONEncoder().encode(
+        Request(
+          mode: settings.mode, idleMinutes: settings.idleMinutes,
+          awakeFrom: settings.awakeFrom, awakeUntil: settings.awakeUntil)))
+    return try Self.decode(ServerPowerSettings.self, from: data)
   }
   func serverDiagnostics() async throws -> [ServerDiagnosticEvent] {
     try Self.decode(

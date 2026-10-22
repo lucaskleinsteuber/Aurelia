@@ -1,0 +1,39 @@
+# What Aurelia Server does when unused, shared by aurelia-autosleep and the aurelia command.
+# The settings live in the server's data folder, where the app changes them through Aurelia
+# Server. That folder belongs to the server's own user, so the file is only ever parsed as plain
+# KEY=value lines here, never run as a script.
+
+# Reads MODE (off, stop: only Aurelia stops, sleep: the computer sleeps), IDLE_MINUTES, AWAKE_FROM
+# and AWAKE_UNTIL from a settings file. Missing or invalid values keep the defaults: off,
+# 15 minutes, no awake hours.
+read_sleep_settings() {
+  MODE=off IDLE_MINUTES=15 AWAKE_FROM="" AWAKE_UNTIL=""
+  local file=$1 key value
+  if [ -f "$file" ] && [ ! -L "$file" ]; then
+    while IFS='=' read -r key value; do
+      case "$key" in
+        MODE)
+          if [[ "$value" =~ ^(off|stop|sleep)$ ]]; then MODE=$value; fi ;;
+        IDLE_MINUTES)
+          if [[ "$value" =~ ^[0-9]{1,4}$ ]] && (( 10#$value >= 5 && 10#$value <= 1440 )); then IDLE_MINUTES=$(( 10#$value )); fi ;;
+        AWAKE_FROM)
+          if [[ "$value" =~ ^(([01][0-9]|2[0-3]):[0-5][0-9])?$ ]]; then AWAKE_FROM=$value; fi ;;
+        AWAKE_UNTIL)
+          if [[ "$value" =~ ^(([01][0-9]|2[0-3]):[0-5][0-9])?$ ]]; then AWAKE_UNTIL=$value; fi ;;
+      esac
+    done < <(head -c 4096 "$file")
+  fi
+  if [ -z "$AWAKE_FROM" ] || [ -z "$AWAKE_UNTIL" ]; then AWAKE_FROM="" AWAKE_UNTIL=""; fi
+  return 0
+}
+
+# Writes the current values for the server's user, which must be able to change them later.
+write_sleep_settings() {
+  local file=$1 temporary
+  temporary=$(mktemp "$file.XXXXXX")
+  printf '# What Aurelia Server does when unused, changed in the app or with `sudo aurelia sleep`.\nMODE=%s\nIDLE_MINUTES=%s\nAWAKE_FROM=%s\nAWAKE_UNTIL=%s\n' \
+    "$MODE" "$IDLE_MINUTES" "$AWAKE_FROM" "$AWAKE_UNTIL" > "$temporary"
+  chown aurelia:aurelia "$temporary"
+  chmod 0600 "$temporary"
+  mv -f "$temporary" "$file"
+}

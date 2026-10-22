@@ -23,6 +23,13 @@ wait_until_ready() {
   return 1
 }
 
+# Power saving may have stopped Aurelia Server; connecting to its local port starts it again.
+ensure_running() {
+  systemctl is-active --quiet aurelia && return 0
+  (exec 3<>/dev/tcp/127.0.0.1/43110) 2>/dev/null || true
+  wait_until_ready
+}
+
 usage() {
   cat <<'USAGE'
 Aurelia Server
@@ -34,8 +41,10 @@ Aurelia Server
   aurelia library list | scan --all | remove --id ID --yes
   aurelia status                              Is the server running, and its fingerprint
   sudo aurelia sleep on [--idle MINUTES] [--awake 17:00-23:30|off]
-                                              Sleep when unused; Wake-on-LAN wakes it
-  sudo aurelia sleep off | aurelia sleep status
+                                              Computer sleeps when unused; Wake-on-LAN wakes it
+  sudo aurelia sleep server [--idle MINUTES] [--awake ...]
+                                              Only Aurelia stops; a device starts it again
+  sudo aurelia sleep off | status             Also in Aurelia's server settings on a Mac
   aurelia logs                                Follow the server log (Ctrl+C ends)
   sudo aurelia restart | start | stop
   aurelia version
@@ -60,7 +69,7 @@ case "$command" in
     done
     read -r -p "Owner name (used to sign in): " owner
     [ -n "$owner" ] || { echo "An owner name is required." >&2; exit 2; }
-    systemctl stop aurelia
+    systemctl stop aurelia-start.socket aurelia
     arguments=(setup-owner --headless --data-dir "$data_dir" --username "$owner" --device-name "$(hostname)")
     [ -n "$name" ] && arguments+=(--server-name "$name")
     # The aurelia user may not read the caller's folder, so the server starts in its own.
@@ -77,6 +86,7 @@ case "$command" in
     echo "  Mac:      run here: aurelia pair, then enter the code in Aurelia on the Mac"
     ;;
   approve)
+    ensure_running
     if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
       code=$1
       shift
@@ -85,20 +95,23 @@ case "$command" in
     exec "$server" pairing approve "$@"
     ;;
   pair)
+    ensure_running
     exec "$server" pairing create "$@"
     ;;
   library|pairing|metadata)
+    ensure_running
     exec "$server" "$command" "$@"
     ;;
   sleep)
     action=${1:-status}
     [ $# -gt 0 ] && shift
-    conf=/etc/aurelia-autosleep.conf
-    IDLE_MINUTES=15 AWAKE_FROM="" AWAKE_UNTIL=""
-    [ -r "$conf" ] && . "$conf"
+    # The settings sit in the server's private data folder, which only root and the server read.
+    require_root sleep "$action"
+    settings="$data_dir/sleep-settings"
+    . "$install_root/aurelia-sleep-settings"
+    read_sleep_settings "$settings"
     case "$action" in
-      on)
-        require_root sleep on
+      on|server)
         while [ $# -gt 0 ]; do
           case "$1" in
             --idle) IDLE_MINUTES=${2:-}; shift 2 ;;
@@ -108,20 +121,31 @@ case "$command" in
             *) echo "Unknown option: $1" >&2; exit 2 ;;
           esac
         done
-        [[ "$IDLE_MINUTES" =~ ^[0-9]+$ ]] && (( IDLE_MINUTES >= 5 )) \
-          || { echo "--idle needs a number of minutes, at least 5." >&2; exit 2; }
+        [[ "$IDLE_MINUTES" =~ ^[0-9]+$ ]] && (( IDLE_MINUTES >= 5 && IDLE_MINUTES <= 1440 )) \
+          || { echo "--idle needs a number of minutes from 5 to 1440." >&2; exit 2; }
         if [ -n "$AWAKE_FROM$AWAKE_UNTIL" ]; then
           for time in "$AWAKE_FROM" "$AWAKE_UNTIL"; do
             [[ "$time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { echo "--awake needs HH:MM-HH:MM, for example 17:00-23:30, or off." >&2; exit 2; }
           done
+          [ "$AWAKE_FROM" != "$AWAKE_UNTIL" ] || { echo "--awake needs a different start and end." >&2; exit 2; }
         fi
-        printf '# When Aurelia Server may sleep. Times are 24-hour HH:MM.\n# With awake hours it stays awake from AWAKE_FROM to AWAKE_UNTIL and wakes itself at AWAKE_FROM;\n# empty means no awake hours, and only Wake-on-LAN wakes it.\nIDLE_MINUTES=%s\nAWAKE_FROM=%s\nAWAKE_UNTIL=%s\n' \
-          "$IDLE_MINUTES" "$AWAKE_FROM" "$AWAKE_UNTIL" > "$conf"
+        if [ "$action" = server ]; then MODE=stop; else MODE=sleep; fi
+        write_sleep_settings "$settings"
+        systemctl enable --now aurelia-autosleep.timer >/dev/null
+        if [ "$MODE" = stop ]; then
+          echo "Power saving is on. Aurelia Server stops five minutes after a player's sleep timer ends, and"
+          if [ -n "$AWAKE_FROM" ]; then
+            echo "after $IDLE_MINUTES unused minutes outside $AWAKE_FROM-$AWAKE_UNTIL. The computer stays on, and Aurelia"
+          else
+            echo "after $IDLE_MINUTES unused minutes. The computer stays on, and Aurelia"
+          fi
+          echo "starts again within seconds when a Mac or Apple TV connects."
+          exit 0
+        fi
         if ! command -v ethtool >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
           apt-get install -y ethtool >/dev/null
         fi
         systemctl enable --now aurelia-wake-on-lan.service >/dev/null 2>&1 || echo "Wake-on-LAN could not be turned on; see: journalctl -u aurelia-wake-on-lan" >&2
-        systemctl enable --now aurelia-autosleep.timer >/dev/null
         echo "Sleep mode is on. The server sleeps five minutes after a player's sleep timer ends, and after"
         if [ -n "$AWAKE_FROM" ]; then
           echo "$IDLE_MINUTES unused minutes outside $AWAKE_FROM-$AWAKE_UNTIL. It wakes itself at $AWAKE_FROM; Aurelia on a"
@@ -132,30 +156,37 @@ case "$command" in
         echo "Some computers also need Wake-on-LAN allowed in the BIOS."
         ;;
       off)
-        require_root sleep off
-        systemctl disable --now aurelia-autosleep.timer >/dev/null 2>&1 || true
-        rm -f /var/lib/aurelia/sleep-ready
-        echo "Sleep mode is off; the server stays awake. Wake-on-LAN stays allowed."
+        MODE=off
+        write_sleep_settings "$settings"
+        rm -f "$data_dir/sleep-ready"
+        if ! systemctl is-active --quiet aurelia; then systemctl start aurelia; fi
+        echo "Power saving is off; the server keeps running. Wake-on-LAN stays allowed."
         ;;
       status)
-        if systemctl is-enabled --quiet aurelia-autosleep.timer 2>/dev/null; then
+        if [ "$MODE" != off ]; then
           hours=""
           [ -n "$AWAKE_FROM" ] && hours=" outside $AWAKE_FROM-$AWAKE_UNTIL"
-          echo "Sleep mode: on (5 minutes after a sleep timer; after $IDLE_MINUTES unused minutes$hours)"
+          what="the computer sleeps"
+          [ "$MODE" = stop ] && what="only Aurelia stops"
+          echo "Power saving: $what (5 minutes after a sleep timer; after $IDLE_MINUTES unused minutes$hours)"
           scratch=$(mktemp -d)
           [ -r /run/aurelia-autosleep/last-active ] && cp /run/aurelia-autosleep/last-active "$scratch/"
-          echo "Right now: $(AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$scratch" "$install_root/aurelia-autosleep" 2>/dev/null || echo "run with sudo to see")"
+          echo "Right now: $(AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$scratch" "$install_root/aurelia-autosleep" 2>/dev/null || echo "unknown")"
           rm -rf "$scratch"
         else
-          echo "Sleep mode: off"
+          echo "Power saving: off"
         fi
         device=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
         [ -n "$device" ] && echo "Wake address: $(cat "/sys/class/net/$device/address") ($device)"
         ;;
-      *) echo "Use: aurelia sleep on | off | status" >&2; exit 2 ;;
+      *) echo "Use: sudo aurelia sleep on | server | off | status" >&2; exit 2 ;;
     esac
     ;;
   status)
+    if systemctl is-active --quiet aurelia-start.socket; then
+      echo "Aurelia Server is stopped to save power and starts when a device connects."
+      exit 0
+    fi
     systemctl --no-pager status aurelia | head -n 5 || true
     echo
     "$server" server identity || true

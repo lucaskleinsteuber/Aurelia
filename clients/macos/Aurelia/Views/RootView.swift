@@ -19,13 +19,8 @@ struct RootView: View {
               .font(.system(size: 46, weight: .medium))
               .symbolRenderingMode(.hierarchical)
               .foregroundStyle(.white.opacity(0.86))
-            VStack(spacing: 8) {
-              Text("Opening Aurelia")
-                .font(.title2.weight(.semibold))
-              Text("Preparing your private library…")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
+            ServerConnectionStatusText(
+              status: model.connectionStatus, serverName: model.profile?.name)
             ProgressView()
               .controlSize(.small)
           }
@@ -69,4 +64,53 @@ struct RootView: View {
       MediaManagerView().environmentObject(model)
     }
   }
+}
+
+/// Says what opening Aurelia is doing: reaching the server, waking it, loading the library.
+struct ServerConnectionStatusText: View {
+  let status: ServerConnectionStatus?
+  let serverName: String?
+
+  var body: some View {
+    VStack(spacing: 8) {
+      switch status {
+      case .waking(let since):
+        Text("Waking \(name)…")
+          .font(.title2.weight(.semibold))
+        Text("It was asleep and usually answers within half a minute.")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+        TimelineView(.periodic(from: since, by: 1)) { context in
+          Text("\(max(0, Int(context.date.timeIntervalSince(since)))) s")
+            .monospacedDigit()
+        }
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+      case .loading:
+        Text("Opening Aurelia")
+          .font(.title2.weight(.semibold))
+        Text("Loading your library from \(name)…")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      case .connecting:
+        Text("Opening Aurelia")
+          .font(.title2.weight(.semibold))
+        Text("Connecting to \(name)…")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      case nil:
+        Text("Opening Aurelia")
+          .font(.title2.weight(.semibold))
+        Text("Preparing your private library…")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .multilineTextAlignment(.center)
+    .frame(maxWidth: 420)
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("server-connection-status")
+  }
+
+  private var name: String { serverName ?? "your server" }
 }

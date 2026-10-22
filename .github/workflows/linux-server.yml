@@ -46,9 +46,10 @@ jobs:
           dotnet publish src/Aurelia.Server/Aurelia.Server.csproj --configuration Release --runtime linux-x64 \
             --self-contained true -p:DebugType=none --output "$stage/server"
           cp packaging/linux/install.sh packaging/linux/aurelia packaging/linux/aurelia.service \
-            packaging/linux/aurelia-autosleep packaging/linux/aurelia-autosleep.service \
+            packaging/linux/aurelia-autosleep packaging/linux/aurelia-sleep-settings packaging/linux/aurelia-autosleep.service \
             packaging/linux/aurelia-autosleep.timer packaging/linux/aurelia-wake-on-lan \
-            packaging/linux/aurelia-wake-on-lan.service "$stage/"
+            packaging/linux/aurelia-wake-on-lan.service packaging/linux/aurelia-start.socket \
+            packaging/linux/aurelia-start.service "$stage/"
           mkdir -p "$stage/notices"
           echo "ci (0)" > "$stage/VERSION"
           echo x64 > "$stage/ARCHITECTURE"

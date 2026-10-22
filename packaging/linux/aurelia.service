@@ -2,6 +2,8 @@
 Description=Aurelia media server
 After=network-online.target local-fs.target
 Wants=network-online.target
+# While Aurelia is stopped to save power, this socket waits for devices in its place.
+Conflicts=aurelia-start.socket
 
 [Service]
 Type=simple
@@ -10,6 +12,8 @@ Group=aurelia
 ExecStart=/opt/aurelia/server/Aurelia.Server run --data-dir /var/lib/aurelia
 WorkingDirectory=/var/lib/aurelia
 Environment=HOME=/var/lib/aurelia
+# The package's aurelia-autosleep acts on the sleep settings the app changes.
+Environment=AURELIA_POWER_SETTINGS=1
 StateDirectory=aurelia
 StateDirectoryMode=0700
 UMask=0077
