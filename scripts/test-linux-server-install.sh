@@ -2,7 +2,8 @@
 # Checks an unpacked Linux server package on this Linux computer with synthetic data only:
 # installation as a service, headless setup, approving a device, a library with a scan, power
 # saving decisions, stopping Aurelia and starting it on a connection, restart, update over the
-# existing installation and uninstalling. With --exfat it also mounts
+# existing installation, `aurelia update` from a local stand-in for GitHub Releases (python3) and
+# uninstalling. With --exfat it also mounts
 # a synthetic exFAT image through /etc/fstab (restored afterwards) to check that its files get
 # no unstable identity and that the unplugged drive counts as unavailable. Everything it adds,
 # including the server data, is removed at the end. It refuses to run where Aurelia is set up.
@@ -21,10 +22,12 @@ password=Synthetic-Linux-Password-1
 pin=2468
 media=/srv/aurelia-linux-test
 fstab_backup=""
+release_server=""
 api=http://127.0.0.1:43110
 
 cleanup() {
   set +e
+  [ -n "$release_server" ] && kill "$release_server" 2>/dev/null
   if [ -n "$fstab_backup" ]; then
     umount "$media/exfat" 2>/dev/null
     cp "$fstab_backup" /etc/fstab
@@ -172,6 +175,62 @@ step "Update over the installation"
 for _ in $(seq 1 60); do aurelia status 2>/dev/null | has 'LAN access: enabled' && break; sleep 1; done
 [ "$(query "SELECT COUNT(*) FROM Users;")" -ge 1 ] || fail "the update lost the accounts"
 as_owner aurelia library list | has 'Linux Test Movies' || fail "the update lost the library"
+
+step "Update from a release, also while power saving stopped Aurelia"
+command -v python3 >/dev/null 2>&1 || fail "python3 is needed for the stand-in release server"
+release=$media/release
+arch=$(cat "$package/ARCHITECTURE")
+installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' /opt/aurelia/VERSION)
+next_build=$((installed_build + 1))
+folder="Aurelia-Server-9.9.9-linux-$arch"
+archive="Aurelia-Server-9.9.9-$next_build-linux-$arch.tar.gz"
+mkdir -p "$release/files" "$release/repos/test/aurelia"
+cp -R "$package" "$release/$folder"
+echo "9.9.9 ($next_build)" > "$release/$folder/VERSION"
+tar -czf "$release/files/$archive" -C "$release" "$folder"
+rm -rf "${release:?}/$folder"
+# Like GitHub's list: a draft with a higher build must be ignored.
+offer() {
+  jq -n --arg files http://127.0.0.1:43180/files --arg name "$1" --arg draft "Aurelia-Server-9.9.9-$((next_build + 5))-linux-$arch.tar.gz" '
+    [ { draft: true, prerelease: false, assets: [ { name: $draft, url: "\($files)/\($draft)" },
+        { name: "SHA256SUMS", url: "\($files)/SHA256SUMS" } ] },
+      { draft: false, prerelease: false, assets: [ { name: $name, url: "\($files)/\($name)" },
+        { name: "SHA256SUMS", url: "\($files)/SHA256SUMS" } ] } ]' > "$release/repos/test/aurelia/releases"
+}
+offer "$archive"
+python3 -I -m http.server 43180 --bind 127.0.0.1 --directory "$release" >/dev/null 2>&1 &
+release_server=$!
+for _ in $(seq 1 20); do curl -fs http://127.0.0.1:43180/files/ >/dev/null && break; sleep 0.5; done
+update() { AURELIA_UPDATE_API=http://127.0.0.1:43180 AURELIA_UPDATE_REPOSITORY=test/aurelia aurelia update "$@"; }
+before=$(cat /opt/aurelia/VERSION)
+
+printf '0%.0s' $(seq 1 64) > "$release/files/SHA256SUMS"
+printf '  ./%s\n' "$archive" >> "$release/files/SHA256SUMS"
+{ update --yes 2>&1 || true; } | has 'does not match its checksum' || fail "a download with a wrong checksum was not refused"
+[ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "a refused download changed the installation"
+(cd "$release/files" && sha256sum "./$archive" > SHA256SUMS)
+
+update --check | has "Newest:    Aurelia Server 9.9.9 ($next_build)" || fail "the check did not find the newer release"
+[ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "checking for an update changed the installation"
+printf 'n\n' | update | has 'Nothing was changed' || fail "declining the update did not stop it"
+
+aurelia sleep server --idle 5 >/dev/null
+date +%s > /var/lib/aurelia/sleep-ready
+/opt/aurelia/aurelia-autosleep
+! systemctl is-active --quiet aurelia || fail "Aurelia did not stop before the update"
+update --yes | has 'updated' || fail "the update from the release failed"
+[ "$(cat /opt/aurelia/VERSION)" = "9.9.9 ($next_build)" ] || fail "the release was not installed"
+systemctl is-active --quiet aurelia || fail "Aurelia did not start after the update"
+for _ in $(seq 1 60); do aurelia status 2>/dev/null | has 'LAN access: enabled' && break; sleep 1; done
+aurelia status | has 'LAN access: enabled' || fail "network access was lost by the update"
+grep -Fx 'MODE=stop' /var/lib/aurelia/sleep-settings >/dev/null || fail "the update changed the power settings"
+as_owner aurelia library list | has 'Linux Test Movies' || fail "the update from the release lost the library"
+aurelia sleep off >/dev/null
+update --check | has 'up to date' || fail "the installed release is not recognized as current"
+
+offer "Aurelia-Server-1.0.0-$installed_build-linux-$arch.tar.gz"
+update --yes | has 'not downgraded' || fail "an older release was not refused"
+[ "$(cat /opt/aurelia/VERSION)" = "9.9.9 ($next_build)" ] || fail "an older release replaced the newer one"
 
 step "Uninstall"
 printf 'y\n' | aurelia uninstall --remove-data | has 'deleted' || fail "uninstall did not remove the test data"

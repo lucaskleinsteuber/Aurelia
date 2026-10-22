@@ -2,7 +2,8 @@
 # Installs or updates Aurelia Server on a Linux computer with systemd, from the unpacked
 # download: sudo ./install.sh. An update replaces only the program; the server's data in
 # /var/lib/aurelia, its accounts and settings stay. --uninstall removes the program and keeps
-# the data unless --remove-data is added. Media folders are never touched.
+# the data unless --remove-data is added. Media folders are never touched. `sudo aurelia update`
+# downloads a newer package and runs its installer the same way.
 set -euo pipefail
 
 package_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -36,7 +37,9 @@ if [ "${1:-}" = --uninstall ]; then
   systemctl disable aurelia-wake-on-lan.service 2>/dev/null || true
   rm -f "$unit" "$command_path" /etc/aurelia-autosleep.conf /etc/systemd/system/aurelia-autosleep.service \
     /etc/systemd/system/aurelia-autosleep.timer /etc/systemd/system/aurelia-wake-on-lan.service \
-    /etc/systemd/system/aurelia-start.socket /etc/systemd/system/aurelia-start.service
+    /etc/systemd/system/aurelia-start.socket /etc/systemd/system/aurelia-start.service \
+    /etc/aurelia/github-token
+  rmdir /etc/aurelia 2>/dev/null || true
   systemctl daemon-reload
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
     ufw delete allow "$lan_port/tcp" >/dev/null 2>&1 || true
@@ -104,6 +107,8 @@ rm -rf "$install_root/server.old"
 rm -rf "$install_root/notices"
 cp -R "$package_root/notices" "$install_root/notices"
 install -m 0644 "$package_root/VERSION" "$install_root/VERSION"
+# The GitHub repository that `aurelia update` downloads from, when the package was built from one.
+[ -f "$package_root/REPOSITORY" ] && install -m 0644 "$package_root/REPOSITORY" "$install_root/REPOSITORY"
 install -m 0755 "$package_root/install.sh" "$install_root/install.sh"
 install -m 0755 "$package_root/aurelia" "$command_path"
 install -m 0644 "$package_root/aurelia.service" "$unit"

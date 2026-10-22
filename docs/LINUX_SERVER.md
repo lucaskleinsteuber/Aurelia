@@ -28,6 +28,33 @@ the computer and restarts after a failure. If `ufw` is active, it allows the ser
 and Bonjour discovery. Installing a newer package the same way updates only the program; accounts,
 library, progress and settings stay.
 
+### Updating from GitHub
+
+From version 1.8.5 the server updates itself from the GitHub Releases of the repository it was
+built from:
+
+```sh
+sudo aurelia update --check   # show the installed and the newest version
+sudo aurelia update           # asks, then downloads and installs the newest version
+sudo aurelia update --yes     # without asking
+```
+
+It picks the published release with the highest build that has a package for this computer,
+checks the download against the release's `SHA256SUMS` and runs the package's installer, so
+accounts, library, progress and settings stay. It never installs an older version. When power
+saving has stopped Aurelia, the update starts it again; power saving then continues as set.
+
+A private repository needs a read-only token. On GitHub, open Settings › Developer settings ›
+Personal access tokens › Fine-grained tokens, generate a token for only this repository with
+the permission Contents: Read-only, and save it on the server:
+
+```sh
+sudo aurelia update --set-token   # paste the token; it is not shown
+```
+
+The token is kept in `/etc/aurelia/github-token`, which only root can read. When it expires,
+`aurelia update` says so; save a new one the same way. An empty entry removes the saved token.
+
 ## Setting up over SSH
 
 ```sh
@@ -106,12 +133,15 @@ sudo aurelia uninstall                # keeps the server data in /var/lib/aureli
 sudo aurelia uninstall --remove-data  # asks, then deletes accounts, library and progress
 ```
 
-Media folders are never touched.
+Media folders are never touched. Uninstalling also removes the saved GitHub token.
 
 ## Building and checking the packages
 
 On a Mac, `scripts/build-linux-server.sh` builds both downloads into the external workspace's
-`Build/Linux/<version>-<build>/`. `scripts/test-linux-server-install.sh <unpacked package>
-[--exfat]` installs a package on a Linux computer without Aurelia data, checks it with synthetic
-data only and removes everything again. The workflow `.github/workflows/linux-server.yml` runs the
+`Build/Linux/<version>-<build>/`; each package records the GitHub repository of `origin` for
+`aurelia update`. After the owner approves a version, `scripts/publish-linux-server-release.sh`
+publishes these downloads and `SHA256SUMS` as the GitHub Release `<version>-<build>` at the pushed
+`HEAD`. `scripts/test-linux-server-install.sh <unpacked package> [--exfat]` installs a package on
+a Linux computer without Aurelia data, checks it with synthetic data only, including an update
+from a local stand-in for GitHub Releases, and removes everything again. The workflow `.github/workflows/linux-server.yml` runs the
 server tests and this check on a Linux runner.

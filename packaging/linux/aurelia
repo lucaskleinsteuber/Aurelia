@@ -30,6 +30,43 @@ ensure_running() {
   wait_until_ready
 }
 
+# Updates come from the GitHub Releases of the repository the package was built from. A private
+# repository needs a read-only token, which only root may read.
+token_file=/etc/aurelia/github-token
+update_api=${AURELIA_UPDATE_API:-https://api.github.com}
+update_repository=${AURELIA_UPDATE_REPOSITORY:-$(cat "$install_root/REPOSITORY" 2>/dev/null || true)}
+update_token=""
+
+# Saves a GitHub address to a file and prints the HTTP status. The token reaches curl through its
+# standard input, so it never shows up in the process list, and curl drops it when GitHub
+# redirects a download to its file storage.
+github_fetch() {
+  local url=$1 output=$2 accept=${3:-application/vnd.github+json} protocols="=https"
+  # Tests point the updater at a local stand-in for GitHub.
+  [ -n "${AURELIA_UPDATE_API:-}" ] && protocols="=http,https"
+  {
+    [ -z "$update_token" ] || printf 'header = "Authorization: Bearer %s"\n' "$update_token"
+  } | curl -sSL --proto "$protocols" --proto-redir "$protocols" --connect-timeout 15 --retry 2 \
+    -H "Accept: $accept" -H "X-GitHub-Api-Version: 2022-11-28" -K - -o "$output" -w '%{http_code}' "$url" \
+    || true
+}
+
+github_failed() {
+  case "$1" in
+    401) echo "GitHub refused the token; it may have expired. Save a new one: sudo aurelia update --set-token" ;;
+    403|429) echo "GitHub refused $2 for now (too many requests or no access). Try again later." ;;
+    404)
+      if [ -n "$update_token" ]; then
+        echo "GitHub did not find $2. Check that the token may read $update_repository."
+      else
+        echo "GitHub did not find $2. A private repository needs a token: sudo aurelia update --set-token"
+      fi ;;
+    000|"") echo "GitHub could not be reached. Check the internet connection." ;;
+    *) echo "GitHub answered $2 with status $1." ;;
+  esac >&2
+  exit 1
+}
+
 usage() {
   cat <<'USAGE'
 Aurelia Server
@@ -48,6 +85,8 @@ Aurelia Server
   aurelia logs                                Follow the server log (Ctrl+C ends)
   sudo aurelia restart | start | stop
   aurelia version
+  sudo aurelia update [--check] [--yes]       Install the newest version from GitHub
+  sudo aurelia update --set-token             Save the GitHub token a private download needs
   sudo aurelia uninstall [--remove-data]      Server data stays unless --remove-data
 
 Commands that change the server ask for the owner's name, Server Password and PIN.
@@ -200,6 +239,128 @@ case "$command" in
     ;;
   version)
     cat "$install_root/VERSION"
+    ;;
+  update)
+    require_root update "$@"
+    check_only=false assume_yes=false set_token=false
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --check) check_only=true ;;
+        --yes|-y) assume_yes=true ;;
+        --set-token) set_token=true ;;
+        *) echo "Unknown option: $1" >&2; exit 2 ;;
+      esac
+      shift
+    done
+    if [ -z "$update_repository" ]; then
+      echo "This installation does not know where its updates come from. Install a newer package by hand once." >&2
+      exit 1
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+      command -v apt-get >/dev/null 2>&1 || { echo "Updating needs jq. Install it with your package manager first." >&2; exit 1; }
+      apt-get install -y jq >/dev/null
+    fi
+    work=$(mktemp -d /var/tmp/aurelia-update.XXXXXX)
+    trap 'rm -rf "$work"' EXIT
+    releases="$update_api/repos/$update_repository/releases"
+
+    if $set_token; then
+      echo "Create a fine-grained token on GitHub with read-only access to the contents of $update_repository."
+      read -r -s -p "GitHub token (hidden; leave empty to remove the saved one): " update_token
+      echo
+      if [ -z "$update_token" ]; then
+        rm -f "$token_file"
+        echo "The saved token was removed."
+        exit 0
+      fi
+      [[ "$update_token" =~ ^[A-Za-z0-9_]+$ ]] || { echo "That is not a GitHub token." >&2; exit 2; }
+      status=$(github_fetch "$releases?per_page=1" "$work/releases.json")
+      [ "$status" = 200 ] || github_failed "$status" "the releases of $update_repository"
+      install -d -m 0700 "$(dirname "$token_file")"
+      (umask 077 && printf '%s\n' "$update_token" > "$token_file")
+      echo "The token is saved. Check for updates with: sudo aurelia update --check"
+      exit 0
+    fi
+
+    [ -r "$token_file" ] && update_token=$(cat "$token_file")
+    status=$(github_fetch "$releases?per_page=30" "$work/releases.json")
+    [ "$status" = 200 ] || github_failed "$status" "the releases of $update_repository"
+    case "$(uname -m)" in
+      x86_64|amd64) arch=x64 ;;
+      aarch64|arm64) arch=arm64 ;;
+      *) arch=$(uname -m) ;;
+    esac
+    # The published release with the highest build that has a package for this computer and a
+    # checksum list; drafts and pre-releases are skipped.
+    newest=$(jq -r --arg arch "$arch" '
+      [ .[] | select((.draft | not) and (.prerelease | not))
+        | first(.assets[] | select(.name == "SHA256SUMS") | .url) as $sums
+        | .assets[]
+        | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
+        | [($found.build | tonumber), $found.version, .name, .url, $sums] ]
+      | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$work/releases.json")
+    if [ -z "$newest" ]; then
+      echo "No release of $update_repository has a Linux server package for $arch yet."
+      exit 0
+    fi
+    IFS=$'\t' read -r build version name url sums_url <<<"$newest"
+    installed=$(cat "$install_root/VERSION" 2>/dev/null || echo unknown)
+    installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' <<<"$installed")
+    echo "Installed: Aurelia Server $installed"
+    echo "Newest:    Aurelia Server $version ($build)"
+    if [ -n "$installed_build" ] && [ "$build" -le "$installed_build" ]; then
+      if [ "$build" -eq "$installed_build" ]; then
+        echo "Aurelia Server is up to date."
+      else
+        echo "The installed version is newer than the newest release; it is not downgraded."
+      fi
+      exit 0
+    fi
+    if $check_only; then
+      echo "Install it with: sudo aurelia update"
+      exit 0
+    fi
+    if ! $assume_yes; then
+      read -r -p "Install $version ($build) now? Accounts, library and settings stay. [y/N] " answer
+      case "$answer" in
+        y|Y|yes|YES) ;;
+        *) echo "Nothing was changed."; exit 0 ;;
+      esac
+    fi
+
+    echo "Downloading $name..."
+    status=$(github_fetch "$sums_url" "$work/SHA256SUMS" application/octet-stream)
+    [ "$status" = 200 ] || github_failed "$status" SHA256SUMS
+    status=$(github_fetch "$url" "$work/$name" application/octet-stream)
+    [ "$status" = 200 ] || github_failed "$status" "$name"
+    expected=$(awk -v name="$name" '{ file = $2; sub(/^\*/, "", file); sub(/^\.\//, "", file); if (file == name) print $1 }' \
+      "$work/SHA256SUMS")
+    actual=$(sha256sum "$work/$name" | awk '{ print $1 }')
+    if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+      echo "The download does not match its checksum; nothing was installed." >&2
+      exit 1
+    fi
+    # Only the package's own folder is unpacked, and only into this temporary folder.
+    folder="Aurelia-Server-$version-linux-$arch"
+    tar -tzf "$work/$name" > "$work/contents"
+    if ! awk -v folder="$folder" 'index($0, folder "/") != 1 || /(^|\/)\.\.(\/|$)/ { bad = 1 } END { exit bad }' \
+      "$work/contents"; then
+      echo "The download is not an Aurelia Server package; nothing was installed." >&2
+      exit 1
+    fi
+    mkdir "$work/package"
+    tar -xzf "$work/$name" --no-same-owner -C "$work/package"
+    package="$work/package/$folder"
+    if [ "$(cat "$package/VERSION" 2>/dev/null)" != "$version ($build)" ] \
+      || [ "$(cat "$package/ARCHITECTURE" 2>/dev/null)" != "$arch" ]; then
+      echo "The download is not Aurelia Server $version ($build) for $arch; nothing was installed." >&2
+      exit 1
+    fi
+    # The installer stops Aurelia, also when power saving stopped it, replaces only the program and
+    # starts it again. It replaces this command too, so nothing after it is read from this file.
+    status=0
+    "$package/install.sh" || status=$?
+    exit "$status"
     ;;
   uninstall)
     require_root uninstall
