@@ -96,6 +96,7 @@ fi
 busy=false
 if ss -Htn state established '( sport = :43111 )' | grep -q .; then busy=true; fi
 if awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
+if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then busy=true; fi
 if $busy; then
   echo "$now" > "$state/last-active"
   say "awake: in use"

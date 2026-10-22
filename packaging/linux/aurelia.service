@@ -12,13 +12,16 @@ Group=aurelia
 ExecStart=/opt/aurelia/server/Aurelia.Server run --data-dir /var/lib/aurelia
 WorkingDirectory=/var/lib/aurelia
 Environment=HOME=/var/lib/aurelia
-# The package's aurelia-autosleep acts on the sleep settings the app changes.
-Environment=AURELIA_POWER_SETTINGS=1
+# Root-run parts of the package act on what the app changes: power saving, updates.
+Environment=AURELIA_LINUX_PACKAGE=1
 StateDirectory=aurelia
 StateDirectoryMode=0700
 UMask=0077
 Restart=on-failure
 RestartSec=5
+# Restart Server in the app ends the server with this status for systemd to start it again.
+RestartForceExitStatus=75
+SuccessExitStatus=75
 TimeoutStopSec=30
 LimitNOFILE=65536
 # Aurelia only reads media: everything outside its own data folder is read-only for it.

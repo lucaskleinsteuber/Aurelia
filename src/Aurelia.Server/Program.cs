@@ -148,6 +148,8 @@ builder.Services.AddSingleton<CredentialAttemptGuard>();
 builder.Services.AddSingleton<ActiveStreamRegistry>();
 builder.Services.AddSingleton<ServerSleepSignal>();
 builder.Services.AddSingleton(services => new ServerPowerSettingsStore(services.GetRequiredService<ServerRuntimeOptions>()));
+builder.Services.AddSingleton(services => new ServerUpdateStore(services.GetRequiredService<ServerRuntimeOptions>(), services.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<LinuxServiceRestart>();
 builder.Services.AddHostedService<ServerSleepWorker>();
 builder.Services.AddSingleton<AdministrationApprovalStore>();
 builder.Services.AddSingleton<ServerRequestGuard>();

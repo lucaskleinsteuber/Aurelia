@@ -8,6 +8,7 @@ struct ServerSummaryCard: View {
   let configuration: ServerConfigurationResponse?
   let client: APIClient?
   let nativeHostAvailable: Bool
+  var hosting: ServerHostingKind = .other
   let refreshing: Bool
   let refresh: () -> Void
   @State private var restarting = false
@@ -19,7 +20,9 @@ struct ServerSummaryCard: View {
   private var problems: [ServerComponentStatus] {
     status.readiness?.components.filter { $0.state != "ready" } ?? []
   }
-  private var canRestart: Bool { model.isLocalHost || (nativeHostAvailable && client != nil) }
+  private var canRestart: Bool {
+    model.isLocalHost || ((nativeHostAvailable || hosting == .linuxPackage) && client != nil)
+  }
 
   var body: some View {
     AureliaSurface {
@@ -31,8 +34,13 @@ struct ServerSummaryCard: View {
             .frame(width: 22)
           VStack(alignment: .leading, spacing: 4) {
             Text("Your Server").font(AureliaDesign.sectionTitle)
-            Text(configuration?.active.serverName ?? model.profile?.name ?? "Aurelia Server")
-              .font(.callout).foregroundStyle(.secondary)
+            Text(
+              [
+                configuration?.active.serverName ?? model.profile?.name ?? "Aurelia Server",
+                hosting.location,
+              ].compactMap { $0 }.joined(separator: " · ")
+            )
+            .font(.callout).foregroundStyle(.secondary)
           }
           Spacer()
           HStack(spacing: 6) {
@@ -48,7 +56,8 @@ struct ServerSummaryCard: View {
           Label(
             configuration.active.lanAccessEnabled
               ? "Devices on your home network can connect."
-              : "Only this Mac can connect.",
+              : model.isLocalHost
+                ? "Only this Mac can connect." : "Only the server computer itself can connect.",
             systemImage: configuration.active.lanAccessEnabled ? "wifi" : "laptopcomputer"
           )
           .foregroundStyle(.secondary)
@@ -122,7 +131,10 @@ struct ServerSummaryCard: View {
         try await model.currentAdministration {
           _ = try await scope.request { try await client.restartServer() }
         }
-        message = "Restart requested. Reconnect after the server has restarted."
+        message =
+          hosting == .linuxPackage
+          ? "Restarting. Aurelia reconnects by itself in a few seconds."
+          : "Restart requested. Reconnect after the server has restarted."
       } catch { if let failure = scope.message(for: error) { message = failure } }
     }
   }

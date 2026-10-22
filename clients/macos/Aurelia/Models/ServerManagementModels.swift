@@ -28,6 +28,59 @@ struct ServerCapabilities: Decodable, Sendable {
   let nativeHostOperations: Bool
   let encryptedBackups: Bool
   let transcoding: Bool
+  /// "macos", "linux", "windows" or "other"; nil from servers before 1.8.7.
+  var platform: String?
+  /// The systemd service from the Linux package, which saves power, restarts and updates itself.
+  var linuxPackage: Bool?
+}
+
+/// Where the server runs, which decides the server settings Aurelia shows.
+enum ServerHostingKind: Equatable, Sendable {
+  case thisMac
+  case otherMac
+  case linuxPackage
+  case other
+
+  init(capabilities: ServerCapabilities?, isLocalHost: Bool) {
+    if isLocalHost {
+      self = .thisMac
+    } else if capabilities?.linuxPackage == true {
+      self = .linuxPackage
+    } else if capabilities?.nativeHostOperations == true || capabilities?.platform == "macos" {
+      self = .otherMac
+    } else {
+      self = .other
+    }
+  }
+
+  var location: String? {
+    switch self {
+    case .thisMac: "Runs on this Mac"
+    case .otherMac: "Runs on another Mac"
+    case .linuxPackage: "Runs on a Linux computer"
+    case .other: nil
+    }
+  }
+
+  /// Settings for running the server inside Aurelia on a Mac.
+  var hostsOnMac: Bool { self == .thisMac || self == .otherMac }
+}
+
+/// Updates of a Linux server installed from the package. Versions read "1.8.7 (91)"; state is
+/// "idle", "checking", "installing" or "failed".
+struct ServerUpdateStatus: Decodable, Equatable, Sendable {
+  let available: Bool
+  let installed: String
+  let newest: String?
+  let updateAvailable: Bool
+  let state: String
+  let checkedAt: String?
+  let message: String?
+
+  /// When the server last looked for a new version.
+  var checkedDate: Date? {
+    checkedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+  }
 }
 struct HostOperationStatus: Decodable, Sendable {
   let id: UUID

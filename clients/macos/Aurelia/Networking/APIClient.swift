@@ -1219,6 +1219,19 @@ struct APIClient: Sendable {
     try Self.decode([ServerBackupSummary].self, from: await perform(path: "/api/v1/server/backups"))
   }
   func serverPower() async throws -> ServerPowerSettings { try await get("/api/v1/server/power") }
+  func serverUpdates() async throws -> ServerUpdateStatus {
+    try await get("/api/v1/server/updates")
+  }
+  func checkServerUpdates() async throws -> ServerUpdateStatus {
+    try Self.decode(
+      ServerUpdateStatus.self,
+      from: await perform(path: "/api/v1/server/updates/check", method: "POST"))
+  }
+  func installServerUpdate() async throws -> ServerUpdateStatus {
+    try Self.decode(
+      ServerUpdateStatus.self,
+      from: await perform(path: "/api/v1/server/updates/install", method: "POST"))
+  }
   func saveServerPower(_ settings: ServerPowerSettings) async throws -> ServerPowerSettings {
     struct Request: Encodable {
       let mode: String

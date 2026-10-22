@@ -23,6 +23,10 @@ struct RootView: View {
               status: model.connectionStatus, serverName: model.profile?.name)
             ProgressView()
               .controlSize(.small)
+            if case .waking = model.connectionStatus {
+              Button("Stop Waiting") { model.stopWaitingForServer() }
+                .accessibilityIdentifier("server-stop-waiting")
+            }
           }
           .accessibilityIdentifier("startup-progress")
         } else if model.operatingMode == nil {

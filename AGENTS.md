@@ -64,9 +64,9 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac release is 1.8.4 (88) (waking at startup, power settings in the app); the
+  changing them. The approved Mac release is 1.8.7 (91) (settings by server kind, updates and restart from the app); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
-  sleep-timer update is 0.3.4 (15).
+  sleep-hint update is 0.3.5 (16).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the

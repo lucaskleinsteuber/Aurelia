@@ -51,7 +51,24 @@ github_fetch() {
     || true
 }
 
-github_failed() {
+# Tells the app what `aurelia update` found or does. Aurelia Server reads update-status from its
+# data folder, so the file belongs to the server's user; values stay plain and short.
+report_update=false
+status_newest_version="" status_newest_build="" status_target="" status_checked_at=""
+write_update_status() {
+  local state=$1 message=${2:-} temporary
+  $report_update || return 0
+  message=$(printf '%s' "$message" | tr -cd '[:print:]' | cut -c1-200)
+  temporary=$(mktemp "$data_dir/update-status.XXXXXX") || return 0
+  printf 'STATE=%s\nCHANGED_AT=%s\nCHECKED_AT=%s\nNEWEST_VERSION=%s\nNEWEST_BUILD=%s\nTARGET_BUILD=%s\nMESSAGE=%s\n' \
+    "$state" "$(date +%s)" "$status_checked_at" "$status_newest_version" "$status_newest_build" "$status_target" \
+    "$message" > "$temporary"
+  chown aurelia:aurelia "$temporary"
+  chmod 0600 "$temporary"
+  mv -f "$temporary" "$data_dir/update-status"
+}
+
+github_failure() {
   case "$1" in
     401) echo "GitHub refused the token; it may have expired. Save a new one: sudo aurelia update --set-token" ;;
     403|429) echo "GitHub refused $2 for now (too many requests or no access). Try again later." ;;
@@ -63,7 +80,14 @@ github_failed() {
       fi ;;
     000|"") echo "GitHub could not be reached. Check the internet connection." ;;
     *) echo "GitHub answered $2 with status $1." ;;
-  esac >&2
+  esac
+}
+
+github_failed() {
+  local message
+  message=$(github_failure "$@")
+  echo "$message" >&2
+  write_update_status failed "$message"
   exit 1
 }
 
@@ -100,6 +124,7 @@ Aurelia Server
   aurelia version
   sudo aurelia update [--check] [--yes]       Install the newest version from GitHub
   sudo aurelia update --set-token             Save the GitHub token a private download needs
+                                              Updates can also be installed in Aurelia on a Mac
   sudo aurelia uninstall [--remove-data]      Server data stays unless --remove-data
 
 Commands that change the server ask for the owner's name, Server Password and PIN.
@@ -255,18 +280,35 @@ case "$command" in
     ;;
   update)
     require_root update "$@"
-    check_only=false assume_yes=false set_token=false
+    check_only=false assume_yes=false set_token=false from_app=false
     while [ $# -gt 0 ]; do
       case "$1" in
         --check) check_only=true ;;
         --yes|-y) assume_yes=true ;;
         --set-token) set_token=true ;;
+        # Run by aurelia-update-request.service when the app left a request in the data folder.
+        --from-app) from_app=true ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
       esac
       shift
     done
+    # Checks and updates tell the app what they found; setting the token does not.
+    if ! $set_token && [ -d "$data_dir" ] && id aurelia >/dev/null 2>&1; then report_update=true; fi
+    if $from_app; then
+      if [ -e "$data_dir/update-requested" ]; then
+        assume_yes=true
+        write_update_status installing
+      elif [ -e "$data_dir/update-check-requested" ]; then
+        check_only=true
+        write_update_status checking
+      else
+        exit 0
+      fi
+      rm -f "$data_dir/update-requested" "$data_dir/update-check-requested"
+    fi
     if [ -z "$update_repository" ]; then
       echo "This installation does not know where its updates come from. Install a newer package by hand once." >&2
+      write_update_status failed "This installation does not know where its updates come from."
       exit 1
     fi
     if ! command -v jq >/dev/null 2>&1; then
@@ -321,11 +363,14 @@ case "$command" in
       [ "$status" = 200 ] || github_failed "$status" "the releases of $update_repository"
       newest=$(newest_package "$work/releases.json")
     done
+    status_checked_at=$(date +%s)
     if [ -z "$newest" ]; then
       echo "No release of $update_repository has a Linux server package for $arch yet."
+      write_update_status idle
       exit 0
     fi
     IFS=$'\t' read -r build version name url sums_url <<<"$newest"
+    status_newest_version=$version status_newest_build=$build
     installed=$(cat "$install_root/VERSION" 2>/dev/null || echo unknown)
     installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' <<<"$installed")
     echo "Installed: Aurelia Server $installed"
@@ -336,10 +381,12 @@ case "$command" in
       else
         echo "The installed version is newer than the newest release; it is not downgraded."
       fi
+      write_update_status idle
       exit 0
     fi
     if $check_only; then
       echo "Install it with: sudo aurelia update"
+      write_update_status idle
       exit 0
     fi
     if ! $assume_yes; then
@@ -350,6 +397,8 @@ case "$command" in
       esac
     fi
 
+    status_target=$build
+    write_update_status installing
     echo "Downloading $name..."
     status=$(github_fetch "$sums_url" "$work/SHA256SUMS" application/octet-stream)
     [ "$status" = 200 ] || github_failed "$status" SHA256SUMS
@@ -360,6 +409,7 @@ case "$command" in
     actual=$(sha256sum "$work/$name" | awk '{ print $1 }')
     if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
       echo "The download does not match its checksum; nothing was installed." >&2
+      write_update_status failed "The download does not match its checksum; nothing was installed."
       exit 1
     fi
     # Only the package's own folder is unpacked, and only into this temporary folder.
@@ -368,6 +418,7 @@ case "$command" in
     if ! awk -v folder="$folder" 'index($0, folder "/") != 1 || /(^|\/)\.\.(\/|$)/ { bad = 1 } END { exit bad }' \
       "$work/contents"; then
       echo "The download is not an Aurelia Server package; nothing was installed." >&2
+      write_update_status failed "The download is not an Aurelia Server package; nothing was installed."
       exit 1
     fi
     mkdir "$work/package"
@@ -376,12 +427,19 @@ case "$command" in
     if [ "$(cat "$package/VERSION" 2>/dev/null)" != "$version ($build)" ] \
       || [ "$(cat "$package/ARCHITECTURE" 2>/dev/null)" != "$arch" ]; then
       echo "The download is not Aurelia Server $version ($build) for $arch; nothing was installed." >&2
+      write_update_status failed "The download is not Aurelia Server $version ($build) for $arch; nothing was installed."
       exit 1
     fi
     # The installer stops Aurelia, also when power saving stopped it, replaces only the program and
-    # starts it again. It replaces this command too, so nothing after it is read from this file.
+    # starts it again. It replaces this command too; bash read this whole case statement before
+    # running it, so the lines after the installer still run as written here.
     status=0
     "$package/install.sh" || status=$?
+    if [ "$status" -eq 0 ]; then
+      write_update_status idle
+    else
+      write_update_status failed "Installing $version ($build) failed; Aurelia Server keeps its previous version where possible."
+    fi
     exit "$status"
     ;;
   uninstall)

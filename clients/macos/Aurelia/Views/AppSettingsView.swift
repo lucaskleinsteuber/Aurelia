@@ -3,10 +3,10 @@ import SwiftUI
 
 struct AppSettingsView: View {
   private enum SettingsPage: Hashable {
-    case general
+    case app
     case playback
     case library
-    case metadata
+    case movieInfo
     case server
   }
 
@@ -14,7 +14,7 @@ struct AppSettingsView: View {
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject private var playbackPreferences = PlaybackPreferencesStore.shared
   @AppStorage(WindowClosePreference.quitsKey) private var quitsWhenWindowCloses = true
-  @State private var selectedPage: SettingsPage = .general
+  @State private var selectedPage: SettingsPage = .app
   @State private var libraryToRemove: LibrarySummary?
   @State private var showingSwitchConfirmation = false
   @State private var pendingLocations: [StorageLocationDraft] = []
@@ -23,18 +23,17 @@ struct AppSettingsView: View {
   @State private var tmdbToken = ""
   @State private var showingReviewQueue = false
   @State private var showingMediaManager = false
-  @State private var showingDeviceApproval = false
 
   var body: some View {
     TabView(selection: $selectedPage) {
       settingsPage {
         interface
         if model.profile?.isViewingSession == true { ChangeProfilePINView() }
-        if model.profile != nil, model.managementUnlocked { devices }
+        if let profile = model.profile { connection(profile) }
         disconnectedState
       }
-      .tabItem { Label("General", systemImage: "gearshape") }
-      .tag(SettingsPage.general)
+      .tabItem { Label("App", systemImage: "macwindow") }
+      .tag(SettingsPage.app)
 
       settingsPage { playback }
         .tabItem { Label("Playback", systemImage: "play.rectangle") }
@@ -72,8 +71,8 @@ struct AppSettingsView: View {
           disconnectedState
         }
       }
-      .tabItem { Label("Metadata", systemImage: "sparkles.rectangle.stack") }
-      .tag(SettingsPage.metadata)
+      .tabItem { Label("Movie Info", systemImage: "info.circle") }
+      .tag(SettingsPage.movieInfo)
 
       settingsPage {
         if let profile = model.profile {
@@ -81,10 +80,15 @@ struct AppSettingsView: View {
             ServerManagementView()
           } else if profile.user?.role.canManageLibraries == true, !model.managementUnlocked {
             ManagementUnlockView()
-          } else if model.managementUnlocked, profile.isViewingSession {
-            ManagementStatusView()
+          } else if model.managementUnlocked {
+            if profile.isViewingSession { ManagementStatusView() }
+            ServerDevicesSection()
+          } else {
+            ContentUnavailableView(
+              "Server Settings Unavailable",
+              systemImage: "person.crop.circle.badge.xmark",
+              description: Text("The server's owner manages its settings and devices."))
           }
-          advanced(profile)
         } else {
           disconnectedState
         }
@@ -94,7 +98,6 @@ struct AppSettingsView: View {
     }
     .frame(width: 760, height: 640)
     .background(AureliaBackdrop())
-    .sheet(isPresented: $showingDeviceApproval) { DeviceApprovalView() }
     .task {
       isLoadingAdministration = true
       await model.reloadAdministration()
@@ -297,9 +300,10 @@ struct AppSettingsView: View {
 
   private var interface: some View {
     AureliaSettingsSection(
-      "Interface",
+      "Window & Appearance",
       symbol: "macwindow",
-      description: "Choose what closing the window does. Aurelia follows your Mac accessibility settings."
+      description:
+        "Choose what closing the window does. Aurelia follows your Mac accessibility settings."
     ) {
       VStack(spacing: 10) {
         VStack(alignment: .leading, spacing: 2) {
@@ -410,57 +414,6 @@ struct AppSettingsView: View {
     Button(title) { Task { await model.classifyDiscovery(discovery, as: decision) } }
   }
 
-  private var devices: some View {
-    AureliaSettingsSection(
-      "Devices",
-      symbol: "laptopcomputer.and.iphone",
-      description: "Pair trusted devices and revoke sessions you no longer use."
-    ) {
-      VStack(alignment: .leading, spacing: 12) {
-        if let code = model.pairingCode {
-          HStack {
-            VStack(alignment: .leading) {
-              Text(code.code).font(.system(.title2, design: .monospaced, weight: .bold))
-              Text("Expires \(code.expiresAt)").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Copy") {
-              NSPasteboard.general.clearContents()
-              NSPasteboard.general.setString(code.code, forType: .string)
-            }
-          }
-        }
-        Button("Pair Another Device") { Task { await model.generatePairingCode() } }
-          .buttonStyle(AureliaPrimaryActionButtonStyle())
-        if model.profile?.user?.role == .owner {
-          Button("Approve Device…") { showingDeviceApproval = true }
-            .disabled(!model.libraryCapabilities.contains("device-authorization-v1"))
-            .help(
-              model.libraryCapabilities.contains("device-authorization-v1")
-                ? "Enter the code shown on the new device." : "Requires Aurelia Server 1.5.5."
-            )
-            .accessibilityIdentifier("approve-device")
-        }
-        ForEach(model.sessions.filter(\.isActive)) { session in
-          HStack {
-            VStack(alignment: .leading) {
-              Text(session.deviceName)
-              Text(session.isCurrent ? "This device" : "Last used \(session.lastSeenAt)")
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if !session.isCurrent && session.revokedAt == nil {
-              Button("Revoke", role: .destructive) {
-                Task { await model.revokeSession(id: session.id) }
-              }
-            }
-          }
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-  }
-
   private var metadata: some View {
     AureliaSettingsSection(
       "Movie & TV Information",
@@ -527,11 +480,11 @@ struct AppSettingsView: View {
     }
   }
 
-  private func advanced(_ profile: StoredServerProfile) -> some View {
+  private func connection(_ profile: StoredServerProfile) -> some View {
     AureliaSettingsSection(
-      "Connection",
+      "Server Connection",
       symbol: "link",
-      description: "How this Mac connects to the server."
+      description: "The server this Mac uses. Its own settings are under Server."
     ) {
       VStack(alignment: .leading, spacing: 12) {
         LabeledContent("Server", value: profile.name)

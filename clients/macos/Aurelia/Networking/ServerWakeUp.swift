@@ -40,7 +40,9 @@ struct ServerWakeUp {
 
   /// Returns whether the server answers. `onWaking` runs once when it has to be woken.
   func run(serverId: UUID, address: URL, onWaking: @MainActor () -> Void) async -> Bool {
-    if await probe(address) { return true }
+    // Stop Waiting cancels the wait; a probe cut short says nothing about the server.
+    if await probe(address) { return !Task.isCancelled }
+    if Task.isCancelled { return false }
     let wakes = canWake(serverId)
     if wakes { onWaking() }
     let started = now()
@@ -51,7 +53,8 @@ struct ServerWakeUp {
         lastWake = now()
       }
       do { try await delay(pollInterval) } catch { return false }
-      if await probe(address) { return true }
+      if await probe(address) { return !Task.isCancelled }
+      if Task.isCancelled { return false }
     }
     return false
   }

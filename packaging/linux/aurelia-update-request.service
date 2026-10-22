@@ -1,0 +1,8 @@
+[Unit]
+Description=Check for or install an Aurelia Server update requested in the app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aurelia update --from-app

@@ -80,7 +80,8 @@ public sealed class ServerRequestGuard
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/auth/sessions/", StringComparison.Ordinal)) return true;
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/media/", StringComparison.Ordinal)
             && path.Split('/').Length == 5) return true;
-        return path == "/api/v1/server/settings" || path.StartsWith("/api/v1/server/operations", StringComparison.Ordinal)
+        return path == "/api/v1/server/settings" || path == "/api/v1/server/updates/install"
+            || path.StartsWith("/api/v1/server/operations", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/server/backups", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/server/sessions", StringComparison.Ordinal)
             || path.StartsWith("/api/v1/users", StringComparison.Ordinal)

@@ -14,6 +14,9 @@ struct ServerUnreachableView: View {
           .foregroundStyle(.white.opacity(0.86))
         ServerConnectionStatusText(status: status, serverName: serverName)
         ProgressView().controlSize(.small)
+        if case .waking = status {
+          Button("Stop Waiting") { model.stopWaitingForServer() }
+        }
       } else {
         Image(systemName: "moon.zzz.fill")
           .font(.system(size: 46, weight: .medium))

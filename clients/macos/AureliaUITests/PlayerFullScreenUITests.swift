@@ -92,7 +92,7 @@ final class PlayerFullScreenUITests: XCTestCase {
     XCTAssertTrue(subtitle.waitForNonExistence(timeout: 5))
 
     app.typeKey(",", modifierFlags: .command)
-    let settingsTab = app.buttons["General"]
+    let settingsTab = app.buttons["App"]
     XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
     app.typeKey("f", modifierFlags: [])
     XCTAssertEqual(playerWindow.frame, originalFrame)

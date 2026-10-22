@@ -203,12 +203,27 @@ release_server=$!
 for _ in $(seq 1 20); do curl -fs http://127.0.0.1:43180/files/ >/dev/null && break; sleep 0.5; done
 update() { AURELIA_UPDATE_API=http://127.0.0.1:43180 AURELIA_UPDATE_REPOSITORY=test/aurelia aurelia update "$@"; }
 before=$(cat /opt/aurelia/VERSION)
+status=/var/lib/aurelia/update-status
+systemctl is-enabled --quiet aurelia-update-request.path && systemctl is-enabled --quiet aurelia-update-check.timer \
+  || fail "updates requested in the app are not watched for"
+# Requests from the app are answered here against the stand-in, not by the service against GitHub.
+systemctl stop aurelia-update-request.path
 
 printf '0%.0s' $(seq 1 64) > "$release/files/SHA256SUMS"
 printf '  ./%s\n' "$archive" >> "$release/files/SHA256SUMS"
 { update --yes 2>&1 || true; } | has 'does not match its checksum' || fail "a download with a wrong checksum was not refused"
 [ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "a refused download changed the installation"
+grep -Fx 'STATE=failed' "$status" >/dev/null && grep -F 'MESSAGE=The download does not match' "$status" >/dev/null \
+  || fail "the app is not told why the update failed"
+[ "$(stat -c %U:%a "$status")" = aurelia:600 ] || fail "the server must own the update status"
 (cd "$release/files" && sha256sum "./$archive" > SHA256SUMS)
+
+touch /var/lib/aurelia/update-check-requested
+update --from-app >/dev/null
+[ ! -e /var/lib/aurelia/update-check-requested ] || fail "the check request from the app stayed"
+grep -Fx 'STATE=idle' "$status" >/dev/null && grep -Fx "NEWEST_BUILD=$next_build" "$status" >/dev/null \
+  || fail "the app is not told about the newer release"
+[ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "a check requested in the app changed the installation"
 
 update --check | has "Newest:    Aurelia Server 9.9.9 ($next_build)" || fail "the check did not find the newer release"
 [ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "checking for an update changed the installation"
@@ -218,7 +233,11 @@ aurelia sleep server --idle 5 >/dev/null
 date +%s > /var/lib/aurelia/sleep-ready
 /opt/aurelia/aurelia-autosleep
 ! systemctl is-active --quiet aurelia || fail "Aurelia did not stop before the update"
-update --yes | has 'updated' || fail "the update from the release failed"
+touch /var/lib/aurelia/update-requested
+update --from-app | has 'updated' || fail "the update requested in the app failed"
+[ ! -e /var/lib/aurelia/update-requested ] || fail "the update request from the app stayed"
+grep -Fx 'STATE=idle' "$status" >/dev/null && grep -Fx "TARGET_BUILD=$next_build" "$status" >/dev/null \
+  || fail "the app is not told that the update finished"
 [ "$(cat /opt/aurelia/VERSION)" = "9.9.9 ($next_build)" ] || fail "the release was not installed"
 systemctl is-active --quiet aurelia || fail "Aurelia did not start after the update"
 for _ in $(seq 1 60); do aurelia status 2>/dev/null | has 'LAN access: enabled' && break; sleep 1; done
@@ -231,11 +250,13 @@ update --check | has 'up to date' || fail "the installed release is not recogniz
 offer "Aurelia-Server-1.0.0-$installed_build-linux-$arch.tar.gz"
 update --yes | has 'not downgraded' || fail "an older release was not refused"
 [ "$(cat /opt/aurelia/VERSION)" = "9.9.9 ($next_build)" ] || fail "an older release replaced the newer one"
+systemctl start aurelia-update-request.path
 
 step "Uninstall"
 printf 'y\n' | aurelia uninstall --remove-data | has 'deleted' || fail "uninstall did not remove the test data"
 [ ! -e /opt/aurelia ] && [ ! -e /var/lib/aurelia ] && [ ! -e /etc/systemd/system/aurelia.service ] \
   && [ ! -e /etc/systemd/system/aurelia-autosleep.timer ] && [ ! -e /etc/aurelia-autosleep.conf ] \
+  && [ ! -e /etc/systemd/system/aurelia-update-request.path ] && [ ! -e /etc/systemd/system/aurelia-update-check.timer ] \
   || fail "uninstall left files behind"
 ! id aurelia >/dev/null 2>&1 || fail "uninstall left the aurelia user behind"
 echo

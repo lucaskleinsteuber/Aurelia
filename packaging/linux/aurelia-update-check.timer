@@ -1,0 +1,10 @@
+[Unit]
+Description=Look for a new Aurelia Server version once a day
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=1d
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

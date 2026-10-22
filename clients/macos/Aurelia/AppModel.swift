@@ -100,6 +100,7 @@ final class AppModel: ObservableObject {
   /// The server stayed silent even after being woken: shown as a calm hint with Try Again.
   @Published private(set) var serverUnreachable = false
   var serverWakeUp = ServerWakeUp()
+  private var serverWakeTask: Task<Bool, Never>?
   @Published private(set) var isWorking = false
   @Published private(set) var isRecoveringLocalHost = false
   @Published var errorMessage: String?
@@ -581,10 +582,22 @@ final class AppModel: ObservableObject {
   /// instead of waiting for a request to time out. Opening the app counts as someone present.
   private func wakeServerIfAsleep(_ profile: StoredServerProfile) async {
     connectionStatus = .connecting
-    let answers = await serverWakeUp.run(serverId: profile.serverId, address: profile.baseURL) {
-      connectionStatus = .waking(since: Date())
+    let wakeUp = serverWakeUp
+    let attempt = Task { @MainActor in
+      await wakeUp.run(serverId: profile.serverId, address: profile.baseURL) {
+        self.connectionStatus = .waking(since: Date())
+      }
     }
+    serverWakeTask = attempt
+    let answers = await attempt.value
+    serverWakeTask = nil
     connectionStatus = answers ? .loading : nil
+  }
+
+  /// Stop Waiting while a server is woken: Aurelia continues at once and shows that the server
+  /// did not answer, with Try Again.
+  func stopWaitingForServer() {
+    serverWakeTask?.cancel()
   }
 
   /// Try Again after the server stayed silent: wake it once more and reload what was showing.

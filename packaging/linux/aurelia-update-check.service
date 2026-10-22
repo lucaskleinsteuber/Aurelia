@@ -1,0 +1,9 @@
+[Unit]
+Description=Look for a new Aurelia Server version
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Only looks and tells the app; installing stays the owner's decision.
+ExecStart=/usr/local/bin/aurelia update --check

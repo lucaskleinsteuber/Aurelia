@@ -21,6 +21,9 @@ struct ServerManagementView: View {
   }
 
   private var client: APIClient? { model.profile.map(APIClient.init(profile:)) }
+  private var hosting: ServerHostingKind {
+    ServerHostingKind(capabilities: capabilities, isLocalHost: model.isLocalHost)
+  }
 
   var body: some View {
     Group {
@@ -33,12 +36,20 @@ struct ServerManagementView: View {
             ServerSummaryCard(
               status: status, configuration: configuration, client: client,
               nativeHostAvailable: capabilities?.nativeHostOperations == true,
+              hosting: hosting,
               refreshing: loading || deletingProfile != nil
             ) { Task { await reload() } }
           }
-          if let client {
-            ServerHostingEditor(
-              client: client, available: capabilities?.nativeHostOperations == true)
+          // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
+          // power saving and updates of the Linux package.
+          if let client, capabilities != nil || model.isLocalHost {
+            if hosting.hostsOnMac {
+              ServerHostingEditor(
+                client: client, available: capabilities?.nativeHostOperations == true)
+            } else if hosting == .linuxPackage {
+              ServerUpdatesEditor(client: client)
+              ServerPowerEditor(client: client)
+            }
           }
           if let configuration, let client {
             ServerEssentialsEditor(configuration: configuration, client: client) {
@@ -46,16 +57,20 @@ struct ServerManagementView: View {
             }
             .id("essentials-\(configuration.stored.revision)")
           }
-          if let client { ServerPowerEditor(client: client) }
           profiles
+          ServerDevicesSection()
           ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
             if let status { ServerDetailsBox(status: status) }
             if let configuration, let client {
-              ServerNetworkEditor(
-                configuration: configuration, client: client,
-                nativeHostAvailable: capabilities?.nativeHostOperations == true
-              ) { Task { await reload() } }
-              .id("network-\(configuration.stored.revision)")
+              if hosting == .linuxPackage {
+                ServerLinuxNetworkBox(configuration: configuration)
+              } else {
+                ServerNetworkEditor(
+                  configuration: configuration, client: client,
+                  nativeHostAvailable: capabilities?.nativeHostOperations == true
+                ) { Task { await reload() } }
+                .id("network-\(configuration.stored.revision)")
+              }
               ServerSecurityEditor(configuration: configuration, client: client) { configuration in
                 self.configuration = configuration
               }.id(configuration.stored.revision)
@@ -331,5 +346,25 @@ private struct ServerSecurityEditor: View {
         }.disabled(saving || settings == configuration.stored)
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
     }.onDisappear { saveTask?.cancel() }
+  }
+}
+
+/// Network access of a Linux server is set up there over SSH (`sudo aurelia setup`), not from a Mac.
+private struct ServerLinuxNetworkBox: View {
+  let configuration: ServerConfigurationResponse
+
+  var body: some View {
+    GroupBox("Network") {
+      VStack(alignment: .leading, spacing: 10) {
+        LabeledContent(
+          "Home network access", value: configuration.active.lanAccessEnabled ? "On" : "Off")
+        LabeledContent("Port", value: "\(configuration.active.lanHttpsPort)")
+        Text(
+          "A Linux server's network access is set up on the server itself with `sudo aurelia setup`."
+        )
+        .font(.caption).foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+    }
   }
 }

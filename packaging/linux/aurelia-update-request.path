@@ -1,0 +1,11 @@
+[Unit]
+Description=Notice an update or update check requested in Aurelia on a Mac
+
+[Path]
+# Aurelia Server leaves these files in its data folder; the service removes them.
+PathExists=/var/lib/aurelia/update-requested
+PathExists=/var/lib/aurelia/update-check-requested
+Unit=aurelia-update-request.service
+
+[Install]
+WantedBy=paths.target

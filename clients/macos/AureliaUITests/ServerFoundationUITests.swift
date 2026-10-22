@@ -59,8 +59,9 @@ final class ServerFoundationUITests: XCTestCase {
     app.launch()
     app.activate()
     app.typeKey(",", modifierFlags: .command)
-    XCTAssertTrue(app.buttons["General"].waitForExistence(timeout: 8))
-    app.buttons["General"].click()
+    // Devices are part of the server's settings.
+    XCTAssertTrue(app.buttons["Server"].waitForExistence(timeout: 8))
+    app.buttons["Server"].click()
     return app
   }
 

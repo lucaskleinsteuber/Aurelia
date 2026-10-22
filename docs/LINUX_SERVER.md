@@ -39,6 +39,13 @@ sudo aurelia update           # asks, then downloads and installs the newest ver
 sudo aurelia update --yes     # without asking
 ```
 
+From version 1.8.7 Aurelia on a Mac shows the installed and the newest version under
+Settings › Server › Updates and installs an update with one click. The server looks for a new
+version once a day by itself (`aurelia-update-check.timer`); installing always waits for the
+owner. A click leaves a request in `/var/lib/aurelia`, where `aurelia-update-request.path` notices
+it and runs `aurelia update` as root, which reports back in `/var/lib/aurelia/update-status`.
+Restart Server in the app works too: the service ends and systemd starts it again.
+
 It picks the published release with the highest build that has a package for this computer,
 checks the download against the release's `SHA256SUMS` and runs the package's installer, so
 accounts, library, progress and settings stay. It never installs an older version. When power

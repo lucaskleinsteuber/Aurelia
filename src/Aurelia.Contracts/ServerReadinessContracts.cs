@@ -5,7 +5,13 @@ public sealed record ServerReadinessResponse(string State);
 public sealed record ServerComponentStatus(string Id, string State, string? Reason = null);
 public sealed record ServerReadinessSummary(string State, IReadOnlyList<ServerComponentStatus> Components, DateTimeOffset CheckedAt);
 public sealed record ServerRecoveryEvent(DateTimeOffset At, string Code);
-public sealed record ServerManagementCapabilities(bool NativeHostOperations, bool EncryptedBackups, bool Transcoding);
+/// <summary>
+/// What a server can do and where it runs. Platform is "macos", "linux", "windows" or "other";
+/// LinuxPackage is true for the systemd service installed from the Linux package, which restarts,
+/// saves power and updates itself.
+/// </summary>
+public sealed record ServerManagementCapabilities(bool NativeHostOperations, bool EncryptedBackups, bool Transcoding,
+    string Platform = "other", bool LinuxPackage = false);
 
 public sealed record ServerStatusResponse(
     string State,
@@ -20,3 +26,10 @@ public sealed record ServerStatusResponse(
     IReadOnlyList<string> NetworkAddresses,
     ServerReadinessSummary Readiness,
     IReadOnlyList<ServerRecoveryEvent> RecentRecoveryEvents);
+
+/// <summary>
+/// Updates of a Linux server installed from the package. Versions read "1.8.7 (91)". State is
+/// "idle", "checking", "installing" or "failed"; Message explains a failure.
+/// </summary>
+public sealed record ServerUpdateStatus(bool Available, string Installed, string? Newest, bool UpdateAvailable,
+    string State, DateTimeOffset? CheckedAt, string? Message);

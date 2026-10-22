@@ -12,10 +12,13 @@ public static class ServerManagementEndpoints
     {
         var server = app.MapGroup("/api/v1/server").RequireAuthorization("Owner");
         server.MapGet("/settings", (ServerConfigurationStore configuration) => configuration.Read());
-        server.MapGet("/capabilities", (NativeHostOperations operations) => new ServerManagementCapabilities(operations.Available, true, false));
+        server.MapGet("/capabilities", (NativeHostOperations operations) =>
+            new ServerManagementCapabilities(operations.Available, true, false, LinuxPackage.Platform, LinuxPackage.IsInstalled));
         server.MapGet("/operations/current", (NativeHostOperations operations, CancellationToken token) => operations.StatusAsync(token));
         server.MapGet("/hosting", (NativeHostOperations operations, CancellationToken token) => operations.HostingStatusAsync(token));
-        server.MapPost("/operations/restart", (HttpContext context, NativeHostOperations operations) => operations.RestartAsync(context.User.RequireSessionId(), context.RequestAborted));
+        // The Mac host restarts its server itself; the Linux package's systemd service restarts on request.
+        server.MapPost("/operations/restart", (HttpContext context, NativeHostOperations operations, LinuxServiceRestart linux) =>
+            operations.Available ? operations.RestartAsync(context.User.RequireSessionId(), context.RequestAborted) : Task.FromResult(linux.Request()));
         server.MapPost("/operations/hosting", (HttpContext context, HostingChangeRequest request, NativeHostOperations operations, CancellationToken token) =>
             operations.AuthorizeHostingAsync(context.User.RequireSessionId(), request, token));
         server.MapPost("/operations/network", (HttpContext context, NetworkTrialRequest request, NativeHostOperations operations) => operations.TrialAsync(context.User.RequireSessionId(), request, context.RequestAborted));
@@ -23,6 +26,9 @@ public static class ServerManagementEndpoints
         { await operations.ConfirmAsync(id, context.User.RequireSessionId(), context.RequestAborted); return Results.NoContent(); });
         server.MapGet("/diagnostics", (ServerDiagnosticsStore diagnostics) => diagnostics.Read());
         server.MapGet("/power", (ServerPowerSettingsStore power) => power.Read());
+        server.MapGet("/updates", (ServerUpdateStore updates) => updates.Read());
+        server.MapPost("/updates/check", (ServerUpdateStore updates) => updates.RequestCheck());
+        server.MapPost("/updates/install", (ServerUpdateStore updates) => updates.RequestInstall());
         server.MapPut("/power", (UpdateServerPowerSettingsRequest request, ServerPowerSettingsStore power) => power.Update(request));
         server.MapGet("/jobs", async (LibraryService libraries, MetadataService metadata, CancellationToken token) => new
         { scans = await libraries.ListScansAsync(null, false, 100, token), metadata = await metadata.ListJobsAsync(false, 100, token) });

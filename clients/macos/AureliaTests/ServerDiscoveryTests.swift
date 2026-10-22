@@ -177,6 +177,20 @@ struct ServerDiscoveryTests {
     #expect(clock.timeIntervalSince1970 == wakeUp.limit)
   }
 
+  @Test func stopWaitingEndsTheWakeUpWithoutClaimingTheServerAnswered() async {
+    var wakeUp = ServerWakeUp()
+    wakeUp.canWake = { _ in true }
+    wakeUp.wake = { _, _ in }
+    // The probe of a cancelled wait fails like any request that was cut short.
+    wakeUp.probe = { _ in true }
+    wakeUp.delay = { _ in try await Task.sleep(for: .seconds(60)) }
+    let attempt = Task { @MainActor in
+      await wakeUp.run(serverId: UUID(), address: URL(string: "https://192.0.2.10:43111")!) {}
+    }
+    attempt.cancel()
+    #expect(!(await attempt.value))
+  }
+
   @Test func closingTheWindowQuitsUnlessTurnedOff() throws {
     let suite = "AureliaWindowCloseTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))

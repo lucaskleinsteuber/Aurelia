@@ -14,7 +14,11 @@ struct ServerPowerEditor: View {
   var body: some View {
     Group {
       if let stored, stored.available, let draft {
-        GroupBox("Power") {
+        AureliaSettingsSection(
+          "Power Saving",
+          symbol: "leaf",
+          description: "What the server computer does while nobody watches."
+        ) {
           VStack(alignment: .leading, spacing: 12) {
             Picker("When Unused", selection: binding(\.mode)) {
               Text("Keep Running").tag("off")
@@ -62,7 +66,7 @@ struct ServerPowerEditor: View {
             }
             if let message { Text(message).font(.caption).foregroundStyle(.orange) }
           }
-          .frame(maxWidth: .infinity, alignment: .leading).padding(10).disabled(working)
+          .frame(maxWidth: .infinity, alignment: .leading).disabled(working)
         }
         .accessibilityIdentifier("server-power")
       }

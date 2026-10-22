@@ -8,8 +8,8 @@ namespace Aurelia.Server.Services;
 /// <summary>
 /// Keeps what a Linux server does when unused in <c>sleep-settings</c> in the data folder, where the
 /// package's root-run <c>aurelia-autosleep</c> and the <c>aurelia sleep</c> command read them as
-/// plain KEY=value lines. The installed service sets <c>AURELIA_POWER_SETTINGS=1</c>; elsewhere
-/// nothing would act on them, so they are reported as unavailable and cannot be changed.
+/// plain KEY=value lines. Elsewhere than in the Linux package nothing would act on them, so they
+/// are reported as unavailable and cannot be changed.
 /// </summary>
 public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtime, bool? available = null)
 {
@@ -20,7 +20,7 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
     public static readonly IReadOnlyList<string> Modes = ["off", "stop", "sleep"];
     private readonly object gate = new();
 
-    private bool Available => available ?? Environment.GetEnvironmentVariable("AURELIA_POWER_SETTINGS") == "1";
+    private bool Available => available ?? LinuxPackage.IsInstalled;
     private string SettingsPath => Path.Combine(runtime.DataDirectory, FileName);
 
     public ServerPowerSettings Read()

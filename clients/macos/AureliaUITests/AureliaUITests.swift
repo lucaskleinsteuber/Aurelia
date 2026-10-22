@@ -168,8 +168,9 @@ final class AureliaUITests: XCTestCase {
     app.activate()
     defer { app.terminate() }
     app.typeKey(",", modifierFlags: .command)
-    XCTAssertTrue(app.buttons["Server"].waitForExistence(timeout: 8))
-    app.buttons["Server"].click()
+    // The connection to the server is part of this Mac's own settings.
+    XCTAssertTrue(app.buttons["App"].waitForExistence(timeout: 8))
+    app.buttons["App"].click()
     let restore = app.buttons["restore-local-host"]
     XCTAssertTrue(restore.waitForExistence(timeout: 8))
     for _ in 0..<8 where !restore.isHittable { app.scrollViews.firstMatch.swipeUp() }
@@ -311,7 +312,7 @@ final class AureliaUITests: XCTestCase {
     defer { app.terminate() }
 
     app.typeKey(",", modifierFlags: .command)
-    let metadataTab = app.buttons["Metadata"]
+    let metadataTab = app.buttons["Movie Info"]
     XCTAssertTrue(metadataTab.waitForExistence(timeout: 8))
     metadataTab.click()
     XCTAssertTrue(app.staticTexts["Movie & TV Information"].waitForExistence(timeout: 8))
