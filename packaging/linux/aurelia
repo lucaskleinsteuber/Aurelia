@@ -266,7 +266,8 @@ case "$command" in
 
     if $set_token; then
       echo "Create a fine-grained token on GitHub with read-only access to the contents of $update_repository."
-      read -r -s -p "GitHub token (hidden; leave empty to remove the saved one): " update_token
+      # A pasted token may come without a line end, which makes read report the end of input.
+      read -r -s -p "GitHub token (hidden; leave empty to remove the saved one): " update_token || true
       echo
       if [ -z "$update_token" ]; then
         rm -f "$token_file"
@@ -321,7 +322,7 @@ case "$command" in
       exit 0
     fi
     if ! $assume_yes; then
-      read -r -p "Install $version ($build) now? Accounts, library and settings stay. [y/N] " answer
+      read -r -p "Install $version ($build) now? Accounts, library and settings stay. [y/N] " answer || true
       case "$answer" in
         y|Y|yes|YES) ;;
         *) echo "Nothing was changed."; exit 0 ;;
