@@ -251,6 +251,19 @@ struct LibraryScanSummary: Codable, Identifiable, Equatable, Sendable {
 struct PairingCodeResponse: Codable, Equatable, Sendable {
   let code: String
   let expiresAt: String
+
+  var expiryDate: Date? { ServerDate.parse(expiresAt) }
+}
+
+/// Server timestamps are ISO 8601, with or without fractional seconds.
+enum ServerDate {
+  static func parse(_ value: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: value) { return date }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: value)
+  }
 }
 
 struct DeviceSessionSummary: Codable, Identifiable, Equatable, Sendable {
@@ -264,14 +277,11 @@ struct DeviceSessionSummary: Codable, Identifiable, Equatable, Sendable {
   let isCurrent: Bool
 
   var isActive: Bool {
-    guard revokedAt == nil else { return false }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let fractional = formatter.date(from: expiresAt)
-    formatter.formatOptions = [.withInternetDateTime]
-    guard let expiry = fractional ?? formatter.date(from: expiresAt) else { return false }
+    guard revokedAt == nil, let expiry = ServerDate.parse(expiresAt) else { return false }
     return expiry > Date()
   }
+
+  var lastSeenDate: Date? { ServerDate.parse(lastSeenAt) }
 }
 
 struct APIProblem: Decodable, Error, Sendable {

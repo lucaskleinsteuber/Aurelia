@@ -370,14 +370,6 @@ struct ServerDetailsBox: View {
 
 enum ServerDateText {
   static func display(_ value: String) -> String {
-    let parser = ISO8601DateFormatter()
-    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let date =
-      parser.date(from: value)
-      ?? {
-        parser.formatOptions = [.withInternetDateTime]
-        return parser.date(from: value)
-      }()
-    return date?.formatted(date: .abbreviated, time: .shortened) ?? value
+    ServerDate.parse(value)?.formatted(date: .abbreviated, time: .shortened) ?? value
   }
 }

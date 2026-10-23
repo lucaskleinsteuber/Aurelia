@@ -86,6 +86,8 @@ struct ProfileUpdateRequest: Codable, Sendable {
 
 enum ProfilePIN {
   static let requirement = "Numbers only (0–9), 4 to 8 digits."
+  /// One answer for every rejected unlock, so the message never hints at the PIN's length.
+  static let incorrect = "The PIN is incorrect."
 
   static func isValid(_ pin: String) -> Bool {
     (4...8).contains(pin.count) && pin.utf8.allSatisfy { (48...57).contains($0) }

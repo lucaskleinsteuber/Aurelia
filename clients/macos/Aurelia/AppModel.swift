@@ -2315,7 +2315,7 @@ final class AppModel: ObservableObject {
           guard expected == profileSelectionGeneration, !Task.isCancelled else { return false }
         }
         guard !choice.pinProtectionEnabled || pin == "1234" || pin == "12345678" else {
-          profileSelectionError = "The PIN is incorrect."
+          profileSelectionError = ProfilePIN.incorrect
           return false
         }
         clearPersonalViewState()
@@ -2386,7 +2386,9 @@ final class AppModel: ObservableObject {
         errorMessage = error.localizedDescription
         beginReconnectIfNeeded(after: error)
       } else if profile == device {
-        profileSelectionError = error.localizedDescription
+        profileSelectionError =
+          (error as? APIClientError)?.problemCode == "invalid_profile_pin"
+          ? ProfilePIN.incorrect : error.localizedDescription
       }
       return false
     }

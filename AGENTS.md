@@ -64,9 +64,9 @@ These rules apply to every task in this repository.
 
 - macOS/server and tvOS are separate products with independent version/build
   counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac release is 1.8.9 (93) (new layered app icon); the
+  changing them. The approved Mac release is 1.9.0 (94) (clearer device pairing); the
   independent tvOS client is named Aurelia, requires tvOS 26, and the approved
-  icon update is 0.3.6 (17).
+  profile picker update is 0.3.7 (18).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the

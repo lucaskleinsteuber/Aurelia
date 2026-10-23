@@ -200,16 +200,14 @@ struct ProfilePickerView: View {
       } label: {
         Image(systemName: "arrow.right")
           .font(.system(size: 15, weight: .bold))
-          .foregroundStyle(ProfilePIN.isValid(pin) ? Color.black : Color.white.opacity(0.5))
+          .foregroundStyle(pin.isEmpty ? Color.white.opacity(0.5) : Color.black)
           .frame(width: 36, height: 36)
-          .background(
-            Circle().fill(ProfilePIN.isValid(pin) ? Color.white : Color.white.opacity(0.12))
-          )
+          .background(Circle().fill(pin.isEmpty ? Color.white.opacity(0.12) : Color.white))
           .contentShape(Circle())
       }
       .buttonStyle(.plain)
       .disabled(pin.isEmpty || isSubmitting)
-      .animation(.smooth(duration: 0.2), value: ProfilePIN.isValid(pin))
+      .animation(.smooth(duration: 0.2), value: pin.isEmpty)
       .help("Open Profile")
       .accessibilityLabel("Open Profile")
       .accessibilityIdentifier("profile-unlock")
@@ -261,7 +259,9 @@ struct ProfilePickerView: View {
     guard !isSubmitting else { return }
     model.clearProfileSelectionError()
     guard ProfilePIN.isValid(pin) else {
-      validationError = ProfilePIN.problem(pin) ?? "Enter 4–8 digits."
+      // A PIN of the wrong length is answered like any wrong PIN.
+      validationError = ProfilePIN.incorrect
+      pin = ""
       failedAttempts += 1
       pinFocused = true
       return
