@@ -10,8 +10,10 @@ public sealed class ServerSleepSignal(ServerRuntimeOptions runtime, ActiveStream
 {
     public const string FileName = "sleep-ready";
     public static readonly TimeSpan Delay = TimeSpan.FromMinutes(5);
-    // The player that ran the timer may still finish a read just after it ended.
-    private static readonly TimeSpan Grace = TimeSpan.FromSeconds(30);
+    // The player that ran the timer may still fill its buffer for a moment after it ended, and a
+    // paused player may keep its read open without sending anything. Data sent after this means
+    // someone, on any device, is watching.
+    private static readonly TimeSpan Settle = TimeSpan.FromMinutes(2);
     private readonly object gate = new();
     private DateTimeOffset? requestedAt;
 
@@ -39,8 +41,7 @@ public sealed class ServerSleepSignal(ServerRuntimeOptions runtime, ActiveStream
         {
             if (requestedAt is not { } at) return false;
             var now = clock.GetUtcNow();
-            var playedSince = streams.LastPlaybackActivity is { } last && last > at + Grace;
-            if (playedSince || (now - at > Grace && streams.PlaybackCount > 0))
+            if (streams.LastPlaybackActivity is { } last && last > at + Settle)
             {
                 requestedAt = null;
                 return false;

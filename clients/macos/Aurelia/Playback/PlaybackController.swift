@@ -143,6 +143,8 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var chapters: [PlaybackChapter] = []
   @Published private(set) var currentChapterIndex: Int32?
   @Published private(set) var sleepTimer: PlaybackSleepTimer = .off
+  /// The sleep timer ran out: the player closes, so nothing keeps the Mac or the server awake.
+  @Published private(set) var sleepTimerFinished = false
   @Published var volume: Double = 1
   @Published var isMuted = false
   @Published var errorMessage: String?
@@ -485,6 +487,7 @@ final class PlaybackController: ObservableObject {
     }
     guard !wantsPlayback else { return true }
     wantsPlayback = true
+    beginPlaybackActivityIfNeeded()
     pauseRequestPending = false
     lastMovementAt = recoveryClock()
     preparedAt = recoveryClock()
@@ -515,6 +518,8 @@ final class PlaybackController: ObservableObject {
     if activePlayback != nil, !recovering, nextItemTask == nil, incidentPausedAt == nil {
       incidentPausedAt = recoveryClock()
     }
+    // A paused title must not keep the Mac awake, for example after a sleep timer.
+    endPlaybackActivity()
     enqueueProgressSave(isFinished: endHandled)
     return true
   }
@@ -701,6 +706,7 @@ final class PlaybackController: ObservableObject {
       self.sleepTimer = .off
       self.enqueueProgressSave(isFinished: false)
       await self.client.sleepTimerEnded()
+      self.sleepTimerFinished = true
     }
   }
 
@@ -836,7 +842,7 @@ final class PlaybackController: ObservableObject {
     engine.volume = volume
     engine.isMuted = isMuted
     engine.playbackRate = playbackRate
-    beginPlaybackActivityIfNeeded()
+    if wantsPlayback { beginPlaybackActivityIfNeeded() }
     scheduleRenewal(for: source)
     if wantsPlayback {
       engine.play()
@@ -962,6 +968,7 @@ final class PlaybackController: ObservableObject {
     if sleepTimer == .endOfEpisode {
       let client = client
       Task { await client.sleepTimerEnded() }
+      sleepTimerFinished = true
     }
     guard sleepTimer != .endOfEpisode,
       preferences.automaticallyPlayNextEpisode,
@@ -1106,6 +1113,9 @@ final class PlaybackController: ObservableObject {
       }
     }
   }
+
+  /// Whether this player keeps the Mac from sleeping now.
+  var preventsSystemSleep: Bool { activityToken != nil }
 
   private func beginPlaybackActivityIfNeeded() {
     guard preferences.preventSleepDuringPlayback, activityToken == nil else { return }

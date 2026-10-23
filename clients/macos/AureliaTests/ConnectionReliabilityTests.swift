@@ -34,6 +34,47 @@ struct ConnectionReliabilityTests {
     #expect(model.errorMessage?.contains("could not be removed securely") == true)
   }
 
+  @Test func aureliaRestsOnlyWhenNothingPlaysAndNobodyUsedTheMac() throws {
+    let suite = "AureliaRestTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    #expect(AureliaRest.isEnabled(defaults: defaults))
+    #expect(AureliaRest.minutes(defaults: defaults) == 15)
+    defaults.set(7, forKey: AureliaRest.minutesKey)
+    #expect(AureliaRest.minutes(defaults: defaults) == 15, "Only offered choices count.")
+    defaults.set(30, forKey: AureliaRest.minutesKey)
+    #expect(AureliaRest.minutes(defaults: defaults) == 30)
+
+    func rests(
+      enabled: Bool = true, idle: TimeInterval = 15 * 60, playing: Bool = false,
+      elsewhere: Bool = true
+    ) -> Bool {
+      AureliaRest.shouldRest(
+        enabled: enabled, minutes: 15, secondsWithoutInput: idle, playing: playing,
+        connectedElsewhere: elsewhere)
+    }
+    #expect(rests())
+    #expect(!rests(idle: 14 * 60))
+    #expect(!rests(playing: true), "A title playing through the night is still watched.")
+    #expect(!rests(enabled: false))
+    #expect(!rests(elsewhere: false), "A server on this Mac is not left alone.")
+  }
+
+  @Test func restingClosesThePlayerAndStaysQuiet() async {
+    let profile = syntheticProfile()
+    let model = AppModel(store: FailingDisconnectStore(profile: profile), initialProfile: profile)
+    guard model.operatingMode != .host else { return }
+    await model.enterRest()
+    #expect(model.isResting)
+    #expect(model.playback == nil)
+    #expect(model.connectionStatus == nil)
+    // Nothing a view might trigger meanwhile reaches the server.
+    await model.refreshFromUI()
+    await model.reloadWatchingProfiles()
+    #expect(model.errorMessage == nil)
+    #expect(model.isResting)
+  }
+
   @Test func viewingCredentialCannotReplacePersistedDeviceCredential() throws {
     let store = KeychainServerStore(service: "Aurelia.tests.device-only.\(UUID().uuidString)")
     defer { try? store.delete() }

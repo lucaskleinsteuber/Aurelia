@@ -869,7 +869,8 @@ public static class ApiEndpointMappings
             return Results.NotFound();
         }
 
-        if (context.Items["Aurelia.StreamLease"] is ActiveStreamRegistry.Lease lease) lease.BindMedia(source.MediaId);
+        var lease = context.Items["Aurelia.StreamLease"] as ActiveStreamRegistry.Lease;
+        lease?.BindMedia(source.MediaId);
 
         context.Response.Headers.CacheControl = "private, no-store";
         context.Response.Headers.XContentTypeOptions = "nosniff";
@@ -886,7 +887,7 @@ public static class ApiEndpointMappings
         var entityTag = new EntityTagHeaderValue(
             $"\"{source.ContentLength:x}-{source.LastModified.ToUnixTimeMilliseconds():x}\"");
         return Results.File(
-            source.Stream,
+            lease is null ? source.Stream : new PlaybackReadStream(source.Stream, lease),
             contentType: source.ContentType,
             fileDownloadName: null,
             lastModified: source.LastModified,

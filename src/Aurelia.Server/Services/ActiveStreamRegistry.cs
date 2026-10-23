@@ -2,8 +2,9 @@ using Aurelia.Contracts;
 
 namespace Aurelia.Server.Services;
 
-public sealed class ActiveStreamRegistry
+public sealed class ActiveStreamRegistry(TimeProvider? clock = null)
 {
+    private readonly TimeProvider clock = clock ?? TimeProvider.System;
     /// <summary>
     /// Timeline preview frames are short reads beside a playing stream. They have their own small
     /// budget so they never take a slot that playback, a seek or another device needs.
@@ -16,7 +17,10 @@ public sealed class ActiveStreamRegistry
     public int Count { get { lock (gate) return streams.Count; } }
     /// <summary>Playback reads now open; preview frames do not count.</summary>
     public int PlaybackCount { get { lock (gate) return streams.Count(stream => !stream.IsPreview); } }
-    /// <summary>When a playback read last started or ended.</summary>
+    /// <summary>
+    /// When a playback read last started, ended or sent data. A paused player may keep its read
+    /// open, but sends nothing then, so this tells watching apart from an open connection.
+    /// </summary>
     public DateTimeOffset? LastPlaybackActivity { get { lock (gate) return lastPlayback; } }
 
     public Lease Enter(Guid userId, Guid sessionId, int globalLimit, int userLimit, CancellationToken request, bool preview = false)
@@ -32,7 +36,7 @@ public sealed class ActiveStreamRegistry
                 throw new AccountException("stream_limit", "Too many simultaneous stream requests. Try again shortly.", 429);
             var lease = new Lease(this, userId, sessionId, preview, request);
             streams.Add(lease);
-            if (!preview) lastPlayback = DateTimeOffset.UtcNow;
+            if (!preview) lastPlayback = clock.GetUtcNow();
             return lease;
         }
     }
@@ -68,13 +72,19 @@ public sealed class ActiveStreamRegistry
         public bool IsPreview { get; }
         public Guid? MediaId { get; private set; }
         public void BindMedia(Guid id) { lock (registry.gate) MediaId = id; }
+        /// <summary>The read sent data to the device.</summary>
+        public void MarkRead()
+        {
+            if (IsPreview) return;
+            lock (registry.gate) registry.lastPlayback = registry.clock.GetUtcNow();
+        }
         public CancellationToken Token => source.Token;
         internal void Cancel() { lock (gate) { if (!disposed) source.Cancel(); } }
         public void Dispose()
         {
             lock (registry.gate)
             {
-                if (registry.streams.Remove(this) && !IsPreview) registry.lastPlayback = DateTimeOffset.UtcNow;
+                if (registry.streams.Remove(this) && !IsPreview) registry.lastPlayback = registry.clock.GetUtcNow();
             }
             lock (gate) { if (!disposed) { disposed = true; source.Dispose(); } }
         }

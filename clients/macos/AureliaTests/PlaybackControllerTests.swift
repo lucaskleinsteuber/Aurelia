@@ -603,6 +603,29 @@ final class PlaybackControllerTests: XCTestCase {
     await controller.shutdown(saveProgress: false)
   }
 
+  func testPausingLetsTheMacSleepAndPlayingKeepsItAwakeAgain() async throws {
+    let source = Self.source(position: 0, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = true
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      engine: engine,
+      preferences: preferences,
+      relayFactory: { _, _ in FakePlaybackRelay() })
+
+    await controller.start()
+    XCTAssertTrue(controller.preventsSystemSleep)
+    XCTAssertTrue(controller.pause())
+    XCTAssertFalse(controller.preventsSystemSleep)
+    XCTAssertTrue(controller.play())
+    XCTAssertTrue(controller.preventsSystemSleep)
+    await controller.shutdown(saveProgress: false)
+    XCTAssertFalse(controller.preventsSystemSleep)
+  }
+
   func testExpiringSleepTimerDoesNotRepeatAnUnacknowledgedDecoderPause() async throws {
     let source = Self.source(position: 0, completed: false)
     let client = FakePlaybackClient(source: source)
@@ -636,6 +659,8 @@ final class PlaybackControllerTests: XCTestCase {
       await Task.yield()
     }
     XCTAssertEqual(client.sleepTimerSignals, 1, "The server learns that the sleep timer ended.")
+    XCTAssertTrue(controller.sleepTimerFinished, "The player closes when the sleep timer ends.")
+    XCTAssertFalse(controller.preventsSystemSleep, "The Mac may sleep once the timer ended.")
     XCTAssertEqual(engine.pauseCalls, 1)
     XCTAssertTrue(engine.isPlaying)
     XCTAssertFalse(controller.isPlaying)

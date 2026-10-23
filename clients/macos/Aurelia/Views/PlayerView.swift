@@ -147,6 +147,7 @@ struct PlayerView: View {
       PlaybackShutdownCoordinator.shared.unregister(controller)
       SystemMediaPlaybackCoordinator.shared.unregister(controller)
       windowPresentation.restore()
+      model.reportPlayerPlaying(false)
       Task { await controller.shutdown() }
     }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) {
@@ -169,7 +170,11 @@ struct PlayerView: View {
     .onChange(of: controller.errorMessage) {
       revealControls(scheduleHide: controller.errorMessage == nil)
     }
+    .onChange(of: controller.sleepTimerFinished) { _, finished in
+      if finished { closePlayer() }
+    }
     .onChange(of: controller.isPlaying) {
+      model.reportPlayerPlaying(controller.isPlaying)
       if !controller.isPlaying { cursor.show() }
       advanceSceneNotes()
     }

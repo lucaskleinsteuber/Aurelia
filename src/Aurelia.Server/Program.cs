@@ -87,8 +87,9 @@ if (tlsIdentity.Certificate is not null)
         options.ConfigureHttpsDefaults(https =>
             https.ServerCertificate = tlsIdentity.Certificate));
 }
-builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.AspNetCore.Routing", LogLevel.Warning);
+// Every request would otherwise leave lines in the journal, all night while an app waits for changes.
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
 // Every database command at the default level would fill a Linux journal with hundreds of
 // thousands of lines an hour; warnings and errors still appear.
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);

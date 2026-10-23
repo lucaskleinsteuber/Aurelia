@@ -53,11 +53,18 @@ struct RootView: View {
           .transition(.opacity)
           .zIndex(10)
       }
+
+      if model.isResting || model.isLeavingRest {
+        AureliaRestView()
+          .transition(.opacity)
+          .zIndex(20)
+      }
     }
     .background(AureliaWindowChrome())
     .aureliaFullWindowCanvas()
     .aureliaRemoveEmptyWindowToolbar()
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.playback)
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: model.isResting)
     .preferredColorScheme(.dark)
     // While playing, the window may shrink to a 16:9 picture-in-picture size; a library minimum
     // combined with the 16:9 ratio would leave macOS no valid size when the edge is dragged.

@@ -14,6 +14,8 @@ struct AppSettingsView: View {
   @Environment(\.scenePhase) private var scenePhase
   @ObservedObject private var playbackPreferences = PlaybackPreferencesStore.shared
   @AppStorage(WindowClosePreference.quitsKey) private var quitsWhenWindowCloses = true
+  @AppStorage(AureliaRest.enabledKey) private var restsWhenUnused = true
+  @AppStorage(AureliaRest.minutesKey) private var restMinutes = AureliaRest.defaultMinutes
   @State private var selectedPage: SettingsPage = .app
   @State private var libraryToRemove: LibrarySummary?
   @State private var showingSwitchConfirmation = false
@@ -303,7 +305,7 @@ struct AppSettingsView: View {
       "Window & Appearance",
       symbol: "macwindow",
       description:
-        "Choose what closing the window does. Aurelia follows your Mac accessibility settings."
+        "What Aurelia does when you close it or leave it. It follows your Mac accessibility settings."
     ) {
       VStack(spacing: 10) {
         VStack(alignment: .leading, spacing: 2) {
@@ -313,6 +315,27 @@ struct AppSettingsView: View {
             model.isLocalHost
               ? "Ends the connection to the server. A server that runs only while Aurelia is open stops too."
               : "Ends the connection to the server, so a server in sleep mode can go to sleep."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        VStack(alignment: .leading, spacing: 2) {
+          HStack {
+            Toggle("Let the Server Rest When Unused", isOn: $restsWhenUnused)
+              .accessibilityIdentifier("interface-rest")
+            Spacer()
+            Picker("After", selection: $restMinutes) {
+              ForEach(AureliaRest.minuteChoices, id: \.self) { minutes in
+                Text("\(minutes) minutes").tag(minutes)
+              }
+            }
+            .labelsHidden()
+            .frame(width: 130)
+            .disabled(!restsWhenUnused)
+          }
+          Text(
+            "With no clicks, keys or playback for this long, Aurelia disconnects so a server that saves power can sleep. Using Aurelia again wakes it."
           )
           .font(.caption)
           .foregroundStyle(.secondary)

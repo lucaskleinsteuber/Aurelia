@@ -100,6 +100,14 @@ final class AppModel: ObservableObject {
   /// The server stayed silent even after being woken: shown as a calm hint with Try Again.
   @Published private(set) var serverUnreachable = false
   var serverWakeUp = ServerWakeUp()
+  /// Aurelia let go of its server after a while without use; see `AureliaRest`.
+  @Published private(set) var isResting = false
+  /// Using Aurelia again: the server is woken and the library loads.
+  @Published private(set) var isLeavingRest = false
+  /// Whether a title plays now; the player reports it.
+  private(set) var playerIsPlaying = false
+  var secondsWithoutInput: @MainActor () -> TimeInterval = { AureliaRest.secondsWithoutInput }
+  private var restWatchTask: Task<Void, Never>?
   private var serverWakeTask: Task<Bool, Never>?
   @Published private(set) var isWorking = false
   @Published private(set) var isRecoveringLocalHost = false
@@ -576,6 +584,53 @@ final class AppModel: ObservableObject {
     }
     connectionStatus = nil
     isStarting = false
+    watchForRest()
+  }
+
+  // MARK: Rest
+
+  func reportPlayerPlaying(_ playing: Bool) {
+    playerIsPlaying = playing
+  }
+
+  /// Checks twice a minute whether Aurelia should let go of its server.
+  private func watchForRest() {
+    restWatchTask?.cancel()
+    restWatchTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        guard let self else { return }
+        if self.shouldRest() { await self.enterRest() }
+      }
+    }
+  }
+
+  func shouldRest() -> Bool {
+    !isResting && !isLeavingRest && !isStarting
+      && AureliaRest.shouldRest(
+        enabled: AureliaRest.isEnabled(), minutes: AureliaRest.minutes(),
+        secondsWithoutInput: secondsWithoutInput(), playing: playerIsPlaying,
+        connectedElsewhere: operatingMode != .host && profile != nil)
+  }
+
+  /// Lets go of the server: a paused title closes with its progress saved, and no requests,
+  /// reconnects or Wake-on-LAN packets go out until Aurelia is used again.
+  func enterRest() async {
+    guard !isResting, operatingMode != .host, profile != nil else { return }
+    isResting = true
+    if playback != nil { dismissPlayback() }
+    connectionStatus = nil
+    await systemWillSleep()
+    PinnedSessionPool.shared.removeAll()
+  }
+
+  /// Using Aurelia again after a rest: wake the server and load what was showing.
+  func leaveRest() async {
+    guard isResting else { return }
+    isResting = false
+    isLeavingRest = true
+    defer { isLeavingRest = false }
+    await retryConnection()
   }
 
   /// Wakes a sleeping server before the first request, so opening Aurelia shows its progress
@@ -1864,7 +1919,7 @@ final class AppModel: ObservableObject {
     #if DEBUG
       if Self.uiTestMode == "local-host-recovery" { return }
     #endif
-    guard let profile, canManageMedia else { return }
+    guard let profile, canManageMedia, !isResting else { return }
     let generation = connectionGeneration
     do {
       let updated = try await currentAdministration {
@@ -1943,7 +1998,7 @@ final class AppModel: ObservableObject {
     let generation = connectionGeneration
     let selection = profileSelectionGeneration
     let viewingSession = profile?.isViewingSession == true ? profile : nil
-    guard !isRecoveringLocalHost else { return }
+    guard !isRecoveringLocalHost, !isResting else { return }
     if operatingMode == .host,
       hostSnapshot.state == .failed || hostSnapshot.state == .stopped
     {
@@ -1977,6 +2032,8 @@ final class AppModel: ObservableObject {
       // Keep real lifecycle observation enabled for unit and preflight tests.
       if Self.uiTestMode != nil { return }
     #endif
+    // A resting Aurelia stays quiet until someone uses it again.
+    if isResting { return }
     let canObserve = !isStarting && !isRecoveringLocalHost && !requiresProfileSelection
     // Opening Aurelia while its server sleeps wakes it now instead of at the next retry.
     if active, operatingMode != .host, reconnectTask != nil {
@@ -2026,6 +2083,7 @@ final class AppModel: ObservableObject {
     #if DEBUG
       if Self.uiTestMode != nil { return }
     #endif
+    if isResting { return }
     // Waking does not prove a server failure. Resume observation first and
     // require the normal confirmation policy before attempting recovery.
     if operatingMode == .host { startHostPolling() }
@@ -2192,6 +2250,7 @@ final class AppModel: ObservableObject {
   }
 
   func reloadWatchingProfiles() async {
+    guard !isResting else { return }
     let selection = profileSelectionGeneration
     do { try await loadWatchingProfiles() } catch is CancellationError {} catch {
       guard selection == profileSelectionGeneration, profile?.isViewingSession != true else {
@@ -2843,7 +2902,7 @@ final class AppModel: ObservableObject {
   }
 
   private func beginReconnectIfNeeded(after error: Error) {
-    guard operatingMode != .host, !hasPendingNetworkConfirmation,
+    guard operatingMode != .host, !hasPendingNetworkConfirmation, !isResting,
       ServerReconnectPolicy.isConnectivityFailure(error),
       reconnectTask == nil, let current = profile
     else { return }
@@ -2926,7 +2985,7 @@ final class AppModel: ObservableObject {
   }
 
   private func startSync() {
-    guard !requiresProfileSelection else { return }
+    guard !requiresProfileSelection, !isResting else { return }
     guard let profile else { return }
     let generation = connectionGeneration
     syncStartTask?.cancel()
