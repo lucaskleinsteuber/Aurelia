@@ -103,6 +103,8 @@ struct TVServerInfo: Codable, Equatable, Sendable {
   let publicKeyFingerprint: String?
   let displayFingerprint: String?
   let capabilities: [String]?
+  /// Hardware addresses of the server's network cards, reported for Wake-on-LAN.
+  var wakeOnLanAddresses: [String]? = nil
 }
 
 struct TVInspectedServer: Equatable, Sendable {

@@ -91,7 +91,7 @@ struct TVConnectionView: View {
         if let saved = model.connection {
           Button("Reconnect to \(saved.name)") {
             choosingOtherServer = false
-            Task { await model.reconnect() }
+            Task { await model.reconnect(userInitiated: true) }
           }.disabled(model.isBusy)
         }
         ForEach(browser.servers) { server in
@@ -144,7 +144,7 @@ struct TVSavedServerView: View {
           if model.isBusy {
             ProgressView("Waiting for the server…")
           } else {
-            Button("Try Again") { Task { await model.reconnect() } }
+            Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
               .accessibilityIdentifier("tv-server-retry")
           }
         }.frame(minHeight: 110)

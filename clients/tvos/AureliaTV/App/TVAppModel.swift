@@ -47,6 +47,9 @@ final class TVAppModel: ObservableObject {
   private var task: Task<Void, Never>?
   private var expiry: Task<Void, Never>?
   private var started = false
+  /// Waking the server is for someone who just opened Aurelia or pressed Try Again, not for a
+  /// screen left on for hours.
+  private var wakeAllowedUntil: Date?
   private var isForeground = true
   private var outboxTransition: Task<Void, Never>?
 
@@ -76,6 +79,7 @@ final class TVAppModel: ObservableObject {
         return
       }
     #endif
+    allowWaking()
     do {
       connection = environment.allowsPersistentCredentials ? try credentials.load() : nil
       if connection != nil { await reconnect() } else { startDiscovery() }
@@ -113,16 +117,19 @@ final class TVAppModel: ObservableObject {
     }
   }
 
-  func reconnect() async {
+  func reconnect(userInitiated: Bool = false) async {
     guard let saved = connection, !isBusy else { return }
+    if userInitiated { allowWaking() }
     let run = beginWork()
     defer { finish(run) }
+    if savedServerUnreachable { wakeIfAllowed(saved.serverID) }
     // A sleeping server does not answer at all, and every try waits for a timeout. After a few
     // seconds the "server is off" hint shows while the tries go on.
     let hint = Task { [weak self] in
       do { try await Task.sleep(for: .seconds(5)) } catch { return }
       guard let self, self.current(run), self.phase == .connection else { return }
       self.savedServerUnreachable = true
+      self.wakeIfAllowed(saved.serverID)
     }
     defer { hint.cancel() }
     do {
@@ -140,6 +147,11 @@ final class TVAppModel: ObservableObject {
       try saveCredentials(relocated)
       connection = relocated
       savedServerUnreachable = false
+      let discovered = browser.servers.filter { $0.serverID == saved.serverID }
+        .flatMap { [$0.baseURL] + $0.alternativeURLs }
+      TVWakeOnLan.remember(
+        serverID: saved.serverID, info: candidate.info,
+        hosts: ([candidate.baseURL] + discovered).compactMap(\.host))
       try await loadProfiles(run: run)
     } catch {
       if current(run), TVServerReachability.isUnreachable(error) {
@@ -154,6 +166,13 @@ final class TVAppModel: ObservableObject {
         startDiscovery()
       }
     }
+  }
+
+  private func allowWaking() { wakeAllowedUntil = Date().addingTimeInterval(600) }
+
+  private func wakeIfAllowed(_ serverID: UUID) {
+    guard isForeground, let until = wakeAllowedUntil, until > Date() else { return }
+    TVWakeOnLan.wake(serverID: serverID)
   }
 
   /// Stops trying the saved server, so another one can be chosen at once.
@@ -203,6 +222,9 @@ final class TVAppModel: ObservableObject {
             case .approved:
               guard let auth = result.authentication else { throw TVCoreError.invalidResponse }
               var paired = try inspected.connection(authentication: auth)
+              TVWakeOnLan.remember(
+                serverID: inspected.info.serverId, info: inspected.info,
+                hosts: [inspected.baseURL.host].compactMap { $0 })
               paired.pendingAcknowledgement = TVPendingPairingAcknowledgement(
                 id: created.id, secret: created.secret, expiresAt: created.expiresAt)
               try saveCredentials(paired)
@@ -391,6 +413,7 @@ final class TVAppModel: ObservableObject {
 
   func enterForeground() {
     isForeground = true
+    allowWaking()
     scheduleLibraryRefresh()
     if phase == .connection { startDiscovery() }
     // The server may have been woken meanwhile, for example by opening Aurelia on a Mac.

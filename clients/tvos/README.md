@@ -1,7 +1,7 @@
 # Aurelia for Apple TV
 
 A native tvOS 26 client for an Aurelia server on your local network, designed
-like the Aurelia Mac app. Version 1.0.0 includes:
+like the Aurelia Mac app. Version 1.1.0 includes:
 
 - Home with a hero, Continue Watching that resumes directly, genre shelves,
   Favorites, Collections and Recently Added
@@ -19,7 +19,9 @@ like the Aurelia Mac app. Version 1.0.0 includes:
 - Profiles in the Mac style with colored avatars, and a digits-only PIN keypad
   that never hints at how long a PIN is
 - A clear "The Server Is Off" screen when the saved server does not answer: turn
-  it on or open Aurelia on a Mac, and the Apple TV connects again by itself
+  it on or open Aurelia on a Mac, and the Apple TV connects again by itself. The
+  Apple TV also tries to wake the server with a Wake-on-LAN packet sent straight
+  to its last address
 - Artwork kept on the Apple TV for each profile, so posters appear at once
   after the app restarts
 

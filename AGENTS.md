@@ -63,10 +63,12 @@ These rules apply to every task in this repository.
 ## Client versions and verification
 
 - macOS/server and tvOS are separate products with independent version/build
-  counters. Confirm product names and intended versions with the user before
-  changing them. The approved Mac release is 1.9.0 (94) (clearer device pairing); the
-  independent tvOS client is named Aurelia, requires tvOS 26, and the approved
-  first full release is 1.0.0 (19).
+  counters. Versions follow Semantic Versioning (MAJOR.MINOR.PATCH): MAJOR for
+  changes that break existing clients, servers or data; MINOR for new features;
+  PATCH for fixes only. Choose the next version by these rules, state it, and
+  confirm it with the user before building; the build number rises by exactly
+  one per build. The current Mac release is 1.9.0 (94); the independent tvOS
+  client is named Aurelia, requires tvOS 26, and is at 1.1.0 (20).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
