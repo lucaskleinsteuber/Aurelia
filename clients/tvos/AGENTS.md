@@ -5,7 +5,7 @@
   library. Platform-neutral TV files under `AureliaTV/Core` are compiled directly
   into the hostless macOS logic-test target.
 - The approved client identity is **Aurelia**, bundle ID
-  `com.lucas.aurelia.tvos`, version **0.3.5**, build **16**, minimum **tvOS 26**.
+  `com.lucas.aurelia.tvos`, version **0.3.6**, build **17**, minimum **tvOS 26**.
   `Configuration/BuildNumber.xcconfig` owns the TV version. Confirm later product
   name or release-version changes with the user before editing them.
 - Keep UI text in English. Use Aurelia's opaque `#202326` canvas, large artwork,

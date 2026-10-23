@@ -1,13 +1,13 @@
 {
-  "images" : [
+  "images": [
     {
-      "filename" : "Aurelia.png",
-      "idiom" : "tv",
-      "scale" : "1x"
+      "filename": "Aurelia.png",
+      "idiom": "tv",
+      "scale": "1x"
     }
   ],
-  "info" : {
-    "author" : "com.lucas.aurelia.tvos",
-    "version" : 1
+  "info": {
+    "author": "com.lucas.aurelia.tvos",
+    "version": 1
   }
 }
