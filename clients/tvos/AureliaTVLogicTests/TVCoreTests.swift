@@ -155,6 +155,15 @@ struct TVCoreTests {
     #expect(!TVProfilePIN.isValid("12 34"))
   }
 
+  @Test func profileColorsMatchTheMacAndInitialsAreUppercase() {
+    #expect(TVProfileColor.index(for: nil) == 0)
+    let id = UUID(uuidString: "00000000-0000-4000-8000-000000000002")!
+    // Bytes 0x40 + 0x80 + 0x02 = 194, and 194 % 7 = 5, as on the Mac.
+    #expect(TVProfileColor.index(for: id) == 5)
+    #expect(TVProfileColor.initial(of: "  lucas") == "L")
+    #expect(TVProfileColor.initial(of: " ") == "?")
+  }
+
   @Test func unlockValidatesResponseBelongsToSelectedProfile() async throws {
     let profile = Self.session
     let transport = TVCoreFakeTransport(responses: [try encodedResponse(profile)])
@@ -173,7 +182,16 @@ struct TVCoreTests {
     do {
       _ = try await client.unlockProfile(id: Self.profileID, pin: "abcd")
       Issue.record("Invalid PIN must fail locally")
-    } catch let error as TVCoreError { #expect(error.code == "invalid_profile_pin") }
+    } catch let error as TVCoreError {
+      #expect(error.code == "invalid_profile_pin")
+      #expect(error.localizedDescription == TVProfilePIN.incorrect)
+    }
+    do {
+      _ = try await client.unlockProfile(id: Self.profileID, pin: "12")
+      Issue.record("A short PIN must fail locally")
+    } catch let error as TVCoreError {
+      #expect(error.localizedDescription == TVProfilePIN.incorrect, "No hint about the length.")
+    }
     #expect(await transport.requests.isEmpty)
   }
 

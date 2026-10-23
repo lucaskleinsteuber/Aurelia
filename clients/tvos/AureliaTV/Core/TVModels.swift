@@ -214,8 +214,27 @@ struct TVProfilePicker: Codable, Equatable, Sendable {
 }
 
 enum TVProfilePIN {
+  /// One answer for every rejected unlock, so the message never hints at the PIN's length.
+  static let incorrect = "The PIN is incorrect."
+
   static func isValid(_ value: String) -> Bool {
     (4...8).contains(value.utf8.count) && value.utf8.allSatisfy { (48...57).contains($0) }
+  }
+}
+
+/// The avatar color of a profile, matching the Mac app's for the same profile.
+enum TVProfileColor {
+  static let count = 7
+
+  static func index(for id: UUID?) -> Int {
+    guard let id else { return 0 }
+    let sum = withUnsafeBytes(of: id.uuid) { $0.reduce(0) { $0 + Int($1) } }
+    return sum % count
+  }
+
+  static func initial(of name: String) -> String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() }
+      ?? "?"
   }
 }
 

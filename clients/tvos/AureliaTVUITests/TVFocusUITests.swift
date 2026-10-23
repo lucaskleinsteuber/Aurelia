@@ -278,7 +278,10 @@ final class TVFocusUITests: XCTestCase {
     let one = app.buttons["pin-key-1"]
     expectFocus(one)
     XCTAssertFalse(app.keyboards.firstMatch.exists, "The PIN uses the on-screen keypad.")
-    XCTAssertFalse(app.buttons["profile-continue"].isEnabled)
+    // OK is always available and the field shows no placeholder dots, so neither hints at the
+    // PIN's length.
+    XCTAssertTrue(app.buttons["profile-continue"].isEnabled)
+    XCTAssertEqual(app.otherElements["profile-pin"].value as? String, "0 digits entered")
     shot(app, "Profiles - PIN Keypad")
     // Enter 1-2-3-4 with the remote and continue with OK.
     let remote = XCUIRemote.shared

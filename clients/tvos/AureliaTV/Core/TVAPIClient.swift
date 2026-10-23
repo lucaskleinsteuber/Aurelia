@@ -116,8 +116,8 @@ struct TVAPIClient: Sendable {
   func unlockProfile(id: UUID, pin: String?) async throws -> TVProfileSession {
     if let pin, !pin.isEmpty, !TVProfilePIN.isValid(pin) {
       throw TVCoreError.server(
-        status: 400, code: "invalid_profile_pin",
-        message: "Enter a PIN with four to eight digits.", retryAfter: nil)
+        status: 401, code: "invalid_profile_pin", message: TVProfilePIN.incorrect,
+        retryAfter: nil)
     }
     struct Payload: Encodable { let pin: String? }
     let value: TVProfileSession = try await post(

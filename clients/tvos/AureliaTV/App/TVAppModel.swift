@@ -16,6 +16,8 @@ final class TVAppModel: ObservableObject {
   /// The saved server did not answer at all, probably asleep: shown as a hint, not as an error.
   @Published private(set) var savedServerUnreachable = false
   @Published var selectedProfile: TVWatchingProfile?
+  /// Counts rejected PINs, so the entry clears and shakes even when the message repeats.
+  @Published private(set) var pinRejections = 0
   @Published private(set) var detailRefresh = UUID()
   let browser = TVBonjourBrowser()
   /// Genre shelves for Home, built from the preloaded Movies and TV Shows pages.
@@ -259,7 +261,9 @@ final class TVAppModel: ObservableObject {
       return
     }
     if let pin, !TVProfilePIN.isValid(pin) {
-      error = "Enter a 4–8 digit PIN."
+      // Answered like any wrong PIN, so the length rule gives nothing away.
+      error = TVProfilePIN.incorrect
+      pinRejections += 1
       return
     }
     let run = beginWork()
@@ -492,7 +496,12 @@ final class TVAppModel: ObservableObject {
   private func current(_ run: UUID) -> Bool { generation == run && !Task.isCancelled }
   private func show(_ failure: Error, run: UUID) {
     guard current(run), !(failure is CancellationError) else { return }
-    error = failure.localizedDescription
+    if (failure as? TVCoreError)?.code == "invalid_profile_pin" {
+      error = TVProfilePIN.incorrect
+      pinRejections += 1
+    } else {
+      error = failure.localizedDescription
+    }
     handleSessionFailure(failure)
   }
   private func retireWork() {
