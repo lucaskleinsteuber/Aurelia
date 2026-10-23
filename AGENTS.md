@@ -132,6 +132,11 @@ These rules apply to every task in this repository.
 - Do not leave old, previous, duplicate, renamed, or backup Aurelia app bundles
   in `/Applications`. After an update, only the intended current
   `/Applications/Aurelia.app` may remain.
+- Local builds use free 7-day development profiles. The per-user job from
+  `scripts/refresh-signing.sh` re-signs the installed Mac and Apple TV apps
+  before their profiles expire, keeping their versions. After installing an
+  Apple TV build, run `zsh scripts/refresh-signing.sh --adopt-tv` so the job
+  re-signs that build; after changing the script, run `--install` again.
 - Do not create local app-bundle backups in `/Applications` or elsewhere as part
   of the release workflow. Git/GitHub history, tags, commits, and published
   builds are the rollback mechanism.
