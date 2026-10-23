@@ -51,21 +51,48 @@ struct TVConnectionView: View {
   @EnvironmentObject private var model: TVAppModel
   @ObservedObject var browser: TVBonjourBrowser
   @State private var address = ""
+  @State private var choosingOtherServer = false
+
+  /// A saved server that is being reached, or is off, gets its own calm screen instead of the
+  /// manual connection form.
+  private var showsSavedServer: Bool {
+    guard model.connection != nil, !choosingOtherServer else { return false }
+    return model.savedServerUnreachable || (model.isBusy && model.error == nil)
+  }
 
   var body: some View {
+    Group {
+      if showsSavedServer, let saved = model.connection {
+        TVSavedServerView(name: saved.name) {
+          model.stopReconnecting()
+          choosingOtherServer = true
+        }
+      } else {
+        connectionForm
+      }
+    }
+    .onChange(of: browser.servers.contains { $0.serverID == model.connection?.serverID }) {
+      _, found in
+      // The saved server announced itself again, so it is awake: connect right away.
+      if found, model.savedServerUnreachable, !model.isBusy, !choosingOtherServer {
+        Task { await model.reconnect() }
+      }
+    }
+  }
+
+  private var connectionForm: some View {
     ScrollView {
       VStack(spacing: 30) {
-        if model.savedServerUnreachable, let saved = model.connection {
-          TVServerAsleepNotice(name: saved.name)
-        } else {
-          Image(systemName: "play.rectangle.fill").font(.system(size: 64)).foregroundStyle(
-            .secondary)
-          Text("Aurelia").font(.system(size: 54, weight: .bold))
-          Text("Connect to your server").font(.title2)
-          if let error = model.error { TVErrorText(message: error) }
-          if model.connection != nil {
-            Button("Reconnect") { Task { await model.reconnect() } }.disabled(model.isBusy)
-          }
+        Image(systemName: "play.rectangle.fill").font(.system(size: 64)).foregroundStyle(
+          .secondary)
+        Text("Aurelia").font(.system(size: 54, weight: .bold))
+        Text("Connect to your server").font(.title2)
+        if let error = model.error { TVErrorText(message: error) }
+        if let saved = model.connection {
+          Button("Reconnect to \(saved.name)") {
+            choosingOtherServer = false
+            Task { await model.reconnect() }
+          }.disabled(model.isBusy)
         }
         ForEach(browser.servers) { server in
           Button {
@@ -91,35 +118,51 @@ struct TVConnectionView: View {
   }
 }
 
-/// The saved server is silent, most likely asleep. This Apple TV keeps trying while the hint shows,
-/// so waking the server with Aurelia on a Mac is enough.
-struct TVServerAsleepNotice: View {
+/// Connecting to the saved server, or telling plainly that it is off. While the hint shows, this
+/// Apple TV keeps trying, so turning the server on or opening Aurelia on a Mac is enough.
+struct TVSavedServerView: View {
   @EnvironmentObject private var model: TVAppModel
   let name: String
+  let chooseOtherServer: () -> Void
 
   var body: some View {
-    VStack(spacing: 26) {
-      Image(systemName: "moon.zzz.fill").font(.system(size: 64)).foregroundStyle(.secondary)
-      Text("\(name) Isn’t Answering").font(.system(size: 48, weight: .bold))
-        .multilineTextAlignment(.center)
-      Text(
-        "The server may be asleep. Open Aurelia on your Mac to wake it. This Apple TV connects again by itself."
-      )
-      .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
-      .frame(maxWidth: 1100)
-      if model.isBusy {
-        ProgressView("Connecting to \(name)…")
+    VStack(spacing: 34) {
+      if model.savedServerUnreachable {
+        Image(systemName: "power").font(.system(size: 72, weight: .medium))
+          .foregroundStyle(.secondary)
+        VStack(spacing: 18) {
+          Text("The Server Is Off").font(.system(size: 56, weight: .bold))
+          Text(
+            "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
+          )
+          .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
+          .frame(maxWidth: 1100)
+          Text("This Apple TV connects by itself as soon as the server is on.")
+            .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+        }
+        ZStack {
+          if model.isBusy {
+            ProgressView("Waiting for the server…")
+          } else {
+            Button("Try Again") { Task { await model.reconnect() } }
+              .accessibilityIdentifier("tv-server-retry")
+          }
+        }.frame(minHeight: 110)
       } else {
-        Button("Try Again") { Task { await model.reconnect() } }
-          .accessibilityIdentifier("tv-server-retry")
+        ProgressView().scaleEffect(1.6).frame(height: 90)
+        Text("Connecting to \(name)…").font(.system(size: 40, weight: .semibold))
       }
+      Button("Connect to Another Server", action: chooseOtherServer)
+        .font(.system(size: 24)).padding(.top, 20)
+        .accessibilityIdentifier("tv-other-server")
     }
-    .padding(.bottom, 20)
+    .padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("tv-server-asleep")
-    .task {
-      // Tries again every half minute while the hint is shown.
+    .task(id: model.savedServerUnreachable) {
+      // Tries again every 20 seconds while the hint is shown.
+      guard model.savedServerUnreachable else { return }
       while !Task.isCancelled {
-        do { try await Task.sleep(for: .seconds(30)) } catch { return }
+        do { try await Task.sleep(for: .seconds(20)) } catch { return }
         if !model.isBusy { await model.reconnect() }
       }
     }

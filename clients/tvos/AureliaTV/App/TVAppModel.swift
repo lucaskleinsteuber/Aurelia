@@ -117,6 +117,14 @@ final class TVAppModel: ObservableObject {
     guard let saved = connection, !isBusy else { return }
     let run = beginWork()
     defer { finish(run) }
+    // A sleeping server does not answer at all, and every try waits for a timeout. After a few
+    // seconds the "server is off" hint shows while the tries go on.
+    let hint = Task { [weak self] in
+      do { try await Task.sleep(for: .seconds(5)) } catch { return }
+      guard let self, self.current(run), self.phase == .connection else { return }
+      self.savedServerUnreachable = true
+    }
+    defer { hint.cancel() }
     do {
       let candidate = try await inspectKnownServer(saved, run: run)
       guard current(run) else { return }
@@ -146,6 +154,15 @@ final class TVAppModel: ObservableObject {
         startDiscovery()
       }
     }
+  }
+
+  /// Stops trying the saved server, so another one can be chosen at once.
+  func stopReconnecting() {
+    guard phase == .connection, connection != nil else { return }
+    retireWork()
+    savedServerUnreachable = false
+    error = nil
+    startDiscovery()
   }
 
   func beginPairing() {
