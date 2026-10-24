@@ -188,6 +188,9 @@ public sealed class WebAppTests
             }
             using (var anonymous = await browser.GetAsync(playback.StreamPath))
                 Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+            // The live player's fetch counts as a stream read too; the invented bytes are no video.
+            using (var live = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, playback.StreamPath + "/live")))
+                Assert.NotEqual(HttpStatusCode.Unauthorized, live.StatusCode);
             // An <img> element: an unknown picture is missing, not a sign-in failure.
             using (var image = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, $"/api/v1/artwork/{Guid.NewGuid()}")))
                 Assert.Equal(HttpStatusCode.NotFound, image.StatusCode);
@@ -204,6 +207,9 @@ public sealed class WebAppTests
                 Assert.Equal(HttpStatusCode.NoContent, ended.StatusCode);
                 Assert.True(CookieJar.Deleted(ended, "aurelia_profile"));
             }
+            // Without a profile the device cookie alone opens no stream.
+            using (var live = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, playback.StreamPath + "/live")))
+                Assert.Equal(HttpStatusCode.Unauthorized, live.StatusCode);
             // The device stays signed in and shows the profiles again.
             using (var picker = await cookies.SendAsync(browser, Web(HttpMethod.Get, "/api/v1/profiles", "device")))
                 Assert.Equal(HttpStatusCode.OK, picker.StatusCode);
@@ -242,7 +248,7 @@ public sealed class WebAppTests
             using var unchanged = await client.SendAsync(conditional);
             Assert.Equal(HttpStatusCode.NotModified, unchanged.StatusCode);
         }
-        foreach (var asset in new[] { "/web/app.css", "/web/js/api.js", "/web/js/logic.js", "/web/js/dom.js", "/web/js/player.js", "/web/icon.svg", "/web/manifest.webmanifest" })
+        foreach (var asset in new[] { "/web/app.css", "/web/js/api.js", "/web/js/logic.js", "/web/js/dom.js", "/web/js/player.js", "/web/js/live.js", "/web/js/live-logic.js", "/web/icon.svg", "/web/manifest.webmanifest" })
         {
             using var response = await client.GetAsync(asset);
             Assert.True(response.StatusCode == HttpStatusCode.OK, asset);

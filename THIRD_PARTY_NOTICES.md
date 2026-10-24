@@ -7,6 +7,17 @@ binary package is included in `Aurelia.app` as `VLCKit-COPYING.txt`.
 
 Source and license information: <https://code.videolan.org/videolan/VLCKit>
 
+The Mac app's server includes ffmpeg and ffprobe 9.0.2 from the FFmpeg project for live
+conversion in web browsers, in `Contents/Resources/Server/ffmpeg`. They are built from the
+unmodified official source (<https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz>, SHA-256
+`8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`) by
+`scripts/build-ffmpeg-macos.sh`, without GPL or non-free parts, and are licensed under the GNU
+Lesser General Public License version 2.1 or later; the license text is beside them as
+`COPYING.LGPLv2.1`. The Linux
+server uses the distribution's own ffmpeg, which Aurelia does not distribute.
+
+Source and license information: <https://ffmpeg.org/legal.html>
+
 The bundled server also includes .NET / ASP.NET Core, Entity Framework Core,
 Microsoft.Data.Sqlite, SkiaSharp, SQLitePCLRaw with SQLite, and Haukcode.Mdns.
 Release builds include the resolved package metadata and available upstream

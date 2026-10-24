@@ -219,6 +219,11 @@ for runtime in osx-arm64 osx-x64; do
     "$publish_root/$runtime/Aurelia.Server.deps.json" "$assets_path" \
     "$candidate/Contents/Resources/ThirdPartyNotices/$runtime"
 done
+# Live conversion for web browsers uses the app's own LGPL ffmpeg beside both server runtimes;
+# the loop below signs it with the hardened runtime like every other server binary.
+ffmpeg_root=$("$repository_root/scripts/build-ffmpeg-macos.sh" | tail -n 1)
+[[ -x "$ffmpeg_root/ffmpeg" && -x "$ffmpeg_root/ffprobe" ]] || { echo "The Mac ffmpeg build failed." >&2; exit 1; }
+/usr/bin/ditto "$ffmpeg_root" "$candidate/Contents/Resources/Server/ffmpeg"
 
 while IFS= read -r -d '' binary; do
   if file "$binary" | grep -q 'Mach-O'; then

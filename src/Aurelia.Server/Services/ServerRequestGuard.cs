@@ -101,7 +101,8 @@ public sealed class ServerRequestGuard
             || path.StartsWith("/api/v1/collections", StringComparison.Ordinal)
             || (path.StartsWith("/api/v1/media/", StringComparison.Ordinal) && (path.Contains("/editor", StringComparison.Ordinal)
                 || path.Contains("/metadata/search", StringComparison.Ordinal) || (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsHead(request.Method)
-                    && !path.EndsWith("/playback", StringComparison.Ordinal) && !path.EndsWith("/progress", StringComparison.Ordinal)
+                    && !path.EndsWith("/playback", StringComparison.Ordinal) && !path.EndsWith("/conversion", StringComparison.Ordinal)
+                    && !path.EndsWith("/progress", StringComparison.Ordinal)
                     && !path.EndsWith("/watch-state", StringComparison.Ordinal) && !path.EndsWith("/continue-watching", StringComparison.Ordinal)
                     && !path.EndsWith("/favorite", StringComparison.Ordinal) && !path.Contains("/notes", StringComparison.Ordinal))));
     }

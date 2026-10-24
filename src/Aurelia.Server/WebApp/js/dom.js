@@ -45,6 +45,7 @@ const PATHS = {
   fullscreen: ["M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5", "stroke"],
   exitFullscreen: ["M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5", "stroke"],
   pip: ["M3.5 5.5h17v13h-17zM12.5 12h6v4.5h-6z", "stroke"],
+  audio: ["M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3", "stroke"],
   captions: ["M3.5 5.5h17v13h-17zM10.5 10.2a2.4 2.4 0 1 0 0 3.6M17 10.2a2.4 2.4 0 1 0 0 3.6", "stroke"],
   delete: ["M9 6h11v12H9l-6-6zM12 9.5l5 5M17 9.5l-5 5", "stroke"],
   lock: ["M7 11V8a5 5 0 0 1 10 0v3M5.5 11h13v9h-13z", "stroke"],

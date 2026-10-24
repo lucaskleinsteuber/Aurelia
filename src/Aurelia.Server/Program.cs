@@ -148,6 +148,7 @@ builder.Services.AddHostedService<LibraryCleanupWorker>();
 builder.Services.AddSingleton<ServerConfigurationStore>();
 builder.Services.AddSingleton<CredentialAttemptGuard>();
 builder.Services.AddSingleton<ActiveStreamRegistry>();
+builder.Services.AddSingleton<LiveConversionService>();
 builder.Services.AddSingleton<ServerSleepSignal>();
 builder.Services.AddSingleton(services => new ServerPowerSettingsStore(services.GetRequiredService<ServerRuntimeOptions>()));
 builder.Services.AddSingleton(services => new ServerUpdateStore(services.GetRequiredService<ServerRuntimeOptions>(), services.GetRequiredService<TimeProvider>()));
@@ -381,6 +382,7 @@ app.MapSceneNotes();
 app.MapProfiles();
 app.MapDeviceAuthorization();
 app.MapWebApp();
+app.MapLiveConversion();
 
 try
 {

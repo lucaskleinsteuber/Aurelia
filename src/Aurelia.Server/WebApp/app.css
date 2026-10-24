@@ -616,6 +616,27 @@ img.artwork-missing { opacity: 0; }
 .time { font-variant-numeric: tabular-nums; font-size: 13px; color: rgba(255, 255, 255, 0.85); min-width: 52px; }
 .time:last-child { text-align: right; }
 .player-tools { display: flex; align-items: center; justify-content: space-between; }
+.live-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.85);
+}
+.audio-menu {
+  top: auto;
+  bottom: calc(100% + 10px);
+  min-width: 260px;
+  max-width: min(360px, calc(100vw - 32px));
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.audio-item { display: flex; align-items: center; gap: 8px; }
+.audio-check { display: inline-grid; place-items: center; width: 16px; flex: none; }
 .volume-group, .tool-group { display: flex; align-items: center; gap: 4px; }
 
 input[type="range"] {

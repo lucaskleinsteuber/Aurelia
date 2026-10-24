@@ -70,7 +70,7 @@ library permissions, devices and backups are all managed from the Mac app.
 | **Aurelia for Mac** | macOS 26 or later, Apple silicon and Intel | Watch, manage the library, host the server or connect to one |
 | **Aurelia for Apple TV** | tvOS 26 or later | Watch on the big screen; pairs with your server by code |
 | **Aurelia Server for Linux** | x64 and arm64, with systemd | Runs the library on its own; updates from GitHub |
-| **Aurelia in a web browser** | Safari, Chrome, Edge or Firefox at home | Browse and watch without installing an app; the server serves it |
+| **Aurelia in a web browser** | Safari, Chrome, Edge or Firefox at home | Browse and watch without installing an app; the server serves it and converts MKV and other files live |
 
 ```mermaid
 flowchart LR
@@ -91,13 +91,29 @@ flowchart LR
    *Settings › Server › Devices*.
 3. **Add your Apple TV.** Open Aurelia on the Apple TV and choose your server. The TV shows
    a code; enter it on the Mac under *Settings › Server › Devices*.
-4. **Open Aurelia in a browser.** *Settings › Server › Devices* shows the address. Open it
-   on any computer, phone or tablet at home; the browser shows a code to enter on the Mac.
+4. **Open Aurelia in a browser** on any computer, phone or tablet at home; see
+   [Watching in a web browser](#watching-in-a-web-browser).
 
 Each [release](../../releases) carries the Linux server packages and a disk image of the
 Mac app. The Mac app is currently signed for development, so it runs only on Macs
 registered for the developer account; a download for everyone is planned through
 GitHub, not the App Store.
+
+## Watching in a web browser
+
+Rather watch in a browser? While the server is on, open its address in Safari, Chrome, Edge
+or Firefox on any computer, phone or tablet at home, for example
+`https://192.168.1.50:43111`. The Mac app shows the address with Copy and Open buttons under
+*Settings › Server › Devices › Web Browser*.
+
+1. **Continue past the certificate warning** the first time. The server signs its own
+   certificate, so the browser doesn't know it yet.
+2. **Approve the code.** The browser shows an 8-digit code; on the Mac, choose *Enter Code
+   from Apple TV or Browser…* and type it.
+3. **Choose your profile, type your PIN and watch.** Files the browser can't open itself,
+   such as MKV, play live converted by the server; nothing converted is ever stored.
+
+More in [Aurelia in a web browser](docs/WEB_APP.md).
 
 ## Documentation
 

@@ -9,7 +9,8 @@ public sealed record PlaybackStreamSource(
     string ContentType,
     long ContentLength,
     DateTimeOffset LastModified,
-    Guid MediaId);
+    Guid MediaId,
+    string SourcePath = "");
 
 public sealed class PlaybackService(
     AureliaDbContext database,
@@ -162,7 +163,8 @@ public sealed class PlaybackService(
             file.ContentType,
             file.Length,
             file.LastModified,
-            ticket.MediaItemId);
+            ticket.MediaItemId,
+            Path.GetFullPath(ticket.MediaItem.SourcePath));
     }
 
     public async Task PruneExpiredAsync(

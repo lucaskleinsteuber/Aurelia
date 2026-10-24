@@ -73,7 +73,7 @@ All cookies are `HttpOnly`, `SameSite=Strict` and `Secure` on HTTPS. A cookie co
 when the request names it in the `X-Aurelia-Web` header, either `device` or `profile`.
 Another site cannot add that header without a CORS preflight, and the server never answers
 one. Every `/api/v1/web/` call requires the header. The one exception is a plain `GET` or
-`HEAD` of `/api/v1/streams/{ticket}` or `/api/v1/artwork/{id}`: it uses the profile cookie
+`HEAD` of `/api/v1/streams/{ticket}` (including its `/live` stream) or `/api/v1/artwork/{id}`: it uses the profile cookie
 without the header, because `<video>` and `<img>` elements cannot set headers. Changing
 data with a cookie alone is refused.
 
@@ -153,9 +153,48 @@ Explicit pause, player close and recovery cancellation must stop automatic work.
 The Mac client retries at most six times without actual forward playback progress;
 a successful reload alone does not reset that budget.
 
-There is no transcoding endpoint yet; the browser app plays only what the browser
-decodes and reports the rest. A new client must choose and test its own
-native decoding engine; byte-range transport tests do not certify codec support.
+A new client must choose and test its own native decoding engine; byte-range
+transport tests do not certify codec support.
+
+## Live conversion
+
+Servers that report `live-conversion-v1` (in `/api/v1/server/info` and
+`/api/v1/capabilities`) convert a title while it plays, for players that cannot open the
+original file, such as a web browser with an MKV. The server reports the feature only when it
+found a working ffmpeg: its own in the Mac app, the system's on Linux, or the one named by the
+`Aurelia:Ffmpeg` setting (`off` turns it off). Converted video is never stored: ffmpeg reads
+the checked file and writes fragmented MP4 straight into the response. There is no cache, no
+segment and no temporary file.
+
+1. `POST /api/v1/media/{id}/conversion` with `{videoCodecs, audioCodecs}`, the codec
+   families the player decodes from MP4 (`h264`, `hevc`, `av1`, `vp9`; `aac`, `mp3`, `ac3`,
+   `eac3`, `opus`, `flac`). The answer is the plan:
+   - `video`: `copy` repackages the picture unchanged; `h264` re-encodes it (at most
+     1920 × 1080, 8-bit 4:2:0) because the player cannot decode it. `videoCodec` is its
+     RFC 6381 codec string, `width` and `height` its size.
+   - `durationSeconds`: the whole title, for the player's timeline.
+   - `audioTracks`: every sound track with its stream `index`, `format`, `channels`,
+     `language`, `title` and `isDefault`. `mode` is `copy` when the player decodes it, else
+     `aac` (stereo AAC); `codec` is the codec string the player then receives.
+     `audioTrack` names the track to start with.
+
+   A server without ffmpeg answers `409 conversion_unavailable`; a picture it can neither
+   repackage nor convert, `422 conversion_not_possible`. The file is read through the same
+   access rules and secure handle as a playback ticket.
+2. Create a playback ticket as for direct playback, then read
+   `GET {streamPath}/live?start=<seconds>&audio=<index>&audioMode=copy|aac&video=copy|h264`.
+   The answer is `video/mp4` as fragmented MP4 (an `ftyp` and `moov`, then `moof`/`mdat`
+   pairs), without a length and without byte ranges. It keeps the title's own timestamps: a
+   stream started at 600 seconds reports positions from about 600 on (repackaging starts at
+   the key frame at or before that point). To seek outside what has arrived, close the stream
+   and open a new one at the target. A stream counts against the device's stream limit like a
+   direct one and ends with its ticket, session or profile. The server runs at most three
+   conversions at once, at most one of them re-encoding the picture, and answers
+   `429 conversion_busy` with `Retry-After` beyond that.
+
+Reading paces the conversion: when the player stops reading, ffmpeg waits. Closing the
+connection ends ffmpeg. Text subtitles, HDR tone mapping and picture conversion beyond
+1080p are not part of `live-conversion-v1`.
 
 ## Minimum new-client acceptance
 

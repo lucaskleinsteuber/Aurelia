@@ -63,6 +63,9 @@ systemctl is-active --quiet aurelia || fail "the service is not running"
 for _ in $(seq 1 30); do aurelia status 2>/dev/null | has 'LAN access: disabled' && break; sleep 1; done
 aurelia status | has 'LAN access: disabled' || fail "a new server must not be reachable from the network"
 [ "$(stat -c '%U %a' /var/lib/aurelia)" = "aurelia 700" ] || fail "the data folder is not private to the aurelia user"
+[ -x /usr/bin/ffmpeg ] && [ -x /usr/bin/ffprobe ] || fail "the installer did not provide ffmpeg"
+for _ in $(seq 1 30); do curl -fsS "$api/api/v1/server/info" 2>/dev/null | has live-conversion-v1 && break; sleep 1; done
+curl -fsS "$api/api/v1/server/info" | has live-conversion-v1 || fail "the service does not report live conversion"
 
 step "Set up without a screen"
 printf '%s\n%s\n' "$owner" "$password" | aurelia setup --name "Linux Test" | tee /dev/stderr | has 'Verification fingerprint' \

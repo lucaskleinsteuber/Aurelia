@@ -85,6 +85,19 @@ if ! ldconfig -p 2>/dev/null | grep -F 'libicuuc.so' >/dev/null; then
   apt-get install -y "$icu" >/dev/null
 fi
 
+# Web browsers play MKV and other files through live conversion with the system's ffmpeg. The
+# server works without it; browsers then play only files they open themselves.
+if [ ! -x /usr/bin/ffmpeg ] || [ ! -x /usr/bin/ffprobe ]; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "Installing ffmpeg, which lets web browsers play MKV and other files..."
+    apt-get install -y ffmpeg >/dev/null 2>&1 \
+      || { apt-get update -qq >/dev/null 2>&1 && apt-get install -y ffmpeg >/dev/null 2>&1; } \
+      || echo "ffmpeg could not be installed. Web browsers play only MP4 files until it is: sudo apt install ffmpeg" >&2
+  else
+    echo "Install ffmpeg with your package manager so web browsers can play MKV and other files." >&2
+  fi
+fi
+
 if ! id aurelia >/dev/null 2>&1; then
   useradd --system --user-group --home-dir "$data_dir" --no-create-home --shell /usr/sbin/nologin aurelia
 fi

@@ -30,6 +30,13 @@ These rules apply to every task in this repository.
   the title ends. No transcode cache, temporary segment files or converted
   copies on disk, in Application Support or anywhere else. (The Classic app
   stored converted files in Application Support and grew to 20–30 GB.)
+- The server's live conversion (`Services/LiveConversion*.cs`) starts ffmpeg
+  without a shell; it reads only the file the server checked and opened and
+  writes only to its standard output, straight into the HTTP response.
+  `LiveConversionTests` guards that no file appears in the data, temporary or
+  media folder; keep it. The Mac app ships its own LGPL ffmpeg from
+  `scripts/build-ffmpeg-macos.sh`, never a GPL build; the Linux server uses the
+  distribution's ffmpeg, which Aurelia does not distribute.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,
@@ -87,7 +94,7 @@ These rules apply to every task in this repository.
   changes that break existing clients, servers or data; MINOR for new features;
   PATCH for fixes only. Choose the next version by these rules, state it, and
   confirm it with the user before building; the build number rises by exactly
-  one per build. The current Mac release is 1.10.0 (96); the independent tvOS
+  one per build. The current Mac release is 1.11.0 (97); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.1.1 (21).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.

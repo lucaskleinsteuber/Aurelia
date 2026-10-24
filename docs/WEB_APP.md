@@ -42,17 +42,34 @@ The browser never holds a token that scripts can read:
 
 ## Watching
 
-The browser plays the original file directly with byte ranges. Nothing is converted or
-stored on the server. Browsers can decode:
+Browsers open MP4, M4V and MOV files with H.264 video (or HEVC in Safari, and in Chrome or
+Edge where the system decodes it) and AAC or MP3 sound themselves. The player plays those
+directly with byte ranges.
 
-| Plays | Doesn't play yet |
-| --- | --- |
-| MP4, M4V and MOV with H.264 video (all browsers) or HEVC video (Safari, and Chrome or Edge where the system decodes it) and AAC or MP3 audio | MKV and AVI files in most browsers, and DTS, TrueHD or other surround formats the browser can't decode |
+Everything else plays **live converted**: MKV and AVI files, and an MP4 whose picture or
+sound the browser can't decode. The server repackages the file while it plays, which costs
+little computing time. Only what the browser can't decode is converted:
 
-When a file can't play, the player says so and suggests the Mac or Apple TV app. When only
-the sound is missing (Chrome and Edge report this), a short notice explains it. Live
-conversion for these files is planned for a later version. It will convert in memory
-only and never store converted video.
+- **Sound** such as DTS, TrueHD or Dolby Digital becomes stereo AAC when the browser can't
+  play it.
+- **Picture** is only re-encoded when the browser can't show it at all, for example HEVC in
+  Firefox or an old AVI. It then becomes H.264 at up to 1080p, one title at a time.
+
+Nothing converted is stored: the server's ffmpeg writes straight into the connection to the
+browser, with no cache and no temporary files. The player keeps about a minute ahead and
+removes what played more than a minute ago. Seeking within what has arrived is instant; a
+seek further away starts a new stream at that point. Converted titles show *Live
+converted*, and the audio button picks another sound track. Up to three titles convert at a
+time on one server.
+
+An MP4 starts directly first. If the browser shows no picture or plays no sound, the player
+switches to live conversion at the same point by itself. Live conversion needs Media Source
+Extensions, which current browsers have (on iPhone from iOS 17.1). When the server can't
+convert (no ffmpeg), the player says the file can't play in a browser and suggests the Mac or
+Apple TV app, as before.
+
+Not yet: subtitles from MKV files, HDR pictures re-encoded with natural colors (they can look
+pale) and picture conversion of 4K titles on slow servers.
 
 The player saves the position every ten seconds, when pausing and when closing. Each save
 names the revision it builds on, so it never overwrites newer progress from another
@@ -69,8 +86,11 @@ full screen, M mutes and Escape closes the player.
   no framework, no build step and nothing loaded from the internet. They are built into the
   server, so every server version carries its matching browser app.
 - The page has its own strict content security policy: only its own scripts, styles,
-  images and media.
-- `js/logic.js` and `js/api.js` hold the rules that need no page. They are tested with:
+  images and media (plus `blob:` media for its own MediaSource).
+- `js/live.js` is the live player (Media Source Extensions, no library); the server side is
+  described under [live conversion](CLIENT_PROTOCOL.md#live-conversion).
+- `js/logic.js`, `js/live-logic.js` and `js/api.js` hold the rules that need no page. They
+  are tested with:
 
 ```bash
 node --test "tests/WebApp/*.test.mjs"

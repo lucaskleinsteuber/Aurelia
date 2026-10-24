@@ -1,10 +1,14 @@
 // The browser player: plays the original file straight from the server with byte ranges,
 // saves the position with guarded progress updates and offers the next episode at the end.
-// Browsers decode MP4/MOV with H.264 or HEVC and AAC; anything else gets a clear message.
+// Browsers decode MP4/MOV with H.264 or HEVC and AAC. Other files (MKV, AVI) play live
+// converted by the server (live.js), and so does an MP4 the browser fails to show or to hear.
+// Without live conversion, such a file gets a clear message.
 
 import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import { ProgressSaver, clock, eyebrow, resumeSeconds } from "./logic.js";
+import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
+import { codecSupport, liveProblem, mimeType, startTrack, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
 
 const SAVE_INTERVAL = 10_000;
 const HIDE_DELAY = 3_000;
@@ -22,14 +26,17 @@ export class Player {
    * @param {(item: object) => void} [options.onPlayNext]
    * @param {() => void} options.onClose
    * @param {(error: ApiError) => void} [options.onSessionEnded]
+   * @param {boolean} [options.canConvert]  the server reports live conversion
    */
-  constructor({ api, item, next, onPlayNext, onClose, onSessionEnded }) {
+  constructor({ api, item, next, onPlayNext, onClose, onSessionEnded, canConvert = false }) {
     this.api = api;
     this.item = item;
     this.next = next;
     this.onPlayNext = onPlayNext;
     this.onClose = onClose;
     this.onSessionEnded = onSessionEnded;
+    this.canConvert = canConvert && liveSupported();
+    this.live = null;
     this.source = null;
     this.saver = null;
     this.timers = new Set();
@@ -40,8 +47,9 @@ export class Player {
 
   build() {
     this.video = h("video", { class: "player-video", playsinline: true, preload: "auto" });
+    this.badge = h("span", { class: "live-badge", hidden: true, title: "The server converts this title while it plays." }, "Live converted");
     this.title = h("div", { class: "player-title" },
-      h("div", { class: "eyebrow" }, eyebrow(this.item)), h("div", { class: "player-name" }, this.item.title));
+      h("div", { class: "eyebrow" }, eyebrow(this.item)), h("div", { class: "player-name" }, this.item.title), this.badge);
     this.closeButton = h("button", { class: "round-button", "aria-label": "Close player", onclick: () => this.close() }, icon("back"));
     this.playButton = h("button", { class: "play-toggle", "aria-label": "Play", onclick: () => this.toggle() }, icon("play", { size: 30 }));
     this.backButton = h("button", { class: "round-button", "aria-label": "Back 10 seconds", onclick: () => this.skip(-10) }, icon("replay10", { size: 24 }));
@@ -51,6 +59,8 @@ export class Player {
     this.left = h("span", { class: "time" }, "0:00");
     this.muteButton = h("button", { class: "icon-button", "aria-label": "Mute", onclick: () => this.toggleMute() }, icon("volume"));
     this.volume = h("input", { class: "volume", type: "range", min: "0", max: "1", step: "0.05", value: "1", "aria-label": "Volume" });
+    this.audioButton = h("button", { class: "icon-button", "aria-label": "Audio", "aria-haspopup": "menu", "aria-expanded": "false", hidden: true, onclick: () => this.toggleAudioMenu() }, icon("audio"));
+    this.audioMenu = h("div", { class: "profile-menu audio-menu", role: "menu", "aria-label": "Audio", hidden: true });
     this.captionsButton = h("button", { class: "icon-button", "aria-label": "Subtitles", hidden: true, onclick: () => this.toggleCaptions() }, icon("captions"));
     this.pipButton = h("button", { class: "icon-button", "aria-label": "Picture in Picture", hidden: !document.pictureInPictureEnabled, onclick: () => this.togglePictureInPicture() }, icon("pip"));
     this.fullscreenButton = h("button", { class: "icon-button", "aria-label": "Full Screen", onclick: () => this.toggleFullscreen() }, icon("fullscreen"));
@@ -65,7 +75,9 @@ export class Player {
         h("div", { class: "timeline-row" }, this.elapsed, this.timeline, this.left),
         h("div", { class: "player-tools" },
           h("div", { class: "volume-group" }, this.muteButton, this.volume),
-          h("div", { class: "tool-group" }, this.captionsButton, this.pipButton, this.fullscreenButton))));
+          h("div", { class: "tool-group" },
+            h("div", { class: "menu-anchor" }, this.audioButton, this.audioMenu),
+            this.captionsButton, this.pipButton, this.fullscreenButton))));
 
     this.element = h("div", { class: "player", role: "dialog", "aria-modal": "true", "aria-label": `Playing ${this.item.title}` },
       this.video, this.spinner, this.controls, this.notice, this.endCard);
@@ -90,14 +102,121 @@ export class Player {
       send: (mediaId, body, options) => this.api.saveProgress(mediaId, body, options),
     });
     this.resumeAt = resumeSeconds(this.source.progress);
-    this.video.src = this.source.streamPath;
     this.scheduleRenewal();
+    if (this.canConvert && !triesDirectPlay(this.source.contentType)) {
+      const at = this.resumeAt;
+      this.resumeAt = 0;
+      await this.startLive(at);
+      return;
+    }
+    this.video.src = this.source.streamPath;
+    await this.play();
+  }
+
+  async play() {
     try {
       await this.video.play();
     } catch {
       // Autoplay can be refused until the viewer taps; the play button stays ready.
       this.updatePlayState();
     }
+  }
+
+  /**
+   * Plays the title converted live from `at` seconds. The plan names what the server repackages
+   * or converts; a codec string the browser refuses after all is left out and planned again.
+   */
+  async startLive(at) {
+    if (this.live || this.closed) return;
+    this.spinner.classList.add("visible");
+    this.video.removeAttribute("src");
+    this.video.load();
+    const without = [];
+    let plan = null;
+    let track = null;
+    try {
+      for (let attempt = 0; attempt < 3 && !plan; attempt += 1) {
+        const candidate = await this.api.conversionPlan(this.item.id, codecSupport((type) => MediaSourceType.isTypeSupported(type), without));
+        const chosen = candidate.audioTracks.find((entry) => entry.index === startTrack(candidate, this.preferredAudio)) ?? null;
+        if (isTypeSupported(mimeType(candidate, chosen))) {
+          plan = candidate;
+          track = chosen;
+        } else if (candidate.video === "copy" && !isTypeSupported(mimeType(candidate, null))) {
+          without.push(videoFamily(candidate.videoCodec));
+        } else if (chosen?.mode === "copy") {
+          without.push(chosen.format);
+        } else break;
+      }
+    } catch (error) {
+      if (error instanceof ApiError && (error.code === "conversion_unavailable" || error.code === "conversion_not_possible")) {
+        this.showNotice(UNPLAYABLE, true);
+      } else {
+        this.fail(error);
+      }
+      return;
+    }
+    if (this.closed) return;
+    if (!plan) {
+      this.showNotice(UNPLAYABLE, true);
+      return;
+    }
+    this.live = new LiveSource({
+      video: this.video,
+      plan,
+      streamPath: this.source.streamPath,
+      audio: track?.index ?? null,
+      onFailure: (status, code) => this.liveFailed(status, code),
+    });
+    this.badge.hidden = false;
+    this.audioButton.hidden = plan.audioTracks.length < 2;
+    await this.live.open(at);
+    await this.play();
+  }
+
+  liveFailed(status, code) {
+    if (this.closed) return;
+    if (status === 401) {
+      this.close();
+      this.onSessionEnded?.(new ApiError(status, code, "The profile session ended."));
+      return;
+    }
+    this.showNotice(liveProblem(status, code) ?? UNPLAYABLE, true);
+  }
+
+  /** A file the browser opened but cannot show or hear plays live converted from where it is. */
+  switchToLive() {
+    if (!this.canConvert || this.live || this.closed) return false;
+    const at = Math.max(this.resumeAt, this.video.currentTime || 0);
+    this.resumeAt = 0;
+    this.startLive(at);
+    return true;
+  }
+
+  toggleAudioMenu(open = this.audioMenu.hidden) {
+    if (!this.live) return;
+    clear(this.audioMenu);
+    if (open) {
+      this.live.plan.audioTracks.forEach((track, position) => {
+        const selected = track.index === this.live.audio;
+        this.audioMenu.append(h("button", {
+          class: "menu-item audio-item",
+          role: "menuitemradio",
+          "aria-checked": String(selected),
+          onclick: () => this.chooseAudio(track.index),
+        }, h("span", { class: "audio-check" }, selected ? icon("check", { size: 16 }) : null), trackLabel(track, position)));
+      });
+    }
+    this.audioMenu.hidden = !open;
+    this.audioButton.setAttribute("aria-expanded", String(open));
+    this.audioButton.classList.toggle("selected", open);
+    if (open) this.audioMenu.querySelector("[aria-checked=true]")?.focus();
+  }
+
+  chooseAudio(index) {
+    this.toggleAudioMenu(false);
+    this.audioButton.focus();
+    this.preferredAudio = index;
+    this.live?.setAudio(index);
   }
 
   bind() {
@@ -112,7 +231,7 @@ export class Player {
       this.updateTime();
       this.updateCaptions();
       // A file the browser opens but cannot show (for example HEVC in some browsers) has no picture.
-      if (video.videoWidth === 0 && video.videoHeight === 0 && this.item.kind !== "trailer") this.check(() => video.videoWidth === 0, 1500);
+      if (!this.live && video.videoWidth === 0 && video.videoHeight === 0 && this.item.kind !== "trailer") this.check(() => video.videoWidth === 0, 1500);
     });
     on(video, "timeupdate", () => this.updateTime());
     on(video, "play", () => this.updatePlayState());
@@ -138,6 +257,9 @@ export class Player {
     });
     on(this.element, "pointermove", () => this.showControls());
     on(this.element, "pointerdown", () => this.showControls());
+    on(document, "pointerdown", (event) => {
+      if (!this.audioMenu.hidden && !this.audioMenu.parentElement.contains(event.target)) this.toggleAudioMenu(false);
+    });
     on(video, "click", () => this.toggle());
     on(video, "dblclick", () => this.toggleFullscreen());
     on(document, "keydown", (event) => this.key(event));
@@ -184,7 +306,11 @@ export class Player {
         this.toggleMute();
         break;
       case "Escape":
-        if (!document.fullscreenElement) {
+        if (!this.audioMenu.hidden) {
+          event.preventDefault();
+          this.toggleAudioMenu(false);
+          this.audioButton.focus();
+        } else if (!document.fullscreenElement) {
           event.preventDefault();
           this.close();
         }
@@ -281,7 +407,7 @@ export class Player {
     this.element.classList.add("controls-visible");
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
-      if (!this.video.paused && !this.video.ended) this.element.classList.remove("controls-visible");
+      if (!this.video.paused && !this.video.ended && this.audioMenu.hidden) this.element.classList.remove("controls-visible");
     }, HIDE_DELAY);
   }
 
@@ -322,8 +448,12 @@ export class Player {
 
   /** The browser reported an error; ask the server whether the stream itself is at fault. */
   async videoFailed() {
-    if (this.closed || !this.source) return;
-    const code = this.video.error?.code;
+    if (this.closed || !this.source || !this.video.error) return;
+    const code = this.video.error.code;
+    if (this.live) {
+      this.showNotice(UNPLAYABLE, true);
+      return;
+    }
     let message = UNPLAYABLE;
     try {
       const response = await fetch(this.source.streamPath, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
@@ -332,6 +462,7 @@ export class Player {
       else if (response.status === 404 || response.status === 409) message = "This file isn’t available on the server.";
       else if (!response.ok) message = "The server couldn’t send this title. Try again.";
       else if (code === 2) message = "The connection to the server was interrupted. Try again.";
+      else if (this.switchToLive()) return;
     } catch {
       message = "The server isn’t answering. Check that it is switched on, then try again.";
     }
@@ -341,17 +472,18 @@ export class Player {
   /** Looks once more after a moment, so a slow start is not mistaken for a missing picture. */
   check(stillWrong, delay) {
     this.after(() => {
-      if (stillWrong() && !this.closed) this.showNotice(UNPLAYABLE, true);
+      if (stillWrong() && !this.closed && !this.live && !this.switchToLive()) this.showNotice(UNPLAYABLE, true);
     }, delay);
   }
 
   /** Chrome and Edge play a file with an audio format they cannot decode silently. */
   checkAudio() {
-    if (this.audioChecked || !("webkitAudioDecodedByteCount" in this.video)) return;
+    if (this.audioChecked || this.live || !("webkitAudioDecodedByteCount" in this.video)) return;
     this.audioChecked = true;
     this.after(() => {
       const video = this.video;
-      if (!this.closed && !video.paused && video.webkitAudioDecodedByteCount === 0 && video.webkitVideoDecodedByteCount > 0)
+      if (!this.closed && !this.live && !video.paused && video.webkitAudioDecodedByteCount === 0 && video.webkitVideoDecodedByteCount > 0
+        && !this.switchToLive())
         this.showNotice("No sound: this file’s audio format can’t play in a browser yet.", false);
     }, 4000);
   }
@@ -360,6 +492,7 @@ export class Player {
     clear(this.notice);
     this.notice.append(icon("warning", { size: 22 }), h("span", {}, text));
     if (blocking) {
+      this.live?.destroy();
       this.video.pause();
       this.video.removeAttribute("src");
       this.video.load();
@@ -392,10 +525,18 @@ export class Player {
       if (this.closed) return;
       try {
         const renewed = await this.api.createPlayback(this.item.id);
-        const position = this.video.currentTime;
-        const paused = this.video.paused;
+        if (this.closed) return this.api.revokePlayback(renewed.id).catch(() => {});
         const old = this.source;
         this.source = renewed;
+        if (this.live) {
+          // The running stream continues; the next seek or track change uses the new ticket.
+          this.live.streamPath = renewed.streamPath;
+          this.api.revokePlayback(old.id).catch(() => {});
+          this.scheduleRenewal();
+          return;
+        }
+        const position = this.video.currentTime;
+        const paused = this.video.paused;
         this.video.src = renewed.streamPath;
         this.video.currentTime = position;
         if (!paused) this.video.play().catch(() => {});
@@ -436,6 +577,7 @@ export class Player {
     this.listeners.forEach((remove) => remove());
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+    this.live?.destroy();
     this.video.pause();
     this.video.removeAttribute("src");
     this.video.load();

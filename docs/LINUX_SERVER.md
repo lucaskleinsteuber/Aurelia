@@ -10,6 +10,10 @@ network. Media files are only read, never changed.
   and newer. Download the `x64` package for Intel and AMD processors and the `arm64` package
   for ARM computers such as a Raspberry Pi 4 or 5 with a 64-bit system.
 - ICU (`libicu`), which the installer adds through `apt` when it is missing.
+- ffmpeg, which the installer also adds through `apt` when it is missing. Web browsers use it
+  to play MKV, AVI and other files the server converts live (see
+  [Aurelia in a web browser](WEB_APP.md#watching)). Without it the server works as before and
+  browsers play only files they open themselves.
 - A network cable is recommended for the server.
 
 ## Installing and updating

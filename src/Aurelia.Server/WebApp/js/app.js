@@ -5,6 +5,7 @@ import { h, icon, clear } from "./dom.js";
 import { createApi, ApiError, loadAllPages } from "./api.js";
 import * as logic from "./logic.js";
 import { Player } from "./player.js";
+import { LIVE_FEATURE } from "./live-logic.js";
 
 const api = createApi();
 const root = document.getElementById("app");
@@ -770,6 +771,7 @@ async function playTitle(item, seasons) {
       if (state.profile) renderRoute({ quiet: true });
     },
     onSessionEnded: () => sessionEnded(),
+    canConvert: Boolean(state.server?.capabilities?.includes(LIVE_FEATURE)),
   });
   state.player = player;
   player.open(document.body);

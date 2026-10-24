@@ -179,6 +179,7 @@ public static class ApiEndpointMappings
         AureliaDbContext database,
         ServerRuntimeOptions runtime,
         ServerTlsIdentity tlsIdentity,
+        LiveConversionService live,
         CancellationToken cancellationToken)
     {
         var identity = await database.ServerIdentities
@@ -195,7 +196,7 @@ public static class ApiEndpointMappings
             runtime.LanAccessEnabled ? runtime.LanHttpsPort : null,
             runtime.LanAccessEnabled ? tlsIdentity.PublicKeyFingerprint : null,
             runtime.LanAccessEnabled ? tlsIdentity.DisplayFingerprint : null,
-            ServerFeatures.All,
+            ServerFeatures.Reported(await live.IsAvailableAsync()),
             runtime.LanAccessEnabled ? WakeOnLan.LocalAddresses() : null));
     }
 

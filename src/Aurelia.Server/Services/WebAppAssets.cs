@@ -14,10 +14,11 @@ public sealed class WebAppAssets
 
     /// <summary>
     /// The page may only load its own scripts, styles, pictures and video and talk to this server:
-    /// no inline code, no other origin, no framing.
+    /// no inline code, no other origin, no framing. Video may also come from a blob: address, the
+    /// page's own MediaSource for live converted titles.
     /// </summary>
     public const string ContentSecurityPolicy =
-        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; "
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; "
         + "connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; "
         + "frame-ancestors 'none'";
 

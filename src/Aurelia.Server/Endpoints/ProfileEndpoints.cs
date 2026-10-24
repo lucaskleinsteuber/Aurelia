@@ -74,8 +74,8 @@ public static class ProfileEndpoints
         { await service.SetEnabledAsync(context.User.RequireUserId(), id, request.IsEnabled, context.RequestAborted); return Results.NoContent(); }).RequireAuthorization("Owner");
         app.MapPut("/api/v1/users/{id:guid}/titles", (Guid id, UpdateProfileTitleAccessRequest request, ProfileService service, HttpContext context) =>
             service.UpdateAccessAsync(context.User.RequireUserId(), id, request, context.RequestAborted)).RequireAuthorization("Owner");
-        app.MapGet("/api/v1/capabilities", () => new ClientCapabilitiesResponse(
-            2, "1.5.1", true, true, true, true, true, true, ServerFeatures.All));
+        app.MapGet("/api/v1/capabilities", async (LiveConversionService live) => new ClientCapabilitiesResponse(
+            2, "1.5.1", true, true, true, true, true, true, ServerFeatures.Reported(await live.IsAvailableAsync())));
         app.MapPost("/api/v1/local/owner-pin", async (InitializeProfilesRequest request, LocalOwnerPinRecovery recovery,
             Aurelia.Server.Data.AureliaDbContext database, ProfileService profiles, HttpContext context) =>
         { recovery.Authorize(context); await recovery.RecoverAsync(request, database, profiles, context.RequestAborted); return Results.NoContent(); })

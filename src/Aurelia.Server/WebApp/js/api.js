@@ -75,6 +75,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     setWatchState: (mediaId, body) => request(`/api/v1/media/${id(mediaId)}/watch-state`, { method: "PUT", body }),
 
     createPlayback: (mediaId) => request(`/api/v1/media/${id(mediaId)}/playback`, { method: "POST" }),
+    conversionPlan: (mediaId, codecs) => request(`/api/v1/media/${id(mediaId)}/conversion`, { method: "POST", body: codecs }),
     revokePlayback: (playbackId) => request(`/api/v1/playback/${id(playbackId)}`, { method: "DELETE", keepalive: true }),
     saveProgress: (mediaId, body, { keepalive = false } = {}) =>
       request(`/api/v1/media/${id(mediaId)}/progress`, { method: "PUT", body, keepalive }),
