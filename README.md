@@ -86,7 +86,7 @@ GitHub, not the App Store.
 
 ## Documentation
 
-| | |
+| Guide | Covers |
 | --- | --- |
 | [Aurelia Server on Linux](docs/LINUX_SERVER.md) | Installing, updating, power saving and media drives |
 | [Backups and recovery](docs/DATABASE_RECOVERY.md) | Keeping the library database safe |
