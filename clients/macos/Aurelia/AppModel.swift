@@ -447,6 +447,14 @@ final class AppModel: ObservableObject {
         home = CinemaUITestFixture.home(Self.previewHome)
         collections = home?.collections ?? Self.previewHome.collections
         if LibraryStateUITestFixture.enabled { updateLibraryStateFixture() }
+        if ShowcaseUITestFixture.enabled {
+          profile = ShowcaseUITestFixture.profile
+          movies = ShowcaseUITestFixture.movies
+          series = ShowcaseUITestFixture.series
+          catalogItems = ShowcaseUITestFixture.catalog
+          home = ShowcaseUITestFixture.home
+          collections = home?.collections ?? []
+        }
         isStarting = false
         return
       }
@@ -1505,6 +1513,10 @@ final class AppModel: ObservableObject {
 
   func refreshHome() async {
     #if DEBUG
+      if ShowcaseUITestFixture.enabled {
+        home = ShowcaseUITestFixture.home
+        return
+      }
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
         home = LibraryStateUITestFixture.home(
           CinemaUITestFixture.home(Self.previewHome), catalog: catalogItems)
@@ -1539,7 +1551,9 @@ final class AppModel: ObservableObject {
     if trimmed.isEmpty { return catalogItems }
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
-        return (catalogItems + [Self.previewSearchEpisode]).filter { item in
+        let candidates =
+          ShowcaseUITestFixture.enabled ? catalogItems : catalogItems + [Self.previewSearchEpisode]
+        return candidates.filter { item in
           ([item.title, item.originalTitle ?? "", item.overview ?? ""] + item.genres)
             .joined(separator: " ")
             .localizedCaseInsensitiveContains(trimmed)
@@ -1557,7 +1571,7 @@ final class AppModel: ObservableObject {
     #if DEBUG
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin" {
         let items =
-          LibraryStateUITestFixture.enabled
+          LibraryStateUITestFixture.enabled || ShowcaseUITestFixture.enabled
           ? catalogItems : catalogItems + [Self.previewSearchEpisode]
         return LibraryStateUITestFixture.browse(items, query: query, search: search)
       }
@@ -1881,6 +1895,12 @@ final class AppModel: ObservableObject {
 
   func catalogDetail(id: UUID) async throws -> CatalogDetailPresentation {
     #if DEBUG
+      if ShowcaseUITestFixture.enabled {
+        guard let detail = ShowcaseUITestFixture.detail(id) else {
+          throw APIClientError.invalidResponse
+        }
+        return detail
+      }
       if Self.uiTestMode == "library" || Self.uiTestMode == "library-admin",
         let item = Self.previewCatalog.first(where: { $0.id == id })
       {

@@ -1110,6 +1110,12 @@ struct APIClient: Sendable {
       {
         return fixture
       }
+      if await ShowcaseUITestFixture.enabled, method == "GET",
+        path.hasPrefix("/api/v1/artwork/"),
+        let data = await ShowcaseUITestFixture.artwork(path: path)
+      {
+        return data
+      }
       if await CinemaUITestFixture.enabled, path.contains("/notes") {
         return try await CinemaUITestFixture.sceneNotes(path: path, method: method, body: body)
       }

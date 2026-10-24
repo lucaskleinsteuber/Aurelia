@@ -16,7 +16,7 @@ A self-hosted media server for Mac or Linux, with native apps for Mac and Apple 
 
 </div>
 
----
+<img src="docs/assets/screenshots/mac-home.jpg" alt="Aurelia for Mac: the Home page with a featured series and Continue Watching">
 
 Aurelia turns the movies and series on your own drives into a library that looks and
 feels like the Apple TV app: posters and backdrops, seasons and episodes, Continue
@@ -44,6 +44,16 @@ are.
 computer, such as an old PC without a screen. On Linux it can sleep when nobody watches
 and wakes again by Wake-on-LAN when you open Aurelia. Updates, power saving, accounts,
 library permissions, devices and backups are all managed from the Mac app.
+
+## Screenshots
+
+| Mac | Apple TV |
+| --- | --- |
+| <img src="docs/assets/screenshots/mac-detail.jpg" alt="A series in Aurelia for Mac with its seasons and episodes"> | <img src="docs/assets/screenshots/tv-home.jpg" alt="The Home page of Aurelia for Apple TV"> |
+| <img src="docs/assets/screenshots/mac-movies.jpg" alt="The Movies page in Aurelia for Mac with filters and sorting"> | <img src="docs/assets/screenshots/tv-detail.jpg" alt="A movie in Aurelia for Apple TV"> |
+
+<sub>All titles, pictures and names in these screenshots are invented and drawn by
+`scripts/make-showcase.swift`.</sub>
 
 ## Your files stay yours
 

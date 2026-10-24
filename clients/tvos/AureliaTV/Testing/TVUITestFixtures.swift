@@ -2,7 +2,7 @@
   import Foundation
 
   enum TVUITestScenario: String, Sendable {
-    case library, profiles, delayed, offline, limitedTracks, nextEpisode
+    case library, profiles, delayed, offline, limitedTracks, nextEpisode, showcase
     static var current: Self? {
       guard ProcessInfo.processInfo.arguments.contains("--aurelia-ui-testing") else { return nil }
       return ProcessInfo.processInfo.environment["AURELIA_TV_UI_SCENARIO"].flatMap(

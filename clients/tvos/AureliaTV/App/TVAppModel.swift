@@ -71,10 +71,11 @@ final class TVAppModel: ObservableObject {
           phase = .profiles
           await refreshProfiles()
         } else {
-          session = TVUITestFixtures.session
+          let fixture =
+            scenario == .showcase ? TVShowcaseTransport.session : TVUITestFixtures.session
+          session = fixture
           phase = .library
-          activateProgress(
-            connection: TVUITestFixtures.connection, session: TVUITestFixtures.session)
+          activateProgress(connection: TVUITestFixtures.connection, session: fixture)
         }
         return
       }

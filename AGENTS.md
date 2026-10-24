@@ -46,7 +46,10 @@ These rules apply to every task in this repository.
 - Keep only source, migrations, versioned tests, configuration, and useful
   documentation in the repository.
 - Never commit build products, result bundles, logs, caches, runtime data,
-  SQLite files, artwork, media, credentials, tokens, or signing material.
+  SQLite files, artwork, media, credentials, tokens, or signing material. The one
+  exception is the README screenshots in `docs/assets/screenshots/`: they come only
+  from `scripts/capture-showcase.sh`, whose library, titles, names and pictures are
+  invented by `scripts/make-showcase.swift`; never show a personal library.
 - Generated output and private local files live in the git-ignored `Local/`
   folder of the checkout (`AURELIA_OTHER_ROOT` may select another place). Never
   commit anything from it and never remove `/Local/` from `.gitignore`. Standard

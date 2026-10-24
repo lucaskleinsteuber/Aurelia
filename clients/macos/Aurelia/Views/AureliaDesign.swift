@@ -240,6 +240,11 @@ struct AureliaWindowChrome: NSViewRepresentable {
       window.standardWindowButton(.zoomButton)?.isHidden = false
       window.contentView?.needsLayout = true
       #if DEBUG
+        if !configuredFixtureSize, ShowcaseUITestFixture.enabled {
+          configuredFixtureSize = true
+          window.setContentSize(NSSize(width: 1440, height: 900))
+          window.center()
+        }
         if !configuredFixtureSize, CinemaUITestFixture.enabled {
           configuredFixtureSize = true
           let minimum = ProcessInfo.processInfo.environment["AURELIA_CINEMA_MINIMUM_WINDOW"] == "1"

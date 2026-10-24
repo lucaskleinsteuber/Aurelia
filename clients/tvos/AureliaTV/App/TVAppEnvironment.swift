@@ -18,7 +18,8 @@ struct TVAppEnvironment {
           ?? "Aurelia.TV.UI.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         return Self(
-          transport: TVUITestTransport(scenario: scenario),
+          transport: scenario == .showcase
+            ? TVShowcaseTransport() : TVUITestTransport(scenario: scenario),
           outbox: TVProgressOutbox(journal: TVDefaultsProgressJournal(defaults: defaults)),
           makePlaybackRuntime: { TVUITestEngine.runtime(scenario: scenario) },
           preferences: TVPlaybackPreferencesStore(defaults: defaults),
