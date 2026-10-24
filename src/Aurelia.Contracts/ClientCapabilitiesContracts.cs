@@ -8,7 +8,7 @@ public static class ServerFeatures
     public static IReadOnlyList<string> All { get; } = Array.AsReadOnly(new[]
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
-        "catalog-pages-500-v1", PreviewStreams,
+        "catalog-pages-500-v1", PreviewStreams, WebApp,
     });
 
     /// <summary>
@@ -16,6 +16,9 @@ public static class ServerFeatures
     /// request budget, so clients may prepare timeline previews on several decoders.
     /// </summary>
     public const string PreviewStreams = "preview-streams-v1";
+
+    /// <summary>The server serves the browser app and its cookie sign-in (docs/WEB_APP.md).</summary>
+    public const string WebApp = "web-app-v1";
 }
 
 public sealed record ClientCapabilitiesResponse(

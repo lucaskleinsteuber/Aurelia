@@ -28,12 +28,14 @@ public sealed class DeviceTokenAuthenticationHandler(
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         var header = Request.Headers.Authorization.ToString();
-        if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        var rawToken = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? header["Bearer ".Length..].Trim()
+            : WebCookies.Credential(Request);
+        if (rawToken is null)
         {
             return AuthenticateResult.NoResult();
         }
 
-        var rawToken = header["Bearer ".Length..].Trim();
         if (rawToken.Length is < 32 or > 256)
         {
             return AuthenticateResult.Fail("Invalid device token.");

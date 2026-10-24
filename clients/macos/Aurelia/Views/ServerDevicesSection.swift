@@ -11,10 +11,12 @@ struct ServerDevicesSection: View {
       "Devices",
       symbol: "laptopcomputer.and.iphone",
       description:
-        "Connect a Mac or Apple TV to this server, and sign out devices you no longer use."
+        "Connect a Mac, Apple TV or web browser to this server, and sign out devices you no longer use."
     ) {
       VStack(alignment: .leading, spacing: 18) {
         appleTVPairing
+        Divider()
+        browserAccess
         Divider()
         macPairing
         let sessions = model.sessions.filter(\.isActive)
@@ -42,7 +44,7 @@ struct ServerDevicesSection: View {
     .sheet(isPresented: $showingDeviceApproval) { DeviceApprovalView() }
   }
 
-  /// The Apple TV shows a code itself; the owner confirms it here.
+  /// The Apple TV and a web browser show a code themselves; the owner confirms it here.
   private var appleTVPairing: some View {
     VStack(alignment: .leading, spacing: 8) {
       Label("Apple TV", systemImage: "appletv").font(.headline)
@@ -51,17 +53,66 @@ struct ServerDevicesSection: View {
       )
       .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       if model.profile?.user?.role == .owner {
-        Button("Enter Code from Apple TV…") { showingDeviceApproval = true }
+        Button("Enter Code from Apple TV or Browser…") { showingDeviceApproval = true }
           .disabled(!model.libraryCapabilities.contains("device-authorization-v1"))
           .help(
             model.libraryCapabilities.contains("device-authorization-v1")
-              ? "Enter the code shown on the Apple TV." : "Requires Aurelia Server 1.5.5."
+              ? "Enter the code shown on the Apple TV or in the browser."
+              : "Requires Aurelia Server 1.5.5."
           )
           .accessibilityIdentifier("approve-device")
       } else {
-        Text("Only the owner can approve an Apple TV.").font(.caption).foregroundStyle(.secondary)
+        Text("Only the owner can approve an Apple TV or a browser.").font(.caption)
+          .foregroundStyle(.secondary)
       }
     }
+  }
+
+  /// The server serves Aurelia for web browsers itself; a browser signs in with a code too.
+  private var browserAccess: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label("Web Browser", systemImage: "safari").font(.headline)
+      if !model.libraryCapabilities.contains("web-app-v1") {
+        Text("Using Aurelia in a web browser requires Aurelia Server 1.10.0.")
+          .font(.callout).foregroundStyle(.secondary)
+      } else if let address = browserAddress {
+        Text(
+          address.thisMacOnly
+            ? "Open this address in a browser on this Mac. To use Aurelia in browsers on other devices, turn on home network access for this server."
+            : "Open this address in a browser on any device at home. The browser shows an 8-digit code; enter it with “Enter Code from Apple TV or Browser…”."
+        )
+        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        HStack {
+          Text(address.url.absoluteString).font(.system(.body, design: .monospaced))
+            .textSelection(.enabled)
+            .accessibilityIdentifier("browser-address")
+          Spacer()
+          Button("Copy") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(address.url.absoluteString, forType: .string)
+          }
+          Button("Open") { NSWorkspace.shared.open(address.url) }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        if !address.thisMacOnly {
+          Text(
+            "The first time, the browser warns that the connection isn’t private, because the server signs its own certificate. Continue to the page to use Aurelia."
+          )
+          .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+      } else {
+        Text("Connect to a server to see its browser address.")
+          .font(.callout).foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private var browserAddress: BrowserAddress? {
+    guard let serverURL = model.profile?.baseURL else { return nil }
+    let local = model.isLocalHost ? model.hostSnapshot.serverInfo : nil
+    return BrowserAddress.resolve(
+      serverURL: serverURL, lanAccessEnabled: local?.lanAccessEnabled, lanPort: local?.lanHttpsPort)
   }
 
   /// Another Mac cannot show a code before it is paired, so this Mac makes one for it.

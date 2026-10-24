@@ -68,7 +68,8 @@
       "device-authorization-v1",
       "artwork-variants-v1",
       "catalog-pages-500-v1",
-      "preview-streams-v1"
+      "preview-streams-v1",
+      "web-app-v1"
     ]
   },
   "problem": {

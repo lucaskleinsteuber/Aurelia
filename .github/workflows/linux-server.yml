@@ -40,6 +40,8 @@ jobs:
           dotnet format Aurelia.slnx --verify-no-changes --no-restore
           dotnet build Aurelia.slnx --configuration Release --no-restore
           dotnet test Aurelia.slnx --configuration Release --no-build
+      - name: Test the browser app's logic
+        run: node --test "tests/WebApp/*.test.mjs"
       - name: Build the linux-x64 package
         run: |
           stage="$RUNNER_TEMP/Aurelia-Server-linux-x64"

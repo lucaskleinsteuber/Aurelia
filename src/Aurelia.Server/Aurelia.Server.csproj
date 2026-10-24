@@ -21,6 +21,12 @@
     <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
     <EnableRequestDelegateGenerator>false</EnableRequestDelegateGenerator>
   </PropertyGroup>
+  <!-- The browser app's files are built into the server (Services/WebAppAssets.cs). -->
+  <ItemGroup>
+    <Content Remove="WebApp/**" />
+    <None Remove="WebApp/**" />
+    <EmbeddedResource Include="WebApp/**" LogicalName="WebApp/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Aurelia.Server.Tests" />
     <ProjectReference Include="../Aurelia.Contracts/Aurelia.Contracts.csproj" />

@@ -12,7 +12,7 @@ struct DeviceApprovalView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      Text("Approve Apple TV").font(.title2.bold())
+      Text("Approve Apple TV or Browser").font(.title2.bold())
       if let preview {
         LabeledContent("Device", value: preview.deviceName)
         LabeledContent("Server", value: preview.serverName)
@@ -20,7 +20,7 @@ struct DeviceApprovalView: View {
           .foregroundStyle(.secondary)
         Text(code).font(.system(.title2, design: .monospaced, weight: .semibold))
       } else {
-        TextField("8-digit code shown on the Apple TV", text: $code)
+        TextField("8-digit code shown on the Apple TV or in the browser", text: $code)
           .textFieldStyle(.roundedBorder)
           .focused($codeFocused)
           .disabled(busy)

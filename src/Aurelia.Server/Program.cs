@@ -138,6 +138,7 @@ builder.Services.AddSingleton<ProfilePinAttemptGuard>();
 builder.Services.AddSingleton<DeviceAuthorizationGuard>();
 builder.Services.AddScoped<DeviceAuthorizationService>();
 builder.Services.AddSingleton<LocalOwnerPinRecovery>();
+builder.Services.AddSingleton<WebAppAssets>();
 builder.Services.AddScoped<LibraryAccessService>();
 builder.Services.AddSingleton<CatalogMutationGate>();
 builder.Services.AddSingleton<EditorArtworkStore>();
@@ -379,6 +380,7 @@ app.MapImportPlanning();
 app.MapSceneNotes();
 app.MapProfiles();
 app.MapDeviceAuthorization();
+app.MapWebApp();
 
 try
 {

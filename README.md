@@ -70,11 +70,13 @@ library permissions, devices and backups are all managed from the Mac app.
 | **Aurelia for Mac** | macOS 26 or later, Apple silicon and Intel | Watch, manage the library, host the server or connect to one |
 | **Aurelia for Apple TV** | tvOS 26 or later | Watch on the big screen; pairs with your server by code |
 | **Aurelia Server for Linux** | x64 and arm64, with systemd | Runs the library on its own; updates from GitHub |
+| **Aurelia in a web browser** | Safari, Chrome, Edge or Firefox at home | Browse and watch without installing an app; the server serves it |
 
 ```mermaid
 flowchart LR
     mac["Aurelia for Mac"] -- "your home network" --> server
     tv["Aurelia for Apple TV"] -- "your home network" --> server
+    web["Aurelia in a browser"] -- "your home network" --> server
     server["Aurelia Server<br/>on a Mac or a Linux PC"] -- "reads only" --> media[("Your media folders")]
     server -. "optional details" .-> tmdb["TMDB"]
 ```
@@ -89,6 +91,8 @@ flowchart LR
    *Settings › Server › Devices*.
 3. **Add your Apple TV.** Open Aurelia on the Apple TV and choose your server. The TV shows
    a code; enter it on the Mac under *Settings › Server › Devices*.
+4. **Open Aurelia in a browser.** *Settings › Server › Devices* shows the address. Open it
+   on any computer, phone or tablet at home; the browser shows a code to enter on the Mac.
 
 Each [release](../../releases) carries the Linux server packages and a disk image of the
 Mac app. The Mac app is currently signed for development, so it runs only on Macs
@@ -101,6 +105,7 @@ GitHub, not the App Store.
 | --- | --- |
 | [Aurelia Server on Linux](docs/LINUX_SERVER.md) | Installing, updating, power saving and media drives |
 | [Backups and recovery](docs/DATABASE_RECOVERY.md) | Keeping the library database safe |
+| [Aurelia in a web browser](docs/WEB_APP.md) | Signing in, what plays in a browser, and its limits |
 | [Client protocol](docs/CLIENT_PROTOCOL.md) and [compatibility](docs/CLIENT_COMPATIBILITY.md) | How the apps talk to the server |
 | [Build and verification](docs/TRANSPORT_TESTING.md) | Building from source and running the checks |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Licenses of included components |

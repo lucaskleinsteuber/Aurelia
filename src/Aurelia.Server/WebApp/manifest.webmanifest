@@ -1,0 +1,12 @@
+{
+  "name": "Aurelia",
+  "short_name": "Aurelia",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#202326",
+  "theme_color": "#202326",
+  "icons": [
+    { "src": "/web/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

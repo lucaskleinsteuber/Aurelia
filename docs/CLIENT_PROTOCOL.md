@@ -53,6 +53,32 @@ stale changes return `409 scene_note_conflict`. Preserve the draft on conflict.
 Notes belong only to the active profile and retain stable media identity when
 storage is offline. They are database records, never embedded video edits.
 
+## Web browser sign-in
+
+The browser app ([WEB_APP.md](WEB_APP.md)) is served by the server from `/` and `/web/`. It
+uses the same owner-approved code as an Apple TV, but no script ever sees a credential:
+
+- `POST /api/v1/web/pairing` with `{deviceName}` starts a device pairing. The answer has
+  only the code, its expiry and the poll interval. The pairing's id and secret go into an
+  HttpOnly cookie that is limited to `/api/v1/web/pairing`.
+- `POST /api/v1/web/pairing/status` reports the state. On approval the server acknowledges
+  the delivery itself and sets the `aurelia_device` cookie, which lasts as long as the
+  device session.
+- `POST /api/v1/web/pairing/cancel` gives up a pending code.
+- `POST /api/v1/web/profiles/{id}/unlock` with `{pin}` opens a profile and sets the
+  `aurelia_profile` session cookie. `POST /api/v1/web/profile/end` ends it.
+- `POST /api/v1/web/sign-out` revokes the device session and deletes both cookies.
+
+All cookies are `HttpOnly`, `SameSite=Strict` and `Secure` on HTTPS. A cookie counts only
+when the request names it in the `X-Aurelia-Web` header, either `device` or `profile`.
+Another site cannot add that header without a CORS preflight, and the server never answers
+one. Every `/api/v1/web/` call requires the header. The one exception is a plain `GET` or
+`HEAD` of `/api/v1/streams/{ticket}` or `/api/v1/artwork/{id}`: it uses the profile cookie
+without the header, because `<video>` and `<img>` elements cannot set headers. Changing
+data with a cookie alone is refused.
+
+A bearer `Authorization` header always takes precedence, so native clients are unaffected.
+
 ## Stable catalog loading
 
 Catalog pages still have `items`, `offset`, `limit` and `total`. Current servers
@@ -127,7 +153,8 @@ Explicit pause, player close and recovery cancellation must stop automatic work.
 The Mac client retries at most six times without actual forward playback progress;
 a successful reload alone does not reset that budget.
 
-There is no transcoding endpoint. A new client must choose and test its own
+There is no transcoding endpoint yet; the browser app plays only what the browser
+decodes and reports the rest. A new client must choose and test its own
 native decoding engine; byte-range transport tests do not certify codec support.
 
 ## Minimum new-client acceptance

@@ -6,6 +6,12 @@ These rules apply to every task in this repository.
 
 - Aurelia is a self-hosted media server with native clients. Do not replace it
   with a browser-only product or a shortcut that merely opens localhost.
+- The server also serves a browser app (`src/Aurelia.Server/WebApp`, see
+  `docs/WEB_APP.md`) for devices without an Aurelia app. It is an additional
+  client, not a replacement: it is plain HTML, CSS and JavaScript modules with
+  no framework, build step, npm package or anything loaded from the internet;
+  its credentials stay in HttpOnly cookies that scripts never read; and its
+  logic is tested with `node --test "tests/WebApp/*.test.mjs"`.
 - This repository's current product name is **Aurelia**. **Aurelia Classic** is
   the separate, local-only reference application and is read-only. Do not call
   the current product by its retired two-word label in user-facing text or
@@ -81,7 +87,7 @@ These rules apply to every task in this repository.
   changes that break existing clients, servers or data; MINOR for new features;
   PATCH for fixes only. Choose the next version by these rules, state it, and
   confirm it with the user before building; the build number rises by exactly
-  one per build. The current Mac release is 1.9.1 (95); the independent tvOS
+  one per build. The current Mac release is 1.10.0 (96); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.1.1 (21).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
