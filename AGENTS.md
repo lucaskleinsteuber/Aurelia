@@ -14,12 +14,16 @@ These rules apply to every task in this repository.
 - Keep all user-facing text in English until localization is an explicit task.
 - Preserve the native macOS design direction, but keep infrastructure
   milestones focused and functional.
-- Media files are only ever read: never modify, copy, convert, remux,
-  transcode, hash, or store video content. Media remains at its original
-  user-selected path; scans read only filesystem metadata and directory
-  structure. One user-approved exception reads content without keeping it:
-  scrub previews decoded live during playback, also ahead in the background,
-  held only in memory and discarded when another title opens.
+- Media files are only ever read: never modify, move, rename, delete or copy
+  them. Media remains at its original user-selected path; scans read only
+  filesystem metadata and directory structure.
+- Converting video live is allowed: decoding, remuxing or transcoding while a
+  title plays (for example for a browser or a device that cannot play the
+  original), and scrub previews decoded ahead in the background. Converted
+  video is never stored: it stays in memory and is discarded when playback or
+  the title ends. No transcode cache, temporary segment files or converted
+  copies on disk, in Application Support or anywhere else. (The Classic app
+  stored converted files in Application Support and grew to 20–30 GB.)
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,

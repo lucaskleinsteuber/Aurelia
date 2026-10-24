@@ -57,7 +57,8 @@ library permissions, devices and backups are all managed from the Mac app.
 
 ## Your files stay yours
 
-- Video files are only ever read: Aurelia never modifies, moves, copies or transcodes them.
+- Video files are only ever read: Aurelia never modifies, moves or copies them, and never
+  stores converted video.
 - Removing a title from the library never deletes its video.
 - Media that goes offline keeps its details, favorites and progress until you remove it.
 - Your library runs on your own hardware; nothing goes to a cloud service.
