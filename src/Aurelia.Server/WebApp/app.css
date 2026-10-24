@@ -288,9 +288,8 @@ img { display: block; }
   gap: clamp(8px, 2vw, 24px);
   height: calc(var(--top-bar) + env(safe-area-inset-top));
   padding: env(safe-area-inset-top) var(--gutter) 0;
-  background: rgba(32, 35, 38, 0.66);
-  backdrop-filter: saturate(160%) blur(24px);
-  -webkit-backdrop-filter: saturate(160%) blur(24px);
+  /* Opaque, so the artwork below is never hidden behind it. */
+  background: var(--canvas-top);
   border-bottom: 1px solid var(--hairline);
 }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
@@ -325,7 +324,7 @@ img { display: block; }
 @media (max-width: 640px) {
   .brand span { display: none; }
   .tab { padding: 7px 10px; }
-  .hero { min-height: min(62vh, 560px); }
+  .hero { aspect-ratio: auto; min-height: min(62vh, 560px); }
 }
 @media (max-width: 420px) {
   .top-bar { gap: 6px; }
@@ -354,23 +353,25 @@ img { display: block; }
 
 /* MARK: Hero */
 
+/* The hero starts below the bar and takes the backdrop's own 16:9 shape, so the whole picture
+   shows; only a very wide window trims it at the bottom, where it fades into the page. */
 .hero {
   position: relative;
-  min-height: min(78vh, 760px);
+  aspect-ratio: 16 / 9;
+  min-height: 420px;
+  max-height: calc(100vh - var(--top-bar) - env(safe-area-inset-top));
   display: flex;
   align-items: flex-end;
-  margin-top: calc(-1 * (var(--top-bar) + env(safe-area-inset-top)));
   overflow: hidden;
 }
-.hero-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.hero-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
 .hero-art.artwork-missing { background: radial-gradient(circle at 70% 20%, #33416d, var(--canvas) 70%); }
 .hero-shade {
   position: absolute;
   inset: 0;
   background:
     linear-gradient(90deg, rgba(32, 35, 38, 0.92) 0%, rgba(32, 35, 38, 0.55) 38%, rgba(32, 35, 38, 0) 70%),
-    linear-gradient(0deg, var(--canvas) 0%, rgba(32, 35, 38, 0.6) 28%, rgba(32, 35, 38, 0) 60%),
-    linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0) 22%);
+    linear-gradient(0deg, var(--canvas) 0%, rgba(32, 35, 38, 0.6) 28%, rgba(32, 35, 38, 0) 60%);
 }
 .hero-content {
   position: relative;
@@ -378,7 +379,7 @@ img { display: block; }
   flex-direction: column;
   gap: 12px;
   max-width: 640px;
-  padding: calc(var(--top-bar) + 80px) var(--gutter) clamp(28px, 5vw, 56px);
+  padding: 48px var(--gutter) clamp(28px, 5vw, 56px);
 }
 .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7); }
 .hero-title { font-size: clamp(32px, 6vw, 56px); line-height: 1.04; font-weight: 800; letter-spacing: -0.02em; text-wrap: balance; }
