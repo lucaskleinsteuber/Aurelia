@@ -47,14 +47,17 @@ These rules apply to every task in this repository.
   documentation in the repository.
 - Never commit build products, result bundles, logs, caches, runtime data,
   SQLite files, artwork, media, credentials, tokens, or signing material.
-- Generated output belongs outside the checkout. `AURELIA_OTHER_ROOT` may select
-  an existing external workspace; an existing `Aurelia Other` folder next to the
-  checkout is used when it is unset. Never rename or move that workspace. Otherwise
-  use the per-user cache defaults in `scripts/workspace-paths.sh`. Standard
-  subdirectories are `Build/`, `Package Cache/`, `Test Results/`, and `Logs/`.
-  Build and test scripts first run `scripts/prune-workspace.sh`, which keeps the
-  two newest builds per platform, ten test results and 30 days of logs; new
-  scripts that write there should call it too.
+- Generated output and private local files live in the git-ignored `Local/`
+  folder of the checkout (`AURELIA_OTHER_ROOT` may select another place). Never
+  commit anything from it and never remove `/Local/` from `.gitignore`. Standard
+  subdirectories are `Build/`, `Package Cache/`, `Test Results/` and `Logs/`;
+  `Local/` also holds the build summaries, icon drafts, the Linux server's SSH
+  access and the archived desktop client. Build and test scripts first run
+  `scripts/prune-workspace.sh`, which keeps the newest build per platform, ten
+  test results and 30 days of logs; new scripts that write there should call it
+  too. Builds are not kept as archives: a published Mac/server version is
+  deleted locally by `scripts/publish-release.sh`, and an installed tvOS build
+  folder is deleted after `refresh-signing.sh --adopt-tv`.
 - Runnable Mac test products must be staged under a unique
   `~/Library/Caches/Aurelia/TestRuns/<run-id>` directory. Pre-install smoke
   candidates use a unique `/private/tmp/Aurelia/<run-id>` directory. Launch the
@@ -66,7 +69,8 @@ These rules apply to every task in this repository.
 ## Client versions and verification
 
 - macOS/server and tvOS are separate products with independent version/build
-  counters. Versions follow Semantic Versioning (MAJOR.MINOR.PATCH): MAJOR for
+  counters. Every Aurelia product (Mac app and server, Linux server, tvOS, and
+  any Windows or other client) follows Semantic Versioning (MAJOR.MINOR.PATCH): MAJOR for
   changes that break existing clients, servers or data; MINOR for new features;
   PATCH for fixes only. Choose the next version by these rules, state it, and
   confirm it with the user before building; the build number rises by exactly
@@ -75,7 +79,7 @@ These rules apply to every task in this repository.
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
-  repository in the external workspace's `Aurelia Desktop (archived)` folder. Do not
+  repository in `Local/Aurelia Desktop (archived)`. Do not
   restore, build or test it unless the user asks for it.
 - For tvOS, run warning-free device/simulator builds, host-executable logic tests
   and XCUITest on the dedicated tvOS 26 simulator. UI tests must use synthetic
@@ -157,10 +161,10 @@ These rules apply to every task in this repository.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
 - After verification, create exactly one concise English Markdown summary in
-  the external workspace's existing summary directory, or `Build Reports/`.
+  `Local/Aurelia Build summarys/`.
   Include objective, behavior, important files, verification, installation,
   known limitations, and the verified final Git hash. Do not commit that
-  external summary.
+  summary.
 
 ## Public distribution
 
@@ -174,5 +178,10 @@ These rules apply to every task in this repository.
   or notarization; a non-notarized package needs a documented per-app Gatekeeper
   exception and verified first launch. Do not assume the current development
   profile, App Group, or Keychain entitlements work on another user's Mac.
-- Never change repository visibility, publish a release, or rewrite historical
-  author information without explicit user authorization.
+- Never change repository visibility or rewrite historical author information
+  without explicit user authorization.
+- The owner wants every Mac/server version that is installed for them published
+  as a GitHub Release with `scripts/publish-release.sh`: the universal Mac DMG,
+  the Linux server packages and GitHub's source archives. Push first, build the
+  Linux packages of the same version, publish, and verify the downloads. tvOS
+  builds are not published; they are development-signed for one Apple TV.

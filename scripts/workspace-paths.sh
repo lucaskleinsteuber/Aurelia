@@ -1,10 +1,10 @@
 #!/bin/sh
 # Shared by build/test scripts. Generated files never belong in the checkout.
-# The workspace is AURELIA_OTHER_ROOT, else an existing "Aurelia Other" folder next to the
-# checkout, else the per-user cache.
-if [ -z "${AURELIA_OTHER_ROOT:-}" ] && [ -n "${repository_root:-}" ] \
-  && [ -d "$(dirname -- "$repository_root")/Aurelia Other" ]; then
-  AURELIA_OTHER_ROOT="$(dirname -- "$repository_root")/Aurelia Other"
+# The workspace is AURELIA_OTHER_ROOT, else the git-ignored Local folder of the checkout, else
+# the per-user cache.
+if [ -z "${AURELIA_OTHER_ROOT:-}" ] && [ -n "${repository_root:-}" ]; then
+  AURELIA_OTHER_ROOT="$repository_root/Local"
+  mkdir -p "$AURELIA_OTHER_ROOT"
 fi
 if [ -z "${AURELIA_OTHER_ROOT:-}" ]; then
   if [ "$(uname -s)" = Darwin ]; then

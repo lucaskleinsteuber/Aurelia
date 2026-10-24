@@ -3,8 +3,10 @@
 # pushed HEAD: the Linux server downloads that scripts/build-linux-server.sh made, which
 # `sudo aurelia update` installs, and the universal Mac app that scripts/build-macos-release.sh
 # made, as a disk image. GitHub adds the source code of the tag by itself. A release is visible to
-# everyone who can see the repository: run this only with the owner's approval for that version.
+# everyone who can see the repository; the owner wants every Mac/server version published this way.
 # An existing release of the same tag gets the downloads added or replaced.
+# Once GitHub lists every download, the local build output of this version is deleted, because
+# the release is the copy that is kept (AURELIA_KEEP_LOCAL_BUILDS=1 keeps it).
 set -euo pipefail
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
@@ -63,3 +65,13 @@ else
     --title "Aurelia $version ($build)" --notes "$notes"
 fi
 echo "Published Aurelia $version ($build) for Mac and Linux as release $tag."
+
+published=$(gh release view "$tag" --json assets --jq '.assets[].name')
+for file in "${files[@]}"; do
+  grep -qxF "$(basename "$file")" <<<"$published" \
+    || { echo "GitHub does not list $(basename "$file"); the local build is kept." >&2; exit 1; }
+done
+if [ "${AURELIA_KEEP_LOCAL_BUILDS:-0}" != 1 ]; then
+  rm -rf -- "$other_root/Build/Build $build" "$output"
+  echo "Removed the local build output of $tag; the release is on GitHub."
+fi

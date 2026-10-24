@@ -10,9 +10,8 @@
     <Version>1.9.1</Version>
     <FileVersion>1.9.1.$(AureliaBuildNumber)</FileVersion>
     <InformationalVersion>1.9.1+build.$(AureliaBuildNumber)</InformationalVersion>
-    <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">$([System.IO.Path]::Combine('$(HOME)', 'Library', 'Caches', 'Aurelia', 'Artifacts'))</AureliaOtherRoot>
-    <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == '' and '$(AureliaOtherRoot)' == ''">$([System.IO.Path]::Combine($([System.Environment]::GetFolderPath(SpecialFolder.UserProfile)), '.cache', 'Aurelia', 'Artifacts'))</AureliaOtherRoot>
-    <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == '' and '$(XDG_CACHE_HOME)' != '' and !$([MSBuild]::IsOSPlatform('OSX'))">$([System.IO.Path]::Combine('$(XDG_CACHE_HOME)', 'Aurelia', 'Artifacts'))</AureliaOtherRoot>
+    <!-- Generated output goes to the git-ignored Local folder unless AURELIA_OTHER_ROOT is set. -->
+    <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == ''">$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'Local'))</AureliaOtherRoot>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' != ''">$(AURELIA_OTHER_ROOT)</AureliaOtherRoot>
     <AureliaBuildRoot Condition="'$(AURELIA_BUILD_ROOT)' == ''">$([System.IO.Path]::Combine('$(AureliaOtherRoot)', 'Build'))</AureliaBuildRoot>
     <AureliaBuildRoot Condition="'$(AURELIA_BUILD_ROOT)' != ''">$(AURELIA_BUILD_ROOT)</AureliaBuildRoot>

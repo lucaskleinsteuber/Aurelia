@@ -8,6 +8,7 @@
 #
 #   zsh scripts/refresh-signing.sh --install      set up the state folder and the daily job
 #   zsh scripts/refresh-signing.sh --adopt-tv     hand the Apple TV build just installed to the job
+#                                                 (its build folder is deleted afterwards)
 #   zsh scripts/refresh-signing.sh [--force]      refresh what expires within 3 days (or all)
 #   zsh scripts/refresh-signing.sh --uninstall    remove the job (keeps the state folder)
 #
@@ -288,6 +289,8 @@ adopt_tv() {
   rm -rf "$state/tvOS/Aurelia.app"
   ditto "$candidate" "$state/tvOS/Aurelia.app"
   print -r -- "$device" >"$state/tvOS/device"
+  # The job's copy is the one that is kept; the build folder is not needed any more.
+  rm -rf -- "$other_root/Build/tvOS/$version-$build"
   log "Apple TV: adopted $installed."
 }
 

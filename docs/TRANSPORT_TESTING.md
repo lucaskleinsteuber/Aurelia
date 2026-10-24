@@ -3,9 +3,9 @@
 ## Build prerequisites and basic checks
 
 Use the .NET SDK pinned in `global.json` and Xcode with the macOS 26 SDK.
-Generated output belongs outside the checkout; `scripts/workspace-paths.sh`
-selects the existing `AURELIA_OTHER_ROOT` workspace, else an existing `Aurelia Other`
-folder next to the checkout, else the user cache.
+Generated output goes to the git-ignored `Local/` folder of the checkout, or to
+`AURELIA_OTHER_ROOT` when it is set (`scripts/workspace-paths.sh`,
+`Directory.Build.props`).
 Run server verification from the repository root:
 
 ```sh

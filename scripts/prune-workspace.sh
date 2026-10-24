@@ -1,8 +1,9 @@
 #!/bin/sh
-# Removes old generated output so the external workspace does not grow without bound.
+# Removes old generated output so the Local workspace does not grow without bound.
 # Build and test scripts call this before they write anything new. It keeps:
-#   - the newest numbered Mac builds ("Build <n>") and the newest tvOS and Linux builds
-#     (AURELIA_KEEP_BUILDS, default 2 each); published releases are on GitHub;
+#   - the newest numbered Mac build ("Build <n>") and the newest tvOS and Linux build
+#     (AURELIA_KEEP_BUILDS, default 1 each); every release is on GitHub;
+#   - the .NET output in Build/bin and Build/obj, which later builds reuse;
 #   - the newest test result bundles (AURELIA_KEEP_TEST_RESULTS, default 10);
 #   - logs from the last 30 days;
 #   - one-off output in Build/ and test run folders from the last day, so a run in progress is
@@ -12,7 +13,7 @@ set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
-keep_builds=${AURELIA_KEEP_BUILDS:-2}
+keep_builds=${AURELIA_KEEP_BUILDS:-1}
 keep_results=${AURELIA_KEEP_TEST_RESULTS:-10}
 
 case "$other_root" in
@@ -39,6 +40,7 @@ if [ -d "$build" ]; then
     fi
   done
   find "$build" -mindepth 1 -maxdepth 1 ! -name 'Build [0-9]*' ! -name tvOS ! -name Linux \
+    ! -name bin ! -name obj \
     -mtime +1 -exec rm -rf -- {} +
 fi
 

@@ -1,3 +1,7 @@
+# Local workspace: builds, test results, logs, package cache, reports and private
+# access files. Never committed.
+/Local/
+
 .DS_Store
 .idea/
 .vscode/

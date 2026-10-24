@@ -144,9 +144,9 @@ Media folders are never touched. Uninstalling also removes the saved GitHub toke
 
 ## Building and checking the packages
 
-On a Mac, `scripts/build-linux-server.sh` builds both downloads into the external workspace's
-`Build/Linux/<version>-<build>/`; each package records the GitHub repository of `origin` for
-`aurelia update`. After the owner approves a version, `scripts/publish-release.sh` publishes these
+On a Mac, `scripts/build-linux-server.sh` builds both downloads into the git-ignored
+`Local/Build/Linux/<version>-<build>/`; each package records the GitHub repository of `origin` for
+`aurelia update`. For every Mac/server version, `scripts/publish-release.sh` publishes these
 downloads, the universal Mac app from `scripts/build-macos-release.sh` as a disk image and
 `SHA256SUMS` as the GitHub Release `<version>-<build>` at the pushed `HEAD`; GitHub adds the
 source code. `scripts/test-linux-server-install.sh <unpacked package> [--exfat]` installs a package on
