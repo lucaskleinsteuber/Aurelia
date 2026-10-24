@@ -36,6 +36,52 @@ struct ProfilePickerLifecycleTests {
     #expect(!model.isSelectingProfile)
   }
 
+  @Test func aServerThatFellAsleepIsWokenBeforeThePINIsSent() async throws {
+    let pending = PendingProfileUnlock()
+    let model = makeModel(unlocker: pending.unlock)
+    var probes = 0
+    var wakes = 0
+    var sawWaking = false
+    model.serverWakeUp.probe = { _ in
+      probes += 1
+      return probes > 2
+    }
+    model.serverWakeUp.canWake = { _ in true }
+    model.serverWakeUp.wake = { _, _ in wakes += 1 }
+    model.serverWakeUp.delay = { _ in
+      if case .waking = model.connectionStatus { sawWaking = true }
+    }
+    let request = Task { await model.selectWatchingProfile(choice(), pin: "1234") }
+    try await pending.waitForRequest()
+    #expect(sawWaking, "The wake-up progress shows instead of a timeout.")
+    #expect(wakes == 1)
+    #expect(model.connectionStatus == nil)
+    #expect(pending.pins == ["1234"], "The PIN is sent once the server answers.")
+    model.cancelWatchingProfileSelection()
+    pending.complete(.failure(CancellationError()))
+    #expect(!(await request.value))
+  }
+
+  @Test func aServerThatStaysAsleepGetsAClearMessageAndNoPIN() async {
+    var requests = 0
+    let model = makeModel(unlocker: { _, _, _ in
+      requests += 1
+      throw APIClientError.invalidResponse
+    })
+    var clock = Date(timeIntervalSince1970: 0)
+    model.serverWakeUp.probe = { _ in false }
+    model.serverWakeUp.canWake = { _ in true }
+    model.serverWakeUp.wake = { _, _ in }
+    model.serverWakeUp.delay = { clock += $0 }
+    model.serverWakeUp.now = { clock }
+    #expect(!(await model.selectWatchingProfile(choice(), pin: "1234")))
+    #expect(requests == 0)
+    #expect(model.serverUnreachable)
+    #expect(model.connectionStatus == nil)
+    #expect(model.profileSelectionError?.contains("isn’t answering") == true)
+    #expect(!model.isSelectingProfile)
+  }
+
   @Test func cancelledNoncooperativeSuccessCannotOpenTheProfileAndEndsItsSession() async throws {
     let pending = PendingProfileUnlock()
     var ended: [StoredServerProfile] = []
@@ -169,7 +215,7 @@ struct ProfilePickerLifecycleTests {
     refresher: (@MainActor (StoredServerProfile) async throws -> Void)? = nil,
     syncController: LibrarySyncController = LibrarySyncController()
   ) -> AppModel {
-    AppModel(
+    let model = AppModel(
       store: InMemoryServerProfileStore(),
       initialProfile: StoredServerProfile(
         serverId: UUID(), name: "Synthetic Server",
@@ -178,6 +224,8 @@ struct ProfilePickerLifecycleTests {
         sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z"),
       syncController: syncController, profileSelectionEnabled: true, profileUnlocker: unlocker,
       profileSessionEnder: ender, profileSnapshotRefresher: refresher)
+    model.serverWakeUp.probe = { _ in true }
+    return model
   }
 
   private func choice() -> WatchingProfile {

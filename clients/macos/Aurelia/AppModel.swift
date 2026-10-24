@@ -649,6 +649,27 @@ final class AppModel: ObservableObject {
     connectionStatus = answers ? .loading : nil
   }
 
+  /// Before a request someone is waiting for, such as opening a profile: a quick check whether
+  /// the server answers, and if it sleeps, waking it with the progress shown, instead of letting
+  /// the request run into a timeout. Returns whether the server answers.
+  private func ensureServerAwake(_ device: StoredServerProfile) async -> Bool {
+    guard operatingMode != .host, connectionStatus == nil, serverWakeTask == nil else {
+      return true
+    }
+    let wakeUp = serverWakeUp
+    let attempt = Task { @MainActor in
+      await wakeUp.run(serverId: device.serverId, address: device.baseURL) {
+        self.connectionStatus = .waking(since: Date())
+      }
+    }
+    serverWakeTask = attempt
+    let answers = await attempt.value
+    serverWakeTask = nil
+    connectionStatus = nil
+    if answers { serverUnreachable = false }
+    return answers
+  }
+
   /// Stop Waiting while a server is woken: Aurelia continues at once and shows that the server
   /// did not answer, with Try Again.
   func stopWaitingForServer() {
@@ -2332,6 +2353,17 @@ final class AppModel: ObservableObject {
         return true
       }
     #endif
+    // The server may have gone to sleep while the profiles were showing.
+    let awake = await ensureServerAwake(device)
+    guard expected == profileSelectionGeneration, profile == device, !Task.isCancelled else {
+      return false
+    }
+    guard awake else {
+      serverUnreachable = true
+      profileSelectionError =
+        "\(device.name) isn’t answering. Check that it is switched on, then try again."
+      return false
+    }
     var acceptedProfile: StoredServerProfile?
     do {
       let response: ProfileSessionResponse
