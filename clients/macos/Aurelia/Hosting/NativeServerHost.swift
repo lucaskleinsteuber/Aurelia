@@ -175,8 +175,10 @@ final class NativeServerHost {
   }
 
   func status() async throws -> NativeHostSnapshot {
+    // A vanished helper stays a failure until start() or stop() discards it.
+    // Clearing it here would turn the next poll into a planned `.stopped`
+    // reply that no helper sent, bypassing the UI's bounded recovery.
     if runningApplication?.isTerminated == true {
-      clearLaunchState()
       throw NativeServerHostError.couldNotLaunch
     }
     guard let controlURL else {
