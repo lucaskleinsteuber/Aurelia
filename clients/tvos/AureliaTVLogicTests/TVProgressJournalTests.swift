@@ -100,7 +100,7 @@ struct TVProgressJournalTests {
     #expect(await outbox.latestPendingSnapshot(scope: otherIdentity, mediaID: mediaID) == nil)
   }
 
-  @Test func confirmedConflictIsDurableAndNeverAnAutomaticResumePosition() async throws {
+  @Test func aConflictKeepsTheServerPositionAndLeavesNothingStuck() async throws {
     let store = TVJournalTestStore()
     let client = TVJournalClient(mode: .conflict)
     let first = TVProgressOutbox(journal: store)
@@ -111,13 +111,35 @@ struct TVProgressJournalTests {
     #expect(await first.latestPendingSnapshot(scope: scope, mediaID: mediaID) == nil)
     #expect(await first.pendingSnapshots(scope: scope).isEmpty)
     await first.deactivate()
+    // The rejected sample is not kept, so after a restart the title saves normally again.
     let restarted = TVProgressOutbox(journal: store)
-    #expect(await restarted.state(scope: scope, mediaID: mediaID) == .conflict)
-    #expect(await restarted.latestPendingSnapshot(scope: scope, mediaID: mediaID) == nil)
+    #expect(await restarted.state(scope: scope, mediaID: mediaID) == nil)
     await restarted.activate(scope: scope, client: client)
-    #expect(await restarted.flush(scope: scope, mediaID: mediaID) == .conflict)
+    #expect(await restarted.flush(scope: scope, mediaID: mediaID) == .saved)
     #expect(await client.attemptCount == 1)
     await restarted.deactivate()
+  }
+
+  @Test func aConflictKeptByAnOlderBuildIsSettledOnActivation() async throws {
+    let scopeJSON = try JSONEncoder().encode(scope)
+    let entry = """
+      {"scope":\(String(decoding: scopeJSON, as: UTF8.self)),"mediaID":"\(mediaID.uuidString)",\
+      "latest":{"id":"\(UUID().uuidString)","position":42000,"duration":100000,"finished":false},\
+      "revision":7,"state":"conflict"}
+      """
+    let store = TVJournalTestStore(
+      data: Data("{\"version\":1,\"legacyImported\":true,\"entries\":[\(entry)]}".utf8))
+    let outbox = TVProgressOutbox(journal: store)
+    #expect(await outbox.state(scope: scope, mediaID: mediaID) == .conflict)
+    let client = TVJournalClient(mode: .accept)
+    await outbox.activate(scope: scope, client: client)
+    #expect(await outbox.state(scope: scope, mediaID: mediaID) == nil)
+    #expect(await outbox.count(scope: scope) == 0)
+    #expect(await client.attemptCount == 0)
+    #expect(
+      await outbox.enqueue(scope: scope, mediaID: mediaID, snapshot: snapshot, baselineRevision: 9))
+    #expect(try await client.waitForAttempt().expectedRevision == 9)
+    await outbox.deactivate()
   }
 
   @Test func flushDeadlineDoesNotWaitForAnUncancellableTransport() async throws {

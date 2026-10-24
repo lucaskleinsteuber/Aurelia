@@ -193,7 +193,7 @@ struct TVPlayerLogicTests {
     await outbox.deactivate()
   }
 
-  @Test func conflictsRemainStoppedAcrossNewSnapshotsAndReactivation() async throws {
+  @Test func aConflictStopsTheOpenPlayerUntilTheTitleIsOpenedAgain() async throws {
     let outbox = TVProgressOutbox()
     let client = TVPlayerFakeProgressClient(mode: .conflict)
     await outbox.activate(scope: scope, client: client)
@@ -204,14 +204,55 @@ struct TVPlayerLogicTests {
         baselineRevision: 7))
     _ = try await client.attempt(1)
     try await eventually { await outbox.state(scope: scope, mediaID: mediaID) == .conflict }
+    // The still open player must not overwrite the other device's newer position.
     #expect(
-      await outbox.enqueue(
+      !(await outbox.enqueue(
         scope: scope, mediaID: mediaID,
         snapshot: TVProgressSnapshot(position: 20_000, duration: 100_000, finished: false),
-        baselineRevision: 8))
+        baselineRevision: 8)))
     await outbox.activate(scope: scope, client: client)
     #expect(await outbox.state(scope: scope, mediaID: mediaID) == .conflict)
     #expect(await client.attemptCount == 1)
+    // Opening the title again starts from the server's position, and saving works again.
+    await outbox.noteBaseline(
+      scope: scope,
+      progress: TVPlaybackProgress(
+        mediaId: mediaID, positionMilliseconds: 50_000, durationMilliseconds: 100_000,
+        isCompleted: false, lastPlayedAt: nil, updatedAt: nil, revision: 12, lastMutationId: nil))
+    #expect(await outbox.state(scope: scope, mediaID: mediaID) == nil)
+    #expect(
+      await outbox.enqueue(
+        scope: scope, mediaID: mediaID,
+        snapshot: TVProgressSnapshot(position: 51_000, duration: 100_000, finished: false),
+        baselineRevision: 12))
+    let next = try await client.attempt(2)
+    #expect(next.expectedRevision == 12)
+    await outbox.deactivate()
+  }
+
+  @Test func leavingAndReturningToTheAppKeepsItsOwnLatestRevision() async throws {
+    let outbox = TVProgressOutbox()
+    let client = TVPlayerFakeProgressClient(mode: .accept)
+    await outbox.activate(scope: scope, client: client)
+    #expect(
+      await outbox.enqueue(
+        scope: scope, mediaID: mediaID,
+        snapshot: TVProgressSnapshot(position: 10_000, duration: 100_000, finished: false),
+        baselineRevision: 7))
+    _ = try await client.attempt(1)
+    try await eventually { await outbox.count(scope: scope) == 0 }
+    // Home button and back: the app deactivates and activates progress saving again.
+    await outbox.deactivate()
+    await outbox.activate(scope: scope, client: client)
+    // The player still holds its baseline from when it opened (7); the next write must expect
+    // this Apple TV's own write (8), not conflict with it.
+    #expect(
+      await outbox.enqueue(
+        scope: scope, mediaID: mediaID,
+        snapshot: TVProgressSnapshot(position: 25_000, duration: 100_000, finished: false),
+        baselineRevision: 7))
+    let second = try await client.attempt(2)
+    #expect(second.expectedRevision == 8)
     await outbox.deactivate()
   }
 

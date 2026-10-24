@@ -1,7 +1,7 @@
 # Aurelia for Apple TV
 
 A native tvOS 26 client for an Aurelia server on your local network, designed
-like the Aurelia Mac app. Version 1.1.0 includes:
+like the Aurelia Mac app. Version 1.1.1 includes:
 
 - Home with a hero, Continue Watching that resumes directly, genre shelves,
   Favorites, Collections and Recently Added

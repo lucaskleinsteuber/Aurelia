@@ -189,6 +189,9 @@ actor TVProgressOutbox {
   private var readFailed = false
   private var legacyImported = false
   private var knownRevisions: [String: Int64] = [:]
+  /// Titles whose newer position came from another device. Their open player stops saving so
+  /// it cannot overwrite that position; opening the title again starts from the server's.
+  private var stoppedAfterConflict: Set<String> = []
   private var confirmedProgress: [String: TVPlaybackProgress] = [:]
   private var observers:
     [UUID: (TVProgressScope, AsyncStream<TVProgressOutboxChange>.Continuation)] = [:]
@@ -273,7 +276,11 @@ actor TVProgressOutbox {
     for index in entries.indices where entries[index].scope == scope {
       if entries[index].state == .accessDenied { entries[index].state = .pending }
     }
-    if storageFailed { _ = persist() }
+    // A conflict is settled in the server's favor; older builds kept such entries forever,
+    // which stopped the title from saving on this Apple TV.
+    let settled = entries.count
+    entries.removeAll { $0.state == .conflict }
+    if storageFailed || entries.count != settled { _ = persist() }
     kick()
   }
 
@@ -285,8 +292,9 @@ actor TVProgressOutbox {
     activeScope = nil
     activeSessionID = nil
     authenticationFailure = nil
-    knownRevisions.removeAll()
-    confirmedProgress.removeAll()
+    // Known revisions stay: they are keyed by server, profile and title, and the app leaves and
+    // returns to the foreground during playback. Forgetting them made this Apple TV's next
+    // write use the player's older baseline and conflict with its own previous write.
   }
 
   func noteBaseline(scope: TVProgressScope, progress: TVPlaybackProgress, sessionID: UUID? = nil) {
@@ -295,6 +303,8 @@ actor TVProgressOutbox {
     }
     let key = revisionKey(scope: scope, mediaID: progress.mediaId)
     knownRevisions[key] = max(knownRevisions[key] ?? 0, progress.revision)
+    // A new playback starts from the server's position, so it may save again.
+    stoppedAfterConflict.remove(key)
     rememberConfirmed(progress, scope: scope)
     guard
       let index = entries.firstIndex(where: { $0.scope == scope && $0.mediaID == progress.mediaId })
@@ -325,8 +335,9 @@ actor TVProgressOutbox {
         notify(reason: .storageFailure, scope: scope, mediaID: mediaID)
         return false
       }
-      let known = knownRevisions[revisionKey(scope: scope, mediaID: mediaID)]
-      let revision = [known, baselineRevision].compactMap { $0 }.max()
+      let key = revisionKey(scope: scope, mediaID: mediaID)
+      guard !stoppedAfterConflict.contains(key) else { return false }
+      let revision = [knownRevisions[key], baselineRevision].compactMap { $0 }.max()
       entries.append(
         TVProgressEntry(scope: scope, mediaID: mediaID, latest: snapshot, revision: revision))
     }
@@ -337,7 +348,11 @@ actor TVProgressOutbox {
   }
 
   func state(scope: TVProgressScope, mediaID: UUID) -> TVProgressSaveState? {
-    entries.first { $0.scope == scope && $0.mediaID == mediaID }?.state
+    if let entry = entries.first(where: { $0.scope == scope && $0.mediaID == mediaID }) {
+      return entry.state
+    }
+    return stoppedAfterConflict.contains(revisionKey(scope: scope, mediaID: mediaID))
+      ? .conflict : nil
   }
 
   func count(scope: TVProgressScope) -> Int { entries.filter { $0.scope == scope }.count }
@@ -401,7 +416,8 @@ actor TVProgressOutbox {
       guard operation == generation, activeScope == scope else { return .inactive }
       if storageFailed { return .storageFailure }
       guard let entry = entries.first(where: { $0.scope == scope && $0.mediaID == mediaID }) else {
-        return .saved
+        return stoppedAfterConflict.contains(revisionKey(scope: scope, mediaID: mediaID))
+          ? .conflict : .saved
       }
       if entry.state == .conflict { return .conflict }
       if entry.state == .accessDenied { return .inactive }
@@ -483,9 +499,14 @@ actor TVProgressOutbox {
         guard operation == generation, !Task.isCancelled else { return }
         guard let index = entryIndex(scope: scope, mediaID: mediaID) else { continue }
         if let api = error as? TVCoreError, api.isConflict {
+          // Another device saved a newer position. Report it once and keep the server's
+          // position: the open player stops saving this title until it is opened again, and the
+          // entry is not kept, so the title is not stuck after that.
           entries[index].state = .conflict
-          _ = persist()
           notify(reason: .stateChanged, scope: scope, mediaID: mediaID)
+          stoppedAfterConflict.insert(revisionKey(scope: scope, mediaID: mediaID))
+          entries.remove(at: index)
+          _ = persist()
           continue
         }
         if let api = error as? TVCoreError, api.isAuthenticationFailure {
