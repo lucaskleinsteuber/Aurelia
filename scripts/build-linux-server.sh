@@ -7,6 +7,8 @@
 set -euo pipefail
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$repository_root/scripts/workspace-paths.sh"
+# Old builds and test results are removed first; see prune-workspace.sh.
+/bin/sh "$repository_root/scripts/prune-workspace.sh" || true
 export DOTNET_ROOT="${DOTNET_ROOT:-$(dirname -- "$DOTNET_BIN")}"
 project="$repository_root/src/Aurelia.Server/Aurelia.Server.csproj"
 

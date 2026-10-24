@@ -52,6 +52,9 @@ These rules apply to every task in this repository.
   checkout is used when it is unset. Never rename or move that workspace. Otherwise
   use the per-user cache defaults in `scripts/workspace-paths.sh`. Standard
   subdirectories are `Build/`, `Package Cache/`, `Test Results/`, and `Logs/`.
+  Build and test scripts first run `scripts/prune-workspace.sh`, which keeps the
+  two newest builds per platform, ten test results and 30 days of logs; new
+  scripts that write there should call it too.
 - Runnable Mac test products must be staged under a unique
   `~/Library/Caches/Aurelia/TestRuns/<run-id>` directory. Pre-install smoke
   candidates use a unique `/private/tmp/Aurelia/<run-id>` directory. Launch the

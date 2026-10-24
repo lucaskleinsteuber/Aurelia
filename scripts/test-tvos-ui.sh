@@ -3,6 +3,8 @@ set -euo pipefail
 
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
+# Old builds and test results are removed first; see prune-workspace.sh.
+/bin/sh "$repository_root/scripts/prune-workspace.sh" || true
 runtime='com.apple.CoreSimulator.SimRuntime.tvOS-26-0'
 device_type='com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-1080p'
 if ! xcrun simctl list runtimes --json | python3 -c 'import json,sys;sys.exit(0 if any(r["identifier"] == sys.argv[1] and r.get("isAvailable") for r in json.load(sys.stdin)["runtimes"]) else 1)' "$runtime"; then
