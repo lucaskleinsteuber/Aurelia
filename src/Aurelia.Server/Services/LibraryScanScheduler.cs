@@ -43,6 +43,14 @@ public sealed class LibraryScanScheduler(ServerConfigurationStore configuration)
         }
     }
 
+    internal bool IsReserved(Guid libraryId)
+    {
+        lock (gate)
+        {
+            return reservedLibraries.Contains(libraryId);
+        }
+    }
+
     public void Pulse() => wake.Writer.TryWrite(true);
 
     public async Task WaitAsync(CancellationToken cancellationToken)

@@ -400,10 +400,13 @@ public sealed class ImportPlanningApiTests
         { using var response = await SendAsync(method, path, body); Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {await response.Content.ReadAsStringAsync()}"); return await ApiTestClient.ReadAsync<T>(response); }
         public async Task WaitAsync(Guid scan)
         {
+            var queue = Factory.Services.GetRequiredService<LibraryScanScheduler>();
             for (var attempt = 0; attempt < 200; attempt++)
             {
                 var status = await GetAsync<LibraryScanSummary>($"/api/v1/scans/{scan}");
-                if (status.State == LibraryScanState.Completed) { await Task.Delay(75); return; }
+                // The worker frees the storage location just after it records the result;
+                // a new analysis is refused until then.
+                if (status.State == LibraryScanState.Completed && !queue.IsReserved(status.LibraryId)) return;
                 Assert.DoesNotContain(status.State, new[] { LibraryScanState.Failed, LibraryScanState.Cancelled });
                 await Task.Delay(25);
             }

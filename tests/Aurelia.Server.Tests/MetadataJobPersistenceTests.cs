@@ -350,6 +350,7 @@ public sealed class MetadataJobPersistenceTests
         public Provider Provider { get; } = new();
         private MetadataJobWorker? worker;
         private Guid libraryId;
+        private string MediaDirectory { get; } = TestPaths.CreateDataDirectory();
         public static Guid Id(int value) => new(value, 0, 0, new byte[8]);
 
         public static async Task<Fixture> CreateAsync(int titles)
@@ -370,7 +371,10 @@ public sealed class MetadataJobPersistenceTests
             fixture.libraryId = Guid.NewGuid();
             await fixture.Write(async database =>
             {
-                database.LibraryRoots.Add(new LibraryRoot { Id = fixture.libraryId, Name = "Synthetic", Path = "", NormalizedPath = "", MonitoringEnabled = false, Kind = LibraryKind.Movies });
+                // A real, empty folder: the reachability worker probes every location, and an empty path
+                // would throw there and stop this test's server while the test still uses it.
+                Directory.CreateDirectory(fixture.MediaDirectory);
+                database.LibraryRoots.Add(new LibraryRoot { Id = fixture.libraryId, Name = "Synthetic", Path = fixture.MediaDirectory, NormalizedPath = MediaPath.Normalize(fixture.MediaDirectory), MonitoringEnabled = false, Kind = LibraryKind.Movies });
                 await database.SaveChangesAsync();
             });
             for (var index = 1; index <= titles; index++) await fixture.AddTitle(index);
@@ -422,7 +426,11 @@ public sealed class MetadataJobPersistenceTests
             await using var scope = Factory.Services.CreateAsyncScope();
             await action(scope.ServiceProvider.GetRequiredService<AureliaDbContext>());
         }
-        public async ValueTask DisposeAsync() { await Stop(); Factory.Dispose(); }
+        public async ValueTask DisposeAsync()
+        {
+            await Stop(); Factory.Dispose();
+            if (Directory.Exists(MediaDirectory)) Directory.Delete(MediaDirectory, recursive: true);
+        }
     }
 
     private sealed class MutableClock : TimeProvider
