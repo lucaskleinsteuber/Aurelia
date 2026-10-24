@@ -1,46 +1,99 @@
+<div align="center">
+
+<img src="docs/assets/aurelia-icon.svg" width="128" height="128" alt="Aurelia app icon">
+
 # Aurelia
 
-Aurelia is a self-hosted movie and TV library with a native Mac app. Keep your
-media on your own drives, browse it in one place, and watch from your Mac or
-connect to your server over your home network or private VPN.
+**Your own movie and TV library, at home.**
 
-## What it does
+A self-hosted media server for Mac or Linux, with native apps for Mac and Apple TV.
 
-- Organizes movies, series, seasons, episodes, extras, and trailers, with an
-  import preview you can correct before adding anything.
-- Lets you edit titles, descriptions, cast and crew, covers, and backgrounds.
-  Your corrections stay in place after later scans.
-- Keeps favorites, watch progress and scene notes separate for each profile,
-  with optional PIN protection. Owner and administrator profiles always use a PIN.
-- Includes subtitle and audio-track selection, fullscreen playback, and
-  Continue Watching.
-- Provides server settings, library permissions, device management, and backups.
+![macOS 26](https://img.shields.io/badge/macOS-26-1F2328?logo=apple&logoColor=white)
+![tvOS 26](https://img.shields.io/badge/tvOS-26-1F2328?logo=apple&logoColor=white)
+![Linux server](https://img.shields.io/badge/server-Linux%20x64%20%7C%20arm64-1F2328?logo=linux&logoColor=white)
+![SwiftUI](https://img.shields.io/badge/SwiftUI-native-5B4FE0?logo=swift&logoColor=white)
+![.NET 10](https://img.shields.io/badge/.NET-10-5B4FE0?logo=dotnet&logoColor=white)
 
-Your video files stay where they are. Aurelia does not modify, move, copy, or
-transcode them. Removing a title from the library does not delete its video.
-Online metadata is optional and uses your own TMDB token.
+</div>
+
+---
+
+Aurelia turns the movies and series on your own drives into a library that looks and
+feels like the Apple TV app: posters and backdrops, seasons and episodes, Continue
+Watching across devices and a profile for everyone at home. Your files stay exactly
+where they are, and nothing leaves your home network unless you want it to.
+
+## Highlights
+
+**A library that organizes itself.** Movies, series, seasons, episodes, extras and
+trailers are recognized from your folders. An import preview shows what Aurelia found
+before anything is added, and you can correct it first. Titles, descriptions, cast and
+crew, covers and backgrounds can all be edited, and your corrections stay after later
+scans. Online details are optional and use your own TMDB token.
+
+**Made for watching.** Fullscreen playback of the original files, audio and subtitle
+choices, Continue Watching, scene notes, a sleep timer and Night Mode, which keeps loud
+scenes calm and dialogue clear. On Apple TV, scrubbing shows preview frames and the next
+episode counts down in an Up Next card.
+
+**Everyone gets their own profile.** Favorites, progress and notes are separate for each
+person. Profiles can be protected with a PIN; owner and administrator profiles always
+are.
+
+**A server that gets out of the way.** Run it inside the Mac app or on its own on a Linux
+computer, such as an old PC without a screen. On Linux it can sleep when nobody watches
+and wakes again by Wake-on-LAN when you open Aurelia. Updates, power saving, accounts,
+library permissions, devices and backups are all managed from the Mac app.
+
+## Your files stay yours
+
+- Video files are only ever read: Aurelia never modifies, moves, copies or transcodes them.
+- Removing a title from the library never deletes its video.
+- Media that goes offline keeps its details, favorites and progress until you remove it.
+- Your library runs on your own hardware; nothing goes to a cloud service.
+
+## Apps
+
+| | Runs on | What it does |
+| --- | --- | --- |
+| **Aurelia for Mac** | macOS 26 or later, Apple silicon and Intel | Watch, manage the library, host the server or connect to one |
+| **Aurelia for Apple TV** | tvOS 26 or later | Watch on the big screen; pairs with your server by code |
+| **Aurelia Server for Linux** | x64 and arm64, with systemd | Runs the library on its own; updates from GitHub |
+
+```mermaid
+flowchart LR
+    mac["Aurelia for Mac"] -- "your home network" --> server
+    tv["Aurelia for Apple TV"] -- "your home network" --> server
+    server["Aurelia Server<br/>on a Mac or a Linux PC"] -- "reads only" --> media[("Your media folders")]
+    server -. "optional details" .-> tmdb["TMDB"]
+```
 
 ## Getting started
 
-The Mac app requires **macOS 26 or later** and supports Apple Silicon and Intel
-Macs. Playback uses the original media; there is no transcoding fallback.
+1. **Set up the server.** Open Aurelia on a Mac and choose whether this Mac hosts your
+   library or connects to an existing server. On a new host, create the owner profile,
+   add your media folders and confirm the import preview. To use a Linux computer
+   instead, follow [Aurelia Server on Linux](docs/LINUX_SERVER.md).
+2. **Connect your Mac apps.** Another Mac connects with a pairing code that you create in
+   *Settings › Server › Devices*.
+3. **Add your Apple TV.** Open Aurelia on the Apple TV and choose your server. The TV shows
+   a code; enter it on the Mac under *Settings › Server › Devices*.
 
-Open Aurelia and choose whether this Mac should host your library or connect
-to an existing server. On a new host, create an owner account, add your media
-folders, and confirm the import preview. Server settings control network
-access, additional accounts, and optional background hosting.
-
-Aurelia Server can also run on its own on a Linux computer, such as an old PC
-without a screen; see [Aurelia Server on Linux](docs/LINUX_SERVER.md).
-
-A public Mac download is not available yet. Distribution is planned through
+Each [release](../../releases) carries the Linux server packages and a disk image of the
+Mac app. The Mac app is currently signed for development, so it runs only on Macs
+registered for the developer account; a download for everyone is planned through
 GitHub, not the App Store.
 
-## More information
+## Documentation
 
-- [Aurelia Server on Linux](docs/LINUX_SERVER.md)
-- [Backups and recovery](docs/DATABASE_RECOVERY.md)
-- [Build and playback verification](docs/TRANSPORT_TESTING.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+| | |
+| --- | --- |
+| [Aurelia Server on Linux](docs/LINUX_SERVER.md) | Installing, updating, power saving and media drives |
+| [Backups and recovery](docs/DATABASE_RECOVERY.md) | Keeping the library database safe |
+| [Client protocol](docs/CLIENT_PROTOCOL.md) and [compatibility](docs/CLIENT_COMPATIBILITY.md) | How the apps talk to the server |
+| [Build and verification](docs/TRANSPORT_TESTING.md) | Building from source and running the checks |
+| [Third-party notices](THIRD_PARTY_NOTICES.md) | Licenses of included components |
 
-Aurelia is currently in development. The app's interface is in English.
+<div align="center">
+<sub>Aurelia is in active development. The interface is in English.</sub>
+</div>
