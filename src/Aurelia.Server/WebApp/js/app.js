@@ -205,84 +205,75 @@ async function unlock(profile, pin) {
 }
 
 function showPin(profile) {
-  const token = ++state.renderToken;
-  let pin = "";
+  state.renderToken += 1;
   let busy = false;
-  const dots = h("div", { class: "pin-dots", "aria-hidden": "true" });
-  const field = h("div", { class: "pin-field", role: "textbox", "aria-label": "PIN", "aria-readonly": "true" }, dots);
+  // A real field: a computer's keyboard types into it, and a phone or tablet shows its own
+  // number keyboard. Its dots show only what was typed, never how long the PIN is.
+  const field = h("input", {
+    class: "pin-input",
+    type: "password",
+    inputmode: "numeric",
+    pattern: "[0-9]*",
+    maxlength: "8",
+    autocomplete: "off",
+    placeholder: "PIN",
+    "aria-label": "PIN",
+  });
   const message = h("p", { class: "error-text", role: "alert" });
-  const update = () => {
-    clear(dots);
-    // Only typed digits show: the field never reveals how long the PIN is.
-    if (pin.length === 0) dots.append(h("span", { class: "pin-placeholder" }, "PIN"));
-    for (let index = 0; index < pin.length; index += 1) dots.append(h("span", { class: "pin-dot" }));
-    field.setAttribute("aria-label", pin.length ? `PIN, ${pin.length} digits entered` : "PIN");
-  };
+  const confirm = h("button", { class: "pin-submit", type: "submit", "aria-label": "Unlock", disabled: true }, icon("arrow", { size: 18 }));
   const shake = () => {
     field.classList.remove("shake");
     void field.offsetWidth;
     field.classList.add("shake");
   };
-  const type = (digit) => {
-    if (busy || pin.length >= 8) return;
-    pin += digit;
-    message.textContent = "";
-    update();
-  };
-  const erase = () => {
-    if (busy) return;
-    pin = pin.slice(0, -1);
-    update();
+  const failed = (text) => {
+    field.value = "";
+    message.textContent = text;
+    shake();
+    field.focus();
   };
   const submit = async () => {
     if (busy) return;
-    if (!logic.isPin(pin)) {
-      if (pin.length > 0) message.textContent = logic.PIN_INCORRECT;
-      pin = "";
-      update();
-      shake();
-      return;
-    }
+    const pin = field.value;
+    if (!logic.isPin(pin)) return failed(pin.length > 0 ? logic.PIN_INCORRECT : "");
+    message.textContent = "";
     busy = true;
+    confirm.disabled = true;
+    field.readOnly = true;
     try {
       await unlock(profile, pin);
-      document.removeEventListener("keydown", keys);
     } catch (error) {
       busy = false;
-      pin = "";
-      update();
-      shake();
-      message.textContent = error instanceof ApiError && error.code === "invalid_profile_pin"
+      field.readOnly = false;
+      failed(error instanceof ApiError && error.code === "invalid_profile_pin"
         ? logic.PIN_INCORRECT
-        : error instanceof ApiError && error.status === 429 ? "Too many tries. Wait a minute, then try again." : error.message;
+        : error instanceof ApiError && error.status === 429 ? "Too many tries. Wait a minute, then try again." : error.message);
     }
   };
-  const back = () => {
-    document.removeEventListener("keydown", keys);
-    showProfiles();
-  };
-  const keys = (event) => {
-    if (token !== state.renderToken) return document.removeEventListener("keydown", keys);
-    if (/^[0-9]$/.test(event.key)) type(event.key);
-    else if (event.key === "Backspace") erase();
-    else if (event.key === "Enter") submit();
-    else if (event.key === "Escape") back();
-    else return;
+  field.addEventListener("input", () => {
+    const digits = field.value.replace(/[^0-9]/g, "").slice(0, 8);
+    if (digits !== field.value) field.value = digits;
+    confirm.disabled = digits.length < 4;
+    message.textContent = "";
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
     event.preventDefault();
-  };
-  document.addEventListener("keydown", keys);
-  const key = (label, action, extra = {}) => h("button", { class: `pin-key ${extra.class ?? ""}`, "aria-label": extra.label ?? label, onclick: action }, extra.icon ?? label);
-  const pad = h("div", { class: "pin-pad" },
-    ["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => key(digit, () => type(digit))),
-    key("Delete", erase, { icon: icon("delete", { size: 22 }), label: "Delete", class: "secondary" }),
-    key("0", () => type("0")),
-    key("OK", submit, { class: "confirm" }));
-  update();
+    showProfiles();
+  });
+  // As on the Mac: the profile, "Enter your PIN" and one round field with its arrow inside.
+  const form = h("form", { class: "pin-form", onsubmit: (event) => {
+    event.preventDefault();
+    submit();
+  } }, field, confirm);
   clear(root);
   root.append(screenFrame(h("div", { class: "center-stack pin-layout" },
-    h("button", { class: "profile-back", onclick: back, "aria-label": "Back to profiles" },
-      profilePicture(profile.id, profile.name, "large"), h("span", { class: "profile-name" }, profile.name)),
-    h("div", { class: "pin-entry" }, h("h1", {}, "Enter PIN"), field, message, pad))));
+    h("button", { class: "profile-back", type: "button", onclick: () => showProfiles(), "aria-label": `${profile.name}, back to profiles` },
+      profilePicture(profile.id, profile.name, "large"), h("span", { class: "profile-name pin-name" }, profile.name)),
+    h("p", { class: "muted pin-prompt" }, "Enter your PIN"),
+    form,
+    message)));
+  field.focus();
 }
 
 async function enterProfile(user) {
@@ -401,7 +392,7 @@ function shell(content) {
     }
   };
   const header = h("header", { class: "top-bar" },
-    h("a", { class: "brand", href: "/", "data-route": true, "aria-label": "Aurelia Home" }, h("img", { src: "/web/icon.svg", alt: "" }), h("span", {}, "Aurelia")),
+    h("a", { class: "brand", href: "/", "data-route": true, "aria-label": "Go to Home" }, h("img", { src: "/web/icon.svg", alt: "" }), h("span", {}, "Aurelia")),
     h("nav", { class: "tabs", "aria-label": "Library" }, tabs.map(([name, label, href]) =>
       h("a", { class: `tab ${current === name ? "selected" : ""}`, href, "data-route": true, "aria-current": current === name ? "page" : null }, label))),
     h("div", { class: "top-actions" },

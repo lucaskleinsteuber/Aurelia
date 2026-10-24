@@ -25,8 +25,9 @@ Web Browser*.
 1. The browser shows an 8-digit code, valid for five minutes.
 2. In Aurelia on the Mac, the owner chooses *Enter Code from Apple TV or Browser…* and enters
    it. The Mac shows the browser's name, such as "Safari on iPhone", before approving.
-3. The browser then shows the profiles. Profiles with a PIN ask for it on a number pad.
-   Keyboard digits work too, and the field never shows how long the PIN is.
+3. The browser then shows the profiles. Profiles with a PIN ask for it in a PIN field: a
+   computer types it on its keyboard, a phone or tablet shows its own number keyboard. The
+   field shows only the digits typed, never how long the PIN is.
 
 The browser then appears under *Signed-In Devices* on the Mac and can be signed out there.
 *Sign Out of This Browser* in the profile menu does the same from the browser.

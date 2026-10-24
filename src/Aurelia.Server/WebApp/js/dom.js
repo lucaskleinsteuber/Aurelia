@@ -31,6 +31,7 @@ const PATHS = {
   pause: ["M7 5h3.2v14H7zM13.8 5H17v14h-3.2z", "fill"],
   back: ["M15 5l-7 7 7 7", "stroke"],
   forward: ["M9 5l7 7-7 7", "stroke"],
+  arrow: ["M5 12h14M13 6l6 6-6 6", "stroke"],
   close: ["M6 6l12 12M18 6L6 18", "stroke"],
   heart: ["M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z", "stroke"],
   heartFill: ["M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z", "fill"],

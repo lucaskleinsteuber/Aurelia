@@ -224,21 +224,46 @@ img { display: block; }
 
 /* PIN */
 
-.pin-layout { flex-direction: row; gap: clamp(24px, 8vw, 96px); align-items: center; }
-.pin-entry { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-.pin-entry h1 { font-size: 24px; }
-.pin-field {
+.pin-layout { gap: 0; width: min(380px, 100%); }
+.pin-layout .profile-back { width: auto; max-width: 100%; gap: 14px; }
+.pin-name { margin-top: 2px; font-size: 22px; font-weight: 700; color: var(--text); }
+.pin-prompt { margin: 6px 0 26px; font-size: 15px; }
+.pin-form { position: relative; width: 100%; }
+.pin-input {
+  width: 100%;
+  height: 68px;
+  padding: 0 64px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 2px solid var(--hairline);
+  color: var(--text);
+  font: inherit;
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+.pin-input::placeholder { color: var(--muted); letter-spacing: normal; }
+.pin-input:focus { outline: none; border-color: var(--accent); }
+.pin-submit {
+  position: absolute;
+  top: 50%;
+  right: 12px;
   display: grid;
   place-items: center;
-  width: 240px;
-  height: 52px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid var(--hairline);
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  transform: translateY(-50%);
+  transition: background 0.15s, opacity 0.15s;
 }
-.pin-dots { display: flex; gap: 12px; align-items: center; }
-.pin-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--text); }
-.pin-placeholder { color: var(--muted); }
+.pin-submit:hover:not(:disabled) { background: rgba(255, 255, 255, 0.22); }
+.pin-submit:disabled { opacity: 0.45; }
+.pin-layout .error-text { margin-top: 14px; }
 .shake { animation: shake 0.45s; }
 @keyframes shake {
   20% { transform: translateX(-10px); }
@@ -246,26 +271,7 @@ img { display: block; }
   60% { transform: translateX(-6px); }
   80% { transform: translateX(3px); }
 }
-.pin-pad { display: grid; grid-template-columns: repeat(3, 64px); gap: 14px; }
-.pin-key {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 24px;
-  font-weight: 500;
-  transition: background 0.12s, transform 0.12s;
-}
-.pin-key:hover { background: rgba(255, 255, 255, 0.2); }
-.pin-key:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.3); }
-.pin-key.secondary { background: transparent; }
-.pin-key.confirm { background: rgba(255, 255, 255, 0.92); color: #000; font-size: 17px; font-weight: 700; }
-
 @media (max-width: 640px) {
-  .pin-layout { flex-direction: column; gap: 18px; }
   .profile-back .profile-picture.large { width: 80px; height: 80px; font-size: 34px; }
   .profile-picture.large { width: 96px; height: 96px; font-size: 40px; }
   .profile-entry { width: 120px; }
