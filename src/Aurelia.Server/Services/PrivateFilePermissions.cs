@@ -22,8 +22,14 @@ public static class PrivateFilePermissions
             throw new IOException("Private server files cannot be symbolic links.");
         if (File.Exists(path) && !OperatingSystem.IsWindows())
         {
-            UnixFileIdentity.RequireOwned(path);
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            try
+            {
+                UnixFileIdentity.RequireOwned(path);
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            // SQLite deletes its -wal and -shm files when the last connection closes; a file that
+            // is gone by now has nothing left to protect.
+            catch (IOException) when (!File.Exists(path) && !Directory.Exists(path)) { }
         }
     }
 
