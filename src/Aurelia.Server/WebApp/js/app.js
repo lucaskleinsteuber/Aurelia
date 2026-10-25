@@ -6,6 +6,7 @@ import { createApi, ApiError, loadAllPages } from "./api.js";
 import * as logic from "./logic.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
+import { createSettings } from "./settings.js";
 
 const api = createApi();
 const root = document.getElementById("app");
@@ -56,6 +57,13 @@ function showServerOff() {
     h("p", { class: "muted" }, "This page connects by itself as soon as the server is on."),
     h("div", { class: "button-row" }, h("button", { class: "primary-button", onclick: () => start() }, "Try Again")))));
   state.retryTimer = setTimeout(() => start(), 20_000);
+}
+
+// Settings needs these app functions; they are declarations, so they exist already.
+const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut });
+
+function settingsScreen(route) {
+  return settings.settingsScreen(route);
 }
 
 function screenFrame(...children) {
@@ -374,14 +382,18 @@ document.addEventListener("click", (event) => {
 });
 
 function shell(content) {
+  // The Mac app's sidebar: Home, then the library's sections.
   const tabs = [
     ["home", "Home", "/"],
-    ["movies", "Movies", "/movies"],
+    ["library", "Library", "/library"],
+    ["recent", "Recently Added", "/recent"],
     ["shows", "TV Shows", "/shows"],
+    ["movies", "Movies", "/movies"],
   ];
   const current = state.route.name;
   const menu = h("div", { class: "profile-menu", hidden: true },
     h("div", { class: "menu-header" }, profilePicture(state.profile.id, state.profile.username), h("span", {}, state.profile.username)),
+    h("a", { class: "menu-item", href: "/settings", "data-route": true }, "Settings…"),
     h("button", { class: "menu-item", onclick: () => switchProfile() }, "Switch Profile"),
     h("button", { class: "menu-item danger", onclick: () => confirmSignOut() }, "Sign Out of This Browser"));
   const toggleMenu = (event) => {
@@ -426,16 +438,19 @@ async function renderRoute({ quiet = false } = {}) {
   clear(root);
   root.append(shell(content));
   if (quiet) window.scrollTo(0, scroll);
-  const label = { home: "Home", movies: "Movies", shows: "TV Shows", search: "Search" }[route.name];
+  const label = { home: "Home", library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", settings: "Settings" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
 }
 
 function screenFor(route, token) {
   switch (route.name) {
+    case "library":
+    case "recent":
     case "movies":
-      return libraryScreen("movie", route);
     case "shows":
-      return libraryScreen("series", route);
+      return browseScreen(route);
+    case "settings":
+      return settingsScreen(route);
     case "search":
       return searchScreen(route, token);
     case "title":
@@ -516,8 +531,8 @@ function progressBar(progress) {
     h("div", { class: "progress-fill", style: { width: `${fraction * 100}%` } }));
 }
 
-function posterCard(item) {
-  return h("a", { class: "poster-card", href: titleHref(item), "data-route": true },
+function posterCard(item, index = 0) {
+  return h("a", { class: "poster-card card-hover", href: titleHref(item), "data-route": true, style: { "--stagger": Math.min(index, 24) } },
     h("div", { class: "poster-frame" },
       artwork(item.poster, 320, "poster-art", ""),
       item.poster ? null : h("div", { class: "poster-fallback" }, item.title),
@@ -551,25 +566,96 @@ function emptyState(symbol, title, text, action) {
   return h("div", { class: "empty-state" }, h("div", { class: "status-icon" }, icon(symbol, { size: 30 })), h("h2", {}, title), h("p", { class: "muted" }, text), action ?? null);
 }
 
-// MARK: Movies and TV shows
+// MARK: Library, Recently Added, Movies and TV Shows (the Mac app's sections and filters)
 
-const SORTS = [
-  ["title", "Title"],
-  ["dateAdded", "Date Added"],
-  ["releaseYear", "Release Year"],
-  ["lastPlayed", "Last Played"],
-];
+const SECTION_TITLES = { library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows" };
 
-async function libraryScreen(kind, route) {
-  const sort = SORTS.some(([value]) => value === route.sort) ? route.sort : "title";
-  const items = await loadAllPages(api.catalogPage, { kind, sort, direction: sort === "title" ? "ascending" : "descending" });
-  const select = h("select", { class: "select", "aria-label": "Sort by", onchange: () => navigate({ ...route, sort: select.value }, { replace: true }) },
-    SORTS.map(([value, label]) => h("option", { value, selected: value === sort }, label)));
-  const title = kind === "movie" ? "Movies" : "TV Shows";
-  return h("div", { class: "library" },
-    h("div", { class: "page-header" }, h("h1", {}, title), h("span", { class: "count" }, String(items.length)), h("div", { class: "spacer" }), select),
-    items.length ? h("div", { class: "poster-grid" }, items.map((item) => posterCard(item)))
-      : emptyState("search", `No ${title}`, `This profile has no ${title.toLowerCase()} yet.`));
+async function browseScreen(route) {
+  const filters = route.filters ?? {};
+  const section = route.name;
+  const items = await loadAllPages(api.catalogPage, logic.browseQuery(section, filters));
+  const facets = logic.browseFacets(items);
+  const update = (change) => navigate({ name: section, filters: { ...filters, ...change } }, { replace: true });
+  const chip = (label, selected, action, extra = {}) =>
+    h("button", { class: `chip ${selected ? "selected" : ""}`, "aria-pressed": String(selected), onclick: action, ...extra }, label);
+  const menuChip = (label, selected, build) => {
+    const button = chip([label, icon("chevronDown", { size: 13 })], selected, (event) => {
+      event.stopPropagation();
+      openMenu(button, build());
+    }, { "aria-haspopup": "menu" });
+    return button;
+  };
+  const yearLabel = filters.yearFrom && filters.yearTo
+    ? filters.yearFrom === filters.yearTo ? String(filters.yearFrom) : `${filters.yearFrom}–${filters.yearTo}`
+    : filters.yearFrom ? `From ${filters.yearFrom}` : filters.yearTo ? `Through ${filters.yearTo}` : "Release Year";
+  const hasFilters = Boolean((section === "library" && filters.kind) || filters.favorites || filters.watch || filters.genre || filters.yearFrom || filters.yearTo);
+  const bar = h("div", { class: "filter-bar" },
+    section === "library" ? [
+      chip("All", !filters.kind, () => update({ kind: undefined })),
+      chip("Movies", filters.kind === "movie", () => update({ kind: filters.kind === "movie" ? undefined : "movie" })),
+      chip("TV Shows", filters.kind === "series", () => update({ kind: filters.kind === "series" ? undefined : "series" })),
+      h("span", { class: "filter-divider" }),
+    ] : null,
+    chip([icon("starFill", { size: 13 }), "Favorites"], Boolean(filters.favorites), () => update({ favorites: !filters.favorites })),
+    logic.WATCH_FILTERS.map(([value, label]) => chip(label, filters.watch === value, () => update({ watch: filters.watch === value ? undefined : value }))),
+    h("span", { class: "filter-divider" }),
+    menuChip(filters.genre ?? "Genre", Boolean(filters.genre), () => [
+      menuOption("All Genres", !filters.genre, () => update({ genre: undefined })),
+      ...facets.genres.map((genre) => menuOption(genre, filters.genre === genre, () => update({ genre }))),
+    ]),
+    menuChip(yearLabel, Boolean(filters.yearFrom || filters.yearTo), () => [
+      menuOption("Any Year", !filters.yearFrom && !filters.yearTo, () => update({ yearFrom: undefined, yearTo: undefined })),
+      h("div", { class: "menu-heading" }, "From"),
+      ...facets.years.map((year) => menuOption(String(year), filters.yearFrom === year && !filters.yearTo, () => update({ yearFrom: year, yearTo: undefined }))),
+    ]),
+    hasFilters ? h("button", { class: "text-button", onclick: () => navigate({ name: section, filters: { sort: filters.sort, descending: filters.descending } }, { replace: true }) }, "Clear") : null,
+    h("span", { class: "spacer" }),
+    menuChip(filters.sort ? logic.BROWSE_SORTS.find(([value]) => value === filters.sort)[1] : section === "recent" ? "Recently Added" : "Default", false, () => [
+      h("div", { class: "menu-heading" }, "Sort By"),
+      menuOption("Default", !filters.sort, () => update({ sort: undefined, descending: undefined })),
+      ...logic.BROWSE_SORTS.map(([value, label]) => menuOption(label, filters.sort === value, () => update({ sort: value }))),
+      h("div", { class: "menu-divider" }),
+      menuOption("Ascending", Boolean(filters.sort) && !filters.descending, () => update({ descending: undefined }), !filters.sort),
+      menuOption("Descending", Boolean(filters.sort) && Boolean(filters.descending), () => update({ descending: true }), !filters.sort),
+    ]));
+  const title = SECTION_TITLES[section];
+  return h("div", { class: "library page-enter" },
+    h("div", { class: "page-header" }, h("h1", {}, title), h("span", { class: "count" }, String(items.length))),
+    bar,
+    items.length ? h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index)))
+      : emptyState("search", hasFilters ? "No Matches" : `No ${title}`, hasFilters ? "No title matches these filters." : "This profile has no titles here yet.",
+        hasFilters ? h("button", { class: "secondary-button", onclick: () => navigate({ name: section, filters: {} }, { replace: true }) }, "Clear Filters") : null));
+}
+
+function menuOption(label, selected, action, disabled = false) {
+  return h("button", { class: "menu-item check-item", role: "menuitemradio", "aria-checked": String(selected), disabled, onclick: action },
+    h("span", { class: "check-mark" }, selected ? icon("check", { size: 15 }) : null), label);
+}
+
+/** A small menu under its button; it closes on any click or Escape. */
+function openMenu(anchor, items) {
+  document.querySelector(".popup-menu")?.remove();
+  const menu = h("div", { class: "popup-menu profile-menu", role: "menu" }, items);
+  const box = anchor.getBoundingClientRect();
+  menu.style.top = `${box.bottom + window.scrollY + 8}px`;
+  menu.style.left = `${Math.max(12, Math.min(box.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - 260))}px`;
+  document.body.append(menu);
+  const close = () => {
+    menu.remove();
+    document.removeEventListener("click", close);
+    document.removeEventListener("keydown", escape);
+  };
+  const escape = (event) => {
+    if (event.key === "Escape") {
+      close();
+      anchor.focus();
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", escape);
+  }, 0);
+  menu.querySelector("[aria-checked=true], button:not(:disabled)")?.focus();
 }
 
 // MARK: Search
@@ -614,123 +700,200 @@ async function searchScreen(route) {
   return h("div", { class: "search" }, h("div", { class: "page-header" }, h("h1", {}, "Search")), h("div", { class: "search-bar" }, icon("search"), input), results);
 }
 
-// MARK: Title details
+// MARK: Title details (the Mac app's detail page)
 
 async function titleScreen(id) {
   const [detail, plan] = await Promise.all([api.detail(id), api.playbackPlan(id).catch(() => null)]);
   const item = detail.item;
   const metadata = detail.metadata ?? {};
-  document.title = `${item.title} · Aurelia`;
-  const credits = (metadata.credits ?? []).filter((credit) => credit.department === "Acting").slice(0, 5).map((credit) => credit.name);
-  const directors = (metadata.credits ?? []).filter((credit) => credit.job === "Director").map((credit) => credit.name);
-  const facts = [metadata.year ?? item.year, logic.runtime(metadata.runtimeMinutes), metadata.contentRating,
-    metadata.rating ? `★ ${metadata.rating.toFixed(1)}` : null].filter(Boolean);
+  document.title = `${metadata.title ?? item.title} · Aurelia`;
+  const seasons = detail.seasons ?? [];
+  const target = plan?.target ?? (item.kind === "series" ? null : item);
 
-  const favorite = h("button", { class: `round-button ${item.isFavorite ? "active" : ""}`, "aria-pressed": String(item.isFavorite), "aria-label": "Favorite" },
-    icon(item.isFavorite ? "heartFill" : "heart"));
-  favorite.addEventListener("click", async () => {
-    const next = favorite.getAttribute("aria-pressed") !== "true";
-    favorite.disabled = true;
+  const playButton = target && target.availability === "available"
+    ? h("button", { class: "primary-button large", onclick: () => playTitle(target, seasons) }, icon("play", { size: 17 }), logic.detailPlayLabel(item, plan))
+    : h("button", { class: "primary-button large", disabled: true }, icon("play", { size: 17 }), target ? "Unavailable" : "No Episodes");
+
+  let isFavorite = item.isFavorite;
+  const favoriteButton = h("button", { class: "secondary-button large favorite-button" });
+  const showFavorite = () => favoriteButton.replaceChildren(icon(isFavorite ? "starFill" : "star", { size: 17 }), isFavorite ? "Remove from Favorites" : "Add to Favorites");
+  showFavorite();
+  favoriteButton.addEventListener("click", async () => {
+    favoriteButton.disabled = true;
     try {
-      await api.setFavorite(item.id, next);
-      favorite.setAttribute("aria-pressed", String(next));
-      favorite.classList.toggle("active", next);
-      favorite.replaceChildren(icon(next ? "heartFill" : "heart"));
+      await api.setFavorite(item.id, !isFavorite);
+      isFavorite = !isFavorite;
+      showFavorite();
+      favoriteButton.classList.add("bounce");
+      setTimeout(() => favoriteButton.classList.remove("bounce"), 400);
     } catch (error) {
       if (!handleError(error)) toast(error.message);
     } finally {
-      favorite.disabled = false;
+      favoriteButton.disabled = false;
     }
   });
 
-  const watched = h("button", { class: `round-button ${item.watchState === "completed" ? "active" : ""}`, "aria-label": "Watched", "aria-pressed": String(item.watchState === "completed") },
-    icon("checkCircle"));
-  watched.addEventListener("click", async () => {
-    watched.disabled = true;
+  const moreButton = h("button", { class: "player-round glass detail-more", "aria-label": "More Actions", "aria-haspopup": "menu" }, icon("more", { size: 20 }));
+  moreButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openMenu(moreButton, watchMenu(item, item.kind === "series" ? "series" : "title"));
+  });
+
+  const stars = logic.starring(metadata.credits);
+  const hero = h("section", { class: "detail-hero" },
+    artwork(item.backdrop ?? metadata.backdrop ?? item.poster, 1920, "hero-art settle", ""),
+    h("div", { class: "detail-shade-side" }),
+    h("div", { class: "detail-shade-bottom" }),
+    h("div", { class: "detail-top" },
+      h("button", { class: "player-round glass", "aria-label": "Back", onclick: () => history.length > 1 ? history.back() : navigate({ name: "home" }) }, icon("back", { size: 20 })),
+      moreButton),
+    h("div", { class: "detail-hero-content" },
+      h("div", { class: "eyebrow rise", style: { "--rise": 0 } }, logic.detailMetadataLine(item, metadata)),
+      h("h1", { class: "hero-title rise", style: { "--rise": 1 } }, metadata.title ?? item.title),
+      (metadata.genres ?? item.genres ?? []).length ? h("div", { class: "hero-genres rise", style: { "--rise": 2 } }, (metadata.genres ?? item.genres).slice(0, 3).join("  ·  ")) : null,
+      metadata.overview ?? item.overview ? h("p", { class: "hero-overview rise", style: { "--rise": 3 } }, metadata.overview ?? item.overview) : null,
+      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, favoriteButton,
+        item.watchState === "completed" ? h("span", { class: "watched-label" }, icon("checkCircle", { size: 15 }), "Watched") : null),
+      target ? progressLine(target) : null),
+    stars.length ? h("div", { class: "starring rise", style: { "--rise": 5 } }, h("span", { class: "muted" }, "Starring "), stars.join(", ")) : null);
+
+  const body = h("div", { class: "detail-sections" },
+    seasons.length ? seasonsSection(item, seasons, target) : null,
+    supplementRails(detail.supplements, item.kind === "series" ? "Series " : "", item.title),
+    castRail(metadata.credits),
+    aboutSection(detail));
+  return h("div", { class: "detail page-enter" }, hero, body);
+}
+
+/** Mark watched or unwatched, and hide from Continue Watching, as in the Mac's menu. */
+function watchMenu(item, scope, seasonNumber) {
+  const run = async (watched) => {
     try {
-      const current = await api.watchState(item.id, item.kind === "series" ? "series" : "title");
-      const next = current.watchState !== "completed";
-      const result = await api.setWatchState(item.id, {
-        isWatched: next, scope: current.scope, seasonNumber: current.seasonNumber, stateToken: current.stateToken, clientMutationId: crypto.randomUUID(),
+      const current = await api.watchState(item.id, scope, seasonNumber);
+      await api.setWatchState(item.id, {
+        isWatched: watched, scope: current.scope, seasonNumber: current.seasonNumber, stateToken: current.stateToken, clientMutationId: crypto.randomUUID(),
       });
-      const done = result.watchState === "completed";
-      watched.setAttribute("aria-pressed", String(done));
-      watched.classList.toggle("active", done);
       renderRoute({ quiet: true });
     } catch (error) {
       if (!handleError(error)) toast(error.message);
-    } finally {
-      watched.disabled = false;
     }
-  });
-
-  const target = plan?.target ?? (item.kind === "series" ? null : item);
-  const playLabel = !plan ? "Play" : plan.action === "resume" ? "Resume" : plan.action === "playAgain" ? "Play Again" : "Play";
-  const playDetail = target && target.kind === "episode" ? ` S${target.seasonNumber ?? "?"} · E${target.episodeNumber ?? "?"}` : "";
-  const play = target && target.availability === "available"
-    ? h("button", { class: "primary-button", onclick: () => playTitle(target, detail.seasons) }, icon("play", { size: 16 }), playLabel + playDetail)
-    : h("button", { class: "primary-button", disabled: true }, target ? "Unavailable" : "No Episodes");
-
-  return h("div", { class: "detail" },
-    h("section", { class: "hero detail-hero" },
-      artwork(item.backdrop ?? metadata.backdrop ?? item.poster, 1920, "hero-art", ""),
-      h("div", { class: "hero-shade" }),
-      h("div", { class: "hero-content" },
-        h("div", { class: "eyebrow" }, logic.eyebrow(item)),
-        h("h1", { class: "hero-title" }, item.title),
-        facts.length ? h("div", { class: "hero-meta" }, facts.join(" · ")) : null,
-        item.genres?.length ? h("div", { class: "hero-meta" }, item.genres.join(" · ")) : null,
-        h("div", { class: "button-row" }, play, favorite, watched),
-        target ? progressLine(target) : null)),
-    h("div", { class: "detail-body" },
-      metadata.overview ?? item.overview ? h("p", { class: "overview" }, metadata.overview ?? item.overview) : null,
-      credits.length ? h("p", { class: "credits" }, h("span", { class: "muted" }, "Starring "), credits.join(", ")) : null,
-      directors.length ? h("p", { class: "credits" }, h("span", { class: "muted" }, directors.length > 1 ? "Directors " : "Director "), directors.join(", ")) : null),
-    detail.seasons?.length ? seasonsSection(detail.seasons, target) : null,
-    detail.supplements?.length ? rail("Extras", detail.supplements.map((supplement) => extraCard(supplement.item)), "landscape") : null);
+  };
+  const label = scope === "season" ? "Season" : item.kind === "series" ? "Show" : "";
+  return [
+    h("button", { class: "menu-item", onclick: () => run(true) }, `Mark ${label ? `${label} ` : ""}as Watched`),
+    h("button", { class: "menu-item", onclick: () => run(false) }, `Mark ${label ? `${label} ` : ""}as Unwatched`),
+  ];
 }
 
 function progressLine(item) {
   const left = logic.remaining(item.progress);
   if (!left) return null;
-  return h("div", { class: "progress-line" }, h("div", { class: "progress inline" }, h("div", { class: "progress-fill", style: { width: `${logic.progressFraction(item.progress) * 100}%` } })), h("span", {}, left));
+  return h("div", { class: "progress-line rise", style: { "--rise": 5 } }, h("div", { class: "progress inline" }, h("div", { class: "progress-fill", style: { width: `${logic.progressFraction(item.progress) * 100}%` } })), h("span", {}, left));
 }
 
-function seasonsSection(seasons, target) {
-  const initialSeason = seasons.find((season) => season.episodes.some((entry) => entry.item.id === target?.id)) ?? seasons[0];
-  const list = h("div", { class: "episode-list" });
-  const choose = (season) => {
-    for (const button of picker.querySelectorAll("button")) button.classList.toggle("selected", button.dataset.season === String(season.number));
-    clear(list);
-    list.append(...season.episodes.map((entry) => episodeRow(entry.item, seasons)));
+/** A horizontal row of cards with arrows at its ends, like the Mac's rails. */
+function hrail(cards, { label, className = "" } = {}) {
+  const track = h("div", { class: `hrail-track ${className}`, role: "list", "aria-label": label }, cards);
+  const back = h("button", { class: "rail-arrow back", "aria-label": `Scroll ${label} back`, hidden: true }, icon("back", { size: 18 }));
+  const forward = h("button", { class: "rail-arrow forward", "aria-label": `Scroll ${label} forward`, hidden: true }, icon("forward", { size: 18 }));
+  const update = () => {
+    back.hidden = track.scrollLeft <= 4;
+    forward.hidden = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
   };
-  const picker = h("div", { class: "season-picker", role: "tablist" }, seasons.map((season) =>
-    h("button", { class: "chip", role: "tab", dataset: { season: String(season.number) }, onclick: () => choose(season) },
-      season.number === 0 ? "Specials" : `Season ${season.number}`)));
-  choose(initialSeason);
-  return h("section", { class: "seasons" }, h("div", { class: "section-header" }, h("h2", {}, "Episodes")), picker, list);
+  back.addEventListener("click", () => track.scrollBy({ left: -track.clientWidth * 0.85, behavior: "smooth" }));
+  forward.addEventListener("click", () => track.scrollBy({ left: track.clientWidth * 0.85, behavior: "smooth" }));
+  track.addEventListener("scroll", update, { passive: true });
+  new ResizeObserver(update).observe(track);
+  return h("div", { class: "hrail" }, track, back, forward);
 }
 
-function episodeRow(item, seasons) {
+function seasonsSection(item, seasons, target) {
+  let current = seasons.find((season) => season.episodes.some((entry) => entry.item.id === target?.id)) ?? seasons[0];
+  const titleButton = h("button", { class: "season-menu", "aria-haspopup": "menu" });
+  const count = h("span", { class: "muted" });
+  const watched = h("span", { class: "watched-label small" });
+  const holder = h("div", { class: "season-body" });
+  const show = (season, animate) => {
+    current = season;
+    titleButton.replaceChildren(icon("chevronUpDown", { size: 15 }), h("span", {}, logic.seasonTitle(season.number)), icon("chevronDown", { size: 13 }));
+    count.textContent = `${season.episodes.length} episode${season.episodes.length === 1 ? "" : "s"}`;
+    const allWatched = season.episodes.length > 0 && season.episodes.every((entry) => entry.item.watchState === "completed");
+    watched.replaceChildren(...(allWatched ? [icon("checkCircle", { size: 14 }), "Watched"] : []));
+    const rail = hrail(season.episodes.map((entry) => episodeCard(entry, seasons)), { label: "Episodes", className: "episodes" });
+    if (animate) rail.classList.add("slide-in");
+    holder.replaceChildren(...[rail, supplementRails(season.supplements, "", `${item.title} · ${logic.seasonTitle(season.number)}`)].filter(Boolean));
+  };
+  titleButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openMenu(titleButton, [
+      ...seasons.map((season) => menuOption(logic.seasonTitle(season.number), season === current, () => show(season, true))),
+      h("div", { class: "menu-divider" }),
+      ...watchMenu(item, "season", current.number),
+    ]);
+  });
+  show(current, false);
+  return h("section", { class: "detail-section" },
+    h("div", { class: "section-header season-header" }, titleButton, h("span", { class: "spacer" }), watched, count),
+    holder);
+}
+
+function episodeCard(entry, seasons) {
+  const item = entry.item;
   const available = item.availability === "available";
-  return h("button", { class: "episode-row", disabled: !available, onclick: () => playTitle(item, seasons) },
-    h("div", { class: "episode-thumb" },
-      artwork(item.backdrop ?? item.poster, 640, "landscape-art", ""),
-      available ? h("div", { class: "play-glyph" }, icon("play", { size: 16 })) : null,
-      progressBar(item.progress)),
+  return h("button", { class: "episode-card card-hover", role: "listitem", disabled: !available, onclick: () => playTitle(item, seasons) },
+    artwork(item.backdrop ?? item.poster, 640, "episode-art", ""),
+    h("div", { class: "episode-shade" }),
     h("div", { class: "episode-text" },
-      h("div", { class: "episode-title" }, logic.episodeLabel(item), item.watchState === "completed" ? icon("check", { size: 14, label: "Watched" }) : null),
-      h("div", { class: "card-subtitle" }, available ? logic.remaining(item.progress) : "Unavailable: the file is offline."),
-      item.overview ? h("p", { class: "episode-overview" }, item.overview) : null));
+      h("div", { class: "eyebrow" }, `Episode ${entry.episodeNumber}`),
+      h("div", { class: "episode-title" }, item.title),
+      item.overview ? h("p", { class: "episode-overview" }, item.overview) : null,
+      h("div", { class: "episode-footer" },
+        h("span", {}, item.year ? String(item.year) : "Episode"),
+        h("span", { class: "spacer" }),
+        item.watchState === "completed" ? h("span", { class: "watched-label small" }, icon("checkCircle", { size: 13 }), "Watched") : null,
+        available ? null : h("span", { class: "badge warning" }, "Offline"))),
+    progressBar(item.progress));
 }
 
-function extraCard(item) {
-  return h("button", { class: "landscape-card", onclick: () => playTitle(item) },
-    h("div", { class: "landscape-frame" },
-      artwork(item.backdrop ?? item.poster, 640, "landscape-art", ""),
-      h("div", { class: "landscape-shade" }),
-      h("div", { class: "landscape-text" }, h("div", { class: "card-title" }, item.title)),
-      h("div", { class: "play-glyph" }, icon("play", { size: 18 }))));
+function supplementRails(supplements, prefix, parentTitle) {
+  const groups = logic.supplementGroups(supplements);
+  if (!groups.length) return null;
+  return h("div", { class: "supplement-rails" }, groups.map((group) => h("section", { class: "detail-section" },
+    h("div", { class: "section-header" }, h("h2", {}, prefix + group.title)),
+    hrail(group.items.map((entry) => supplementCard(entry, parentTitle)), { label: prefix + group.title, className: "supplements" }))));
+}
+
+function supplementCard(entry, parentTitle) {
+  const item = { ...entry.item, parentTitle: entry.item.parentTitle ?? parentTitle };
+  return h("button", { class: "supplement-card card-hover", role: "listitem", disabled: item.availability !== "available", onclick: () => playTitle(item) },
+    artwork(item.backdrop ?? item.poster, 640, "episode-art", ""),
+    h("div", { class: "episode-shade" }),
+    h("div", { class: "supplement-play glass" }, icon("play", { size: 20 })),
+    h("div", { class: "episode-text" },
+      h("div", { class: "eyebrow" }, entry.category),
+      h("div", { class: "episode-title" }, item.title),
+      h("div", { class: "card-subtitle" }, logic.eyebrow(item) || "Extra")));
+}
+
+function castRail(credits) {
+  const cards = logic.people(credits);
+  if (!cards.length) return null;
+  return h("section", { class: "detail-section" },
+    h("div", { class: "section-header" }, h("h2", {}, "Cast & Crew")),
+    hrail(cards.map((person) => h("div", { class: "person", role: "listitem" },
+      h("div", { class: "person-photo" }, artwork(person.profile, 320, "person-art", ""), person.profile ? null : h("span", { class: "person-initial" }, logic.initial(person.name))),
+      h("div", { class: "person-name" }, person.name),
+      person.subtitle ? h("div", { class: "person-role" }, person.subtitle) : null)), { label: "Cast & Crew", className: "people" }));
+}
+
+function aboutSection(detail) {
+  const metadata = detail.metadata ?? {};
+  const overview = metadata.overview ?? detail.item.overview;
+  return h("section", { class: "detail-section about" },
+    overview ? h("div", { class: "about-text" }, h("h2", {}, `About ${metadata.title ?? detail.item.title}`), h("p", {}, overview)) : null,
+    h("h2", {}, "Information"),
+    h("div", { class: `info-grid ${detail.item.kind === "series" ? "series" : ""}` }, logic.informationFields(detail).map((field) =>
+      h("div", { class: "info-value" }, h("div", { class: "info-title" }, field.title), h("div", {}, field.value ?? "—")))));
 }
 
 async function collectionScreen(id) {

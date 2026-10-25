@@ -52,6 +52,18 @@ const PATHS = {
   more: ["M6 12h.01M12 12h.01M18 12h.01", "dots"],
   warning: ["M12 4l9 16H3zM12 10v4.5M12 17.5h.01", "stroke"],
   power: ["M12 3v8M7 6.5a7 7 0 1 0 10 0", "stroke"],
+  moon: ["M19 14.5A7.5 7.5 0 1 1 9.5 5a6 6 0 0 0 9.5 9.5zM16 3.5h3l-3 3h3", "stroke"],
+  moonFill: ["M19 14.5A7.5 7.5 0 1 1 9.5 5a6 6 0 0 0 9.5 9.5z", "fill"],
+  bookmark: ["M7 4h10v16l-5-3.6L7 20z", "stroke"],
+  captionsFill: ["M3.5 5.5h17v13h-17zM10.5 10.2a2.4 2.4 0 1 0 0 3.6M17 10.2a2.4 2.4 0 1 0 0 3.6", "fill"],
+  plus: ["M12 5v14M5 12h14", "stroke"],
+  chapters: ["M4 6h16M4 12h16M4 18h10", "stroke"],
+  library: ["M4 5h4v14H4zM10 5h4v14h-4zM16.5 5.5l3.6.9-3.3 13.2-3.6-.9z", "stroke"],
+  gear: ["M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.4-2.3 1a7.4 7.4 0 0 0-1.7-1L15 3.6h-4l-.4 2.5a7.4 7.4 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.5a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7.4 7.4 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 1.7-1l2.3 1 2-3.4z", "stroke"],
+  chevronDown: ["M7 10l5 5 5-5", "stroke"],
+  chevronUpDown: ["M8 9l4-4 4 4M8 15l4 4 4-4", "stroke"],
+  star: ["M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z", "stroke"],
+  starFill: ["M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z", "fill"],
 };
 
 export function icon(name, { size = 20, label } = {}) {

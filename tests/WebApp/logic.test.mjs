@@ -72,13 +72,19 @@ test("artwork uses the prepared widths and only the server's own addresses", () 
 test("addresses map to screens and back", () => {
   const id = "0b7f6c4e-8f3a-4b52-9c1d-2a6e1f0d9b3c";
   assert.deepEqual(logic.parseRoute("/"), { name: "home" });
-  assert.deepEqual(logic.parseRoute("/movies", "?sort=dateAdded"), { name: "movies", sort: "dateAdded" });
-  assert.deepEqual(logic.parseRoute("/shows"), { name: "shows", sort: "title" });
+  assert.deepEqual(logic.parseRoute("/movies", "?sort=dateAdded&order=descending"), { name: "movies", filters: { sort: "dateAdded", descending: true } });
+  assert.deepEqual(logic.parseRoute("/shows"), { name: "shows", filters: {} });
+  assert.deepEqual(logic.parseRoute("/library", "?kind=series&favorites=1&watch=inProgress&genre=Drama&from=2001&to=2010"),
+    { name: "library", filters: { kind: "series", favorites: true, watch: "inProgress", genre: "Drama", yearFrom: 2001, yearTo: 2010 } });
+  assert.deepEqual(logic.parseRoute("/library", "?kind=nonsense&watch=x&sort=y"), { name: "library", filters: {} });
   assert.deepEqual(logic.parseRoute("/search", "?q=harbor"), { name: "search", query: "harbor" });
+  assert.deepEqual(logic.parseRoute("/settings/server"), { name: "settings", page: "server" });
+  assert.deepEqual(logic.parseRoute("/settings/nope"), { name: "settings", page: "general" });
   assert.deepEqual(logic.parseRoute(`/title/${id.toUpperCase()}`), { name: "title", id });
   assert.deepEqual(logic.parseRoute("/title/not-an-id"), { name: "home" });
   assert.deepEqual(logic.parseRoute("/anything/else"), { name: "home" });
-  for (const route of [{ name: "home" }, { name: "movies", sort: "releaseYear" }, { name: "shows", sort: "title" },
+  for (const route of [{ name: "home" }, { name: "movies", filters: { sort: "releaseYear" } }, { name: "shows", filters: {} },
+    { name: "recent", filters: { genre: "Sci-Fi & Fantasy", favorites: true } }, { name: "settings", page: "general" }, { name: "settings", page: "playback" },
     { name: "search", query: "quiet harbor" }, { name: "title", id }, { name: "collection", id }]) {
     const [path, search = ""] = logic.routePath(route).split("?");
     assert.deepEqual(logic.parseRoute(path, search ? `?${search}` : ""), route);
@@ -188,4 +194,83 @@ test("a title without a known duration is not saved", async () => {
   const saver = new logic.ProgressSaver({ mediaId: "m", send, newId });
   assert.equal(await saver.save(1000, 0), false);
   assert.equal(sent.length, 0);
+});
+
+test("the player says when a title ends, in the viewer's time and at the chosen speed", () => {
+  const now = new Date(2026, 9, 25, 1, 10, 52);
+  assert.equal(logic.endsAt(36, 3895, 1, now, "de-DE"), "Ends at 2:15");
+  assert.equal(logic.endsAt(0, 3600, 2, now, "de-DE"), "Ends at 1:40");
+  assert.equal(logic.endsAt(0, 0, 1, now), "");
+  assert.equal(logic.rateLabel(1), "1x");
+  assert.equal(logic.rateLabel(0.75), "0.75x");
+});
+
+test("Up Next shows in the last 20 seconds of an episode-length title only", () => {
+  const base = { duration: 2400, hasNext: true, autoplay: true, stopsAtEnd: false, dismissed: false };
+  assert.equal(logic.showsUpNext({ ...base, position: 2385 }), true);
+  assert.equal(logic.showsUpNext({ ...base, position: 2300 }), false);
+  assert.equal(logic.showsUpNext({ ...base, position: 2385, hasNext: false }), false);
+  assert.equal(logic.showsUpNext({ ...base, position: 2385, stopsAtEnd: true }), false);
+  assert.equal(logic.showsUpNext({ ...base, position: 2385, dismissed: true }), false);
+  assert.equal(logic.showsUpNext({ ...base, duration: 200, position: 190 }), false);
+  assert.equal(logic.upNextSeconds(2385.2, 2400), 15);
+});
+
+test("the player's subtitle line names the show, season and episode like the Mac", () => {
+  assert.equal(logic.playerSubtitle({ kind: "episode", parentTitle: "Mr. Robot", seasonNumber: 1, episodeNumber: 1 }), "Mr. Robot · Season 1 · Episode 1");
+  assert.equal(logic.playerSubtitle({ kind: "episode", parentTitle: "Top Gear", seasonNumber: 0, episodeNumber: 3 }), "Top Gear · Specials · Episode 3");
+  assert.equal(logic.playerSubtitle({ kind: "movie", title: "Heat" }), "NOW PLAYING");
+});
+
+test("playback preferences stay within the Mac's limits", () => {
+  assert.deepEqual(logic.normalizePreferences(null), { ...logic.PLAYBACK_DEFAULTS });
+  const odd = logic.normalizePreferences({ defaultPlaybackRate: 3, seekInterval: 2, controlsAutoHideDelay: 99, defaultVolume: -1, nightMode: true });
+  assert.equal(odd.defaultPlaybackRate, 1);
+  assert.equal(odd.seekInterval, 5);
+  assert.equal(odd.controlsAutoHideDelay, 10);
+  assert.equal(odd.defaultVolume, 0);
+  assert.equal(odd.nightMode, true);
+});
+
+test("cast and crew follow the Mac: actors with their roles, crew with their jobs, billing order", () => {
+  const credits = [
+    { name: "Aaron Paul", department: "Acting", character: "Jesse Pinkman", order: 1, personKey: "p2", profile: { path: "/api/v1/artwork/b" } },
+    { name: "Bryan Cranston", department: "Acting", character: "Walter White", order: 0, personKey: "p1" },
+    { name: "Bryan Cranston", department: "Directing", job: "Director", order: 9, personKey: "p1", profile: { path: "/api/v1/artwork/a" } },
+    { name: "Vince Gilligan", department: "Writing", job: "Creator", order: 20, personKey: "p3" },
+    { name: "Aaron Paul", department: "Acting", character: "Jesse Pinkman", order: 1, personKey: "p2" },
+  ];
+  assert.deepEqual(logic.starring(credits), ["Bryan Cranston", "Aaron Paul"]);
+  const cards = logic.people(credits);
+  assert.deepEqual(cards.map((card) => [card.name, card.subtitle]), [["Bryan Cranston", "Walter White"], ["Aaron Paul", "Jesse Pinkman"], ["Vince Gilligan", "Creator"]]);
+  assert.equal(cards[0].profile.path, "/api/v1/artwork/a");
+});
+
+test("information fields match the Mac for shows and movies", () => {
+  const show = logic.informationFields({ item: { kind: "series" }, metadata: { year: 2008, studios: ["Sony"], countries: ["", "US"], genres: ["Drama", "Crime"] }, seasons: [{ episodes: [1, 2] }, { episodes: [1] }] });
+  assert.deepEqual(show.map((field) => [field.title, field.value]), [["Seasons", "2"], ["Episodes", "3"], ["Studio", "Sony"], ["Released", "2008"], ["Country of Origin", "US"], ["Genres", "Drama, Crime"], ["FSK", null]]);
+  const movie = logic.informationFields({ item: { kind: "movie" }, metadata: { runtimeMinutes: 132, fskAge: 16 } });
+  assert.deepEqual(movie.map((field) => field.title), ["Runtime", "Release Year", "Genres", "Studio", "Country of Origin", "FSK"]);
+  assert.equal(movie[0].value, "132 min");
+  assert.equal(movie[5].value, "FSK 16");
+});
+
+test("supplements split into Trailers and Extras; play labels and metadata lines match the Mac", () => {
+  const groups = logic.supplementGroups([{ item: { kind: "trailer" }, category: "Trailer" }, { item: { kind: "extra" }, category: "Behind the Scenes" }, { item: { kind: "extra" }, category: "Teaser Trailer" }]);
+  assert.deepEqual(groups.map((group) => [group.title, group.items.length]), [["Trailers", 2], ["Extras", 1]]);
+  assert.equal(logic.detailPlayLabel({ kind: "series" }, { action: "resume", target: { seasonNumber: 2, episodeNumber: 10 } }), "Resume S02 E10");
+  assert.equal(logic.detailPlayLabel({ kind: "movie" }, { action: "playAgain" }), "Play Again");
+  assert.equal(logic.detailMetadataLine({ kind: "movie", year: 2019 }, { runtimeMinutes: 132 }), "MOVIE  ·  2019  ·  132 MIN");
+  assert.equal(logic.detailMetadataLine({ kind: "series" }, { year: 2008 }), "TV SHOW  ·  2008");
+  assert.equal(logic.seasonTitle(0), "Specials");
+});
+
+test("library browsing builds the server's query like the Mac's filters", () => {
+  assert.deepEqual(logic.browseQuery("library", {}), {});
+  assert.deepEqual(logic.browseQuery("movies", { kind: "series", favorites: true, watch: "unplayed" }), { kind: "movie", favorite: "true", watchState: "unplayed" });
+  assert.deepEqual(logic.browseQuery("recent", {}), { sort: "dateAdded", direction: "descending" });
+  assert.deepEqual(logic.browseQuery("library", { genre: "Drama", yearFrom: 2010, yearTo: 2005, sort: "releaseYear" }),
+    { genre: "Drama", yearFrom: "2010", yearTo: "2010", sort: "releaseYear", direction: "ascending" });
+  assert.deepEqual(logic.browseFacets([{ genres: ["Drama", "Crime"], year: 2008 }, { genres: ["Comedy", "Drama"], year: 2015 }]),
+    { genres: ["Comedy", "Crime", "Drama"], years: [2015, 2008] });
 });

@@ -1,21 +1,74 @@
-// The browser player: plays the original file straight from the server with byte ranges,
-// saves the position with guarded progress updates and offers the next episode at the end.
-// Browsers decode MP4/MOV with H.264 or HEVC and AAC. Other files (MKV, AVI) play live
-// converted by the server (live.js), and so does an MP4 the browser fails to show or to hear.
-// Without live conversion, such a file gets a clear message.
+// The browser player, laid out like the Mac app's: back and the menus (speed, sound, subtitles,
+// sleep timer, scene notes) at the top, the transport in the middle, title, volume and the
+// timeline at the bottom, and "Up Next" in the last seconds of an episode.
+// It plays MP4/MOV with H.264 or HEVC and AAC straight from the server with byte ranges. Other
+// files (MKV, AVI) play live converted by the server (live.js), and so does an MP4 the browser
+// fails to show or to hear. Without live conversion, such a file gets a clear message.
+// Progress is saved with guarded updates.
 
 import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
-import { ProgressSaver, clock, eyebrow, resumeSeconds } from "./logic.js";
+import {
+  ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences, noteTime,
+  playerSubtitle, rateLabel, resumeSeconds, showsUpNext, upNextSeconds,
+} from "./logic.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
 import { codecSupport, liveProblem, mimeType, startTrack, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
 
 const SAVE_INTERVAL = 10_000;
-const HIDE_DELAY = 3_000;
 const RENEW_BEFORE = 5 * 60_000;
+const PREFERENCES_KEY = "aurelia.playback";
 
 export const UNPLAYABLE =
   "This file can’t play in a browser yet. Watch it in Aurelia on the Mac or Apple TV.";
+
+/** This browser's playback preferences (Settings › Playback). */
+export function loadPreferences() {
+  try {
+    return normalizePreferences(JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? "null"));
+  } catch {
+    return normalizePreferences(null);
+  }
+}
+
+export function savePreferences(value) {
+  const normalized = normalizePreferences(value);
+  try {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify(normalized));
+  } catch {
+    // Private browsing: the choice lasts for this page only.
+  }
+  return normalized;
+}
+
+/** The circular arrow with the interval inside, like SF Symbols' gobackward.10. */
+function seekGlyph(forward, seconds) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "24");
+  svg.setAttribute("height", "24");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const arc = document.createElementNS(svg.namespaceURI, "path");
+  arc.setAttribute("d", forward
+    ? "M12 4.5a8 8 0 1 1-7.6 5.5M12 4.5V1.8l3.2 2.7-3.2 2.7z"
+    : "M12 4.5a8 8 0 1 0 7.6 5.5M12 4.5V1.8L8.8 4.5l3.2 2.7z");
+  arc.setAttribute("fill", "none");
+  arc.setAttribute("stroke", "currentColor");
+  arc.setAttribute("stroke-width", "1.9");
+  arc.setAttribute("stroke-linecap", "round");
+  arc.setAttribute("stroke-linejoin", "round");
+  const label = document.createElementNS(svg.namespaceURI, "text");
+  label.setAttribute("x", "12");
+  label.setAttribute("y", "15.6");
+  label.setAttribute("text-anchor", "middle");
+  label.setAttribute("font-size", "7.4");
+  label.setAttribute("font-weight", "700");
+  label.setAttribute("fill", "currentColor");
+  label.textContent = String(seconds);
+  svg.append(arc, label);
+  return svg;
+}
 
 export class Player {
   /**
@@ -36,51 +89,78 @@ export class Player {
     this.onClose = onClose;
     this.onSessionEnded = onSessionEnded;
     this.canConvert = canConvert && liveSupported();
+    this.preferences = loadPreferences();
     this.live = null;
     this.source = null;
     this.saver = null;
     this.timers = new Set();
     this.closed = false;
     this.listeners = [];
+    this.notes = [];
+    this.sleep = { mode: "off", until: 0 };
+    this.upNextItem = undefined;
+    this.upNextDismissed = false;
     this.build();
   }
 
   build() {
+    const seconds = this.preferences.seekInterval;
     this.video = h("video", { class: "player-video", playsinline: true, preload: "auto" });
-    this.badge = h("span", { class: "live-badge", hidden: true, title: "The server converts this title while it plays." }, "Live converted");
-    this.title = h("div", { class: "player-title" },
-      h("div", { class: "eyebrow" }, eyebrow(this.item)), h("div", { class: "player-name" }, this.item.title), this.badge);
-    this.closeButton = h("button", { class: "round-button", "aria-label": "Close player", onclick: () => this.close() }, icon("back"));
-    this.playButton = h("button", { class: "play-toggle", "aria-label": "Play", onclick: () => this.toggle() }, icon("play", { size: 30 }));
-    this.backButton = h("button", { class: "round-button", "aria-label": "Back 10 seconds", onclick: () => this.skip(-10) }, icon("replay10", { size: 24 }));
-    this.forwardButton = h("button", { class: "round-button", "aria-label": "Forward 10 seconds", onclick: () => this.skip(10) }, icon("skip10", { size: 24 }));
-    this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Position" });
-    this.elapsed = h("span", { class: "time" }, "0:00");
-    this.left = h("span", { class: "time" }, "0:00");
-    this.muteButton = h("button", { class: "icon-button", "aria-label": "Mute", onclick: () => this.toggleMute() }, icon("volume"));
-    this.volume = h("input", { class: "volume", type: "range", min: "0", max: "1", step: "0.05", value: "1", "aria-label": "Volume" });
-    this.audioButton = h("button", { class: "icon-button", "aria-label": "Audio", "aria-haspopup": "menu", "aria-expanded": "false", hidden: true, onclick: () => this.toggleAudioMenu() }, icon("audio"));
-    this.audioMenu = h("div", { class: "profile-menu audio-menu", role: "menu", "aria-label": "Audio", hidden: true });
-    this.captionsButton = h("button", { class: "icon-button", "aria-label": "Subtitles", hidden: true, onclick: () => this.toggleCaptions() }, icon("captions"));
-    this.pipButton = h("button", { class: "icon-button", "aria-label": "Picture in Picture", hidden: !document.pictureInPictureEnabled, onclick: () => this.togglePictureInPicture() }, icon("pip"));
-    this.fullscreenButton = h("button", { class: "icon-button", "aria-label": "Full Screen", onclick: () => this.toggleFullscreen() }, icon("fullscreen"));
-    this.notice = h("div", { class: "player-notice", role: "status", hidden: true });
-    this.spinner = h("div", { class: "spinner", "aria-hidden": "true" });
-    this.endCard = h("div", { class: "end-card", hidden: true });
+    this.startScreen = h("div", { class: "player-start", "aria-label": "Loading" }, h("div", { class: "start-ring" }));
 
-    this.controls = h("div", { class: "player-controls" },
-      h("div", { class: "player-top" }, this.closeButton, this.title),
-      h("div", { class: "player-center" }, this.backButton, this.playButton, this.forwardButton),
-      h("div", { class: "player-bottom" },
-        h("div", { class: "timeline-row" }, this.elapsed, this.timeline, this.left),
-        h("div", { class: "player-tools" },
-          h("div", { class: "volume-group" }, this.muteButton, this.volume),
-          h("div", { class: "tool-group" },
-            h("div", { class: "menu-anchor" }, this.audioButton, this.audioMenu),
-            this.captionsButton, this.pipButton, this.fullscreenButton))));
+    // Top: back, then one glass capsule with the menus.
+    this.backButton = h("button", { class: "player-round glass", "aria-label": "Back", onclick: () => this.close() }, icon("back", { size: 20 }));
+    this.rateButton = this.menuButton("Playback Rate", h("span", { class: "rate-label" }, rateLabel(this.preferences.defaultPlaybackRate)), () => this.rateMenu());
+    this.audioButton = this.menuButton("Audio", icon("audio", { size: 18 }), () => this.audioMenu());
+    this.subtitleButton = this.menuButton("Subtitles", icon("captions", { size: 18 }), () => this.subtitleMenu());
+    this.sleepButton = this.menuButton("Sleep Timer", icon("moon", { size: 18 }), () => this.sleepMenu());
+    this.notesButton = this.menuButton("Scene Notes", icon("bookmark", { size: 18 }), () => this.notesPanel());
+    this.top = h("div", { class: "player-top" }, this.backButton,
+      h("div", { class: "player-menus glass" }, this.rateButton, this.audioButton, this.subtitleButton, this.sleepButton, this.notesButton));
 
-    this.element = h("div", { class: "player", role: "dialog", "aria-modal": "true", "aria-label": `Playing ${this.item.title}` },
-      this.video, this.spinner, this.controls, this.notice, this.endCard);
+    // Middle: back, play and forward in one capsule.
+    this.playButton = h("button", { class: "transport-play", "aria-label": "Play", onclick: () => this.toggle() }, icon("play", { size: 22 }));
+    this.transport = h("div", { class: "player-transport glass" },
+      h("button", { class: "transport-seek", "aria-label": `Back ${seconds} Seconds`, onclick: () => this.skip(-seconds) }, seekGlyph(false, seconds)),
+      this.playButton,
+      h("button", { class: "transport-seek", "aria-label": `Forward ${seconds} Seconds`, onclick: () => this.skip(seconds) }, seekGlyph(true, seconds)));
+
+    // Bottom: title on the left, sound and window controls on the right, then the timeline.
+    this.subtitleLine = h("div", { class: "player-subtitle" }, playerSubtitle(this.item));
+    this.titleLine = h("div", { class: "player-name" }, this.item.title);
+    this.muteButton = h("button", { class: "player-icon", "aria-label": "Mute", onclick: () => this.toggleMute() }, icon("volume", { size: 18 }));
+    this.volume = h("input", { class: "volume", type: "range", min: "0", max: "1", step: "0.02", value: String(this.preferences.defaultVolume), "aria-label": "Volume" });
+    this.pipButton = h("button", { class: "player-icon", "aria-label": "Enter Picture in Picture", hidden: !document.pictureInPictureEnabled, onclick: () => this.togglePictureInPicture() }, icon("pip", { size: 18 }));
+    this.fullscreenButton = h("button", { class: "player-icon", "aria-label": "Enter Full Screen", onclick: () => this.toggleFullscreen() }, icon("fullscreen", { size: 18 }));
+    this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.pipButton, this.fullscreenButton);
+    this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Playback Position" });
+    this.noteMarks = h("div", { class: "note-marks", "aria-hidden": "true" });
+    this.elapsed = h("span", { class: "time elapsed" }, "0:00");
+    this.total = h("span", { class: "time" }, "0:00");
+    this.endsAt = h("div", { class: "ends-at" });
+    this.bottom = h("div", { class: "player-bottom" },
+      h("div", { class: "player-info-row" }, h("div", { class: "player-info" }, this.subtitleLine, this.titleLine), this.trailing),
+      h("div", { class: "timeline-row" }, this.elapsed, h("div", { class: "timeline-track" }, this.timeline, this.noteMarks), this.total),
+      this.endsAt);
+
+    this.controls = h("div", { class: "player-controls" }, h("div", { class: "player-shade" }), this.top, this.transport, this.bottom);
+    this.popover = h("div", { class: "player-popover glass", role: "menu", hidden: true });
+    this.upNext = h("div", { class: "up-next glass", hidden: true });
+    this.cue = h("div", { class: "note-cue glass", hidden: true, "aria-live": "polite" });
+    this.notice = h("div", { class: "player-notice glass", role: "status", hidden: true });
+
+    this.element = h("div", { class: "player controls-visible paused", role: "dialog", "aria-modal": "true", "aria-label": `Playing ${this.item.title}`, tabindex: "-1" },
+      this.video, this.startScreen, this.controls, this.cue, this.upNext, this.popover, this.notice);
+  }
+
+  menuButton(label, content, open) {
+    const button = h("button", { class: "menu-control", "aria-label": label, "aria-haspopup": "menu", "aria-expanded": "false" }, content);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (this.popoverOwner === button) this.closePopover();
+      else open();
+    });
+    return button;
   }
 
   async open(parent) {
@@ -89,6 +169,10 @@ export class Player {
     this.bind();
     this.showControls();
     this.element.focus?.();
+    this.video.volume = this.preferences.defaultVolume;
+    this.updateVolume();
+    // Opening the player is a click, so the browser allows sound processing to start now.
+    if (this.preferences.nightMode) this.applyNightMode();
     try {
       this.source = await this.api.createPlayback(this.item.id);
     } catch (error) {
@@ -101,8 +185,9 @@ export class Player {
       revision: this.source.progress?.revision ?? 0,
       send: (mediaId, body, options) => this.api.saveProgress(mediaId, body, options),
     });
-    this.resumeAt = resumeSeconds(this.source.progress);
+    this.resumeAt = this.preferences.automaticResume ? resumeSeconds(this.source.progress) : 0;
     this.scheduleRenewal();
+    this.loadNotes();
     if (this.canConvert && !triesDirectPlay(this.source.contentType)) {
       const at = this.resumeAt;
       this.resumeAt = 0;
@@ -114,6 +199,7 @@ export class Player {
   }
 
   async play() {
+    this.video.playbackRate = this.preferences.defaultPlaybackRate;
     try {
       await this.video.play();
     } catch {
@@ -128,7 +214,7 @@ export class Player {
    */
   async startLive(at) {
     if (this.live || this.closed) return;
-    this.spinner.classList.add("visible");
+    this.startScreen.hidden = false;
     this.video.removeAttribute("src");
     this.video.load();
     const without = [];
@@ -167,8 +253,6 @@ export class Player {
       audio: track?.index ?? null,
       onFailure: (status, code) => this.liveFailed(status, code),
     });
-    this.badge.hidden = false;
-    this.audioButton.hidden = plan.audioTracks.length < 2;
     await this.live.open(at);
     await this.play();
   }
@@ -192,33 +276,6 @@ export class Player {
     return true;
   }
 
-  toggleAudioMenu(open = this.audioMenu.hidden) {
-    if (!this.live) return;
-    clear(this.audioMenu);
-    if (open) {
-      this.live.plan.audioTracks.forEach((track, position) => {
-        const selected = track.index === this.live.audio;
-        this.audioMenu.append(h("button", {
-          class: "menu-item audio-item",
-          role: "menuitemradio",
-          "aria-checked": String(selected),
-          onclick: () => this.chooseAudio(track.index),
-        }, h("span", { class: "audio-check" }, selected ? icon("check", { size: 16 }) : null), trackLabel(track, position)));
-      });
-    }
-    this.audioMenu.hidden = !open;
-    this.audioButton.setAttribute("aria-expanded", String(open));
-    this.audioButton.classList.toggle("selected", open);
-    if (open) this.audioMenu.querySelector("[aria-checked=true]")?.focus();
-  }
-
-  chooseAudio(index) {
-    this.toggleAudioMenu(false);
-    this.audioButton.focus();
-    this.preferredAudio = index;
-    this.live?.setAudio(index);
-  }
-
   bind() {
     const on = (target, type, handler, options) => {
       target.addEventListener(type, handler, options);
@@ -229,27 +286,30 @@ export class Player {
       if (this.resumeAt > 0 && this.resumeAt < video.duration) video.currentTime = this.resumeAt;
       this.resumeAt = 0;
       this.updateTime();
-      this.updateCaptions();
+      this.renderNoteMarks();
       // A file the browser opens but cannot show (for example HEVC in some browsers) has no picture.
       if (!this.live && video.videoWidth === 0 && video.videoHeight === 0 && this.item.kind !== "trailer") this.check(() => video.videoWidth === 0, 1500);
     });
-    on(video, "timeupdate", () => this.updateTime());
+    on(video, "timeupdate", () => this.tick());
     on(video, "play", () => this.updatePlayState());
     on(video, "pause", () => {
       this.updatePlayState();
       this.saveNow();
     });
     on(video, "playing", () => {
-      this.spinner.classList.remove("visible");
+      this.startScreen.hidden = true;
+      this.element.classList.remove("waiting");
       this.checkAudio();
     });
-    on(video, "waiting", () => this.spinner.classList.add("visible"));
+    on(video, "waiting", () => this.element.classList.add("waiting"));
     on(video, "seeked", () => this.saveNow());
     on(video, "volumechange", () => this.updateVolume());
+    on(video, "ratechange", () => this.updateRate());
     on(video, "ended", () => this.finish());
     on(video, "error", () => this.videoFailed());
     on(this.timeline, "input", () => {
       if (Number.isFinite(video.duration)) video.currentTime = (this.timeline.value / 1000) * video.duration;
+      this.updateTime();
     });
     on(this.volume, "input", () => {
       video.volume = Number(this.volume.value);
@@ -257,13 +317,19 @@ export class Player {
     });
     on(this.element, "pointermove", () => this.showControls());
     on(this.element, "pointerdown", () => this.showControls());
-    on(document, "pointerdown", (event) => {
-      if (!this.audioMenu.hidden && !this.audioMenu.parentElement.contains(event.target)) this.toggleAudioMenu(false);
+    on(video, "click", () => {
+      if (!this.popover.hidden) return this.closePopover();
+      this.toggle();
     });
-    on(video, "click", () => this.toggle());
     on(video, "dblclick", () => this.toggleFullscreen());
+    on(document, "click", (event) => {
+      // The click's path is fixed when it starts, so a menu that redraws itself stays open.
+      if (!this.popover.hidden && !event.composedPath().includes(this.popover)) this.closePopover();
+    });
     on(document, "keydown", (event) => this.key(event));
     on(document, "fullscreenchange", () => this.updateFullscreen());
+    on(video, "enterpictureinpicture", () => this.updatePictureInPicture());
+    on(video, "leavepictureinpicture", () => this.updatePictureInPicture());
     on(document, "visibilitychange", () => {
       if (document.visibilityState === "hidden") this.saveNow({ keepalive: true });
     });
@@ -271,12 +337,14 @@ export class Player {
     this.every(() => {
       if (!video.paused && !video.ended) this.saveNow();
     }, SAVE_INTERVAL);
+    this.every(() => this.checkSleep(), 1000);
   }
 
   key(event) {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
     const target = event.target;
-    if (target instanceof HTMLInputElement && target.type !== "range") return;
+    if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
+    const seconds = this.preferences.seekInterval;
     switch (event.key) {
       case " ":
       case "k":
@@ -288,12 +356,12 @@ export class Player {
       case "ArrowLeft":
       case "j":
         event.preventDefault();
-        this.skip(-10);
+        this.skip(-seconds);
         break;
       case "ArrowRight":
       case "l":
         event.preventDefault();
-        this.skip(10);
+        this.skip(seconds);
         break;
       case "f":
       case "F":
@@ -306,14 +374,10 @@ export class Player {
         this.toggleMute();
         break;
       case "Escape":
-        if (!this.audioMenu.hidden) {
-          event.preventDefault();
-          this.toggleAudioMenu(false);
-          this.audioButton.focus();
-        } else if (!document.fullscreenElement) {
-          event.preventDefault();
-          this.close();
-        }
+        event.preventDefault();
+        if (!this.popover.hidden) this.closePopover();
+        else if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+        else if (!document.fullscreenElement) this.close();
         break;
       default:
         return;
@@ -325,29 +389,19 @@ export class Player {
     if (!this.source) return;
     if (this.video.paused || this.video.ended) this.video.play().catch(() => {});
     else this.video.pause();
+    this.showControls();
   }
 
   skip(seconds) {
     const video = this.video;
     if (!Number.isFinite(video.duration)) return;
     video.currentTime = Math.min(Math.max(0, video.currentTime + seconds), video.duration);
+    this.showControls();
   }
 
   toggleMute() {
     this.video.muted = !this.video.muted;
     if (!this.video.muted && this.video.volume === 0) this.video.volume = 1;
-  }
-
-  toggleCaptions() {
-    const tracks = [...this.video.textTracks];
-    const showing = tracks.find((track) => track.mode === "showing");
-    tracks.forEach((track) => (track.mode = "disabled"));
-    if (!showing) tracks[0].mode = "showing";
-    else {
-      const next = tracks[tracks.indexOf(showing) + 1];
-      if (next) next.mode = "showing";
-    }
-    this.captionsButton.classList.toggle("active", tracks.some((track) => track.mode === "showing"));
   }
 
   async togglePictureInPicture() {
@@ -371,80 +425,378 @@ export class Player {
 
   updateFullscreen() {
     const full = Boolean(document.fullscreenElement);
-    this.fullscreenButton.replaceChildren(icon(full ? "exitFullscreen" : "fullscreen"));
-    this.fullscreenButton.setAttribute("aria-label", full ? "Exit Full Screen" : "Full Screen");
+    this.fullscreenButton.replaceChildren(icon(full ? "exitFullscreen" : "fullscreen", { size: 18 }));
+    this.fullscreenButton.setAttribute("aria-label", full ? "Exit Full Screen" : "Enter Full Screen");
+  }
+
+  updatePictureInPicture() {
+    const active = document.pictureInPictureElement === this.video;
+    this.pipButton.classList.toggle("active", active);
+    this.pipButton.setAttribute("aria-label", active ? "Exit Picture in Picture" : "Enter Picture in Picture");
   }
 
   updatePlayState() {
     const playing = !this.video.paused && !this.video.ended;
-    this.playButton.replaceChildren(icon(playing ? "pause" : "play", { size: 30 }));
+    this.keepAwake(playing);
+    this.playButton.replaceChildren(icon(playing ? "pause" : "play", { size: 22 }));
+    this.playButton.classList.toggle("is-paused", !playing);
     this.playButton.setAttribute("aria-label", playing ? "Pause" : "Play");
     this.element.classList.toggle("paused", !playing);
     this.showControls();
+  }
+
+  tick() {
+    this.updateTime();
+    this.updateUpNext();
+    this.updateCue();
   }
 
   updateTime() {
     const video = this.video;
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
     this.elapsed.textContent = clock(video.currentTime);
-    this.left.textContent = duration ? `-${clock(duration - video.currentTime)}` : "0:00";
+    this.total.textContent = duration ? clock(duration) : "0:00";
     if (document.activeElement !== this.timeline) this.timeline.value = duration ? String(Math.round((video.currentTime / duration) * 1000)) : "0";
     this.timeline.style.setProperty("--fill", duration ? `${(video.currentTime / duration) * 100}%` : "0%");
+    this.endsAt.textContent = endsAt(video.currentTime, duration, video.playbackRate || 1);
   }
 
   updateVolume() {
     const muted = this.video.muted || this.video.volume === 0;
-    this.muteButton.replaceChildren(icon(muted ? "mute" : "volume"));
+    this.muteButton.replaceChildren(icon(muted ? "mute" : "volume", { size: 18 }));
     this.muteButton.setAttribute("aria-label", muted ? "Unmute" : "Mute");
     this.volume.value = muted ? "0" : String(this.video.volume);
+    this.volume.style.setProperty("--fill", `${(muted ? 0 : this.video.volume) * 100}%`);
   }
 
-  updateCaptions() {
-    this.captionsButton.hidden = this.video.textTracks.length === 0;
+  updateRate() {
+    this.rateButton.firstChild.textContent = rateLabel(this.video.playbackRate);
+    this.updateTime();
   }
 
+  /** Keeps the screen on while a title plays, like "Prevent Sleep During Playback" on the Mac. */
+  async keepAwake(playing) {
+    if (playing && this.preferences.keepScreenOn && !this.wakeLock && navigator.wakeLock && document.visibilityState === "visible") {
+      try {
+        this.wakeLock = await navigator.wakeLock.request("screen");
+        this.wakeLock.addEventListener("release", () => (this.wakeLock = null), { once: true });
+      } catch {
+        // Not allowed here (for example on plain HTTP); the screen follows its own settings.
+      }
+    } else if (!playing && this.wakeLock) {
+      this.wakeLock.release().catch(() => {});
+      this.wakeLock = null;
+    }
+  }
+
+  /** Controls fade out after the chosen delay while playing, unless a menu is open. */
   showControls() {
     this.element.classList.add("controls-visible");
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
-      if (!this.video.paused && !this.video.ended && this.audioMenu.hidden) this.element.classList.remove("controls-visible");
-    }, HIDE_DELAY);
+      if (!this.video.paused && !this.video.ended && this.popover.hidden) this.element.classList.remove("controls-visible");
+    }, this.preferences.controlsAutoHideDelay * 1000);
   }
 
-  saveNow(options = {}) {
+  // MARK: Menus
+
+  openPopover(owner, content, { align = "end" } = {}) {
+    this.closePopover();
+    clear(this.popover);
+    this.popover.append(...[content].flat());
+    this.popover.hidden = false;
+    this.popoverOwner = owner;
+    owner.setAttribute("aria-expanded", "true");
+    owner.classList.add("selected");
+    const box = owner.getBoundingClientRect();
+    const frame = this.element.getBoundingClientRect();
+    const below = box.top < frame.height / 2;
+    this.popover.style.top = below ? `${box.bottom - frame.top + 8}px` : "";
+    this.popover.style.bottom = below ? "" : `${frame.bottom - box.top + 8}px`;
+    const right = frame.right - box.right;
+    this.popover.style.right = align === "end" ? `${Math.max(12, right)}px` : "";
+    this.popover.classList.toggle("from-top", below);
+    this.popover.querySelector("[aria-checked=true], button, input, textarea")?.focus({ preventScroll: true });
+    this.showControls();
+  }
+
+  closePopover() {
+    if (this.popover.hidden) return;
+    this.popover.hidden = true;
+    clear(this.popover);
+    this.popoverOwner?.setAttribute("aria-expanded", "false");
+    this.popoverOwner?.classList.remove("selected");
+    this.popoverOwner = null;
+    this.showControls();
+  }
+
+  menuItems(options) {
+    return options.map((option) => {
+      if (option === "divider") return h("div", { class: "menu-divider", role: "separator" });
+      return h("button", {
+        class: "menu-item check-item",
+        role: "menuitemradio",
+        "aria-checked": String(Boolean(option.selected)),
+        disabled: option.enabled === false,
+        onclick: () => {
+          this.closePopover();
+          option.action?.();
+        },
+      }, h("span", { class: "check-mark" }, option.selected ? icon("check", { size: 15 }) : null), option.title);
+    });
+  }
+
+  rateMenu() {
+    const current = this.video.playbackRate || 1;
+    this.openPopover(this.rateButton, this.menuItems(PLAYBACK_RATES.map((rate) => ({
+      title: rate === 1 ? "Standard" : rateLabel(rate),
+      selected: current === rate,
+      action: () => (this.video.playbackRate = rate),
+    }))));
+  }
+
+  audioMenu() {
+    const tracks = this.live?.plan.audioTracks ?? [];
+    const options = tracks.length
+      ? tracks.map((track, position) => ({
+        title: trackLabel(track, position),
+        selected: track.index === this.live.audio,
+        action: () => this.chooseAudio(track.index),
+      }))
+      : [{ title: "Original sound", selected: true, enabled: false }];
+    options.push("divider", { title: "Night Mode", selected: this.preferences.nightMode, action: () => this.setNightMode(!this.preferences.nightMode) });
+    this.openPopover(this.audioButton, this.menuItems(options));
+  }
+
+  chooseAudio(index) {
+    this.preferredAudio = index;
+    this.live?.setAudio(index);
+  }
+
+  /** Night Mode softens loud scenes and lifts quiet dialogue with a compressor, as on the Mac. */
+  setNightMode(enabled) {
+    this.preferences = savePreferences({ ...this.preferences, nightMode: enabled });
+    this.applyNightMode();
+  }
+
+  applyNightMode() {
+    if (!this.preferences.nightMode && !this.audioGraph) return;
+    try {
+      if (!this.audioGraph) {
+        const context = new AudioContext();
+        const source = context.createMediaElementSource(this.video);
+        const compressor = context.createDynamicsCompressor();
+        compressor.threshold.value = -30;
+        compressor.knee.value = 24;
+        compressor.ratio.value = 6;
+        compressor.attack.value = 0.005;
+        compressor.release.value = 0.3;
+        const gain = context.createGain();
+        this.audioGraph = { context, source, compressor, gain };
+      }
+      const { context, source, compressor, gain } = this.audioGraph;
+      source.disconnect();
+      compressor.disconnect();
+      gain.disconnect();
+      if (this.preferences.nightMode) {
+        gain.gain.value = 1.6;
+        source.connect(compressor).connect(gain).connect(context.destination);
+      } else {
+        source.connect(context.destination);
+      }
+      context.resume().catch(() => {});
+    } catch {
+      // Web Audio is not available; the sound plays unchanged.
+    }
+    this.audioButton.classList.toggle("active", this.preferences.nightMode);
+  }
+
+  subtitleMenu() {
+    const tracks = [...this.video.textTracks];
+    const showing = tracks.find((track) => track.mode === "showing");
+    const options = [{ title: "Off", selected: !showing, action: () => tracks.forEach((track) => (track.mode = "disabled")) }, "divider"];
+    if (tracks.length === 0) options.push({ title: "No subtitles available", enabled: false });
+    tracks.forEach((track, position) => options.push({
+      title: track.label || (track.language ? trackLabel({ language: track.language }, position) : `Subtitle ${position + 1}`),
+      selected: track === showing,
+      action: () => tracks.forEach((other) => (other.mode = other === track ? "showing" : "disabled")),
+    }));
+    this.openPopover(this.subtitleButton, this.menuItems(options));
+  }
+
+  sleepMenu() {
+    const options = [
+      { title: "Off", selected: this.sleep.mode === "off", action: () => this.setSleep("off") },
+      "divider",
+      { title: "At end of episode", selected: this.sleep.mode === "end", action: () => this.setSleep("end") },
+      ...SLEEP_MINUTES.map((minutes) => ({
+        title: `${minutes} minutes`,
+        selected: this.sleep.mode === "minutes" && this.sleep.minutes === minutes,
+        action: () => this.setSleep("minutes", minutes),
+      })),
+    ];
+    this.openPopover(this.sleepButton, this.menuItems(options));
+  }
+
+  setSleep(mode, minutes = 0) {
+    this.sleep = { mode, minutes, until: mode === "minutes" ? Date.now() + minutes * 60_000 : 0 };
+    this.sleepButton.replaceChildren(icon(mode === "off" ? "moon" : "moonFill", { size: 18 }));
+    this.sleepButton.classList.toggle("active", mode !== "off");
+  }
+
+  /** The sleep timer pauses and closes the player, as the Mac app does. */
+  checkSleep() {
+    if (this.sleep.mode === "minutes" && Date.now() >= this.sleep.until) {
+      this.video.pause();
+      this.close();
+    }
+  }
+
+  // MARK: Scene notes
+
+  async loadNotes() {
+    try {
+      this.notes = (await this.api.sceneNotes(this.item.id)) ?? [];
+    } catch {
+      this.notes = [];
+    }
+    this.renderNoteMarks();
+  }
+
+  renderNoteMarks() {
+    clear(this.noteMarks);
+    const duration = this.video.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    for (const note of this.notes) {
+      const start = Math.min(1, Math.max(0, note.startMilliseconds / 1000 / duration));
+      const end = Math.min(1, Math.max(start, (note.endMilliseconds ?? note.startMilliseconds) / 1000 / duration));
+      this.noteMarks.append(h("span", { class: "note-mark", style: { left: `${start * 100}%`, width: `max(3px, ${(end - start) * 100}%)` } }));
+    }
+  }
+
+  /** A note's text appears at its moment, top right, while the title plays on. */
+  updateCue() {
+    const now = this.video.currentTime * 1000;
+    const note = this.notes.find((entry) => entry.text && now >= entry.startMilliseconds && now <= (entry.endMilliseconds ?? entry.startMilliseconds + 6000));
+    this.cue.hidden = !note;
+    if (note && this.cue.textContent !== note.text) this.cue.textContent = note.text;
+  }
+
+  notesPanel(draft = null) {
+    const position = Math.round(this.video.currentTime * 1000);
+    const content = [h("div", { class: "notes-header" }, h("span", {}, icon("bookmark", { size: 16 }), " Scene Notes"))];
+    if (draft) {
+      const text = h("textarea", { class: "notes-text", rows: "3", placeholder: "Note (optional)", maxlength: "2000" }, draft.text ?? "");
+      const status = h("p", { class: "notes-status", role: "alert" });
+      content.push(h("div", { class: "notes-editor" },
+        h("div", { class: "notes-time" }, `At ${noteTime(draft.startMilliseconds)}`),
+        text,
+        h("div", { class: "notes-actions" },
+          h("button", { class: "secondary-button small", onclick: () => this.notesPanel() }, "Cancel"),
+          h("button", {
+            class: "primary-button small",
+            onclick: async () => {
+              try {
+                await this.api.saveSceneNote(this.item.id, draft.id, {
+                  startMilliseconds: draft.startMilliseconds, endMilliseconds: draft.endMilliseconds ?? null, text: text.value.trim(), revision: draft.revision ?? 0,
+                });
+                await this.loadNotes();
+                this.notesPanel();
+              } catch (error) {
+                status.textContent = error.message;
+              }
+            },
+          }, "Save")),
+        status));
+    } else {
+      content.push(h("button", { class: "secondary-button small notes-create", onclick: () => this.notesPanel({ id: crypto.randomUUID(), startMilliseconds: position, revision: 0 }) },
+        icon("plus", { size: 15 }), "Mark Current Position"));
+    }
+    content.push(h("div", { class: "menu-divider" }));
+    if (this.notes.length === 0) content.push(h("p", { class: "notes-empty" }, "No scene notes yet."));
+    else content.push(h("div", { class: "notes-list" }, this.notes.map((note) => h("div", { class: "note-row" },
+      h("button", {
+        class: "note-jump",
+        onclick: () => {
+          this.video.currentTime = note.startMilliseconds / 1000;
+          this.closePopover();
+        },
+      }, h("span", { class: "note-when" }, noteTime(note.startMilliseconds)), h("span", { class: "note-text" }, note.text || "Marked scene")),
+      h("button", { class: "player-icon small", "aria-label": "Edit", onclick: () => this.notesPanel({ ...note }) }, icon("more", { size: 15 })),
+      h("button", {
+        class: "player-icon small",
+        "aria-label": "Remove",
+        onclick: async () => {
+          await this.api.removeSceneNote(this.item.id, note.id, note.revision).catch(() => {});
+          await this.loadNotes();
+          this.notesPanel();
+        },
+      }, icon("close", { size: 15 }))))));
+    content.push(h("p", { class: "notes-footnote" }, "Private to your profile. Playback keeps running."));
+    this.openPopover(this.notesButton, h("div", { class: "notes-panel" }, content));
+  }
+
+  // MARK: Up Next and the end
+
+  async updateUpNext() {
     const video = this.video;
-    if (!this.saver || !Number.isFinite(video.duration) || video.duration <= 0 || this.resumeAt > 0) return;
-    this.saver.save(video.currentTime * 1000, video.duration * 1000, false, options);
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (this.upNextItem === undefined && this.next && duration >= 300 && duration - video.currentTime < 60) {
+      this.upNextItem = null;
+      this.upNextItem = await this.next().catch(() => null);
+    }
+    const visible = showsUpNext({
+      position: video.currentTime,
+      duration,
+      hasNext: Boolean(this.upNextItem),
+      autoplay: this.preferences.automaticallyPlayNextEpisode,
+      stopsAtEnd: this.sleep.mode === "end",
+      dismissed: this.upNextDismissed,
+    });
+    if (!visible) {
+      this.upNext.hidden = true;
+      return;
+    }
+    const seconds = upNextSeconds(video.currentTime, duration);
+    if (this.upNext.hidden || this.upNext.dataset.id !== this.upNextItem.id) {
+      clear(this.upNext);
+      this.upNextCount = h("span", {}, `Play Now · ${seconds}`);
+      this.upNext.dataset.id = this.upNextItem.id;
+      this.upNext.append(
+        h("div", { class: "eyebrow" }, "Up Next"),
+        h("div", { class: "up-next-title" }, this.upNextItem.title),
+        h("div", { class: "up-next-subtitle" }, playerSubtitle(this.upNextItem)),
+        h("div", { class: "button-row" },
+          h("button", { class: "primary-button", onclick: () => this.playNext(this.upNextItem) }, icon("play", { size: 15 }), this.upNextCount),
+          h("button", { class: "secondary-button", onclick: () => this.dismissUpNext() }, "Cancel")));
+      this.upNext.hidden = false;
+    }
+    this.upNextCount.textContent = `Play Now · ${seconds}`;
+  }
+
+  dismissUpNext() {
+    this.upNextDismissed = true;
+    this.upNext.hidden = true;
   }
 
   async finish() {
     this.updatePlayState();
     const video = this.video;
     if (this.saver && Number.isFinite(video.duration)) await this.saver.save(video.duration * 1000, video.duration * 1000, true);
-    const next = this.next ? await this.next().catch(() => null) : null;
     if (this.closed) return;
-    clear(this.endCard);
-    if (next) {
-      this.endCard.append(
-        h("div", { class: "eyebrow" }, "Up Next"),
-        h("div", { class: "end-title" }, eyebrow(next)),
-        h("div", { class: "end-name" }, next.title),
-        h("div", { class: "button-row" },
-          h("button", { class: "primary-button", onclick: () => this.playNext(next) }, icon("play", { size: 16 }), "Play Next Episode"),
-          h("button", { class: "secondary-button", onclick: () => this.close() }, "Close")));
-    } else {
-      this.endCard.append(
-        h("div", { class: "end-name" }, "Finished"),
-        h("div", { class: "button-row" }, h("button", { class: "primary-button", onclick: () => this.close() }, "Close")));
-    }
-    this.endCard.hidden = false;
-    this.endCard.querySelector("button")?.focus();
+    const next = this.sleep.mode === "end" || this.upNextDismissed || !this.preferences.automaticallyPlayNextEpisode
+      ? null
+      : this.upNextItem ?? (this.next ? await this.next().catch(() => null) : null);
+    if (next) this.playNext(next);
+    else this.close();
   }
 
   playNext(next) {
     this.close();
     this.onPlayNext?.(next);
   }
+
+  // MARK: Problems
 
   /** The browser reported an error; ask the server whether the stream itself is at fault. */
   async videoFailed() {
@@ -496,13 +848,13 @@ export class Player {
       this.video.pause();
       this.video.removeAttribute("src");
       this.video.load();
-      this.notice.append(h("button", { class: "secondary-button", onclick: () => this.close() }, "Close"));
+      this.startScreen.hidden = true;
+      this.notice.append(h("button", { class: "secondary-button", onclick: () => this.close() }, "Back"));
       this.element.classList.add("failed");
     } else {
       this.after(() => (this.notice.hidden = true), 8000);
     }
     this.notice.hidden = false;
-    this.spinner.classList.remove("visible");
   }
 
   fail(error) {
@@ -515,6 +867,14 @@ export class Player {
       ? error.offline ? "The server isn’t answering. Check that it is switched on, then try again." : error.message
       : "This title couldn’t be opened.";
     this.showNotice(message, true);
+  }
+
+  // MARK: Lifetime
+
+  saveNow(options = {}) {
+    const video = this.video;
+    if (!this.saver || !Number.isFinite(video.duration) || video.duration <= 0 || this.resumeAt > 0) return;
+    this.saver.save(video.currentTime * 1000, video.duration * 1000, false, options);
   }
 
   /** Tickets last hours; a very long session gets a fresh one before the old one ends. */
@@ -581,6 +941,8 @@ export class Player {
     this.video.pause();
     this.video.removeAttribute("src");
     this.video.load();
+    this.audioGraph?.context.close().catch(() => {});
+    this.wakeLock?.release().catch(() => {});
     this.revoke();
     this.element.remove();
     document.body.classList.remove("playing");

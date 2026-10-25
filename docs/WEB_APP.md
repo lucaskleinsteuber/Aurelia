@@ -10,9 +10,11 @@ The address is the server's own HTTPS address, for example `https://192.168.1.50
 The Mac app shows it with Copy and Open buttons under *Settings › Server › Devices ›
 Web Browser*.
 
-- **The first visit shows a warning** such as "This connection is not private". The server
-  signs its own certificate, so browsers don't know it yet. Continue to the page once in
-  each browser.
+- **The first visit shows a warning** such as "This connection is not private" or, in
+  Firefox, "Warning: Potential Security Risk Ahead". The connection is encrypted (HTTPS), but
+  the server signs its own certificate, so browsers don't know it yet. Continue to the page
+  once in each browser (in Firefox: *Advanced… › Accept the Risk and Continue*). The address
+  bar may keep saying "Not Secure" for the same reason.
 - **Without home network access**, a server running in the Mac app is reachable only from
   a browser on that Mac. Its loopback address is shown then.
 - **When the server is off or asleep**, the browser cannot load the page at all, because
@@ -56,11 +58,11 @@ little computing time. Only what the browser can't decode is converted:
   Firefox or an old AVI. It then becomes H.264 at up to 1080p, one title at a time.
 
 Nothing converted is stored: the server's ffmpeg writes straight into the connection to the
-browser, with no cache and no temporary files. The player keeps about a minute ahead and
-removes what played more than a minute ago. Seeking within what has arrived is instant; a
-seek further away starts a new stream at that point. Converted titles show *Live
-converted*, and the audio button picks another sound track. Up to three titles convert at a
-time on one server.
+browser, with no cache and no temporary files. The player keeps up to a minute ahead (less
+for high bitrates, so the browser's own limit of about 100 MB is never reached) and removes
+what played earlier. Seeking within what has arrived is instant; a seek further away starts a
+new stream at that point, and a dropped connection continues where the arrived part ends.
+The audio menu picks another sound track. Up to three titles convert at a time on one server.
 
 An MP4 starts directly first. If the browser shows no picture or plays no sound, the player
 switches to live conversion at the same point by itself. Live conversion needs Media Source
@@ -71,14 +73,41 @@ Apple TV app, as before.
 Not yet: subtitles from MKV files, HDR pictures re-encoded with natural colors (they can look
 pale) and picture conversion of 4K titles on slow servers.
 
+The player looks and works like the Mac app's: back and the menus at the top (playback
+speed, sound tracks with Night Mode, subtitles, sleep timer, scene notes), back/play/forward
+in the middle, title, volume, Picture in Picture and full screen at the bottom, the timeline
+with scene notes and "Ends at". In the last 20 seconds of an episode, *Up Next* counts down
+to the next one. Scene notes are private to the profile, as on the Mac.
+
 The player saves the position every ten seconds, when pausing and when closing. Each save
 names the revision it builds on, so it never overwrites newer progress from another
 device. If another device saved meanwhile, that position wins quietly and the browser
-stops saving until the title is opened again. At the end of an episode, the player offers
-the next one.
+stops saving until the title is opened again.
 
-Keys: Space or K plays and pauses, the arrow keys (or J and L) skip ten seconds, F switches
-full screen, M mutes and Escape closes the player.
+Keys: Space or K plays and pauses, the arrow keys (or J and L) skip by the seek interval,
+F switches full screen, M mutes and Escape closes a menu or the player.
+
+## Browsing and settings
+
+The top bar has the Mac app's sections: Home, Library, Recently Added, TV Shows and Movies.
+The library sections have the same filters as on the Mac (kind, Favorites, watch state,
+genre, release year and sort order); they are part of the address, so Back and bookmarks
+keep them. A title's page shows its seasons as a row of episodes, its trailers and extras,
+cast and crew, and its information, like the Mac's.
+
+*Settings* in the profile menu has three pages:
+
+- **General**: the version (the browser app is part of the server and always has its
+  version), the server, the profile, Switch Profile and Sign Out of This Browser.
+- **Playback**: the Mac's playback preferences, kept in this browser: automatic resume,
+  playing the next episode, keeping the screen on, Night Mode, default speed and volume,
+  how long controls stay and the seek interval.
+- **Server** (owners and administrators): unlocked with the Server Password for ten minutes,
+  as on the Mac; the browser doesn't keep the password. It shows the server's status and
+  updates, scans storage locations, looks for missing movie info, lists profiles and
+  signed-in devices (with Sign Out), sets the Linux server's power behavior and makes a
+  backup. Every change the server guards gets a one-time approval for exactly that change.
+  Adding storage locations, editing profiles and editing metadata stay in the Mac app.
 
 ## How it is built
 
@@ -89,6 +118,7 @@ full screen, M mutes and Escape closes the player.
   images and media (plus `blob:` media for its own MediaSource).
 - `js/live.js` is the live player (Media Source Extensions, no library); the server side is
   described under [live conversion](CLIENT_PROTOCOL.md#live-conversion).
+- `js/player.js` is the player, `js/settings.js` the settings pages.
 - `js/logic.js`, `js/live-logic.js` and `js/api.js` hold the rules that need no page. They
   are tested with:
 

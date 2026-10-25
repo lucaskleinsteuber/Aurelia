@@ -248,7 +248,7 @@ public sealed class WebAppTests
             using var unchanged = await client.SendAsync(conditional);
             Assert.Equal(HttpStatusCode.NotModified, unchanged.StatusCode);
         }
-        foreach (var asset in new[] { "/web/app.css", "/web/js/api.js", "/web/js/logic.js", "/web/js/dom.js", "/web/js/player.js", "/web/js/live.js", "/web/js/live-logic.js", "/web/icon.svg", "/web/manifest.webmanifest" })
+        foreach (var asset in new[] { "/web/app.css", "/web/js/api.js", "/web/js/logic.js", "/web/js/dom.js", "/web/js/player.js", "/web/js/live.js", "/web/js/live-logic.js", "/web/js/settings.js", "/web/icon.svg", "/web/manifest.webmanifest" })
         {
             using var response = await client.GetAsync(asset);
             Assert.True(response.StatusCode == HttpStatusCode.OK, asset);

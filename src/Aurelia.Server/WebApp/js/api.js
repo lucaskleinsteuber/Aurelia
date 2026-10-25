@@ -16,15 +16,16 @@ export class ApiError extends Error {
 }
 
 export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
-  async function request(path, { method = "GET", body, as = "profile", signal, keepalive = false } = {}) {
+  async function request(path, { method = "GET", body, as = "profile", signal, keepalive = false, approval } = {}) {
     const headers = { Accept: "application/json", "X-Aurelia-Web": as };
     if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (approval) headers["X-Aurelia-Approval"] = approval;
     let response;
     try {
       response = await fetchImpl(path, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
         credentials: "same-origin",
         cache: "no-store",
         signal,
@@ -49,6 +50,18 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
   }
 
   const id = (value) => encodeURIComponent(value);
+
+  /**
+   * A server change that needs the owner's approval: while server management is unlocked, the
+   * server issues a one-time approval for exactly this method, address and body.
+   */
+  async function approved(path, { method = "POST", body } = {}) {
+    const text = body === undefined ? "" : JSON.stringify(body);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    const payloadHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const grant = await request("/api/v1/server/approval", { method: "POST", body: { action: `${method} ${path}`, payloadHash } });
+    return request(path, { method, body: body === undefined ? undefined : text, approval: grant.token });
+  }
 
   return {
     request,
@@ -76,9 +89,30 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
 
     createPlayback: (mediaId) => request(`/api/v1/media/${id(mediaId)}/playback`, { method: "POST" }),
     conversionPlan: (mediaId, codecs) => request(`/api/v1/media/${id(mediaId)}/conversion`, { method: "POST", body: codecs }),
+    sceneNotes: (mediaId) => request(`/api/v1/media/${id(mediaId)}/notes`),
+    saveSceneNote: (mediaId, noteId, body) => request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}`, { method: "PUT", body }),
+    removeSceneNote: (mediaId, noteId, revision) =>
+      request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}?${new URLSearchParams({ revision })}`, { method: "DELETE" }),
     revokePlayback: (playbackId) => request(`/api/v1/playback/${id(playbackId)}`, { method: "DELETE", keepalive: true }),
     saveProgress: (mediaId, body, { keepalive = false } = {}) =>
       request(`/api/v1/media/${id(mediaId)}/progress`, { method: "PUT", body, keepalive }),
+    approved,
+    unlockManagement: (password) => request("/api/v1/management/unlock", { method: "POST", body: { password } }),
+    lockManagement: () => request("/api/v1/management/lock", { method: "POST" }),
+    serverStatus: () => request("/api/v1/server/status"),
+    serverUpdates: () => request("/api/v1/server/updates"),
+    checkForUpdates: () => request("/api/v1/server/updates/check", { method: "POST" }),
+    serverPower: () => request("/api/v1/server/power"),
+    saveServerPower: (body) => request("/api/v1/server/power", { method: "PUT", body }),
+    serverUsers: () => request("/api/v1/server/users"),
+    serverBackups: () => request("/api/v1/server/backups"),
+    libraries: () => request("/api/v1/libraries"),
+    scanLibrary: (libraryId) => request(`/api/v1/libraries/${id(libraryId)}/scans`, { method: "POST" }),
+    scanAllLibraries: () => request("/api/v1/libraries/scans", { method: "POST" }),
+    setLibraryMonitoring: (libraryId, enabled) => request(`/api/v1/libraries/${id(libraryId)}/monitoring`, { method: "PUT", body: { enabled } }),
+    metadataJobs: () => request("/api/v1/metadata/jobs"),
+    startMetadataJob: (body) => request("/api/v1/metadata/jobs", { method: "POST", body }),
+    devices: () => request("/api/v1/auth/sessions"),
     changes: (after, generation, signal) =>
       request(`/api/v1/sync/changes?${new URLSearchParams(generation ? { after, waitSeconds: 25, generation } : { after, waitSeconds: 25 })}`, { signal }),
   };
@@ -92,7 +126,9 @@ function defaultMessage(status) {
 }
 
 /** Loads every page of a catalog list against one revision, restarting if the library changed meanwhile. */
-export async function loadAllPages(loadPage, parameters, { limit = 200, restarts = 3 } = {}) {
+// 500 is the most the server sends per page ("catalog-pages-500-v1"): fewer round trips for a
+// slow server.
+export async function loadAllPages(loadPage, parameters, { limit = 500, restarts = 3 } = {}) {
   for (let attempt = 0; attempt <= restarts; attempt += 1) {
     const items = [];
     const seen = new Set();
