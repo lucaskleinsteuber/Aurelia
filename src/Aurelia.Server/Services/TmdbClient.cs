@@ -150,7 +150,10 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
     {
         if (!int.TryParse(seriesProviderId, out _) || seasonNumber < 0)
             throw new MetadataException("invalid_metadata_match", "The series metadata match is invalid.", StatusCodes.Status400BadRequest);
-        using var response = await SendAsync(token, $"tv/{seriesProviderId}/season/{seasonNumber}?language={language}", cancellationToken);
+        using var response = await SendAsync(token, $"tv/{seriesProviderId}/season/{seasonNumber}?language={language}", cancellationToken, allowNotFound: true);
+        // TMDB does not know every season a library has (a special or a differently counted one).
+        // That season simply gets no episode details; it is not a failure of the whole series.
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return [];
         await EnsureSuccessAsync(response, cancellationToken);
         using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         if (!document.RootElement.TryGetProperty("episodes", out var episodes)) return [];
@@ -213,7 +216,7 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
         }
     }
 
-    private async Task<HttpResponseMessage> SendAsync(string token, string path, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(string token, string path, CancellationToken cancellationToken, bool allowNotFound = false)
     {
         return await SendProviderAsync(() =>
         {
@@ -221,12 +224,13 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             return request;
-        }, cancellationToken);
+        }, cancellationToken, allowNotFound);
     }
 
     private async Task<HttpResponseMessage> SendProviderAsync(
         Func<HttpRequestMessage> requestFactory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowNotFound = false)
     {
         using var request = requestFactory();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -235,6 +239,7 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
         try
         {
             response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+            if (allowNotFound && response.StatusCode == System.Net.HttpStatusCode.NotFound) return response;
             if (!response.IsSuccessStatusCode)
             {
                 var status = (int)response.StatusCode;

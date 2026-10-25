@@ -262,7 +262,7 @@ public sealed class MetadataService(
         var episodes = await database.MediaItems.Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
             .Where(item => item.ParentId == series.Id && item.Kind == MediaKind.Episode && item.SeasonNumber != null && item.EpisodeNumber != null)
             .ToListAsync(cancellationToken);
-        foreach (var season in episodes.GroupBy(item => item.SeasonNumber!.Value))
+        foreach (var season in episodes.GroupBy(item => item.SeasonNumber!.Value).OrderBy(group => group.Key))
         {
             if (canApply is not null && !await canApply(cancellationToken)) return;
             var providerEpisodes = await tmdb.GetEpisodesAsync(configuration.Token!, configuration.Language, provider.ProviderId, season.Key, cancellationToken);

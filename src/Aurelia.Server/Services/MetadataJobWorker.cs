@@ -200,6 +200,18 @@ public sealed partial class MetadataJobWorker(
         await database.SaveChangesAsync(token);
         try
         {
+            // Looking for missing info on a series that is already matched only fills in its
+            // episodes from the known match; it never searches again or replaces that match.
+            if (job.Mode == MetadataJobMode.Incremental && item.Kind == MediaKind.Series
+                && item.Metadata is { ProviderMediaId: { } known, ReviewState: MetadataReviewState.Matched })
+            {
+                var existing = await tmdb.GetAsync(settings.Token, settings.Language, item.Metadata.ProviderMediaType ?? "tv", known, token);
+                if (!await CanApplyAsync(token)) { await CompleteAsync(MetadataWorkState.Skipped); return true; }
+                applying = true;
+                await service.ApplyEpisodesAsync(item, existing, settings, token, CanApplyAsync);
+                await CompleteAsync(await CanApplyAsync(token) ? MetadataWorkState.Matched : MetadataWorkState.Skipped);
+                return true;
+            }
             var title = item.Metadata?.ManualTitle ?? item.OverrideTitle ?? item.DetectedTitle;
             var candidates = await tmdb.SearchAsync(settings.Token, settings.Language, item.Kind, title, item.Year, token);
             if (!await CanApplyAsync(token))

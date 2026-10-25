@@ -71,7 +71,12 @@ public sealed class MetadataJobStore(
         else
             query = request.Mode switch
             {
-                MetadataJobMode.Incremental => query.Where(item => item.Metadata == null || item.Metadata.ProviderMediaId == null || item.Metadata.ReviewState == MetadataReviewState.NeedsReview),
+                // A matched series still counts while some of its episodes have no details yet.
+                MetadataJobMode.Incremental => query.Where(item => item.Metadata == null || item.Metadata.ProviderMediaId == null
+                    || item.Metadata.ReviewState == MetadataReviewState.NeedsReview
+                    || (item.Kind == MediaKind.Series && database.MediaItems.Any(episode => episode.ParentId == item.Id && episode.Kind == MediaKind.Episode
+                        && episode.SeasonNumber != null && episode.EpisodeNumber != null
+                        && (episode.Metadata == null || episode.Metadata.ProviderMediaId == null)))),
                 MetadataJobMode.RetryFailed => query.Where(item => item.MetadataReviews.Any(review => review.State == MetadataReviewState.NeedsReview)),
                 _ => query,
             };
