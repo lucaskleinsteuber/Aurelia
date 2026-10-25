@@ -156,13 +156,13 @@ public static class LiveConversionPlanner
                 break;
             case LiveVideoEncoder.Libx264:
                 arguments.AddRange([
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "12M", "-bufsize", "24M",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-maxrate", "8M", "-bufsize", "16M",
                     "-profile:v", "high", "-level:v", "4.1",
                 ]);
                 AddPicture(arguments);
                 break;
             case LiveVideoEncoder.VideoToolbox:
-                arguments.AddRange(["-c:v", "h264_videotoolbox", "-allow_sw", "1", "-b:v", "8M", "-profile:v", "high"]);
+                arguments.AddRange(["-c:v", "h264_videotoolbox", "-allow_sw", "1", "-b:v", "6M", "-profile:v", "high"]);
                 AddPicture(arguments);
                 break;
         }

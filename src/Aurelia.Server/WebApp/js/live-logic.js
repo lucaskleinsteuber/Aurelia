@@ -2,10 +2,16 @@
 // more of the stream, when a seek needs a new stream and how sound tracks are named. They run
 // the same in a browser and in `node --test tests/WebApp`.
 
-/** About a minute is kept ahead of the playhead; reading pauses beyond it, so the server waits too. */
+/** At most a minute is kept ahead of the playhead; reading pauses beyond it, so the server waits too. */
 export const AHEAD_SECONDS = 60;
 /** What played more than a minute ago is removed again, so a phone's memory never fills up. */
 export const BEHIND_SECONDS = 60;
+/**
+ * Browsers cap the video they keep (Firefox at about 100 MB), so the window is also measured in
+ * bytes: a high bitrate keeps fewer seconds ahead and behind.
+ */
+export const AHEAD_BYTES = 48 * 1024 * 1024;
+export const BEHIND_BYTES = 16 * 1024 * 1024;
 /** A seek this far beyond what has arrived waits for the running stream instead of starting anew. */
 export const WAIT_SECONDS = 15;
 
@@ -82,6 +88,19 @@ export function ranges(timeRanges) {
 export function bufferedEnd(buffered, time, tolerance = 0.3) {
   const range = buffered.find(([start, end]) => time >= start - tolerance && time <= end + tolerance);
   return range ? range[1] : null;
+}
+
+/**
+ * Seconds to keep ahead of and behind the playhead for a stream of `bytesPerSecond`; before the
+ * bitrate is known, a cautious 20 seconds ahead.
+ */
+export function bufferWindow(bytesPerSecond) {
+  if (!(bytesPerSecond > 0)) return { ahead: 20, behind: 20 };
+  const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+  return {
+    ahead: clamp(AHEAD_BYTES / bytesPerSecond, 10, AHEAD_SECONDS),
+    behind: clamp(BEHIND_BYTES / bytesPerSecond, 5, BEHIND_SECONDS),
+  };
 }
 
 /** Whether to read more of the stream now: less than a minute is ready ahead of the playhead. */

@@ -49,6 +49,21 @@ test("reading pauses with a minute ahead and old parts are trimmed a minute behi
   assert.deepEqual(live.ranges({ length: 2, start: (index) => index * 100, end: (index) => index * 100 + 50 }), [[0, 50], [100, 150]]);
 });
 
+test("the buffer window shrinks for high bitrates so a browser's cap is never reached", () => {
+  assert.deepEqual(live.bufferWindow(null), { ahead: 20, behind: 20 });
+  // 4 Mbit/s: a full minute ahead and behind fits.
+  assert.deepEqual(live.bufferWindow(500_000), { ahead: 60, behind: 33.554432 });
+  // A 40 Mbit/s 4K remux keeps about ten seconds ahead and five behind.
+  const remux = live.bufferWindow(5_000_000);
+  assert.equal(remux.ahead, 10.0663296);
+  assert.equal(remux.behind, 5);
+  // Ahead plus behind stays well below Firefox's 100 MB at every bitrate.
+  for (const rate of [250_000, 1_000_000, 2_500_000, 10_000_000]) {
+    const window = live.bufferWindow(rate);
+    assert.ok((window.ahead + window.behind) * rate <= 70 * 1024 * 1024 || window.ahead === 10, String(rate));
+  }
+});
+
 test("a seek plays what arrived, waits for a running stream nearby and restarts elsewhere", () => {
   const buffered = [[598, 640]];
   assert.equal(live.seekAction({ buffered, target: 620, streaming: true, streamStart: 600 }), "play");

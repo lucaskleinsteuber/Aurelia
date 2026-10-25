@@ -1,9 +1,10 @@
 // The live player: plays a title the server converts while it plays. The server sends
 // fragmented MP4; this reads it with fetch and hands it to the video element through Media
-// Source Extensions (ManagedMediaSource on iPhone). About a minute is kept ahead of the
-// playhead: beyond that it stops reading, so the server's ffmpeg waits as well. What played
-// more than a minute ago is removed again. A seek outside what has arrived starts a new stream
-// at that point; the stream keeps the title's own timestamps, so positions stay correct.
+// Source Extensions (ManagedMediaSource on iPhone). Up to a minute, and no more than about
+// 48 MB, is kept ahead of the playhead: beyond that it stops reading, so the server's ffmpeg
+// waits as well. What played earlier is removed again, so the browser's buffer never fills.
+// A seek outside what has arrived starts a new stream at that point; the stream keeps the
+// title's own timestamps, so positions stay correct.
 
 import * as rules from "./live-logic.js";
 
@@ -43,6 +44,7 @@ export class LiveSource {
     this.streaming = false;
     this.streamStart = 0;
     this.retries = 0;
+    this.bytes = 0;
     this.destroyed = false;
     this.waiters = new Set();
     this.listeners = [];
@@ -123,6 +125,7 @@ export class LiveSource {
     this.streamStart = at;
     this.streaming = true;
     this.nudge = true;
+    this.bytes = 0;
     let response;
     try {
       response = await fetch(rules.streamUrl(this.streamPath, {
@@ -176,7 +179,10 @@ export class LiveSource {
     }
   }
 
-  /** A broken connection continues where the arrived part ends, a few times, before giving up. */
+  /**
+   * A broken connection continues where the arrived part ends, keeping what is already there,
+   * a few times before giving up.
+   */
   interrupted(generation) {
     this.streaming = false;
     if (this.destroyed || generation !== this.generation) return;
@@ -185,11 +191,34 @@ export class LiveSource {
       return;
     }
     this.retries += 1;
-    const time = this.video.currentTime;
-    const end = this.buffer ? rules.bufferedEnd(rules.ranges(this.buffer.buffered), time) : null;
     setTimeout(() => {
-      if (generation === this.generation) this.restart(end ?? time);
+      if (generation !== this.generation) return;
+      const time = this.video.currentTime;
+      const end = this.buffer ? rules.bufferedEnd(rules.ranges(this.buffer.buffered), time) : null;
+      if (end == null) this.restart(time);
+      else this.continueFrom(end);
     }, 1000 * this.retries);
+  }
+
+  /** Starts a new stream at `at` and appends it after what is already there. */
+  async continueFrom(at) {
+    const generation = ++this.generation;
+    this.controller?.abort();
+    await this.idle();
+    if (generation !== this.generation || !this.buffer) return;
+    try {
+      if (this.mediaSource.readyState === "open") this.buffer.abort();
+    } catch {
+      // Nothing to reset.
+    }
+    if (generation === this.generation) this.run(at, generation);
+  }
+
+  /** The stream's measured bitrate in bytes per second, once a few seconds have arrived. */
+  rate() {
+    const buffered = this.buffer ? rules.ranges(this.buffer.buffered) : [];
+    const covered = (buffered.length ? buffered[buffered.length - 1][1] : 0) - this.streamStart;
+    return covered >= 2 && this.bytes > 0 ? this.bytes / covered : null;
   }
 
   async append(bytes, generation) {
@@ -199,11 +228,13 @@ export class LiveSource {
       try {
         this.buffer.appendBuffer(bytes);
         await this.idle();
+        this.bytes += bytes.byteLength;
         break;
       } catch (error) {
-        // A full buffer frees what already played, then waits for the playhead to move on.
-        if (error?.name !== "QuotaExceededError" || attempt >= 30) throw error;
-        await this.trim(10);
+        // The browser's buffer is full: free what already played and wait for the playhead to
+        // move on. This never gives up while the title plays; reading simply pauses.
+        if (error?.name !== "QuotaExceededError") throw error;
+        await this.trim(attempt === 0 ? 5 : 2);
         await this.sleep(1000);
       }
     }
@@ -215,7 +246,7 @@ export class LiveSource {
       const start = buffered[0][0];
       if (this.video.currentTime < start && start - this.video.currentTime < 2) this.video.currentTime = start;
     }
-    await this.trim(rules.BEHIND_SECONDS);
+    await this.trim(rules.bufferWindow(this.rate()).behind);
   }
 
   async trim(behind) {
@@ -235,7 +266,8 @@ export class LiveSource {
   async room(generation) {
     while (generation === this.generation && !this.destroyed) {
       const allowed = this.mediaSource.streaming !== false;
-      if (allowed && rules.shouldRead(rules.ranges(this.buffer.buffered), this.video.currentTime)) return;
+      const { ahead } = rules.bufferWindow(this.rate());
+      if (allowed && rules.shouldRead(rules.ranges(this.buffer.buffered), this.video.currentTime, ahead)) return;
       await this.sleep(1000);
     }
   }
