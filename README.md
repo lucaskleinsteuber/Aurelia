@@ -99,6 +99,10 @@ Mac app. The Mac app is currently signed for development, so it runs only on Mac
 registered for the developer account; a download for everyone is planned through
 GitHub, not the App Store.
 
+To update the Mac app, choose *Aurelia › Check for Updates…*. It installs the newest
+release from GitHub and keeps your library, settings and sign-ins; see
+[Updating the Mac app](docs/FREE_DISTRIBUTION.md#updating-the-mac-app).
+
 ## Watching in a web browser
 
 Rather watch in a browser? While the server is on, open its address in Safari, Chrome, Edge

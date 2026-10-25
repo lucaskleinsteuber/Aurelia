@@ -31,6 +31,11 @@ struct AureliaApp: App {
     .defaultSize(width: 1_470, height: 956)
     .windowStyle(.hiddenTitleBar)
     .commands {
+      CommandGroup(after: .appInfo) {
+        Button("Check for Updates…") {
+          Task { await AppUpdater.shared.check(userInitiated: true) }
+        }
+      }
       CommandGroup(after: .newItem) {
         Button("Add Media…") { model.showMediaManager() }
           .keyboardShortcut("o", modifiers: .command)
@@ -62,6 +67,7 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
     Task {
       await AppModel.active?.start()
     }
+    AppUpdater.shared.checkInBackgroundIfDue()
   }
 
   func applicationShouldHandleReopen(

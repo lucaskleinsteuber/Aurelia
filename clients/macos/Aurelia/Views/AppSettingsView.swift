@@ -25,11 +25,15 @@ struct AppSettingsView: View {
   @State private var tmdbToken = ""
   @State private var showingReviewQueue = false
   @State private var showingMediaManager = false
+  @ObservedObject private var updater = AppUpdater.shared
+  @State private var updateTokenDraft = ""
+  @State private var updateTokenMessage: String?
 
   var body: some View {
     TabView(selection: $selectedPage) {
       settingsPage {
         interface
+        updates
         if model.profile?.isViewingSession == true { ChangeProfilePINView() }
         if let profile = model.profile { connection(profile) }
         disconnectedState
@@ -346,6 +350,68 @@ struct AppSettingsView: View {
         LabeledContent("Reduced Transparency", value: "Follows System Settings")
         LabeledContent("Increased Contrast", value: "Follows System Settings")
       }
+    }
+  }
+
+  private var updates: some View {
+    AureliaSettingsSection(
+      "Updates",
+      symbol: "arrow.down.circle",
+      description:
+        "Aurelia looks for new versions in its GitHub releases. Your library, settings and sign-ins stay when it updates."
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        LabeledContent("Installed", value: "\(updater.currentVersion) (\(updater.currentBuild))")
+        LabeledContent("Status", value: updateStatusText)
+        VStack(alignment: .leading, spacing: 4) {
+          HStack {
+            SecureField(
+              updater.hasToken ? "Token saved — enter a new one to replace it" : "GitHub token",
+              text: $updateTokenDraft
+            )
+            .textFieldStyle(.roundedBorder)
+            .accessibilityIdentifier("updates-token")
+            Button(updateTokenDraft.isEmpty && updater.hasToken ? "Remove" : "Save") {
+              do {
+                try updater.saveToken(updateTokenDraft)
+                updateTokenDraft = ""
+                updateTokenMessage =
+                  updater.hasToken ? "Token saved in the Keychain." : "Token removed."
+              } catch {
+                updateTokenMessage = error.localizedDescription
+              }
+            }
+            .disabled(updateTokenDraft.isEmpty && !updater.hasToken)
+          }
+          Text(
+            updateTokenMessage
+              ?? "The releases are private: a fine-grained GitHub token with read-only access to this repository's contents lets Aurelia read them. It stays in this Mac's Keychain."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        Button("Check for Updates…") {
+          Task { await updater.check(userInitiated: true) }
+        }
+        .disabled(
+          updater.state == .checking || updater.state == .downloading
+            || updater.state == .installing
+        )
+        .accessibilityIdentifier("updates-check")
+      }
+    }
+  }
+
+  private var updateStatusText: String {
+    switch updater.state {
+    case .idle: updater.repository == nil ? "Release builds only" : "Not checked yet"
+    case .checking: "Checking…"
+    case .upToDate: "Up to date"
+    case .available(let release): "\(release.version) (\(release.build)) is available"
+    case .downloading: "Downloading…"
+    case .installing: "Installing…"
+    case .failed(let message): message
     }
   }
 

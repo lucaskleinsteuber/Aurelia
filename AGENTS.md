@@ -203,5 +203,7 @@ These rules apply to every task in this repository.
 - The owner wants every Mac/server version that is installed for them published
   as a GitHub Release with `scripts/publish-release.sh`: the universal Mac DMG,
   the Linux server packages and GitHub's source archives. Push first, build the
-  Linux packages of the same version, publish, and verify the downloads. tvOS
-  builds are not published; they are development-signed for one Apple TV.
+  Linux packages of the same version, publish, and verify the downloads. Then
+  update the owner's Linux server to that release with `sudo aurelia update
+  --yes`, without asking. tvOS builds are not published; they are
+  development-signed for one Apple TV.

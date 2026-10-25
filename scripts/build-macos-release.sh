@@ -256,6 +256,15 @@ else
 /usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $team_identifier" \
   "$release_entitlements"
 fi
+# "Check for Updates…" reads the releases of the GitHub repository this app is built from.
+origin=$(git -C "$repository_root" remote get-url origin 2>/dev/null || true)
+update_repository=${origin#https://github.com/}
+update_repository=${update_repository#git@github.com:}
+update_repository=${update_repository#ssh://git@github.com/}
+update_repository=${update_repository%.git}
+if [[ "$update_repository" == */* && "$update_repository" != */*/* ]]; then
+  plutil -replace AureliaUpdateRepository -string "$update_repository" "$candidate/Contents/Info.plist"
+fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$release_entitlements" \
   "$candidate"

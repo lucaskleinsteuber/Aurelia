@@ -14,6 +14,8 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
   private var workspaceObservers: [NSObjectProtocol] = []
 
   static func main() {
+    // The app starts this helper in a second role to install an update it downloaded.
+    if UpdateInstaller.runIfRequested(CommandLine.arguments) { return }
     let application = NSApplication.shared
     let delegate = ServerHostApplication()
     application.delegate = delegate

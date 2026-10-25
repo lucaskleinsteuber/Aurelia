@@ -128,3 +128,25 @@ script, the checkout and the Apple TV app in
 `--adopt-tv` after installing an Apple TV build, `--force` to refresh now, and
 `--uninstall` to remove the job. A paid Apple Developer Program membership makes this
 unnecessary with one-year profiles.
+
+## Updating the Mac app
+
+*Aurelia › Check for Updates…* asks GitHub for the newest release of the repository the app
+was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
+app's Info.plist; builds made in Xcode have none and cannot update). With a token saved, the
+app also looks once a day at launch and speaks up only when a newer build exists.
+
+A private repository needs a read-only token, made like the one for
+[the Linux server](LINUX_SERVER.md): a fine-grained token for only this repository with
+Contents: Read-only. Paste it under *Settings › App › Updates*. It stays in this Mac's
+Keychain and is sent only to GitHub's API.
+
+The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
+checksum. It then quits and hands the image to the server host helper, which runs outside
+the sandbox. The helper waits until the app and its server have stopped, then mounts the
+image read-only. It checks that the image holds the same bundle identifier, the expected
+build number, a valid signature and the installed app's signing team. Only then does it
+replace the app bundle and open the new version; the old bundle is moved aside first and put
+back if the replacement fails. Library, server data, settings, sign-ins and media are not
+touched, and no backup copy stays behind.
+
