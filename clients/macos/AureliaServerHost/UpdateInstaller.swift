@@ -42,20 +42,12 @@ enum UpdateInstaller {
 
   static func install(image: URL, expectedBuild: Int, appPID: pid_t, app: URL) throws {
     let fileManager = FileManager.default
-    guard app.pathExtension == "app", let current = Bundle(url: app),
-      let identifier = current.bundleIdentifier
-    else { throw InstallError.notInstalled }
     try waitUntilGone(pid: appPID)
-    try waitForOtherProcesses(in: app)
 
     let mount = fileManager.temporaryDirectory.appendingPathComponent(
       "AureliaUpdate-\(UUID().uuidString)")
-    let staging = fileManager.temporaryDirectory.appendingPathComponent(
-      "AureliaInstall-\(UUID().uuidString)")
     try fileManager.createDirectory(at: mount, withIntermediateDirectories: true)
-    try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
     defer {
-      try? fileManager.removeItem(at: staging)
       try? fileManager.removeItem(at: mount)
     }
     try run(
@@ -63,37 +55,32 @@ enum UpdateInstaller {
       ["attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mount.path, image.path])
     defer { _ = try? run("/usr/bin/hdiutil", ["detach", "-quiet", "-force", mount.path]) }
 
-    let candidate = mount.appendingPathComponent(app.lastPathComponent)
-    guard let bundle = Bundle(url: candidate), bundle.bundleIdentifier == identifier else {
-      throw InstallError.wrongApp
-    }
-    guard
-      Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") == expectedBuild
-    else {
-      throw InstallError.wrongVersion
-    }
-    try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", candidate.path])
-    guard let team = try teamIdentifier(app), try teamIdentifier(candidate) == team else {
-      throw InstallError.wrongSigner
-    }
+    let transaction = app.deletingLastPathComponent().appendingPathComponent(
+      ".aurelia-update-\(UUID().uuidString)", isDirectory: true)
+    try UpdateInstallation.replace(
+      app: app, candidate: mount.appendingPathComponent(app.lastPathComponent),
+      expectedBuild: expectedBuild, transaction: transaction,
+      operations: .init(
+        identity: identity,
+        verifySignature: {
+          _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", $0.path])
+        },
+        waitForProcesses: waitForOtherProcesses,
+        copy: { source, destination in
+          try run("/usr/bin/ditto", ["--noqtn", source.path, destination.path])
+          _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", destination.path])
+        }))
+  }
 
-    // The sandboxed app's download is quarantined; the checked copy is not, so Gatekeeper
-    // doesn't refuse to open the update like a fresh download.
-    let staged = staging.appendingPathComponent(app.lastPathComponent)
-    try run("/usr/bin/ditto", ["--noqtn", candidate.path, staged.path])
-    _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", staged.path])
-    let previous = staging.appendingPathComponent("Previous.app")
-    // Both moves stay on one volume, so each is a single rename.
-    try fileManager.moveItem(at: app, to: previous)
-    do {
-      try fileManager.moveItem(at: staged, to: app)
-    } catch {
-      try? fileManager.moveItem(at: previous, to: app)
-      throw error
-    }
+  private static func identity(_ app: URL) throws -> UpdateInstallation.Identity {
+    guard let bundle = Bundle(url: app), let identifier = bundle.bundleIdentifier,
+      let build = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "")
+    else { throw InstallError.wrongApp }
+    return .init(identifier: identifier, build: build, team: try teamIdentifier(app))
   }
 
   private static func waitUntilGone(pid: pid_t) throws {
+    guard pid > 0, pid != getpid() else { throw InstallError.appStillRunning }
     for _ in 0..<600 {
       if kill(pid, 0) != 0 && errno == ESRCH { return }
       Thread.sleep(forTimeInterval: 0.1)
@@ -103,16 +90,10 @@ enum UpdateInstaller {
 
   /// A server host started from the old bundle must have stopped before the bundle is replaced.
   private static func waitForOtherProcesses(in app: URL) throws {
-    let prefix = app.path + "/"
     for _ in 0..<300 {
-      let listing = (try? run("/bin/ps", ["-axo", "pid=,comm="])) ?? ""
-      let others = listing.split(whereSeparator: \.isNewline).compactMap { line -> pid_t? in
-        let fields = line.trimmingCharacters(in: .whitespaces).split(separator: " ", maxSplits: 1)
-        guard fields.count == 2, let pid = pid_t(fields[0]), pid != getpid(),
-          String(fields[1]).hasPrefix(prefix)
-        else { return nil }
-        return pid
-      }
+      // A failed process listing cannot establish that replacement is safe.
+      let listing = try run("/bin/ps", ["-axo", "pid=,comm="])
+      let others = UpdateInstallation.otherProcesses(in: app, listing: listing, excluding: getpid())
       if others.isEmpty { return }
       Thread.sleep(forTimeInterval: 0.1)
     }
@@ -160,28 +141,10 @@ enum UpdateInstaller {
       application.activate()
       let alert = NSAlert()
       alert.messageText = "Aurelia Couldn't Be Updated"
-      alert.informativeText = "\(message) The installed version stays as it was."
+      alert.informativeText = message
       alert.runModal()
     }
   }
 
-  enum InstallError: Error {
-    case notInstalled
-    case appStillRunning
-    case wrongApp
-    case wrongVersion
-    case wrongSigner
-    case toolFailed(String)
-
-    var message: String {
-      switch self {
-      case .notInstalled: "The installed app could not be found."
-      case .appStillRunning: "Aurelia or its server didn't quit in time."
-      case .wrongApp: "The download doesn't contain Aurelia."
-      case .wrongVersion: "The download contains a different version than expected."
-      case .wrongSigner: "The download isn't signed by the same developer."
-      case .toolFailed(let tool): "Checking or copying the update failed (\(tool))."
-      }
-    }
-  }
+  typealias InstallError = UpdateInstallation.Failure
 }

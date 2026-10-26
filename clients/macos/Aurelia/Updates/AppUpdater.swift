@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Foundation
 import OSLog
 
@@ -30,15 +29,21 @@ final class AppUpdater: ObservableObject {
   let repository: String?
   let currentVersion: String
   let currentBuild: Int
+  private let client: AppUpdateClient
 
-  init(tokens: AppUpdateTokenStore = AppUpdateTokenStore(), bundle: Bundle = .main) {
+  init(
+    tokens: AppUpdateTokenStore = AppUpdateTokenStore(), bundle: Bundle = .main,
+    client: AppUpdateClient = AppUpdateClient()
+  ) {
     self.tokens = tokens
+    self.client = client
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
     repository = configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
     currentVersion =
       bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-    hasToken = tokens.load() != nil
+    // Unit/preflight hosts must never read the installed user's update credential.
+    hasToken = !AppModel.isTestProcess && tokens.load() != nil
   }
 
   var canCheck: Bool { repository != nil && hasToken }
@@ -80,18 +85,8 @@ final class AppUpdater: ObservableObject {
     }
     state = .checking
     do {
-      var request = URLRequest(
-        url: URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!)
-      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-      request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-      request.timeoutInterval = 20
-      let (data, response) = try await URLSession.shared.data(for: request)
-      let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-      guard status == 200 else { throw UpdateError.github(status) }
+      let release = try await client.latest(repository: repository, token: token)
       UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
-      guard let release = AppUpdateLogic.release(fromLatest: data) else {
-        throw UpdateError.noDiskImage
-      }
       if AppUpdateLogic.isNewer(build: release.build, than: currentBuild) {
         state = .available(release)
         offer(release)
@@ -105,7 +100,7 @@ final class AppUpdater: ObservableObject {
       }
     } catch {
       let message =
-        (error as? UpdateError)?.message
+        (error as? AppUpdateError)?.message
         ?? "GitHub couldn't be reached. Check the internet connection, then try again."
       state = .failed(message)
       Self.logger.error("Update check failed: \(message, privacy: .public)")
@@ -133,21 +128,16 @@ final class AppUpdater: ObservableObject {
 
   /// Downloads and checks the release, then lets the helper replace the app after it quits.
   func install(_ release: AppRelease) async {
+    guard state != .checking, state != .downloading, state != .installing else { return }
+    guard let repository else { return }
     guard let token = tokens.load() else { return askForToken() }
     state = .downloading
+    var downloadedImage: URL?
     do {
       let folder = try Self.updatesDirectory()
-      let sums = try await download(release.checksumsURL, token: token)
-      guard
-        let expected = AppUpdateLogic.checksum(
-          for: release.diskImageName, in: String(decoding: sums, as: UTF8.self))
-      else { throw UpdateError.noChecksum }
-      let image = try await download(release.diskImageURL, token: token)
-      let actual = SHA256.hash(data: image).map { String(format: "%02x", $0) }.joined()
-      guard actual == expected else { throw UpdateError.checksumMismatch }
-      let destination = folder.appendingPathComponent(release.diskImageName)
-      try? FileManager.default.removeItem(at: destination)
-      try image.write(to: destination, options: .atomic)
+      let destination = try await client.download(
+        release, repository: repository, token: token, currentBuild: currentBuild, folder: folder)
+      downloadedImage = destination
 
       state = .installing
       let helper = Bundle.main.bundleURL
@@ -160,26 +150,18 @@ final class AppUpdater: ObservableObject {
       ]
       _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
       Self.logger.notice("Installing Aurelia \(release.version, privacy: .public); quitting.")
+      AppModel.active?.isPreparingApplicationUpdate = true
       NSApp.terminate(nil)
     } catch {
+      if let downloadedImage {
+        try? FileManager.default.removeItem(at: downloadedImage.deletingLastPathComponent())
+      }
       let message =
-        (error as? UpdateError)?.message ?? "The update couldn't be downloaded. Try again."
+        (error as? AppUpdateError)?.message
+        ?? "The update installer couldn't be started. Try again."
       state = .failed(message)
       alert("Couldn't Install the Update", message)
     }
-  }
-
-  private func download(_ url: URL, token: String) async throws -> Data {
-    // GitHub's API serves a private release's file as a redirect to storage; the token is sent
-    // only to GitHub and dropped on the redirect.
-    var request = URLRequest(url: url)
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
-    request.timeoutInterval = 120
-    let (data, response) = try await URLSession.shared.data(for: request)
-    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-    guard status == 200 else { throw UpdateError.github(status) }
-    return data
   }
 
   /// A folder the helper can read too: the App Group shared with it.
@@ -187,11 +169,13 @@ final class AppUpdater: ObservableObject {
     guard
       let container = fileManager.containerURL(
         forSecurityApplicationGroupIdentifier: HostBootstrapLocation.appGroupIdentifier)
-    else { throw UpdateError.noFolder }
+    else { throw AppUpdateError.noFolder }
     let folder = container.appendingPathComponent(
       "Library/Caches/Aurelia/Updates", isDirectory: true)
-    try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
-    try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+    do {
+      try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+      try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+    } catch { throw AppUpdateError.classify(error) }
     return folder
   }
 
@@ -214,30 +198,4 @@ final class AppUpdater: ObservableObject {
     alert.runModal()
   }
 
-  enum UpdateError: Error {
-    case github(Int)
-    case noDiskImage
-    case noChecksum
-    case checksumMismatch
-    case noFolder
-
-    var message: String {
-      switch self {
-      case .github(401), .github(403):
-        "GitHub didn't accept the token. Check it under Settings › App › Updates."
-      case .github(404):
-        "GitHub has no release here yet, or the token can't read this repository."
-      case .github(let status):
-        "GitHub answered with an error (\(status)). Try again later."
-      case .noDiskImage:
-        "The newest release has no Mac disk image."
-      case .noChecksum:
-        "The newest release has no checksum for its disk image."
-      case .checksumMismatch:
-        "The downloaded disk image doesn't match its published checksum, so it wasn't installed."
-      case .noFolder:
-        "Aurelia couldn't prepare a folder for the download."
-      }
-    }
-  }
 }

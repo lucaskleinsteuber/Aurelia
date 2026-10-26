@@ -142,11 +142,30 @@ Contents: Read-only. Paste it under *Settings › App › Updates*. It stays in 
 Keychain and is sent only to GitHub's API.
 
 The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
-checksum. It then quits and hands the image to the server host helper, which runs outside
+checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
+they are not buffered in memory. Release descriptions and checksum lists are limited to 2 MiB
+and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject HTML and oversized
+or incomplete responses, and remove partial files after failures. Expired tokens, invalid
+releases, checksum mismatches, interrupted downloads and insufficient disk space have specific
+error messages. Asset URLs must belong to the configured GitHub repository; storage redirects
+use HTTPS and never retain the token or cookies.
+
+It then quits and hands the image to the server host helper, which runs outside
 the sandbox. The helper waits until the app and its server have stopped, then mounts the
 image read-only. It checks that the image holds the same bundle identifier, the expected
-build number, a valid signature and the installed app's signing team. Only then does it
+newer build number, a valid signature and the installed app's signing team. The staged copy
+is checked again before replacement. Updating also stops a background host for this quit;
+its background and login settings are retained for the next launch. Only then does it
 replace the app bundle and open the new version; the old bundle is moved aside first and put
 back if the replacement fails. Library, server data, settings, sign-ins and media are not
-touched, and no backup copy stays behind.
+touched, and no backup copy stays behind after success or a successful rollback. If both
+replacement and rollback fail, the original app is retained in the private transaction folder
+and the error gives its recovery path instead of deleting it.
+
+`sh scripts/test-update-installer.sh` exercises the production filesystem transaction with
+invented bundles and injected signature/process checks in a unique
+`~/Library/Caches/Aurelia/TestRuns/` directory. It neither launches applications nor modifies
+the installed app. Mac unit tests cover release validation, bounded transfer and checksum
+rules, download failures and cleanup using a synthetic transport. Real GitHub asset redirects
+and macOS first launch after an update still require a suitable newer published release.
 

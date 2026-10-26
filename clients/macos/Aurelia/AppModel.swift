@@ -1273,6 +1273,9 @@ final class AppModel: ObservableObject {
     } catch { if isCurrent(generation) { reportAdministrationFailure(error) } }
   }
 
+  /// Only the updater changes this; background-host preferences remain untouched.
+  var isPreparingApplicationUpdate = false
+
   func shutdown() async {
     profileSelectionGeneration = UUID()
     isSelectingProfile = true
@@ -1288,7 +1291,12 @@ final class AppModel: ObservableObject {
     homeRefreshTask?.cancel()
     scanPollTask?.cancel()
     await syncController.stop()
-    if operatingMode == .host && !serverHost.isBackgroundService { await serverHost.stop() }
+    if AppUpdateLogic.shouldStopHost(
+      isHosting: operatingMode == .host, isBackgroundService: serverHost.isBackgroundService,
+      installingUpdate: isPreparingApplicationUpdate)
+    {
+      await serverHost.stop()
+    }
     endTerminationProtection()
   }
   func saveHostingSettings(_ settings: HostServiceSettings) async throws {
@@ -3493,7 +3501,7 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private static var isTestProcess: Bool {
+  static var isTestProcess: Bool {
     if NativePreflightIsolation.isRequested { return true }
     #if DEBUG
       return uiTestMode != nil
