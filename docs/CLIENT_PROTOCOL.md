@@ -203,8 +203,12 @@ segment and no temporary file.
    limited to 8 MiB in request memory and 30 seconds. No subtitle file is written or cached.
 
 Reading paces the conversion: when the player stops reading, ffmpeg waits. Closing the
-connection ends ffmpeg. HDR tone mapping and picture conversion beyond 1080p are not part of
-`live-conversion-v1`.
+connection ends ffmpeg. PQ/HLG pictures re-encoded to H.264 are tone- and gamut-mapped to SDR
+BT.709 with limited range; copied pictures and SDR sources keep their existing behavior.
+The server detects a usable mapper when discovering ffmpeg: native perceptual `scale` mapping
+in FFmpeg 9, or the older `zscale` plus `tonemap` filters. If neither is present, a request that
+needs HDR picture re-encoding returns `422 hdr_conversion_unavailable`; original picture
+copying remains available. Picture conversion beyond 1080p is not part of `live-conversion-v1`.
 
 ## Minimum new-client acceptance
 

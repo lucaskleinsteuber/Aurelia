@@ -18,7 +18,8 @@ public sealed record LiveStreamOptions(
     ProbedVideo Video,
     LiveVideoEncoder? Encoder,
     ProbedAudio? Audio,
-    bool CopyAudio);
+    bool CopyAudio,
+    HdrToneMapping ToneMapping = HdrToneMapping.Unavailable);
 
 /// <summary>
 /// Decides how a title reaches a player that cannot open the original: the picture is only
@@ -40,13 +41,15 @@ public static class LiveConversionPlanner
     public static readonly IReadOnlySet<string> CopyableAudio = new HashSet<string>(["aac", "mp3", "ac3", "eac3", "opus", "flac"], StringComparer.Ordinal);
 
     /// <returns>Null when the picture can neither be repackaged nor converted.</returns>
-    public static LiveConversionPlanResponse? Plan(MediaProbeResult probe, LiveConversionRequest request, bool canEncodeVideo)
+    public static LiveConversionPlanResponse? Plan(MediaProbeResult probe, LiveConversionRequest request, bool canEncodeVideo,
+        HdrToneMapping toneMapping = HdrToneMapping.Unavailable)
     {
         if (probe.Video is not { Width: > 0, Height: > 0 } video) return null;
         var videoCodecs = Normalize(request.VideoCodecs);
         var audioCodecs = Normalize(request.AudioCodecs);
         var copy = CanCopyVideo(video, videoCodecs);
         if (!copy && !canEncodeVideo) return null;
+        if (!copy && video.IsHdr && toneMapping == HdrToneMapping.Unavailable) throw LiveHdr.Unsupported();
         var (width, height) = copy ? (video.Width, video.Height) : Fit(video.Width, video.Height);
         var tracks = probe.Audio.Select(track =>
         {
@@ -162,11 +165,11 @@ public static class LiveConversionPlanner
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-maxrate", "8M", "-bufsize", "16M",
                     "-profile:v", "high", "-level:v", "4.1",
                 ]);
-                AddPicture(arguments);
+                AddPicture(arguments, options);
                 break;
             case LiveVideoEncoder.VideoToolbox:
                 arguments.AddRange(["-c:v", "h264_videotoolbox", "-allow_sw", "1", "-b:v", "6M", "-profile:v", "high"]);
-                AddPicture(arguments);
+                AddPicture(arguments, options);
                 break;
         }
 
@@ -192,11 +195,17 @@ public static class LiveConversionPlanner
         return arguments;
     }
 
-    private static void AddPicture(List<string> arguments) => arguments.AddRange([
-        "-vf", $"scale='min({MaximumWidth},iw)':'min({MaximumHeight},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
+    private static void AddPicture(List<string> arguments, LiveStreamOptions options)
+    {
+        arguments.AddRange([
+        "-vf", LiveHdr.PictureFilter(options.Video, options.ToneMapping),
         // A key frame every two seconds or so keeps fragments small, so playback starts soon.
         "-g", "48",
-    ]);
+        ]);
+        if (options.Video.IsHdr) arguments.AddRange([
+            "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
+        ]);
+    }
 
     private static string Seconds(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
 

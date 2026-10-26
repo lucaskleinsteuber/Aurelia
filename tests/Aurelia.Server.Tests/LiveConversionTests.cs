@@ -20,7 +20,7 @@ namespace Aurelia.Server.Tests;
 /// so they run on their own instead of beside the rest of the suite.
 /// </summary>
 [Collection(LiveConversionRuns.Name)]
-public sealed class LiveConversionTests
+public sealed partial class LiveConversionTests
 {
     private static readonly LiveConversionRequest Browser = new(["h264", "hevc"], ["aac", "mp3"]);
 

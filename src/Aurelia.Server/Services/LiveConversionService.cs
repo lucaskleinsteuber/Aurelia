@@ -7,7 +7,8 @@ namespace Aurelia.Server.Services;
 /// <param name="Ffmpeg">The converter.</param>
 /// <param name="Ffprobe">The header reader next to it.</param>
 /// <param name="Encoder">The H.264 encoder for pictures a player cannot decode, or null.</param>
-public sealed record FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder);
+public sealed record FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder,
+    HdrToneMapping ToneMapping = HdrToneMapping.Unavailable);
 
 /// <summary>
 /// Converts titles live with ffmpeg for players that cannot open the original file. ffmpeg reads
@@ -80,8 +81,12 @@ public sealed partial class LiveConversionService : IDisposable
                 LiveVideoEncoder? encoder = OperatingSystem.IsMacOS() && HasEncoder(encoders, "h264_videotoolbox")
                     ? LiveVideoEncoder.VideoToolbox
                     : HasEncoder(encoders, "libx264") ? LiveVideoEncoder.Libx264 : null;
+                var scaleHelp = RunForOutput(ffmpeg, ["-hide_banner", "-h", "filter=scale"], TimeSpan.FromSeconds(10));
+                var toneMapping = LiveHdr.Detect(scaleHelp, null);
+                if (toneMapping == HdrToneMapping.Unavailable)
+                    toneMapping = LiveHdr.Detect(null, RunForOutput(ffmpeg, ["-hide_banner", "-filters"], TimeSpan.FromSeconds(10)));
                 LogFound(logger, ffmpeg, encoder is { } found ? found.ToString() : "none");
-                return new FfmpegTools(ffmpeg, ffprobe, encoder);
+                return new FfmpegTools(ffmpeg, ffprobe, encoder, toneMapping);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
                                                   or InvalidOperationException or System.ComponentModel.Win32Exception)

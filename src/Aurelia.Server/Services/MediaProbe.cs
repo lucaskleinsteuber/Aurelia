@@ -11,7 +11,14 @@ public sealed record ProbedVideo(
     int Width,
     int Height,
     string? PixelFormat,
-    int BitDepth);
+    int BitDepth,
+    string? ColorTransfer = null,
+    string? ColorPrimaries = null,
+    string? ColorSpace = null,
+    string? ColorRange = null)
+{
+    public bool IsHdr => ColorTransfer is "smpte2084" or "arib-std-b67";
+}
 
 public sealed record ProbedAudio(
     int Index,
@@ -47,7 +54,7 @@ public static class MediaProbe
     public static IReadOnlyList<string> Arguments(string input) =>
     [
         "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "file",
-        "-show_entries", "stream=index,codec_name,codec_type,profile,level,width,height,pix_fmt,bits_per_raw_sample,channels,duration"
+        "-show_entries", "stream=index,codec_name,codec_type,profile,level,width,height,pix_fmt,bits_per_raw_sample,channels,duration,color_transfer,color_primaries,color_space,color_range"
             + ":stream_disposition=attached_pic,default,forced:stream_tags=language,title:format=format_name,duration,start_time",
         "-of", "json", "file:" + input,
     ];
@@ -75,7 +82,9 @@ public static class MediaProbe
                 {
                     var pixelFormat = Text(stream, "pix_fmt");
                     video = new ProbedVideo(index, codec, Text(stream, "profile"), Integer(stream, "level") ?? 0,
-                        Integer(stream, "width") ?? 0, Integer(stream, "height") ?? 0, pixelFormat, BitDepth(stream, pixelFormat));
+                        Integer(stream, "width") ?? 0, Integer(stream, "height") ?? 0, pixelFormat, BitDepth(stream, pixelFormat),
+                        Text(stream, "color_transfer")?.ToLowerInvariant(), Text(stream, "color_primaries")?.ToLowerInvariant(),
+                        Text(stream, "color_space")?.ToLowerInvariant(), Text(stream, "color_range")?.ToLowerInvariant());
                     videoDuration = Number(stream, "duration");
                 }
                 else if (type == "audio")

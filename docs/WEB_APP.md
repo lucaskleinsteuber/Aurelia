@@ -57,6 +57,16 @@ little computing time. Only what the browser can't decode is converted:
 - **Picture** is only re-encoded when the browser can't show it at all, for example HEVC in
   Firefox or an old AVI. It then becomes H.264 at up to 1080p, one title at a time.
 
+HDR pictures (PQ or HLG) that need re-encoding are mapped to SDR BT.709 so their brightness
+and colors fit the browser's output. A picture the browser can already decode stays unchanged;
+SDR pictures do not incur HDR conversion work. The server keeps the output within 1080p and
+uses FFmpeg's native perceptual color mapper in the Mac app's LGPL build. Older Linux ffmpeg
+builds can use `zscale` with `tonemap` instead; a build with neither reports that HDR conversion
+is unavailable instead of returning a pale picture. Valid source color tags are retained as
+input; missing HDR primaries/matrix tags default to BT.2020. The older-filter fallback uses a
+100-nit SDR reference and conservative peak references of 10,000 nits for PQ and 1,000 nits for
+HLG, preserving bright detail rather than assuming every PQ source peaks at 1,000 nits.
+
 Nothing converted is stored: the server's ffmpeg writes straight into the connection to the
 browser, with no cache and no temporary files. The player keeps up to a minute ahead (less
 for high bitrates, so the browser's own limit of about 100 MB is never reached) and removes
@@ -77,8 +87,8 @@ Extensions, which current browsers have (on iPhone from iOS 17.1). When the serv
 convert (no ffmpeg), the player says the file can't play in a browser and suggests the Mac or
 Apple TV app, as before.
 
-Not yet: HDR pictures re-encoded with natural colors (they can look pale) and picture conversion
-of 4K titles on slow servers.
+Picture conversion of 4K titles can still be too slow on older servers. HDR conversion adds
+work even after reducing the picture size; direct playback or repackaging avoids that cost.
 
 The player looks and works like the Mac app's: back and the menus at the top (playback
 speed, sound tracks with Night Mode, subtitles, sleep timer, scene notes), back/play/forward
