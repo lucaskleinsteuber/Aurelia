@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Xml;
+using Aurelia.Server.Data;
 using Microsoft.Data.Sqlite;
 
 namespace Aurelia.Server.Services;
@@ -194,7 +195,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
             Directory.Delete(rollback, true);
             throw;
         }
-        SqliteConnection.ClearAllPools();
+        SqliteConnections.ClearPool(runtime.DatabasePath);
         // Backup connections can create or retire SQLite sidecars. Capture the
         // actual closed-connection state, and validate it again before activation.
         originals = StateFiles(runtime.DataDirectory).Concat(DatabaseSidecars
@@ -264,7 +265,7 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
         var undo = UndoDirectory(runtime, journal!.Id);
         if (!Directory.Exists(undo) || new DirectoryInfo(undo).LinkTarget is not null)
             throw new InvalidDataException("The interrupted restore undo state is missing.");
-        SqliteConnection.ClearAllPools();
+        SqliteConnections.ClearPool(runtime.DatabasePath);
         foreach (var name in journal.Replacements.Except(journal.Originals, StringComparer.Ordinal))
             if (File.Exists(Path.Combine(runtime.DataDirectory, name))) File.Delete(Path.Combine(runtime.DataDirectory, name));
         foreach (var name in journal.Originals)

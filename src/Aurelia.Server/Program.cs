@@ -13,7 +13,6 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 var commandLine = ServerCommandLine.Parse(args);
@@ -100,16 +99,7 @@ if (commandLine.Command == "setup-owner")
     builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Model.Validation", LogLevel.Error);
 }
 
-var connectionString = new SqliteConnectionStringBuilder
-{
-    DataSource = runtime.DatabasePath,
-    Mode = SqliteOpenMode.ReadWriteCreate,
-    // Shared-cache table locks defeat WAL reader/writer concurrency, even when
-    // readers use deferred transactions. Each pooled connection needs a private cache.
-    Cache = SqliteCacheMode.Private,
-    ForeignKeys = true,
-    Pooling = true,
-}.ToString();
+var connectionString = SqliteConnections.ConnectionString(runtime.DatabasePath);
 
 builder.Services.AddSingleton(runtime);
 builder.Services.AddSingleton(tlsIdentity);

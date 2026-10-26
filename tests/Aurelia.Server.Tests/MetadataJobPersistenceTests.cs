@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Net;
 using System.Net.Http.Headers;
 using Aurelia.Contracts;
@@ -14,12 +15,16 @@ using Xunit;
 
 namespace Aurelia.Server.Tests;
 
-public sealed class MetadataJobPersistenceTests
+public sealed class MetadataJobPersistenceTests : IClassFixture<MetadataJobPersistenceTests.SeededOwnerTemplate>
 {
+    private readonly SeededOwnerTemplate template;
+
+    public MetadataJobPersistenceTests(SeededOwnerTemplate template) => this.template = template;
+
     [Fact]
     public async Task WorklistIsFrozenAndRestartResumesOnlyUnfinishedTitles()
     {
-        await using var fixture = await Fixture.CreateAsync(2);
+        await using var fixture = await Fixture.CreateAsync(2, template);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Provider.BeforeSearch = async (title, token) =>
         {
@@ -45,7 +50,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task ACrashProcessingMarkerResumesWithoutRepeatingCompletedItems()
     {
-        await using var fixture = await Fixture.CreateAsync(2);
+        await using var fixture = await Fixture.CreateAsync(2, template);
         var job = await fixture.Start();
         await fixture.Write(async database =>
         {
@@ -75,7 +80,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task BackoffHasFourAttemptsAndRetryCopiesOnlyUnfinishedTitles()
     {
-        await using var fixture = await Fixture.CreateAsync(2);
+        await using var fixture = await Fixture.CreateAsync(2, template);
         fixture.Provider.BeforeSearch = (title, _) => title == "Title 2"
             ? throw new MetadataProviderException("Synthetic temporary failure", transient: true) : Task.CompletedTask;
         var job = await fixture.Start();
@@ -108,7 +113,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task LongerRetryAfterDelaysOtherAutomaticJobsAndSurvivesWorkerRestart()
     {
-        await using var fixture = await Fixture.CreateAsync(2);
+        await using var fixture = await Fixture.CreateAsync(2, template);
         fixture.Provider.BeforeSearch = (_, _) => throw new MetadataProviderException("Synthetic rate limit", transient: true, retryAfter: TimeSpan.FromMinutes(20));
         var job = await fixture.Start(Fixture.Id(1));
         await fixture.Run();
@@ -130,7 +135,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task UnexpectedItemFailureAlsoRetainsAnIndividualFailedResult()
     {
-        await using var fixture = await Fixture.CreateAsync(1);
+        await using var fixture = await Fixture.CreateAsync(1, template);
         fixture.Provider.BeforeSearch = (_, _) => throw new FormatException("Synthetic malformed provider data");
         var job = await fixture.Start();
         await fixture.Run();
@@ -144,7 +149,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task AuthenticationFailureStopsImmediatelyWithoutCreatingAReview()
     {
-        await using var fixture = await Fixture.CreateAsync(2);
+        await using var fixture = await Fixture.CreateAsync(2, template);
         fixture.Provider.BeforeSearch = (_, _) => throw new MetadataProviderException("Synthetic rejected token", transient: false, authenticationFailure: true);
         var job = await fixture.Start();
         await fixture.Run();
@@ -158,7 +163,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task PartiallyAppliedIncrementalTitleCanRetryIdempotently()
     {
-        await using var fixture = await Fixture.CreateAsync(1);
+        await using var fixture = await Fixture.CreateAsync(1, template);
         fixture.Provider.WithArtwork = true;
         fixture.Provider.BeforeImage = () => fixture.Provider.ImageRequests == 1
             ? throw new MetadataProviderException("Synthetic artwork timeout", transient: true) : Task.CompletedTask;
@@ -177,7 +182,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task RemovedTitlesAndRevokedTitleGrantsAreSkippedAtExecutionTime()
     {
-        await using var fixture = await Fixture.CreateAsync(3);
+        await using var fixture = await Fixture.CreateAsync(3, template);
         var admin = new ServerUser { Id = Guid.NewGuid(), Username = "Scoped", NormalizedUsername = "SCOPED", PasswordHash = "synthetic", Role = UserRole.Admin, AccessMode = ProfileAccessMode.SelectedTitles };
         await fixture.Write(async database =>
         {
@@ -210,7 +215,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task CancellationAndConcurrentManualCorrectionAreObservedAfterProviderAwait()
     {
-        await using var fixture = await Fixture.CreateAsync(1);
+        await using var fixture = await Fixture.CreateAsync(1, template);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Provider.BeforeSearch = async (_, token) => { entered.TrySetResult(); await release.Task.WaitAsync(token); };
@@ -241,7 +246,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task StorageFailureRetainsResultsAndDoesNotConsumeProviderRetryBudget()
     {
-        await using var fixture = await Fixture.CreateAsync(2);
+        await using var fixture = await Fixture.CreateAsync(2, template);
         fixture.Provider.BeforeSearch = (title, _) => title == "Title 2" && fixture.Provider.Searches[title] == 1
             ? throw new SqliteException("Synthetic full disk", 13) : Task.CompletedTask;
         var job = await fixture.Start();
@@ -258,7 +263,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task DuplicateStartsReturnOneDurableWorklistAcrossMultipleCreationBatches()
     {
-        await using var fixture = await Fixture.CreateAsync(513);
+        await using var fixture = await Fixture.CreateAsync(513, template);
         var starts = await Task.WhenAll(fixture.Start(), fixture.Start());
         Assert.Equal(starts[0].Id, starts[1].Id);
         Assert.Equal(513, starts[0].ItemsTotal);
@@ -269,7 +274,7 @@ public sealed class MetadataJobPersistenceTests
     [Fact]
     public async Task EmptyWorklistsCompleteWithoutWaitingForProviderCooldown()
     {
-        await using var fixture = await Fixture.CreateAsync(0);
+        await using var fixture = await Fixture.CreateAsync(0, template);
         await fixture.Write(async database =>
         {
             database.MetadataProviderCooldowns.Add(new MetadataProviderCooldown { NotBefore = fixture.Clock.GetUtcNow().AddHours(1), WaitReason = "tmdb" });
@@ -343,6 +348,62 @@ public sealed class MetadataJobPersistenceTests
         protected override bool TryComputeLength(out long length) { length = 0; return false; }
     }
 
+    /// <summary>
+    /// Metadata persistence uses services directly, so prepare its real owner/PIN/management
+    /// hashes once through the normal API. Every case still starts an isolated server and gets
+    /// its own provider, clock, libraries and worklists; no authenticated API behavior is mocked.
+    /// </summary>
+    public sealed class SeededOwnerTemplate : IAsyncLifetime, IDisposable
+    {
+        private readonly string root = TestPaths.CreateDataDirectory();
+        private FrozenDictionary<string, byte[]> files = FrozenDictionary<string, byte[]>.Empty;
+
+        public async Task InitializeAsync()
+        {
+            try
+            {
+                using (var factory = new AureliaServerFactory(root))
+                using (var client = factory.CreateClient())
+                    _ = await ApiTestClient.SetupOwnerAsync(client);
+                var runtime = ServerRuntimeOptions.Resolve(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), ["--data-dir", root]);
+                SqliteConnections.ClearPool(runtime.DatabasePath);
+                var options = new DbContextOptionsBuilder<AureliaDbContext>().UseSqlite($"Data Source={runtime.DatabasePath};Pooling=False").Options;
+                await using (var database = new AureliaDbContext(options))
+                {
+                    Assert.Equal(UserRole.Owner, (await database.Users.SingleAsync()).Role);
+                    Assert.NotNull(await database.AdministrationCredentials.SingleOrDefaultAsync());
+                    Assert.Equal(0, await database.MetadataJobs.CountAsync());
+                    Assert.Equal(0, await database.LibraryRoots.CountAsync());
+                    // Device/profile sessions are not needed by these direct service tests.
+                    await database.DeviceSessions.ExecuteDeleteAsync();
+                }
+                var snapshot = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+                foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                {
+                    var relative = Path.GetRelativePath(root, path);
+                    if (!relative.StartsWith("Backups" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                        snapshot.Add(relative, await File.ReadAllBytesAsync(path));
+                }
+                files = snapshot.ToFrozenDictionary(StringComparer.Ordinal);
+            }
+            catch { Dispose(); throw; }
+        }
+
+        public void CopyTo(string destination)
+        {
+            foreach (var parent in files.Keys.Select(name => Path.GetDirectoryName(Path.Combine(destination, name))!).Distinct(StringComparer.Ordinal))
+                PrivateFilePermissions.CreatePrivateDirectory(parent);
+            foreach (var (name, bytes) in files)
+            {
+                using var output = PrivateFilePermissions.OpenNewPrivateFile(Path.Combine(destination, name));
+                output.Write(bytes);
+            }
+        }
+
+        public Task DisposeAsync() { Dispose(); return Task.CompletedTask; }
+        public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public AureliaServerFactory Factory { get; private set; } = null!;
@@ -353,7 +414,7 @@ public sealed class MetadataJobPersistenceTests
         private string MediaDirectory { get; } = TestPaths.CreateDataDirectory();
         public static Guid Id(int value) => new(value, 0, 0, new byte[8]);
 
-        public static async Task<Fixture> CreateAsync(int titles)
+        public static async Task<Fixture> CreateAsync(int titles, SeededOwnerTemplate template)
         {
             var fixture = new Fixture();
             fixture.Factory = new AureliaServerFactory(configureServices: services =>
@@ -365,8 +426,8 @@ public sealed class MetadataJobPersistenceTests
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(fixture.Clock);
             });
+            template.CopyTo(fixture.Factory.DataDirectory);
             using var client = fixture.Factory.CreateClient();
-            _ = await ApiTestClient.SetupOwnerAsync(client);
             fixture.Factory.Services.GetRequiredService<MetadataProviderSettingsStore>().Save(new UpdateMetadataProviderRequest(true, "en", "synthetic-provider-token-with-no-network"));
             fixture.libraryId = Guid.NewGuid();
             await fixture.Write(async database =>
@@ -375,14 +436,15 @@ public sealed class MetadataJobPersistenceTests
                 // would throw there and stop this test's server while the test still uses it.
                 Directory.CreateDirectory(fixture.MediaDirectory);
                 database.LibraryRoots.Add(new LibraryRoot { Id = fixture.libraryId, Name = "Synthetic", Path = fixture.MediaDirectory, NormalizedPath = MediaPath.Normalize(fixture.MediaDirectory), MonitoringEnabled = false, Kind = LibraryKind.Movies });
+                for (var index = 1; index <= titles; index++) database.MediaItems.Add(fixture.Title(index));
                 await database.SaveChangesAsync();
             });
-            for (var index = 1; index <= titles; index++) await fixture.AddTitle(index);
             return fixture;
         }
+        private MediaItem Title(int index) => new() { Id = Id(index), LibraryRootId = libraryId, Kind = MediaKind.Movie, DetectedTitle = $"Title {index}", SourcePath = $"synthetic/{index}", NormalizedSourcePath = $"SYNTHETIC/{index}" };
         public async Task AddTitle(int index) => await Write(async database =>
         {
-            database.MediaItems.Add(new MediaItem { Id = Id(index), LibraryRootId = libraryId, Kind = MediaKind.Movie, DetectedTitle = $"Title {index}", SourcePath = $"synthetic/{index}", NormalizedSourcePath = $"SYNTHETIC/{index}" });
+            database.MediaItems.Add(Title(index));
             await database.SaveChangesAsync();
         });
         public async Task<MetadataJobSummary> Start(Guid? id = null, MetadataJobMode mode = MetadataJobMode.FullRefresh)

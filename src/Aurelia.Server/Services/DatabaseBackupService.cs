@@ -392,7 +392,7 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerCo
                 }
             }
 
-            SqliteConnection.ClearAllPools();
+            SqliteConnections.ClearPool(runtime.DatabasePath);
             DeleteDatabaseSidecar(runtime.DatabasePath + "-wal");
             DeleteDatabaseSidecar(runtime.DatabasePath + "-shm");
             File.Move(stagePath, runtime.DatabasePath, overwrite: true);

@@ -1,16 +1,20 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
 using Aurelia.Server.Services;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace Aurelia.Server.Tests;
 
-public sealed class RestoreActivationTests
+public sealed class RestoreActivationTests : IClassFixture<RestoreActivationTests.PreparedRestoreTemplate>
 {
+    private readonly PreparedRestoreTemplate template;
+
+    public RestoreActivationTests(PreparedRestoreTemplate template) => this.template = template;
+
     [Theory]
     [InlineData((int)RestoreActivationStep.JournalWritten, 0)]
     [InlineData((int)RestoreActivationStep.OriginalMoved, 1)]
@@ -21,14 +25,11 @@ public sealed class RestoreActivationTests
     public async Task FailedArtworkRichActivationRestoresAllOriginalStateAndCanRestart(int step, int position)
     {
         using var fixture = new RestoreFixture();
-        await fixture.SeedAsync();
-        using var full = fixture.Service();
-        var exported = await full.ExportAsync(RestoreFixture.Passphrase, CancellationToken.None);
-        var prepared = await full.PrepareRestoreAsync(new(exported.Id, RestoreFixture.Passphrase, true), CancellationToken.None);
+        template.CopyTo(fixture.Root);
         await fixture.ChangeCurrentStateAsync();
         var before = await fixture.SnapshotAsync();
         await Assert.ThrowsAsync<IOException>(() => FullServerBackupService.ApplyPreparedCoreAsync(
-            fixture.Runtime, prepared.Id, CancellationToken.None, (current, count) =>
+            fixture.Runtime, template.PreparedId, CancellationToken.None, (current, count) =>
             {
                 if ((int)current == step && count == position) throw new IOException("Synthetic activation interruption.");
             }));
@@ -47,12 +48,9 @@ public sealed class RestoreActivationTests
     public async Task SuccessfulArtworkRichRestoreRevokesOldSessionAndPreservesImages()
     {
         using var fixture = new RestoreFixture();
-        await fixture.SeedAsync();
-        using var full = fixture.Service();
-        var exported = await full.ExportAsync(RestoreFixture.Passphrase, CancellationToken.None);
-        var prepared = await full.PrepareRestoreAsync(new(exported.Id, RestoreFixture.Passphrase, true), CancellationToken.None);
+        template.CopyTo(fixture.Root);
         await fixture.ChangeCurrentStateAsync();
-        await FullServerBackupService.ApplyPreparedAsync(fixture.Runtime, prepared.Id, CancellationToken.None);
+        await FullServerBackupService.ApplyPreparedAsync(fixture.Runtime, template.PreparedId, CancellationToken.None);
         await using var database = new AureliaDbContext(fixture.Options);
         Assert.Equal("Original library", (await database.LibraryRoots.SingleAsync()).Name);
         Assert.NotNull((await database.DeviceSessions.SingleAsync()).RevokedAt);
@@ -119,6 +117,55 @@ public sealed class RestoreActivationTests
         finally { Directory.Delete(root, true); }
     }
 
+    /// <summary>
+    /// Make the expensive real encrypted backup once. Only immutable bytes are shared: every
+    /// activation still gets its own database, prepared stage and all 300 artwork files.
+    /// </summary>
+    public sealed class PreparedRestoreTemplate : IAsyncLifetime, IDisposable
+    {
+        private readonly RestoreFixture source = new();
+        private FrozenDictionary<string, byte[]> files = FrozenDictionary<string, byte[]>.Empty;
+        public Guid PreparedId { get; private set; }
+
+        public async Task InitializeAsync()
+        {
+            try
+            {
+                await source.SeedAsync();
+                using var full = source.Service();
+                var exported = await full.ExportAsync(RestoreFixture.Passphrase, CancellationToken.None);
+                var prepared = await full.PrepareRestoreAsync(new(exported.Id, RestoreFixture.Passphrase, true), CancellationToken.None);
+                PreparedId = prepared.Id;
+                var snapshot = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+                foreach (var path in Directory.EnumerateFiles(source.Root, "*", SearchOption.AllDirectories))
+                    snapshot.Add(Path.GetRelativePath(source.Root, path), await File.ReadAllBytesAsync(path));
+                files = snapshot.ToFrozenDictionary(StringComparer.Ordinal);
+            }
+            catch { source.Dispose(); throw; }
+        }
+
+        public void CopyTo(string root)
+        {
+            foreach (var parent in files.Keys.Select(name => Path.GetDirectoryName(Path.Combine(root, name))!).Distinct(StringComparer.Ordinal))
+                PrivateFilePermissions.CreatePrivateDirectory(parent);
+            foreach (var (name, bytes) in files)
+            {
+                var destination = Path.Combine(root, name);
+                using var output = PrivateFilePermissions.OpenNewPrivateFile(destination);
+                output.Write(bytes);
+            }
+        }
+
+        public Task DisposeAsync()
+        {
+            // The database retains only paths into this empty synthetic folder; keeping it alive
+            // lets each restart check observe an available location without reading any media.
+            Dispose();
+            return Task.CompletedTask;
+        }
+        public void Dispose() => source.Dispose();
+    }
+
     private sealed class RestoreFixture : IDisposable
     {
         public const string Passphrase = "synthetic activation test passphrase";
@@ -183,6 +230,12 @@ public sealed class RestoreActivationTests
             result[ServerHostSettings.FileName] = await File.ReadAllBytesAsync(Path.Combine(Root, ServerHostSettings.FileName));
             return result;
         }
-        public void Dispose() { SqliteConnection.ClearAllPools(); if (Directory.Exists(Root)) Directory.Delete(Root, true); }
+        public void Dispose()
+        {
+            // The fixture's contexts do not pool. A restarted test host does, so release only
+            // that root's host pool rather than changing connections owned by parallel tests.
+            SqliteConnections.ClearPool(Runtime.DatabasePath);
+            if (Directory.Exists(Root)) Directory.Delete(Root, true);
+        }
     }
 }
