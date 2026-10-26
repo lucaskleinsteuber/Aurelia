@@ -13,7 +13,7 @@ namespace Aurelia.Server.Endpoints;
 /// plan says what will be repackaged or converted; the stream runs ffmpeg for one playback ticket
 /// and sends its fragmented MP4 straight into the response. Nothing converted is stored.
 /// </summary>
-public static class LiveConversionEndpoints
+public static partial class LiveConversionEndpoints
 {
     private const double LongestTitleSeconds = 48 * 3600;
 
@@ -23,6 +23,9 @@ public static class LiveConversionEndpoints
         app.MapGet("/api/v1/streams/{ticket}/live", StreamAsync)
             .RequireAuthorization()
             .WithDisplayName("Stream converted media");
+        app.MapGet("/api/v1/streams/{ticket}/subtitles/{index:int}", SubtitlesAsync)
+            .RequireAuthorization()
+            .WithDisplayName("Read embedded subtitles");
     }
 
     private static async Task<IResult> PlanAsync(

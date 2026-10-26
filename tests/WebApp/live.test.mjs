@@ -96,3 +96,24 @@ test("live failures explain themselves; formats the server cannot convert fall b
   assert.equal(live.liveProblem(422, "conversion_not_possible"), null);
   assert.match(live.liveProblem(500, "conversion_failed"), /couldn’t convert/);
 });
+
+test("subtitle labels distinguish text, forced and unsupported bitmap tracks", () => {
+  assert.equal(live.subtitleLabel({ language: "eng", format: "subrip", supported: true }), "English · SubRip");
+  assert.equal(live.subtitleLabel({ language: "deu", title: "Signs", format: "ass", isForced: true, supported: true }), "German · Signs · ASS · Forced");
+  assert.equal(live.subtitleLabel({ format: "dvd_subtitle", supported: false }, 2), "Subtitle 3 · VobSub · Not supported in this browser");
+  assert.match(live.subtitleLabel({ format: "hdmv_pgs_subtitle", supported: false }), /PGS · Not supported/);
+});
+
+test("subtitle selection preserves absolute cue times before and after a resumed seek", () => {
+  assert.equal(live.subtitleUrl("/api/v1/streams/ticket", 4), "/api/v1/streams/ticket/subtitles/4");
+  const first = { mode: "disabled", cues: [{ startTime: 6, endTime: 9, text: "Second cue" }] };
+  const second = { mode: "showing", cues: [{ startTime: 10, endTime: 12, text: "Later cue" }] };
+  live.selectSubtitle([first, second], first);
+  assert.deepEqual([first.mode, second.mode], ["showing", "disabled"]);
+  assert.equal(first.cues[0].startTime, 6);
+  assert.equal(first.cues[0].endTime, 9);
+  live.selectSubtitle([first, second], null);
+  live.selectSubtitle([first, second], first);
+  assert.equal(first.cues[0].startTime, 6);
+  assert.deepEqual([first.mode, second.mode], ["showing", "disabled"]);
+});

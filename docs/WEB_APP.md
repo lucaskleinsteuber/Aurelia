@@ -64,14 +64,21 @@ what played earlier. Seeking within what has arrived is instant; a seek further 
 new stream at that point, and a dropped connection continues where the arrived part ends.
 The audio menu picks another sound track. Up to three titles convert at a time on one server.
 
+The subtitle menu also lists embedded text tracks (SubRip, ASS/SSA and MP4 text subtitles).
+Selecting one reads the track as WebVTT into request memory, with no subtitle files or cache on
+disk. Cues use the title's timeline and stay aligned when resuming, seeking or changing sound
+tracks. Bitmap subtitles (PGS and VobSub) are listed as unsupported. ASS positioning and styling
+are reduced to the text and formatting that WebVTT supports. A request is limited to 8 MiB and
+30 seconds; a failed subtitle load leaves the video playing and can be retried from the menu.
+
 An MP4 starts directly first. If the browser shows no picture or plays no sound, the player
 switches to live conversion at the same point by itself. Live conversion needs Media Source
 Extensions, which current browsers have (on iPhone from iOS 17.1). When the server can't
 convert (no ffmpeg), the player says the file can't play in a browser and suggests the Mac or
 Apple TV app, as before.
 
-Not yet: subtitles from MKV files, HDR pictures re-encoded with natural colors (they can look
-pale) and picture conversion of 4K titles on slow servers.
+Not yet: HDR pictures re-encoded with natural colors (they can look pale) and picture conversion
+of 4K titles on slow servers.
 
 The player looks and works like the Mac app's: back and the menus at the top (playback
 speed, sound tracks with Night Mode, subtitles, sleep timer, scene notes), back/play/forward

@@ -177,6 +177,9 @@ segment and no temporary file.
      `language`, `title` and `isDefault`. `mode` is `copy` when the player decodes it, else
      `aac` (stereo AAC); `codec` is the codec string the player then receives.
      `audioTrack` names the track to start with.
+   - `subtitleTracks` (optional on older servers): embedded subtitle streams with `index`,
+     `format`, `language`, `title`, `isDefault`, `isForced` and `supported`. Text tracks can
+     become WebVTT; bitmap tracks remain listed with `supported: false`.
 
    A server without ffmpeg answers `409 conversion_unavailable`; a picture it can neither
    repackage nor convert, `422 conversion_not_possible`. The file is read through the same
@@ -191,10 +194,17 @@ segment and no temporary file.
    direct one and ends with its ticket, session or profile. The server runs at most three
    conversions at once, at most one of them re-encoding the picture, and answers
    `429 conversion_busy` with `Retry-After` beyond that.
+3. An embedded text track is read with `GET {streamPath}/subtitles/{index}` under the same
+   ticket, session and profile rules. The response is `text/vtt; charset=utf-8`, private and
+   uncached, and contains the full track in normalized title time. Do not add the live stream's
+   seek offset to its cues. SubRip, ASS/SSA, `mov_text`, WebVTT and plain text are supported;
+   bitmap tracks return `422 subtitle_not_supported`, an unknown index
+   `404 invalid_subtitle_track`. Extraction runs through the same conversion budget and is
+   limited to 8 MiB in request memory and 30 seconds. No subtitle file is written or cached.
 
 Reading paces the conversion: when the player stops reading, ffmpeg waits. Closing the
-connection ends ffmpeg. Text subtitles, HDR tone mapping and picture conversion beyond
-1080p are not part of `live-conversion-v1`.
+connection ends ffmpeg. HDR tone mapping and picture conversion beyond 1080p are not part of
+`live-conversion-v1`.
 
 ## Minimum new-client acceptance
 

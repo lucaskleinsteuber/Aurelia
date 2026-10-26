@@ -20,7 +20,8 @@ public sealed record LiveConversionPlanResponse(
     int Height,
     double? DurationSeconds,
     IReadOnlyList<LiveAudioTrack> AudioTracks,
-    int? AudioTrack);
+    int? AudioTrack,
+    IReadOnlyList<LiveSubtitleTrack>? SubtitleTracks = null);
 
 /// <param name="Index">The stream index in the file, sent back as the stream's audio parameter.</param>
 /// <param name="Mode">"copy" keeps the sound unchanged; "aac" converts it to stereo AAC.</param>
@@ -34,3 +35,13 @@ public sealed record LiveAudioTrack(
     bool IsDefault,
     string Mode,
     string Codec);
+
+/// <summary>An embedded subtitle stream; bitmap formats are listed but cannot become WebVTT.</summary>
+public sealed record LiveSubtitleTrack(
+    int Index,
+    string Format,
+    string? Language,
+    string? Title,
+    bool IsDefault,
+    bool IsForced,
+    bool Supported);

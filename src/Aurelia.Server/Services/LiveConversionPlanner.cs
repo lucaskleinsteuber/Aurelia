@@ -62,7 +62,9 @@ public static class LiveConversionPlanner
             height,
             probe.DurationSeconds,
             tracks,
-            first?.Index);
+            first?.Index,
+            (probe.Subtitles ?? []).Select(track => new LiveSubtitleTrack(track.Index, track.Codec, track.Language,
+                track.Title, track.IsDefault, track.IsForced, LiveSubtitles.CanConvert(track.Codec))).ToList());
     }
 
     public static bool CanCopyVideo(ProbedVideo video, IReadOnlySet<string> playerCodecs)
@@ -142,7 +144,8 @@ public static class LiveConversionPlanner
         if (options.Start > 0) arguments.AddRange(["-ss", Seconds(options.Start)]);
         // The output keeps the file's own timestamps, so a stream started at a later point still
         // reports the real position in the title.
-        arguments.AddRange(["-copyts", "-fflags", "+genpts", "-i", "file:" + input]);
+        // Normalize a container's nonzero start as well: resumed fragments and WebVTT use title time.
+        arguments.AddRange(["-copyts", "-start_at_zero", "-fflags", "+genpts", "-i", "file:" + input]);
         arguments.AddRange(["-map", $"0:{options.Video.Index}"]);
         if (options.Audio is { } audio) arguments.AddRange(["-map", $"0:{audio.Index}"]);
         arguments.AddRange(["-map_metadata", "-1", "-map_chapters", "-1"]);

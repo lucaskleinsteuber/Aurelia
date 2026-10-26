@@ -13,7 +13,7 @@ import {
   playerSubtitle, rateLabel, resumeSeconds, showsUpNext, upNextSeconds,
 } from "./logic.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
-import { codecSupport, liveProblem, mimeType, startTrack, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
+import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtitleLabel, subtitleUrl, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
 
 const SAVE_INTERVAL = 10_000;
 const RENEW_BEFORE = 5 * 60_000;
@@ -97,6 +97,8 @@ export class Player {
     this.closed = false;
     this.listeners = [];
     this.notes = [];
+    this.embeddedSubtitles = [];
+    this.subtitleElements = new Map();
     this.sleep = { mode: "off", until: 0 };
     this.upNextItem = undefined;
     this.upNextDismissed = false;
@@ -246,6 +248,7 @@ export class Player {
       this.showNotice(UNPLAYABLE, true);
       return;
     }
+    this.embeddedSubtitles = plan.subtitleTracks ?? [];
     this.live = new LiveSource({
       video: this.video,
       plan,
@@ -614,14 +617,41 @@ export class Player {
   subtitleMenu() {
     const tracks = [...this.video.textTracks];
     const showing = tracks.find((track) => track.mode === "showing");
-    const options = [{ title: "Off", selected: !showing, action: () => tracks.forEach((track) => (track.mode = "disabled")) }, "divider"];
-    if (tracks.length === 0) options.push({ title: "No subtitles available", enabled: false });
-    tracks.forEach((track, position) => options.push({
+    const options = [{ title: "Off", selected: !showing, action: () => selectSubtitle(tracks, null) }, "divider"];
+    if (tracks.length === 0 && this.embeddedSubtitles.length === 0) options.push({ title: "No subtitles available", enabled: false });
+    const embedded = new Set([...this.subtitleElements.values()].map((element) => element.track));
+    tracks.filter((track) => !embedded.has(track)).forEach((track, position) => options.push({
       title: track.label || (track.language ? trackLabel({ language: track.language }, position) : `Subtitle ${position + 1}`),
       selected: track === showing,
-      action: () => tracks.forEach((other) => (other.mode = other === track ? "showing" : "disabled")),
+      action: () => selectSubtitle(tracks, track),
+    }));
+    // Embedded tracks are listed before they are loaded. Selecting one starts a single bounded
+    // extraction; native WebVTT cues then remain valid across every seek and sound-track change.
+    this.embeddedSubtitles.forEach((track, position) => options.push({
+      title: subtitleLabel(track, position),
+      selected: Boolean(showing && this.subtitleElements.get(track.index)?.track === showing),
+      enabled: track.supported,
+      action: () => this.chooseSubtitle(track),
     }));
     this.openPopover(this.subtitleButton, this.menuItems(options));
+  }
+
+  chooseSubtitle(track) {
+    if (!track.supported || !this.source || this.closed) return;
+    let element = this.subtitleElements.get(track.index);
+    if (!element) {
+      element = h("track", { kind: "subtitles", label: subtitleLabel(track), srclang: track.language || "und" });
+      element.src = subtitleUrl(this.source.streamPath, track.index);
+      element.addEventListener("error", () => {
+        if (this.closed) return;
+        element.remove();
+        this.subtitleElements.delete(track.index);
+        this.showNotice("This subtitle track couldn’t be loaded. Try selecting it again.", false);
+      });
+      this.subtitleElements.set(track.index, element);
+      this.video.append(element);
+    }
+    selectSubtitle([...this.video.textTracks], element.track);
   }
 
   sleepMenu() {
@@ -891,6 +921,10 @@ export class Player {
         if (this.live) {
           // The running stream continues; the next seek or track change uses the new ticket.
           this.live.streamPath = renewed.streamPath;
+          for (const [index, element] of this.subtitleElements) {
+            // Loaded cues are already in memory; a pending or failed fetch needs the fresh ticket.
+            if (element.readyState !== 2) element.src = subtitleUrl(renewed.streamPath, index);
+          }
           this.api.revokePlayback(old.id).catch(() => {});
           this.scheduleRenewal();
           return;
@@ -938,6 +972,8 @@ export class Player {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
     this.live?.destroy();
+    for (const element of this.subtitleElements.values()) element.remove();
+    this.subtitleElements.clear();
     this.video.pause();
     this.video.removeAttribute("src");
     this.video.load();

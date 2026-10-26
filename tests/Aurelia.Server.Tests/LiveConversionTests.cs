@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using Aurelia.Contracts;
+using Aurelia.Server.Authentication;
 using Aurelia.Server.Data;
 using Aurelia.Server.Services;
 using Microsoft.Extensions.Configuration;
@@ -123,6 +124,133 @@ public sealed class LiveConversionTests
         Assert.Equal(new ProbedAudio(2, "dts", "DTS-HD MA", 8, "eng", "Surround 7.1", true), probe.Audio[0]);
         Assert.Null(probe.Audio[1].Language);
         Assert.Equal("file:/proc/1/fd/9", MediaProbe.Arguments("/proc/1/fd/9")[^1]);
+    }
+
+    [Fact]
+    public void ProbeListsTextAndBitmapSubtitlesAndKeepsRealMotionJpegVideo()
+    {
+        var probe = MediaProbe.Parse("""
+            {"streams":[
+              {"index":0,"codec_name":"mjpeg","codec_type":"video","width":640,"height":360,"pix_fmt":"yuvj420p","disposition":{"attached_pic":0}},
+              {"index":1,"codec_name":"subrip","codec_type":"subtitle","disposition":{"default":1},"tags":{"language":"eng","title":"Dialogue"}},
+              {"index":2,"codec_name":"ass","codec_type":"subtitle","disposition":{"forced":1},"tags":{"language":"und"}},
+              {"index":3,"codec_name":"hdmv_pgs_subtitle","codec_type":"subtitle"},
+              {"index":4,"codec_name":"dvd_subtitle","codec_type":"subtitle"}],
+             "format":{"format_name":"matroska,webm","duration":"12"}}
+            """);
+        Assert.Equal("mjpeg", probe.Video?.Codec);
+        var plan = LiveConversionPlanner.Plan(probe, Browser, canEncodeVideo: true)!;
+        Assert.Equal("h264", plan.Video);
+        var tracks = plan.SubtitleTracks!;
+        Assert.Equal(4, tracks.Count);
+        Assert.Equal(new LiveSubtitleTrack(1, "subrip", "eng", "Dialogue", true, false, true), tracks[0]);
+        Assert.True(tracks[1].IsForced);
+        Assert.Null(tracks[1].Language);
+        Assert.False(tracks[2].Supported);
+        Assert.False(tracks[3].Supported);
+        foreach (var codec in new[] { "subrip", "ass", "ssa", "mov_text" }) Assert.True(LiveSubtitles.CanConvert(codec));
+        Assert.False(LiveSubtitles.CanConvert("unknown"));
+        var arguments = LiveSubtitles.Arguments("/Invented/Film;title.mkv", 2);
+        Assert.Contains("file:/Invented/Film;title.mkv", arguments);
+        Assert.Contains("-copyts", arguments);
+        Assert.Contains("-start_at_zero", arguments);
+        Assert.Equal(["-map", "0:2"], arguments.SkipWhile(argument => argument != "-map").Take(2));
+        Assert.Equal("pipe:1", arguments[^1]);
+    }
+
+    [Fact]
+    public async Task ConverterOutputHasAByteLimitAndHonorsCancellation()
+    {
+        await using var exact = new MemoryStream(new byte[16]);
+        Assert.Equal(16, (await LiveConversionService.ReadLimitedAsync(exact, 16, CancellationToken.None)).Length);
+        await using var tooLarge = new MemoryStream(new byte[17]);
+        await Assert.ThrowsAsync<InvalidDataException>(() => LiveConversionService.ReadLimitedAsync(tooLarge, 16, CancellationToken.None));
+        await using var cancelled = new MemoryStream(new byte[16]);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => LiveConversionService.ReadLimitedAsync(cancelled, 16, new CancellationToken(true)));
+        var oversizedMetadata = "{\"streams\":[{\"index\":1,\"codec_name\":\"subrip\",\"codec_type\":\"subtitle\",\"tags\":{\"title\":\"" + new string('x', 1000) + "\"}}]}";
+        Assert.Equal(256, Assert.Single(MediaProbe.Parse(oversizedMetadata).Subtitles!).Title!.Length);
+    }
+
+    [Theory]
+    [InlineData("srt", ".mkv", "subrip")]
+    [InlineData("ass", ".mkv", "ass")]
+    [InlineData("mov_text", ".mp4", "mov_text")]
+    public async Task EmbeddedSubtitlesUseTitleTimeAndTicketRulesWithoutWritingFiles(string codec, string extension, string expectedCodec)
+    {
+        if (Installed() is not { } maker) return;
+        var ffmpeg = Tools() ?? maker;
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Invented Subtitle Library");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Invented Captions" + extension);
+        try
+        {
+            await MakeSubtitleMediaAsync(maker, path, codec);
+            var before = (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length);
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, path);
+            var plan = await PlanAsync(client, owner.Token, mediaId, Browser);
+            var track = Assert.Single(plan.SubtitleTracks!);
+            Assert.Equal(expectedCodec, track.Format);
+            Assert.True(track.Supported);
+            Assert.Equal("eng", track.Language);
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            var live = factory.Services.GetRequiredService<LiveConversionService>();
+            var tools = (await live.ToolsAsync())!;
+            await using (var source = File.OpenRead(path))
+            {
+                var file = new OpenMediaFile(source, "video/x-matroska", source.Length, new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero));
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => live.ExtractSubtitlesAsync(
+                    tools, file, path, track.Index, new CancellationToken(true)));
+            }
+            var dataFiles = Files(factory.DataDirectory);
+            var temporaryFiles = TemporaryVideoFiles();
+            var address = $"{playback.StreamPath}/subtitles/{track.Index}";
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, address, owner.Token))
+            using (var response = await client.SendAsync(request))
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal("text/vtt", response.Content.Headers.ContentType?.MediaType);
+                Assert.Contains("no-store", response.Headers.CacheControl?.ToString(), StringComparison.Ordinal);
+                var vtt = await response.Content.ReadAsStringAsync();
+                Assert.StartsWith("WEBVTT", vtt, StringComparison.Ordinal);
+                Assert.Contains("00:02.000 --> 00:04.000", vtt, StringComparison.Ordinal);
+                Assert.Contains("00:06.000 --> 00:09.000", vtt, StringComparison.Ordinal);
+                Assert.Contains("Second cue", vtt, StringComparison.Ordinal);
+                Assert.DoesNotContain("00:11.000", vtt, StringComparison.Ordinal);
+            }
+            // A native <track> request cannot add the app header: its HttpOnly profile cookie
+            // must authenticate exactly like the existing native <video> request.
+            using (var nativeTrack = new HttpRequestMessage(HttpMethod.Get, address))
+            {
+                nativeTrack.Headers.Add("Cookie", $"{WebCookies.Profile}={owner.Token}");
+                using var response = await client.SendAsync(nativeTrack);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+            // The source starts at timestamp five. Resumed picture time must still be title time,
+            // matching the complete WebVTT track rather than adding either source or seek offsets.
+            var later = await ReadStreamAsync(client, owner.Token, $"{playback.StreamPath}/live?start=6&video=copy");
+            Assert.InRange(FirstFragmentSeconds(later), 5.9, 6.1);
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/999", owner.Token))
+            using (var response = await client.SendAsync(request)) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            using (var anonymous = await client.GetAsync(address)) Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+            using var login = await ApiTestClient.LoginAsync(client, new LoginRequest("lucas", "correct horse battery staple", "Another Invented Browser"));
+            var otherDevice = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
+            using (var foreign = ApiTestClient.Authorized(HttpMethod.Get, address, otherDevice.Token))
+            using (var response = await client.SendAsync(foreign)) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            using (var revoke = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/playback/{playback.Id}", owner.Token))
+            using (var response = await ApiTestClient.SendAsync(client, revoke)) response.EnsureSuccessStatusCode();
+            using (var stale = ApiTestClient.Authorized(HttpMethod.Get, address, owner.Token))
+            using (var response = await client.SendAsync(stale)) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+            Assert.DoesNotContain(Files(factory.DataDirectory).Except(dataFiles), file => !ServerBookkeeping(factory.DataDirectory, file));
+            Assert.Empty(TemporaryVideoFiles().Except(temporaryFiles));
+            Assert.Equal([path], Directory.GetFiles(root));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(factory.DataDirectory, "Converter")));
+            Assert.Equal(before, (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length));
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
 
     [Fact]
@@ -302,6 +430,23 @@ public sealed class LiveConversionTests
         Assert.True(process.ExitCode == 0, errors);
     }
 
+    private static async Task MakeSubtitleMediaAsync(string ffmpeg, string path, string codec)
+    {
+        var captions = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(path))!, "Invented captions.srt");
+        await File.WriteAllTextAsync(captions, "1\n00:00:02,000 --> 00:00:04,000\nFirst cue\n\n2\n00:00:06,000 --> 00:00:09,000\nSecond cue\n");
+        var start = new ProcessStartInfo(ffmpeg) { RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in new[]
+        {
+            "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=10", "-i", captions,
+            "-t", "12", "-map", "0:v", "-map", "1:s", "-c:v", "libx264", "-preset", "ultrafast", "-g", "20",
+            "-c:s", codec, "-metadata:s:s:0", "language=eng", "-output_ts_offset", "5", path,
+        }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var errors = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, errors);
+    }
+
     private static async Task<Guid> AddMediaAsync(AureliaServerFactory factory, string root, string path)
     {
         using var scope = factory.Services.CreateScope();
@@ -327,7 +472,7 @@ public sealed class LiveConversionTests
             NormalizedSourcePath = MediaPath.Normalize(path),
             DetectedTitle = "Invented Film",
             Category = string.Empty,
-            Extension = ".mkv",
+            Extension = Path.GetExtension(path),
             FileSize = new FileInfo(path).Length,
             FileModifiedAt = new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero),
             Availability = MediaAvailability.Available,

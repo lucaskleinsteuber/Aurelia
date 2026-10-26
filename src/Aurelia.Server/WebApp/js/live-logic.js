@@ -168,6 +168,25 @@ export function trackLabel(track, position = 0, locale = "en") {
   return [language || `Track ${position + 1}`, title, format].filter(Boolean).join(" · ");
 }
 
+/** Embedded subtitle labels include formats and make unsupported bitmap tracks explicit. */
+export function subtitleLabel(track, position = 0, locale = "en") {
+  const language = languageName(track.language, locale);
+  const title = track.title && track.title !== language ? track.title : "";
+  const format = { subrip: "SubRip", srt: "SubRip", ass: "ASS", ssa: "SSA", mov_text: "Text", webvtt: "WebVTT", hdmv_pgs_subtitle: "PGS", dvd_subtitle: "VobSub" }[track.format]
+    ?? String(track.format ?? "").toUpperCase();
+  return [language || `Subtitle ${position + 1}`, title, format, track.isForced ? "Forced" : "", track.supported === false ? "Not supported in this browser" : ""].filter(Boolean).join(" · ");
+}
+
+/** A complete WebVTT track uses title timestamps, independent of the video's current seek offset. */
+export function subtitleUrl(streamPath, index) {
+  return `${streamPath}/subtitles/${encodeURIComponent(index)}`;
+}
+
+/** Native WebVTT cues stay on the title timeline when selecting a track or seeking the video. */
+export function selectSubtitle(tracks, selected) {
+  for (const track of tracks) track.mode = track === selected ? "showing" : "disabled";
+}
+
 /** What the player says when a live stream fails, from the server's answer. */
 export function liveProblem(status, code) {
   if (status === 0) return "The server isn’t answering. Check that it is switched on, then try again.";

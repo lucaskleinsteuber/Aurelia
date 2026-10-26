@@ -21,7 +21,9 @@ public sealed partial class LiveConversionService : IDisposable
     public const int MaximumVideoConversions = 1;
     private const int ProbeCacheSize = 256;
     private const int ErrorTailCharacters = 4096;
+    private const int MaximumProbeBytes = 256 * 1024;
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan SubtitleTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan SlotWait = TimeSpan.FromSeconds(5);
 
     private readonly ILogger<LiveConversionService> logger;
@@ -127,20 +129,23 @@ public sealed partial class LiveConversionService : IDisposable
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(ProbeTimeout);
             using var process = Start(tools.Ffprobe, MediaProbe.Arguments(InputPath(file.Stream, checkedPath)), lowPriority: false);
-            var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
             var errors = ReadTailAsync(process.StandardError);
             string json;
             try
             {
-                json = await output;
+                json = Encoding.UTF8.GetString(await ReadLimitedAsync(process.StandardOutput.BaseStream, MaximumProbeBytes, timeout.Token));
                 await process.WaitForExitAsync(timeout.Token);
             }
             catch (OperationCanceledException)
             {
-                Stop(process);
                 if (cancellationToken.IsCancellationRequested) throw;
                 throw new PlaybackException("media_probe_failed", "The server couldn’t read this title’s format in time.", StatusCodes.Status422UnprocessableEntity);
             }
+            catch (InvalidDataException)
+            {
+                throw new PlaybackException("media_probe_failed", "This title’s format description is too large.", StatusCodes.Status422UnprocessableEntity);
+            }
+            finally { Stop(process); }
             if (process.ExitCode != 0)
             {
                 LogFailed(logger, "ffprobe", process.ExitCode, await errors);
@@ -157,6 +162,48 @@ public sealed partial class LiveConversionService : IDisposable
             return result;
         }
         finally { probes.Release(); }
+    }
+
+    /// <summary>Extracts one text track to bounded request memory, never to a temporary file or cache.</summary>
+    public async Task<byte[]> ExtractSubtitlesAsync(FfmpegTools tools, OpenMediaFile file, string checkedPath, int index, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(SubtitleTimeout);
+        using var process = Start(tools.Ffmpeg, LiveSubtitles.Arguments(InputPath(file.Stream, checkedPath), index));
+        var errors = ReadTailAsync(process.StandardError);
+        using var stopOnAbort = timeout.Token.Register(() => Kill(process));
+        try
+        {
+            var output = await ReadLimitedAsync(process.StandardOutput.BaseStream, LiveSubtitles.MaximumBytes, timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            if (process.ExitCode == 0 && output.AsSpan().StartsWith("WEBVTT"u8)) return output;
+            LogFailed(logger, "ffmpeg subtitles", process.ExitCode, await errors);
+            throw new PlaybackException("subtitle_conversion_failed", "The server couldn’t read this subtitle track.", StatusCodes.Status422UnprocessableEntity);
+        }
+        catch (InvalidDataException)
+        {
+            throw new PlaybackException("subtitle_too_large", "This subtitle track is too large to open in a browser.", StatusCodes.Status422UnprocessableEntity);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new PlaybackException("subtitle_conversion_failed", "The server couldn’t read this subtitle track in time.", StatusCodes.Status422UnprocessableEntity);
+        }
+        finally { Stop(process); }
+    }
+
+    /// <summary>Reads at most the configured byte limit, including output from untrusted media metadata.</summary>
+    public static async Task<byte[]> ReadLimitedAsync(Stream stream, int maximumBytes, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
+        using var output = new MemoryStream();
+        var buffer = new byte[16 * 1024];
+        int read;
+        while ((read = await stream.ReadAsync(buffer, cancellationToken)) > 0)
+        {
+            if (read > maximumBytes - output.Length) throw new InvalidDataException("The converter output exceeds its byte limit.");
+            output.Write(buffer, 0, read);
+        }
+        return output.ToArray();
     }
 
     /// <summary>
