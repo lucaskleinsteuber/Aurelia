@@ -21,6 +21,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (approval) headers["X-Aurelia-Approval"] = approval;
     let response;
+    let text;
     try {
       response = await fetchImpl(path, {
         method,
@@ -31,17 +32,17 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
         signal,
         keepalive,
       });
+      if (response.status !== 204 && response.status !== 304) text = await response.text();
     } catch (error) {
       if (error?.name === "AbortError") throw error;
       throw new ApiError(0, "offline", "The server isn’t answering.");
     }
     if (response.status === 204 || response.status === 304) return null;
-    const text = await response.text();
     let value = null;
     try {
       value = text ? JSON.parse(text) : null;
     } catch {
-      value = null;
+      if (response.ok) throw new ApiError(response.status, "invalid_response", "The server returned an unreadable answer. Try again.");
     }
     if (!response.ok) {
       throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
@@ -52,15 +53,16 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
   const id = (value) => encodeURIComponent(value);
 
   /**
-   * A server change that needs the owner's approval: while server management is unlocked, the
+   * A guarded server change: while server management is unlocked, the
    * server issues a one-time approval for exactly this method, address and body.
    */
-  async function approved(path, { method = "POST", body } = {}) {
+  async function approved(path, { method = "POST", body, signal } = {}) {
     const text = body === undefined ? "" : JSON.stringify(body);
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     const payloadHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-    const grant = await request("/api/v1/server/approval", { method: "POST", body: { action: `${method} ${path}`, payloadHash } });
-    return request(path, { method, body: body === undefined ? undefined : text, approval: grant.token });
+    const grant = await request("/api/v1/management/approval", { method: "POST", body: { action: `${method} ${path}`, payloadHash }, signal });
+    if (!grant?.token) throw new ApiError(200, "invalid_response", "The server did not authorize this change. Try again.");
+    return request(path, { method, body: body === undefined ? undefined : text, approval: grant.token, signal });
   }
 
   return {
@@ -99,20 +101,31 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     approved,
     unlockManagement: (password) => request("/api/v1/management/unlock", { method: "POST", body: { password } }),
     lockManagement: () => request("/api/v1/management/lock", { method: "POST" }),
-    serverStatus: () => request("/api/v1/server/status"),
-    serverUpdates: () => request("/api/v1/server/updates"),
+    serverStatus: (options = {}) => request("/api/v1/server/status", options),
+    serverUpdates: (options = {}) => request("/api/v1/server/updates", options),
     checkForUpdates: () => request("/api/v1/server/updates/check", { method: "POST" }),
-    serverPower: () => request("/api/v1/server/power"),
+    serverPower: (options = {}) => request("/api/v1/server/power", options),
     saveServerPower: (body) => request("/api/v1/server/power", { method: "PUT", body }),
-    serverUsers: () => request("/api/v1/server/users"),
-    serverBackups: () => request("/api/v1/server/backups"),
-    libraries: () => request("/api/v1/libraries"),
+    serverUsers: (options = {}) => request("/api/v1/server/users", options),
+    serverBackups: (options = {}) => request("/api/v1/server/backups", options),
+    libraries: (options = {}) => request("/api/v1/libraries", options),
+    addLibrary: (body, options = {}) => approved("/api/v1/libraries", { ...options, body }),
+    removeLibrary: (libraryId, options = {}) => approved(`/api/v1/libraries/${id(libraryId)}`, { ...options, method: "DELETE" }),
+    libraryOperation: (operationId, options = {}) => request(`/api/v1/library-operations/${id(operationId)}`, options),
+    profileEditor: (userId, options = {}) => request(`/api/v1/users/${id(userId)}/profile`, options),
+    createProfile: (body, options = {}) => approved("/api/v1/users", { ...options, body }),
+    updateProfile: (userId, body, options = {}) => approved(`/api/v1/users/${id(userId)}/profile`, { ...options, method: "PUT", body }),
+    mediaEditor: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/editor`, options),
+    saveMediaEditor: (mediaId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/editor`, { ...options, method: "PUT", body }),
+    metadataSearch: (mediaId, query, options = {}) => request(`/api/v1/media/${id(mediaId)}/metadata/search?${new URLSearchParams({ query })}`, options),
+    selectMetadataMatch: (mediaId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/metadata/match`, { ...options, method: "PUT", body }),
+    clearMetadataMatch: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/metadata/match`, { ...options, method: "DELETE" }),
     scanLibrary: (libraryId) => request(`/api/v1/libraries/${id(libraryId)}/scans`, { method: "POST" }),
     scanAllLibraries: () => request("/api/v1/libraries/scans", { method: "POST" }),
     setLibraryMonitoring: (libraryId, enabled) => request(`/api/v1/libraries/${id(libraryId)}/monitoring`, { method: "PUT", body: { enabled } }),
-    metadataJobs: () => request("/api/v1/metadata/jobs"),
+    metadataJobs: (options = {}) => request("/api/v1/metadata/jobs", options),
     startMetadataJob: (body) => request("/api/v1/metadata/jobs", { method: "POST", body }),
-    devices: () => request("/api/v1/auth/sessions"),
+    devices: (options = {}) => request("/api/v1/auth/sessions", options),
     changes: (after, generation, signal) =>
       request(`/api/v1/sync/changes?${new URLSearchParams(generation ? { after, waitSeconds: 25, generation } : { after, waitSeconds: 25 })}`, { signal }),
   };

@@ -48,6 +48,7 @@ function showConnecting() {
 }
 
 function showServerOff() {
+  settings.closeEditors();
   stopSync();
   const name = state.server?.name ?? "The server";
   render(screenFrame(h("div", { class: "center-stack narrow" },
@@ -80,6 +81,7 @@ function render(element) {
 // MARK: Pairing
 
 async function showPairing(note) {
+  settings.closeEditors();
   stopSync();
   document.title = "Aurelia";
   const token = ++state.renderToken;
@@ -164,6 +166,7 @@ async function showPairing(note) {
 // MARK: Profiles
 
 async function showProfiles(note) {
+  settings.closeEditors();
   stopSync();
   closePlayer();
   state.profile = null;
@@ -307,6 +310,7 @@ function confirmSignOut() {
 }
 
 async function signOut() {
+  settings.closeEditors();
   stopSync();
   closePlayer();
   try {
@@ -319,6 +323,7 @@ async function signOut() {
 }
 
 async function switchProfile() {
+  settings.closeEditors();
   stopSync();
   closePlayer();
   try {
@@ -331,6 +336,7 @@ async function switchProfile() {
 
 /** A profile request was refused: the profile session ended, or the whole browser was signed out. */
 async function sessionEnded() {
+  settings.closeEditors();
   stopSync();
   closePlayer();
   state.profile = null;
@@ -358,6 +364,7 @@ function handleError(error) {
 // MARK: Navigation
 
 function navigate(route, { replace = false } = {}) {
+  settings.closeEditors();
   const path = logic.routePath(route);
   if (replace) history.replaceState(null, "", path);
   else if (path !== location.pathname + location.search) history.pushState(null, "", path);
@@ -367,6 +374,7 @@ function navigate(route, { replace = false } = {}) {
 }
 
 window.addEventListener("popstate", () => {
+  settings.closeEditors();
   if (!state.profile) return;
   closePlayer();
   state.route = logic.parseRoute(location.pathname, location.search);
@@ -736,7 +744,10 @@ async function titleScreen(id) {
   const moreButton = h("button", { class: "player-round glass detail-more", "aria-label": "More Actions", "aria-haspopup": "menu" }, icon("more", { size: 20 }));
   moreButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    openMenu(moreButton, watchMenu(item, item.kind === "series" ? "series" : "title"));
+    const actions = watchMenu(item, item.kind === "series" ? "series" : "title");
+    if (logic.managementPermissions(state.profile).administrator)
+      actions.push(h("button", { class: "menu-item", onclick: () => settings.editMetadata(item) }, "Edit Metadata…"));
+    openMenu(moreButton, actions);
   });
 
   const stars = logic.starring(metadata.credits);

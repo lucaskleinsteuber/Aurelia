@@ -8,6 +8,138 @@ export function isPin(text) {
 
 export const PIN_INCORRECT = "The PIN is incorrect.";
 
+/** Matches the server's owner-only settings and full-library storage policy. */
+export function managementPermissions(profile) {
+  const owner = profile?.role === "owner";
+  const administrator = owner || profile?.role === "admin";
+  return { owner, administrator, storage: administrator && (owner || profile.accessMode !== "selectedTitles") };
+}
+
+/** A management check that administrators are allowed to make, before optional owner sections. */
+export async function loadManagementSections(api, profile, { signal } = {}) {
+  const permissions = managementPermissions(profile);
+  if (!permissions.administrator) throw new Error("Only the server's owner and administrators manage it.");
+  const jobs = await api.metadataJobs({ signal });
+  const sections = { jobs, libraries: [], devices: [], users: [], backups: [], issues: [] };
+  const readers = { devices: () => api.devices({ signal }) };
+  if (permissions.storage) readers.libraries = () => api.libraries({ signal });
+  if (permissions.owner) Object.assign(readers, {
+    status: () => api.serverStatus({ signal }), updates: () => api.serverUpdates({ signal }),
+    users: () => api.serverUsers({ signal }), power: () => api.serverPower({ signal }), backups: () => api.serverBackups({ signal }),
+  });
+  await Promise.all(Object.entries(readers).map(async ([name, read]) => {
+    try { sections[name] = await read(); }
+    catch (error) {
+      if (error?.name === "AbortError" || error?.status === 401 || error?.code === "management_locked") throw error;
+      sections.issues.push({ section: name, message: error.message ?? "This section could not be loaded." });
+    }
+  }));
+  return sections;
+}
+
+export function libraryPayload({ name = "", path = "", kind = "automatic" }) {
+  // Filesystem existence, permissions, symlinks and overlap are checked by the server.
+  if (!path || path.includes("\0") || !(/^(\/|[a-z]:[\\/]|\\\\)/i.test(path)))
+    throw new Error("Enter an absolute folder path on the server.");
+  if (!["automatic", "movies", "tvShows"].includes(kind)) throw new Error("Choose a valid storage type.");
+  if (name.trim().length > 128 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("Use a storage location name of up to 128 visible characters.");
+  return { name: name.trim() || null, path, kind, combineExisting: false, requireImportPreview: false };
+}
+
+function abortableDelay(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    const abort = () => { clearTimeout(timer); reject(new DOMException("Cancelled", "AbortError")); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, milliseconds);
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+/** Removing a large location is asynchronous. Never report it removed on a mere 202 response. */
+export async function waitForLibraryOperation(api, operation, { signal, onProgress = () => {}, wait = abortableDelay, attempts = 300 } = {}) {
+  if (!operation) return null; // 204 means completed synchronously.
+  for (let attempt = 0; attempt <= attempts; attempt += 1) {
+    if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+    if (operation.state === "completed") return operation;
+    if (["failed", "cancelled", "interrupted"].includes(operation.state)) throw new Error(operation.error || "The storage location could not be removed.");
+    if (!operation.id || attempt === attempts) throw new Error("Removal is still running on the server. Refresh Storage Locations to check its progress.");
+    onProgress(operation);
+    await wait(1000, signal);
+    operation = await api.libraryOperation(operation.id, { signal });
+  }
+}
+
+/** The profile editor saves role, PIN, enablement and access together against its revision. */
+export function profilePayload(snapshot, draft) {
+  const creating = !snapshot;
+  const role = draft.role;
+  if (!["owner", "admin", "user"].includes(role)) throw new Error("Choose a valid profile role.");
+  const pinProtectionEnabled = role !== "user" || Boolean(draft.pinProtectionEnabled);
+  const pin = String(draft.pin ?? "");
+  const confirmation = String(draft.pinConfirmation ?? "");
+  const existingPIN = snapshot?.user.pinProtectionEnabled && !snapshot.user.needsPinSetup;
+  if (pinProtectionEnabled && ((pin || confirmation) ? !isPin(pin) || pin !== confirmation : !existingPIN))
+    throw new Error("Enter a matching PIN of 4–8 digits in both fields.");
+  const accessMode = role === "owner" ? "entireLibrary" : draft.accessMode;
+  if (!["entireLibrary", "selectedTitles", "legacyLibraries"].includes(accessMode)
+    || (accessMode === "legacyLibraries" && (creating || snapshot.access.mode !== "legacyLibraries")))
+    throw new Error("Choose a valid content access mode.");
+  const titleIds = accessMode === "selectedTitles" ? [...new Set(draft.titleIds ?? [])].sort() : [];
+  const body = { role, isEnabled: Boolean(draft.isEnabled), pinProtectionEnabled, ...(pinProtectionEnabled && pin ? { pin } : {}) };
+  if (creating) {
+    const username = String(draft.username ?? "").trim();
+    if (username.length < 3 || username.length > 64) throw new Error("Use a profile name of 3–64 characters.");
+    return { ...body, username, accessMode, titleIds };
+  }
+  const sameTitles = JSON.stringify(titleIds) === JSON.stringify([...(snapshot.access.titleIds ?? [])].sort());
+  if (accessMode !== snapshot.access.mode || (accessMode === "selectedTitles" && !sameTitles)) Object.assign(body, { accessMode, titleIds });
+  return { revision: snapshot.revision, ...body };
+}
+
+const EDITOR_PROPERTIES = { title: "title", releaseYear: "releaseYear", overview: "overview", runtimeMinutes: "runtimeMinutes", fsk: "fskAge", genres: "genres", studios: "studios", country: "country" };
+
+function editorNumber(value, label, minimum, maximum) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  if (!/^\d+$/.test(text) || Number(text) < minimum || Number(text) > maximum) throw new Error(`Check ${label}.`);
+  return Number(text);
+}
+
+function editorList(value) {
+  const list = Array.isArray(value) ? value : String(value ?? "").split(/\r?\n/);
+  const entries = [...new Set(list.map((entry) => entry.trim()).filter(Boolean))];
+  if (entries.length > 50 || entries.some((entry) => entry.length > 128)) throw new Error("Use up to 50 entries, each at most 128 characters.");
+  return entries;
+}
+
+/** Edits only named fields. Hidden credits, artwork and pre-existing overrides remain intact. */
+export function metadataPayload(document, changes = {}, automatic = []) {
+  const values = structuredClone(document.values);
+  const overrides = new Set(document.overrideFields ?? []);
+  for (const field of automatic) {
+    if (!EDITOR_PROPERTIES[field]) throw new Error("Unknown metadata field.");
+    values[EDITOR_PROPERTIES[field]] = structuredClone(document.automaticValues[EDITOR_PROPERTIES[field]]);
+    overrides.delete(field);
+  }
+  for (const [field, raw] of Object.entries(changes)) {
+    const property = EDITOR_PROPERTIES[field];
+    if (!property) throw new Error("Unknown metadata field.");
+    let value = raw;
+    if (field === "releaseYear") value = editorNumber(raw, "the release year (1800–3000)", 1800, 3000);
+    else if (field === "runtimeMinutes") value = document.kind === "movie" ? editorNumber(raw, "the runtime (1–14400 minutes)", 1, 14400) : null;
+    else if (field === "fsk") {
+      value = editorNumber(raw, "the FSK age", 0, 18);
+      if (value !== null && ![0, 6, 12, 16, 18].includes(value)) throw new Error("Choose a valid FSK age.");
+    } else if (field === "genres" || field === "studios") value = editorList(raw);
+    else value = String(raw ?? "").trim();
+    values[property] = value;
+    overrides.add(field);
+  }
+  if (!values.title?.trim() || values.title.length > 512) throw new Error("Enter a title of 1–512 characters.");
+  if ((values.overview?.length ?? 0) > 8192 || (values.country?.length ?? 0) > 128) throw new Error("Use a shorter description or country name.");
+  return { revision: document.revision, values, overrideFields: [...overrides].sort() };
+}
+
 /** A readable name for the Mac's device list, such as "Safari on iPhone". */
 export function deviceName(userAgent = "", maxTouchPoints = 0) {
   const agent = String(userAgent);

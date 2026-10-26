@@ -5,8 +5,9 @@
 
 import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
-import { PLAYBACK_DEFAULTS, PLAYBACK_RATES, rateLabel } from "./logic.js";
+import { PLAYBACK_DEFAULTS, PLAYBACK_RATES, loadManagementSections, managementPermissions, rateLabel } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
+import { createManagementEditors } from "./settings-editors.js";
 
 const PAGES = [
   ["general", "General", "gear"],
@@ -21,6 +22,7 @@ const PAGES = [
 export function createSettings(app) {
   const { api, state } = app;
   const canManage = () => state.profile?.role === "owner" || state.profile?.role === "admin";
+  const editors = createManagementEditors({ ...app, onSaved: () => app.navigate(state.route, { replace: true }) });
 
   async function settingsScreen(route) {
     const page = route.page === "server" && !canManage() ? "general" : route.page;
@@ -138,31 +140,28 @@ export function createSettings(app) {
   // MARK: Server
 
   async function serverPage() {
-    let status;
+    const permissions = managementPermissions(state.profile);
+    const profileID = state.profile.id;
+    let sections;
     try {
-      status = await api.serverStatus();
+      sections = await loadManagementSections(api, state.profile);
     } catch (error) {
       if (error instanceof ApiError && (error.code === "management_locked" || error.status === 403)) return unlockPage(error.code === "management_locked");
       throw error;
     }
-    const [updates, libraries, jobs, users, devices, power, backups] = await Promise.all([
-      api.serverUpdates().catch(() => null),
-      api.libraries().catch(() => []),
-      api.metadataJobs().catch(() => []),
-      api.serverUsers().catch(() => []),
-      api.devices().catch(() => []),
-      api.serverPower().catch(() => null),
-      api.serverBackups().catch(() => []),
-    ]);
+    const { status, updates, libraries, jobs, users, devices, power, backups, issues } = sections;
     const refresh = () => app.navigate({ name: "settings", page: "server" }, { replace: true });
     const act = async (button, work, done) => {
       button.disabled = true;
       try {
         await work();
+        if (profileID !== state.profile?.id || !button.isConnected) return;
         if (done) app.toast(done);
         refresh();
       } catch (error) {
+        if (profileID !== state.profile?.id || !button.isConnected) return;
         button.disabled = false;
+        if (error.code === "management_locked") return refresh();
         if (!app.handleError(error)) app.toast(error.message);
       }
     };
@@ -172,16 +171,17 @@ export function createSettings(app) {
       element.addEventListener("click", () => act(element, work, done));
       return element;
     };
+    const openButton = (label, action, kind = "secondary-button") => h("button", { type: "button", class: kind, onclick: action }, label);
 
     return h("div", { class: "settings-stack" },
-      section("Your Server", "library", null,
+      section("Your Server", "library", permissions.owner ? null : "Server management is unlocked. Administrators manage their allowed content.",
         row("Name", value(state.server?.name ?? "Aurelia")),
-        row("Status", value(status.readiness?.state === "ready" || status.state === "ok" ? "Running" : capitalize(status.readiness?.state ?? status.state))),
-        row("Version", value(status.version)),
-        row("Running For", value(duration(status.uptimeSeconds))),
-        row("Playing Now", value(`${status.activeStreams} stream${status.activeStreams === 1 ? "" : "s"}`)),
-        row("Free Disk Space", value(status.freeDiskBytes != null ? bytes(status.freeDiskBytes) : "—")),
+        status ? [row("Status", value(status.readiness?.state === "ready" || status.state === "ok" ? "Running" : capitalize(status.readiness?.state ?? status.state))),
+          row("Version", value(status.version)), row("Running For", value(duration(status.uptimeSeconds))),
+          row("Playing Now", value(`${status.activeStreams} stream${status.activeStreams === 1 ? "" : "s"}`)),
+          row("Free Disk Space", value(status.freeDiskBytes != null ? bytes(status.freeDiskBytes) : "—"))] : row("Version", value(state.server?.version)),
         h("div", { class: "button-row" }, button("Lock Server Management", () => api.lockManagement(), "Server management is locked."))),
+      issues.length ? h("p", { class: "error-text", role: "status" }, issues.map((issue) => `${capitalize(issue.section)}: ${issue.message}`).join(" ")) : null,
 
       updates?.available ? section("Updates", "power", null,
         row("Installed", value(updates.installed)),
@@ -191,7 +191,7 @@ export function createSettings(app) {
           button("Check for Updates", () => api.checkForUpdates(), "Checking for updates…"),
           updates.updateAvailable ? button(`Install ${updates.newest}`, () => api.approved("/api/v1/server/updates/install"), "The server installs the update and restarts.", "primary-button") : null)) : null,
 
-      section("Storage Locations", "library", "Aurelia only reads your media; scans never change files.",
+      permissions.storage ? section("Storage Locations", "library", "Aurelia only reads your media; scans never change files.",
         libraries.length ? libraries.map((library) => h("div", { class: "settings-card" },
           h("div", { class: "settings-card-main" },
             h("div", { class: "settings-card-title" }, library.name),
@@ -208,33 +208,38 @@ export function createSettings(app) {
                 if (!app.handleError(error)) app.toast(error.message);
               }
             }, `Watch ${library.name} for changes`), "Watch for Changes"),
-            button("Scan Now", () => api.scanLibrary(library.id), `Scanning ${library.name}…`)))) : h("p", { class: "muted" }, "No storage locations yet. Add one in Aurelia on the Mac."),
-        libraries.length > 1 ? h("div", { class: "button-row" }, button("Scan All", () => api.scanAllLibraries(), "Scanning all storage locations…")) : null),
+            button("Scan Now", () => api.scanLibrary(library.id), `Scanning ${library.name}…`),
+            permissions.owner ? openButton("Remove…", () => editors.removeStorage(library), "secondary-button danger") : null))) : h("p", { class: "muted" }, "No storage locations yet."),
+        h("div", { class: "button-row" }, permissions.owner ? openButton("Add Storage Location…", () => editors.addStorage()) : null,
+          libraries.length > 1 ? button("Scan All", () => api.scanAllLibraries(), "Scanning all storage locations…") : null))
+        : section("Storage Locations", "library", "Storage management requires full library access. This administrator profile is limited to selected titles."),
 
       section("Movie Info", "star", "Titles, artwork and episode details from The Movie Database.",
         jobs.slice(0, 3).map((job) => row(`${capitalize(job.mode)} · ${new Date(job.createdAt).toLocaleString()}`,
           value(`${capitalize(job.state)} · ${job.itemsProcessed}/${job.itemsTotal}${job.itemsNeedingReview ? ` · ${job.itemsNeedingReview} to review` : ""}`))),
         h("div", { class: "button-row" },
+          openButton("Edit Metadata…", () => editors.metadataPicker()),
           button("Find Missing Info", () => api.startMetadataJob({ mode: "incremental" }), "Looking up missing movie info…"),
           state.profile.role === "owner" ? button("Refresh All Info", () => api.startMetadataJob({ mode: "fullRefresh" }), "Refreshing all movie info…") : null)),
 
-      users.length ? section("Profiles", "lock", "Add or edit profiles in Aurelia on the Mac.",
+      permissions.owner ? section("Profiles", "lock", "Choose who can watch and what they can see.",
         users.map((entry) => row(h("span", { class: "inline-control" }, app.profilePicture(entry.user.id, entry.user.username), entry.user.username),
-          value(`${roleTitle(entry.user.role)}${entry.isEnabled ? "" : " · Disabled"}`)))) : null,
+          h("div", { class: "inline-control" }, value(`${roleTitle(entry.user.role)}${entry.isEnabled ? "" : " · Disabled"}`), openButton("Edit…", () => editors.editProfile(entry))))),
+        h("div", { class: "button-row" }, openButton("Create Profile…", () => editors.editProfile()))) : null,
 
       section("Signed-In Devices", "lock", "Devices and browsers signed in to this account.",
         (devices ?? []).filter((device) => !device.revokedAt).map((device) => h("div", { class: "settings-card" },
           h("div", { class: "settings-card-main" },
             h("div", { class: "settings-card-title" }, device.deviceName, device.isCurrent ? h("span", { class: "tag" }, "This Browser") : null),
             h("div", { class: "muted small" }, `Last used ${new Date(device.lastSeenAt).toLocaleString()}`)),
-          device.isCurrent ? null : h("div", { class: "settings-card-actions" },
+          device.isCurrent || !permissions.owner ? null : h("div", { class: "settings-card-actions" },
             button("Sign Out", () => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }), `${device.deviceName} is signed out.`))))),
 
       power?.available ? powerSection(power, act) : null,
 
-      section("Backups", "library", "The server backs up its database every day.",
+      permissions.owner ? section("Backups", "library", "The server backs up its database every day.",
         (backups ?? []).slice(0, 3).map((backup) => row(new Date(backup.createdAt).toLocaleString(), value(`${capitalize(backup.kind)} · ${bytes(backup.bytes)}`))),
-        h("div", { class: "button-row" }, button("Back Up Now", () => api.approved("/api/v1/server/backups/database"), "Backup created."))));
+        h("div", { class: "button-row" }, button("Back Up Now", () => api.approved("/api/v1/server/backups/database"), "Backup created."))) : null);
   }
 
   function powerSection(power, act) {
@@ -280,7 +285,7 @@ export function createSettings(app) {
         form, message));
   }
 
-  return { settingsScreen };
+  return { settingsScreen, editMetadata: editors.editMetadata, closeEditors: editors.close };
 }
 
 function roleTitle(role) {

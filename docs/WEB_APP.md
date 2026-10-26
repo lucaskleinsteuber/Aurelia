@@ -120,11 +120,32 @@ cast and crew, and its information, like the Mac's.
   playing the next episode, keeping the screen on, Night Mode, default speed and volume,
   how long controls stay and the seek interval.
 - **Server** (owners and administrators): unlocked with the Server Password for ten minutes,
-  as on the Mac; the browser doesn't keep the password. It shows the server's status and
-  updates, scans storage locations, looks for missing movie info, lists profiles and
-  signed-in devices (with Sign Out), sets the Linux server's power behavior and makes a
-  backup. Every change the server guards gets a one-time approval for exactly that change.
-  Adding storage locations, editing profiles and editing metadata stay in the Mac app.
+  as on the Mac; the browser doesn't keep the password or ask again while management is
+  unlocked. Owners add storage locations using an absolute folder path on the server,
+  remove locations after confirmation and manage profiles. Location removal waits for the
+  server's operation to complete; media files are never changed. Full-library administrators
+  can rescan locations and change monitoring; selected-title administrators manage only their
+  allowed titles. Owner-only status, updates, profile editing, device revocation, power and
+  backups keep the same server permissions.
+
+Profile forms use the Mac's role, enabled state, PIN protection and content access controls.
+PINs require matching 4–8 digit fields; leaving both empty preserves an existing PIN. Selected
+Titles uses a searchable list of films and series, and existing storage grants stay unchanged
+unless the owner changes the access mode. Saves use the profile's revision and one approval
+for the complete change.
+
+**Edit Metadata** is available from a title's More Actions menu and from Server › Movie Info.
+General and Production & Release fields match the Mac: title, release year, FSK, movie runtime,
+description, genres, studios and country. Manual changes survive scans and provider refreshes;
+Reset to Automatic removes the selected override. Existing cast, artwork and file associations
+are preserved. Provider matching can be searched, selected or cleared. The editor uses the
+server's revision; a conflict keeps the draft open until the user chooses to reload. Artwork,
+cast and source-file editing remain available in the Mac app.
+
+Every guarded change gets a one-time approval for exactly its method, address and serialized
+body. If the management window expires while editing, the browser keeps the draft and offers
+an inline unlock. Switching profiles or navigating away closes editors and cancels outstanding
+reads; closing an editor with unsaved changes asks before discarding them.
 
 ## How it is built
 
@@ -135,7 +156,8 @@ cast and crew, and its information, like the Mac's.
   images and media (plus `blob:` media for its own MediaSource).
 - `js/live.js` is the live player (Media Source Extensions, no library); the server side is
   described under [live conversion](CLIENT_PROTOCOL.md#live-conversion).
-- `js/player.js` is the player, `js/settings.js` the settings pages.
+- `js/player.js` is the player, `js/settings.js` the settings pages, and `js/settings-editors.js`
+  the storage, profile and metadata forms.
 - `js/logic.js`, `js/live-logic.js` and `js/api.js` hold the rules that need no page. They
   are tested with:
 

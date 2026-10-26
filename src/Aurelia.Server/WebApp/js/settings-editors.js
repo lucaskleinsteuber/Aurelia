@@ -1,0 +1,342 @@
+// Native browser forms for the same server operations as the Mac settings. Credentials stay
+// in HttpOnly cookies; an expired management window asks once, without discarding the draft.
+import { h, clear } from "./dom.js";
+import { loadAllPages } from "./api.js";
+import { libraryPayload, managementPermissions, metadataPayload, profilePayload, waitForLibraryOperation } from "./logic.js";
+
+const input = (value = "", attributes = {}) => h("input", { class: "text-field", value: String(value ?? ""), ...attributes });
+const field = (title, control, note) => h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, title), control,
+  note ? h("span", { class: "muted small" }, note) : null);
+const choice = (options, current) => h("select", { class: "select" }, options.map(([value, label]) => h("option", { value, selected: value === current }, label)));
+const button = (title, action, kind = "secondary-button") => h("button", { type: "button", class: kind, onclick: action }, title);
+
+export function createManagementEditors(app) {
+  const { api, state } = app;
+  const dialogs = new Set();
+
+  function editor(title, saveLabel, onSave) {
+    const profileID = state.profile?.id;
+    const controller = new AbortController();
+    const body = h("div", { class: "editor-body" });
+    const message = h("p", { class: "error-text editor-message", role: "alert" });
+    const unlock = h("div", { class: "editor-unlock" });
+    const discard = h("div", { class: "button-row", hidden: true });
+    const cancel = button(saveLabel ? "Cancel" : "Close", requestClose);
+    const save = h("button", { type: "submit", class: "primary-button", disabled: true }, saveLabel);
+    const form = h("form", { class: "editor-form" }, body, message, unlock, discard,
+      h("div", { class: "button-row end editor-actions" }, cancel, saveLabel ? save : null));
+    const dialog = h("dialog", { class: "sheet settings-editor", "aria-label": title }, h("h2", {}, title), form);
+    let busy = false;
+    let canCancel = true;
+    let dirty = false;
+    let ready = false;
+    const alive = () => !controller.signal.aborted && profileID === state.profile?.id && dialog.isConnected;
+    const finish = () => { dialog.close(); app.onSaved?.(); };
+    const setBusy = (value, cancellable = true) => {
+      busy = value;
+      canCancel = !value || cancellable;
+      save.disabled = value || !ready;
+      cancel.disabled = value && !cancellable;
+      form.setAttribute("aria-busy", String(value));
+      for (const control of body.querySelectorAll("input, select, textarea, button")) {
+        if (value) control.dataset.wasDisabled = String(control.disabled);
+        if (value || control.dataset.wasDisabled !== undefined) control.disabled = value || control.dataset.wasDisabled === "true";
+        if (!value) delete control.dataset.wasDisabled;
+      }
+    };
+    function requestClose() {
+      if (busy && !canCancel) return;
+      if (!dirty) return dialog.close();
+      message.textContent = "Discard unsaved changes?";
+      clear(discard);
+      discard.hidden = false;
+      discard.append(button("Keep Editing", () => { discard.hidden = true; message.textContent = ""; }),
+        button("Discard", () => dialog.close(), "danger-button"));
+    }
+    function showUnlock(retry) {
+      clear(unlock);
+      const password = input("", { type: "password", autocomplete: "current-password", "aria-label": "Server Password" });
+      const submit = button("Unlock", async () => {
+        if (!password.value || !alive()) return;
+        submit.disabled = true;
+        try {
+          await api.unlockManagement(password.value);
+          password.value = "";
+          if (!alive()) return;
+          clear(unlock);
+          message.textContent = "";
+          await retry();
+        } catch (error) {
+          password.value = "";
+          if (!alive()) return;
+          submit.disabled = false;
+          message.textContent = error.code === "invalid_credentials" ? "The Server Password is incorrect." : error.message;
+          password.focus();
+        }
+      }, "primary-button");
+      password.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); submit.click(); } });
+      unlock.append(h("p", { class: "muted small" }, "Unlock Server Management to continue. Your draft stays open."),
+        field("Server Password", password), submit);
+      password.focus();
+    }
+    async function run(work, { complete = false, cancellable = !complete } = {}) {
+      if (!alive() || busy) return;
+      setBusy(true, cancellable);
+      message.textContent = "";
+      try {
+        await work();
+        if (alive() && complete) finish();
+      } catch (error) {
+        if (!alive() || error?.name === "AbortError") return;
+        if (error.code === "management_locked") showUnlock(() => run(work, { complete, cancellable }));
+        else if (error.offline || !app.handleError(error)) message.textContent = error.message;
+      } finally {
+        if (alive()) setBusy(false);
+      }
+    }
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (ready && saveLabel) run(() => onSave(context), { complete: true });
+    });
+    form.addEventListener("input", () => { dirty = true; discard.hidden = true; });
+    form.addEventListener("change", () => { dirty = true; discard.hidden = true; });
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); requestClose(); });
+    dialog.addEventListener("close", () => {
+      controller.abort();
+      for (const secret of form.querySelectorAll("input[type=password]")) secret.value = "";
+      dialogs.delete(dialog);
+      dialog.remove();
+    }, { once: true });
+    dialogs.add(dialog);
+    document.body.append(dialog);
+    dialog.showModal();
+    const context = {
+      body, dialog, signal: controller.signal, alive, run, finish,
+      message: (text) => { if (alive()) message.textContent = text; },
+      ready: () => { ready = true; save.disabled = busy; },
+      clean: () => { dirty = false; },
+    };
+    return context;
+  }
+
+  function addStorage() {
+    if (!managementPermissions(state.profile).owner) return;
+    const name = input("", { maxlength: 128, placeholder: "Optional name" });
+    const path = input("", { required: true, spellcheck: false, placeholder: "/path/on/the/server", autocomplete: "off" });
+    const kind = choice([["automatic", "Automatic"], ["movies", "Movies"], ["tvShows", "TV Shows"]], "automatic");
+    const context = editor("Add Storage Location", "Add Storage Location", async ({ signal }) => {
+      await api.addLibrary(libraryPayload({ name: name.value, path: path.value, kind: kind.value }), { signal });
+      app.toast("Storage location added. Choose Scan Now to read its media.");
+    });
+    context.body.append(field("Name", name), field("Server Folder Path", path, "Enter an existing folder on the server computer. Aurelia validates the folder and only reads your media."),
+      field("Content", kind));
+    context.ready();
+    path.focus();
+  }
+
+  function removeStorage(library) {
+    if (!managementPermissions(state.profile).owner) return;
+    const context = editor("Remove Storage Location", "Remove", async ({ signal, message }) => {
+      const operation = await api.removeLibrary(library.id, { signal });
+      await waitForLibraryOperation(api, operation, { signal, onProgress: () => message("Removing the storage location…") });
+      app.toast("Storage location removed.");
+    });
+    context.body.append(h("p", {}, `Remove “${library.name}” from Aurelia? Its titles, artwork and library state will be removed. Accounts, server settings and media files stay in place.`),
+      h("div", { class: "muted small mono" }, library.path));
+    context.ready();
+  }
+
+  async function profileTitles(signal) {
+    const items = await loadAllPages((parameters) => api.request(`/api/v1/catalog/items?${new URLSearchParams(parameters)}`, { signal }), {});
+    return items.filter((item) => item.kind === "movie" || item.kind === "series").sort((a, b) => a.title.localeCompare(b.title));
+  }
+
+  function editProfile(existing = null) {
+    if (!managementPermissions(state.profile).owner) return;
+    let snapshot = null;
+    let collect;
+    const context = editor(existing ? "Edit Profile" : "Create Profile", existing ? "Save" : "Create Profile", async ({ signal }) => {
+      const body = profilePayload(snapshot, collect());
+      if (existing) await api.updateProfile(existing.user.id, body, { signal });
+      else await api.createProfile(body, { signal });
+      app.toast(existing ? "Profile saved." : "Profile created.");
+    });
+    const load = async () => {
+      const [loaded, titles] = await Promise.all([existing ? api.profileEditor(existing.user.id, { signal: context.signal }) : null, profileTitles(context.signal)]);
+      if (!context.alive()) return;
+      snapshot = loaded;
+      clear(context.body);
+      const user = snapshot?.user;
+      const name = input(user?.username ?? "", { minlength: 3, maxlength: 64, required: true, disabled: Boolean(existing) });
+      const role = choice([["user", "User"], ["admin", "Administrator"], ["owner", "Owner"]], user?.role ?? "user");
+      const enabled = input("", { type: "checkbox", checked: snapshot?.isEnabled ?? true });
+      const protection = input("", { type: "checkbox", checked: user?.pinProtectionEnabled ?? false });
+      const pin = input("", { type: "password", inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: 8, autocomplete: "new-password" });
+      const confirm = input("", { type: "password", inputmode: "numeric", pattern: "[0-9]{4,8}", maxlength: 8, autocomplete: "new-password" });
+      const access = choice([
+        ...(snapshot?.access.mode === "legacyLibraries" ? [["legacyLibraries", "Existing Storage Grants"]] : []),
+        ["entireLibrary", "Entire Library"], ["selectedTitles", "Selected Titles"],
+      ], snapshot?.access.mode ?? "selectedTitles");
+      const selected = new Set(snapshot?.access.titleIds ?? []);
+      const query = input("", { type: "search", placeholder: "Search films and series" });
+      const count = h("span", { class: "muted small" });
+      const list = h("div", { class: "editor-title-list" });
+      const picker = h("div", { class: "editor-title-picker" }, field("Films and Series", query), count, list,
+        h("p", { class: "muted small" }, "A series includes all current and future seasons, episodes, extras and trailers."));
+      const protectionFields = h("div", { class: "editor-grid" }, field(user?.pinProtectionEnabled && !user.needsPinSetup ? "New PIN (optional)" : "PIN (4–8 digits)", pin), field("Confirm PIN", confirm));
+      const accessNote = h("p", { class: "muted small" });
+      const redraw = () => {
+        clear(list);
+        const matches = titles.filter((item) => item.title.toLocaleLowerCase().includes(query.value.toLocaleLowerCase()));
+        count.textContent = `${selected.size} selected${matches.length > 100 ? " · Showing the first 100 matches; refine the search to see more." : ""}`;
+        list.append(...matches.slice(0, 100).map((item) => {
+          const checked = input("", { type: "checkbox", checked: selected.has(item.id) });
+          checked.addEventListener("change", () => { if (checked.checked) selected.add(item.id); else selected.delete(item.id); count.textContent = `${selected.size} selected`; });
+          return h("label", { class: "editor-title-option" }, checked, h("span", {}, item.title), item.year ? h("span", { class: "muted small" }, item.year) : null);
+        }));
+        if (!matches.length) list.append(h("p", { class: "muted small" }, "No matching films or series."));
+      };
+      const update = () => {
+        const privileged = role.value !== "user";
+        if (privileged) protection.checked = true;
+        protection.disabled = privileged;
+        protectionFields.hidden = !protection.checked;
+        if (!protection.checked) { pin.value = ""; confirm.value = ""; }
+        access.disabled = role.value === "owner";
+        if (role.value === "owner") access.value = "entireLibrary";
+        picker.hidden = access.value !== "selectedTitles";
+        accessNote.textContent = access.value === "legacyLibraries" ? "Existing storage grants stay unchanged unless you select another access mode."
+          : access.value === "entireLibrary" ? "Includes all existing titles and titles added later." : "Choose the films and series this profile can watch.";
+      };
+      query.addEventListener("input", redraw);
+      for (const control of [role, protection, access]) control.addEventListener("change", update);
+      context.body.append(field("Name", name), field("Role", role, "Administrators manage their allowed content. Owners manage the whole server."),
+        field("Profile enabled", enabled), h("h3", {}, "PIN Protection"), field("Require a Profile PIN", protection, "Owner and administrator profiles always require a PIN."),
+        protectionFields, h("p", { class: "muted small" }, user?.pinProtectionEnabled && !user.needsPinSetup
+          ? "Leave both PIN fields empty to keep the current PIN. Changing it locks active sessions."
+          : "Use 4–8 digits and enter the same PIN in both fields when protection is enabled."),
+        h("h3", {}, "Content Access"), field("Can watch", access), accessNote, picker);
+      collect = () => ({ username: name.value, role: role.value, isEnabled: enabled.checked, pinProtectionEnabled: protection.checked,
+        pin: pin.value, pinConfirmation: confirm.value, accessMode: access.value, titleIds: [...selected] });
+      redraw(); update(); context.clean(); context.ready();
+    };
+    context.body.append(h("p", { class: "muted" }, "Loading profile…"));
+    context.run(load);
+  }
+
+  function metadataPicker() {
+    if (!managementPermissions(state.profile).administrator) return;
+    const context = editor("Edit Metadata", null);
+    const query = input("", { type: "search", placeholder: "Search your library", "aria-label": "Search your library" });
+    const results = h("div", { class: "editor-title-list" });
+    let generation = 0;
+    let searchController;
+    const search = async () => {
+      const mine = ++generation;
+      searchController?.abort();
+      clear(results);
+      context.message("");
+      if (!query.value.trim()) return;
+      searchController = new AbortController();
+      const current = searchController;
+      const stop = () => current.abort();
+      context.signal.addEventListener("abort", stop, { once: true });
+      try {
+        const page = await api.request(`/api/v1/catalog/search?${new URLSearchParams({ query: query.value.trim(), limit: 100 })}`, { signal: current.signal });
+        if (!context.alive() || mine !== generation) return;
+        for (const item of page.items ?? []) results.append(button(`${item.title}${item.year ? ` (${item.year})` : ""}`, () => { context.dialog.close(); editMetadata(item); }));
+        if (!page.items?.length) results.append(h("p", { class: "muted" }, "No matching titles."));
+      } catch (error) { if (context.alive() && mine === generation && error.name !== "AbortError") context.message(error.message); }
+      finally { context.signal.removeEventListener("abort", stop); }
+    };
+    query.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); search(); } });
+    context.body.append(field("Title", query), button("Search", search), results);
+    query.focus();
+  }
+
+  function editMetadata(item) {
+    if (!managementPermissions(state.profile).administrator) return;
+    let document;
+    const changes = {};
+    const automatic = new Set();
+    const controls = new Map();
+    const context = editor("Edit Metadata", "Save", async ({ signal }) => {
+      await api.saveMediaEditor(item.id, metadataPayload(document, changes, [...automatic]), { signal });
+      app.toast("Metadata saved.");
+    });
+    const load = async () => {
+      const loaded = await api.mediaEditor(item.id, { signal: context.signal });
+      if (!context.alive()) return;
+      document = loaded;
+      for (const key of Object.keys(changes)) delete changes[key];
+      automatic.clear(); controls.clear(); clear(context.body);
+      const makeField = (label, key, property, attributes = {}) => {
+        const value = document.values[property];
+        const list = key === "genres" || key === "studios";
+        const control = key === "overview" || list ? h("textarea", { class: `text-field ${list ? "editor-lines" : "editor-description"}`, maxlength: 8192,
+          ...attributes }, Array.isArray(value) ? value.join("\n") : value ?? "")
+          : key === "fsk" ? choice([["", "Not specified"], ...[0, 6, 12, 16, 18].map((age) => [String(age), `FSK ${age}`])], value == null ? "" : String(value))
+            : input(Array.isArray(value) ? value.join(", ") : value ?? "", attributes);
+        controls.set(key, { control, property });
+        const changed = () => { changes[key] = list ? control.value.split("\n") : control.value; automatic.delete(key); };
+        control.addEventListener("input", changed);
+        control.addEventListener("change", changed);
+        const reset = button("Reset to Automatic", () => {
+          automatic.add(key); delete changes[key];
+          const resetValue = document.automaticValues[property];
+          control.value = Array.isArray(resetValue) ? resetValue.join("\n") : resetValue ?? "";
+          control.dispatchEvent(new Event("change", { bubbles: true }));
+          delete changes[key]; automatic.add(key);
+        });
+        return h("div", { class: "editor-metadata-field" }, field(label, control), reset);
+      };
+      const general = h("section", { class: "editor-section" }, h("h3", {}, "General"), makeField("Title", "title", "title", { required: true, maxlength: 512 }),
+        h("div", { class: "editor-grid" }, makeField("Release Year", "releaseYear", "releaseYear", { inputmode: "numeric", placeholder: "Not specified" }), makeField("FSK", "fsk", "fskAge")),
+        document.kind === "movie" ? makeField("Runtime in Minutes", "runtimeMinutes", "runtimeMinutes", { inputmode: "numeric", placeholder: "Not specified" }) : null,
+        makeField("Description", "overview", "overview"), makeField("Genres", "genres", "genres", { placeholder: "One genre per line" }));
+      const production = h("section", { class: "editor-section" }, h("h3", {}, "Production & Release"), makeField("Studios", "studios", "studios", { placeholder: "One studio per line" }),
+        makeField("Country of Origin", "country", "country", { maxlength: 128 }), h("p", { class: "muted small" }, "Choose one country. Foreign content ratings are not automatically converted to FSK."));
+      const reload = button("Reload", () => {
+        // Reload is explicit: keep a conflict draft until the user chooses to discard it.
+        const confirm = button("Discard Draft and Reload", () => context.run(load), "danger-button");
+        reload.replaceWith(confirm);
+      });
+      context.body.append(h("p", { class: "muted small" }, "Manual changes survive scans and provider refreshes. Existing artwork, cast and file associations are preserved."),
+        general, production, matchingSection(item, context, load), reload);
+      context.clean(); context.ready();
+    };
+    context.body.append(h("p", { class: "muted" }, "Loading editor…"));
+    context.run(load);
+  }
+
+  function matchingSection(item, context, reload) {
+    const query = input(item.title, { type: "search", "aria-label": "Find Movie Info" });
+    const results = h("div", { class: "editor-match-list" });
+    const search = () => context.run(async () => {
+      const candidates = await api.metadataSearch(item.id, query.value.trim(), { signal: context.signal });
+      if (!context.alive()) return;
+      clear(results);
+      for (const candidate of candidates ?? []) results.append(h("div", { class: "settings-card" },
+        h("div", { class: "settings-card-main" }, h("strong", {}, candidate.title), h("span", { class: "muted small" }, [candidate.year, candidate.mediaType].filter(Boolean).join(" · "))),
+        button("Use Match", () => {
+          clear(results);
+          results.append(h("p", {}, "Use this match? Unsaved edits in this form will be discarded. Saved manual overrides stay in place."), button("Use Match and Reload", () => context.run(async () => {
+            await api.selectMetadataMatch(item.id, { providerMediaId: candidate.providerMediaId, mediaType: candidate.mediaType }, { signal: context.signal });
+            await reload();
+          }, { cancellable: false })));
+        })));
+      if (!candidates?.length) results.append(h("p", { class: "muted small" }, "No matching movie info."));
+    });
+    query.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); search(); } });
+    const remove = button("Clear Match", () => {
+      clear(results);
+      results.append(h("p", {}, "Clear the provider match? Unsaved edits in this form will be discarded. Saved manual overrides stay in place."), button("Clear Match and Reload", () => context.run(async () => {
+        await api.clearMetadataMatch(item.id, { signal: context.signal });
+        await reload();
+      }, { cancellable: false }), "danger-button"));
+    });
+    return h("details", { class: "editor-section" }, h("summary", {}, "Find Movie Info"), field("Title", query), h("div", { class: "button-row" }, button("Search", search), remove), results);
+  }
+
+  return { addStorage, removeStorage, editProfile, editMetadata, metadataPicker, close: () => { for (const dialog of [...dialogs]) dialog.close(); } };
+}
