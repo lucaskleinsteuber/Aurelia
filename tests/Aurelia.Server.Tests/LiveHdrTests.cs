@@ -9,6 +9,44 @@ namespace Aurelia.Server.Tests;
 
 public sealed partial class LiveConversionTests
 {
+    [Fact]
+    public void MapperDiscoveryIsDeferredUntilHdrPictureEncodingAndCachedOnce()
+    {
+        var discoveries = 0;
+        var tools = new FfmpegTools("/invented/ffmpeg", "/invented/ffprobe", LiveVideoEncoder.VideoToolbox, () =>
+        {
+            discoveries++;
+            return HdrToneMapping.PerceptualScale;
+        });
+        var hdr = Video("hevc", "Main 10", 150, pixelFormat: "yuv420p10le", bitDepth: 10) with { ColorTransfer = "smpte2084" };
+        var probe = new MediaProbeResult("matroska", 12, hdr, []);
+        var h264Only = new LiveConversionRequest(["h264"], []);
+        Assert.NotNull(tools.Encoder);
+        Assert.Equal("copy", LiveConversionPlanner.Plan(probe, Browser, true, () => tools.ToneMapping)!.Video);
+        Assert.Equal("h264", LiveConversionPlanner.Plan(probe with { Video = hdr with { ColorTransfer = "bt709" } }, h264Only, true, () => tools.ToneMapping)!.Video);
+        Assert.Null(LiveConversionPlanner.Plan(probe, h264Only, false, () => tools.ToneMapping));
+        Assert.Null(LiveConversionPlanner.Plan(probe with { Video = null }, h264Only, true, () => tools.ToneMapping));
+        Assert.Equal(0, discoveries);
+        Assert.Equal("h264", LiveConversionPlanner.Plan(probe, h264Only, true, () => tools.ToneMapping)!.Video);
+        Assert.Equal("h264", LiveConversionPlanner.Plan(probe, h264Only, true, () => tools.ToneMapping)!.Video);
+        Assert.Equal(1, discoveries);
+    }
+
+    [Fact]
+    public void ConcurrentHdrRequestsShareOneThreadSafeMapperDiscoveryIncludingUnavailableResult()
+    {
+        var discoveries = 0;
+        var tools = new FfmpegTools("/invented/ffmpeg", "/invented/ffprobe", LiveVideoEncoder.Libx264, () =>
+        {
+            Interlocked.Increment(ref discoveries);
+            return HdrToneMapping.Unavailable;
+        });
+        Parallel.For(0, 32, _ => Assert.Equal(HdrToneMapping.Unavailable, tools.ToneMapping));
+        Assert.Equal(1, discoveries);
+        Assert.Equal(HdrToneMapping.Unavailable, tools.ToneMapping);
+        Assert.Equal(1, discoveries);
+    }
+
     [Theory]
     [InlineData("smpte2084")]
     [InlineData("arib-std-b67")]

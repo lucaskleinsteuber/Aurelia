@@ -49,7 +49,7 @@ public static partial class LiveConversionEndpoints
             var file = MediaFileAccess.OpenRead(media);
             await using var stream = file.Stream;
             var probe = await live.ProbeAsync(tools, file, Path.GetFullPath(media.SourcePath), media.Id, cancellationToken);
-            return LiveConversionPlanner.Plan(probe, request, tools.Encoder is not null, tools.ToneMapping) is { } plan
+            return LiveConversionPlanner.Plan(probe, request, tools.Encoder is not null, () => tools.ToneMapping) is { } plan
                 ? Results.Ok(plan)
                 : NotPossible();
         }
@@ -134,7 +134,8 @@ public static partial class LiveConversionEndpoints
         if (probe.Video is not { } picture) return NotPossible();
         if (encodeVideo.Value ? tools.Encoder is null : !LiveConversionPlanner.CopyableVideo.Contains(picture.Codec))
             return NotPossible();
-        if (encodeVideo.Value && picture.IsHdr && tools.ToneMapping == HdrToneMapping.Unavailable)
+        var toneMapping = encodeVideo.Value && picture.IsHdr ? tools.ToneMapping : HdrToneMapping.Unavailable;
+        if (encodeVideo.Value && picture.IsHdr && toneMapping == HdrToneMapping.Unavailable)
         {
             var unsupported = LiveHdr.Unsupported();
             return Problem(unsupported.Code, unsupported.Message, unsupported.StatusCode);
@@ -155,7 +156,7 @@ public static partial class LiveConversionEndpoints
             return Problem("conversion_busy", "The server is converting as many titles as it can. Try again shortly.", StatusCodes.Status429TooManyRequests);
         }
 
-        var options = new LiveStreamOptions(startSeconds, picture, encodeVideo.Value ? tools.Encoder : null, sound, copyAudio.Value, tools.ToneMapping);
+        var options = new LiveStreamOptions(startSeconds, picture, encodeVideo.Value ? tools.Encoder : null, sound, copyAudio.Value, toneMapping);
         using var process = live.Start(tools.Ffmpeg, LiveConversionPlanner.Arguments(LiveConversionService.InputPath(file, source.SourcePath), options));
         var errors = LiveConversionService.ReadTailAsync(process.StandardError);
         var output = process.StandardOutput.BaseStream;

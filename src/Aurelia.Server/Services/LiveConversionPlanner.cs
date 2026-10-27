@@ -43,13 +43,17 @@ public static class LiveConversionPlanner
     /// <returns>Null when the picture can neither be repackaged nor converted.</returns>
     public static LiveConversionPlanResponse? Plan(MediaProbeResult probe, LiveConversionRequest request, bool canEncodeVideo,
         HdrToneMapping toneMapping = HdrToneMapping.Unavailable)
+        => Plan(probe, request, canEncodeVideo, () => toneMapping);
+
+    public static LiveConversionPlanResponse? Plan(MediaProbeResult probe, LiveConversionRequest request, bool canEncodeVideo,
+        Func<HdrToneMapping> resolveToneMapping)
     {
         if (probe.Video is not { Width: > 0, Height: > 0 } video) return null;
         var videoCodecs = Normalize(request.VideoCodecs);
         var audioCodecs = Normalize(request.AudioCodecs);
         var copy = CanCopyVideo(video, videoCodecs);
         if (!copy && !canEncodeVideo) return null;
-        if (!copy && video.IsHdr && toneMapping == HdrToneMapping.Unavailable) throw LiveHdr.Unsupported();
+        if (!copy && video.IsHdr && resolveToneMapping() == HdrToneMapping.Unavailable) throw LiveHdr.Unsupported();
         var (width, height) = copy ? (video.Width, video.Height) : Fit(video.Width, video.Height);
         var tracks = probe.Audio.Select(track =>
         {

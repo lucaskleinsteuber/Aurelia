@@ -7,8 +7,21 @@ namespace Aurelia.Server.Services;
 /// <param name="Ffmpeg">The converter.</param>
 /// <param name="Ffprobe">The header reader next to it.</param>
 /// <param name="Encoder">The H.264 encoder for pictures a player cannot decode, or null.</param>
-public sealed record FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder,
-    HdrToneMapping ToneMapping = HdrToneMapping.Unavailable);
+public sealed record FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder)
+{
+    private readonly Lazy<HdrToneMapping> toneMapping = new(() => HdrToneMapping.Unavailable);
+    public HdrToneMapping ToneMapping => toneMapping.Value;
+
+    public FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder, HdrToneMapping ToneMapping)
+        : this(Ffmpeg, Ffprobe, Encoder) => toneMapping = new(() => ToneMapping);
+
+    public FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder, Func<HdrToneMapping> discoverToneMapping)
+        : this(Ffmpeg, Ffprobe, Encoder)
+    {
+        ArgumentNullException.ThrowIfNull(discoverToneMapping);
+        toneMapping = new(discoverToneMapping, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+}
 
 /// <summary>
 /// Converts titles live with ffmpeg for players that cannot open the original file. ffmpeg reads
@@ -81,12 +94,10 @@ public sealed partial class LiveConversionService : IDisposable
                 LiveVideoEncoder? encoder = OperatingSystem.IsMacOS() && HasEncoder(encoders, "h264_videotoolbox")
                     ? LiveVideoEncoder.VideoToolbox
                     : HasEncoder(encoders, "libx264") ? LiveVideoEncoder.Libx264 : null;
-                var scaleHelp = RunForOutput(ffmpeg, ["-hide_banner", "-h", "filter=scale"], TimeSpan.FromSeconds(10));
-                var toneMapping = LiveHdr.Detect(scaleHelp, null);
-                if (toneMapping == HdrToneMapping.Unavailable)
-                    toneMapping = LiveHdr.Detect(null, RunForOutput(ffmpeg, ["-hide_banner", "-filters"], TimeSpan.FromSeconds(10)));
                 LogFound(logger, ffmpeg, encoder is { } found ? found.ToString() : "none");
-                return new FfmpegTools(ffmpeg, ffprobe, encoder, toneMapping);
+                // Mapper discovery starts only when HDR picture encoding actually needs it.
+                // Startup, direct delivery, repackaging and SDR conversion pay no extra process cost.
+                return new FfmpegTools(ffmpeg, ffprobe, encoder, () => DiscoverToneMapping(ffmpeg));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
                                                   or InvalidOperationException or System.ComponentModel.Win32Exception)
@@ -95,6 +106,23 @@ public sealed partial class LiveConversionService : IDisposable
             }
         }
         return null;
+    }
+
+    private HdrToneMapping DiscoverToneMapping(string ffmpeg)
+    {
+        try
+        {
+            var scaleHelp = RunForOutput(ffmpeg, ["-hide_banner", "-h", "filter=scale"], TimeSpan.FromSeconds(10));
+            var mapping = LiveHdr.Detect(scaleHelp, null);
+            return mapping != HdrToneMapping.Unavailable ? mapping
+                : LiveHdr.Detect(null, RunForOutput(ffmpeg, ["-hide_banner", "-filters"], TimeSpan.FromSeconds(10)));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                              or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            LogUnusable(logger, ffmpeg, exception.Message);
+            return HdrToneMapping.Unavailable;
+        }
     }
 
     private static bool HasEncoder(string list, string name) =>

@@ -66,6 +66,8 @@ is unavailable instead of returning a pale picture. Valid source color tags are 
 input; missing HDR primaries/matrix tags default to BT.2020. The older-filter fallback uses a
 100-nit SDR reference and conservative peak references of 10,000 nits for PQ and 1,000 nits for
 HLG, preserving bright detail rather than assuming every PQ source peaks at 1,000 nits.
+The server checks HDR filter support only when an HDR picture first needs re-encoding, then
+reuses that result. Startup, native delivery, repackaging and SDR conversion skip this check.
 
 Nothing converted is stored: the server's ffmpeg writes straight into the connection to the
 browser, with no cache and no temporary files. The player keeps up to a minute ahead (less
