@@ -17,6 +17,22 @@ log_root="$other_root/Logs"
 final_unit_result="$result_root/Aurelia-macOS-Unit-$run_id.xcresult"
 final_ui_result="$result_root/Aurelia-macOS-UI-$run_id.xcresult"
 final_log="$log_root/Aurelia-macOS-$run_id.log"
+unit_test_filter="${AURELIA_UNIT_TEST_FILTER:-AureliaTests}"
+unit_test_exclusions=(-skip-testing:AureliaTests/PlaybackFullChainTests)
+
+if [[ "${AURELIA_LOGIC_ONLY:-0}" == "1" ]]; then
+  # Keep native engines, decoder/rendering probes and optional live-server credentials out
+  # of this explicit logic-only run. Controller/transport tests with injected fakes remain.
+  if [[ "$unit_test_filter" != AureliaTests && "$unit_test_filter" != AureliaTests/* ]]; then
+    print -u2 "Logic-only runs must select AureliaTests, not a UI test target."
+    exit 1
+  fi
+  for suite in PlaybackEngineReliabilityTests PlaybackStartTests PlayerComfortTests \
+    ScrubPreviewTests AureliaIntegrationTests ImportPlanningTests MetadataEditorTests \
+    ServerSettingsRenderTests PlayerFullScreenKeyboardTests; do
+    unit_test_exclusions+=("-skip-testing:AureliaTests/$suite")
+  done
+fi
 
 mkdir -p "$runtime_root" "$result_root" "$log_root"
 
@@ -24,7 +40,7 @@ stop_test_hosts() {
   # Never stop the installed app or another task's host. Only this run owns these PIDs.
   local test_pid test_command
   for test_pid in $(pgrep -x Aurelia 2>/dev/null || true) $(pgrep -x AureliaUITests-Runner 2>/dev/null || true); do
-    test_command=$(ps -p "$test_pid" -o command= 2>/dev/null || true)
+    test_command=$(ps -p "$test_pid" -o comm= 2>/dev/null || true)
     if [[ "$test_command" == "$runtime_root/"* ]]; then
       kill -TERM "$test_pid" 2>/dev/null || true
     fi
@@ -84,13 +100,13 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
   -resultBundlePath "$temporary_unit_result" \
   -enableCodeCoverage NO \
   -parallel-testing-enabled NO \
-  -only-testing:"${AURELIA_UNIT_TEST_FILTER:-AureliaTests}" \
-  -skip-testing:AureliaTests/PlaybackFullChainTests \
+  -only-testing:"$unit_test_filter" \
+  "${unit_test_exclusions[@]}" \
   test-without-building 2>&1 | tee -a "$temporary_log"
 
 stop_test_hosts
 
-if [[ "${AURELIA_SKIP_UI_TESTS:-0}" != "1" ]]; then
+if [[ "${AURELIA_SKIP_UI_TESTS:-0}" != "1" && "${AURELIA_LOGIC_ONLY:-0}" != "1" ]]; then
   DEVELOPER_DIR="$developer_dir" xcodebuild \
     -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
     -scheme Aurelia \
