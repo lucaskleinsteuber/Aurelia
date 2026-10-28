@@ -208,6 +208,13 @@ export function createSettings(app) {
           health.freeDiskBytes != null ? `${bytes(health.freeDiskBytes)} free` : null,
           `Database ${bytes(health.databaseBytes)}`,
         ].filter(Boolean).join(" · "))),
+        health.backup ? row("Database Backups", value(health.backup.lastAttemptFailed
+          ? "Last backup failed"
+          : (health.backup.lastSucceededAt
+            ? `Last succeeded ${new Date(health.backup.lastSucceededAt).toLocaleTimeString()} · ${health.backup.totalBackups} snapshot${health.backup.totalBackups === 1 ? "" : "s"} (${bytes(health.backup.totalBackupBytes)})`
+            : (health.backup.totalBackups > 0
+              ? `${health.backup.totalBackups} snapshot${health.backup.totalBackups === 1 ? "" : "s"} (${bytes(health.backup.totalBackupBytes)})`
+              : (health.backup.enabled ? "Scheduled daily when idle" : "Disabled"))))) : null,
         row("Scrub Previews", value(health.scrubPreviewTitleCount > 0
           ? `${health.scrubPreviewTitleCount} title${health.scrubPreviewTitleCount === 1 ? "" : "s"} (${bytes(health.scrubPreviewBytes)})${health.scrubPreviewPendingCount > 0 ? ` · ${health.scrubPreviewPendingCount} pending` : ""}`
           : "None prepared")),

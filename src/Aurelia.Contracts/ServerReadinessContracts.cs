@@ -46,7 +46,17 @@ public sealed record ServerHealthResponse(
     int OfflineMediaCount,
     ServerHealthScanSummary? LastScan,
     ServerHealthBackgroundJobs BackgroundJobs,
-    IReadOnlyList<ServerHealthEvent> RecentIssues);
+    IReadOnlyList<ServerHealthEvent> RecentIssues,
+    ServerHealthBackupSummary? Backup = null);
+
+public sealed record ServerHealthBackupSummary(
+    bool Enabled,
+    bool LastAttemptFailed,
+    DateTimeOffset? LastSucceededAt,
+    int TotalBackups,
+    long TotalBackupBytes,
+    DateTimeOffset? LatestDailyAt,
+    DateTimeOffset? LatestWeeklyAt);
 
 public sealed record ServerHealthScanSummary(
     Guid ScanId,

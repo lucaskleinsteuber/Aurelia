@@ -257,6 +257,16 @@ struct ServerHealthEvent: Decodable, Sendable, Identifiable {
   let status: Int?
 }
 
+struct ServerHealthBackupSummary: Decodable, Sendable {
+  let enabled: Bool
+  let lastAttemptFailed: Bool
+  let lastSucceededAt: String?
+  let totalBackups: Int
+  let totalBackupBytes: Int64
+  let latestDailyAt: String?
+  let latestWeeklyAt: String?
+}
+
 struct ServerHealthResponse: Decodable, Sendable {
   let uptimeSeconds: Double
   let freeDiskBytes: Int64?
@@ -270,4 +280,5 @@ struct ServerHealthResponse: Decodable, Sendable {
   let lastScan: ServerHealthScanSummary?
   let backgroundJobs: ServerHealthBackgroundJobs
   let recentIssues: [ServerHealthEvent]
+  let backup: ServerHealthBackupSummary?
 }

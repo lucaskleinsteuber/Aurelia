@@ -279,4 +279,108 @@ public sealed class DatabaseBackupTests
         command.Parameters.AddWithValue("$username", username);
         await command.ExecuteNonQueryAsync();
     }
+
+    [Fact]
+    public async Task ScheduledBackupDefersWhenServerIsBusy()
+    {
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(dataDirectory);
+        var databasePath = Path.Combine(dataDirectory, "aurelia.db");
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={databasePath}")
+            .Options;
+
+        try
+        {
+            await using (var database = new AureliaDbContext(options))
+            {
+                await database.Database.MigrateAsync();
+                await database.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+            }
+
+            var runtime = ServerRuntimeOptions.Resolve(
+                new ConfigurationBuilder().Build(),
+                ["--data-dir", dataDirectory]);
+
+            // When isBusy reports true, backup is deferred (returns null and creates no file)
+            var busyBackups = new DatabaseBackupService(
+                runtime,
+                configuration: null,
+                activeStreams: null,
+                liveConversions: null,
+                isBusy: () => true);
+
+            var now = DateTimeOffset.UtcNow;
+            var result = await busyBackups.CreateScheduledBackupIfDueAsync(now, CancellationToken.None);
+            Assert.Null(result);
+            Assert.Empty(busyBackups.ListBackups());
+
+            // When isBusy reports false, backup runs
+            var idleBackups = new DatabaseBackupService(
+                runtime,
+                configuration: null,
+                activeStreams: null,
+                liveConversions: null,
+                isBusy: () => false);
+
+            var idleResult = await idleBackups.CreateScheduledBackupIfDueAsync(now, CancellationToken.None);
+            Assert.NotNull(idleResult);
+            Assert.NotEmpty(idleBackups.ListBackups());
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+            {
+                Directory.Delete(dataDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ScheduledBackupDuplicatesDailyToWeeklyWhenBothDue()
+    {
+        var dataDirectory = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(dataDirectory);
+        var databasePath = Path.Combine(dataDirectory, "aurelia.db");
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={databasePath}")
+            .Options;
+
+        try
+        {
+            await using (var database = new AureliaDbContext(options))
+            {
+                await database.Database.MigrateAsync();
+                await database.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+            }
+
+            var runtime = ServerRuntimeOptions.Resolve(
+                new ConfigurationBuilder().Build(),
+                ["--data-dir", dataDirectory]);
+
+            var backups = new DatabaseBackupService(runtime);
+            var now = DateTimeOffset.UtcNow;
+
+            // Initially both daily and weekly are due; this creates daily and duplicates to weekly
+            var latestPath = await backups.CreateScheduledBackupIfDueAsync(now, CancellationToken.None);
+            Assert.NotNull(latestPath);
+
+            var allBackups = backups.ListBackups();
+            var daily = allBackups.SingleOrDefault(b => b.Kind == DatabaseBackupKind.Daily);
+            var weekly = allBackups.SingleOrDefault(b => b.Kind == DatabaseBackupKind.Weekly);
+
+            Assert.NotNull(daily);
+            Assert.NotNull(weekly);
+            Assert.True(File.Exists(daily.Path));
+            Assert.True(File.Exists(weekly.Path));
+            Assert.Equal(new FileInfo(daily.Path).Length, new FileInfo(weekly.Path).Length);
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+            {
+                Directory.Delete(dataDirectory, recursive: true);
+            }
+        }
+    }
 }

@@ -8,12 +8,19 @@ file directly as a backup.
 ## Automatic and migration backups
 
 While the server is running, its maintenance worker creates a verified daily
-snapshot and a separate weekly snapshot. It retains the newest seven daily and
-four weekly snapshots by default; owners can change interval and retention in
-Server settings. It also makes a verified snapshot immediately before an
-upgrade migration. Backup files live in the private `Backups` subdirectory of
-the server data directory; their file and directory permissions are restricted
-to the account running Aurelia.
+snapshot and a separate weekly snapshot. Scheduled automatic backups run only
+when the server is idle: if an active playback stream or live conversion is
+running, the backup is deferred to the next maintenance interval so it never
+competes for disk I/O and CPU on lower-powered hardware. When both daily and weekly
+snapshots are due at once, the weekly snapshot duplicates the freshly verified daily
+file to eliminate redundant backup cycles. Backup health, total snapshots, and
+storage usage are surfaced in the Server Health view in the macOS client and browser app.
+
+The server retains the newest seven daily and four weekly snapshots by default;
+owners can change interval and retention in Server settings. It also makes a
+verified snapshot immediately before an upgrade migration. Backup files live in the
+private `Backups` subdirectory of the server data directory; their file and directory
+permissions are restricted to the account running Aurelia.
 
 Before any pending migration, Aurelia runs SQLite `quick_check` and
 `foreign_key_check`, checks the recorded migration identifiers, and creates the

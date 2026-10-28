@@ -39,6 +39,8 @@ public sealed class ServerHealthTests
         Assert.True(health.UptimeSeconds >= 0);
         Assert.NotNull(health.BackgroundJobs);
         Assert.NotNull(health.RecentIssues);
+        Assert.NotNull(health.Backup);
+        Assert.True(health.Backup.Enabled);
 
         // Issues must never leak file paths or secrets
         foreach (var issue in health.RecentIssues)

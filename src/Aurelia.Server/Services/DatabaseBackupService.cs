@@ -20,7 +20,12 @@ public sealed record DatabaseVerificationResult(
 
 public sealed record DatabaseBackupRuntimeStatus(bool LastAttemptFailed, DateTimeOffset? LastSucceededAt);
 
-public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerConfigurationStore? configuration = null)
+public sealed class DatabaseBackupService(
+    ServerRuntimeOptions runtime,
+    ServerConfigurationStore? configuration = null,
+    ActiveStreamRegistry? activeStreams = null,
+    LiveConversionService? liveConversions = null,
+    Func<bool>? isBusy = null)
 {
     private const string BackupPrefix = "aurelia-database-";
     private const string RestoreStageName = ".database-restore.pending.db";
@@ -31,6 +36,12 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerCo
     public string BackupDirectory => Path.Combine(runtime.DataDirectory, "Backups");
     private DatabaseBackupRuntimeStatus health = new(false, null);
     public DatabaseBackupRuntimeStatus Health => Volatile.Read(ref health);
+
+    /// <summary>
+    /// Scheduled backups run only when the server is idle. Active playback streams
+    /// or active live conversions defer scheduled runs to the next maintenance interval.
+    /// </summary>
+    public bool IsServerBusy => isBusy?.Invoke() ?? ((activeStreams?.PlaybackCount > 0) || (liveConversions?.Running > 0));
 
     public async Task<string> CreateBackupAsync(
         DatabaseBackupKind kind,
@@ -73,6 +84,11 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerCo
     {
         using var operationLock = AcquireOperationLock();
         if (configuration?.Current.AutomaticBackupsEnabled == false) return null;
+        if (IsServerBusy)
+        {
+            return null;
+        }
+
         if (!File.Exists(runtime.DatabasePath) || new FileInfo(runtime.DatabasePath).Length == 0)
         {
             return null;
@@ -88,17 +104,38 @@ public sealed class DatabaseBackupService(ServerRuntimeOptions runtime, ServerCo
             .OrderByDescending(backup => backup.CreatedAt)
             .FirstOrDefault();
         string? latestPath = null;
+        string? createdDailyPath = null;
         if (daily is null || now - daily.CreatedAt >= TimeSpan.FromHours(configuration?.Current.BackupIntervalHours ?? 24))
         {
             latestPath = await CreateBackupLockedAsync(DatabaseBackupKind.Daily, cancellationToken);
+            createdDailyPath = latestPath;
         }
 
         if (weekly is null || now - weekly.CreatedAt >= WeeklyInterval)
         {
-            latestPath = await CreateBackupLockedAsync(DatabaseBackupKind.Weekly, cancellationToken);
+            if (createdDailyPath is not null && File.Exists(createdDailyPath))
+            {
+                // When daily was just created and verified, duplicate it as weekly to avoid a second expensive SQLite backup and verification cycle on slow hardware.
+                latestPath = DuplicateVerifiedBackupLocked(createdDailyPath, DatabaseBackupKind.Weekly);
+            }
+            else
+            {
+                latestPath = await CreateBackupLockedAsync(DatabaseBackupKind.Weekly, cancellationToken);
+            }
         }
 
         return latestPath;
+    }
+
+    private string DuplicateVerifiedBackupLocked(string sourcePath, DatabaseBackupKind targetKind)
+    {
+        EnsurePrivateBackupDirectory();
+        var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        var finalPath = Path.Combine(BackupDirectory, $"{BackupPrefix}{KindName(targetKind)}-{stamp}.db");
+        File.Copy(sourcePath, finalPath, overwrite: true);
+        PrivateFilePermissions.ProtectFile(finalPath);
+        ApplyRetention(targetKind);
+        return finalPath;
     }
 
     public async Task<DatabaseVerificationResult> VerifyAsync(

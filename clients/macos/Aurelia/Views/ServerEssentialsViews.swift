@@ -401,7 +401,7 @@ struct ServerHealthCard: View {
         HStack(spacing: 12) {
           metric("Scrub Previews", scrubPreviewSummary)
           metric("Last Scan", scanSummary)
-          metric("Offline Media", "\(health.offlineMediaCount) missing")
+          metric("Database Backups", backupSummary)
           metric("Background Jobs", backgroundJobsSummary)
         }
         if !health.recentIssues.isEmpty {
@@ -453,6 +453,15 @@ struct ServerHealthCard: View {
       health.backgroundJobs.activeScans + health.backgroundJobs.activeMetadataJobs
       + health.backgroundJobs.activeScrubPreviewJobs
     return active == 0 ? "Idle" : "\(active) active"
+  }
+
+  private var backupSummary: String {
+    guard let backup = health.backup else { return "None" }
+    if backup.lastAttemptFailed { return "Last Failed" }
+    if backup.totalBackups == 0 { return backup.enabled ? "Scheduled" : "Disabled" }
+    let bytes = ByteCountFormatter.string(
+      fromByteCount: backup.totalBackupBytes, countStyle: .file)
+    return "\(backup.totalBackups) backups (\(bytes))"
   }
 
   private func metric(_ title: String, _ value: String) -> some View {

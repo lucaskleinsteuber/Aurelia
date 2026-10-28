@@ -186,11 +186,21 @@ test("server health loads metrics and background jobs for administrators", async
       offlineMediaCount: 0,
       lastScan: null,
       backgroundJobs: { activeScans: 0, activeMetadataJobs: 0, activeScrubPreviewJobs: 0 },
-      recentIssues: []
+      recentIssues: [],
+      backup: {
+        enabled: true,
+        lastAttemptFailed: false,
+        lastSucceededAt: "2026-10-28T22:00:00Z",
+        totalBackups: 3,
+        totalBackupBytes: 45 * 1024 * 1024,
+        latestDailyAt: "2026-10-28T22:00:00Z",
+        latestWeeklyAt: null
+      }
     };
   };
   const sections = await loadManagementSections(api, { role: "admin", accessMode: "entireLibrary" });
   assert.ok(calls.includes("serverHealth"));
   assert.equal(sections.health.uptimeSeconds, 3600);
   assert.equal(sections.health.activeStreams, 1);
+  assert.equal(sections.health.backup.totalBackups, 3);
 });

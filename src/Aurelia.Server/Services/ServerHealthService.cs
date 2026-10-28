@@ -13,6 +13,8 @@ public sealed class ServerHealthService(
     LibraryScanScheduler scanScheduler,
     MetadataJobScheduler metadataScheduler,
     ServerDiagnosticsStore diagnostics,
+    DatabaseBackupService backupService,
+    ServerConfigurationStore? configuration = null,
     TimeProvider? timeProvider = null)
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
@@ -67,6 +69,32 @@ public sealed class ServerHealthService(
             .Select(e => new ServerHealthEvent(e.At, SanitizeCode(e.Code), e.Severity, e.Status))
             .ToList();
 
+        ServerHealthBackupSummary? backupSummary = null;
+        try
+        {
+            var backups = backupService.ListBackups();
+            var backupHealth = backupService.Health;
+            long totalBackupBytes = 0;
+            foreach (var b in backups)
+            {
+                try { totalBackupBytes += new FileInfo(b.Path).Length; } catch { }
+            }
+            var daily = backups.Where(b => b.Kind == DatabaseBackupKind.Daily).MaxBy(b => b.CreatedAt);
+            var weekly = backups.Where(b => b.Kind == DatabaseBackupKind.Weekly).MaxBy(b => b.CreatedAt);
+            backupSummary = new ServerHealthBackupSummary(
+                configuration?.Current.AutomaticBackupsEnabled ?? true,
+                backupHealth.LastAttemptFailed,
+                backupHealth.LastSucceededAt,
+                backups.Count,
+                totalBackupBytes,
+                daily?.CreatedAt,
+                weekly?.CreatedAt);
+        }
+        catch
+        {
+            // Database backup inspection should not block health reporting
+        }
+
         return new ServerHealthResponse(
             uptimeSeconds,
             freeBytes,
@@ -79,7 +107,8 @@ public sealed class ServerHealthService(
             offlineCount,
             lastScan,
             backgroundJobs,
-            recentDiagnostics);
+            recentDiagnostics,
+            backupSummary);
     }
 
     internal static string SanitizeCode(string code)
