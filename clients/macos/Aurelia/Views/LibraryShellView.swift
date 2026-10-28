@@ -1,38 +1,5 @@
 import SwiftUI
 
-private enum LibraryDestination: String, CaseIterable, Identifiable {
-  case home
-  case library
-  case watchlist
-  case recentlyAdded
-  case tvShows
-  case movies
-
-  var id: String { rawValue }
-
-  var title: String {
-    switch self {
-    case .home: "Home"
-    case .library: "Library"
-    case .watchlist: "Watchlist"
-    case .recentlyAdded: "Recently Added"
-    case .tvShows: "TV Shows"
-    case .movies: "Movies"
-    }
-  }
-
-  var symbol: String {
-    switch self {
-    case .home: "house.fill"
-    case .library: "rectangle.stack.fill"
-    case .watchlist: "bookmark.fill"
-    case .recentlyAdded: "clock"
-    case .tvShows: "tv"
-    case .movies: "film.stack"
-    }
-  }
-}
-
 /// Cmd-F focuses the library search; coming from Home or a detail page starts a new search.
 private struct FindRequest: Equatable {
   let id = UUID()
@@ -172,6 +139,36 @@ struct LibraryShellView: View {
         selection = nil
       }
     }
+    .onAppear {
+      restoreDestination()
+    }
+    .onChange(of: model.profile?.sessionId) {
+      restoreDestination()
+    }
+    .onChange(of: destination) { _, newDestination in
+      persistDestination(newDestination)
+    }
+  }
+
+  private func restoreDestination() {
+    guard let profile = model.profile else { return }
+    let store = LibraryDestinationStore(
+      defaults: LibraryBrowsePreferenceStore.applicationDefaults)
+    let restored = store.load(
+      serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
+    if restored == .watchlist && !model.supportsWatchlist {
+      destination = .home
+    } else {
+      destination = restored
+    }
+  }
+
+  private func persistDestination(_ newDestination: LibraryDestination) {
+    guard let profile = model.profile else { return }
+    let store = LibraryDestinationStore(
+      defaults: LibraryBrowsePreferenceStore.applicationDefaults)
+    store.save(
+      newDestination, serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
   }
 
   private var sidebar: some View {

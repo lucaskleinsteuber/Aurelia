@@ -24,6 +24,15 @@ const state = {
   watchlistIds: new Set(),
 };
 
+const scrollMemory = new logic.ScrollMemory();
+let isRenderingRoute = false;
+
+window.addEventListener("scroll", () => {
+  if (isRenderingRoute || !state.profile) return;
+  const currentPath = logic.routePath(state.route) || (location.pathname + location.search);
+  scrollMemory.remember(currentPath, window.scrollY);
+}, { passive: true });
+
 // MARK: Start and connection
 
 async function start() {
@@ -354,6 +363,7 @@ function showShortcutsDialog() {
 }
 
 async function signOut() {
+  scrollMemory.clear();
   settings.closeEditors();
   stopSync();
   closePlayer();
@@ -367,6 +377,7 @@ async function signOut() {
 }
 
 async function switchProfile() {
+  scrollMemory.clear();
   settings.closeEditors();
   stopSync();
   closePlayer();
@@ -380,6 +391,7 @@ async function switchProfile() {
 
 /** A profile request was refused: the profile session ended, or the whole browser was signed out. */
 async function sessionEnded() {
+  scrollMemory.clear();
   catalog.close();
   settings.closeEditors();
   stopSync();
@@ -410,6 +422,8 @@ function handleError(error) {
 
 function navigate(route, { replace = false } = {}) {
   settings.closeEditors();
+  const currentPath = logic.routePath(state.route) || (location.pathname + location.search);
+  if (!replace) scrollMemory.remember(currentPath, window.scrollY);
   const path = logic.routePath(route);
   if (replace) history.replaceState(null, "", path);
   else if (path !== location.pathname + location.search) history.pushState(null, "", path);
@@ -423,7 +437,7 @@ window.addEventListener("popstate", () => {
   if (!state.profile) return;
   closePlayer();
   state.route = logic.parseRoute(location.pathname, location.search);
-  renderRoute();
+  renderRoute({ restoreScroll: true });
 });
 
 // Links inside the app change the screen without reloading the page.
@@ -471,12 +485,15 @@ function shell(content) {
   return h("div", { class: "app-shell" }, header, h("main", { class: "page", id: "page" }, content));
 }
 
-async function renderRoute({ quiet = false } = {}) {
+async function renderRoute({ quiet = false, restoreScroll = false } = {}) {
   catalog.close();
   if (!state.profile) return;
+  isRenderingRoute = true;
   const route = state.route;
   const token = ++state.renderToken;
-  const scroll = window.scrollY;
+  const path = logic.routePath(route) || (location.pathname + location.search);
+  const targetScroll = restoreScroll ? scrollMemory.recall(path) : null;
+  const scroll = quiet ? window.scrollY : (targetScroll ?? 0);
   const page = h("div", { class: "page-loading" }, h("div", { class: "spinner visible" }));
   if (!quiet) {
     clear(root);
@@ -487,13 +504,23 @@ async function renderRoute({ quiet = false } = {}) {
     content = await screenFor(route, token);
   } catch (error) {
     if (token !== state.renderToken) return;
+    isRenderingRoute = false;
     if (handleError(error)) return;
     content = emptyState("warning", "Couldn’t Load This Page", error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
   }
-  if (token !== state.renderToken || !content) return;
+  if (token !== state.renderToken || !content) {
+    isRenderingRoute = false;
+    return;
+  }
   clear(root);
   root.append(shell(content));
-  if (quiet) window.scrollTo(0, scroll);
+  if (quiet || restoreScroll) {
+    window.scrollTo(0, scroll);
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => window.scrollTo(0, scroll));
+    }
+  }
+  isRenderingRoute = false;
   const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", settings: "Settings" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
 }

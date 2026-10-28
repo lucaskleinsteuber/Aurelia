@@ -768,3 +768,31 @@ export function volumeValueText(volume, muted) {
   return `${percent}%`;
 }
 
+/** Bounded memory of scroll positions by route path. */
+export class ScrollMemory {
+  constructor(limit = 64) {
+    this.limit = limit;
+    this.positions = new Map();
+  }
+
+  remember(path, scrollY) {
+    if (!path || typeof path !== "string" || !Number.isFinite(scrollY) || scrollY < 0) return;
+    if (this.positions.has(path)) this.positions.delete(path);
+    this.positions.set(path, Math.floor(scrollY));
+    if (this.positions.size > this.limit) {
+      const first = this.positions.keys().next().value;
+      this.positions.delete(first);
+    }
+  }
+
+  recall(path) {
+    if (!path || typeof path !== "string") return 0;
+    return this.positions.get(path) ?? 0;
+  }
+
+  clear() {
+    this.positions.clear();
+  }
+}
+
+

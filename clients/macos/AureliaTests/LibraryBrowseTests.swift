@@ -33,6 +33,33 @@ import Testing
     #expect(fields["sessionId"] == nil)
   }
 
+  @Test func destinationStorePersistsPerServerAndUserAndFallsBackToHome() throws {
+    let suite = "Aurelia.LibraryDestinationTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = LibraryDestinationStore(defaults: defaults)
+    let server1 = UUID()
+    let server2 = UUID()
+    let user1 = UUID()
+    let user2 = UUID()
+
+    #expect(store.load(serverId: server1, userId: user1) == .home)
+
+    store.save(.movies, serverId: server1, userId: user1)
+    store.save(.tvShows, serverId: server1, userId: user2)
+    store.save(.watchlist, serverId: server2, userId: user1)
+
+    #expect(store.load(serverId: server1, userId: user1) == .movies)
+    #expect(store.load(serverId: server1, userId: user2) == .tvShows)
+    #expect(store.load(serverId: server2, userId: user1) == .watchlist)
+    #expect(store.load(serverId: server2, userId: user2) == .home)
+
+    defaults.set(
+      "unknown-screen",
+      forKey: "aurelia.library-destination.v1.\(server1.uuidString).\(user1.uuidString)")
+    #expect(store.load(serverId: server1, userId: user1) == .home)
+  }
+
   @Test func resettingFiltersRetainsSortingAndThePagesMediaLimit() {
     var query = CatalogBrowseQuery(
       kind: .series, favoritesOnly: true, genre: "Drama", yearFrom: 2000, yearTo: 2020,

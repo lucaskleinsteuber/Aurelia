@@ -149,6 +149,64 @@ struct LibraryBrowsePreferenceStore {
   }
 }
 
+enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
+  case home
+  case library
+  case watchlist
+  case recentlyAdded
+  case tvShows
+  case movies
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .home: "Home"
+    case .library: "Library"
+    case .watchlist: "Watchlist"
+    case .recentlyAdded: "Recently Added"
+    case .tvShows: "TV Shows"
+    case .movies: "Movies"
+    }
+  }
+
+  var symbol: String {
+    switch self {
+    case .home: "house.fill"
+    case .library: "rectangle.stack.fill"
+    case .watchlist: "bookmark.fill"
+    case .recentlyAdded: "clock"
+    case .tvShows: "tv"
+    case .movies: "film.stack"
+    }
+  }
+}
+
+/// Remembers the last selected library screen per server and user.
+struct LibraryDestinationStore {
+  let defaults: UserDefaults
+
+  @MainActor
+  init(defaults: UserDefaults = LibraryBrowsePreferenceStore.applicationDefaults) {
+    self.defaults = defaults
+  }
+
+  func load(serverId: UUID, userId: UUID) -> LibraryDestination {
+    guard let raw = defaults.string(forKey: key(serverId, userId)),
+      let destination = LibraryDestination(rawValue: raw)
+    else { return .home }
+    return destination
+  }
+
+  func save(_ destination: LibraryDestination, serverId: UUID, userId: UUID) {
+    defaults.set(destination.rawValue, forKey: key(serverId, userId))
+  }
+
+  private func key(_ serverId: UUID, _ userId: UUID) -> String {
+    "aurelia.library-destination.v1.\(serverId.uuidString).\(userId.uuidString)"
+  }
+}
+
 /// An older query, a profile switch, and a view teardown cannot publish stale cards.
 @MainActor final class LibraryBrowseController: ObservableObject {
   @Published private(set) var items: [CatalogItemSummary] = []
