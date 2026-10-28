@@ -296,6 +296,7 @@ struct PlayerView: View {
           }
           .buttonStyle(.plain).disabled(!controller.canPlayPrevious)
           .accessibilityLabel("Previous Episode").help("Previous Episode (P)")
+          .focused($focusedControl, equals: "previous")
           seekButton(forward: false)
           Button {
             controller.togglePlayback()
@@ -321,6 +322,7 @@ struct PlayerView: View {
           }
           .buttonStyle(.plain).disabled(!controller.canPlayNext)
           .accessibilityLabel("Next Episode").help("Next Episode (N)")
+          .focused($focusedControl, equals: "next")
         }
         .padding(6)
         .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
@@ -404,6 +406,10 @@ struct PlayerView: View {
       ) {
         PlayerControlLabel { Image(systemName: "waveform") }
       }
+      .accessibilityValue(
+        controller.audioTracks.first(where: { $0.id == controller.selectedAudioTrackID })?.title
+          ?? "Default"
+      )
 
       trackedMenu("Subtitles", id: "subtitle", options: subtitleOptions) {
         PlayerControlLabel {
@@ -412,12 +418,23 @@ struct PlayerView: View {
               ? "captions.bubble" : "captions.bubble.fill")
         }
       }
+      .accessibilityValue(
+        controller.selectedSubtitleTrackID == nil
+          ? "Off"
+          : (controller.subtitleTracks.first(where: { $0.id == controller.selectedSubtitleTrackID }
+          )?
+          .title ?? "On")
+      )
 
       trackedMenu("Sleep Timer", id: "sleep", options: sleepOptions) {
         PlayerControlLabel {
           Image(systemName: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill")
         }
       }
+      .accessibilityValue(
+        controller.sleepTimer == .off
+          ? "Off" : (controller.sleepTimer == .endOfEpisode ? "At end of episode" : "Active")
+      )
 
       Button {
         if !notesPresented { sceneNotes.create(at: controller.currentTimeMilliseconds) }
@@ -534,7 +551,12 @@ struct PlayerView: View {
               image: previews.imageBucket == previews.bucket(for: Int64(position))
                 ? previews.image : nil)
           },
-          onEditingChanged: timelineEditingChanged)
+          onEditingChanged: timelineEditingChanged
+        )
+        .focused($focusedControl, equals: "timeline")
+        .accessibilityValue(
+          "\(formatTime(displayedPosition)) of \(formatTime(max(Double(controller.durationMilliseconds), 1)))"
+        )
         Text(formatTime(Double(controller.durationMilliseconds)))
           .monospacedDigit().frame(minWidth: 44, alignment: .leading)
       }
@@ -854,6 +876,10 @@ struct PlayerView: View {
       } else {
         _ = controller.playNextFromSystemMedia()
       }
+      return true
+    }
+    if event.charactersIgnoringModifiers == "?" {
+      model.isKeyboardShortcutsPresented = true
       return true
     }
     switch event.keyCode {

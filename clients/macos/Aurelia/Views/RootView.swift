@@ -74,6 +74,9 @@ struct RootView: View {
     .sheet(isPresented: $model.isMediaManagerPresented) {
       MediaManagerView().environmentObject(model)
     }
+    .sheet(isPresented: $model.isKeyboardShortcutsPresented) {
+      KeyboardShortcutsSheet()
+    }
   }
 }
 

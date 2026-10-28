@@ -58,6 +58,12 @@ struct AureliaApp: App {
           .keyboardShortcut("o", modifiers: .command)
           .disabled(model.profile == nil || !model.canManageMedia)
       }
+      CommandGroup(replacing: .help) {
+        Button("Keyboard Shortcuts") {
+          model.isKeyboardShortcutsPresented = true
+        }
+        .keyboardShortcut("/", modifiers: .command)
+      }
     }
 
     Settings {

@@ -176,13 +176,26 @@ struct TrackedPlayerMenu<Label: View>: View {
   let onOpen: (Bool) -> Void
   let onFocus: (Bool) -> Void
   @ViewBuilder let label: () -> Label
+  @State private var isFocused = false
 
   var body: some View {
     label()
       .overlay {
+        if isFocused {
+          Capsule()
+            .stroke(Color.accentColor, lineWidth: 2)
+            .padding(-2)
+            .allowsHitTesting(false)
+        }
+      }
+      .overlay {
         MenuButton(
           title: title, identifier: identifier, options: options,
-          onOpen: onOpen, onFocus: onFocus)
+          onOpen: onOpen,
+          onFocus: { focused in
+            isFocused = focused
+            onFocus(focused)
+          })
       }
   }
 

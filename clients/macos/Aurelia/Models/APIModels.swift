@@ -324,7 +324,7 @@ enum MetadataReviewState: String, Codable, Sendable {
   case ignored
 }
 
-struct ArtworkSummary: Codable, Identifiable, Equatable, Sendable {
+struct ArtworkSummary: Codable, Identifiable, Equatable, Hashable, Sendable {
   let id: UUID
   let kind: ArtworkKind
   let path: String

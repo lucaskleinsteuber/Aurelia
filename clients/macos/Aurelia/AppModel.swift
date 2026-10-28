@@ -127,6 +127,7 @@ final class AppModel: ObservableObject {
     errorMessage ?? synchronizationErrorMessage ?? homeErrorMessage
   }
   @Published var isMediaManagerPresented = false
+  @Published var isKeyboardShortcutsPresented = false
   @Published var importPreviewLibrary: LibrarySummary?
 
   let artworkLoader = ArtworkLoader()

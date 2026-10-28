@@ -11,6 +11,7 @@ import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
   playerSubtitle, rateLabel, playbackStartSeconds, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
+  timelineValueText, volumeValueText,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
@@ -81,12 +82,13 @@ export class Player {
    * @param {() => Promise<object|null>} [options.previous] finds the preceding normal episode
    * @param {"play"|"resume"} [options.intent] only Resume may use saved progress
    * @param {(item: object, options: {intent: "play"}) => void} [options.onPlayNext]
+   * @param {() => void} [options.onShowShortcuts]
    * @param {() => void} options.onClose
    * @param {(error: ApiError) => void} [options.onSessionEnded]
    * @param {string} [options.preferenceScope] server/profile identity for private track choices
    * @param {boolean} [options.canConvert]  the server reports live conversion
    */
-  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onClose, onSessionEnded, canConvert = false, canScrubPreview = canConvert, preferenceScope }) {
+  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, canConvert = false, canScrubPreview = canConvert, preferenceScope }) {
     this.api = api;
     this.item = item;
     this.next = next;
@@ -95,6 +97,7 @@ export class Player {
     this.navigationPending = false;
     this.onPlayNext = onPlayNext;
     this.onMediaMenu = onMediaMenu;
+    this.onShowShortcuts = onShowShortcuts;
     this.onClose = onClose;
     this.onSessionEnded = onSessionEnded;
     this.canConvert = canConvert && liveSupported();
@@ -152,11 +155,11 @@ export class Player {
     this.subtitleLine = h("div", { class: "player-subtitle" }, playerSubtitle(this.item));
     this.titleLine = h("div", { class: "player-name" }, this.item.title);
     this.muteButton = h("button", { class: "player-icon", "aria-label": "Mute", onclick: () => this.toggleMute() }, icon("volume", { size: 18 }));
-    this.volume = h("input", { class: "volume", type: "range", min: "0", max: "1", step: "0.02", value: String(this.preferences.defaultVolume), "aria-label": "Volume" });
+    this.volume = h("input", { class: "volume", type: "range", min: "0", max: "1", step: "0.02", value: String(this.preferences.defaultVolume), "aria-label": "Volume", "aria-valuetext": volumeValueText(this.preferences.defaultVolume, false) });
     this.pipButton = h("button", { class: "player-icon", "aria-label": "Enter Picture in Picture", hidden: !document.pictureInPictureEnabled, onclick: () => this.togglePictureInPicture() }, icon("pip", { size: 18 }));
     this.fullscreenButton = h("button", { class: "player-icon", "aria-label": "Enter Full Screen", onclick: () => this.toggleFullscreen() }, icon("fullscreen", { size: 18 }));
     this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.pipButton, this.fullscreenButton);
-    this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Playback Position" });
+    this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Playback Position", "aria-valuetext": timelineValueText(0, 0) });
     this.noteMarks = h("div", { class: "note-marks", "aria-hidden": "true" });
     this.previewImg = h("img", { class: "scrub-preview-img", alt: "" });
     this.previewTime = h("span", { class: "scrub-preview-time" }, "0:00");
@@ -373,6 +376,7 @@ export class Player {
     });
     on(this.element, "pointermove", () => this.showControls());
     on(this.element, "pointerdown", () => this.showControls());
+    on(this.element, "focusin", () => this.showControls());
     on(video, "click", () => {
       if (!this.popover.hidden) return this.closePopover();
       this.toggle();
@@ -449,6 +453,10 @@ export class Player {
         if (!this.popover.hidden) this.closePopover();
         else if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
         else if (!document.fullscreenElement) this.close();
+        break;
+      case "?":
+        event.preventDefault();
+        this.onShowShortcuts?.();
         break;
       default:
         return;
@@ -528,6 +536,7 @@ export class Player {
     this.elapsed.textContent = clock(video.currentTime);
     this.total.textContent = duration ? clock(duration) : "0:00";
     if (document.activeElement !== this.timeline) this.timeline.value = duration ? String(Math.round((video.currentTime / duration) * 1000)) : "0";
+    this.timeline.setAttribute("aria-valuetext", timelineValueText(video.currentTime, duration));
     this.timeline.style.setProperty("--fill", duration ? `${(video.currentTime / duration) * 100}%` : "0%");
     this.endsAt.textContent = endsAt(video.currentTime, duration, video.playbackRate || 1);
   }
@@ -537,6 +546,7 @@ export class Player {
     this.muteButton.replaceChildren(icon(muted ? "mute" : "volume", { size: 18 }));
     this.muteButton.setAttribute("aria-label", muted ? "Unmute" : "Mute");
     this.volume.value = muted ? "0" : String(this.video.volume);
+    this.volume.setAttribute("aria-valuetext", volumeValueText(this.video.volume, muted));
     this.volume.style.setProperty("--fill", `${(muted ? 0 : this.video.volume) * 100}%`);
   }
 
@@ -587,7 +597,10 @@ export class Player {
     this.element.classList.add("controls-visible");
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => {
-      if (!this.video.paused && !this.video.ended && this.popover.hidden) this.element.classList.remove("controls-visible");
+      const focusInControls = this.controls.contains(document.activeElement);
+      if (!this.video.paused && !this.video.ended && this.popover.hidden && !focusInControls) {
+        this.element.classList.remove("controls-visible");
+      }
     }, this.preferences.controlsAutoHideDelay * 1000);
   }
 

@@ -332,6 +332,27 @@ function confirmSignOut() {
   dialog.showModal();
 }
 
+function showShortcutsDialog() {
+  document.querySelector(".shortcuts-sheet")?.remove();
+  const dialog = h("dialog", { class: "sheet shortcuts-sheet", "aria-labelledby": "shortcuts-title" },
+    h("div", { class: "shortcuts-header" },
+      h("h2", { id: "shortcuts-title" }, "Keyboard Shortcuts"),
+      h("button", { class: "icon-button close-button", "aria-label": "Close", onclick: () => dialog.close() }, icon("close", { size: 18 }))),
+    h("div", { class: "shortcuts-body" },
+      logic.KEYBOARD_SHORTCUTS.map((section) =>
+        h("section", { class: "shortcuts-group" },
+          h("h3", {}, section.group),
+          h("ul", { class: "shortcuts-list" },
+            section.items.map((item) =>
+              h("li", { class: "shortcut-row" },
+                h("span", { class: "shortcut-action" }, item.action),
+                h("span", { class: "shortcut-keys" },
+                  item.keys.map((key) => h("kbd", { class: "shortcut-key" }, key))))))))));
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
 async function signOut() {
   settings.closeEditors();
   stopSync();
@@ -427,6 +448,7 @@ function shell(content) {
   const menu = h("div", { class: "profile-menu", hidden: true },
     h("div", { class: "menu-header" }, profilePicture(state.profile.id, state.profile.username), h("span", {}, state.profile.username)),
     h("a", { class: "menu-item", href: "/settings", "data-route": true }, "Settings…"),
+    h("button", { class: "menu-item", onclick: () => showShortcutsDialog() }, "Keyboard Shortcuts"),
     h("button", { class: "menu-item", onclick: () => switchProfile() }, "Switch Profile"),
     h("button", { class: "menu-item danger", onclick: () => confirmSignOut() }, "Sign Out of This Browser"));
   const toggleMenu = (event) => {
@@ -536,7 +558,8 @@ function heroBanner(item) {
 
 function rail(title, cards, kind = "poster", allHref) {
   const track = h("div", { class: `rail-track ${kind}` }, cards);
-  const scroll = (direction) => track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: "smooth" });
+  const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
+  const scroll = (direction) => track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: scrollBehavior() });
   return h("section", { class: "rail" },
     h("div", { class: "section-header" }, h("h2", {}, title), h("span", { class: "count" }, String(cards.length)),
       allHref ? h("a", { class: "text-button", href: allHref, "data-route": true }, "See All") : null,
@@ -761,12 +784,13 @@ function hrail(cards, { label, className = "" } = {}) {
   const track = h("div", { class: `hrail-track ${className}`, role: "list", "aria-label": label }, cards);
   const back = h("button", { class: "rail-arrow back", "aria-label": `Scroll ${label} back`, hidden: true }, icon("back", { size: 18 }));
   const forward = h("button", { class: "rail-arrow forward", "aria-label": `Scroll ${label} forward`, hidden: true }, icon("forward", { size: 18 }));
+  const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
   const update = () => {
     back.hidden = track.scrollLeft <= 4;
     forward.hidden = track.scrollLeft + track.clientWidth >= track.scrollWidth - 4;
   };
-  back.addEventListener("click", () => track.scrollBy({ left: -track.clientWidth * 0.85, behavior: "smooth" }));
-  forward.addEventListener("click", () => track.scrollBy({ left: track.clientWidth * 0.85, behavior: "smooth" }));
+  back.addEventListener("click", () => track.scrollBy({ left: -track.clientWidth * 0.85, behavior: scrollBehavior() }));
+  forward.addEventListener("click", () => track.scrollBy({ left: track.clientWidth * 0.85, behavior: scrollBehavior() }));
   track.addEventListener("scroll", update, { passive: true });
   new ResizeObserver(update).observe(track);
   return h("div", { class: "hrail" }, track, back, forward);
@@ -918,6 +942,7 @@ async function playTitle(item, seasons, { intent = "play" } = {}) {
     next: async () => (target.kind === "episode" ? logic.nextEpisode(seasons, target.id) : null),
     previous: async () => (target.kind === "episode" ? logic.previousEpisode(seasons, target.id) : null),
     onPlayNext: (next, options) => playTitle(next, seasons, options),
+    onShowShortcuts: () => showShortcutsDialog(),
     onClose: () => {
       if (state.player === player) state.player = null;
       // Progress and Continue Watching changed; show them without jumping to the top.
@@ -997,6 +1022,19 @@ function refreshSoon() {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.profile && !state.player) refreshSoon();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "?" && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    const target = event.target;
+    if (target?.isContentEditable || target?.tagName === "SELECT") return;
+    if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
+    if (state.player) return;
+    const dialog = target?.closest?.('dialog, [role="dialog"]');
+    if (dialog && !dialog.classList.contains("shortcuts-sheet")) return;
+    event.preventDefault();
+    showShortcutsDialog();
+  }
 });
 
 start();

@@ -728,3 +728,43 @@ export function browseFacets(items) {
   }
   return { genres: [...genres].sort((a, b) => a.localeCompare(b)), years: [...years].sort((a, b) => b - a) };
 }
+
+/** The shortcuts supported by the browser player and navigation. */
+export const KEYBOARD_SHORTCUTS = [
+  {
+    group: "Playback",
+    items: [
+      { keys: ["Space", "K"], action: "Play or Pause" },
+      { keys: ["←", "J"], action: "Seek Back" },
+      { keys: ["→", "L"], action: "Seek Forward" },
+      { keys: ["N"], action: "Next Episode" },
+      { keys: ["P"], action: "Previous Episode" },
+      { keys: ["M"], action: "Mute or Unmute" },
+      { keys: ["F"], action: "Toggle Full Screen" },
+      { keys: ["Escape"], action: "Close Menu or Player" },
+    ],
+  },
+  {
+    group: "Navigation & Dialogs",
+    items: [
+      { keys: ["?"], action: "Keyboard Shortcuts" },
+      { keys: ["Escape"], action: "Close Dialog or Menu" },
+    ],
+  },
+];
+
+/** Screen reader value text for the timeline, like "1:23 of 45:00". */
+export function timelineValueText(currentSeconds, durationSeconds) {
+  const cur = Number.isFinite(currentSeconds) ? Math.max(0, currentSeconds) : 0;
+  const dur = Number.isFinite(durationSeconds) ? Math.max(0, durationSeconds) : 0;
+  if (!dur) return clock(cur);
+  return `${clock(cur)} of ${clock(dur)}`;
+}
+
+/** Screen reader value text for the volume slider, like "80%" or "Muted". */
+export function volumeValueText(volume, muted) {
+  if (muted || volume <= 0) return "Muted";
+  const percent = Math.round(Math.min(1, Math.max(0, volume)) * 100);
+  return `${percent}%`;
+}
+
