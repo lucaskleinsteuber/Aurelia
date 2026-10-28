@@ -8,6 +8,7 @@ import { ApiError } from "./api.js";
 import { PLAYBACK_DEFAULTS, PLAYBACK_RATES, loadManagementSections, managementPermissions, rateLabel } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { createManagementEditors } from "./settings-editors.js";
+import { createServerUpdates } from "./server-updates.js";
 
 const PAGES = [
   ["general", "General", "gear"],
@@ -23,8 +24,17 @@ export function createSettings(app) {
   const { api, state } = app;
   const canManage = () => state.profile?.role === "owner" || state.profile?.role === "admin";
   const editors = createManagementEditors({ ...app, onSaved: () => app.navigate(state.route, { replace: true }) });
+  let updatesView;
+  let serverRead = new AbortController();
+  function closeUpdates() {
+    updatesView?.close();
+    updatesView = null;
+    serverRead.abort();
+    serverRead = new AbortController();
+  }
 
   async function settingsScreen(route) {
+    closeUpdates();
     const page = route.page === "server" && !canManage() ? "general" : route.page;
     const content = page === "playback" ? playbackPage() : page === "server" ? await serverPage() : generalPage();
     return h("div", { class: "settings page-enter" },
@@ -142,13 +152,16 @@ export function createSettings(app) {
   async function serverPage() {
     const permissions = managementPermissions(state.profile);
     const profileID = state.profile.id;
+    const signal = serverRead.signal;
     let sections;
     try {
-      sections = await loadManagementSections(api, state.profile);
+      sections = await loadManagementSections(api, state.profile, { signal });
     } catch (error) {
+      if (signal.aborted || state.profile?.id !== profileID) throw new DOMException("Cancelled", "AbortError");
       if (error instanceof ApiError && (error.code === "management_locked" || error.status === 403)) return unlockPage(error.code === "management_locked");
       throw error;
     }
+    if (signal.aborted || state.profile?.id !== profileID) throw new DOMException("Cancelled", "AbortError");
     const { status, updates, libraries, jobs, users, devices, power, backups, issues } = sections;
     const refresh = () => app.navigate({ name: "settings", page: "server" }, { replace: true });
     const act = async (button, work, done) => {
@@ -172,6 +185,12 @@ export function createSettings(app) {
       return element;
     };
     const openButton = (label, action, kind = "secondary-button") => h("button", { type: "button", class: kind, onclick: action }, label);
+    if (updates?.available) updatesView = createServerUpdates({
+      api, initial: updates,
+      isCurrent: () => !signal.aborted && state.profile?.id === profileID,
+      onLocked: refresh,
+      onSessionEnded: app.handleError,
+    });
 
     return h("div", { class: "settings-stack" },
       section("Your Server", "library", permissions.owner ? null : "Server management is unlocked. Administrators manage their allowed content.",
@@ -183,13 +202,7 @@ export function createSettings(app) {
         h("div", { class: "button-row" }, button("Lock Server Management", () => api.lockManagement(), "Server management is locked."))),
       issues.length ? h("p", { class: "error-text", role: "status" }, issues.map((issue) => `${capitalize(issue.section)}: ${issue.message}`).join(" ")) : null,
 
-      updates?.available ? section("Updates", "power", null,
-        row("Installed", value(updates.installed)),
-        row("Newest", value(updates.newest ?? (updates.checkedAt ? "Up to date" : "Not checked yet"))),
-        updates.message ? h("p", { class: "muted small" }, updates.message) : null,
-        h("div", { class: "button-row" },
-          button("Check for Updates", () => api.checkForUpdates(), "Checking for updates…"),
-          updates.updateAvailable ? button(`Install ${updates.newest}`, () => api.approved("/api/v1/server/updates/install"), "The server installs the update and restarts.", "primary-button") : null)) : null,
+      updatesView?.element ?? null,
 
       permissions.storage ? section("Storage Locations", "library", "Aurelia only reads your media; scans never change files.",
         libraries.length ? libraries.map((library) => h("div", { class: "settings-card" },
@@ -285,7 +298,7 @@ export function createSettings(app) {
         form, message));
   }
 
-  return { settingsScreen, editMetadata: editors.editMetadata, closeEditors: editors.close };
+  return { settingsScreen, editMetadata: editors.editMetadata, closeEditors: () => { editors.close(); closeUpdates(); } };
 }
 
 function roleTitle(role) {

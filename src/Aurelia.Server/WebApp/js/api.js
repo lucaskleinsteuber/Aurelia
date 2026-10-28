@@ -105,7 +105,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     lockManagement: () => request("/api/v1/management/lock", { method: "POST" }),
     serverStatus: (options = {}) => request("/api/v1/server/status", options),
     serverUpdates: (options = {}) => request("/api/v1/server/updates", options),
-    checkForUpdates: () => request("/api/v1/server/updates/check", { method: "POST" }),
+    checkForUpdates: (options = {}) => request("/api/v1/server/updates/check", { ...options, method: "POST" }),
     serverPower: (options = {}) => request("/api/v1/server/power", options),
     saveServerPower: (body) => request("/api/v1/server/power", { method: "PUT", body }),
     serverUsers: (options = {}) => request("/api/v1/server/users", options),

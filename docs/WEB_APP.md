@@ -218,3 +218,23 @@ node --test "tests/WebApp/*.test.mjs"
 
 - The server side (cookies, the sign-in steps, the page's policy) is tested in
   `tests/Aurelia.Server.Tests/WebAppTests.cs`.
+
+### Server updates in the browser
+
+Owners of a Linux server installed from the Aurelia package can check and install releases
+under Settings › Server › Updates. The section shows the installed/newest versions and the
+server updater's checking, installing, failed or completed state. Progress is indeterminate:
+the existing server contract does not provide a download percentage. Installation uses the
+existing exact-action management approval after a confirmation, and never resets server data.
+
+While checking, installing or reconnecting after a restart, only the update-status endpoint
+is polled, once every two seconds; the rest of Settings is not reloaded. Polling resumes if
+the section opens while an operation is already running, stops on navigation/profile change,
+and has a bounded wait with an explicit status retry. Reaching idle alone does not prove a
+new version was installed: the section reports the version actually returned by the server.
+A management expiry offers the existing Server Password unlock page; a retired profile after
+restart must be chosen again before progress can be checked. Passwords, tokens and cookies
+are never read by the component or retained in its state.
+
+Headless Node tests use an invented updater and manual timer queue to cover progress, restart
+outages, failures, cancellation, approvals, unlock and duplicate clicks without a real server.
