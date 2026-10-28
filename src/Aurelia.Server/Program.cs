@@ -168,6 +168,7 @@ builder.Services.AddScoped<LibraryReachabilityService>();
 builder.Services.AddHostedService<LibraryReachabilityWorker>();
 builder.Services.AddScoped<SyncChangeService>();
 builder.Services.AddScoped<MediaSearchIndexService>();
+builder.Services.AddScoped<ServerHealthService>();
 builder.Services.AddSingleton<MetadataProviderSettingsStore>();
 builder.Services.AddSingleton<ArtworkStore>();
 builder.Services.AddSingleton<ArtworkVariantStore>();

@@ -33,3 +33,39 @@ public sealed record ServerStatusResponse(
 /// </summary>
 public sealed record ServerUpdateStatus(bool Available, string Installed, string? Newest, bool UpdateAvailable,
     string State, DateTimeOffset? CheckedAt, string? Message);
+
+public sealed record ServerHealthResponse(
+    double UptimeSeconds,
+    long? FreeDiskBytes,
+    long DatabaseBytes,
+    int ScrubPreviewTitleCount,
+    long ScrubPreviewBytes,
+    int ScrubPreviewPendingCount,
+    int ActiveLiveConversions,
+    int ActiveStreams,
+    int OfflineMediaCount,
+    ServerHealthScanSummary? LastScan,
+    ServerHealthBackgroundJobs BackgroundJobs,
+    IReadOnlyList<ServerHealthEvent> RecentIssues);
+
+public sealed record ServerHealthScanSummary(
+    Guid ScanId,
+    string State,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? CompletedAt,
+    double? DurationSeconds,
+    int AddedFiles,
+    int UpdatedFiles,
+    int MissingFiles,
+    int FailedFiles);
+
+public sealed record ServerHealthBackgroundJobs(
+    int ActiveScans,
+    int ActiveMetadataJobs,
+    int ActiveScrubPreviewJobs);
+
+public sealed record ServerHealthEvent(
+    DateTimeOffset At,
+    string Code,
+    string Severity,
+    int? Status);

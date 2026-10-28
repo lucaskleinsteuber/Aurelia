@@ -22,6 +22,7 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
   const jobs = await api.metadataJobs({ signal });
   const sections = { jobs, libraries: [], devices: [], users: [], backups: [], issues: [] };
   const readers = { devices: () => api.devices({ signal }) };
+  if (typeof api.serverHealth === "function") readers.health = () => api.serverHealth({ signal });
   if (permissions.storage) readers.libraries = () => api.libraries({ signal });
   if (permissions.owner) {
     Object.assign(readers, {

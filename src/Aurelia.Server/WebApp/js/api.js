@@ -109,6 +109,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     unlockManagement: (password) => request("/api/v1/management/unlock", { method: "POST", body: { password } }),
     lockManagement: () => request("/api/v1/management/lock", { method: "POST" }),
     serverStatus: (options = {}) => request("/api/v1/server/status", options),
+    serverHealth: (options = {}) => request("/api/v1/server/health", options),
     serverUpdates: (options = {}) => request("/api/v1/server/updates", options),
     checkForUpdates: (options = {}) => request("/api/v1/server/updates/check", { ...options, method: "POST" }),
     serverPower: (options = {}) => request("/api/v1/server/power", options),

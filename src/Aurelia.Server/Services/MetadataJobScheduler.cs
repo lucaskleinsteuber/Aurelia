@@ -13,6 +13,8 @@ public sealed class MetadataJobScheduler
     });
     private readonly ConcurrentDictionary<Guid, JobCancellationRegistration> active = new();
 
+    public int ActiveCount => active.Count;
+
     public void Pulse() => wake.Writer.TryWrite(true);
 
     public async Task WaitAsync(CancellationToken cancellationToken) =>

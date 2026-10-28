@@ -373,3 +373,98 @@ enum ServerDateText {
     ServerDate.parse(value)?.formatted(date: .abbreviated, time: .shortened) ?? value
   }
 }
+
+struct ServerHealthCard: View {
+  let health: ServerHealthResponse
+
+  var body: some View {
+    AureliaSurface {
+      VStack(alignment: .leading, spacing: 14) {
+        HStack {
+          Label("Server Health", systemImage: "heart.text.square")
+            .font(AureliaDesign.sectionTitle)
+          Spacer()
+        }
+        HStack(spacing: 12) {
+          metric("Uptime", uptime)
+          metric(
+            "Free Disk Space",
+            health.freeDiskBytes.map {
+              ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+            } ?? "—")
+          metric(
+            "Database",
+            ByteCountFormatter.string(fromByteCount: health.databaseBytes, countStyle: .file))
+          metric(
+            "Playing / Converting", "\(health.activeStreams) / \(health.activeLiveConversions)")
+        }
+        HStack(spacing: 12) {
+          metric("Scrub Previews", scrubPreviewSummary)
+          metric("Last Scan", scanSummary)
+          metric("Offline Media", "\(health.offlineMediaCount) missing")
+          metric("Background Jobs", backgroundJobsSummary)
+        }
+        if !health.recentIssues.isEmpty {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Recent Warnings & Errors").font(.caption.weight(.semibold)).foregroundStyle(
+              .secondary)
+            ForEach(health.recentIssues.prefix(5)) { issue in
+              HStack(spacing: 8) {
+                Image(
+                  systemName: issue.severity == "error"
+                    ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(issue.severity == "error" ? .red : .orange)
+                .font(.caption)
+                Text(issue.code)
+                  .font(.caption.monospaced())
+                Spacer()
+                Text(ServerDateText.display(issue.at))
+                  .font(.caption2)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  private var uptime: String {
+    Duration.seconds(max(60, health.uptimeSeconds)).formatted(
+      .units(allowed: [.days, .hours, .minutes], width: .wide, maximumUnitCount: 2))
+  }
+
+  private var scrubPreviewSummary: String {
+    if health.scrubPreviewTitleCount == 0 { return "None" }
+    let bytes = ByteCountFormatter.string(
+      fromByteCount: health.scrubPreviewBytes, countStyle: .file)
+    return "\(health.scrubPreviewTitleCount) titles (\(bytes))"
+  }
+
+  private var scanSummary: String {
+    guard let scan = health.lastScan else { return "None" }
+    return "\(scan.state.capitalized) (+\(scan.addedFiles), -\(scan.missingFiles))"
+  }
+
+  private var backgroundJobsSummary: String {
+    let active =
+      health.backgroundJobs.activeScans + health.backgroundJobs.activeMetadataJobs
+      + health.backgroundJobs.activeScrubPreviewJobs
+    return active == 0 ? "Idle" : "\(active) active"
+  }
+
+  private func metric(_ title: String, _ value: String) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text(value).font(.callout.weight(.semibold)).monospacedDigit()
+      Text(title).font(.caption2).foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.vertical, 8)
+    .padding(.horizontal, 10)
+    .background(
+      AureliaDesign.raisedSurface,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.compactRadius, style: .continuous))
+  }
+}

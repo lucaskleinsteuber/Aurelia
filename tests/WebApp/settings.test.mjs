@@ -169,3 +169,28 @@ test("scrub preview helpers bucketize timeline seconds, build cacheable URLs and
   assert.ok(calls.includes("serverScrubPreviews"));
   assert.equal(sections.scrubPreviews.mode, "onOpenOrPlay");
 });
+
+test("server health loads metrics and background jobs for administrators", async () => {
+  const { api, calls } = sectionApi();
+  api.serverHealth = async () => {
+    calls.push("serverHealth");
+    return {
+      uptimeSeconds: 3600,
+      freeDiskBytes: 50 * 1024 * 1024 * 1024,
+      databaseBytes: 15 * 1024 * 1024,
+      scrubPreviewTitleCount: 5,
+      scrubPreviewBytes: 10 * 1024 * 1024,
+      scrubPreviewPendingCount: 0,
+      activeLiveConversions: 0,
+      activeStreams: 1,
+      offlineMediaCount: 0,
+      lastScan: null,
+      backgroundJobs: { activeScans: 0, activeMetadataJobs: 0, activeScrubPreviewJobs: 0 },
+      recentIssues: []
+    };
+  };
+  const sections = await loadManagementSections(api, { role: "admin", accessMode: "entireLibrary" });
+  assert.ok(calls.includes("serverHealth"));
+  assert.equal(sections.health.uptimeSeconds, 3600);
+  assert.equal(sections.health.activeStreams, 1);
+});

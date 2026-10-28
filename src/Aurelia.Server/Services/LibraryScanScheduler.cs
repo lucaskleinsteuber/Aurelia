@@ -18,6 +18,8 @@ public sealed class LibraryScanScheduler(ServerConfigurationStore configuration)
     private readonly HashSet<Guid> reservedLibraries = [];
     private readonly ConcurrentDictionary<Guid, JobCancellationRegistration> active = new();
 
+    public int ActiveCount => active.Count;
+
     public bool TryReserve(Guid libraryId)
     {
         lock (gate)

@@ -34,6 +34,8 @@ public static class ServerManagementEndpoints
         { scans = await libraries.ListScansAsync(null, false, 100, token), metadata = await metadata.ListJobsAsync(false, 100, token) });
         app.MapPost("/api/v1/metadata/jobs/{id:guid}/retry", (Guid id, MetadataService metadata, CancellationToken token) => metadata.RetryJobAsync(id, token))
             .RequireAuthorization("Administrator");
+        app.MapGet("/api/v1/server/health", (ServerHealthService health, CancellationToken token) => health.GetHealthAsync(token))
+            .RequireAuthorization("Administrator");
         server.MapGet("/diagnostics/export", (ServerDiagnosticsStore diagnostics, ServerConfigurationStore configuration) => new
         { formatVersion = 1, version = ServerProductVersion.Current, policy = new { configuration.Current.DeviceSessionDays, configuration.Current.GlobalStreamLimit, configuration.Current.UserStreamLimit }, events = diagnostics.Read() });
         server.MapGet("/backups", (DatabaseBackupService backups) => backups.ListBackups().OrderByDescending(value => value.CreatedAt).Select(value => new

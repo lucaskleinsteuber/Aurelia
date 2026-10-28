@@ -162,7 +162,7 @@ export function createSettings(app) {
       throw error;
     }
     if (signal.aborted || state.profile?.id !== profileID) throw new DOMException("Cancelled", "AbortError");
-    const { status, updates, libraries, jobs, users, devices, power, scrubPreviews, backups, issues } = sections;
+    const { status, health, updates, libraries, jobs, users, devices, power, scrubPreviews, backups, issues } = sections;
     const refresh = () => app.navigate({ name: "settings", page: "server" }, { replace: true });
     const act = async (button, work, done) => {
       button.disabled = true;
@@ -201,6 +201,37 @@ export function createSettings(app) {
           row("Free Disk Space", value(status.freeDiskBytes != null ? bytes(status.freeDiskBytes) : "—"))] : row("Version", value(state.server?.version)),
         h("div", { class: "button-row" }, button("Lock Server Management", () => api.lockManagement(), "Server management is locked."))),
       issues.length ? h("p", { class: "error-text", role: "status" }, issues.map((issue) => `${capitalize(issue.section)}: ${issue.message}`).join(" ")) : null,
+
+      health ? section("Server Health", "library", "Diagnostic metrics for server operation, storage, background jobs, and recent issues.",
+        row("Uptime", value(duration(health.uptimeSeconds))),
+        row("Storage", value([
+          health.freeDiskBytes != null ? `${bytes(health.freeDiskBytes)} free` : null,
+          `Database ${bytes(health.databaseBytes)}`,
+        ].filter(Boolean).join(" · "))),
+        row("Scrub Previews", value(health.scrubPreviewTitleCount > 0
+          ? `${health.scrubPreviewTitleCount} title${health.scrubPreviewTitleCount === 1 ? "" : "s"} (${bytes(health.scrubPreviewBytes)})${health.scrubPreviewPendingCount > 0 ? ` · ${health.scrubPreviewPendingCount} pending` : ""}`
+          : "None prepared")),
+        row("Streaming & Conversion", value([
+          `${health.activeStreams} stream${health.activeStreams === 1 ? "" : "s"}`,
+          `${health.activeLiveConversions} live conversion${health.activeLiveConversions === 1 ? "" : "s"}`,
+        ].join(" · "))),
+        row("Library Scan", value(health.lastScan
+          ? `${capitalize(health.lastScan.state)}${health.lastScan.completedAt ? ` · ${new Date(health.lastScan.completedAt).toLocaleTimeString()}` : " (running)"} (${health.lastScan.addedFiles} added, ${health.lastScan.missingFiles} missing)`
+          : "No scans recorded")),
+        row("Offline Titles", value(health.offlineMediaCount > 0 ? `${health.offlineMediaCount} title${health.offlineMediaCount === 1 ? "" : "s"} offline` : "All titles available")),
+        row("Background Jobs", value([
+          health.backgroundJobs.activeScans > 0 ? `${health.backgroundJobs.activeScans} scan active` : null,
+          health.backgroundJobs.activeMetadataJobs > 0 ? `${health.backgroundJobs.activeMetadataJobs} metadata job active` : null,
+          health.backgroundJobs.activeScrubPreviewJobs > 0 ? `${health.backgroundJobs.activeScrubPreviewJobs} preview task active` : null,
+        ].filter(Boolean).join(" · ") || "Idle")),
+        row("Recent Warnings & Errors", value(health.recentIssues.length > 0
+          ? `${health.recentIssues.length} event${health.recentIssues.length === 1 ? "" : "s"}`
+          : "No warnings or errors")),
+        health.recentIssues.length ? h("div", { class: "settings-card-list" },
+          health.recentIssues.slice(0, 10).map((issue) => h("div", { class: "settings-card small" },
+            h("div", { class: "settings-card-main" },
+              h("div", { class: issue.severity === "error" ? "error-text" : "muted" }, issue.code),
+              h("div", { class: "muted small" }, new Date(issue.at).toLocaleString()))))) : null) : null,
 
       updatesView?.element ?? null,
 

@@ -4,6 +4,7 @@ struct ServerManagementView: View {
   @EnvironmentObject private var model: AppModel
   @State private var configuration: ServerConfigurationResponse?
   @State private var status: ServerStatusSummary?
+  @State private var health: ServerHealthResponse?
   @State private var users: [UserAccessSummary] = []
   @State private var editingUser: UserAccessSummary?
   @State private var creatingUser = false
@@ -39,6 +40,9 @@ struct ServerManagementView: View {
               hosting: hosting,
               refreshing: loading || deletingProfile != nil
             ) { Task { await reload() } }
+          }
+          if let health {
+            ServerHealthCard(health: health)
           }
           // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
           // power saving and updates of the Linux package.
@@ -105,6 +109,7 @@ struct ServerManagementView: View {
     .onChange(of: model.profile?.sessionId) { _, _ in
       configuration = nil
       status = nil
+      health = nil
       users = []
       capabilities = nil
       editingUser = nil
@@ -262,10 +267,11 @@ struct ServerManagementView: View {
         async let overview = client.serverStatus()
         async let accounts = client.serverUsers()
         async let abilities = client.serverCapabilities()
-        return try await (config, overview, accounts, abilities)
+        async let healthOverview = client.serverHealth()
+        return try await (config, overview, accounts, abilities, healthOverview)
       }
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
-      (configuration, status, users, capabilities) = loaded
+      (configuration, status, users, capabilities, health) = loaded
       error = nil
     } catch is CancellationError {
     } catch {

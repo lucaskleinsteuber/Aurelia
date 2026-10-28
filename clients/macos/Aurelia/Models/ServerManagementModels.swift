@@ -230,3 +230,44 @@ struct UpdateScrubPreviewSettingsRequest: Codable, Equatable, Sendable {
   var intervalSeconds: Int
   var storageCapMegabytes: Int
 }
+
+struct ServerHealthScanSummary: Decodable, Sendable {
+  let scanId: UUID
+  let state: String
+  let startedAt: String
+  let completedAt: String?
+  let durationSeconds: Double?
+  let addedFiles: Int
+  let updatedFiles: Int
+  let missingFiles: Int
+  let failedFiles: Int
+}
+
+struct ServerHealthBackgroundJobs: Decodable, Sendable {
+  let activeScans: Int
+  let activeMetadataJobs: Int
+  let activeScrubPreviewJobs: Int
+}
+
+struct ServerHealthEvent: Decodable, Sendable, Identifiable {
+  var id: String { "\(at)-\(code)" }
+  let at: String
+  let code: String
+  let severity: String
+  let status: Int?
+}
+
+struct ServerHealthResponse: Decodable, Sendable {
+  let uptimeSeconds: Double
+  let freeDiskBytes: Int64?
+  let databaseBytes: Int64
+  let scrubPreviewTitleCount: Int
+  let scrubPreviewBytes: Int64
+  let scrubPreviewPendingCount: Int
+  let activeLiveConversions: Int
+  let activeStreams: Int
+  let offlineMediaCount: Int
+  let lastScan: ServerHealthScanSummary?
+  let backgroundJobs: ServerHealthBackgroundJobs
+  let recentIssues: [ServerHealthEvent]
+}
