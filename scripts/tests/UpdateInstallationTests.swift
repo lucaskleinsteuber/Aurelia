@@ -40,7 +40,88 @@ struct UpdateInstallationTests {
         14 /other/Aurelia.app/Contents/MacOS/Aurelia
         """, excluding: 11)
     try check(processes == [10, 12], "Only this bundle's other processes block replacement")
-    print("Passed 16 installer scenarios; no apps launched or installed.")
+    try downloadCleanup(parent: parent)
+    print("Passed 23 installer scenarios; no apps launched or installed.")
+  }
+
+  static func downloadCleanup(parent: URL) throws {
+    let manager = FileManager.default
+    let updates = parent.appendingPathComponent("Updates")
+    try manager.createDirectory(at: updates, withIntermediateDirectories: true)
+    for fails in [false, true] {
+      let directory = updates.appendingPathComponent(UUID().uuidString)
+      try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+      let image = directory.appendingPathComponent("synthetic.dmg")
+      try Data("synthetic image".utf8).write(to: image)
+      var failed = false
+      do {
+        try UpdateInstallation.withDownloadedImage(at: image) {
+          try check(manager.fileExists(atPath: image.path), "Keep the image during installation")
+          if fails { throw TestError.injected }
+        }
+      } catch {
+        failed = true
+        try check(
+          !manager.fileExists(atPath: directory.path), "Clean before diagnostic failure handling")
+      }
+      try check(failed == fails, "Do not swallow installer failures")
+      try check(
+        !manager.fileExists(atPath: directory.path), "Remove the image and empty UUID directory")
+    }
+    let withSibling = updates.appendingPathComponent(UUID().uuidString)
+    try manager.createDirectory(at: withSibling, withIntermediateDirectories: true)
+    let image = withSibling.appendingPathComponent("synthetic.dmg")
+    let sibling = withSibling.appendingPathComponent("keep.txt")
+    try Data("synthetic image".utf8).write(to: image)
+    try Data("keep".utf8).write(to: sibling)
+    UpdateInstallation.removeDownloadedImage(at: image)
+    try check(!manager.fileExists(atPath: image.path), "Remove only the consumed image")
+    try check(
+      manager.fileExists(atPath: sibling.path), "Never recursively remove a nonempty workspace")
+    let ordinary = parent.appendingPathComponent("Ordinary downloads")
+    try manager.createDirectory(at: ordinary, withIntermediateDirectories: true)
+    let ordinaryImage = ordinary.appendingPathComponent("synthetic.dmg")
+    try Data("synthetic image".utf8).write(to: ordinaryImage)
+    UpdateInstallation.removeDownloadedImage(at: ordinaryImage)
+    try check(
+      manager.fileExists(atPath: ordinary.path), "Do not remove an ordinary parent directory")
+    try check(
+      manager.fileExists(atPath: ordinaryImage.path),
+      "Do not remove an image outside a managed download")
+    let external = parent.appendingPathComponent("External sentinel")
+    try manager.createDirectory(at: external, withIntermediateDirectories: true)
+    let externalImage = external.appendingPathComponent("synthetic.dmg")
+    try Data("keep".utf8).write(to: externalImage)
+    let linkedDirectory = updates.appendingPathComponent(UUID().uuidString)
+    try manager.createSymbolicLink(at: linkedDirectory, withDestinationURL: external)
+    UpdateInstallation.removeDownloadedImage(
+      at: linkedDirectory.appendingPathComponent("synthetic.dmg"))
+    try check(
+      manager.fileExists(atPath: externalImage.path), "Never follow a UUID directory symlink")
+    let externalUpdates = parent.appendingPathComponent("External updates")
+    let externalDownload = externalUpdates.appendingPathComponent(UUID().uuidString)
+    try manager.createDirectory(at: externalDownload, withIntermediateDirectories: true)
+    let externalDownloadImage = externalDownload.appendingPathComponent("synthetic.dmg")
+    try Data("keep".utf8).write(to: externalDownloadImage)
+    let linkRoot = parent.appendingPathComponent("Linked root")
+    try manager.createDirectory(at: linkRoot, withIntermediateDirectories: true)
+    let linkedUpdates = linkRoot.appendingPathComponent("Updates")
+    try manager.createSymbolicLink(at: linkedUpdates, withDestinationURL: externalUpdates)
+    UpdateInstallation.removeDownloadedImage(
+      at: linkedUpdates.appendingPathComponent(externalDownload.lastPathComponent)
+        .appendingPathComponent("synthetic.dmg"))
+    try check(
+      manager.fileExists(atPath: externalDownloadImage.path),
+      "Never follow an Updates directory symlink")
+    let unexpectedDirectory = updates.appendingPathComponent(UUID().uuidString)
+      .appendingPathComponent("not-an-image.dmg")
+    try manager.createDirectory(at: unexpectedDirectory, withIntermediateDirectories: true)
+    let sentinel = unexpectedDirectory.appendingPathComponent("keep.txt")
+    try Data("keep".utf8).write(to: sentinel)
+    UpdateInstallation.removeDownloadedImage(at: unexpectedDirectory)
+    try check(
+      manager.fileExists(atPath: sentinel.path),
+      "Never recursively remove an unexpected image directory")
   }
 
   static func exercise(_ scenario: String, root: URL) throws {

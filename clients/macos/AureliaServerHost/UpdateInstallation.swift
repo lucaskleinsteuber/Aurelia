@@ -1,8 +1,40 @@
+import Darwin
 import Foundation
 
 /// The filesystem transaction used by the installer, independent of AppKit and process launch.
 /// Tests inject identity, signature, process and move operations against invented bundles.
 enum UpdateInstallation {
+  /// Consume this request's image before reporting/relaunching, including diagnostic failures.
+  static func withDownloadedImage(at image: URL, install: () throws -> Void) rethrows {
+    defer { removeDownloadedImage(at: image) }
+    try install()
+  }
+
+  static func removeDownloadedImage(at image: URL) {
+    guard image.isFileURL else { return }
+    let manager = FileManager.default
+    let directory = image.deletingLastPathComponent()
+    let updates = directory.deletingLastPathComponent()
+    guard UUID(uuidString: directory.lastPathComponent) != nil,
+      updates.lastPathComponent == "Updates",
+      let directoryValues = try? directory.resourceValues(forKeys: [
+        .isDirectoryKey, .isSymbolicLinkKey,
+      ]),
+      directoryValues.isDirectory == true, directoryValues.isSymbolicLink != true,
+      let updatesValues = try? updates.resourceValues(forKeys: [
+        .isDirectoryKey, .isSymbolicLinkKey,
+      ]),
+      updatesValues.isDirectory == true, updatesValues.isSymbolicLink != true
+    else { return }
+    let values = try? image.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+    if values?.isRegularFile == true, values?.isSymbolicLink != true {
+      try? manager.removeItem(at: image)
+    }
+    // Unlike recursive removeItem, rmdir fails atomically if a sibling appeared or the
+    // directory is a symlink. Never delete another download or any unexpected content.
+    directory.path.withCString { _ = Darwin.rmdir($0) }
+  }
+
   struct Identity: Equatable {
     let identifier: String
     let build: Int

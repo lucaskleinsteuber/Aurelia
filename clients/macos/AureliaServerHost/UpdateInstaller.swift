@@ -22,7 +22,9 @@ enum UpdateInstaller {
     let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
       .deletingLastPathComponent().standardizedFileURL
     do {
-      try install(image: image, expectedBuild: build, appPID: pid, app: app)
+      try UpdateInstallation.withDownloadedImage(at: image) {
+        try install(image: image, expectedBuild: build, appPID: pid, app: app)
+      }
       logger.notice("Installed build \(build, privacy: .public).")
       if relaunch { open(app) }
     } catch {
@@ -36,7 +38,6 @@ enum UpdateInstaller {
         exit(1)
       }
     }
-    try? FileManager.default.removeItem(at: image)
     return true
   }
 

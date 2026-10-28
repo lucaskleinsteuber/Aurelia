@@ -145,7 +145,9 @@ The app downloads the release's disk image and `SHA256SUMS` and checks the image
 checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
 they are not buffered in memory. Release descriptions and checksum lists are limited to 2 MiB
 and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject HTML and oversized
-or incomplete responses, and remove partial files after failures. Expired tokens, invalid
+or incomplete responses, and remove partial files after failures. Consumed images and their empty managed UUID folders
+are also removed after installation failures, including the diagnostic no-relaunch path.
+Cleanup preserves unexpected files and rejects linked download folders. Expired tokens, invalid
 releases, checksum mismatches, interrupted downloads and insufficient disk space have specific
 error messages. Asset URLs must belong to the configured GitHub repository; storage redirects
 use HTTPS and never retain the token or cookies.
