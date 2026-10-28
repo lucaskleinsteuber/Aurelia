@@ -26,6 +26,7 @@ struct AppSettingsView: View {
   @State private var showingReviewQueue = false
   @State private var showingMediaManager = false
   @ObservedObject private var updater = AppUpdater.shared
+  @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
   @State private var updateTokenDraft = ""
   @State private var updateTokenMessage: String?
 
@@ -363,6 +364,8 @@ struct AppSettingsView: View {
       VStack(alignment: .leading, spacing: 12) {
         LabeledContent("Installed", value: "\(updater.currentVersion) (\(updater.currentBuild))")
         LabeledContent("Status", value: updateStatusText)
+        Toggle("Check for updates automatically", isOn: $automaticUpdateChecks)
+          .accessibilityIdentifier("updates-automatic")
         VStack(alignment: .leading, spacing: 4) {
           HStack {
             SecureField(

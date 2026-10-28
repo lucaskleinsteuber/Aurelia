@@ -256,18 +256,144 @@ struct AppUpdateLogicTests {
     #expect(await transport.requests.isEmpty)
   }
 
+  @Test func releaseNotesAndDownloadSizeComeFromTheMatchingImage() throws {
+    let notes = "## Changes\n\n- Keeps **Markdown** as plain text.\n<https://example.invalid>"
+    var object = try #require(
+      JSONSerialization.jsonObject(with: releaseData(notes: notes, imageSize: Int64(147_000_000)))
+        as? [String: Any])
+    var assets = try #require(object["assets"] as? [[String: Any]])
+    assets.insert(["name": "Other.dmg", "size": 1], at: 0)
+    object["assets"] = assets
+    let release = try AppUpdateLogic.validatedRelease(
+      fromLatest: JSONSerialization.data(withJSONObject: object))
+    #expect(release.releaseNotes == notes)
+    #expect(release.downloadBytes == 147_000_000)
+    #expect(AppUpdateLogic.releaseNotesText(release.releaseNotes) == notes)
+    #expect(AppUpdateLogic.downloadSizeText(release.downloadBytes).hasPrefix("Download size: "))
+    let missing = try AppUpdateLogic.validatedRelease(fromLatest: releaseData())
+    #expect(missing.releaseNotes.isEmpty)
+    #expect(missing.downloadBytes == nil)
+    #expect(
+      AppUpdateLogic.releaseNotesText(" \n\t") == "No release notes were provided for this version."
+    )
+    #expect(AppUpdateLogic.downloadSizeText(nil) == "Download size unavailable.")
+  }
+
+  @Test(arguments: [Int64(0), 1, 147_000_000, Int64.max])
+  func downloadSizesAcceptNonnegativeIntegerByteCounts(bytes: Int64) throws {
+    let release = try AppUpdateLogic.validatedRelease(fromLatest: releaseData(imageSize: bytes))
+    #expect(release.downloadBytes == bytes)
+  }
+
+  @Test func malformedOptionalReleaseDetailsDoNotInventASizeOrNotes() throws {
+    for size: Any in [true, false, -1, 1.5, "147000000", NSNull(), Double.greatestFiniteMagnitude] {
+      let release = try AppUpdateLogic.validatedRelease(
+        fromLatest: releaseData(notes: 42, imageSize: size))
+      #expect(release.downloadBytes == nil)
+      #expect(release.releaseNotes.isEmpty)
+    }
+  }
+
+  @Test func automaticChecksDefaultOnAndRunAtMostOncePerDay() throws {
+    try withPreferences { defaults, _ in
+      let now = Date(timeIntervalSince1970: 1_800_000_000)
+      #expect(AppUpdatePreferences.checksAutomatically(in: defaults))
+      #expect(AppUpdatePreferences.backgroundCheckIsDue(in: defaults, now: now))
+      defaults.set(now, forKey: AppUpdatePreferences.lastCheckKey)
+      #expect(!AppUpdatePreferences.backgroundCheckIsDue(in: defaults, now: now))
+      #expect(
+        !AppUpdatePreferences.backgroundCheckIsDue(
+          in: defaults, now: now.addingTimeInterval(86_399)))
+      #expect(
+        AppUpdatePreferences.backgroundCheckIsDue(in: defaults, now: now.addingTimeInterval(86_400))
+      )
+      defaults.set(false, forKey: AppUpdatePreferences.automaticChecksKey)
+      #expect(!AppUpdatePreferences.checksAutomatically(in: defaults))
+      #expect(
+        !AppUpdatePreferences.backgroundCheckIsDue(
+          in: defaults, now: now.addingTimeInterval(172_800)))
+      defaults.set(true, forKey: AppUpdatePreferences.automaticChecksKey)
+      #expect(
+        AppUpdatePreferences.backgroundCheckIsDue(
+          in: defaults, now: now.addingTimeInterval(172_800)))
+    }
+  }
+
+  @Test func skippedVersionsPersistWithoutSuppressingOtherVersionsOrManualChecks() throws {
+    try withPreferences { defaults, suite in
+      AppUpdatePreferences.skip(version: "1.15.0", in: defaults)
+      AppUpdatePreferences.skip(version: "1.15.0", in: defaults)
+      AppUpdatePreferences.skip(version: "1.14.1", in: defaults)
+      let reopened = try #require(UserDefaults(suiteName: suite))
+      #expect(
+        reopened.stringArray(forKey: AppUpdatePreferences.skippedVersionsKey) == [
+          "1.15.0", "1.14.1",
+        ])
+      #expect(
+        !AppUpdatePreferences.shouldOffer(
+          version: "1.15.0", userInitiated: false, defaults: reopened))
+      #expect(
+        !AppUpdatePreferences.shouldOffer(
+          version: "1.14.1", userInitiated: false, defaults: reopened))
+      #expect(
+        AppUpdatePreferences.shouldOffer(
+          version: "1.15.1", userInitiated: false, defaults: reopened))
+      #expect(
+        AppUpdatePreferences.shouldOffer(
+          version: "1.16.0", userInitiated: false, defaults: reopened))
+      #expect(
+        AppUpdatePreferences.shouldOffer(version: "1.15.0", userInitiated: true, defaults: reopened)
+      )
+    }
+  }
+
+  @Test func choicesAreRecheckedWhenAnInFlightBackgroundCheckCompletes() throws {
+    try withPreferences { defaults, _ in
+      #expect(
+        AppUpdatePreferences.shouldOffer(
+          version: "1.15.0", userInitiated: false, defaults: defaults))
+      defaults.set(false, forKey: AppUpdatePreferences.automaticChecksKey)
+      #expect(
+        !AppUpdatePreferences.shouldOffer(
+          version: "1.15.0", userInitiated: false, defaults: defaults))
+      #expect(
+        AppUpdatePreferences.shouldOffer(version: "1.15.0", userInitiated: true, defaults: defaults)
+      )
+      defaults.set(true, forKey: AppUpdatePreferences.automaticChecksKey)
+      AppUpdatePreferences.skip(version: "1.15.0", in: defaults)
+      #expect(
+        !AppUpdatePreferences.shouldOffer(
+          version: "1.15.0", userInitiated: false, defaults: defaults))
+      #expect(
+        AppUpdatePreferences.shouldOffer(version: "1.15.0", userInitiated: true, defaults: defaults)
+      )
+    }
+  }
+
+  private func withPreferences(_ check: (UserDefaults, String) throws -> Void) throws {
+    let suite = "Aurelia.UpdateTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    try check(defaults, suite)
+  }
+
   private func releaseData(
     tag: String = "1.13.0-100", imageName: String = "Aurelia-1.13.0-100-macOS-universal.dmg",
     checksumName: String = "SHA256SUMS",
-    imageURL: String = "https://api.github.com/repos/owner/repo/releases/assets/1"
+    imageURL: String = "https://api.github.com/repos/owner/repo/releases/assets/1",
+    notes: Any? = nil, imageSize: Any? = nil
   ) -> Data {
-    try! JSONSerialization.data(withJSONObject: [
+    var image: [String: Any] = ["name": imageName, "url": imageURL]
+    if let imageSize { image["size"] = imageSize }
+    var release: [String: Any] = [
       "tag_name": tag, "draft": false,
       "assets": [
-        ["name": imageName, "url": imageURL],
+        image,
         ["name": checksumName, "url": "https://api.github.com/repos/owner/repo/releases/assets/2"],
       ],
-    ])
+    ]
+    if let notes { release["body"] = notes }
+    return try! JSONSerialization.data(withJSONObject: release)
   }
 
   private func checksums() -> Data {

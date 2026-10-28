@@ -20,7 +20,6 @@ final class AppUpdater: ObservableObject {
 
   static let shared = AppUpdater()
   private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "updates")
-  private static let lastCheckKey = "AureliaLastUpdateCheck"
 
   @Published private(set) var state: State = .idle
   @Published private(set) var hasToken: Bool
@@ -30,13 +29,15 @@ final class AppUpdater: ObservableObject {
   let currentVersion: String
   let currentBuild: Int
   private let client: AppUpdateClient
+  private let defaults: UserDefaults
 
   init(
     tokens: AppUpdateTokenStore = AppUpdateTokenStore(), bundle: Bundle = .main,
-    client: AppUpdateClient = AppUpdateClient()
+    client: AppUpdateClient = AppUpdateClient(), defaults: UserDefaults = .standard
   ) {
     self.tokens = tokens
     self.client = client
+    self.defaults = defaults
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
     repository = configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
     currentVersion =
@@ -60,16 +61,15 @@ final class AppUpdater: ObservableObject {
   }
 
   /// At launch, at most once a day and only with a token; it speaks up only when there is news.
-  func checkInBackgroundIfDue(defaults: UserDefaults = .standard) {
-    guard canCheck else { return }
-    let last = defaults.object(forKey: Self.lastCheckKey) as? Date ?? .distantPast
-    guard Date().timeIntervalSince(last) > 20 * 3_600 else { return }
+  func checkInBackgroundIfDue() {
+    guard canCheck, AppUpdatePreferences.backgroundCheckIsDue(in: defaults) else { return }
     Task { await check(userInitiated: false) }
   }
 
   /// Looks for a newer release; a check the user asked for always answers.
   func check(userInitiated: Bool) async {
     guard state != .checking, state != .downloading, state != .installing else { return }
+    guard userInitiated || AppUpdatePreferences.checksAutomatically(in: defaults) else { return }
     guard let repository else {
       if userInitiated {
         alert(
@@ -86,10 +86,15 @@ final class AppUpdater: ObservableObject {
     state = .checking
     do {
       let release = try await client.latest(repository: repository, token: token)
-      UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
+      defaults.set(Date(), forKey: AppUpdatePreferences.lastCheckKey)
       if AppUpdateLogic.isNewer(build: release.build, than: currentBuild) {
         state = .available(release)
-        offer(release)
+        // Re-read choices after the request: Settings may have changed while it was in flight.
+        if AppUpdatePreferences.shouldOffer(
+          version: release.version, userInitiated: userInitiated, defaults: defaults)
+        {
+          offer(release)
+        }
       } else {
         state = .upToDate
         if userInitiated {
@@ -112,18 +117,47 @@ final class AppUpdater: ObservableObject {
     let alert = NSAlert()
     alert.messageText = "Aurelia \(release.version) Is Available"
     alert.informativeText =
-      "You have \(currentVersion) (\(currentBuild)). Install \(release.version) (\(release.build)) now? Aurelia quits, updates and opens again; your library, settings and sign-ins stay."
+      "You have \(currentVersion) (\(currentBuild)). Install \(release.version) (\(release.build)) now? Aurelia quits, updates and opens again; your library, settings and sign-ins stay.\n\n\(AppUpdateLogic.downloadSizeText(release.downloadBytes))"
     alert.addButton(withTitle: "Install and Restart")
     alert.addButton(withTitle: "Later")
-    if release.pageURL != nil { alert.addButton(withTitle: "Release Notes") }
+    alert.addButton(withTitle: "Skip This Version")
+    alert.accessoryView = releaseNotesView(release.releaseNotes)
     switch alert.runModal() {
     case .alertFirstButtonReturn:
       Task { await install(release) }
     case .alertThirdButtonReturn:
-      if let page = release.pageURL { NSWorkspace.shared.open(page) }
+      AppUpdatePreferences.skip(version: release.version, in: defaults)
     default:
       break
     }
+  }
+
+  private func releaseNotesView(_ notes: String) -> NSScrollView {
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 200))
+    scroll.hasVerticalScroller = true
+    scroll.borderType = .bezelBorder
+    let text = NSTextView(frame: scroll.contentView.bounds)
+    text.isEditable = false
+    text.isSelectable = true
+    text.isRichText = false
+    text.isAutomaticLinkDetectionEnabled = false
+    text.isHorizontallyResizable = false
+    text.isVerticallyResizable = true
+    text.minSize = NSSize(width: 0, height: scroll.contentSize.height)
+    text.maxSize = NSSize(
+      width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+    text.autoresizingMask = [.width]
+    text.textContainer?.widthTracksTextView = true
+    text.textContainer?.containerSize = NSSize(
+      width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+    text.textContainerInset = NSSize(width: 8, height: 8)
+    text.font = .systemFont(ofSize: NSFont.systemFontSize)
+    text.textColor = .textColor
+    text.backgroundColor = .textBackgroundColor
+    text.string = AppUpdateLogic.releaseNotesText(notes)
+    text.setAccessibilityLabel("Release Notes")
+    scroll.documentView = text
+    return scroll
   }
 
   /// Downloads and checks the release, then lets the helper replace the app after it quits.

@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 /// A GitHub release of this app that is newer than the one running.
@@ -9,6 +10,56 @@ struct AppRelease: Equatable, Sendable {
   let diskImageURL: URL
   let checksumsURL: URL
   let pageURL: URL?
+  let releaseNotes: String
+  let downloadBytes: Int64?
+
+  init(
+    tag: String, version: String, build: Int, diskImageName: String, diskImageURL: URL,
+    checksumsURL: URL, pageURL: URL?, releaseNotes: String = "", downloadBytes: Int64? = nil
+  ) {
+    self.tag = tag
+    self.version = version
+    self.build = build
+    self.diskImageName = diskImageName
+    self.diskImageURL = diskImageURL
+    self.checksumsURL = checksumsURL
+    self.pageURL = pageURL
+    self.releaseNotes = releaseNotes
+    self.downloadBytes = downloadBytes
+  }
+}
+
+/// Local update choices; callers inject a private defaults suite in tests.
+enum AppUpdatePreferences {
+  static let automaticChecksKey = "AureliaAutomaticUpdateChecks"
+  static let skippedVersionsKey = "AureliaSkippedUpdateVersions"
+  static let lastCheckKey = "AureliaLastUpdateCheck"
+  static let checkInterval: TimeInterval = 24 * 3_600
+
+  static func checksAutomatically(in defaults: UserDefaults) -> Bool {
+    defaults.object(forKey: automaticChecksKey) == nil || defaults.bool(forKey: automaticChecksKey)
+  }
+
+  static func backgroundCheckIsDue(in defaults: UserDefaults, now: Date = Date()) -> Bool {
+    guard checksAutomatically(in: defaults) else { return false }
+    let last = defaults.object(forKey: lastCheckKey) as? Date ?? .distantPast
+    return now.timeIntervalSince(last) >= checkInterval
+  }
+
+  static func shouldOffer(
+    version: String, userInitiated: Bool, defaults: UserDefaults
+  ) -> Bool {
+    userInitiated
+      || (checksAutomatically(in: defaults)
+        && !(defaults.stringArray(forKey: skippedVersionsKey) ?? []).contains(version))
+  }
+
+  static func skip(version: String, in defaults: UserDefaults) {
+    var versions = defaults.stringArray(forKey: skippedVersionsKey) ?? []
+    guard !versions.contains(version) else { return }
+    versions.append(version)
+    defaults.set(versions, forKey: skippedVersionsKey)
+  }
 }
 
 /// The rules of updating that need no network or user interface: which release is newer, which
@@ -73,6 +124,8 @@ enum AppUpdateLogic {
         .flatMap(URL.init(string:))
     }
     guard let image = assetURL(imageName) else { throw AppUpdateError.noDiskImage }
+    let imageAsset = assets.first { $0["name"] as? String == imageName }
+    let bytes = downloadBytes(from: imageAsset?["size"])
     guard let sums = assetURL("SHA256SUMS") else { throw AppUpdateError.noChecksum }
     guard isAssetURL(image, repository: repository), isAssetURL(sums, repository: repository) else {
       throw AppUpdateError.invalidURL
@@ -81,7 +134,25 @@ enum AppUpdateLogic {
     return AppRelease(
       tag: tag, version: parsed.version, build: parsed.build, diskImageName: imageName,
       diskImageURL: image, checksumsURL: sums,
-      pageURL: page.flatMap { isReleasePageURL($0, repository: repository) ? $0 : nil })
+      pageURL: page.flatMap { isReleasePageURL($0, repository: repository) ? $0 : nil },
+      releaseNotes: object["body"] as? String ?? "", downloadBytes: bytes)
+  }
+
+  static func releaseNotesText(_ notes: String) -> String {
+    notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      ? "No release notes were provided for this version." : notes
+  }
+
+  static func downloadSizeText(_ bytes: Int64?) -> String {
+    guard let bytes, bytes >= 0 else { return "Download size unavailable." }
+    return "Download size: \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))."
+  }
+
+  private static func downloadBytes(from value: Any?) -> Int64? {
+    guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+      let bytes = Int64(number.stringValue), bytes >= 0
+    else { return nil }
+    return bytes
   }
 
   static func isAssetURL(_ url: URL, repository: String? = nil) -> Bool {

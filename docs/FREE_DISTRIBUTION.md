@@ -134,7 +134,15 @@ unnecessary with one-year profiles.
 *Aurelia › Check for Updates…* asks GitHub for the newest release of the repository the app
 was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
 app's Info.plist; builds made in Xcode have none and cannot update). With a token saved, the
-app also looks once a day at launch and speaks up only when a newer build exists.
+app also looks at launch when at least 24 hours have passed since its last successful check.
+*Settings › App › Updates › Check for updates automatically* is on by default; turning it
+off stops background checks. *Check for Updates…* continues to work manually.
+
+The update dialog shows GitHub's release notes as selectable plain text in a scrollable
+field, together with the disk image's published download size when available. *Later*
+dismisses the offer; *Skip This Version* remembers that version on this Mac and suppresses
+its automatic offers, including another build of the same version. Future versions are
+still offered. A manual check also offers skipped versions, so they can still be installed.
 
 A private repository needs a read-only token, made like the one for
 [the Linux server](LINUX_SERVER.md): a fine-grained token for only this repository with
@@ -168,6 +176,8 @@ and the error gives its recovery path instead of deleting it.
 invented bundles and injected signature/process checks in a unique
 `~/Library/Caches/Aurelia/TestRuns/` directory. It neither launches applications nor modifies
 the installed app. Mac unit tests cover release validation, bounded transfer and checksum
-rules, download failures and cleanup using a synthetic transport. Real GitHub asset redirects
+rules, download failures and cleanup using a synthetic transport, plus release notes,
+optional download sizes, automatic-check timing and version-specific skip choices using
+private preference suites. Real GitHub asset redirects
 and macOS first launch after an update still require a suitable newer published release.
 
