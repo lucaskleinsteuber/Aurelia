@@ -117,6 +117,14 @@ or Firefox on any computer, phone or tablet at home, for example
 3. **Choose your profile, type your PIN and watch.** Files the browser can't open itself,
    such as MKV, play live converted by the server; nothing converted is ever stored.
 
+| Home and Continue Watching | Seasons and episodes |
+| --- | --- |
+| <img src="docs/assets/screenshots/web-home.jpg" alt="Aurelia in a browser: Home and Continue Watching in the invented showcase library"> | <img src="docs/assets/screenshots/web-detail.jpg" alt="Aurelia in a browser: the invented Cobalt Station series and its episodes"> |
+| <img src="docs/assets/screenshots/web-player.jpg" alt="Aurelia browser player controls, shown paused over generated artwork"> | <img src="docs/assets/screenshots/web-settings.jpg" alt="Aurelia browser playback settings"> |
+
+<sub>The same invented showcase library as above; the player controls are shown paused.
+Generated with `zsh scripts/capture-showcase.sh --web-only`.</sub>
+
 More in [Aurelia in a web browser](docs/WEB_APP.md).
 
 ## Documentation

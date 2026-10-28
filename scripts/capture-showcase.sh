@@ -4,10 +4,15 @@
 # apps in their DEBUG showcase mode. No server, media or personal data is involved.
 #
 # The Mac UI test takes over the screen for about a minute; the Apple TV test runs in a
-# temporary tvOS simulator.
+# temporary tvOS simulator. `--web-only` instead captures the browser in an isolated headless
+# context with simulated metadata; it never enters the native test path.
 set -euo pipefail
 
 repository_root=${0:A:h:h}
+if [[ "${1:-}" == "--web-only" ]]; then
+  shift
+  exec sh "$repository_root/scripts/capture-web-showcase.sh" "$@"
+fi
 source "$repository_root/scripts/workspace-paths.sh"
 showcase="$other_root/Showcase"
 screenshots="$repository_root/docs/assets/screenshots"

@@ -238,3 +238,33 @@ are never read by the component or retained in its state.
 
 Headless Node tests use an invented updater and manual timer queue to cover progress, restart
 outages, failures, cancellation, approvals, unlock and duplicate clicks without a real server.
+
+## Reproducing the browser screenshots
+
+Run `zsh scripts/capture-showcase.sh --web-only` on a Mac with Swift, Node and an existing Playwright
+installation. Set `AURELIA_PLAYWRIGHT_NODE_MODULES` (or `NODE_PATH`) to its `node_modules`
+folder if it is not on Node's module path. `AURELIA_CHROMIUM_EXECUTABLE` can select an existing
+Chromium/Chrome executable; `AURELIA_NODE` can select Node. Nothing is downloaded or added to
+the browser app's dependencies. `--help` prints usage, and
+`node scripts/capture-web-showcase.mjs --check` only checks capture dependencies.
+
+The script regenerates the same 13-title library and artwork with `scripts/make-showcase.swift`
+in a unique cache folder, serves it with the unchanged production browser modules on an
+unused loopback port, and uses a fresh headless browser context. The fixture API is a separate
+developer script, never compiled into Aurelia; it does not connect to a real server or read
+credentials. Only its own origin is allowed, and every real media request is rejected.
+
+Home, the title page, paused player controls and Playback settings are written as `web-*.jpg`
+under `docs/assets/screenshots`. The player receives capture-only simulated video metadata and
+a generated episode backdrop. Native media `src`, `load` and `play` are intercepted before the
+app loads, so no video or audio engine plays anything. These images demonstrate the production
+controls' layout; they are not playback verification or an authenticated-server test. The
+private report under `Local/Logs` records image hashes, fixture provenance and rejected
+requests; temporary fixture data and the headless browser context are removed afterward.
+
+The approved `capture-showcase.sh --web-only` entrypoint dispatches before the native path.
+It never invokes Mac/tvOS apps, native builds or UI/XCUITest suites; the default entrypoint
+without `--web-only` retains its existing native capture behavior.
+
+Developer fixture and wrapper guards run with `node --test "tests/WebShowcase/*.test.mjs"`.
+They use synthetic files and simulated media objects, with no browser launch or native tests.
