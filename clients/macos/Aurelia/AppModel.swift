@@ -6,6 +6,7 @@ import OSLog
 final class AppModel: ObservableObject {
   /// A one-shot detail route shared by library menus and the player.
   @Published var requestedMediaDetail: UUID?
+  @Published var requestedPersonDetail: PersonSelection?
 
   static var active: AppModel?
   @Published private(set) var operatingMode: OperatingMode?
@@ -75,6 +76,8 @@ final class AppModel: ObservableObject {
   @Published private(set) var catalogItems: [CatalogItemSummary] = []
   @Published private(set) var home: HomeResponse?
   @Published private(set) var collections: [CollectionSummary] = []
+  @Published private(set) var watchlistItems: [CatalogItemSummary] = []
+  @Published private(set) var watchlistIds: Set<UUID> = []
   @Published private(set) var playback: PlaybackPresentation?
   @Published private(set) var sceneNotesVersion: UInt64 = 0
   @Published private(set) var catalogVisibilityRevision: UInt64 = 0
@@ -84,6 +87,9 @@ final class AppModel: ObservableObject {
       if LibraryStateUITestFixture.enabled { return true }
     #endif
     return libraryCapabilities.contains("library-state-v1")
+  }
+  var supportsWatchlist: Bool {
+    libraryCapabilities.contains("watchlist-people-v1")
   }
   @Published private(set) var hostSnapshot: NativeHostSnapshot = .stopped
   @Published private(set) var libraries: [LibrarySummary] = []
@@ -1514,6 +1520,12 @@ final class AppModel: ObservableObject {
     libraryCapabilities = Set(info.capabilities ?? [])
     collections = newCollections
     home = newHome
+    if (info.capabilities ?? []).contains("watchlist-people-v1"),
+      let loadedWatchlist = try? await client.watchlist(), isCurrent(generation)
+    {
+      watchlistItems = loadedWatchlist.items
+      watchlistIds = Set(loadedWatchlist.mediaIds)
+    }
     scheduleHomeRefresh()
     warmLibraryBrowsing()
     if !Self.isTestProcess, !NativePreflightIsolation.isRequested, let current = self.profile {
@@ -1952,6 +1964,48 @@ final class AppModel: ObservableObject {
     } catch {
       if isCurrent(generation) { errorMessage = error.localizedDescription }
       return false
+    }
+  }
+
+  func isWatchlisted(_ mediaId: UUID) -> Bool {
+    watchlistIds.contains(mediaId)
+  }
+
+  func refreshWatchlist() async {
+    guard let profile, supportsWatchlist else { return }
+    let generation = connectionGeneration
+    if let loaded = try? await APIClient(profile: profile).watchlist(), isCurrent(generation) {
+      watchlistItems = loaded.items
+      watchlistIds = Set(loaded.mediaIds)
+    }
+  }
+
+  func setWatchlist(mediaId: UUID, isWatchlisted: Bool) async -> Bool {
+    guard let profile else { return false }
+    let generation = connectionGeneration
+    do {
+      _ = try await APIClient(profile: profile).setWatchlist(
+        mediaId: mediaId, isWatchlisted: isWatchlisted)
+      guard isCurrent(generation) else { return false }
+      if isWatchlisted {
+        watchlistIds.insert(mediaId)
+      } else {
+        watchlistIds.remove(mediaId)
+        watchlistItems.removeAll { $0.id == mediaId }
+      }
+      await refreshWatchlist()
+      return isCurrent(generation)
+    } catch {
+      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      return false
+    }
+  }
+
+  func personDetail(_ selection: PersonSelection) async throws -> PersonDetailResponse {
+    guard let profile else { throw APIClientError.invalidResponse }
+    return try await currentConnection {
+      try await APIClient(profile: profile).personDetail(
+        name: selection.name, personKey: selection.personKey)
     }
   }
 
@@ -2609,6 +2663,8 @@ final class AppModel: ObservableObject {
     catalogItems = []
     home = nil
     collections = []
+    watchlistItems = []
+    watchlistIds = []
     clearAdministrationState()
     artworkLoader.removeAll()
     isMediaManagerPresented = false
@@ -2703,6 +2759,8 @@ final class AppModel: ObservableObject {
     catalogItems = []
     home = nil
     collections = []
+    watchlistItems = []
+    watchlistIds = []
     libraries = []
     activeScans = []
     scanStatusUnavailable = []
@@ -3164,6 +3222,13 @@ final class AppModel: ObservableObject {
       }
       guard isCurrent(generation) else { throw CancellationError() }
       if changes.changedAreas.contains(.userState) {
+        if supportsWatchlist,
+          let loadedWatchlist = try? await APIClient(profile: profile).watchlist(),
+          isCurrent(generation)
+        {
+          watchlistItems = loadedWatchlist.items
+          watchlistIds = Set(loadedWatchlist.mediaIds)
+        }
         sceneNotesVersion &+= 1
         catalogVisibilityRevision &+= 1
       }

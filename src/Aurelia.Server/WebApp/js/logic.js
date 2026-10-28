@@ -313,6 +313,15 @@ export function parseRoute(pathname = "/", search = "") {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (parts.length === 0) return { name: "home" };
   if (parts.length === 1 && BROWSE_SECTIONS.includes(parts[0])) return { name: parts[0], filters: parseFilters(query) };
+  if (parts.length === 1 && parts[0] === "watchlist") return { name: "watchlist" };
+  if (parts.length === 1 && parts[0] === "person") {
+    const personName = query.get("name")?.trim() ?? "";
+    const rawKey = query.get("key")?.trim() ?? "";
+    const personKey = rawKey && !rawKey.startsWith("unidentified:") ? rawKey : "";
+    if (personName || personKey) {
+      return { name: "person", ...(personName ? { personName } : {}), ...(personKey ? { personKey } : {}) };
+    }
+  }
   if (parts.length === 1 && parts[0] === "collections") return { name: "collections" };
   if (parts.length === 1 && parts[0] === "search") return { name: "search", query: query.get("q") ?? "" };
   if (parts[0] === "settings" && parts.length <= 2) {
@@ -342,6 +351,15 @@ export function routePath(route) {
       return route.page && route.page !== "general" ? `/settings/${route.page}` : "/settings";
     case "title":
       return `/title/${route.id}`;
+    case "watchlist":
+      return "/watchlist";
+    case "person": {
+      const query = new URLSearchParams();
+      if (route.personName) query.set("name", route.personName);
+      if (route.personKey && !String(route.personKey).startsWith("unidentified:")) query.set("key", route.personKey);
+      const search = query.toString();
+      return search ? `/person?${search}` : "/";
+    }
     case "collections":
       return "/collections";
     case "collection":
@@ -594,6 +612,14 @@ export function people(credits) {
     });
   }
   return cards.sort((left, right) => (left.order - right.order) || (left.index - right.index)).map(({ index, ...card }) => card);
+}
+
+export function personHref(person) {
+  const query = new URLSearchParams();
+  if (person?.name?.trim()) query.set("name", person.name.trim());
+  if (person?.id && !String(person.id).startsWith("unidentified:")) query.set("key", String(person.id));
+  const search = query.toString();
+  return search ? `/person?${search}` : "/";
 }
 
 /** The "Information" fields of a title, in the Mac app's order. */

@@ -6,7 +6,7 @@ import { browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS } from "./logic.
 const TITLES = { library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows" };
 const PAGE_SIZE = 100;
 
-export function createCatalogView({ api, navigate, replaceRoute, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast, onChanged, play, canManage = () => false, editMetadata }) {
+export function createCatalogView({ api, navigate, replaceRoute, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast, onChanged, play, canManage = () => false, editMetadata, isWatchlisted, toggleWatchlist }) {
   let lifetime = new AbortController();
   let dialog = null;
   let debounce;
@@ -293,13 +293,25 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     if (["movie", "series", "episode"].includes(item.kind)) actions.push(h("div", { class: "menu-divider" }),
       ...watchMenu(item, item.kind === "series" ? "series" : "title", undefined, { includeContinueWatching: false }));
     // The server supports favorites for movies and series. Episode identity is never sent to that endpoint.
-    if (["movie", "series"].includes(item.kind)) actions.push(option(item.isFavorite ? "Remove from Favorites" : "Add to Favorites", item.isFavorite ? "starSlash" : "star", async () => {
-      if (actionWorking) return;
-      actionWorking = true;
-      try { await api.setFavorite(item.id, !item.isFavorite, { signal }); if (!signal.aborted) onChanged(); }
-      catch (error) { report(error, signal); }
-      finally { if (!signal.aborted) actionWorking = false; }
-    }));
+    if (["movie", "series"].includes(item.kind)) {
+      actions.push(option(item.isFavorite ? "Remove from Favorites" : "Add to Favorites", item.isFavorite ? "starSlash" : "star", async () => {
+        if (actionWorking) return;
+        actionWorking = true;
+        try { await api.setFavorite(item.id, !item.isFavorite, { signal }); if (!signal.aborted) onChanged(); }
+        catch (error) { report(error, signal); }
+        finally { if (!signal.aborted) actionWorking = false; }
+      }));
+      if (typeof toggleWatchlist === "function") {
+        const watchlisted = Boolean(isWatchlisted?.(item.id));
+        actions.push(option(watchlisted ? "Remove from Watchlist" : "Add to Watchlist", watchlisted ? "bookmarkFill" : "bookmark", async () => {
+          if (actionWorking) return;
+          actionWorking = true;
+          try { await toggleWatchlist(item.id, !watchlisted, { signal }); if (!signal.aborted) onChanged(); }
+          catch (error) { report(error, signal); }
+          finally { if (!signal.aborted) actionWorking = false; }
+        }));
+      }
+    }
     actions.push(...continueWatchingMenu(item));
     if (canManage() && editMetadata) actions.push(h("div", { class: "menu-divider" }), option("Edit Metadata…", "pencil", () => {
       if (canManage()) editMetadata(item);

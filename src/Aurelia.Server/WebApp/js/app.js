@@ -21,6 +21,7 @@ const state = {
   player: null,
   pendingRefresh: false,
   retryTimer: null,
+  watchlistIds: new Set(),
 };
 
 // MARK: Start and connection
@@ -68,6 +69,12 @@ const settings = createSettings({ api, state, navigate, toast, handleError, prof
 const catalog = createCatalogView({ api, navigate, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast,
   play: playTitle, canManage: () => logic.managementPermissions(state.profile).administrator,
   editMetadata: (item) => settings.editMetadata(item),
+  isWatchlisted: (mediaId) => state.watchlistIds.has(mediaId),
+  toggleWatchlist: async (mediaId, isWatchlisted, options) => {
+    await api.setWatchlist(mediaId, isWatchlisted, options);
+    if (isWatchlisted) state.watchlistIds.add(mediaId);
+    else state.watchlistIds.delete(mediaId);
+  },
   replaceRoute: (route) => { state.route = route; history.replaceState(null, "", logic.routePath(route)); },
   onChanged: () => renderRoute({ quiet: true }),
 });
@@ -302,6 +309,10 @@ function showPin(profile) {
 
 async function enterProfile(user) {
   state.profile = user;
+  state.watchlistIds = new Set();
+  api.watchlist().then((response) => {
+    if (state.profile?.id === user.id) state.watchlistIds = new Set(response?.mediaIds ?? []);
+  }).catch(() => {});
   startSync();
   renderRoute();
 }
@@ -407,6 +418,7 @@ function shell(content) {
   const tabs = [
     ["home", "Home", "/"],
     ["library", "Library", "/library"],
+    ["watchlist", "Watchlist", "/watchlist"],
     ["recent", "Recently Added", "/recent"],
     ["shows", "TV Shows", "/shows"],
     ["movies", "Movies", "/movies"],
@@ -460,7 +472,7 @@ async function renderRoute({ quiet = false } = {}) {
   clear(root);
   root.append(shell(content));
   if (quiet) window.scrollTo(0, scroll);
-  const label = { home: "Home", library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", settings: "Settings" }[route.name];
+  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", settings: "Settings" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
 }
 
@@ -471,6 +483,10 @@ function screenFor(route, token) {
     case "movies":
     case "shows":
       return catalog.browse(route);
+    case "watchlist":
+      return watchlistScreen();
+    case "person":
+      return personScreen(route);
     case "settings":
       return settingsScreen(route);
     case "search":
@@ -641,7 +657,12 @@ function openMenu(anchor, items) {
 // MARK: Title details (the Mac app's detail page)
 
 async function titleScreen(id) {
-  const [detail, plan] = await Promise.all([api.detail(id), api.playbackPlan(id).catch(() => null)]);
+  const [detail, plan, watchlistSnapshot] = await Promise.all([
+    api.detail(id),
+    api.playbackPlan(id).catch(() => null),
+    api.watchlist().catch(() => null),
+  ]);
+  if (watchlistSnapshot?.mediaIds) state.watchlistIds = new Set(watchlistSnapshot.mediaIds);
   const item = detail.item;
   const metadata = detail.metadata ?? {};
   document.title = `${metadata.title ?? item.title} · Aurelia`;
@@ -671,6 +692,27 @@ async function titleScreen(id) {
     }
   });
 
+  let isWatchlisted = state.watchlistIds.has(item.id);
+  const watchlistButton = h("button", { class: "secondary-button large watchlist-button" });
+  const showWatchlist = () => watchlistButton.replaceChildren(icon(isWatchlisted ? "bookmarkFill" : "bookmark", { size: 17 }), isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist");
+  showWatchlist();
+  watchlistButton.addEventListener("click", async () => {
+    watchlistButton.disabled = true;
+    try {
+      await api.setWatchlist(item.id, !isWatchlisted);
+      isWatchlisted = !isWatchlisted;
+      if (isWatchlisted) state.watchlistIds.add(item.id);
+      else state.watchlistIds.delete(item.id);
+      showWatchlist();
+      watchlistButton.classList.add("bounce");
+      setTimeout(() => watchlistButton.classList.remove("bounce"), 400);
+    } catch (error) {
+      if (!handleError(error)) toast(error.message);
+    } finally {
+      watchlistButton.disabled = false;
+    }
+  });
+
   const moreButton = h("button", { class: "player-round glass detail-more", "aria-label": "More Actions", "aria-haspopup": "menu" }, icon("more", { size: 20 }));
   moreButton.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -691,7 +733,7 @@ async function titleScreen(id) {
       h("h1", { class: "hero-title rise", style: { "--rise": 1 } }, metadata.title ?? item.title),
       (metadata.genres ?? item.genres ?? []).length ? h("div", { class: "hero-genres rise", style: { "--rise": 2 } }, (metadata.genres ?? item.genres).slice(0, 3).join("  ·  ")) : null,
       metadata.overview ?? item.overview ? h("p", { class: "hero-overview rise", style: { "--rise": 3 } }, metadata.overview ?? item.overview) : null,
-      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, favoriteButton,
+      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, favoriteButton, watchlistButton,
         item.watchState === "completed" ? h("span", { class: "watched-label" }, icon("checkCircle", { size: 15 }), "Watched") : null),
       target ? progressLine(target) : null),
     stars.length ? h("div", { class: "starring rise", style: { "--rise": 5 } }, h("span", { class: "muted" }, "Starring "), stars.join(", ")) : null);
@@ -803,10 +845,42 @@ function castRail(credits) {
   if (!cards.length) return null;
   return h("section", { class: "detail-section" },
     h("div", { class: "section-header" }, h("h2", {}, "Cast & Crew")),
-    hrail(cards.map((person) => h("div", { class: "person", role: "listitem" },
+    hrail(cards.map((person) => h("a", { class: "person card-hover", role: "listitem", href: logic.personHref(person), "data-route": true },
       h("div", { class: "person-photo" }, artwork(person.profile, 320, "person-art", ""), person.profile ? null : h("span", { class: "person-initial" }, logic.initial(person.name))),
       h("div", { class: "person-name" }, person.name),
       person.subtitle ? h("div", { class: "person-role" }, person.subtitle) : null)), { label: "Cast & Crew", className: "people" }));
+}
+
+async function watchlistScreen() {
+  const response = await api.watchlist();
+  const items = response?.items ?? [];
+  state.watchlistIds = new Set(response?.mediaIds ?? items.map((item) => item.id));
+  if (!items.length) {
+    return emptyState("bookmark", "Your Watchlist Is Empty", "Save movies and TV shows you want to watch later from their detail page or context menu.");
+  }
+  return h("div", { class: "library page-enter" },
+    h("div", { class: "page-header" }, h("h1", {}, "Watchlist"), h("span", { class: "count" }, String(items.length))),
+    h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index))));
+}
+
+async function personScreen(route) {
+  const detail = await api.person({ name: route.personName, key: route.personKey });
+  const items = detail?.items ?? [];
+  const name = detail?.name ?? route.personName ?? "Person";
+  document.title = `${name} · Aurelia`;
+  return h("div", { class: "library person-page page-enter" },
+    h("div", { class: "person-header" },
+      h("button", { class: "player-round glass", "aria-label": "Back", onclick: () => history.length > 1 ? history.back() : navigate({ name: "home" }) }, icon("back", { size: 20 })),
+      h("div", { class: "person-photo large" },
+        artwork(detail?.profile, 320, "person-art", ""),
+        detail?.profile ? null : h("span", { class: "person-initial" }, logic.initial(name))),
+      h("div", { class: "person-heading" },
+        h("div", { class: "eyebrow" }, detail?.subtitle ?? "Cast & Crew"),
+        h("h1", {}, name),
+        h("div", { class: "muted" }, `${items.length} ${items.length === 1 ? "title" : "titles"} in your library`))),
+    items.length
+      ? h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index)))
+      : emptyState("search", "No Titles Found", "No accessible movies or TV shows in this library match this person."));
 }
 
 function aboutSection(detail) {

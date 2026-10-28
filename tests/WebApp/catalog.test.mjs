@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createCatalogView } from "../../src/Aurelia.Server/WebApp/js/catalog-view.js";
 import { createApi, ApiError } from "../../src/Aurelia.Server/WebApp/js/api.js";
-import { parseRoute, routePath, browseQuery } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import { parseRoute, routePath, browseQuery, personHref } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 import { h } from "../../src/Aurelia.Server/WebApp/js/dom.js";
 import { installDOM, flush, deferred, all, button, input } from "./dom-fixture.mjs";
 const items = (start, count) => Array.from({ length: count }, (_v, i) => ({ id: `item-${start + i}`, title: `Invented ${start + i}`, kind: "movie", genres: ["Drama"], year: 2000 }));
@@ -125,6 +125,12 @@ test("filtered search and collection routes round-trip", () => {
   const route = { name: "movies", filters: { query: "Quiet & Harbor", yearFrom: 1990, yearTo: 2000, favorites: true } }; const [path, query] = routePath(route).split("?");
   assert.deepEqual(parseRoute(path, query), route); assert.deepEqual(browseQuery("movies", route.filters), { query: "Quiet & Harbor", kind: "movie", favorite: "true", yearFrom: "1990", yearTo: "2000" });
   assert.deepEqual(parseRoute("/collections"), { name: "collections" }); assert.equal(routePath({ name: "collections" }), "/collections");
+  assert.deepEqual(parseRoute("/watchlist"), { name: "watchlist" }); assert.equal(routePath({ name: "watchlist" }), "/watchlist");
+  const personRoute = { name: "person", personName: "Clara Vale", personKey: "tmdb:person:42" };
+  const [personPath, personQuery] = routePath(personRoute).split("?");
+  assert.deepEqual(parseRoute(personPath, personQuery), personRoute);
+  assert.equal(personHref({ id: "tmdb:person:42", name: "Clara Vale" }), "/person?name=Clara+Vale&key=tmdb%3Aperson%3A42");
+  assert.equal(personHref({ id: "unidentified:1", name: "Clara Vale" }), "/person?name=Clara+Vale");
 });
 
 test("a late watch-state read after a profile change cannot write with the next profile's cookies", async (t) => {

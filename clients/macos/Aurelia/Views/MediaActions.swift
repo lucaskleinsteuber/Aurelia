@@ -122,6 +122,15 @@ struct MediaContextMenuItems: View {
       ) {
         Task { _ = await model.setFavorite(mediaId: item.id, isFavorite: !item.isFavorite) }
       }
+      if model.supportsWatchlist {
+        let watchlisted = model.isWatchlisted(item.id)
+        Button(
+          watchlisted ? "Remove from Watchlist" : "Add to Watchlist",
+          systemImage: watchlisted ? "bookmark.slash" : "bookmark"
+        ) {
+          Task { _ = await model.setWatchlist(mediaId: item.id, isWatchlisted: !watchlisted) }
+        }
+      }
     }
     MediaContinueWatchingMenuItem(item: item, controller: controller)
     if model.canManageMedia, let onEdit {

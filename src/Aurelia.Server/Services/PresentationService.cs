@@ -91,6 +91,122 @@ public sealed class PresentationService(
         return ids.Where(byId.ContainsKey).Select(id => ToCatalog(byId[id], userId)).ToList();
     }
 
+    public async Task<PersonDetailResponse> PersonAsync(
+        Guid userId,
+        string? name,
+        string? personKey,
+        CancellationToken cancellationToken)
+    {
+        var trimmedName = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        var trimmedKey = string.IsNullOrWhiteSpace(personKey) || personKey.StartsWith("unidentified:", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : personKey.Trim();
+        if (trimmedName is null && trimmedKey is null)
+        {
+            throw new MetadataException(
+                "invalid_person",
+                "A person name or key is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        string? providerPersonId = null;
+        if (trimmedKey is not null)
+        {
+            const string marker = ":person:";
+            var index = trimmedKey.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0 && index + marker.Length < trimmedKey.Length)
+            {
+                providerPersonId = trimmedKey[(index + marker.Length)..].Trim();
+            }
+        }
+
+        var escapedName = trimmedName is null ? null : EscapeLike(trimmedName);
+        var accessibleTopLevel = database.MediaItems.AsNoTracking()
+            .Where(item => item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series);
+        var creditsQuery = database.MediaCredits.AsNoTracking()
+            .Join(accessibleTopLevel, credit => credit.MediaItemId, item => item.Id, (credit, _) => credit);
+        if (providerPersonId is not null && escapedName is not null)
+        {
+            creditsQuery = creditsQuery.Where(credit =>
+                credit.ProviderPersonId == providerPersonId
+                || (credit.ProviderPersonId == null && EF.Functions.Like(credit.Name, escapedName, "\\")));
+        }
+        else if (providerPersonId is not null)
+        {
+            creditsQuery = creditsQuery.Where(credit => credit.ProviderPersonId == providerPersonId);
+        }
+        else
+        {
+            creditsQuery = creditsQuery.Where(credit => EF.Functions.Like(credit.Name, escapedName!, "\\"));
+        }
+
+        var matches = await creditsQuery
+            .OrderBy(credit => credit.SortOrder)
+            .ThenBy(credit => credit.Id)
+            .Select(credit => new
+            {
+                credit.MediaItemId,
+                credit.Name,
+                credit.Department,
+                credit.Job,
+                credit.ProfileAssetId,
+                credit.ProfilePath,
+            })
+            .ToListAsync(cancellationToken);
+
+        var resolvedName = matches.Select(credit => credit.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+            ?? trimmedName
+            ?? "Person";
+        if (matches.Count == 0)
+        {
+            return new PersonDetailResponse(resolvedName, null, null, []);
+        }
+
+        var roles = matches
+            .Select(credit => string.Equals(credit.Department, "Acting", StringComparison.OrdinalIgnoreCase)
+                ? "Acting"
+                : !string.IsNullOrWhiteSpace(credit.Job) ? credit.Job! : credit.Department)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var subtitle = roles.Count > 0 ? string.Join(" · ", roles) : null;
+
+        ArtworkSummary? profile = null;
+        var profileAssetId = matches.Select(credit => credit.ProfileAssetId).FirstOrDefault(id => id.HasValue);
+        if (profileAssetId.HasValue)
+        {
+            var asset = await database.ArtworkAssets.AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.Id == profileAssetId.Value, cancellationToken);
+            if (asset is not null)
+            {
+                profile = MetadataPresentation.ToArtwork(asset);
+            }
+        }
+
+        if (profile is null)
+        {
+            var profilePath = matches.Select(credit => credit.ProfilePath).FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+            if (profilePath is not null)
+            {
+                var asset = await database.ArtworkAssets.AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.Kind == ArtworkKind.Profile && candidate.ProviderPath == profilePath,
+                        cancellationToken);
+                if (asset is not null)
+                {
+                    profile = MetadataPresentation.ToArtwork(asset);
+                }
+            }
+        }
+
+        var mediaIds = matches.Select(credit => credit.MediaItemId).Distinct().ToList();
+        var items = (await SummariesAsync(userId, mediaIds, cancellationToken))
+            .OrderByDescending(item => item.Year ?? 0)
+            .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new PersonDetailResponse(resolvedName, subtitle, profile, items);
+    }
+
     public async Task<PagedResponse<CatalogItemSummary>> SearchAsync(Guid userId, string query, int offset, int limit, CancellationToken cancellationToken) =>
         await SearchAsync(userId, query, new CatalogQuery(Offset: offset, Limit: limit), cancellationToken);
 

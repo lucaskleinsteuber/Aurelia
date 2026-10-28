@@ -61,6 +61,15 @@ struct MediaDetailView: View {
                 }
               }
             },
+            isWatchlisted: model.isWatchlisted(detail.item.id),
+            onWatchlist: model.supportsWatchlist
+              ? {
+                Task {
+                  _ = await model.setWatchlist(
+                    mediaId: detail.item.id,
+                    isWatchlisted: !model.isWatchlisted(detail.item.id))
+                }
+              } : nil,
             // Editing waits for the full details; a list entry shown first is incomplete.
             metadataReady: self.detail != nil,
             onEdit: model.canManageMedia
@@ -499,17 +508,28 @@ struct MediaDetailView: View {
           arrowHeight: 112
         ) {
           ForEach(CreditPresentation.people(values)) { credit in
-            VStack(spacing: 8) {
-              AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
-                .frame(width: 112, height: 112)
-                .clipShape(Circle())
-                .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 1) }
-              Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
-              if let subtitle = credit.subtitle {
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            Button {
+              model.requestedPersonDetail = PersonSelection(
+                name: credit.name,
+                personKey: credit.id.hasPrefix("unidentified:") ? nil : credit.id,
+                profile: credit.profile,
+                subtitle: credit.subtitle)
+            } label: {
+              VStack(spacing: 8) {
+                AuthenticatedArtwork(artwork: credit.profile, symbol: "person.fill")
+                  .frame(width: 112, height: 112)
+                  .clipShape(Circle())
+                  .overlay { Circle().stroke(.white.opacity(0.1), lineWidth: 1) }
+                Text(credit.name).font(.callout.weight(.semibold)).lineLimit(1)
+                if let subtitle = credit.subtitle {
+                  Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
               }
+              .frame(width: 132)
+              .contentShape(Rectangle())
             }
-            .frame(width: 132)
+            .buttonStyle(AureliaCardButtonStyle())
+            .accessibilityIdentifier("person-\(credit.id)")
           }
         }
       }
@@ -621,6 +641,8 @@ private struct DetailHero: View {
   let onBack: () -> Void
   let onPlay: () -> Void
   let onFavorite: () -> Void
+  var isWatchlisted = false
+  var onWatchlist: (() -> Void)? = nil
   let metadataReady: Bool
   let onEdit: (() -> Void)?
   let onMatch: (() -> Void)?
@@ -699,6 +721,18 @@ private struct DetailHero: View {
             .symbolEffect(.bounce, value: detail.item.isFavorite)
           }
           .buttonStyle(.bordered).controlSize(.large)
+          if let onWatchlist {
+            Button(action: onWatchlist) {
+              Label(
+                isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist",
+                systemImage: isWatchlisted ? "bookmark.fill" : "bookmark"
+              )
+              .contentTransition(.symbolEffect(.replace))
+              .symbolEffect(.bounce, value: isWatchlisted)
+            }
+            .buttonStyle(.bordered).controlSize(.large)
+            .accessibilityIdentifier("watchlist-media")
+          }
           if let playTarget {
             AvailabilityBadge(
               availability: playTarget.availability,

@@ -21,6 +21,11 @@ public static class ServerFeatures
     public const string WebApp = "web-app-v1";
 
     /// <summary>
+    /// The server provides a shared per-profile watchlist and navigable cast and crew person pages.
+    /// </summary>
+    public const string WatchlistAndPeople = "watchlist-people-v1";
+
+    /// <summary>
     /// The server can convert a title live into fragmented MP4 (docs/CLIENT_PROTOCOL.md). It is
     /// only reported when the server found a working ffmpeg, so it is not part of <see cref="All"/>.
     /// </summary>
@@ -34,7 +39,9 @@ public static class ServerFeatures
 
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
     public static IReadOnlyList<string> Reported(bool liveConversion) =>
-        liveConversion ? Array.AsReadOnly([.. All, LiveConversion, ScrubPreviews]) : All;
+        liveConversion
+            ? Array.AsReadOnly([.. All, WatchlistAndPeople, LiveConversion, ScrubPreviews])
+            : Array.AsReadOnly([.. All, WatchlistAndPeople]);
 }
 
 public sealed record ClientCapabilitiesResponse(

@@ -59,6 +59,7 @@ const PATHS = {
   moon: ["M19 14.5A7.5 7.5 0 1 1 9.5 5a6 6 0 0 0 9.5 9.5zM16 3.5h3l-3 3h3", "stroke"],
   moonFill: ["M19 14.5A7.5 7.5 0 1 1 9.5 5a6 6 0 0 0 9.5 9.5z", "fill"],
   bookmark: ["M7 4h10v16l-5-3.6L7 20z", "stroke"],
+  bookmarkFill: ["M7 4h10v16l-5-3.6L7 20z", "fill"],
   captionsFill: ["M3.5 5.5h17v13h-17zM10.5 10.2a2.4 2.4 0 1 0 0 3.6M17 10.2a2.4 2.4 0 1 0 0 3.6", "fill"],
   previous: ["M5 5h2v14H5zM18 5v14l-10-7z", "fill"],
   next: ["M17 5h2v14h-2zM6 5l10 7-10 7z", "fill"],

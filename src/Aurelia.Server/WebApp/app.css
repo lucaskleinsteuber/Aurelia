@@ -1092,3 +1092,9 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
   .metadata-editor::backdrop { backdrop-filter: none; background: rgba(0, 0, 0, 0.75); }
 }
 .metadata-editor input.text-field, .metadata-editor .select { min-height: 42px; padding: 10px 12px; border-radius: 10px; }
+
+.person { text-decoration: none; color: inherit; cursor: pointer; }
+.person-header { display: flex; align-items: center; gap: 22px; margin-bottom: 30px; flex-wrap: wrap; }
+.person-photo.large { width: 96px; height: 96px; font-size: 32px; flex: none; }
+.person-heading { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.person-heading h1 { margin: 0; font-size: clamp(26px, 3.4vw, 38px); }

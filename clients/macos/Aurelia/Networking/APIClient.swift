@@ -804,6 +804,33 @@ struct APIClient: Sendable {
     return try Self.decode(Bool.self, from: data)
   }
 
+  func watchlist() async throws -> WatchlistResponse {
+    try await get("/api/v1/watchlist")
+  }
+
+  func setWatchlist(mediaId: UUID, isWatchlisted: Bool) async throws -> WatchlistItemStateResponse {
+    let body = try JSONEncoder().encode(SetWatchlistRequest(isWatchlisted: isWatchlisted))
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/watchlist",
+      method: "PUT",
+      body: body)
+    return try Self.decode(WatchlistItemStateResponse.self, from: data)
+  }
+
+  func personDetail(name: String?, personKey: String?) async throws -> PersonDetailResponse {
+    var items: [URLQueryItem] = []
+    if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      items.append(URLQueryItem(name: "name", value: name))
+    }
+    if let personKey, !personKey.isEmpty, !personKey.hasPrefix("unidentified:") {
+      items.append(URLQueryItem(name: "key", value: personKey))
+    }
+    var components = URLComponents()
+    components.path = "/api/v1/catalog/person"
+    components.queryItems = items.isEmpty ? nil : items
+    return try await get(components.string ?? "/api/v1/catalog/person")
+  }
+
   func mediaMetadata(id: UUID) async throws -> MediaMetadataSummary {
     try await get("/api/v1/media/\(id.uuidString.lowercased())/metadata")
   }

@@ -162,6 +162,7 @@ builder.Services.AddScoped<SceneNoteService>();
 builder.Services.AddScoped<MetadataService>();
 builder.Services.AddScoped<MetadataJobStore>();
 builder.Services.AddScoped<PresentationService>();
+builder.Services.AddScoped<WatchlistService>();
 builder.Services.AddScoped<LibraryStateService>();
 builder.Services.AddScoped<LibraryReachabilityService>();
 builder.Services.AddHostedService<LibraryReachabilityWorker>();

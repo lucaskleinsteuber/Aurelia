@@ -546,6 +546,22 @@ public sealed record SyncChangesResponse(
 
 public sealed record SetFavoriteRequest(bool IsFavorite);
 
+public sealed record SetWatchlistRequest(bool IsWatchlisted);
+
+public sealed record WatchlistItemStateResponse(
+    Guid MediaId,
+    bool IsWatchlisted);
+
+public sealed record WatchlistResponse(
+    IReadOnlyList<CatalogItemSummary> Items,
+    IReadOnlyList<Guid> MediaIds);
+
+public sealed record PersonDetailResponse(
+    string Name,
+    string? Subtitle,
+    ArtworkSummary? Profile,
+    IReadOnlyList<CatalogItemSummary> Items);
+
 public sealed record CatalogItemSummary(
     Guid Id,
     MediaKind Kind,

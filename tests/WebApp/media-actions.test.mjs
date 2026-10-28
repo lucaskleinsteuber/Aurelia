@@ -82,3 +82,24 @@ test("player series navigation uses the supplied close boundary instead of navig
   button(menu, "Go to Series").click();
   assert.deepEqual(received, ["series"]); assert.deepEqual(f.routes, []);
 });
+
+test("watchlist actions toggle shared state for movies and series when provided", async (t) => {
+  installDOM(t);
+  const toggles = [];
+  let watchlisted = false, changed = 0;
+  const view = createCatalogView({
+    api: {}, navigate: () => {}, play: () => {}, canManage: () => false,
+    handleError: () => false, toast: () => {}, onChanged: () => { changed++; },
+    isWatchlisted: () => watchlisted,
+    toggleWatchlist: async (id, next) => { toggles.push([id, next]); watchlisted = next; },
+  });
+  t.after(() => view.close());
+  const firstMenu = h("div", {}, view.mediaMenu(movie));
+  assert.equal(labels(firstMenu).includes("Add to Watchlist"), true);
+  button(firstMenu, "Add to Watchlist").click();
+  await flush();
+  assert.deepEqual(toggles, [["film", true]]);
+  assert.equal(changed, 1);
+  const secondMenu = h("div", {}, view.mediaMenu(movie));
+  assert.equal(labels(secondMenu).includes("Remove from Watchlist"), true);
+});

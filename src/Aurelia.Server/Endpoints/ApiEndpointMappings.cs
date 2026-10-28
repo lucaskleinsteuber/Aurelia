@@ -78,6 +78,7 @@ public static class ApiEndpointMappings
         catalog.MapGet("/items/{mediaId:guid}", GetCatalogDetailAsync);
         catalog.MapGet("/items/{mediaId:guid}/summary", GetCatalogSummaryAsync);
         catalog.MapGet("/search", SearchCatalogAsync);
+        catalog.MapGet("/person", GetCatalogPersonAsync);
         catalog.MapPost("/search/rebuild", RebuildCatalogSearchAsync)
             .RequireAuthorization("Owner");
         catalog.MapGet("/collections", ListCollectionsAsync);
@@ -88,6 +89,7 @@ public static class ApiEndpointMappings
         collections.MapDelete("/{collectionId:guid}", DeleteCollectionAsync);
 
         api.MapGet("/home", GetHomeAsync).RequireAuthorization();
+        api.MapGet("/watchlist", GetWatchlistAsync).RequireAuthorization();
 
         var metadata = api.MapGroup("/metadata").RequireAuthorization("Administrator");
         metadata.MapGet("/provider", GetMetadataProviderAsync).RequireAuthorization("Owner");
@@ -130,6 +132,7 @@ public static class ApiEndpointMappings
         media.MapPut("/{mediaId:guid}/metadata/match", SelectMetadataMatchAsync)
             .RequireAuthorization("Administrator");
         media.MapPut("/{mediaId:guid}/favorite", SetFavoriteAsync);
+        media.MapPut("/{mediaId:guid}/watchlist", SetWatchlistAsync);
 
         var playback = api.MapGroup("/playback").RequireAuthorization();
         playback.MapDelete("/{playbackId:guid}", RevokePlaybackAsync);
@@ -706,6 +709,15 @@ public static class ApiEndpointMappings
 
     private static Task<IResult> SetFavoriteAsync(HttpContext context, Guid mediaId, SetFavoriteRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.SetFavoriteAsync(context.User.RequireUserId(), mediaId, request.IsFavorite, cancellationToken));
+
+    private static Task<IResult> GetWatchlistAsync(HttpContext context, WatchlistService watchlist, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => watchlist.GetAsync(context.User.RequireUserId(), presentation, cancellationToken));
+
+    private static Task<IResult> SetWatchlistAsync(HttpContext context, Guid mediaId, SetWatchlistRequest request, WatchlistService watchlist, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => watchlist.SetAsync(context.User.RequireUserId(), mediaId, request.IsWatchlisted, cancellationToken));
+
+    private static Task<IResult> GetCatalogPersonAsync(HttpContext context, string? name, string? key, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
+        ExecuteRevisionedAsync(context, changes, () => presentation.PersonAsync(context.User.RequireUserId(), name, key, cancellationToken));
 
     private static MediaKind? ParseCatalogKind(string? value)
     {

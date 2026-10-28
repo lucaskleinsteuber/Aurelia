@@ -82,7 +82,12 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     catalogPage: (parameters, options = {}) => request(`/api/v1/catalog/items?${new URLSearchParams(parameters)}`, options),
     search: (parameters, options = {}) => request(`/api/v1/catalog/search?${new URLSearchParams(parameters)}`, options),
     detail: (mediaId) => request(`/api/v1/catalog/items/${id(mediaId)}`),
+    person: ({ name, key } = {}, options = {}) =>
+      request(`/api/v1/catalog/person?${new URLSearchParams({ ...(name ? { name } : {}), ...(key ? { key } : {}) })}`, options),
     collections: (parameters = { limit: 200 }, options = {}) => request(`/api/v1/catalog/collections?${new URLSearchParams(parameters)}`, options),
+    watchlist: (options = {}) => request("/api/v1/watchlist", options),
+    setWatchlist: (mediaId, isWatchlisted, options = {}) =>
+      request(`/api/v1/media/${id(mediaId)}/watchlist`, { method: "PUT", body: { isWatchlisted }, signal: options.signal }),
     playbackPlan: (mediaId) => request(`/api/v1/media/${id(mediaId)}/playback-plan`),
     setFavorite: (mediaId, isFavorite, options = {}) => request(`/api/v1/media/${id(mediaId)}/favorite`, { method: "PUT", body: { isFavorite }, signal: options.signal }),
     watchState: (mediaId, scope = "title", seasonNumber, options = {}) =>

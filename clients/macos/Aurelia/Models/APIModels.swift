@@ -552,6 +552,34 @@ struct SetFavoriteRequest: Encodable, Sendable {
   let isFavorite: Bool
 }
 
+struct SetWatchlistRequest: Encodable, Sendable {
+  let isWatchlisted: Bool
+}
+
+struct WatchlistItemStateResponse: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let isWatchlisted: Bool
+}
+
+struct WatchlistResponse: Codable, Equatable, Sendable {
+  let items: [CatalogItemSummary]
+  let mediaIds: [UUID]
+}
+
+struct PersonDetailResponse: Codable, Equatable, Sendable {
+  let name: String
+  let subtitle: String?
+  let profile: ArtworkSummary?
+  let items: [CatalogItemSummary]
+}
+
+struct PersonSelection: Hashable, Sendable {
+  let name: String
+  let personKey: String?
+  let profile: ArtworkSummary?
+  let subtitle: String?
+}
+
 struct SelectMetadataMatchRequest: Encodable, Sendable {
   let providerMediaId: String
   let mediaType: String

@@ -3,6 +3,7 @@ import SwiftUI
 private enum LibraryDestination: String, CaseIterable, Identifiable {
   case home
   case library
+  case watchlist
   case recentlyAdded
   case tvShows
   case movies
@@ -13,6 +14,7 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
     switch self {
     case .home: "Home"
     case .library: "Library"
+    case .watchlist: "Watchlist"
     case .recentlyAdded: "Recently Added"
     case .tvShows: "TV Shows"
     case .movies: "Movies"
@@ -23,6 +25,7 @@ private enum LibraryDestination: String, CaseIterable, Identifiable {
     switch self {
     case .home: "house.fill"
     case .library: "rectangle.stack.fill"
+    case .watchlist: "bookmark.fill"
     case .recentlyAdded: "clock"
     case .tvShows: "tv"
     case .movies: "film.stack"
@@ -39,6 +42,7 @@ private struct FindRequest: Equatable {
 private enum MediaSelection: Hashable {
   case media(UUID)
   case collection(UUID)
+  case person(PersonSelection)
 }
 
 struct LibraryShellView: View {
@@ -155,6 +159,11 @@ struct LibraryShellView: View {
       selection = .media(id)
       model.requestedMediaDetail = nil
     }
+    .onChange(of: model.requestedPersonDetail) { _, person in
+      guard let person else { return }
+      selection = .person(person)
+      model.requestedPersonDetail = nil
+    }
     .onChange(of: model.catalogVisibilityRevision) {
       if case .media(let id) = selection, !model.catalogItems.contains(where: { $0.id == id }) {
         selection = nil
@@ -173,6 +182,9 @@ struct LibraryShellView: View {
         }
         Section("Library") {
           sidebarButton(.library)
+          if model.supportsWatchlist {
+            sidebarButton(.watchlist)
+          }
           sidebarButton(.recentlyAdded)
           sidebarButton(.tvShows)
           sidebarButton(.movies)
@@ -300,6 +312,11 @@ struct LibraryShellView: View {
           onBack: { selection = nil },
           onSelect: { selection = .media($0) })
       }
+    case .person(let person):
+      PersonDetailView(
+        person: person,
+        onBack: { selection = nil },
+        onSelect: { selection = .media($0) })
     }
   }
 
@@ -317,6 +334,8 @@ struct LibraryShellView: View {
         section: .library, findRequest: findRequest,
         onSelect: { selection = .media($0) },
         onSelectCollection: { selection = .collection($0) })
+    case .watchlist:
+      WatchlistPage(onSelect: { selection = .media($0) })
     case .recentlyAdded:
       LibraryPage(
         section: .recentlyAdded, findRequest: findRequest,
@@ -1097,4 +1116,119 @@ private func posterGrid(_ items: [CatalogItemSummary], onSelect: @escaping (UUID
   }
   // Filtering and sorting let cards glide to their new places instead of jumping.
   .aureliaListMotion(items.map(\.id))
+}
+
+private struct WatchlistPage: View {
+  @EnvironmentObject private var model: AppModel
+  @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
+  let onSelect: (UUID) -> Void
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 26) {
+        AureliaSectionHeading(title: "Watchlist", count: model.watchlistItems.count)
+          .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding + 24))
+        if model.watchlistItems.isEmpty {
+          ContentUnavailableView(
+            "Your Watchlist Is Empty",
+            systemImage: "bookmark",
+            description: Text(
+              "Save movies and TV shows you want to watch later from their detail page or context menu."
+            )
+          )
+          .frame(maxWidth: .infinity, minHeight: 330)
+        } else {
+          posterGrid(model.watchlistItems, onSelect: onSelect)
+        }
+      }
+      .padding(AureliaDesign.pagePadding)
+      .padding(.top, 22)
+    }
+    .scrollClipDisabled()
+    .aureliaOverlayScrollbars()
+    .task { await model.refreshWatchlist() }
+    .accessibilityIdentifier("watchlist-page")
+  }
+}
+
+private struct PersonDetailView: View {
+  @EnvironmentObject private var model: AppModel
+  let person: PersonSelection
+  let onBack: () -> Void
+  let onSelect: (UUID) -> Void
+  @State private var detail: PersonDetailResponse?
+  @State private var isLoading = true
+  @State private var errorMessage: String?
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 28) {
+        HStack(spacing: 18) {
+          AureliaIconControl(symbol: "chevron.left", label: "Back", action: onBack)
+          AuthenticatedArtwork(
+            artwork: detail?.profile ?? person.profile,
+            symbol: "person.fill"
+          )
+          .frame(width: 84, height: 84)
+          .clipShape(Circle())
+          .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
+          VStack(alignment: .leading, spacing: 6) {
+            Text((detail?.subtitle ?? person.subtitle ?? "Cast & Crew").uppercased())
+              .font(.caption.weight(.bold))
+              .tracking(1)
+              .foregroundStyle(.secondary)
+            Text(detail?.name ?? person.name)
+              .font(AureliaDesign.heroTitle)
+              .lineLimit(2)
+            if let items = detail?.items {
+              Text("\(items.count) \(items.count == 1 ? "title" : "titles") in your library")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+          }
+          Spacer()
+        }
+        if isLoading {
+          ProgressView("Loading titles…")
+            .frame(maxWidth: .infinity, minHeight: 240)
+        } else if let errorMessage {
+          ContentUnavailableView(
+            "Couldn’t Load Person",
+            systemImage: "exclamationmark.triangle",
+            description: Text(errorMessage)
+          )
+          .frame(maxWidth: .infinity, minHeight: 260)
+        } else if let items = detail?.items, !items.isEmpty {
+          posterGrid(items, onSelect: onSelect)
+        } else {
+          ContentUnavailableView(
+            "No Titles Found",
+            systemImage: "person.crop.circle.badge.questionmark",
+            description: Text("No accessible movies or TV shows in this library match this person.")
+          )
+          .frame(maxWidth: .infinity, minHeight: 260)
+        }
+      }
+      .padding(AureliaDesign.pagePadding)
+      .padding(.top, 28)
+      .padding(.bottom, 48)
+    }
+    .scrollClipDisabled()
+    .aureliaOverlayScrollbars()
+    .aureliaCompactHeader(title: detail?.name ?? person.name, threshold: 200, onBack: onBack)
+    .task(id: person) {
+      isLoading = true
+      errorMessage = nil
+      do {
+        detail = try await model.personDetail(person)
+        isLoading = false
+      } catch {
+        if !(error is CancellationError) {
+          errorMessage = error.localizedDescription
+          isLoading = false
+        }
+      }
+    }
+    .accessibilityIdentifier("person-detail-page")
+  }
 }
