@@ -750,12 +750,6 @@ private struct DetailHero: View {
           .buttonStyle(.plain).accessibilityLabel("Back")
           Spacer()
           HStack(spacing: 10) {
-            if let onEdit {
-              AureliaIconControl(symbol: "pencil", label: "Edit Metadata", action: onEdit)
-                .disabled(!metadataReady)
-                .help("Edit Metadata")
-                .accessibilityIdentifier("media-edit-metadata")
-            }
             AureliaIconMenu(symbol: "ellipsis", label: "More Actions") {
               MediaContextMenuItems(
                 item: detail.item, controller: watchActions, onEdit: onEdit,

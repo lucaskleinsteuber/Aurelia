@@ -2,7 +2,7 @@
 // in HttpOnly cookies; an expired management window asks once, without discarding the draft.
 import { h, clear } from "./dom.js";
 import { loadAllPages } from "./api.js";
-import { libraryPayload, managementPermissions, metadataPayload, profilePayload, waitForLibraryOperation } from "./logic.js";
+import { libraryPayload, managementPermissions, metadataPayload, profilePayload, waitForLibraryOperation, artworkUrl } from "./logic.js";
 
 const input = (value = "", attributes = {}) => h("input", { class: "text-field", value: String(value ?? ""), ...attributes });
 const field = (title, control, note) => h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, title), control,
@@ -30,12 +30,13 @@ export function createManagementEditors(app) {
     let canCancel = true;
     let dirty = false;
     let ready = false;
+    let valid = true;
     const alive = () => !controller.signal.aborted && profileID === state.profile?.id && dialog.isConnected;
     const finish = () => { dialog.close(); app.onSaved?.(); };
     const setBusy = (value, cancellable = true) => {
       busy = value;
       canCancel = !value || cancellable;
-      save.disabled = value || !ready;
+      save.disabled = value || !ready || !valid;
       cancel.disabled = value && !cancellable;
       form.setAttribute("aria-busy", String(value));
       for (const control of body.querySelectorAll("input, select, textarea, button")) {
@@ -96,7 +97,7 @@ export function createManagementEditors(app) {
     }
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      if (ready && saveLabel) run(() => onSave(context), { complete: true });
+      if (ready && valid && saveLabel) run(() => onSave(context), { complete: true });
     });
     form.addEventListener("input", () => { dirty = true; discard.hidden = true; });
     form.addEventListener("change", () => { dirty = true; discard.hidden = true; });
@@ -113,7 +114,8 @@ export function createManagementEditors(app) {
     const context = {
       body, dialog, signal: controller.signal, alive, run, finish,
       message: (text) => { if (alive()) message.textContent = text; },
-      ready: () => { ready = true; save.disabled = busy; },
+      ready: () => { ready = true; save.disabled = busy || !valid; },
+      setValid: (value) => { valid = value; save.disabled = busy || !ready || !valid; },
       clean: () => { dirty = false; },
     };
     return context;
@@ -264,6 +266,30 @@ export function createManagementEditors(app) {
       await api.saveMediaEditor(item.id, metadataPayload(document, changes, [...automatic]), { signal });
       app.toast("Metadata saved.");
     });
+    context.dialog.setAttribute("class", "sheet settings-editor metadata-editor");
+    const posterPath = artworkUrl(item.poster, 320);
+    const name = h("p", { class: "metadata-editor-title" }, item.title);
+    context.dialog.querySelector("h2").replaceWith(h("header", { class: "metadata-editor-header" },
+      posterPath ? h("img", { class: "metadata-editor-poster", src: posterPath, alt: "", decoding: "async" })
+        : h("div", { class: "metadata-editor-poster artwork-missing", "aria-hidden": "true" }),
+      h("div", {}, h("h2", {}, "Edit Metadata"), name,
+        h("p", { class: "muted small" }, "Changes apply to this title. Your video files stay in place."))));
+    const section = (title, ...content) => h("section", { class: "editor-section settings-section metadata-section" }, h("h3", {}, title), ...content);
+    const imagePreview = (selection, label) => selection?.assetId
+      ? h("img", { class: label === "Poster" ? "metadata-artwork-poster" : "metadata-artwork-backdrop",
+        src: `/api/v1/media/${encodeURIComponent(item.id)}/editor/artwork/${encodeURIComponent(selection.assetId)}`, alt: label, loading: "lazy", decoding: "async" })
+      : h("p", { class: "muted small" }, `No ${label.toLowerCase()} selected.`);
+    const validate = () => {
+      for (const [key, entry] of controls) {
+        entry.error.textContent = "";
+        entry.control.setAttribute("aria-invalid", "false");
+        if (!Object.hasOwn(changes, key)) continue;
+        try { metadataPayload(document, { [key]: changes[key] }, []); }
+        catch (error) { entry.error.textContent = error.message; entry.control.setAttribute("aria-invalid", "true"); }
+      }
+      try { metadataPayload(document, changes, [...automatic]); context.setValid(true); }
+      catch { context.setValid(false); }
+    };
     const load = async () => {
       const loaded = await api.mediaEditor(item.id, { signal: context.signal });
       if (!context.alive()) return;
@@ -277,8 +303,14 @@ export function createManagementEditors(app) {
           ...attributes }, Array.isArray(value) ? value.join("\n") : value ?? "")
           : key === "fsk" ? choice([["", "Not specified"], ...[0, 6, 12, 16, 18].map((age) => [String(age), `FSK ${age}`])], value == null ? "" : String(value))
             : input(Array.isArray(value) ? value.join(", ") : value ?? "", attributes);
-        controls.set(key, { control, property });
-        const changed = () => { changes[key] = list ? control.value.split("\n") : control.value; automatic.delete(key); };
+        const error = h("p", { class: "error-text metadata-field-error", role: "status", "aria-live": "polite" });
+        controls.set(key, { control, property, error });
+        const changed = () => {
+          changes[key] = list ? control.value.split("\n") : control.value;
+          automatic.delete(key);
+          if (key === "title") name.textContent = control.value || item.title;
+          validate();
+        };
         control.addEventListener("input", changed);
         control.addEventListener("change", changed);
         const reset = button("Reset to Automatic", () => {
@@ -286,23 +318,34 @@ export function createManagementEditors(app) {
           const resetValue = document.automaticValues[property];
           control.value = Array.isArray(resetValue) ? resetValue.join("\n") : resetValue ?? "";
           control.dispatchEvent(new Event("change", { bubbles: true }));
-          delete changes[key]; automatic.add(key);
+          delete changes[key]; automatic.add(key); validate();
         });
-        return h("div", { class: "editor-metadata-field" }, field(label, control), reset);
+        return h("div", { class: "editor-metadata-field" }, field(label, control), error, reset);
       };
-      const general = h("section", { class: "editor-section" }, h("h3", {}, "General"), makeField("Title", "title", "title", { required: true, maxlength: 512 }),
+      const titleAndYear = section("Title and Year", makeField("Title", "title", "title", { required: true, maxlength: 512 }),
         h("div", { class: "editor-grid" }, makeField("Release Year", "releaseYear", "releaseYear", { inputmode: "numeric", placeholder: "Not specified" }), makeField("FSK", "fsk", "fskAge")),
-        document.kind === "movie" ? makeField("Runtime in Minutes", "runtimeMinutes", "runtimeMinutes", { inputmode: "numeric", placeholder: "Not specified" }) : null,
-        makeField("Description", "overview", "overview"), makeField("Genres", "genres", "genres", { placeholder: "One genre per line" }));
-      const production = h("section", { class: "editor-section" }, h("h3", {}, "Production & Release"), makeField("Studios", "studios", "studios", { placeholder: "One studio per line" }),
+        document.kind === "movie" ? makeField("Runtime in Minutes", "runtimeMinutes", "runtimeMinutes", { inputmode: "numeric", placeholder: "Not specified" }) : null);
+      const overview = section("Overview", makeField("Overview", "overview", "overview"));
+      const genres = section("Genres", makeField("Genres", "genres", "genres", { placeholder: "One genre per line" }));
+      const production = section("Production and Release", makeField("Studios", "studios", "studios", { placeholder: "One studio per line" }),
         makeField("Country of Origin", "country", "country", { maxlength: 128 }), h("p", { class: "muted small" }, "Choose one country. Foreign content ratings are not automatically converted to FSK."));
+      const credits = section("Cast and Crew", h("p", { class: "muted small" }, "Cast and crew are preserved when you save."),
+        document.values.credits.length ? h("ul", { class: "metadata-credit-list" }, document.values.credits.map((person) => h("li", {}, h("strong", {}, person.name),
+          h("span", { class: "muted small" }, [person.department, person.job, person.character].filter(Boolean).join(" · "))))) : h("p", { class: "muted small" }, "No cast or crew listed."));
+      const artwork = section("Artwork", h("p", { class: "muted small" }, "Your existing artwork and crops are preserved when you save."),
+        h("div", { class: "metadata-artwork-grid" }, h("div", {}, h("h4", {}, "Poster"), imagePreview(document.values.poster, "Poster")),
+          h("div", {}, h("h4", {}, "Background"), imagePreview(document.values.backdrop, "Background"))));
+      const source = section("Source", h("p", { class: "muted small" }, "The source association is preserved. Video files are never uploaded, moved or changed."),
+        h("p", { class: "metadata-source" }, document.sourcePath || document.relativeSourcePath || "No source path available."));
       const reload = button("Reload", () => {
         // Reload is explicit: keep a conflict draft until the user chooses to discard it.
         const confirm = button("Discard Draft and Reload", () => context.run(load), "danger-button");
         reload.replaceWith(confirm);
       });
       context.body.append(h("p", { class: "muted small" }, "Manual changes survive scans and provider refreshes. Existing artwork, cast and file associations are preserved."),
-        general, production, matchingSection(item, context, load), reload);
+        titleAndYear, overview, genres, production, credits, artwork, matchingSection(item, context, load), source, reload);
+      name.textContent = document.values.title;
+      validate();
       context.clean(); context.ready();
     };
     context.body.append(h("p", { class: "muted" }, "Loading editor…"));
@@ -335,7 +378,7 @@ export function createManagementEditors(app) {
         await reload();
       }, { cancellable: false }), "danger-button"));
     });
-    return h("details", { class: "editor-section" }, h("summary", {}, "Find Movie Info"), field("Title", query), h("div", { class: "button-row" }, button("Search", search), remove), results);
+    return h("section", { class: "editor-section settings-section metadata-section" }, h("h3", {}, "Match with TMDB"), field("Title", query), h("div", { class: "button-row" }, button("Search", search), remove), results);
   }
 
   return { addStorage, removeStorage, editProfile, editMetadata, metadataPicker, close: () => { for (const dialog of [...dialogs]) dialog.close(); } };

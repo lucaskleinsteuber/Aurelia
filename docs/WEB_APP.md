@@ -279,3 +279,7 @@ They use synthetic files and simulated media objects, with no browser launch or 
 ### Consistent title actions
 
 Title cards, Continue Watching and episode cards use the same context-menu ordering: Play, Resume when progress exists, Go to Series for episodes, watched status, supported favorites, Continue Watching visibility and administrator metadata editing. Play starts at the beginning; Resume keeps progress. Missing titles retain navigation and management actions while playback stays disabled. Favorite actions retain the server's movie/series scope; watch-state changes keep the existing confirmation and exact state token. Route/profile changes retire open actions.
+
+### Metadata editor layout
+
+Edit Metadata is available in the title's More Actions menu. Its poster/title header and settings sections match the Mac editor: Title and Year, Overview, Genres, Production and Release, Cast and Crew, Artwork, Match with TMDB and Source. Cancel and Save remain visible while the form scrolls; invalid fields explain the correction beside the control. Existing cast, artwork/crops and source associations remain read-only in the browser and are preserved by text edits. Revision conflicts keep the draft until an explicit reload, and management expiry uses the existing unlock flow. Native Mac editing retains its existing image/crop, cast and server-file controls.

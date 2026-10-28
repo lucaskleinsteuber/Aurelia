@@ -1054,3 +1054,36 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .notes-editor .button-row { flex-wrap: nowrap; gap: 6px; }
 .notes-header { justify-content: space-between; }
 .note-row .notes-actions { gap: 6px; }
+
+/* Metadata follows the same title, section and footer hierarchy as native Server Settings. */
+.metadata-editor { width: min(940px, calc(100vw - 32px)); max-width: 940px; padding: 0; overflow: hidden; background: var(--canvas); }
+.metadata-editor[open] { display: flex; flex-direction: column; }
+.metadata-editor-header { flex: none; display: flex; align-items: center; gap: 20px; padding: 24px; border-bottom: 1px solid var(--hairline); }
+.metadata-editor-header h2 { font-size: 24px; margin: 0 0 6px; }
+.metadata-editor-header > div { min-width: 0; }
+.metadata-editor-header .metadata-editor-title { overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.metadata-editor-poster { width: 64px; height: 96px; flex: none; object-fit: cover; border-radius: 8px; background: var(--surface); }
+.metadata-editor > .editor-form { flex: 1 1 auto; min-height: 0; margin: 0; max-height: none; overflow: auto; padding: 24px; scroll-padding-bottom: 88px; }
+.metadata-editor .editor-body { gap: 24px; }
+.metadata-editor .metadata-section { animation: none; gap: 18px; }
+.metadata-editor .metadata-section h3 { margin: 0; font-size: 20px; font-weight: 600; }
+.metadata-editor .editor-actions { position: sticky; bottom: -24px; z-index: 1; margin: 0 -24px -24px; padding: 16px 24px; background: var(--canvas); }
+.metadata-field-error:empty { display: none; }
+.metadata-credit-list { list-style: none; display: grid; gap: 12px; padding: 0; margin: 0; }
+.metadata-credit-list li { display: flex; flex-direction: column; gap: 4px; }
+.metadata-artwork-grid { display: grid; grid-template-columns: minmax(90px, 180px) minmax(160px, 1fr); gap: 24px; }
+.metadata-artwork-grid h4 { margin: 0 0 12px; font-size: 14px; }
+.metadata-artwork-poster { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 10px; }
+.metadata-artwork-backdrop { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; }
+.metadata-source { overflow-wrap: anywhere; user-select: text; font-size: 13px; }
+@media (max-width: 560px) {
+  .metadata-editor-header { padding: 20px; gap: 16px; }
+  .metadata-editor > .editor-form { padding: 16px; }
+  .metadata-editor .editor-actions { bottom: -16px; margin: 0 -16px -16px; padding: 16px; }
+  .metadata-artwork-grid { grid-template-columns: minmax(0, 1fr); }
+  .metadata-artwork-poster { max-width: 160px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .metadata-editor::backdrop { backdrop-filter: none; background: rgba(0, 0, 0, 0.75); }
+}
+.metadata-editor input.text-field, .metadata-editor .select { min-height: 42px; padding: 10px 12px; border-radius: 10px; }

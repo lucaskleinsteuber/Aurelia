@@ -80,7 +80,26 @@ import Testing
     #expect(!expired.isActive)
   }
 
-  @Test func nativeEditorRendersAllFourSectionsWithSyntheticData() async throws {
+  @Test func invalidMetadataExplainsTheFieldAndRetainsOtherDraftValues() {
+    let draft = MetadataDraft()
+    draft.load(document())
+    let originalGenres = draft.values.genres
+    draft.values.title = "  "
+    draft.year = "invalid"
+    draft.runtime = "0"
+    #expect(!draft.valid)
+    #expect(draft.validationErrors["title"] == "Enter a title.")
+    #expect(draft.validationErrors["releaseYear"] != nil)
+    #expect(draft.validationErrors["runtimeMinutes"] != nil)
+    #expect(draft.values.genres == originalGenres)
+    draft.values.title = "Invented Film"
+    draft.year = "2024"
+    draft.runtime = "90"
+    #expect(draft.valid)
+    #expect(draft.validationErrors.isEmpty)
+  }
+
+  @Test func nativeEditorRendersSettingsHierarchyWithSyntheticData() async throws {
     let previous = AppModel.active
     defer { AppModel.active = previous }
     let model = AppModel.serverSettingsRenderPreview()
@@ -91,10 +110,10 @@ import Testing
       runtimeMinutes: 103, rating: nil, contentRating: nil, genres: fixture.values.genres,
       studios: fixture.values.studios, countries: ["US"], credits: [], poster: nil, backdrop: nil,
       still: nil, provider: nil, providerMediaId: nil, reviewState: .matched)
-    for section in MetadataEditorSheet.Page.allCases {
+    do {
       let view = NSHostingView(
         rootView: MetadataEditorSheet(
-          metadata: metadata, onSaved: {}, previewDocument: fixture, page: section
+          metadata: metadata, onSaved: {}, previewDocument: fixture
         )
         .environmentObject(model).environment(\.colorScheme, .dark).frame(width: 940, height: 720))
       let window = NSWindow(
@@ -108,7 +127,7 @@ import Testing
       view.cacheDisplay(in: view.bounds, to: bitmap)
       let png = try #require(bitmap.representation(using: .png, properties: [:]))
       #expect(png.count > 10_000)
-      Attachment.record(Array(png), named: "Metadata Editor - \(section.rawValue).png")
+      Attachment.record(Array(png), named: "Metadata Editor - Settings.png")
     }
   }
 

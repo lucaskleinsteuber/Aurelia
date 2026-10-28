@@ -625,25 +625,24 @@ final class AureliaUITests: XCTestCase {
     let movie = app.buttons["media-10000000-0000-0000-0000-000000000001"]
     XCTAssertTrue(movie.waitForExistence(timeout: 8))
     movie.click()
-    // Editing is one visible click away, and the More Actions circle is a full-size target.
-    let editButton = app.buttons["media-edit-metadata"]
-    XCTAssertTrue(editButton.waitForExistence(timeout: 5))
-    XCTAssertGreaterThanOrEqual(editButton.frame.width, 40)
+    // Editing belongs to the native More Actions menu, without a separate pencil control.
+    XCTAssertFalse(app.buttons["media-edit-metadata"].exists)
     let actions = app.descendants(matching: .any)["media-actions"]
     XCTAssertTrue(actions.waitForExistence(timeout: 5))
     XCTAssertGreaterThanOrEqual(actions.frame.width, 40)
     XCTAssertGreaterThanOrEqual(actions.frame.height, 40)
-    // The editor opens only once the full details have loaded.
+    actions.click()
+    let editMetadata = app.menuItems["Edit Metadata…"]
+    XCTAssertTrue(editMetadata.waitForExistence(timeout: 5))
     let enabled = expectation(
-      for: NSPredicate(format: "isEnabled == true"), evaluatedWith: editButton)
+      for: NSPredicate(format: "isEnabled == true"), evaluatedWith: editMetadata)
     wait(for: [enabled], timeout: 8)
-    editButton.click()
+    editMetadata.click()
     XCTAssertTrue(app.descendants(matching: .any)["metadata-editor"].waitForExistence(timeout: 5))
     app.buttons["Cancel"].click()
     XCTAssertTrue(
       app.descendants(matching: .any)["metadata-editor"].waitForNonExistence(timeout: 5))
     actions.click()
-    let editMetadata = app.menuItems["Edit Metadata"]
     XCTAssertTrue(editMetadata.waitForExistence(timeout: 5))
     editMetadata.click()
     XCTAssertTrue(app.descendants(matching: .any)["metadata-editor"].waitForExistence(timeout: 5))
@@ -660,8 +659,14 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(keepEditing.waitForExistence(timeout: 5))
     keepEditing.click()
     XCTAssertEqual(title.value as? String, "Corrected Test Title")
-    for section in ["Production & Release", "Cast & Crew", "Artwork & File", "General"] {
-      app.descendants(matching: .any)[section].firstMatch.click()
+    let editorScroll = app.scrollViews["metadata-editor-scroll"]
+    for section in ["Production and Release", "Cast and Crew", "Artwork", "Source"] {
+      let heading = app.staticTexts[section].firstMatch
+      for _ in 0..<24 {
+        if heading.isHittable { break }
+        editorScroll.scroll(byDeltaX: 0, deltaY: -240)
+      }
+      XCTAssertTrue(heading.isHittable)
     }
     app.buttons["Save"].click()
     XCTAssertTrue(

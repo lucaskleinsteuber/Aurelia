@@ -20,12 +20,23 @@ import UniformTypeIdentifiers
       || source != nil || year != document.values.releaseYear.map(String.init) ?? ""
       || runtime != document.values.runtimeMinutes.map(String.init) ?? ""
   }
-  var valid: Bool {
-    !values.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && (year.isEmpty || Int(year).map { (1800...3000).contains($0) } == true)
-      && (runtime.isEmpty || Int(runtime).map { (1...14400).contains($0) } == true)
-      && values.credits.allSatisfy { !$0.name.trimmingCharacters(in: .whitespaces).isEmpty }
+  var validationErrors: [String: String] {
+    var errors: [String: String] = [:]
+    if values.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      errors["title"] = "Enter a title."
+    }
+    if !year.isEmpty && Int(year).map({ (1800...3000).contains($0) }) != true {
+      errors["releaseYear"] = "Enter a year from 1800 to 3000, or leave it empty."
+    }
+    if !runtime.isEmpty && Int(runtime).map({ (1...14400).contains($0) }) != true {
+      errors["runtimeMinutes"] = "Enter 1–14,400 minutes, or leave it empty."
+    }
+    if values.credits.contains(where: { $0.name.trimmingCharacters(in: .whitespaces).isEmpty }) {
+      errors["credits"] = "Enter a name for every person, or remove the empty entry."
+    }
+    return errors
   }
+  var valid: Bool { validationErrors.isEmpty }
   func load(_ document: MediaEditorDocument) {
     self.document = document
     values = document.values
@@ -83,27 +94,21 @@ struct MetadataEditorSheet: View {
   @StateObject private var draft = MetadataDraft()
   let metadata: MediaMetadataSummary
   let onSaved: () async -> Void
-  @State private var page = Page.general
   @State private var discard = false
   @State private var reloadConfirmation = false
   @State private var filePicker = false
   @State private var cropTarget: CropTarget?
-  enum Page: String, CaseIterable {
-    case general = "General"
-    case production = "Production & Release"
-    case people = "Cast & Crew"
-    case artwork = "Artwork & File"
-  }
+  @State private var matchMetadata: MediaMetadataSummary?
+  @State private var matchConfirmation = false
   init(
     metadata: MediaMetadataSummary, onSaved: @escaping () async -> Void,
-    previewDocument: MediaEditorDocument? = nil, page: Page = .general
+    previewDocument: MediaEditorDocument? = nil
   ) {
     self.metadata = metadata
     self.onSaved = onSaved
     let state = MetadataDraft()
     if let previewDocument { state.load(previewDocument) }
     _draft = StateObject(wrappedValue: state)
-    _page = State(initialValue: page)
   }
   private struct CropTarget: Identifiable {
     let id = UUID()
@@ -117,26 +122,13 @@ struct MetadataEditorSheet: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack {
-        Label("Edit Metadata", systemImage: "pencil.and.list.clipboard").font(.title2.bold())
-        Spacer()
-        if draft.dirty { Text("Unsaved changes").font(.caption).foregroundStyle(.secondary) }
-      }.padding(20)
-      Picker("Editor section", selection: $page) {
-        ForEach(Page.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-      }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 20).padding(.bottom, 16)
-        .accessibilityIdentifier("metadata-section-picker")
+      editorHeader
       Divider()
       if draft.document != nil {
         ScrollView {
-          VStack(alignment: .leading, spacing: 20) {
-            switch page {
-            case .general: general
-            case .production: production
-            case .people: people
-            case .artwork: artwork
-            }
-          }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+          editorSections
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollIndicators(.automatic, axes: .vertical)
         .accessibilityIdentifier("metadata-editor-scroll")
@@ -167,7 +159,7 @@ struct MetadataEditorSheet: View {
       }.padding(16)
     }
     .frame(
-      minWidth: 700, idealWidth: 940, maxWidth: .infinity, minHeight: 610, idealHeight: 720,
+      minWidth: 760, idealWidth: 940, maxWidth: .infinity, minHeight: 610, idealHeight: 720,
       maxHeight: .infinity
     )
     .background(AureliaDesign.canvas)
@@ -191,6 +183,18 @@ struct MetadataEditorSheet: View {
         "Another device may have changed this title. Copy any changes you want to keep before reloading."
       )
     }
+    .alert("Discard this draft to find a match?", isPresented: $matchConfirmation) {
+      Button("Keep Editing", role: .cancel) {}
+      Button("Discard Draft and Find Match", role: .destructive) {
+        if let document = draft.document { draft.load(document) }
+        Task { await openMatchEditor() }
+      }
+    } message: {
+      Text("Saved manual changes stay in place. Unsaved changes in this form will be discarded.")
+    }
+    .sheet(item: $matchMetadata) { current in
+      MetadataMatchSheet(metadata: current) { await load() }.environmentObject(model)
+    }
     .sheet(isPresented: $filePicker) {
       if let client {
         ServerVideoPicker(client: client, mediaId: metadata.mediaId) {
@@ -212,7 +216,62 @@ struct MetadataEditorSheet: View {
     }
   }
 
-  private var general: some View {
+  private var editorHeader: some View {
+    HStack(alignment: .center, spacing: 20) {
+      EditorImagePreview(
+        client: client, mediaId: metadata.mediaId, selection: draft.values.poster,
+        width: 64, height: 96
+      )
+      .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 7) {
+        Text("Edit Metadata").font(.title2.bold())
+        Text(draft.values.title.isEmpty ? metadata.title : draft.values.title)
+          .font(.headline).lineLimit(2)
+        Text("Changes apply to this title. Your video files stay in place.")
+          .font(.callout).foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 12)
+      if draft.dirty {
+        Label("Unsaved changes", systemImage: "circle.fill")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+    }
+    .padding(24)
+  }
+
+  private var editorSections: some View {
+    LazyVStack(alignment: .leading, spacing: AureliaDesign.sectionSpacing) {
+      AureliaSettingsSection("Title and Year", symbol: "textformat") { titleAndYear }
+      AureliaSettingsSection("Overview", symbol: "text.alignleft") {
+        field("Overview", key: "overview") {
+          EditorDescriptionInput(text: draft.text(\.overview, field: "overview"))
+            .frame(minHeight: 150, idealHeight: 180, maxHeight: 230)
+        }
+      }
+      AureliaSettingsSection("Genres", symbol: "tag") {
+        field("Genres", key: "genres") {
+          EditorTagList(values: draft.binding(\.genres, field: "genres"), placeholder: "Add genre")
+        }
+      }
+      AureliaSettingsSection("Production and Release", symbol: "building.2") { production }
+      AureliaSettingsSection("Cast and Crew", symbol: "person.2") {
+        people
+        if let error = draft.validationErrors["credits"] { validationMessage(error) }
+      }
+      AureliaSettingsSection("Artwork", symbol: "photo.on.rectangle") { artwork }
+      AureliaSettingsSection("Match with TMDB", symbol: "magnifyingglass") {
+        Text("Find the correct movie or series. Saved manual changes stay in place.")
+          .font(.callout).foregroundStyle(.secondary)
+        Button("Find Metadata Match…") {
+          if draft.dirty { matchConfirmation = true } else { Task { await openMatchEditor() } }
+        }
+        .disabled(draft.document?.kind != .movie && draft.document?.kind != .series)
+      }
+      AureliaSettingsSection("Source", symbol: "doc") { source }
+    }
+  }
+
+  private var titleAndYear: some View {
     VStack(alignment: .leading, spacing: 18) {
       field("Title", key: "title") {
         TextField("Title", text: draft.binding(\.title, field: "title")).accessibilityIdentifier(
@@ -249,13 +308,6 @@ struct MetadataEditorSheet: View {
                 }))
           }
         }
-      }
-      field("Description", key: "overview") {
-        EditorDescriptionInput(text: draft.text(\.overview, field: "overview"))
-          .frame(minHeight: 150, idealHeight: 180, maxHeight: 230)
-      }
-      field("Genres", key: "genres") {
-        EditorTagList(values: draft.binding(\.genres, field: "genres"), placeholder: "Add genre")
       }
     }.textFieldStyle(.roundedBorder)
   }
@@ -348,7 +400,10 @@ struct MetadataEditorSheet: View {
           .fixedSize(horizontal: true, vertical: false)
         VStack(alignment: .leading, spacing: 28) { artworkPreviews }
       }
-      Divider()
+    }
+  }
+  private var source: some View {
+    VStack(alignment: .leading, spacing: 12) {
       Text(draft.document?.kind == .series ? "Series Folder" : "Video File").font(.headline)
       Text(draft.source ?? draft.document?.sourcePath ?? "").font(.callout.monospaced())
         .textSelection(.enabled)
@@ -386,7 +441,12 @@ struct MetadataEditorSheet: View {
         automatic(key)
       }
       content()
+      if let error = draft.validationErrors[key] { validationMessage(error) }
     }.frame(maxWidth: .infinity, alignment: .leading)
+  }
+  private func validationMessage(_ message: String) -> some View {
+    Label(message, systemImage: "exclamationmark.circle")
+      .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
   }
   private func automatic(_ field: String) -> some View {
     Button("Use Automatic Value") { draft.automatic(field) }.font(.caption).buttonStyle(.borderless)
@@ -482,6 +542,19 @@ struct MetadataEditorSheet: View {
       cropTarget = CropTarget(field: field, person: person, selection: selection, image: image)
     } catch { draft.error = error.localizedDescription }
   }
+  private func openMatchEditor() async {
+    guard model.canManageMedia, let profile = model.profile else { return }
+    draft.busy = true
+    defer { draft.busy = false }
+    do {
+      let current = try await APIClient(profile: profile).mediaMetadata(id: metadata.mediaId)
+      guard model.profile == profile, model.canManageMedia else { return }
+      matchMetadata = current
+    } catch {
+      guard model.profile == profile, !(error is CancellationError) else { return }
+      draft.error = error.localizedDescription
+    }
+  }
   private func load() async {
     guard let client else { return }
     draft.busy = true
@@ -491,7 +564,9 @@ struct MetadataEditorSheet: View {
     }
   }
   private func save() async {
-    guard let client, let document = draft.document else { return }
+    guard draft.valid, model.canManageMedia, let client, let document = draft.document else {
+      return
+    }
     draft.busy = true
     defer { draft.busy = false }
     do {

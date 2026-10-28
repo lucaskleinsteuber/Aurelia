@@ -207,3 +207,42 @@ for (const action of ["cancel", "profile switch"]) {
     assert.equal(f.saved, 0);
   });
 }
+
+test("metadata editor follows native settings sections and preserves read-only source, cast and artwork", async (t) => {
+  const document = editorDocument();
+  document.sourcePath = "/invented/Quiet Harbor/Quiet Harbor.mkv";
+  document.values.credits = [{ id: "person", name: "Morgan Vale", department: "Acting", character: "Alex" }];
+  document.values.poster = { assetId: "poster" };
+  const f = fixture(t, { mediaEditor: async () => document });
+  f.editors.editMetadata({ id: "film", title: "Invented Film", poster: { path: "/api/v1/artwork/invented" } }); await flush();
+  assert.deepEqual(f.dialog.querySelectorAll("h3").map((node) => node.textContent),
+    ["Title and Year", "Overview", "Genres", "Production and Release", "Cast and Crew", "Artwork", "Match with TMDB", "Source"]);
+  assert.match(f.dialog.textContent, /Morgan Vale/); assert.match(f.dialog.textContent, /\/invented\/Quiet Harbor/);
+  const images = f.dialog.querySelectorAll("img");
+  assert.equal(images[0].getAttribute("src"), "/api/v1/artwork/invented?width=320");
+  assert.equal(images[1].getAttribute("src"), "/api/v1/media/film/editor/artwork/poster");
+  assert.equal(f.dialog.querySelectorAll("h2")[0].textContent, "Edit Metadata");
+  assert.ok(f.dialog.querySelectorAll("button").some((node) => node.textContent === "Cancel"));
+});
+
+test("invalid metadata stays beside its field, blocks writes and becomes saveable after correction", async (t) => {
+  let writes = 0; const f = fixture(t, { saveMediaEditor: async () => { writes++; } });
+  f.editors.editMetadata({ id: "film", title: "Invented Film" }); await flush();
+  const year = labelled(f.dialog, "Release Year"); year.value = "invalid";
+  year.dispatchEvent(new Event("input", { bubbles: true }));
+  const save = f.dialog.querySelectorAll("button").find((node) => node.textContent === "Save");
+  assert.equal(save.disabled, true); assert.match(f.dialog.textContent, /year/i);
+  f.dialog.querySelector("form").dispatchEvent(new Event("submit", { cancelable: true })); await flush(); assert.equal(writes, 0);
+  year.value = "2020"; year.dispatchEvent(new Event("input", { bubbles: true }));
+  assert.equal(save.disabled, false);
+  f.dialog.querySelector("form").dispatchEvent(new Event("submit", { cancelable: true })); await flush(); assert.equal(writes, 1);
+});
+
+test("metadata Escape preserves the draft until explicit discard", async (t) => {
+  const f = fixture(t); f.editors.editMetadata({ id: "film", title: "Invented Film" }); await flush();
+  const title = labelled(f.dialog, "Title"); title.value = "Private draft"; title.dispatchEvent(new Event("input", { bubbles: true }));
+  f.dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+  assert.equal(title.value, "Private draft"); assert.ok(f.dialog);
+  f.dialog.querySelectorAll("button").find((node) => node.textContent === "Keep Editing").click();
+  assert.equal(title.value, "Private draft"); assert.ok(f.dialog);
+});

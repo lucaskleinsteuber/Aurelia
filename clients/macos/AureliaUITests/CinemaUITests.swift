@@ -354,18 +354,14 @@ final class CinemaUITests: XCTestCase {
   }
 
   @MainActor private func selectEditorSection(_ name: String, in app: XCUIApplication) {
-    let editor = app.descendants(matching: .any)["metadata-editor"].firstMatch.frame
-    // Native segmented controls may expose the picker's identifier on each
-    // segment. Select the visible segment, never a title behind the sheet.
-    let matches = app.descendants(matching: .any).matching(
-      NSPredicate(format: "label == %@ OR identifier == %@", name, name))
-    let segment = matches.allElementsBoundByIndex.first {
-      let frame = $0.frame
-      return frame.minY >= editor.minY && frame.maxY < editor.minY + 130
-        && frame.width > 0 && frame.height < 50
+    let scroll = app.scrollViews["metadata-editor-scroll"]
+    scroll.scroll(byDeltaX: 0, deltaY: 10_000)
+    let heading = app.staticTexts[name].firstMatch
+    for _ in 0..<24 {
+      if heading.isHittable { break }
+      scroll.scroll(byDeltaX: 0, deltaY: -240)
     }
-    XCTAssertNotNil(segment, "Editor segment \(name) must be visible")
-    if let segment { pointer(segment, in: app).click() }
+    XCTAssertTrue(heading.isHittable, "Editor section \(name) must be visible")
   }
 
   @MainActor func testRailArrowsAndLocalizedSidebarUseTheActualScrollableCards() throws {
@@ -444,7 +440,7 @@ final class CinemaUITests: XCTestCase {
     XCTAssertTrue(
       app.windows.firstMatch.frame.contains(CGPoint(x: actions.frame.midX, y: actions.frame.midY)))
     pointer(actions, in: app).click()
-    app.menuItems["Edit Metadata"].click()
+    app.menuItems["Edit Metadata…"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
     let description = app.textViews["metadata-description"]
     XCTAssertTrue(description.exists)
@@ -453,10 +449,10 @@ final class CinemaUITests: XCTestCase {
     description.typeText("A multiline\nsynthetic description.")
     description.typeKey("z", modifierFlags: .command)
     shot(app, "Cinema - Editor - General")
-    selectEditorSection("Cast & Crew", in: app)
+    selectEditorSection("Cast and Crew", in: app)
     XCTAssertTrue(app.buttons["Add Person"].waitForExistence(timeout: 5))
     shot(app, "Cinema - Editor - Circular Photos and Separate Actions")
-    selectEditorSection("Artwork & File", in: app)
+    selectEditorSection("Artwork", in: app)
     shot(app, "Cinema - Editor - Artwork")
     let crop = app.buttons["metadata-crop-backdrop"]
     XCTAssertTrue(crop.waitForExistence(timeout: 5))
@@ -502,9 +498,9 @@ final class CinemaUITests: XCTestCase {
     app.buttons["Save"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForNonExistence(timeout: 5))
     pointer(actions, in: app).click()
-    app.menuItems["Edit Metadata"].click()
+    app.menuItems["Edit Metadata…"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
-    selectEditorSection("Artwork & File", in: app)
+    selectEditorSection("Artwork", in: app)
     app.buttons["metadata-crop-backdrop"].click()
     XCTAssertTrue(app.buttons["crop-use"].waitForExistence(timeout: 5))
     XCTAssertEqual(selection.frame.width, savedFrame.width, accuracy: 2)
@@ -512,7 +508,7 @@ final class CinemaUITests: XCTestCase {
     XCTAssertEqual(selection.frame.minY, savedFrame.minY, accuracy: 2)
     shot(app, "Cinema - Crop - Reopened Saved Selection")
     app.buttons["crop-cancel"].click()
-    selectEditorSection("Cast & Crew", in: app)
+    selectEditorSection("Cast and Crew", in: app)
     XCTAssertTrue(app.buttons["Add Person"].waitForExistence(timeout: 5))
     app.menuButtons["Photo"].firstMatch.click()
     app.menuItems["Crop…"].click()
@@ -551,9 +547,9 @@ final class CinemaUITests: XCTestCase {
     app.buttons["Save"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForNonExistence(timeout: 5))
     actions.click()
-    app.menuItems["Edit Metadata"].click()
+    app.menuItems["Edit Metadata…"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
-    selectEditorSection("Cast & Crew", in: app)
+    selectEditorSection("Cast and Crew", in: app)
     app.menuButtons["Photo"].firstMatch.click()
     app.menuItems["Crop…"].click()
     XCTAssertTrue(app.buttons["crop-use"].waitForExistence(timeout: 5))
