@@ -2,7 +2,8 @@
 // and the player. The server serves this page, so every address here is its own.
 
 import { h, icon, clear } from "./dom.js";
-import { createApi, ApiError, loadAllPages } from "./api.js";
+import { createApi, ApiError } from "./api.js";
+import { createCatalogView } from "./catalog-view.js";
 import * as logic from "./logic.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
@@ -48,6 +49,7 @@ function showConnecting() {
 }
 
 function showServerOff() {
+  catalog.close();
   settings.closeEditors();
   stopSync();
   const name = state.server?.name ?? "The server";
@@ -63,6 +65,11 @@ function showServerOff() {
 // Settings needs these app functions; they are declarations, so they exist already.
 const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut });
 
+const catalog = createCatalogView({ api, navigate, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast,
+  replaceRoute: (route) => { state.route = route; history.replaceState(null, "", logic.routePath(route)); },
+  onChanged: () => renderRoute({ quiet: true }),
+});
+
 function settingsScreen(route) {
   return settings.settingsScreen(route);
 }
@@ -72,6 +79,7 @@ function screenFrame(...children) {
 }
 
 function render(element) {
+  catalog.close();
   state.renderToken += 1;
   document.title = "Aurelia";
   clear(root);
@@ -81,6 +89,7 @@ function render(element) {
 // MARK: Pairing
 
 async function showPairing(note) {
+  catalog.close();
   settings.closeEditors();
   stopSync();
   document.title = "Aurelia";
@@ -166,6 +175,7 @@ async function showPairing(note) {
 // MARK: Profiles
 
 async function showProfiles(note) {
+  catalog.close();
   settings.closeEditors();
   stopSync();
   closePlayer();
@@ -336,6 +346,7 @@ async function switchProfile() {
 
 /** A profile request was refused: the profile session ended, or the whole browser was signed out. */
 async function sessionEnded() {
+  catalog.close();
   settings.closeEditors();
   stopSync();
   closePlayer();
@@ -425,6 +436,7 @@ function shell(content) {
 }
 
 async function renderRoute({ quiet = false } = {}) {
+  catalog.close();
   if (!state.profile) return;
   const route = state.route;
   const token = ++state.renderToken;
@@ -446,7 +458,7 @@ async function renderRoute({ quiet = false } = {}) {
   clear(root);
   root.append(shell(content));
   if (quiet) window.scrollTo(0, scroll);
-  const label = { home: "Home", library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", settings: "Settings" }[route.name];
+  const label = { home: "Home", library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", settings: "Settings" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
 }
 
@@ -456,15 +468,17 @@ function screenFor(route, token) {
     case "recent":
     case "movies":
     case "shows":
-      return browseScreen(route);
+      return catalog.browse(route);
     case "settings":
       return settingsScreen(route);
     case "search":
-      return searchScreen(route, token);
+      return catalog.search(route);
     case "title":
       return titleScreen(route.id);
+    case "collections":
+      return catalog.collections();
     case "collection":
-      return collectionScreen(route.id);
+      return catalog.collection(route);
     default:
       return homeScreen();
   }
@@ -480,7 +494,7 @@ async function homeScreen() {
   if (continuing.length) sections.push(rail("Continue Watching", continuing.map((item) => continueCard(item)), "landscape"));
   if (home.favorites?.length) sections.push(rail("Favorites", home.favorites.map((item) => posterCard(item))));
   if (home.recentlyAdded?.length) sections.push(rail("Recently Added", home.recentlyAdded.map((item) => posterCard(item))));
-  if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection))));
+  if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
   if (!hero && sections.length === 0)
     return emptyState("search", "Nothing Here Yet", "Your library is empty or this profile has no titles. Add a library folder in Aurelia on your Mac.");
   return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, sections));
@@ -502,11 +516,12 @@ function heroBanner(item) {
         h("a", { class: "secondary-button", href: `/title/${target}`, "data-route": true }, "Details"))));
 }
 
-function rail(title, cards, kind = "poster") {
+function rail(title, cards, kind = "poster", allHref) {
   const track = h("div", { class: `rail-track ${kind}` }, cards);
   const scroll = (direction) => track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: "smooth" });
   return h("section", { class: "rail" },
     h("div", { class: "section-header" }, h("h2", {}, title), h("span", { class: "count" }, String(cards.length)),
+      allHref ? h("a", { class: "text-button", href: allHref, "data-route": true }, "See All") : null,
       h("div", { class: "rail-arrows" },
         h("button", { class: "icon-button", "aria-label": `Scroll ${title} back`, onclick: () => scroll(-1) }, icon("back")),
         h("button", { class: "icon-button", "aria-label": `Scroll ${title} forward`, onclick: () => scroll(1) }, icon("forward")))),
@@ -550,7 +565,7 @@ function posterCard(item, index = 0) {
 }
 
 function continueCard(item) {
-  return h("button", { class: "landscape-card", onclick: () => playTitle(item), "aria-label": `Resume ${item.parentTitle ?? item.title}` },
+  const play = h("button", { class: "landscape-card", onclick: () => playTitle(item), "aria-label": `Resume ${item.parentTitle ?? item.title}` },
     h("div", { class: "landscape-frame" },
       artwork(item.backdrop ?? item.poster, 640, "landscape-art", ""),
       h("div", { class: "landscape-shade" }),
@@ -559,10 +574,15 @@ function continueCard(item) {
         h("div", { class: "card-subtitle" }, item.kind === "episode" ? `${logic.eyebrow({ ...item, parentTitle: null })} · ${item.title}` : logic.remaining(item.progress))),
       h("div", { class: "play-glyph" }, icon("play", { size: 18 })),
       progressBar(item.progress)));
+  const more = h("button", { class: "icon-button continue-actions", "aria-label": `More Actions for ${item.parentTitle ?? item.title}`, "aria-haspopup": "menu", onclick: (event) => {
+    event.stopPropagation();
+    openMenu(more, watchMenu(item, item.kind === "series" ? "series" : "title"));
+  } }, icon("more"));
+  return h("div", { class: "continue-card" }, play, more);
 }
 
-function collectionCard(collection) {
-  return h("a", { class: "poster-card", href: `/collection/${collection.id}`, "data-route": true },
+function collectionCard(collection, offset = 0) {
+  return h("a", { class: "poster-card", href: logic.routePath({ name: "collection", id: collection.id, ...(offset ? { offset } : {}) }), "data-route": true },
     h("div", { class: "poster-frame" },
       artwork(collection.poster ?? collection.items?.[0]?.poster, 320, "poster-art", ""),
       h("span", { class: "badge count-badge" }, String(collection.items?.length ?? 0))),
@@ -575,65 +595,6 @@ function emptyState(symbol, title, text, action) {
 }
 
 // MARK: Library, Recently Added, Movies and TV Shows (the Mac app's sections and filters)
-
-const SECTION_TITLES = { library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows" };
-
-async function browseScreen(route) {
-  const filters = route.filters ?? {};
-  const section = route.name;
-  const items = await loadAllPages(api.catalogPage, logic.browseQuery(section, filters));
-  const facets = logic.browseFacets(items);
-  const update = (change) => navigate({ name: section, filters: { ...filters, ...change } }, { replace: true });
-  const chip = (label, selected, action, extra = {}) =>
-    h("button", { class: `chip ${selected ? "selected" : ""}`, "aria-pressed": String(selected), onclick: action, ...extra }, label);
-  const menuChip = (label, selected, build) => {
-    const button = chip([label, icon("chevronDown", { size: 13 })], selected, (event) => {
-      event.stopPropagation();
-      openMenu(button, build());
-    }, { "aria-haspopup": "menu" });
-    return button;
-  };
-  const yearLabel = filters.yearFrom && filters.yearTo
-    ? filters.yearFrom === filters.yearTo ? String(filters.yearFrom) : `${filters.yearFrom}–${filters.yearTo}`
-    : filters.yearFrom ? `From ${filters.yearFrom}` : filters.yearTo ? `Through ${filters.yearTo}` : "Release Year";
-  const hasFilters = Boolean((section === "library" && filters.kind) || filters.favorites || filters.watch || filters.genre || filters.yearFrom || filters.yearTo);
-  const bar = h("div", { class: "filter-bar" },
-    section === "library" ? [
-      chip("All", !filters.kind, () => update({ kind: undefined })),
-      chip("Movies", filters.kind === "movie", () => update({ kind: filters.kind === "movie" ? undefined : "movie" })),
-      chip("TV Shows", filters.kind === "series", () => update({ kind: filters.kind === "series" ? undefined : "series" })),
-      h("span", { class: "filter-divider" }),
-    ] : null,
-    chip([icon("starFill", { size: 13 }), "Favorites"], Boolean(filters.favorites), () => update({ favorites: !filters.favorites })),
-    logic.WATCH_FILTERS.map(([value, label]) => chip(label, filters.watch === value, () => update({ watch: filters.watch === value ? undefined : value }))),
-    h("span", { class: "filter-divider" }),
-    menuChip(filters.genre ?? "Genre", Boolean(filters.genre), () => [
-      menuOption("All Genres", !filters.genre, () => update({ genre: undefined })),
-      ...facets.genres.map((genre) => menuOption(genre, filters.genre === genre, () => update({ genre }))),
-    ]),
-    menuChip(yearLabel, Boolean(filters.yearFrom || filters.yearTo), () => [
-      menuOption("Any Year", !filters.yearFrom && !filters.yearTo, () => update({ yearFrom: undefined, yearTo: undefined })),
-      h("div", { class: "menu-heading" }, "From"),
-      ...facets.years.map((year) => menuOption(String(year), filters.yearFrom === year && !filters.yearTo, () => update({ yearFrom: year, yearTo: undefined }))),
-    ]),
-    hasFilters ? h("button", { class: "text-button", onclick: () => navigate({ name: section, filters: { sort: filters.sort, descending: filters.descending } }, { replace: true }) }, "Clear") : null,
-    h("span", { class: "spacer" }),
-    menuChip(filters.sort ? logic.BROWSE_SORTS.find(([value]) => value === filters.sort)[1] : section === "recent" ? "Recently Added" : "Default", false, () => [
-      h("div", { class: "menu-heading" }, "Sort By"),
-      menuOption("Default", !filters.sort, () => update({ sort: undefined, descending: undefined })),
-      ...logic.BROWSE_SORTS.map(([value, label]) => menuOption(label, filters.sort === value, () => update({ sort: value }))),
-      h("div", { class: "menu-divider" }),
-      menuOption("Ascending", Boolean(filters.sort) && !filters.descending, () => update({ descending: undefined }), !filters.sort),
-      menuOption("Descending", Boolean(filters.sort) && Boolean(filters.descending), () => update({ descending: true }), !filters.sort),
-    ]));
-  const title = SECTION_TITLES[section];
-  return h("div", { class: "library page-enter" },
-    h("div", { class: "page-header" }, h("h1", {}, title), h("span", { class: "count" }, String(items.length))),
-    bar,
-    items.length ? h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index)))
-      : emptyState("search", hasFilters ? "No Matches" : `No ${title}`, hasFilters ? "No title matches these filters." : "This profile has no titles here yet.",
-        hasFilters ? h("button", { class: "secondary-button", onclick: () => navigate({ name: section, filters: {} }, { replace: true }) }, "Clear Filters") : null));
-}
 
 function menuOption(label, selected, action, disabled = false) {
   return h("button", { class: "menu-item check-item", role: "menuitemradio", "aria-checked": String(selected), disabled, onclick: action },
@@ -664,48 +625,6 @@ function openMenu(anchor, items) {
     document.addEventListener("keydown", escape);
   }, 0);
   menu.querySelector("[aria-checked=true], button:not(:disabled)")?.focus();
-}
-
-// MARK: Search
-
-async function searchScreen(route) {
-  const results = h("div", { class: "search-results" });
-  const input = h("input", { class: "search-field", type: "search", placeholder: "Movies, shows and episodes", value: route.query, "aria-label": "Search", autocomplete: "off", enterkeyhint: "search" });
-  let timer;
-  let generation = 0;
-  const run = async (query) => {
-    const mine = ++generation;
-    clear(results);
-    if (!query.trim()) {
-      results.append(emptyState("search", "Search Your Library", "Find a title by its name."));
-      return;
-    }
-    results.append(h("div", { class: "page-loading" }, h("div", { class: "spinner visible" })));
-    try {
-      const page = await api.search({ query: query.trim(), limit: 100 });
-      if (mine !== generation) return;
-      clear(results);
-      const items = page.items ?? [];
-      results.append(items.length
-        ? h("div", { class: "poster-grid" }, items.map((item) => posterCard(item)))
-        : emptyState("search", "No Results", `Nothing matches “${query.trim()}”.`));
-    } catch (error) {
-      if (mine !== generation || handleError(error)) return;
-      clear(results);
-      results.append(emptyState("warning", "Search Failed", error.message));
-    }
-  };
-  input.addEventListener("input", () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      state.route = { name: "search", query: input.value };
-      history.replaceState(null, "", logic.routePath(state.route));
-      run(input.value);
-    }, 250);
-  });
-  run(route.query);
-  setTimeout(() => input.focus(), 0);
-  return h("div", { class: "search" }, h("div", { class: "page-header" }, h("h1", {}, "Search")), h("div", { class: "search-bar" }, icon("search"), input), results);
 }
 
 // MARK: Title details (the Mac app's detail page)
@@ -776,24 +695,8 @@ async function titleScreen(id) {
   return h("div", { class: "detail page-enter" }, hero, body);
 }
 
-/** Mark watched or unwatched, and hide from Continue Watching, as in the Mac's menu. */
 function watchMenu(item, scope, seasonNumber) {
-  const run = async (watched) => {
-    try {
-      const current = await api.watchState(item.id, scope, seasonNumber);
-      await api.setWatchState(item.id, {
-        isWatched: watched, scope: current.scope, seasonNumber: current.seasonNumber, stateToken: current.stateToken, clientMutationId: crypto.randomUUID(),
-      });
-      renderRoute({ quiet: true });
-    } catch (error) {
-      if (!handleError(error)) toast(error.message);
-    }
-  };
-  const label = scope === "season" ? "Season" : item.kind === "series" ? "Show" : "";
-  return [
-    h("button", { class: "menu-item", onclick: () => run(true) }, `Mark ${label ? `${label} ` : ""}as Watched`),
-    h("button", { class: "menu-item", onclick: () => run(false) }, `Mark ${label ? `${label} ` : ""}as Unwatched`),
-  ];
+  return catalog.watchMenu(item, scope, seasonNumber);
 }
 
 function progressLine(item) {
@@ -907,16 +810,6 @@ function aboutSection(detail) {
       h("div", { class: "info-value" }, h("div", { class: "info-title" }, field.title), h("div", {}, field.value ?? "—")))));
 }
 
-async function collectionScreen(id) {
-  const collections = await api.collections();
-  const collection = (collections ?? []).find((entry) => entry.id === id);
-  if (!collection) return emptyState("search", "Collection Not Found", "It may have been removed.");
-  document.title = `${collection.name} · Aurelia`;
-  return h("div", { class: "library" },
-    h("div", { class: "page-header" }, h("h1", {}, collection.name), h("span", { class: "count" }, String(collection.items.length))),
-    h("div", { class: "poster-grid" }, collection.items.map((item) => posterCard(item))));
-}
-
 // MARK: Playing
 
 async function playTitle(item, seasons) {
@@ -937,6 +830,7 @@ async function playTitle(item, seasons) {
   const player = new Player({
     api,
     item: target,
+    preferenceScope: `${state.server?.serverId ?? location.origin}:${state.profile?.id ?? ""}`,
     next: async () => (target.kind === "episode" ? logic.nextEpisode(seasons, target.id) : null),
     onPlayNext: (next) => playTitle(next, seasons),
     onClose: () => {

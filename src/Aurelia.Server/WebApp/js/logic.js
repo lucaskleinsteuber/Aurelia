@@ -242,6 +242,7 @@ const SETTINGS_PAGES = ["general", "playback", "account", "server"];
 /** Library filters from an address's query, without the defaults. */
 function parseFilters(query) {
   const filters = {};
+  if (query.get("q")?.trim()) filters.query = query.get("q").trim().slice(0, 256);
   const kind = query.get("kind");
   if (kind === "movie" || kind === "series") filters.kind = kind;
   if (query.get("favorites") === "1") filters.favorites = true;
@@ -262,6 +263,7 @@ function parseFilters(query) {
 
 function filterQuery(filters = {}) {
   const query = new URLSearchParams();
+  if (filters.query?.trim()) query.set("q", filters.query.trim().slice(0, 256));
   if (filters.kind) query.set("kind", filters.kind);
   if (filters.favorites) query.set("favorites", "1");
   if (filters.watch) query.set("watch", filters.watch);
@@ -282,13 +284,17 @@ export function parseRoute(pathname = "/", search = "") {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (parts.length === 0) return { name: "home" };
   if (parts.length === 1 && BROWSE_SECTIONS.includes(parts[0])) return { name: parts[0], filters: parseFilters(query) };
+  if (parts.length === 1 && parts[0] === "collections") return { name: "collections" };
   if (parts.length === 1 && parts[0] === "search") return { name: "search", query: query.get("q") ?? "" };
   if (parts[0] === "settings" && parts.length <= 2) {
     const page = parts[1] ?? "general";
     return SETTINGS_PAGES.includes(page) ? { name: "settings", page } : { name: "settings", page: "general" };
   }
   if (parts.length === 2 && parts[0] === "title" && uuid.test(parts[1])) return { name: "title", id: parts[1].toLowerCase() };
-  if (parts.length === 2 && parts[0] === "collection" && uuid.test(parts[1])) return { name: "collection", id: parts[1].toLowerCase() };
+  if (parts.length === 2 && parts[0] === "collection" && uuid.test(parts[1])) {
+    const offset = Number(query.get("offset"));
+    return { name: "collection", id: parts[1].toLowerCase(), ...(Number.isSafeInteger(offset) && offset > 0 && offset <= 2147483647 ? { offset } : {}) };
+  }
   return { name: "home" };
 }
 
@@ -307,8 +313,10 @@ export function routePath(route) {
       return route.page && route.page !== "general" ? `/settings/${route.page}` : "/settings";
     case "title":
       return `/title/${route.id}`;
+    case "collections":
+      return "/collections";
     case "collection":
-      return `/collection/${route.id}`;
+      return `/collection/${route.id}${route.offset ? `?offset=${route.offset}` : ""}`;
     default:
       return "/";
   }
@@ -623,6 +631,7 @@ export function browseQuery(section, filters = {}) {
   const sort = filters.sort ?? (section === "recent" ? "dateAdded" : null);
   const descending = filters.sort ? Boolean(filters.descending) : section === "recent";
   const query = {};
+  if (filters.query?.trim()) query.query = filters.query.trim().slice(0, 256);
   if (kind) query.kind = kind;
   if (filters.favorites) query.favorite = "true";
   if (filters.watch) query.watchState = filters.watch;

@@ -79,22 +79,24 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     signOut: () => request("/api/v1/web/sign-out", { method: "POST", as: "device" }),
 
     home: () => request("/api/v1/home"),
-    catalogPage: (parameters) => request(`/api/v1/catalog/items?${new URLSearchParams(parameters)}`),
-    search: (parameters) => request(`/api/v1/catalog/search?${new URLSearchParams(parameters)}`),
+    catalogPage: (parameters, options = {}) => request(`/api/v1/catalog/items?${new URLSearchParams(parameters)}`, options),
+    search: (parameters, options = {}) => request(`/api/v1/catalog/search?${new URLSearchParams(parameters)}`, options),
     detail: (mediaId) => request(`/api/v1/catalog/items/${id(mediaId)}`),
-    collections: () => request("/api/v1/catalog/collections?limit=200"),
+    collections: (parameters = { limit: 200 }, options = {}) => request(`/api/v1/catalog/collections?${new URLSearchParams(parameters)}`, options),
     playbackPlan: (mediaId) => request(`/api/v1/media/${id(mediaId)}/playback-plan`),
     setFavorite: (mediaId, isFavorite) => request(`/api/v1/media/${id(mediaId)}/favorite`, { method: "PUT", body: { isFavorite } }),
-    watchState: (mediaId, scope = "title", seasonNumber) =>
-      request(`/api/v1/media/${id(mediaId)}/watch-state?${new URLSearchParams(seasonNumber == null ? { scope } : { scope, seasonNumber })}`),
-    setWatchState: (mediaId, body) => request(`/api/v1/media/${id(mediaId)}/watch-state`, { method: "PUT", body }),
+    watchState: (mediaId, scope = "title", seasonNumber, options = {}) =>
+      request(`/api/v1/media/${id(mediaId)}/watch-state?${new URLSearchParams(seasonNumber == null ? { scope } : { scope, seasonNumber })}`, options),
+    setWatchState: (mediaId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/watch-state`, { ...options, method: "PUT", body }),
+    setContinueWatching: (mediaId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/continue-watching`, { ...options, method: "PUT", body }),
 
     createPlayback: (mediaId) => request(`/api/v1/media/${id(mediaId)}/playback`, { method: "POST" }),
     conversionPlan: (mediaId, codecs) => request(`/api/v1/media/${id(mediaId)}/conversion`, { method: "POST", body: codecs }),
-    sceneNotes: (mediaId) => request(`/api/v1/media/${id(mediaId)}/notes`),
-    saveSceneNote: (mediaId, noteId, body) => request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}`, { method: "PUT", body }),
-    removeSceneNote: (mediaId, noteId, revision) =>
-      request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}?${new URLSearchParams({ revision })}`, { method: "DELETE" }),
+    sceneNotes: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/notes`, options),
+    saveSceneNote: (mediaId, noteId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}`, { ...options, method: "PUT", body }),
+    removeSceneNote: (mediaId, noteId, revision, options = {}) =>
+      request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}?${new URLSearchParams({ revision })}`, { ...options, method: "DELETE" }),
+    sleepTimerEnded: () => request("/api/v1/playback/sleep-timer-ended", { method: "POST", keepalive: true }),
     revokePlayback: (playbackId) => request(`/api/v1/playback/${id(playbackId)}`, { method: "DELETE", keepalive: true }),
     saveProgress: (mediaId, body, { keepalive = false } = {}) =>
       request(`/api/v1/media/${id(mediaId)}/progress`, { method: "PUT", body, keepalive }),

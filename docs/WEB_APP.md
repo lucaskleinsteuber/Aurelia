@@ -74,7 +74,10 @@ browser, with no cache and no temporary files. The player keeps up to a minute a
 for high bitrates, so the browser's own limit of about 100 MB is never reached) and removes
 what played earlier. Seeking within what has arrived is instant; a seek further away starts a
 new stream at that point, and a dropped connection continues where the arrived part ends.
-The audio menu picks another sound track. Up to three titles convert at a time on one server.
+The audio menu picks another sound track. A directly played file also exposes its native sound
+tracks when the browser provides that control; otherwise Original sound is shown. This does not
+start conversion or probing merely to populate a menu. Up to three titles convert at a time on
+one server.
 
 The subtitle menu also lists embedded text tracks (SubRip, ASS/SSA and MP4 text subtitles).
 Selecting one reads the track as WebVTT into request memory, with no subtitle files or cache on
@@ -82,6 +85,14 @@ disk. Cues use the title's timeline and stay aligned when resuming, seeking or c
 tracks. Bitmap subtitles (PGS and VobSub) are listed as unsupported. ASS positioning and styling
 are reduced to the text and formatting that WebVTT supports. A request is limited to 8 MiB and
 30 seconds; a failed subtitle load leaves the video playing and can be retried from the menu.
+Only the currently selected extracted subtitle track is retained.
+
+Sound and subtitle choices, including an explicit Off, are remembered in this browser for the
+current server and profile, with each series or film keeping its own choice. A different title
+falls back to the last choice for that profile. Matching uses language and track names rather
+than stream numbers, so reordered episode tracks do not select a different language. Missing,
+ambiguous or unsupported choices leave the available defaults. At most 300 title choices and
+32 server/profile defaults are kept; no credential enters this storage.
 
 An MP4 starts directly first. If the browser shows no picture or plays no sound, the player
 switches to live conversion at the same point by itself. Live conversion needs Media Source
@@ -96,7 +107,12 @@ The player looks and works like the Mac app's: back and the menus at the top (pl
 speed, sound tracks with Night Mode, subtitles, sleep timer, scene notes), back/play/forward
 in the middle, title, volume, Picture in Picture and full screen at the bottom, the timeline
 with scene notes and "Ends at". In the last 20 seconds of an episode, *Up Next* counts down
-to the next one. Scene notes are private to the profile, as on the Mac.
+to the next one. Scene notes are private to the profile, as on the Mac. Mark a Moment or a
+Time Range, edit Start and End as m:ss or h:mm:ss (optional milliseconds), or use the current
+position. Reload updates the list while preserving an unsaved draft. Load, remove and revision
+conflict failures remain visible; a conflict never replaces another device’s edit automatically.
+The sleep timer stops playback and informs the server when it actually ends, so the server’s
+existing sleep mode can take effect. Closing the player manually does not send that signal.
 
 The player saves the position every ten seconds, when pausing and when closing. Each save
 names the revision it builds on, so it never overwrites newer progress from another
@@ -111,8 +127,25 @@ F switches full screen, M mutes and Escape closes a menu or the player.
 The top bar has the Mac app's sections: Home, Library, Recently Added, TV Shows and Movies.
 The library sections have the same filters as on the Mac (kind, Favorites, watch state,
 genre, release year and sort order); they are part of the address, so Back and bookmarks
-keep them. A title's page shows its seasons as a row of episodes, its trailers and extras,
+keep them. Each section also searches within those filters. Release Year offers both From and
+To; leaving a bound empty keeps that side open. Genre suggestions come from loaded titles;
+Choose Genre also accepts a genre outside the current results without downloading the whole
+library. Library and search load 100 titles at a time, with Load More for the rest. A changed
+catalog restarts paging against a fresh revision rather than mixing old and new pages.
+
+Collections has a complete, paged index, available from Library and See All on Home. Collection
+links remember the index page; if a collection moves after a rename or is removed, All
+Collections opens the index again. Collection editing remains management functionality in the
+Mac app. A title's page shows its seasons as a row of episodes, its trailers and extras,
 cast and crew, and its information, like the Mac's.
+
+A title’s More Actions menu can remove it from Continue Watching or show it there again,
+without changing its playback position. Continue Watching cards offer the same menu. Marking a
+whole show or season watched or unwatched asks for confirmation with the number of episodes;
+marking it unwatched resets the selected episodes’ positions, as in the Mac app.
+
+Watchlist and navigable cast/person pages are not current features in the Mac or browser app;
+Favorites and Cast & Crew cards remain available.
 
 *Settings* in the profile menu has three pages:
 

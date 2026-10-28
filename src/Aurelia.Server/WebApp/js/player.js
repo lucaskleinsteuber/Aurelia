@@ -9,9 +9,11 @@
 import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import {
-  ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences, noteTime,
+  ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
   playerSubtitle, rateLabel, resumeSeconds, showsUpNext, upNextSeconds,
 } from "./logic.js";
+import { createSceneNotes } from "./player-notes.js";
+import { createTrackChoices, matchingTrack } from "./track-choices.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
 import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtitleLabel, subtitleUrl, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
 
@@ -79,9 +81,10 @@ export class Player {
    * @param {(item: object) => void} [options.onPlayNext]
    * @param {() => void} options.onClose
    * @param {(error: ApiError) => void} [options.onSessionEnded]
+   * @param {string} [options.preferenceScope] server/profile identity for private track choices
    * @param {boolean} [options.canConvert]  the server reports live conversion
    */
-  constructor({ api, item, next, onPlayNext, onClose, onSessionEnded, canConvert = false }) {
+  constructor({ api, item, next, onPlayNext, onClose, onSessionEnded, canConvert = false, preferenceScope }) {
     this.api = api;
     this.item = item;
     this.next = next;
@@ -90,6 +93,7 @@ export class Player {
     this.onSessionEnded = onSessionEnded;
     this.canConvert = canConvert && liveSupported();
     this.preferences = loadPreferences();
+    this.trackChoices = createTrackChoices({ scope: preferenceScope, item });
     this.live = null;
     this.source = null;
     this.saver = null;
@@ -103,6 +107,12 @@ export class Player {
     this.upNextItem = undefined;
     this.upNextDismissed = false;
     this.build();
+    this.sceneNotes = createSceneNotes({ api, mediaId: item.id, position: () => Math.round(this.video.currentTime * 1000),
+      seek: (milliseconds) => { this.video.currentTime = milliseconds / 1000; this.closePopover(); },
+      show: (content) => this.openPopover(this.notesButton, content), isOpen: () => this.popoverOwner === this.notesButton,
+      onNotes: (notes) => { this.notes = notes; this.renderNoteMarks(); },
+      onSessionEnded: (error) => { this.close(); this.onSessionEnded?.(error); },
+    });
   }
 
   build() {
@@ -225,7 +235,8 @@ export class Player {
     try {
       for (let attempt = 0; attempt < 3 && !plan; attempt += 1) {
         const candidate = await this.api.conversionPlan(this.item.id, codecSupport((type) => MediaSourceType.isTypeSupported(type), without));
-        const chosen = candidate.audioTracks.find((entry) => entry.index === startTrack(candidate, this.preferredAudio)) ?? null;
+        const remembered = matchingTrack(candidate.audioTracks, this.trackChoices.audio());
+        const chosen = remembered ?? candidate.audioTracks.find((entry) => entry.index === startTrack(candidate, this.preferredAudio)) ?? null;
         if (isTypeSupported(mimeType(candidate, chosen))) {
           plan = candidate;
           track = chosen;
@@ -257,6 +268,8 @@ export class Player {
       onFailure: (status, code) => this.liveFailed(status, code),
     });
     await this.live.open(at);
+    if (this.closed) return;
+    this.restoreTrackChoices();
     await this.play();
   }
 
@@ -290,9 +303,13 @@ export class Player {
       this.resumeAt = 0;
       this.updateTime();
       this.renderNoteMarks();
+      this.restoreTrackChoices();
       // A file the browser opens but cannot show (for example HEVC in some browsers) has no picture.
       if (!this.live && video.videoWidth === 0 && video.videoHeight === 0 && this.item.kind !== "trailer") this.check(() => video.videoWidth === 0, 1500);
     });
+    for (const tracks of [video.audioTracks, video.textTracks]) {
+      if (tracks?.addEventListener) on(tracks, "addtrack", () => this.after(() => this.restoreTrackChoices(), 0));
+    }
     on(video, "timeupdate", () => this.tick());
     on(video, "play", () => this.updatePlayState());
     on(video, "pause", () => {
@@ -560,20 +577,50 @@ export class Player {
 
   audioMenu() {
     const tracks = this.live?.plan.audioTracks ?? [];
-    const options = tracks.length
-      ? tracks.map((track, position) => ({
-        title: trackLabel(track, position),
-        selected: track.index === this.live.audio,
-        action: () => this.chooseAudio(track.index),
-      }))
-      : [{ title: "Original sound", selected: true, enabled: false }];
+    const native = Array.from(this.video.audioTracks ?? []);
+    const options = tracks.length ? tracks.map((track, position) => ({
+      title: trackLabel(track, position), selected: track.index === this.live.audio, action: () => this.chooseAudio(track.index),
+    })) : native.length ? native.map((track, position) => ({
+      title: trackLabel({ ...track, title: track.label, language: track.language }, position), selected: track.enabled, action: () => this.chooseNativeAudio(track),
+    })) : [{ title: "Original sound", selected: true, enabled: false }];
     options.push("divider", { title: "Night Mode", selected: this.preferences.nightMode, action: () => this.setNightMode(!this.preferences.nightMode) });
     this.openPopover(this.audioButton, this.menuItems(options));
   }
 
-  chooseAudio(index) {
+  async chooseAudio(index) {
+    const track = this.live?.plan.audioTracks.find((entry) => entry.index === index);
+    if (!track || this.closed) return;
     this.preferredAudio = index;
-    this.live?.setAudio(index);
+    this.trackChoices.rememberAudio(track);
+    try { await this.live.setAudio(index); if (!this.closed) this.restoreTrackChoices(); }
+    catch { if (!this.closed) this.showNotice("This sound track couldn’t be loaded. Try selecting it again.", false); }
+  }
+
+  chooseNativeAudio(track, remember = true) {
+    const tracks = Array.from(this.video.audioTracks ?? []);
+    if (this.closed || !tracks.includes(track)) return;
+    for (const candidate of tracks) candidate.enabled = candidate === track;
+    if (remember) this.trackChoices.rememberAudio(track);
+  }
+
+  restoreTrackChoices() {
+    if (this.closed || this.restoringTracks) return;
+    this.restoringTracks = true;
+    try {
+      if (!this.live) {
+        const audio = matchingTrack(Array.from(this.video.audioTracks ?? []), this.trackChoices.audio());
+        if (audio) this.chooseNativeAudio(audio, false);
+      }
+      const preference = this.trackChoices.subtitle();
+      if (!preference.chosen) return;
+      const tracks = Array.from(this.video.textTracks);
+      if (!preference.track) { selectSubtitle(tracks, null); return; }
+      const embedded = matchingTrack(this.embeddedSubtitles.filter((track) => track.supported), preference.track);
+      if (embedded) { this.chooseSubtitle(embedded, false); return; }
+      const extracted = new Set([...this.subtitleElements.values()].map((element) => element.track));
+      const native = matchingTrack(tracks.filter((track) => !extracted.has(track) && ["subtitles", "captions"].includes(track.kind)), preference.track);
+      if (native) selectSubtitle(tracks, native);
+    } finally { this.restoringTracks = false; }
   }
 
   /** Night Mode softens loud scenes and lifts quiet dialogue with a compressor, as on the Mac. */
@@ -615,15 +662,15 @@ export class Player {
   }
 
   subtitleMenu() {
-    const tracks = [...this.video.textTracks];
+    const tracks = Array.from(this.video.textTracks);
     const showing = tracks.find((track) => track.mode === "showing");
-    const options = [{ title: "Off", selected: !showing, action: () => selectSubtitle(tracks, null) }, "divider"];
+    const options = [{ title: "Off", selected: !showing, action: () => { this.trackChoices.rememberSubtitle(null); selectSubtitle(tracks, null); } }, "divider"];
     if (tracks.length === 0 && this.embeddedSubtitles.length === 0) options.push({ title: "No subtitles available", enabled: false });
     const embedded = new Set([...this.subtitleElements.values()].map((element) => element.track));
     tracks.filter((track) => !embedded.has(track)).forEach((track, position) => options.push({
       title: track.label || (track.language ? trackLabel({ language: track.language }, position) : `Subtitle ${position + 1}`),
       selected: track === showing,
-      action: () => selectSubtitle(tracks, track),
+      action: () => { this.trackChoices.rememberSubtitle(track); selectSubtitle(tracks, track); },
     }));
     // Embedded tracks are listed before they are loaded. Selecting one starts a single bounded
     // extraction; native WebVTT cues then remain valid across every seek and sound-track change.
@@ -636,14 +683,18 @@ export class Player {
     this.openPopover(this.subtitleButton, this.menuItems(options));
   }
 
-  chooseSubtitle(track) {
+  chooseSubtitle(track, remember = true) {
     if (!track.supported || !this.source || this.closed) return;
+    if (remember) this.trackChoices.rememberSubtitle(track);
     let element = this.subtitleElements.get(track.index);
     if (!element) {
+      // Keep only the selected extracted track; each can contain up to 8 MiB of cues.
+      for (const previous of this.subtitleElements.values()) previous.remove();
+      this.subtitleElements.clear();
       element = h("track", { kind: "subtitles", label: subtitleLabel(track), srclang: track.language || "und" });
       element.src = subtitleUrl(this.source.streamPath, track.index);
       element.addEventListener("error", () => {
-        if (this.closed) return;
+        if (this.closed || this.subtitleElements.get(track.index) !== element) return;
         element.remove();
         this.subtitleElements.delete(track.index);
         this.showNotice("This subtitle track couldn’t be loaded. Try selecting it again.", false);
@@ -651,7 +702,7 @@ export class Player {
       this.subtitleElements.set(track.index, element);
       this.video.append(element);
     }
-    selectSubtitle([...this.video.textTracks], element.track);
+    selectSubtitle(Array.from(this.video.textTracks), element.track);
   }
 
   sleepMenu() {
@@ -669,29 +720,30 @@ export class Player {
   }
 
   setSleep(mode, minutes = 0) {
-    this.sleep = { mode, minutes, until: mode === "minutes" ? Date.now() + minutes * 60_000 : 0 };
+    this.sleep = { mode, minutes, notified: false, until: mode === "minutes" ? Date.now() + minutes * 60_000 : 0 };
     this.sleepButton.replaceChildren(icon(mode === "off" ? "moon" : "moonFill", { size: 18 }));
     this.sleepButton.classList.toggle("active", mode !== "off");
   }
 
   /** The sleep timer pauses and closes the player, as the Mac app does. */
   checkSleep() {
+    if (this.closed) return;
     if (this.sleep.mode === "minutes" && Date.now() >= this.sleep.until) {
+      this.signalSleepEnded();
       this.video.pause();
       this.close();
     }
   }
 
+  signalSleepEnded() {
+    if (this.closed || this.sleep.notified) return;
+    this.sleep.notified = true;
+    this.api.sleepTimerEnded().catch(() => {});
+  }
+
   // MARK: Scene notes
 
-  async loadNotes() {
-    try {
-      this.notes = (await this.api.sceneNotes(this.item.id)) ?? [];
-    } catch {
-      this.notes = [];
-    }
-    this.renderNoteMarks();
-  }
+  loadNotes() { return this.sceneNotes.reload(); }
 
   renderNoteMarks() {
     clear(this.noteMarks);
@@ -712,59 +764,7 @@ export class Player {
     if (note && this.cue.textContent !== note.text) this.cue.textContent = note.text;
   }
 
-  notesPanel(draft = null) {
-    const position = Math.round(this.video.currentTime * 1000);
-    const content = [h("div", { class: "notes-header" }, h("span", {}, icon("bookmark", { size: 16 }), " Scene Notes"))];
-    if (draft) {
-      const text = h("textarea", { class: "notes-text", rows: "3", placeholder: "Note (optional)", maxlength: "2000" }, draft.text ?? "");
-      const status = h("p", { class: "notes-status", role: "alert" });
-      content.push(h("div", { class: "notes-editor" },
-        h("div", { class: "notes-time" }, `At ${noteTime(draft.startMilliseconds)}`),
-        text,
-        h("div", { class: "notes-actions" },
-          h("button", { class: "secondary-button small", onclick: () => this.notesPanel() }, "Cancel"),
-          h("button", {
-            class: "primary-button small",
-            onclick: async () => {
-              try {
-                await this.api.saveSceneNote(this.item.id, draft.id, {
-                  startMilliseconds: draft.startMilliseconds, endMilliseconds: draft.endMilliseconds ?? null, text: text.value.trim(), revision: draft.revision ?? 0,
-                });
-                await this.loadNotes();
-                this.notesPanel();
-              } catch (error) {
-                status.textContent = error.message;
-              }
-            },
-          }, "Save")),
-        status));
-    } else {
-      content.push(h("button", { class: "secondary-button small notes-create", onclick: () => this.notesPanel({ id: crypto.randomUUID(), startMilliseconds: position, revision: 0 }) },
-        icon("plus", { size: 15 }), "Mark Current Position"));
-    }
-    content.push(h("div", { class: "menu-divider" }));
-    if (this.notes.length === 0) content.push(h("p", { class: "notes-empty" }, "No scene notes yet."));
-    else content.push(h("div", { class: "notes-list" }, this.notes.map((note) => h("div", { class: "note-row" },
-      h("button", {
-        class: "note-jump",
-        onclick: () => {
-          this.video.currentTime = note.startMilliseconds / 1000;
-          this.closePopover();
-        },
-      }, h("span", { class: "note-when" }, noteTime(note.startMilliseconds)), h("span", { class: "note-text" }, note.text || "Marked scene")),
-      h("button", { class: "player-icon small", "aria-label": "Edit", onclick: () => this.notesPanel({ ...note }) }, icon("more", { size: 15 })),
-      h("button", {
-        class: "player-icon small",
-        "aria-label": "Remove",
-        onclick: async () => {
-          await this.api.removeSceneNote(this.item.id, note.id, note.revision).catch(() => {});
-          await this.loadNotes();
-          this.notesPanel();
-        },
-      }, icon("close", { size: 15 }))))));
-    content.push(h("p", { class: "notes-footnote" }, "Private to your profile. Playback keeps running."));
-    this.openPopover(this.notesButton, h("div", { class: "notes-panel" }, content));
-  }
+  notesPanel() { this.sceneNotes.open(); }
 
   // MARK: Up Next and the end
 
@@ -810,6 +810,8 @@ export class Player {
   }
 
   async finish() {
+    if (this.closed) return;
+    if (this.sleep.mode === "end") this.signalSleepEnded();
     this.updatePlayState();
     const video = this.video;
     if (this.saver && Number.isFinite(video.duration)) await this.saver.save(video.duration * 1000, video.duration * 1000, true);
@@ -963,6 +965,7 @@ export class Player {
     if (this.closed) return;
     this.saveNow({ keepalive: true });
     this.closed = true;
+    this.sceneNotes.close();
     for (const timer of this.timers) {
       clearTimeout(timer);
       clearInterval(timer);

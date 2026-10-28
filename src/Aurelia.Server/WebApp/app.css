@@ -1042,3 +1042,15 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* Viewer paging and the same compact library search used by the native client. */
+.catalog-search { margin-bottom: 18px; }
+.catalog-footer { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 28px var(--gutter); }
+.continue-card { position: relative; min-width: 0; }
+.continue-card .landscape-card { width: 100%; }
+.continue-actions { position: absolute; top: 8px; right: 8px; background: rgba(0, 0, 0, 0.65); }
+
+.notes-editor .text-field { min-width: 0; width: 100%; }
+.notes-editor .button-row { flex-wrap: nowrap; gap: 6px; }
+.notes-header { justify-content: space-between; }
+.note-row .notes-actions { gap: 6px; }
