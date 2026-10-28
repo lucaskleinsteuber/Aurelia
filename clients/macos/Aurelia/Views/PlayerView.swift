@@ -16,6 +16,7 @@ struct PlayerView: View {
   @State private var controlsVisible = true
   @State private var isScrubbing = false
   @State private var scrubPosition: Double = 0
+  @State private var previewControlsHeight: CGFloat?
   @State private var hideTask: Task<Void, Never>?
   @State private var windowPresentation = PlayerWindowPresentation()
   @State private var fullScreenKeyboard = PlayerFullScreenKeyboard()
@@ -506,6 +507,11 @@ struct PlayerView: View {
         Spacer(minLength: 30)
         trailingControls
       }
+      .onGeometryChange(for: CGFloat.self) {
+        $0.size.height
+      } action: { height in
+        previewControlsHeight = height
+      }
 
       HStack(spacing: 10) {
         Text(formatTime(displayedPosition)).monospacedDigit().frame(
@@ -520,8 +526,10 @@ struct PlayerView: View {
           chapters: controller.chapters,
           notes: sceneNotes.notes,
           hoverPosition: $hoverPosition,
-          preview: previewPosition.map { position in
-            PlayerTimelinePreview(
+          previewClearance: (previewControlsHeight ?? 0) + 9,
+          preview: previewPosition.flatMap { position -> PlayerTimelinePreview? in
+            guard previewControlsHeight != nil else { return nil }
+            return PlayerTimelinePreview(
               position: position, label: formatTime(position),
               image: previews.imageBucket == previews.bucket(for: Int64(position))
                 ? previews.image : nil)
@@ -973,6 +981,7 @@ private struct PlayerTimeline: View {
   let chapters: [PlaybackChapter]
   let notes: [SceneNote]
   @Binding var hoverPosition: Double?
+  let previewClearance: CGFloat
   let preview: PlayerTimelinePreview?
   let onEditingChanged: (Bool) -> Void
 
@@ -1011,12 +1020,16 @@ private struct PlayerTimeline: View {
       }
       .overlay(alignment: .topLeading) {
         if let preview {
-          let width: CGFloat = 192
-          let x = min(
-            max(proxy.size.width * preview.position / duration - width / 2, 0),
-            max(proxy.size.width - width, 0))
+          let width = PlayerPreviewPlacement.width(in: proxy.size.width)
+          let x = PlayerPreviewPlacement.leading(
+            timelineWidth: proxy.size.width, position: preview.position, duration: duration,
+            previewWidth: width)
           PlayerPreviewBubble(preview: preview, width: width)
-            .offset(x: x, y: -(width * 9 / 16) - 34)
+            .alignmentGuide(.top) { dimensions in
+              PlayerPreviewPlacement.topAlignment(
+                previewHeight: dimensions.height, controlsHeight: previewClearance)
+            }
+            .offset(x: x)
             .allowsHitTesting(false)
         }
       }
