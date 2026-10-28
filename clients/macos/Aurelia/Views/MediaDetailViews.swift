@@ -752,6 +752,18 @@ private struct DetailHero: View {
             AvailabilityBadge(
               availability: playTarget.availability,
               libraryAvailability: playTarget.libraryAvailability)
+            if MediaAvailabilityPresentation.isOffline(playTarget) {
+              Label(
+                MediaAvailabilityPresentation.offlineDetailNotice,
+                systemImage: "icloud.slash"
+              )
+              .font(.caption)
+              .foregroundStyle(.white.opacity(0.85))
+              .padding(.horizontal, 10)
+              .padding(.vertical, 5)
+              .background(.black.opacity(0.56), in: Capsule())
+              .overlay { Capsule().stroke(.white.opacity(0.16), lineWidth: 1) }
+            }
           }
           if MediaWatchPresentation.isWatched(detail.item) {
             Label("Watched", systemImage: "checkmark.circle.fill")

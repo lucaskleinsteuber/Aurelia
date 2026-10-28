@@ -148,6 +148,12 @@ struct MediaDetailStateTests {
         == nil)
     #expect(!MediaAvailabilityPresentation.canPlay(item(kind: .series)))
     #expect(!MediaAvailabilityPresentation.canPlay(item(libraryAvailability: .unavailable)))
+    #expect(MediaAvailabilityPresentation.isOffline(item(availability: .missing)))
+    #expect(MediaAvailabilityPresentation.isOffline(item(libraryAvailability: .unavailable)))
+    #expect(!MediaAvailabilityPresentation.isOffline(item(availability: .available)))
+    #expect(
+      MediaAvailabilityPresentation.offlineDetailNotice
+        == "This file is offline; its details and progress are kept.")
   }
 
   @Test func primaryLabelNamesResolvedEpisodeAndCompletedStateDoesNotShowProgress() {
@@ -176,11 +182,12 @@ struct MediaDetailStateTests {
 
   private func item(
     kind: MediaKind = .movie, season: Int? = nil, episode: Int? = nil,
-    watchState: CatalogWatchState? = nil, libraryAvailability: LibraryAvailability? = nil
+    watchState: CatalogWatchState? = nil, libraryAvailability: LibraryAvailability? = nil,
+    availability: MediaAvailability = .available
   ) -> CatalogItemSummary {
     CatalogItemSummary(
       id: UUID(), kind: kind, title: "Synthetic", originalTitle: nil, year: nil,
-      overview: nil, genres: [], poster: nil, backdrop: nil, availability: .available,
+      overview: nil, genres: [], poster: nil, backdrop: nil, availability: availability,
       isFavorite: false, progress: nil, addedAt: "2026-10-14T00:00:00Z",
       seasonNumber: season, episodeNumber: episode, watchState: watchState,
       libraryAvailability: libraryAvailability)

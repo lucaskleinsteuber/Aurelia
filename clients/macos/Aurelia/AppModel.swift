@@ -71,6 +71,11 @@ final class AppModel: ObservableObject {
     !usesProfileSelection
       || (profile?.isViewingSession == true && (managementExpiresAt ?? .distantPast) > Date())
   }
+  var canWakeCurrentServer: Bool {
+    guard operatingMode != .host, let serverId = deviceConnection?.serverId ?? profile?.serverId
+    else { return false }
+    return !WakeOnLan.addresses(for: serverId).isEmpty
+  }
   @Published private(set) var movies: [MovieSummary] = []
   @Published private(set) var series: [SeriesSummary] = []
   @Published private(set) var catalogItems: [CatalogItemSummary] = []

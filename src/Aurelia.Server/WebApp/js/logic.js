@@ -795,4 +795,15 @@ export class ScrollMemory {
   }
 }
 
+/** Notice displayed on title detail pages when the media file is offline. */
+export const OFFLINE_FILE_NOTICE = "This file is offline; its details and progress are kept.";
+
+/** Whether a title or its playback target is currently missing or unavailable. */
+export function isTitleOffline(item, target) {
+  if (target && target.availability !== "available") return true;
+  if (item && item.kind !== "series" && item.availability !== "available") return true;
+  return false;
+}
+
+
 

@@ -65,8 +65,8 @@ function showServerOff() {
   const name = state.server?.name ?? "The server";
   render(screenFrame(h("div", { class: "center-stack narrow" },
     h("div", { class: "status-icon" }, icon("power", { size: 34 })),
-    h("h1", {}, "The Server Is Off"),
-    h("p", {}, `“${name}” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it.`),
+    h("h1", {}, "The Server Is Asleep or Offline"),
+    h("p", {}, `“${name}” isn’t answering. The computer may be asleep or turned off. You can wake it with Aurelia on your Mac if Wake-on-LAN is set up, or check that the computer is turned on.`),
     h("p", { class: "muted" }, "This page connects by itself as soon as the server is on."),
     h("div", { class: "button-row" }, h("button", { class: "primary-button", onclick: () => start() }, "Try Again")))));
   state.retryTimer = setTimeout(() => start(), 20_000);
@@ -784,6 +784,7 @@ async function titleScreen(id) {
       (metadata.genres ?? item.genres ?? []).length ? h("div", { class: "hero-genres rise", style: { "--rise": 2 } }, (metadata.genres ?? item.genres).slice(0, 3).join("  ·  ")) : null,
       metadata.overview ?? item.overview ? h("p", { class: "hero-overview rise", style: { "--rise": 3 } }, metadata.overview ?? item.overview) : null,
       h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, favoriteButton, watchlistButton,
+        logic.isTitleOffline(item, target) ? h("span", { class: "detail-offline-notice" }, icon("warning", { size: 14 }), logic.OFFLINE_FILE_NOTICE) : null,
         item.watchState === "completed" ? h("span", { class: "watched-label" }, icon("checkCircle", { size: 15 }), "Watched") : null),
       target ? progressLine(target) : null),
     stars.length ? h("div", { class: "starring rise", style: { "--rise": 5 } }, h("span", { class: "muted" }, "Starring "), stars.join(", ")) : null);

@@ -877,6 +877,12 @@ struct AvailabilityBadge: View {
 }
 
 enum MediaAvailabilityPresentation {
+  static let offlineDetailNotice = "This file is offline; its details and progress are kept."
+
+  static func isOffline(_ item: CatalogItemSummary) -> Bool {
+    item.availability != .available || item.libraryAvailability == .unavailable
+  }
+
   static func message(for item: CatalogItemSummary) -> String? {
     message(availability: item.availability, libraryAvailability: item.libraryAvailability)
   }

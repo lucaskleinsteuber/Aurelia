@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ScrollMemory } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import { ScrollMemory, isTitleOffline, OFFLINE_FILE_NOTICE } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("scroll memory remembers and recalls scroll positions", () => {
   const memory = new ScrollMemory(4);
@@ -49,3 +49,12 @@ test("scroll memory is bounded and evicts oldest entries", () => {
   assert.equal(memory.recall("/c"), 0);
   assert.equal(memory.recall("/d"), 0);
 });
+
+test("offline file notice identifies missing media and provides clear text", () => {
+  assert.equal(OFFLINE_FILE_NOTICE, "This file is offline; its details and progress are kept.");
+  assert.equal(isTitleOffline({ kind: "movie", availability: "missing" }, null), true);
+  assert.equal(isTitleOffline({ kind: "movie", availability: "available" }, null), false);
+  assert.equal(isTitleOffline({ kind: "series", availability: "available" }, { availability: "missing" }), true);
+  assert.equal(isTitleOffline({ kind: "series", availability: "available" }, { availability: "available" }), false);
+});
+
