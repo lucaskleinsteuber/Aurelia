@@ -5,7 +5,7 @@
 
 import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
-import { PLAYBACK_DEFAULTS, PLAYBACK_RATES, loadManagementSections, managementPermissions, rateLabel } from "./logic.js";
+import { PLAYBACK_DEFAULTS, PLAYBACK_RATES, loadManagementSections, managementPermissions, rateLabel, scrubPreviewUsageText } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { createManagementEditors } from "./settings-editors.js";
 import { createServerUpdates } from "./server-updates.js";
@@ -162,7 +162,7 @@ export function createSettings(app) {
       throw error;
     }
     if (signal.aborted || state.profile?.id !== profileID) throw new DOMException("Cancelled", "AbortError");
-    const { status, updates, libraries, jobs, users, devices, power, backups, issues } = sections;
+    const { status, updates, libraries, jobs, users, devices, power, scrubPreviews, backups, issues } = sections;
     const refresh = () => app.navigate({ name: "settings", page: "server" }, { replace: true });
     const act = async (button, work, done) => {
       button.disabled = true;
@@ -250,6 +250,8 @@ export function createSettings(app) {
 
       power?.available ? powerSection(power, act) : null,
 
+      permissions.owner && scrubPreviews ? scrubPreviewsSection(scrubPreviews, act) : null,
+
       permissions.owner ? section("Backups", "library", "The server backs up its database every day.",
         (backups ?? []).slice(0, 3).map((backup) => row(new Date(backup.createdAt).toLocaleString(), value(`${capitalize(backup.kind)} · ${bytes(backup.bytes)}`))),
         h("div", { class: "button-row" }, button("Back Up Now", () => api.approved("/api/v1/server/backups/database"), "Backup created."))) : null);
@@ -267,6 +269,36 @@ export function createSettings(app) {
       row("When Unused", mode),
       row("After", minutes),
       h("div", { class: "button-row" }, save));
+  }
+
+  function scrubPreviewsSection(scrubPreviews, act) {
+    const mode = select([
+      ["off", "Off"],
+      ["onOpenOrPlay", "When a Title Is Opened or Played"],
+      ["afterImport", "After Import"],
+    ], scrubPreviews.mode ?? "off", () => {}, "Generate Previews");
+    const intervalChoices = [...new Set([10, 15, 20, 30, 60, scrubPreviews.intervalSeconds ?? 15])].sort((a, b) => a - b);
+    const interval = select(intervalChoices.map((seconds) => [seconds, `Every ${seconds} seconds`]), scrubPreviews.intervalSeconds ?? 15, () => {}, "Frame Interval");
+    const capChoices = [...new Set([100, 250, 500, 1000, 2000, 5000, scrubPreviews.storageCapMegabytes ?? 500])].sort((a, b) => a - b);
+    const cap = select(capChoices.map((mb) => [mb, mb >= 1000 && mb % 1000 === 0 ? `${mb / 1000} GB` : `${mb} MB`]), scrubPreviews.storageCapMegabytes ?? 500, () => {}, "Storage Limit");
+    const save = h("button", { class: "secondary-button" }, "Save");
+    save.addEventListener("click", () => act(save, () => api.saveServerScrubPreviews({
+      mode: mode.value,
+      intervalSeconds: Number(interval.value),
+      storageCapMegabytes: Number(cap.value),
+    }), "Scrub preview settings saved."));
+    const clearButton = h("button", { class: "secondary-button danger", disabled: !scrubPreviews.storedTitleCount && !scrubPreviews.storedBytes }, "Delete All Previews");
+    clearButton.addEventListener("click", () => act(clearButton, () => api.deleteServerScrubPreviews(), "All stored scrub previews deleted."));
+    const activeTotal = Math.max(scrubPreviews.totalScheduledCount ?? 0, (scrubPreviews.completedCount ?? 0) + (scrubPreviews.pendingCount ?? 0) + (scrubPreviews.activeCount ?? 0));
+    const progressText = (scrubPreviews.activeCount > 0 || scrubPreviews.pendingCount > 0)
+      ? (scrubPreviews.pausedForPlayback ? `Paused while playback is active (${scrubPreviews.completedCount ?? 0} of ${activeTotal} prepared)` : `Preparing previews… (${scrubPreviews.completedCount ?? 0} of ${activeTotal})`)
+      : null;
+    return section("Scrub Previews", "play", "Small timeline preview images prepared by the server in its data folder so scrubbing shows a frame right away. Converted video is never stored.",
+      row("Generate Previews", mode),
+      row("Frame Interval", interval),
+      row("Storage Limit", cap),
+      row("Stored Previews", value(scrubPreviewUsageText(scrubPreviews)), progressText),
+      h("div", { class: "button-row" }, save, clearButton));
   }
 
   function unlockPage(locked) {

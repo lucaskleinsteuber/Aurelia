@@ -23,10 +23,13 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
   const sections = { jobs, libraries: [], devices: [], users: [], backups: [], issues: [] };
   const readers = { devices: () => api.devices({ signal }) };
   if (permissions.storage) readers.libraries = () => api.libraries({ signal });
-  if (permissions.owner) Object.assign(readers, {
-    status: () => api.serverStatus({ signal }), updates: () => api.serverUpdates({ signal }),
-    users: () => api.serverUsers({ signal }), power: () => api.serverPower({ signal }), backups: () => api.serverBackups({ signal }),
-  });
+  if (permissions.owner) {
+    Object.assign(readers, {
+      status: () => api.serverStatus({ signal }), updates: () => api.serverUpdates({ signal }),
+      users: () => api.serverUsers({ signal }), power: () => api.serverPower({ signal }), backups: () => api.serverBackups({ signal }),
+    });
+    if (typeof api.serverScrubPreviews === "function") readers.scrubPreviews = () => api.serverScrubPreviews({ signal });
+  }
   await Promise.all(Object.entries(readers).map(async ([name, read]) => {
     try { sections[name] = await read(); }
     catch (error) {
@@ -234,6 +237,32 @@ export function artworkUrl(artwork, width) {
   const sizes = [320, 640, 1280, 1920];
   const chosen = sizes.find((size) => size >= width) ?? 1920;
   return `${artwork.path}${artwork.path.includes("?") ? "&" : "?"}width=${chosen}`;
+}
+
+export function scrubPreviewBucketSeconds(seconds, durationSeconds = 0, intervalSeconds = 15) {
+  const baseInterval = Math.min(120, Math.max(5, Math.floor(Number(intervalSeconds) || 15)));
+  const duration = Math.max(0, Math.floor(Number(durationSeconds) || 0));
+  const spread = duration > 0 ? Math.ceil(duration / 720) : baseInterval;
+  const effectiveInterval = Math.max(baseInterval, Math.ceil(spread / 5) * 5);
+  const clamped = duration > 0 ? Math.min(Math.max(0, Math.floor(Number(seconds) || 0)), Math.max(0, duration - 1)) : Math.max(0, Math.floor(Number(seconds) || 0));
+  return Math.floor(clamped / effectiveInterval) * effectiveInterval;
+}
+
+export function scrubPreviewFrameUrl(mediaId, seconds, durationSeconds = 0, intervalSeconds = 15) {
+  if (!mediaId) return "";
+  const bucket = scrubPreviewBucketSeconds(seconds, durationSeconds, intervalSeconds);
+  return `/api/v1/media/${encodeURIComponent(mediaId)}/scrub-previews/${bucket}`;
+}
+
+export function scrubPreviewUsageText(settings) {
+  if (!settings) return "0 titles · 0 MB of 500 MB";
+  const count = Number(settings.storedTitleCount) || 0;
+  const storedBytes = Math.max(0, Number(settings.storedBytes) || 0);
+  const cap = Number(settings.storageCapMegabytes) || 500;
+  const mb = storedBytes / (1024 * 1024);
+  const usedLabel = storedBytes === 0 ? "0 MB" : mb < 1 ? "< 1 MB" : `${Math.round(mb)} MB`;
+  const capLabel = cap >= 1000 && cap % 1000 === 0 ? `${cap / 1000} GB` : `${cap} MB`;
+  return `${count} ${count === 1 ? "title" : "titles"} · ${usedLabel} of ${capLabel}`;
 }
 
 const BROWSE_SECTIONS = ["library", "recent", "movies", "shows"];

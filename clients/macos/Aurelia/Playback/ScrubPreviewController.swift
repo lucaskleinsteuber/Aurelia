@@ -58,9 +58,11 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   private var prefetchReady = false
   private var prefetchStart: Task<Void, Never>?
   private var generation = 0
+  private var serverFrameFetcher: (@MainActor (UUID, Int64) async -> Data?)?
 
   private struct Job {
-    let decoder: any ScrubPreviewDecoding
+    var decoder: (any ScrubPreviewDecoding)?
+    var task: Task<Void, Never>?
     let bucket: Int64
     let interactive: Bool
     let timeout: Task<Void, Never>
@@ -73,6 +75,7 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
 
   static let serverFeature = "preview-streams-v1"
+  static let serverScrubPreviewsFeature = "scrub-previews-v1"
 
   var backgroundWorkers: Int { workerOverride ?? (parallel ? Self.parallelWorkers : 1) }
 
@@ -101,11 +104,15 @@ final class ScrubPreviewController: NSObject, ObservableObject {
 
   /// Frames belong to `mediaID`. A new source for the same title, after a reconnect, keeps
   /// them; another title starts over.
-  func configure(mediaID: UUID?, source: URL?, duration: Int64, parallel: Bool = false) {
+  func configure(
+    mediaID: UUID?, source: URL?, duration: Int64, parallel: Bool = false,
+    serverFrameFetcher: (@MainActor (UUID, Int64) async -> Data?)? = nil
+  ) {
     if mediaID != self.mediaID {
       reset()
       self.mediaID = mediaID
     }
+    self.serverFrameFetcher = serverFrameFetcher
     if parallel != self.parallel {
       self.parallel = parallel
       fillPrefetchSlots()
@@ -219,6 +226,7 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     duration = 0
     interval = Self.minimumInterval
     prefetchOrder = []
+    serverFrameFetcher = nil
   }
 
   private func discardFrames() {
@@ -237,7 +245,8 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   private func cancelJobs() {
     for job in jobs.values {
       job.timeout.cancel()
-      job.decoder.cancel()
+      job.task?.cancel()
+      job.decoder?.cancel()
     }
     jobs = [:]
     // Resting background slots belong to the cancelled work.
@@ -320,7 +329,6 @@ final class ScrubPreviewController: NSObject, ObservableObject {
 
   private func start(bucket: Int64, interactive: Bool) {
     guard let source, duration > 0 else { return }
-    let decoder = decoderFactory()
     let key = UUID()
     let expected = generation
     let timeout = Task { [weak self] in
@@ -328,9 +336,37 @@ final class ScrubPreviewController: NSObject, ObservableObject {
       guard let self, !Task.isCancelled, self.generation == expected else { return }
       self.finish(key, image: nil)
     }
-    jobs[key] = Job(
-      decoder: decoder, bucket: bucket, interactive: interactive, timeout: timeout)
     let middle = Self.snapshotPosition(bucket: bucket, interval: interval, duration: duration)
+    if let mediaID, let fetcher = serverFrameFetcher {
+      let seconds = max(0, middle / 1_000)
+      let task = Task { [weak self] in
+        if let data = await fetcher(mediaID, seconds), Self.decode(data) != nil {
+          guard let self, !Task.isCancelled, self.generation == expected else { return }
+          self.finishData(key, data: data)
+          return
+        }
+        guard let self, !Task.isCancelled, self.generation == expected else { return }
+        self.startLocalDecoder(key: key, source: source, middle: middle)
+      }
+      jobs[key] = Job(
+        decoder: nil, task: task, bucket: bucket, interactive: interactive, timeout: timeout)
+      return
+    }
+    let decoder = decoderFactory()
+    jobs[key] = Job(
+      decoder: decoder, task: nil, bucket: bucket, interactive: interactive, timeout: timeout)
+    decoder.start(source: source, position: Float(Double(middle) / Double(duration))) {
+      [weak self] image in
+      self?.finish(key, image: image)
+    }
+  }
+
+  private func startLocalDecoder(key: UUID, source: URL, middle: Int64) {
+    guard var job = jobs[key], duration > 0 else { return }
+    let decoder = decoderFactory()
+    job.decoder = decoder
+    job.task = nil
+    jobs[key] = job
     decoder.start(source: source, position: Float(Double(middle) / Double(duration))) {
       [weak self] image in
       self?.finish(key, image: image)
@@ -338,10 +374,15 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
 
   private func finish(_ key: UUID, image: CGImage?) {
+    finishData(key, data: image.flatMap(Self.encode))
+  }
+
+  private func finishData(_ key: UUID, data: Data?) {
     guard let job = jobs.removeValue(forKey: key) else { return }
     job.timeout.cancel()
-    job.decoder.cancel()
-    if let image, let data = Self.encode(image) {
+    job.task?.cancel()
+    job.decoder?.cancel()
+    if let data {
       frames.insert(data, for: job.bucket)
       failed.remove(job.bucket)
       preparedCount = frames.count

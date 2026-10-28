@@ -591,8 +591,11 @@ public static class ApiEndpointMappings
                 yearFrom, yearTo, sort, direction, offset, limit),
             cancellationToken), cancellationToken));
 
-    private static Task<IResult> GetCatalogDetailAsync(HttpContext context, Guid mediaId, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
-        ExecuteRevisionedAsync(context, changes, () => presentation.DetailAsync(context.User.RequireUserId(), mediaId, cancellationToken));
+    private static Task<IResult> GetCatalogDetailAsync(HttpContext context, Guid mediaId, PresentationService presentation, SyncChangeService changes, ScrubPreviewService scrubPreviews, CancellationToken cancellationToken)
+    {
+        scrubPreviews.NotifyTitleOpened(mediaId);
+        return ExecuteRevisionedAsync(context, changes, () => presentation.DetailAsync(context.User.RequireUserId(), mediaId, cancellationToken));
+    }
 
     private static Task<IResult> GetCatalogSummaryAsync(HttpContext context, Guid mediaId, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
         ExecuteRevisionedAsync(context, changes, () => presentation.SummaryAsync(context.User.RequireUserId(), mediaId, cancellationToken));
@@ -794,9 +797,11 @@ public static class ApiEndpointMappings
         Guid mediaId,
         PlaybackService playback,
         ServerSleepSignal sleep,
+        ScrubPreviewService scrubPreviews,
         CancellationToken cancellationToken)
     {
         sleep.PlaybackStarted();
+        scrubPreviews.NotifyTitleOpened(mediaId);
         return ExecuteAsync(() => playback.CreateAsync(
             context.User.RequireUserId(),
             context.User.RequireSessionId(),

@@ -9,7 +9,8 @@ public sealed partial class LibraryScanWorker(
     MetadataProviderSettingsStore metadataSettings,
     IServiceScopeFactory scopeFactory,
     IMediaLibraryScanner scanner,
-    ILogger<LibraryScanWorker> logger) : BackgroundService
+    ILogger<LibraryScanWorker> logger,
+    ScrubPreviewService? scrubPreviews = null) : BackgroundService
 {
     internal static readonly TimeSpan IdleFallback = TimeSpan.FromSeconds(30);
 
@@ -378,6 +379,7 @@ public sealed partial class LibraryScanWorker(
             cancellationToken);
         await RebuildLocalCollectionsAsync(database, library, cancellationToken);
         await PruneOldScansAsync(database, library.Id, scan.Id, cancellationToken);
+        scrubPreviews?.NotifyScanCompleted();
         var provider = metadataSettings.Load();
         if (provider.Enabled && provider.Token is not null
             && !await database.MetadataJobs.AnyAsync(

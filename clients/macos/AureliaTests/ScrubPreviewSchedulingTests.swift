@@ -162,6 +162,31 @@ struct ScrubPreviewSchedulingTests {
       ])
   }
 
+  @Test func serverFrameFetcherBypassesLocalDecoderAndFallsBackWhenNil() async throws {
+    let recorder = PreviewDecodeRecorder()
+    var serverRequests: [Int64] = []
+    let serverData = try #require(ScrubPreviewController.encode(try pixels()))
+    let previews = makeController(recorder: recorder)
+    defer { previews.reset() }
+    previews.configure(
+      mediaID: UUID(), source: source(1), duration: 100_000,
+      serverFrameFetcher: { _, seconds in
+        serverRequests.append(seconds)
+        return seconds == 25 ? serverData : nil
+      })
+    previews.request(at: 20_000)
+    try await waitUntil { previews.imageBucket == 20_000 }
+    #expect(serverRequests == [25])
+    #expect(recorder.decoders.isEmpty)
+    #expect(previews.image != nil)
+
+    previews.request(at: 40_000)
+    try await waitUntil { recorder.decoders.count == 1 }
+    #expect(serverRequests == [25, 45])
+    recorder.decoders[0].complete(try pixels())
+    #expect(previews.imageBucket == 40_000)
+  }
+
   private func makeController(
     recorder: PreviewDecodeRecorder, delay: Duration = .zero, neighbors: Bool = false,
     cacheFrameLimit: Int = ScrubPreviewController.memoryFrameLimit

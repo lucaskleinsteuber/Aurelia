@@ -854,6 +854,7 @@ async function playTitle(item, seasons, { intent = "play" } = {}) {
       seasons, onGoToSeries: (id) => { closePlayer(); navigate({ name: "title", id }); },
     })),
     canConvert: Boolean(state.server?.capabilities?.includes(LIVE_FEATURE)),
+    canScrubPreview: Boolean(state.server?.capabilities?.includes("scrub-previews-v1") || state.server?.capabilities?.includes(LIVE_FEATURE)),
   });
   state.player = player;
   player.open(document.body);

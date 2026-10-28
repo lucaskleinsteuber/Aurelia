@@ -53,8 +53,8 @@ configure_options=(
   --enable-pthreads --enable-zlib --enable-videotoolbox
   --enable-protocol=file,pipe
   --enable-demuxer=matroska,mov,avi,mpegts
-  --enable-muxer=mp4,mov,webvtt
-  --enable-encoder=aac,h264_videotoolbox,webvtt
+  --enable-muxer=mp4,mov,webvtt,image2,image2pipe
+  --enable-encoder=aac,h264_videotoolbox,webvtt,mjpeg
   --enable-decoder=h264,hevc,mpeg4,msmpeg4v1,msmpeg4v2,msmpeg4v3,mpeg1video,mpeg2video,vc1,wmv1,wmv2,wmv3,vp8,vp9,av1,mjpeg,h263,theora
   --enable-decoder=aac,aac_latm,ac3,eac3,dca,truehd,mlp,mp1,mp2,mp3,opus,vorbis,flac,alac,wmav1,wmav2,wmapro
   --enable-decoder=pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_f32le,pcm_u8,pcm_bluray,pcm_dvd
@@ -114,11 +114,12 @@ tar -xJf "$archive" -O "ffmpeg-$version/COPYING.LGPLv2.1" >"$staged/COPYING.LGPL
 [[ "$(lipo -archs "$staged/ffmpeg")" == "x86_64 arm64" ]] || { print -u2 "ffmpeg is not universal."; exit 1; }
 "$staged/ffmpeg" -hide_banner -L 2>&1 | tr '\n' ' ' | grep -q 'GNU Lesser General Public *License' || { print -u2 "ffmpeg is not LGPL."; exit 1; }
 encoders=$("$staged/ffmpeg" -hide_banner -encoders)
-for encoder in aac h264_videotoolbox webvtt; do
+for encoder in aac h264_videotoolbox webvtt mjpeg; do
   grep -qE "^ [A-Z.]{6} $encoder " <<<"$encoders" || { print -u2 -r -- "ffmpeg lacks the $encoder encoder."; exit 1; }
 done
 muxers=$("$staged/ffmpeg" -hide_banner -muxers)
 grep -qE '^  E  webvtt ' <<<"$muxers" || { print -u2 "ffmpeg lacks the WebVTT writer."; exit 1; }
+grep -qE '^  E  image2 ' <<<"$muxers" || { print -u2 "ffmpeg lacks the image2 writer."; exit 1; }
 if otool -L "$staged"/ffmpeg "$staged"/ffprobe "$staged"/*.dylib | grep -v ':$' | awk '$1 !~ /^(\/System\/|\/usr\/lib\/|@rpath\/)/' | grep -q .; then
   print -u2 "ffmpeg links a library outside macOS."
   exit 1

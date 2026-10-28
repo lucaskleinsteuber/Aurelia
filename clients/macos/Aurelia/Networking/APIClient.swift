@@ -1225,6 +1225,33 @@ struct APIClient: Sendable {
     try Self.decode([ServerBackupSummary].self, from: await perform(path: "/api/v1/server/backups"))
   }
   func serverPower() async throws -> ServerPowerSettings { try await get("/api/v1/server/power") }
+  func serverScrubPreviews() async throws -> ScrubPreviewSettings {
+    try await get("/api/v1/server/scrub-previews")
+  }
+  func saveServerScrubPreviews(_ settings: UpdateScrubPreviewSettingsRequest) async throws
+    -> ScrubPreviewSettings
+  {
+    let data = try await perform(
+      path: "/api/v1/server/scrub-previews", method: "PUT",
+      body: JSONEncoder().encode(settings))
+    return try Self.decode(ScrubPreviewSettings.self, from: data)
+  }
+  func deleteServerScrubPreviews() async throws -> ScrubPreviewSettings {
+    let data = try await perform(path: "/api/v1/server/scrub-previews", method: "DELETE")
+    return try Self.decode(ScrubPreviewSettings.self, from: data)
+  }
+  func scrubPreviewFrame(mediaId: UUID, seconds: Int) async throws -> Data {
+    let (data, _, _) = try await Self.request(
+      baseURL: profile.baseURL,
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/scrub-previews/\(max(0, seconds))",
+      method: "GET",
+      token: profile.token,
+      body: nil,
+      trustMode: .pinned(profile.publicKeyFingerprint),
+      additionalHeaders: ["Accept": "image/jpeg"],
+      timeout: 8)
+    return data
+  }
   func serverUpdates() async throws -> ServerUpdateStatus {
     try await get("/api/v1/server/updates")
   }
@@ -1452,6 +1479,12 @@ struct APIClient: Sendable {
           response = "{\"scans\":[],\"metadata\":[]}"
         }
       case "/api/v1/server/operations/current": response = "null"
+      case "/api/v1/server/scrub-previews":
+        response = """
+          {"available":true,"mode":"off","intervalSeconds":15,"storageCapMegabytes":500,
+          "storedTitleCount":0,"storedBytes":0,"activeCount":0,"pendingCount":0,
+          "completedCount":0,"totalScheduledCount":0,"pausedForPlayback":false}
+          """
       default: throw APIClientError.invalidResponse
       }
       return Data(response.utf8)

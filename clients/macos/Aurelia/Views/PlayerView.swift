@@ -782,10 +782,20 @@ struct PlayerView: View {
 
   /// Previews belong to the open title; the next one discards them from memory.
   private func configurePreviews() {
+    let useServer = model.libraryCapabilities.contains(
+      ScrubPreviewController.serverScrubPreviewsFeature)
+    let client = APIClient(profile: profile)
+    var fetcher: (@MainActor (UUID, Int64) async -> Data?)?
+    if useServer {
+      fetcher = { mediaId, seconds in
+        try? await client.scrubPreviewFrame(mediaId: mediaId, seconds: Int(seconds))
+      }
+    }
     previews.configure(
       mediaID: controller.presentation.mediaId, source: controller.previewSourceURL,
       duration: controller.durationMilliseconds,
-      parallel: model.libraryCapabilities.contains(ScrubPreviewController.serverFeature))
+      parallel: model.libraryCapabilities.contains(ScrubPreviewController.serverFeature),
+      serverFrameFetcher: fetcher)
   }
 
   private var displayedPosition: Double {

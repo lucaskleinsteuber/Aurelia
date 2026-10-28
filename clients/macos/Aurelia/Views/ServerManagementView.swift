@@ -56,6 +56,7 @@ struct ServerManagementView: View {
               self.configuration = $0
             }
             .id("essentials-\(configuration.stored.revision)")
+            ServerScrubPreviewsEditor(client: client)
           }
           profiles
           ServerDevicesSection()

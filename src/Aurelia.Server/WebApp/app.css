@@ -860,6 +860,11 @@ img.artwork-missing { opacity: 0; }
 .timeline-track { position: relative; flex: 1; display: flex; align-items: center; }
 .note-marks { position: absolute; left: 0; right: 0; top: calc(50% + 7px); height: 3px; pointer-events: none; }
 .note-mark { position: absolute; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.65); }
+.scrub-preview { position: absolute; bottom: calc(100% + 14px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 4; }
+.scrub-preview-frame { width: 176px; height: 99px; border-radius: 8px; overflow: hidden; background: #000; border: 1px solid rgba(255, 255, 255, 0.35); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55); }
+.scrub-preview-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.scrub-preview-img:not([src]) { opacity: 0; }
+.scrub-preview-time { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 3px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.65); }
 .ends-at { align-self: flex-end; font-size: 11px; font-weight: 500; color: rgba(255, 255, 255, 0.62); font-variant-numeric: tabular-nums; min-height: 14px; }
 
 input[type="range"] {

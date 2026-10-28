@@ -170,3 +170,203 @@ struct ServerPowerEditor: View {
     return minutes == 60 ? "1 hour" : "\(minutes / 60) hours"
   }
 }
+
+/// Optional server-prepared scrub preview strips stored in the server data directory.
+struct ServerScrubPreviewsEditor: View {
+  @EnvironmentObject private var model: AppModel
+  let client: APIClient
+  @State private var stored: ScrubPreviewSettings?
+  @State private var draft: UpdateScrubPreviewSettingsRequest?
+  @State private var working = false
+  @State private var message: String?
+
+  static let intervalChoices = [10, 15, 20, 30, 60]
+  static let capChoices = [100, 250, 500, 1_000, 2_000, 5_000]
+
+  var body: some View {
+    Group {
+      if let stored, let draft {
+        AureliaSettingsSection(
+          "Scrub Previews",
+          symbol: "film.stack",
+          description:
+            "Small timeline preview images prepared by the server so scrubbing shows a frame right away."
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            if !stored.available {
+              Text(
+                "FFmpeg is not installed on this server, so timeline previews are decoded on each device instead."
+              )
+              .font(.caption).foregroundStyle(.secondary)
+            }
+            Picker("Generate Previews", selection: binding(\.mode)) {
+              Text("Off").tag("off")
+              Text("When a Title Is Opened or Played").tag("onOpenOrPlay")
+              Text("After Import").tag("afterImport")
+            }
+            .pickerStyle(.radioGroup)
+            .accessibilityIdentifier("server-scrub-previews-mode")
+            Text(Self.explanation(draft.mode))
+              .font(.caption).foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+            if draft.mode != "off" {
+              Picker("Frame Interval", selection: binding(\.intervalSeconds)) {
+                ForEach(choices(Self.intervalChoices, including: draft.intervalSeconds), id: \.self)
+                { seconds in
+                  Text("Every \(seconds) seconds").tag(seconds)
+                }
+              }
+              .frame(maxWidth: 320)
+              Picker("Storage Limit", selection: binding(\.storageCapMegabytes)) {
+                ForEach(choices(Self.capChoices, including: draft.storageCapMegabytes), id: \.self)
+                { megabytes in
+                  Text(Self.formatCap(megabytes)).tag(megabytes)
+                }
+              }
+              .frame(maxWidth: 320)
+            }
+            Text(Self.usageSummary(stored: stored, capMegabytes: draft.storageCapMegabytes))
+              .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+              .accessibilityIdentifier("server-scrub-previews-usage")
+            if let progress = Self.progressSummary(stored: stored) {
+              Text(progress)
+                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                .accessibilityIdentifier("server-scrub-previews-progress")
+            }
+            HStack(spacing: 10) {
+              Button("Save Scrub Preview Settings") { save() }
+                .disabled(!hasChanges(draft: draft, stored: stored))
+                .accessibilityIdentifier("server-scrub-previews-save")
+              Button("Delete All Previews", role: .destructive) { deleteAll() }
+                .disabled(stored.storedTitleCount == 0 && stored.storedBytes == 0)
+                .accessibilityIdentifier("server-scrub-previews-delete")
+              if working { ProgressView().controlSize(.small) }
+            }
+            if let message { Text(message).font(.caption).foregroundStyle(.orange) }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading).disabled(working)
+        }
+        .accessibilityIdentifier("server-scrub-previews")
+      }
+    }
+    .task(id: model.administrationGeneration) { await load() }
+  }
+
+  private func load() async {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    guard model.managementUnlocked else { return }
+    do {
+      let settings = try await model.currentAdministration {
+        try await scope.request { try await client.serverScrubPreviews() }
+      }
+      apply(settings)
+    } catch let failure as APIClientError where failure.httpStatus == 404 {
+      stored = nil
+    } catch {
+      message = scope.message(for: error)
+    }
+  }
+
+  private func apply(_ settings: ScrubPreviewSettings) {
+    stored = settings
+    draft = UpdateScrubPreviewSettingsRequest(
+      mode: settings.mode,
+      intervalSeconds: settings.intervalSeconds,
+      storageCapMegabytes: settings.storageCapMegabytes)
+  }
+
+  private func save() {
+    guard let draft else { return }
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    working = true
+    message = nil
+    Task {
+      defer { working = false }
+      do {
+        let saved = try await model.currentAdministration {
+          try await scope.request { try await client.saveServerScrubPreviews(draft) }
+        }
+        apply(saved)
+      } catch {
+        message = scope.message(for: error)
+      }
+    }
+  }
+
+  private func deleteAll() {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    working = true
+    message = nil
+    Task {
+      defer { working = false }
+      do {
+        let updated = try await model.currentAdministration {
+          try await scope.request { try await client.deleteServerScrubPreviews() }
+        }
+        apply(updated)
+      } catch {
+        message = scope.message(for: error)
+      }
+    }
+  }
+
+  private func hasChanges(
+    draft: UpdateScrubPreviewSettingsRequest, stored: ScrubPreviewSettings
+  ) -> Bool {
+    draft.mode != stored.mode
+      || draft.intervalSeconds != stored.intervalSeconds
+      || draft.storageCapMegabytes != stored.storageCapMegabytes
+  }
+
+  private func binding<Value>(
+    _ keyPath: WritableKeyPath<UpdateScrubPreviewSettingsRequest, Value>
+  ) -> Binding<Value> {
+    Binding(
+      get: { draft![keyPath: keyPath] },
+      set: { draft?[keyPath: keyPath] = $0 })
+  }
+
+  private func choices(_ standard: [Int], including current: Int) -> [Int] {
+    standard.contains(current) ? standard : (standard + [current]).sorted()
+  }
+
+  static func explanation(_ mode: String) -> String {
+    switch mode {
+    case "onOpenOrPlay":
+      "Prepares a compact preview strip in the server data folder when a title is opened or played. Converted video is never stored."
+    case "afterImport":
+      "Prepares preview strips in the background after library scans, starting with the largest files, and pauses automatically while anyone is watching."
+    default:
+      "No preview strips are stored on disk. Timeline previews stay in memory only while scrubbing."
+    }
+  }
+
+  static func formatCap(_ megabytes: Int) -> String {
+    megabytes >= 1_000 && megabytes % 1_000 == 0
+      ? "\(megabytes / 1_000) GB" : "\(megabytes) MB"
+  }
+
+  static func formatBytes(_ bytes: Int64) -> String {
+    let megabytes = Double(max(0, bytes)) / (1_024 * 1_024)
+    if megabytes == 0 { return "0 MB" }
+    if megabytes < 1 { return "< 1 MB" }
+    return "\(Int(megabytes.rounded())) MB"
+  }
+
+  static func usageSummary(stored: ScrubPreviewSettings, capMegabytes: Int) -> String {
+    let noun = stored.storedTitleCount == 1 ? "title" : "titles"
+    return
+      "\(stored.storedTitleCount) \(noun) · \(formatBytes(stored.storedBytes)) of \(formatCap(capMegabytes))"
+  }
+
+  static func progressSummary(stored: ScrubPreviewSettings) -> String? {
+    guard stored.activeCount > 0 || stored.pendingCount > 0 else { return nil }
+    let total = max(
+      stored.totalScheduledCount,
+      stored.completedCount + stored.pendingCount + stored.activeCount)
+    if stored.pausedForPlayback {
+      return "Paused while playback is active (\(stored.completedCount) of \(total) prepared)"
+    }
+    return "Preparing previews… (\(stored.completedCount) of \(total))"
+  }
+}

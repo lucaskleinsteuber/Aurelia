@@ -10,7 +10,7 @@ import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
-  playerSubtitle, rateLabel, playbackStartSeconds, showsUpNext, upNextSeconds,
+  playerSubtitle, rateLabel, playbackStartSeconds, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
@@ -86,7 +86,7 @@ export class Player {
    * @param {string} [options.preferenceScope] server/profile identity for private track choices
    * @param {boolean} [options.canConvert]  the server reports live conversion
    */
-  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onClose, onSessionEnded, canConvert = false, preferenceScope }) {
+  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onClose, onSessionEnded, canConvert = false, canScrubPreview = canConvert, preferenceScope }) {
     this.api = api;
     this.item = item;
     this.next = next;
@@ -98,6 +98,7 @@ export class Player {
     this.onClose = onClose;
     this.onSessionEnded = onSessionEnded;
     this.canConvert = canConvert && liveSupported();
+    this.canScrubPreview = Boolean(canScrubPreview);
     this.preferences = loadPreferences();
     this.trackChoices = createTrackChoices({ scope: preferenceScope, item });
     this.live = null;
@@ -157,12 +158,17 @@ export class Player {
     this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.pipButton, this.fullscreenButton);
     this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Playback Position" });
     this.noteMarks = h("div", { class: "note-marks", "aria-hidden": "true" });
+    this.previewImg = h("img", { class: "scrub-preview-img", alt: "" });
+    this.previewTime = h("span", { class: "scrub-preview-time" }, "0:00");
+    this.scrubPreview = h("div", { class: "scrub-preview", hidden: true, "aria-hidden": "true" },
+      h("div", { class: "scrub-preview-frame" }, this.previewImg),
+      this.previewTime);
     this.elapsed = h("span", { class: "time elapsed" }, "0:00");
     this.total = h("span", { class: "time" }, "0:00");
     this.endsAt = h("div", { class: "ends-at" });
     this.bottom = h("div", { class: "player-bottom" },
       h("div", { class: "player-info-row" }, h("div", { class: "player-info" }, this.subtitleLine, this.titleLine), this.trailing),
-      h("div", { class: "timeline-row" }, this.elapsed, h("div", { class: "timeline-track" }, this.timeline, this.noteMarks), this.total),
+      h("div", { class: "timeline-row" }, this.elapsed, h("div", { class: "timeline-track" }, this.timeline, this.noteMarks, this.scrubPreview), this.total),
       this.endsAt);
 
     this.controls = h("div", { class: "player-controls" }, h("div", { class: "player-shade" }), this.top, this.transport, this.bottom);
@@ -346,9 +352,21 @@ export class Player {
     on(video, "ended", () => this.finish());
     on(video, "error", () => this.videoFailed());
     on(this.timeline, "input", () => {
-      if (Number.isFinite(video.duration)) video.currentTime = (this.timeline.value / 1000) * video.duration;
+      if (Number.isFinite(video.duration)) {
+        const fraction = Math.min(1, Math.max(0, Number(this.timeline.value) / 1000));
+        video.currentTime = fraction * video.duration;
+        this.showScrubPreview(fraction);
+      }
       this.updateTime();
     });
+    on(this.timeline, "pointermove", (event) => {
+      if (!Number.isFinite(video.duration) || video.duration <= 0) return;
+      const rect = this.timeline.getBoundingClientRect();
+      const fraction = rect.width > 0 ? Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) : 0;
+      this.showScrubPreview(fraction);
+    });
+    on(this.timeline, "pointerleave", () => this.hideScrubPreview());
+    on(this.timeline, "pointercancel", () => this.hideScrubPreview());
     on(this.volume, "input", () => {
       video.volume = Number(this.volume.value);
       video.muted = video.volume === 0;
@@ -525,6 +543,28 @@ export class Player {
   updateRate() {
     this.rateButton.firstChild.textContent = rateLabel(this.video.playbackRate);
     this.updateTime();
+  }
+
+  showScrubPreview(fraction) {
+    const duration = Number.isFinite(this.video.duration) ? this.video.duration : 0;
+    if (!duration || !this.scrubPreview || !this.canScrubPreview) return;
+    const clamped = Math.min(1, Math.max(0, fraction));
+    const seconds = clamped * duration;
+    this.previewTime.textContent = clock(seconds);
+    this.scrubPreview.style.left = `clamp(88px, ${(clamped * 100).toFixed(2)}%, calc(100% - 88px))`;
+    this.scrubPreview.hidden = false;
+    const url = scrubPreviewFrameUrl(this.item.id, seconds, duration);
+    if (!url || this.requestedPreviewUrl === url) return;
+    this.requestedPreviewUrl = url;
+    clearTimeout(this.previewDebounce);
+    this.previewDebounce = setTimeout(() => {
+      if (!this.closed && this.previewImg) this.previewImg.src = url;
+    }, 90);
+  }
+
+  hideScrubPreview() {
+    clearTimeout(this.previewDebounce);
+    if (this.scrubPreview) this.scrubPreview.hidden = true;
   }
 
   /** Keeps the screen on while a title plays, like "Prevent Sleep During Playback" on the Mac. */
@@ -1028,6 +1068,8 @@ export class Player {
       clearInterval(timer);
     }
     clearTimeout(this.hideTimer);
+    clearTimeout(this.previewDebounce);
+    this.previewImg?.removeAttribute("src");
     this.listeners.forEach((remove) => remove());
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});

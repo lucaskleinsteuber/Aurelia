@@ -210,3 +210,23 @@ struct ServerPowerSettings: Codable, Equatable, Sendable {
   var awakeFrom: String?
   var awakeUntil: String?
 }
+
+struct ScrubPreviewSettings: Codable, Equatable, Sendable {
+  var available: Bool
+  var mode: String
+  var intervalSeconds: Int
+  var storageCapMegabytes: Int
+  var storedTitleCount: Int
+  var storedBytes: Int64
+  var activeCount: Int
+  var pendingCount: Int
+  var completedCount: Int
+  var totalScheduledCount: Int
+  var pausedForPlayback: Bool
+}
+
+struct UpdateScrubPreviewSettingsRequest: Codable, Equatable, Sendable {
+  var mode: String
+  var intervalSeconds: Int
+  var storageCapMegabytes: Int
+}

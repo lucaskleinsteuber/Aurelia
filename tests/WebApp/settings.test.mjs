@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { libraryPayload, loadManagementSections, managementPermissions, metadataPayload, profilePayload, waitForLibraryOperation } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import { libraryPayload, loadManagementSections, managementPermissions, metadataPayload, profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, waitForLibraryOperation } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
   assert.deepEqual(managementPermissions({ role: "owner", accessMode: "selectedTitles" }), { owner: true, administrator: true, storage: true });
@@ -153,4 +153,19 @@ test("metadata validation rejects invalid years, runtimes, FSK, long lists and e
     assert.throws(() => metadataPayload(document, changes));
   assert.throws(() => metadataPayload(document, { unknownField: "value" }), /Unknown/);
   assert.throws(() => metadataPayload(document, {}, ["credits"]), /Unknown/);
+});
+
+test("scrub preview helpers bucketize timeline seconds, build cacheable URLs and format storage usage", async () => {
+  assert.equal(scrubPreviewBucketSeconds(0, 600, 15), 0);
+  assert.equal(scrubPreviewBucketSeconds(14.9, 600, 15), 0);
+  assert.equal(scrubPreviewBucketSeconds(15, 600, 15), 15);
+  assert.equal(scrubPreviewBucketSeconds(44.2, 600, 15), 30);
+  assert.equal(scrubPreviewBucketSeconds(999, 600, 15), 585);
+  assert.equal(scrubPreviewFrameUrl("title/1", 44.2, 600, 15), "/api/v1/media/title%2F1/scrub-previews/30");
+  assert.match(scrubPreviewUsageText({ storedTitleCount: 3, storedBytes: 2 * 1024 * 1024, storageCapMegabytes: 500 }), /3 titles · 2 MB of 500 MB/);
+  const { api, calls } = sectionApi();
+  api.serverScrubPreviews = async () => { calls.push("serverScrubPreviews"); return { mode: "onOpenOrPlay", intervalSeconds: 15, storageCapMegabytes: 500 }; };
+  const sections = await loadManagementSections(api, { role: "owner" });
+  assert.ok(calls.includes("serverScrubPreviews"));
+  assert.equal(sections.scrubPreviews.mode, "onOpenOrPlay");
 });

@@ -85,3 +85,25 @@ test("native subtitle lists may be array-like without an iterator", () => {
   const p = player({ video: { audioTracks: [], textTracks: { 0: subtitle, length: 1 } } });
   p.trackChoices.rememberSubtitle(null); assert.doesNotThrow(() => p.restoreTrackChoices()); assert.equal(subtitle.mode, "disabled");
 });
+test("scrub preview hover debounces rapid timeline movement and reuses the bucket URL", async (t) => {
+  installDOM(t);
+  const preview = document.createElement("div"); preview.hidden = true;
+  const previewImg = document.createElement("img");
+  const previewTime = document.createElement("span");
+  const p = player({
+    item: { id: "film-1", kind: "movie" },
+    video: { currentTime: 0, duration: 300, audioTracks: [], textTracks: [], pause() {} },
+    canScrubPreview: true,
+    scrubPreview: preview, previewImg, previewTime,
+    requestedPreviewUrl: "",
+  });
+  p.showScrubPreview(14 / 300);
+  p.showScrubPreview(32 / 300);
+  assert.equal(preview.hidden, false);
+  assert.equal(previewTime.textContent, "0:32");
+  assert.equal(p.requestedPreviewUrl, "/api/v1/media/film-1/scrub-previews/30");
+  await new Promise((resolve) => setTimeout(resolve, 110));
+  assert.equal(previewImg.src, "/api/v1/media/film-1/scrub-previews/30");
+  p.hideScrubPreview();
+  assert.equal(preview.hidden, true);
+});

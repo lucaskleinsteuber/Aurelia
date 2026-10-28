@@ -139,6 +139,8 @@ builder.Services.AddSingleton<ServerConfigurationStore>();
 builder.Services.AddSingleton<CredentialAttemptGuard>();
 builder.Services.AddSingleton<ActiveStreamRegistry>();
 builder.Services.AddSingleton<LiveConversionService>();
+builder.Services.AddSingleton<ScrubPreviewService>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ScrubPreviewService>());
 builder.Services.AddSingleton<ServerSleepSignal>();
 builder.Services.AddSingleton(services => new ServerPowerSettingsStore(services.GetRequiredService<ServerRuntimeOptions>()));
 builder.Services.AddSingleton(services => new ServerUpdateStore(services.GetRequiredService<ServerRuntimeOptions>(), services.GetRequiredService<TimeProvider>()));
@@ -373,6 +375,7 @@ app.MapProfiles();
 app.MapDeviceAuthorization();
 app.MapWebApp();
 app.MapLiveConversion();
+app.MapScrubPreviews();
 
 try
 {

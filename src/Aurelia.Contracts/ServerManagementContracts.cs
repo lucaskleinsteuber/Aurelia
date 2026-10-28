@@ -15,3 +15,34 @@ public sealed record AdministrationApprovalResponse(string Token, DateTimeOffset
 /// </summary>
 public sealed record ServerPowerSettings(bool Available, string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil);
 public sealed record UpdateServerPowerSettingsRequest(string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil);
+
+/// <summary>
+/// Optional timeline scrub-preview settings and status. Small JPEG stills are kept in memory when
+/// Mode is "off", or stored as bounded strips in the server's data folder when Mode is
+/// "onOpenOrPlay" or "afterImport". Converted video is never stored.
+/// </summary>
+public sealed record ScrubPreviewSettingsResponse(
+    bool Available,
+    string Mode,
+    int IntervalSeconds,
+    int StorageCapMegabytes,
+    int StoredTitleCount,
+    long StoredBytes,
+    int ActiveCount,
+    int PendingCount,
+    int CompletedCount,
+    int TotalScheduledCount,
+    bool PausedForPlayback);
+
+public sealed record UpdateScrubPreviewSettingsRequest(
+    string Mode,
+    int IntervalSeconds,
+    int StorageCapMegabytes);
+
+public sealed record ScrubPreviewManifestResponse(
+    bool Available,
+    string Mode,
+    int IntervalSeconds,
+    int DurationSeconds,
+    IReadOnlyList<int> ReadySeconds,
+    string Revision);

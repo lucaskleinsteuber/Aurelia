@@ -21,7 +21,8 @@ public static class WebCookies
         if (purpose == "device") return request.Cookies[Device];
         if (purpose == "profile") return request.Cookies[Profile];
         if (purpose.Length == 0 && (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
-            && (request.Path.StartsWithSegments("/api/v1/streams") || request.Path.StartsWithSegments("/api/v1/artwork")))
+            && (request.Path.StartsWithSegments("/api/v1/streams") || request.Path.StartsWithSegments("/api/v1/artwork")
+                || (request.Path.StartsWithSegments("/api/v1/media") && (request.Path.Value ?? string.Empty).Contains("/scrub-previews/", StringComparison.Ordinal))))
             return request.Cookies[Profile];
         return null;
     }

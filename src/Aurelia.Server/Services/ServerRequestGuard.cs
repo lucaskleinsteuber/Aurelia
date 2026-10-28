@@ -59,10 +59,12 @@ public sealed class ServerRequestGuard
         }
     }
 
-    /// <summary>A stream read that a client marked as a timeline preview.</summary>
+    /// <summary>A stream read or scrub-preview read that a client marked as a timeline preview.</summary>
     public static bool IsPreviewStream(HttpRequest request) =>
-        request.Path.StartsWithSegments("/api/v1/streams")
-        && string.Equals(request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase);
+        (request.Path.StartsWithSegments("/api/v1/streams")
+            && string.Equals(request.Headers["X-Aurelia-Stream-Purpose"], "preview", StringComparison.OrdinalIgnoreCase))
+        || (request.Path.StartsWithSegments("/api/v1/media")
+            && (request.Path.Value ?? string.Empty).Contains("/scrub-previews", StringComparison.Ordinal));
 
     public static bool RequiresApproval(HttpRequest request)
     {

@@ -29,7 +29,9 @@ These rules apply to every task in this repository.
   video is never stored: it stays in memory and is discarded when playback or
   the title ends. No transcode cache, temporary segment files or converted
   copies on disk, in Application Support or anywhere else. (The Classic app
-  stored converted files in Application Support and grew to 20–30 GB.)
+  stored converted files in Application Support and grew to 20–30 GB.) Small
+  still preview images for scrub previews may be stored in the server data
+  folder, optional and with a size cap; converted video is still never stored.
 - The server's live conversion (`Services/LiveConversion*.cs`) starts ffmpeg
   without a shell; it reads only the file the server checked and opened and
   writes only to its standard output, straight into the HTTP response.
