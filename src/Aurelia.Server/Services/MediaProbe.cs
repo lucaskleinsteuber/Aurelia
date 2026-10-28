@@ -51,6 +51,18 @@ public sealed record MediaProbeResult(
 /// <summary>Reads a file's header with ffprobe; only the header is read, never the whole file.</summary>
 public static class MediaProbe
 {
+    private static readonly HashSet<string> DisallowedContainers = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "concat", "subfile", "lavfi", "sdp", "tty"
+    };
+
+    public static bool IsDisallowedContainer(string? formatName)
+    {
+        if (string.IsNullOrWhiteSpace(formatName)) return false;
+        var formats = formatName.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        return formats.Any(f => DisallowedContainers.Contains(f));
+    }
+
     public static IReadOnlyList<string> Arguments(string input) =>
     [
         "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "file",
@@ -64,6 +76,11 @@ public static class MediaProbe
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var format = root.TryGetProperty("format", out var formatElement) ? formatElement : default;
+        var container = Text(format, "format_name") ?? string.Empty;
+        if (IsDisallowedContainer(container))
+        {
+            throw new JsonException("The title format is not an allowed media container.");
+        }
         ProbedVideo? video = null;
         double? videoDuration = null;
         var audio = new List<ProbedAudio>();
@@ -104,7 +121,7 @@ public static class MediaProbe
 
         var duration = Number(format, "duration") is > 0 and var total ? total : videoDuration;
         return new MediaProbeResult(
-            Text(format, "format_name") ?? string.Empty,
+            container,
             duration is > 0 ? duration : null,
             video,
             audio,

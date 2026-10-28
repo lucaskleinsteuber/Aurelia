@@ -126,6 +126,19 @@ public sealed partial class LiveConversionTests
         Assert.Equal("file:/proc/1/fd/9", MediaProbe.Arguments("/proc/1/fd/9")[^1]);
     }
 
+    [Theory]
+    [InlineData("concat")]
+    [InlineData("subfile")]
+    [InlineData("lavfi")]
+    [InlineData("sdp")]
+    [InlineData("tty")]
+    [InlineData("concat,wav")]
+    public void DisallowedContainersAreRejected(string container)
+    {
+        var json = $"{{\"format\":{{\"format_name\":\"{container}\"}}}}";
+        Assert.Throws<System.Text.Json.JsonException>(() => MediaProbe.Parse(json));
+    }
+
     [Fact]
     public void ProbeListsTextAndBitmapSubtitlesAndKeepsRealMotionJpegVideo()
     {
