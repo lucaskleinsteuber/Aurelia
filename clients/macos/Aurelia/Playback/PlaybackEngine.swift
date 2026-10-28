@@ -116,6 +116,8 @@ protocol PlaybackEngine: AnyObject {
   var selectedSubtitleTrackID: Int32? { get }
   /// The series whose audio and subtitle choices apply; set before `load(url:)`.
   var trackScope: UUID? { get set }
+  /// The active profile ID so track choices stay scoped per profile.
+  var profileScope: UUID? { get set }
 
   func attach(to view: NSView)
   func load(url: URL)
@@ -139,6 +141,11 @@ extension PlaybackEngine {
   var opensAtStartPosition: Bool { false }
 
   var trackScope: UUID? {
+    get { nil }
+    set {}
+  }
+
+  var profileScope: UUID? {
     get { nil }
     set {}
   }
@@ -208,6 +215,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
   private var requestedMuted = false
   private var requestedRate: Double = 1
   var trackScope: UUID?
+  var profileScope: UUID?
   /// Prebuffering before the picture starts and after a seek. The local relay reads a server
   /// on this Mac fast enough for 300 ms; remote servers keep the default 500 ms.
   var networkCachingMilliseconds: Int?
@@ -420,7 +428,8 @@ final class VLCPlaybackEngine: PlaybackEngine {
   func selectAudioTrack(id: Int32) {
     player.currentAudioTrackIndex = id
     if let track = audioTracks.first(where: { $0.id == id }) {
-      PlaybackTrackPreferenceStore.shared.rememberAudio(track.preference, scope: trackScope)
+      PlaybackTrackPreferenceStore.shared.rememberAudio(
+        track.preference, scope: trackScope, profileId: profileScope)
     }
     onUpdate?()
   }
@@ -430,7 +439,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
     PlaybackTrackPreferenceStore.shared.rememberSubtitle(
       id.flatMap { selected in
         subtitleTracks.first(where: { $0.id == selected })?.preference
-      }, scope: trackScope)
+      }, scope: trackScope, profileId: profileScope)
     onUpdate?()
   }
 
@@ -490,17 +499,20 @@ final class VLCPlaybackEngine: PlaybackEngine {
     appliedTrackPreferences = true
 
     let store = PlaybackTrackPreferenceStore.shared
-    if let preference = store.audio(scope: trackScope),
+    if let preference = store.audio(scope: trackScope, profileId: profileScope),
       let track = bestMatch(preference, tracks: audioTracks)
     {
       player.currentAudioTrackIndex = track.id
     }
-    if let preference = store.subtitle(scope: trackScope),
-      let track = bestMatch(preference, tracks: subtitleTracks)
-    {
-      player.currentVideoSubTitleIndex = track.id
-    } else {
-      player.currentVideoSubTitleIndex = -1
+    let subChoice = store.subtitleChoice(scope: trackScope, profileId: profileScope)
+    if subChoice.chosen {
+      if let preference = subChoice.preference {
+        if let track = bestMatch(preference, tracks: subtitleTracks) {
+          player.currentVideoSubTitleIndex = track.id
+        }
+      } else {
+        player.currentVideoSubTitleIndex = -1
+      }
     }
   }
 
@@ -585,77 +597,115 @@ final class PlaybackTrackPreferenceStore {
   static let seriesLimit = 300
 
   private let defaults: UserDefaults
-  private let audioKey = "playback.preferredAudioTrack"
-  private let subtitleKey = "playback.preferredSubtitleTrack"
-  private let seriesKey = "playback.seriesTrackChoices.v1"
+  private let baseAudioKey = "playback.preferredAudioTrack"
+  private let baseSubtitleKey = "playback.preferredSubtitleTrack"
+  private let baseSeriesKey = "playback.seriesTrackChoices.v1"
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
   }
 
-  /// The series' own choice, or else the last choice made anywhere.
-  func audio(scope: UUID?) -> PlaybackTrackPreference? {
-    scope.flatMap { seriesChoices()[$0.uuidString]?.audio } ?? audio
+  private func audioKey(_ profileId: UUID?) -> String {
+    profileId.map { "playback.preferredAudioTrack.\($0.uuidString)" } ?? baseAudioKey
   }
 
-  /// nil means subtitles off.
-  func subtitle(scope: UUID?) -> PlaybackTrackPreference? {
-    if let scope, let choice = seriesChoices()[scope.uuidString], choice.subtitleChosen {
-      return choice.subtitle
+  private func subtitleKey(_ profileId: UUID?) -> String {
+    profileId.map { "playback.preferredSubtitleTrack.\($0.uuidString)" } ?? baseSubtitleKey
+  }
+
+  private func seriesKey(_ profileId: UUID?) -> String {
+    profileId.map { "playback.seriesTrackChoices.\($0.uuidString).v1" } ?? baseSeriesKey
+  }
+
+  /// The series' own choice, or else the last choice made anywhere for this profile.
+  func audio(scope: UUID?, profileId: UUID? = nil) -> PlaybackTrackPreference? {
+    scope.flatMap { seriesChoices(profileId: profileId)[$0.uuidString]?.audio }
+      ?? load(key: audioKey(profileId))
+  }
+
+  /// Tells whether a subtitle choice was explicitly made, and returns the preferred track (nil if Off).
+  func subtitleChoice(scope: UUID?, profileId: UUID? = nil) -> (
+    chosen: Bool, preference: PlaybackTrackPreference?
+  ) {
+    if let scope, let choice = seriesChoices(profileId: profileId)[scope.uuidString],
+      choice.subtitleChosen
+    {
+      return (true, choice.subtitle)
     }
-    return subtitle
+    if let global = load(key: subtitleKey(profileId)) {
+      return (true, global)
+    }
+    return (false, nil)
   }
 
-  func rememberAudio(_ preference: PlaybackTrackPreference, scope: UUID?) {
-    audio = preference
-    updateSeries(scope) { $0.audio = preference }
+  /// nil means subtitles off or unchosen.
+  func subtitle(scope: UUID?, profileId: UUID? = nil) -> PlaybackTrackPreference? {
+    subtitleChoice(scope: scope, profileId: profileId).preference
   }
 
-  func rememberSubtitle(_ preference: PlaybackTrackPreference?, scope: UUID?) {
-    subtitle = preference
-    updateSeries(scope) {
+  func rememberAudio(
+    _ preference: PlaybackTrackPreference, scope: UUID?, profileId: UUID? = nil
+  ) {
+    save(preference, key: audioKey(profileId))
+    updateSeries(scope, profileId: profileId) { $0.audio = preference }
+  }
+
+  func rememberSubtitle(
+    _ preference: PlaybackTrackPreference?, scope: UUID?, profileId: UUID? = nil
+  ) {
+    save(preference, key: subtitleKey(profileId))
+    updateSeries(scope, profileId: profileId) {
       $0.subtitle = preference
       $0.subtitleChosen = true
     }
   }
 
-  func forgetAll() {
-    audio = nil
-    subtitle = nil
-    defaults.removeObject(forKey: seriesKey)
+  func forgetAll(profileId: UUID? = nil) {
+    save(nil, key: audioKey(profileId))
+    save(nil, key: subtitleKey(profileId))
+    defaults.removeObject(forKey: seriesKey(profileId))
+    if profileId != nil {
+      save(nil, key: baseAudioKey)
+      save(nil, key: baseSubtitleKey)
+      defaults.removeObject(forKey: baseSeriesKey)
+    }
   }
 
-  private func updateSeries(_ scope: UUID?, _ change: (inout SeriesTrackChoice) -> Void) {
+  private func updateSeries(
+    _ scope: UUID?, profileId: UUID? = nil, _ change: (inout SeriesTrackChoice) -> Void
+  ) {
     guard let scope else { return }
-    var choices = seriesChoices()
+    let key = seriesKey(profileId)
+    var choices = seriesChoices(profileId: profileId)
     var choice = choices[scope.uuidString] ?? SeriesTrackChoice(updatedAt: Date())
     change(&choice)
     choice.updatedAt = Date()
     choices[scope.uuidString] = choice
     if choices.count > Self.seriesLimit {
-      for key in choices.sorted(by: { $0.value.updatedAt < $1.value.updatedAt })
+      for oldKey in choices.sorted(by: { $0.value.updatedAt < $1.value.updatedAt })
         .prefix(choices.count - Self.seriesLimit).map(\.key)
       {
-        choices.removeValue(forKey: key)
+        choices.removeValue(forKey: oldKey)
       }
     }
-    if let data = try? JSONEncoder().encode(choices) { defaults.set(data, forKey: seriesKey) }
+    if let data = try? JSONEncoder().encode(choices) { defaults.set(data, forKey: key) }
   }
 
-  private func seriesChoices() -> [String: SeriesTrackChoice] {
-    defaults.data(forKey: seriesKey).flatMap {
+  private func seriesChoices(profileId: UUID? = nil) -> [String: SeriesTrackChoice] {
+    let key = seriesKey(profileId)
+    return defaults.data(forKey: key).flatMap {
       try? JSONDecoder().decode([String: SeriesTrackChoice].self, from: $0)
     } ?? [:]
   }
 
   var audio: PlaybackTrackPreference? {
-    get { load(key: audioKey) }
-    set { save(newValue, key: audioKey) }
+    get { load(key: baseAudioKey) }
+    set { save(newValue, key: baseAudioKey) }
   }
 
   var subtitle: PlaybackTrackPreference? {
-    get { load(key: subtitleKey) }
-    set { save(newValue, key: subtitleKey) }
+    get { load(key: baseSubtitleKey) }
+    set { save(newValue, key: baseSubtitleKey) }
   }
 
   private func load(key: String) -> PlaybackTrackPreference? {

@@ -70,6 +70,47 @@ struct PlayerComfortTests {
     #expect(store.subtitle(scope: breakingBad) == nil)
   }
 
+  @Test func trackChoicesAreScopedPerProfile() throws {
+    let suite = "PlayerComfortTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = PlaybackTrackPreferenceStore(defaults: defaults)
+    let profileA = UUID()
+    let profileB = UUID()
+    let seriesID = UUID()
+
+    let english = PlaybackTrackPreference(language: "en", title: "English")
+    let german = PlaybackTrackPreference(language: "de", title: "Deutsch")
+    let frenchSubs = PlaybackTrackPreference(language: "fr", title: "Français")
+
+    // Profile A chooses German audio and French subtitles for seriesID
+    store.rememberAudio(german, scope: seriesID, profileId: profileA)
+    store.rememberSubtitle(frenchSubs, scope: seriesID, profileId: profileA)
+
+    // Profile B chooses English audio and Off for subtitles for the same seriesID
+    store.rememberAudio(english, scope: seriesID, profileId: profileB)
+    store.rememberSubtitle(nil, scope: seriesID, profileId: profileB)
+
+    // Profile A preserves its choices
+    #expect(store.audio(scope: seriesID, profileId: profileA) == german)
+    let subA = store.subtitleChoice(scope: seriesID, profileId: profileA)
+    #expect(subA.chosen)
+    #expect(subA.preference == frenchSubs)
+
+    // Profile B preserves its choices independently
+    #expect(store.audio(scope: seriesID, profileId: profileB) == english)
+    let subB = store.subtitleChoice(scope: seriesID, profileId: profileB)
+    #expect(subB.chosen)
+    #expect(subB.preference == nil)
+
+    // A third profile without choices reports unchosen
+    let profileC = UUID()
+    #expect(store.audio(scope: seriesID, profileId: profileC) == nil)
+    let subC = store.subtitleChoice(scope: seriesID, profileId: profileC)
+    #expect(!subC.chosen)
+    #expect(subC.preference == nil)
+  }
+
   /// Plays a synthetic loud-then-quiet tone into a file (nothing is audible) and compares how
   /// far apart the two parts end up with and without night mode.
   @Test(.timeLimit(.minutes(1))) func nightModeNarrowsTheGapBetweenLoudAndQuiet() async throws {

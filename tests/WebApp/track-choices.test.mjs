@@ -62,3 +62,19 @@ test("unavailable storage keeps this page's bounded choices, while an anonymous 
   createTrackChoices({ item: episode("one"), storage: privateStore }).rememberAudio(german);
   assert.equal(createTrackChoices({ item: episode("two"), storage: privateStore }).audio(), null);
 });
+
+test("bitmap subtitles that browser cannot display are skipped during track matching", () => {
+  const pgsGerman = { index: 1, language: "deu", title: "Full", format: "hdmv_pgs_subtitle", supported: false };
+  const vttGerman = { index: 2, language: "deu", title: "Full", format: "webvtt", supported: true };
+  const store = storage(), choices = createTrackChoices({ scope: "server:profile", item: episode("one"), storage: store });
+  choices.rememberSubtitle(vttGerman);
+
+  const available = [pgsGerman, vttGerman];
+  // Filtering supported tracks ensures PGS bitmap subtitles are never picked
+  const supportedOnly = available.filter((t) => t.supported !== false);
+  const matched = matchingTrack(supportedOnly, choices.subtitle().track);
+  assert.equal(matched, vttGerman);
+
+  // If only unsupported bitmap subtitle is present, selection falls back to null (defaults)
+  assert.equal(matchingTrack([pgsGerman].filter((t) => t.supported !== false), choices.subtitle().track), null);
+});

@@ -250,6 +250,7 @@ final class PlaybackController: ObservableObject {
     self.progressOutbox = .shared
     self.presentation = presentation
     self.engine = engine
+    self.engine.profileScope = profile.user?.id ?? profile.serverId
     self.preferences = preferences.normalized
     self.playbackRate = preferences.normalized.defaultPlaybackRate
     self.volume = preferences.normalized.defaultVolume
