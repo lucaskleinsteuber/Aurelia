@@ -4,7 +4,9 @@
 # `sudo aurelia update` installs, and the universal Mac app that scripts/build-macos-release.sh
 # made, as a disk image. GitHub adds the source code of the tag by itself. A release is visible to
 # everyone who can see the repository; the owner wants every Mac/server version published this way.
-# An existing release of the same tag gets the downloads added or replaced.
+# An existing release of the same tag gets the downloads added or replaced. A new release stays a
+# draft until every download is uploaded, so the Mac updater never sees a half-uploaded release.
+# The release text comes from a notes file when there is one (see below).
 # Once GitHub lists every download, the local build output of this version is deleted, because
 # the release is the copy that is kept (AURELIA_KEEP_LOCAL_BUILDS=1 keeps it).
 set -euo pipefail
@@ -50,19 +52,50 @@ hdiutil verify -quiet "$dmg"
 (cd "$output" && shasum -a 256 "./$(basename "${linux[0]}")" "./$(basename "${linux[1]}")" "./$(basename "$dmg")" > SHA256SUMS)
 files=("${linux[@]}" "$dmg" "$output/SHA256SUMS")
 
-notes="Aurelia $version ($build).
-
-- **Mac:** Aurelia-$tag-macOS-universal.dmg, for Apple silicon and Intel. Open it and drag Aurelia to Applications. It is signed for development and not notarized, so it runs on the Macs registered for this developer account.
+downloads="- **Mac:** Aurelia-$tag-macOS-universal.dmg, for Apple silicon and Intel. Open it and drag Aurelia to Applications. It is signed for development and not notarized, so it runs on the Macs registered for this developer account.
 - **Linux server:** the package for x64 or arm64; see docs/LINUX_SERVER.md. Installed servers update with \`sudo aurelia update\` or in Aurelia on a Mac under Settings › Server › Updates.
 - **Source code:** attached by GitHub below."
 
+# Readable notes (what is new, what was fixed) come from a Markdown file, by default
+# "<workspace>/Release Notes/<version>-<build>.md"; AURELIA_RELEASE_NOTES selects another file.
+# The Mac updater shows this text in its update dialog. Without a file the download list is used.
+notes_file=${AURELIA_RELEASE_NOTES:-"$other_root/Release Notes/$tag.md"}
+if [ -n "${AURELIA_RELEASE_NOTES:-}" ] && [ ! -f "$notes_file" ]; then
+  echo "Missing release notes $notes_file." >&2
+  exit 1
+fi
+if [ -f "$notes_file" ] && grep -q '[^[:space:]]' "$notes_file"; then
+  notes="$(cat "$notes_file")
+
+## Downloads
+
+$downloads"
+else
+  echo "No release notes at $notes_file; using the download list only." >&2
+  notes="Aurelia $version ($build).
+
+$downloads"
+fi
+
+# Large uploads sometimes fail over HTTP/2 with HTTP 408; retry them one by one over HTTP/1.1.
+upload() {
+  gh release upload "$tag" "$@" --clobber && return 0
+  echo "Upload failed; retrying each download over HTTP/1.1." >&2
+  local file
+  for file in "$@"; do
+    GODEBUG=http2client=0 gh release upload "$tag" "$file" --clobber || return 1
+  done
+}
+
 cd "$repository_root"
 if gh release view "$tag" >/dev/null 2>&1; then
-  gh release upload "$tag" "${files[@]}" --clobber
-  gh release edit "$tag" --notes "$notes"
+  upload "${files[@]}"
+  gh release edit "$tag" --notes "$notes" --draft=false
 else
-  gh release create "$tag" "${files[@]}" --target "$head" --latest \
+  gh release create "$tag" --target "$head" --latest --draft \
     --title "Aurelia $version ($build)" --notes "$notes"
+  upload "${files[@]}"
+  gh release edit "$tag" --draft=false --latest
 fi
 echo "Published Aurelia $version ($build) for Mac and Linux as release $tag."
 
