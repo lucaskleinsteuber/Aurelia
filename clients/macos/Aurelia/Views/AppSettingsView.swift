@@ -27,8 +27,6 @@ struct AppSettingsView: View {
   @State private var showingMediaManager = false
   @ObservedObject private var updater = AppUpdater.shared
   @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
-  @State private var updateTokenDraft = ""
-  @State private var updateTokenMessage: String?
 
   var body: some View {
     TabView(selection: $selectedPage) {
@@ -366,34 +364,6 @@ struct AppSettingsView: View {
         LabeledContent("Status", value: updateStatusText)
         Toggle("Check for updates automatically", isOn: $automaticUpdateChecks)
           .accessibilityIdentifier("updates-automatic")
-        VStack(alignment: .leading, spacing: 4) {
-          HStack {
-            SecureField(
-              updater.hasToken ? "Token saved — enter a new one to replace it" : "GitHub token",
-              text: $updateTokenDraft
-            )
-            .textFieldStyle(.roundedBorder)
-            .accessibilityIdentifier("updates-token")
-            Button(updateTokenDraft.isEmpty && updater.hasToken ? "Remove" : "Save") {
-              do {
-                try updater.saveToken(updateTokenDraft)
-                updateTokenDraft = ""
-                updateTokenMessage =
-                  updater.hasToken ? "Token saved in the Keychain." : "Token removed."
-              } catch {
-                updateTokenMessage = error.localizedDescription
-              }
-            }
-            .disabled(updateTokenDraft.isEmpty && !updater.hasToken)
-          }
-          Text(
-            updateTokenMessage
-              ?? "The releases are private: a fine-grained GitHub token with read-only access to this repository's contents lets Aurelia read them. It stays in this Mac's Keychain."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
         Button("Check for Updates…") {
           Task { await updater.check(userInitiated: true) }
         }

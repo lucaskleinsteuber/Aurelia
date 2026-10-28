@@ -289,6 +289,7 @@ final class AppModel: ObservableObject {
   private static let operatingModeSelectionVersionKey = "AureliaOperatingModeSelectionVersion"
 
   var canManageMedia: Bool { profile?.user?.role.canManageLibraries == true && managementUnlocked }
+  var canEditMetadata: Bool { profile?.user?.role.canManageLibraries == true }
   var canManageStorage: Bool {
     canManageMedia
       && (profile?.user?.role == .owner || profile?.user?.accessMode != .selectedTitles)

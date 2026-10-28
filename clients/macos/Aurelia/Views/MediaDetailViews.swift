@@ -72,11 +72,11 @@ struct MediaDetailView: View {
               } : nil,
             // Editing waits for the full details; a list entry shown first is incomplete.
             metadataReady: self.detail != nil,
-            onEdit: model.canManageMedia
+            onEdit: model.canEditMetadata
               ? { showingMetadataEditor = true } : nil,
-            onMatch: model.canManageMedia
+            onMatch: model.canEditMetadata
               ? { showingMatchEditor = true } : nil,
-            onRemove: model.canManageMedia
+            onRemove: model.canEditMetadata
               ? { showingRemoveConfirmation = true } : nil
           )
 
@@ -436,7 +436,8 @@ struct MediaDetailView: View {
             .buttonStyle(AureliaCardButtonStyle())
             .disabled(!MediaAvailabilityPresentation.canPlay(episode.item) || isStartingPlayback)
             .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
-            .mediaActions(item: episode.item, seasonNumber: season.number)
+            .mediaActions(
+              item: episode.item, seasonNumber: season.number, showGoToSeries: false)
           }
         }
         .id(season.number)

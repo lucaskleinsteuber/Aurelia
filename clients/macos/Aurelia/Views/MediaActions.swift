@@ -8,6 +8,7 @@ struct MediaActionsModifier: ViewModifier {
   var onResume: (() -> Void)?
   var onGoToSeries: ((UUID) -> Void)?
   var seasonNumber: Int? = nil
+  var showGoToSeries = true
   @State private var editing: MediaMetadataSummary?
   @State private var removing = false
   @State private var error: String?
@@ -18,10 +19,10 @@ struct MediaActionsModifier: ViewModifier {
         item: item, controller: watchActions,
         onEdit: {
           Task {
-            guard model.canManageMedia, let profile = model.profile else { return }
+            guard model.canEditMetadata, let profile = model.profile else { return }
             do {
               let metadata = try await APIClient(profile: profile).mediaMetadata(id: item.id)
-              guard profile == model.profile, model.canManageMedia else { return }
+              guard profile == model.profile, model.canEditMetadata else { return }
               editing = metadata
             } catch {
               guard profile == model.profile, !(error is CancellationError) else { return }
@@ -29,7 +30,7 @@ struct MediaActionsModifier: ViewModifier {
             }
           }
         }, onRemove: { removing = true }, onPlay: onPlay, onResume: onResume,
-        onGoToSeries: onGoToSeries, seasonNumber: seasonNumber)
+        onGoToSeries: onGoToSeries, seasonNumber: seasonNumber, showGoToSeries: showGoToSeries)
     }
     .modifier(MediaWatchActionConfirmation(controller: watchActions))
     .sheet(item: $editing) { metadata in
@@ -99,6 +100,7 @@ struct MediaContextMenuItems: View {
   var onResume: (() -> Void)? = nil
   var onGoToSeries: ((UUID) -> Void)? = nil
   var seasonNumber: Int? = nil
+  var showGoToSeries = true
 
   var body: some View {
     Button("Play", systemImage: "play.fill") {
@@ -111,29 +113,14 @@ struct MediaContextMenuItems: View {
       }
       .disabled(item.kind != .series && !item.isPlayable)
     }
-    if let series = MediaContextMenuPolicy.seriesID(item) {
+    if showGoToSeries, let series = MediaContextMenuPolicy.seriesID(item) {
       Button("Go to Series", systemImage: "tv") {
         if let onGoToSeries { onGoToSeries(series) } else { model.requestedMediaDetail = series }
       }
     }
-    if item.kind == .episode, let seriesId = item.parentId {
+    if item.kind == .episode {
       MediaWatchMenuItems(
         item: item, controller: controller, scope: .title, includeContinueWatching: false)
-      let resolvedSeason = item.seasonNumber ?? seasonNumber
-      if let resolvedSeason {
-        let seriesSummary = CatalogItemSummary(
-          stubId: seriesId, kind: .series, title: item.parentTitle ?? item.title,
-          availability: item.availability, isFavorite: false)
-        MediaWatchMenuItems(
-          item: seriesSummary, controller: controller, scope: .season,
-          seasonNumber: resolvedSeason, includeContinueWatching: false, subjectPrefix: "Season")
-      }
-      let seriesSummary = CatalogItemSummary(
-        stubId: seriesId, kind: .series, title: item.parentTitle ?? item.title,
-        availability: item.availability, isFavorite: false)
-      MediaWatchMenuItems(
-        item: seriesSummary, controller: controller, scope: .series,
-        includeContinueWatching: false, subjectPrefix: "Series")
     } else {
       if item.kind == .series, let seasonNumber {
         MediaWatchMenuItems(
@@ -162,12 +149,12 @@ struct MediaContextMenuItems: View {
       }
     }
     MediaContinueWatchingMenuItem(item: item, controller: controller)
-    if model.canManageMedia, let onEdit {
+    if model.canEditMetadata, let onEdit {
       Divider()
       Button("Edit Metadata…", systemImage: "pencil", action: onEdit)
         .disabled(!metadataReady)
     }
-    if model.canManageMedia, let onRemove {
+    if model.canEditMetadata, let onRemove {
       Divider()
       Button("Remove from Library…", systemImage: "trash", role: .destructive, action: onRemove)
     }
@@ -390,11 +377,12 @@ extension View {
     item: CatalogItemSummary, onRemoved: (() -> Void)? = nil, onPlay: (() -> Void)? = nil,
     onResume: (() -> Void)? = nil,
     onGoToSeries: ((UUID) -> Void)? = nil,
-    seasonNumber: Int? = nil
+    seasonNumber: Int? = nil,
+    showGoToSeries: Bool = true
   ) -> some View {
     modifier(
       MediaActionsModifier(
         item: item, onRemoved: onRemoved, onPlay: onPlay, onResume: onResume,
-        onGoToSeries: onGoToSeries, seasonNumber: seasonNumber))
+        onGoToSeries: onGoToSeries, seasonNumber: seasonNumber, showGoToSeries: showGoToSeries))
   }
 }

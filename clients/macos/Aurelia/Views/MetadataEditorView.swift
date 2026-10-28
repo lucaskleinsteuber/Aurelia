@@ -543,12 +543,12 @@ struct MetadataEditorSheet: View {
     } catch { draft.error = error.localizedDescription }
   }
   private func openMatchEditor() async {
-    guard model.canManageMedia, let profile = model.profile else { return }
+    guard model.canEditMetadata, let profile = model.profile else { return }
     draft.busy = true
     defer { draft.busy = false }
     do {
       let current = try await APIClient(profile: profile).mediaMetadata(id: metadata.mediaId)
-      guard model.profile == profile, model.canManageMedia else { return }
+      guard model.profile == profile, model.canEditMetadata else { return }
       matchMetadata = current
     } catch {
       guard model.profile == profile, !(error is CancellationError) else { return }
@@ -564,7 +564,7 @@ struct MetadataEditorSheet: View {
     }
   }
   private func save() async {
-    guard draft.valid, model.canManageMedia, let client, let document = draft.document else {
+    guard draft.valid, model.canEditMetadata, let client, let document = draft.document else {
       return
     }
     draft.busy = true

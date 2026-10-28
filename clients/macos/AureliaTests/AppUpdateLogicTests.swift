@@ -256,6 +256,24 @@ struct AppUpdateLogicTests {
     #expect(await transport.requests.isEmpty)
   }
 
+  @Test func publicRepositoryUpdateChecksAndDownloadsOmitAuthorizationHeader() async throws {
+    let folder = try testFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let transport = StubUpdateTransport(steps: [
+      .body(releaseData()), .body(checksums()), .body(Data("abc".utf8)),
+    ])
+    let client = AppUpdateClient(transport: transport)
+    let release = try await client.latest(repository: "owner/repo")
+    let image = try await client.download(
+      release, repository: "owner/repo", currentBuild: 99, folder: folder)
+    #expect(try Data(contentsOf: image) == Data("abc".utf8))
+    let requests = await transport.requests
+    #expect(requests.count == 3)
+    for request in requests {
+      #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+    }
+  }
+
   @Test func releaseNotesAndDownloadSizeComeFromTheMatchingImage() throws {
     let notes = "## Changes\n\n- Keeps **Markdown** as plain text.\n<https://example.invalid>"
     var object = try #require(

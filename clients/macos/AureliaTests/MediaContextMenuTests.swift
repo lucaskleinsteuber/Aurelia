@@ -27,6 +27,11 @@ struct MediaContextMenuTests {
       MediaContextMenuPolicy.canFavorite(item(kind: kind)) == (kind == .movie || kind == .series))
   }
 
+  @Test(arguments: [UserRole.owner, .admin, .user])
+  func editMetadataPermissionsFollowAdministratorOrOwnerRole(role: UserRole) {
+    #expect(role.canManageLibraries == (role == .owner || role == .admin))
+  }
+
   private func item(
     kind: MediaKind, parent: UUID? = nil, position: Int64 = 0, completed: Bool = false,
     state: CatalogWatchState? = nil

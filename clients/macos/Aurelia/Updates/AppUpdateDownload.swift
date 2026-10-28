@@ -11,10 +11,10 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
 
   var message: String {
     switch self {
-    case .github(401), .github(403):
-      "GitHub didn't accept the token. Check it under Settings › App › Updates."
+    case .github(let status) where status == 401 || status == 403:
+      "GitHub answered with an error (\(status)). Try again later."
     case .github(404):
-      "GitHub has no release here yet, or the token can't read this repository."
+      "GitHub has no release for this repository yet."
     case .github(let status): "GitHub answered with an error (\(status)). Try again later."
     case .invalidRelease: "GitHub returned an invalid release description. Try again later."
     case .invalidTag: "The newest release has an invalid version tag. It wasn't installed."
@@ -193,7 +193,7 @@ struct AppUpdateClient: Sendable {
     self.transport = transport
   }
 
-  func latest(repository: String, token: String) async throws -> AppRelease {
+  func latest(repository: String, token: String? = nil) async throws -> AppRelease {
     guard AppUpdateLogic.isRepository(repository),
       let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")
     else { throw AppUpdateError.invalidURL }
@@ -202,7 +202,7 @@ struct AppUpdateClient: Sendable {
   }
 
   func download(
-    _ release: AppRelease, repository: String, token: String, currentBuild: Int, folder: URL
+    _ release: AppRelease, repository: String, token: String? = nil, currentBuild: Int, folder: URL
   ) async throws -> URL {
     guard let tag = AppUpdateLogic.parseTag(release.tag), tag.build == release.build,
       tag.version == release.version,
@@ -237,11 +237,13 @@ struct AppUpdateClient: Sendable {
   }
 
   private func transfer(
-    _ url: URL, token: String, maximumBytes: Int64, destination: URL? = nil
+    _ url: URL, token: String? = nil, maximumBytes: Int64, destination: URL? = nil
   ) async throws -> AppUpdateTransfer {
     var request = URLRequest(
       url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    if let token, !token.isEmpty {
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
     request.setValue(
       destination == nil ? "application/vnd.github+json" : "application/octet-stream",
       forHTTPHeaderField: "Accept")

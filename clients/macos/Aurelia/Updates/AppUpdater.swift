@@ -22,8 +22,6 @@ final class AppUpdater: ObservableObject {
   private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "updates")
 
   @Published private(set) var state: State = .idle
-  @Published private(set) var hasToken: Bool
-  let tokens: AppUpdateTokenStore
   /// "owner/name" baked in by build-macos-release.sh; builds from Xcode have none.
   let repository: String?
   let currentVersion: String
@@ -35,7 +33,6 @@ final class AppUpdater: ObservableObject {
     tokens: AppUpdateTokenStore = AppUpdateTokenStore(), bundle: Bundle = .main,
     client: AppUpdateClient = AppUpdateClient(), defaults: UserDefaults = .standard
   ) {
-    self.tokens = tokens
     self.client = client
     self.defaults = defaults
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
@@ -43,24 +40,15 @@ final class AppUpdater: ObservableObject {
     currentVersion =
       bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-    // Unit/preflight hosts must never read the installed user's update credential.
-    hasToken = !AppModel.isTestProcess && tokens.load() != nil
-  }
-
-  var canCheck: Bool { repository != nil && hasToken }
-
-  func saveToken(_ token: String) throws {
-    let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.isEmpty {
-      try tokens.delete()
-    } else {
-      try tokens.save(trimmed)
+    // Clean up any legacy token stored in the Keychain.
+    if !AppModel.isTestProcess {
+      try? tokens.delete()
     }
-    hasToken = tokens.load() != nil
-    if case .failed = state { state = .idle }
   }
 
-  /// At launch, at most once a day and only with a token; it speaks up only when there is news.
+  var canCheck: Bool { repository != nil }
+
+  /// At launch, at most once a day; it speaks up only when there is news.
   func checkInBackgroundIfDue() {
     guard canCheck, AppUpdatePreferences.backgroundCheckIsDue(in: defaults) else { return }
     Task { await check(userInitiated: false) }
@@ -79,13 +67,9 @@ final class AppUpdater: ObservableObject {
       }
       return
     }
-    guard let token = tokens.load() else {
-      if userInitiated { askForToken() }
-      return
-    }
     state = .checking
     do {
-      let release = try await client.latest(repository: repository, token: token)
+      let release = try await client.latest(repository: repository)
       defaults.set(Date(), forKey: AppUpdatePreferences.lastCheckKey)
       if AppUpdateLogic.isNewer(build: release.build, than: currentBuild) {
         state = .available(release)
@@ -164,13 +148,12 @@ final class AppUpdater: ObservableObject {
   func install(_ release: AppRelease) async {
     guard state != .checking, state != .downloading, state != .installing else { return }
     guard let repository else { return }
-    guard let token = tokens.load() else { return askForToken() }
     state = .downloading
     var downloadedImage: URL?
     do {
       let folder = try Self.updatesDirectory()
       let destination = try await client.download(
-        release, repository: repository, token: token, currentBuild: currentBuild, folder: folder)
+        release, repository: repository, currentBuild: currentBuild, folder: folder)
       downloadedImage = destination
 
       state = .installing
@@ -211,18 +194,6 @@ final class AppUpdater: ObservableObject {
       try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
     } catch { throw AppUpdateError.classify(error) }
     return folder
-  }
-
-  private func askForToken() {
-    let alert = NSAlert()
-    alert.messageText = "Add a GitHub Token"
-    alert.informativeText =
-      "Aurelia's releases are in a private GitHub repository. Add a read-only token under Settings › App › Updates, then check again."
-    alert.addButton(withTitle: "Open Settings")
-    alert.addButton(withTitle: "Cancel")
-    if alert.runModal() == .alertFirstButtonReturn {
-      NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-    }
   }
 
   private func alert(_ title: String, _ message: String) {
