@@ -238,7 +238,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     });
   }
 
-  function watchMenu(item, scope = "title", seasonNumber, { includeContinueWatching = true } = {}) {
+  function watchMenu(item, scope = "title", seasonNumber, { includeContinueWatching = true, labelScope = false } = {}) {
     const signal = current();
     const run = async (watched) => {
       if (actionWorking || signal.aborted) return;
@@ -254,7 +254,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       } catch (error) { report(error, signal); }
       finally { if (!signal.aborted) actionWorking = false; }
     };
-    const label = scope === "season" ? "Season" : "";
+    const label = scope === "season" ? "Season" : (scope === "series" && (labelScope || item.kind === "episode")) ? "Series" : "";
     const actions = [
       h("button", { class: "menu-item", onclick: () => run(true) }, icon("checkCircle", { size: 16 }), `Mark ${label ? `${label} ` : ""}as Watched`),
       h("button", { class: "menu-item", onclick: () => run(false) }, icon("circle", { size: 16 }), `Mark ${label ? `${label} ` : ""}as Unwatched`),
@@ -279,7 +279,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     } }, icon(intendedHidden ? "hide" : "eye", { size: 16 }), intendedHidden ? "Remove from Continue Watching" : "Show in Continue Watching")];
   }
 
-  function mediaMenu(item, { seasons, onGoToSeries } = {}) {
+  function mediaMenu(item, { seasons, seasonNumber, onGoToSeries } = {}) {
     const signal = current();
     const option = (label, symbol, action, disabled = false) => h("button", {
       class: "menu-item", disabled, onclick: () => { if (!signal.aborted) action(); },
@@ -290,8 +290,29 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       actions.push(option("Resume", "play", () => play?.(item, seasons, { intent: "resume" }), !available));
     if (item.kind === "episode" && item.parentId)
       actions.push(option("Go to Series", "tv", () => onGoToSeries ? onGoToSeries(item.parentId) : navigate({ name: "title", id: item.parentId })));
-    if (["movie", "series", "episode"].includes(item.kind)) actions.push(h("div", { class: "menu-divider" }),
-      ...watchMenu(item, item.kind === "series" ? "series" : "title", undefined, { includeContinueWatching: false }));
+    if (["movie", "series", "episode"].includes(item.kind)) {
+      actions.push(h("div", { class: "menu-divider" }));
+      if (item.kind === "episode" && item.parentId && (seasons?.length || seasonNumber != null)) {
+        actions.push(...watchMenu(item, "title", undefined, { includeContinueWatching: false }));
+        const resolvedSeason = item.seasonNumber ?? seasonNumber ?? (seasons?.[0]?.number);
+        const seriesItem = { id: item.parentId, kind: "series" };
+        if (resolvedSeason != null) {
+          actions.push(...watchMenu(seriesItem, "season", resolvedSeason, { includeContinueWatching: false, labelScope: true }));
+        }
+        actions.push(...watchMenu(seriesItem, "series", undefined, { includeContinueWatching: false, labelScope: true }));
+      } else {
+        if (item.kind === "series" && (seasonNumber != null || seasons?.length)) {
+          const resolvedSeason = seasonNumber ?? (seasons?.[0]?.number);
+          if (resolvedSeason != null) {
+            actions.push(...watchMenu(item, "season", resolvedSeason, { includeContinueWatching: false, labelScope: true }));
+          }
+        }
+        actions.push(...watchMenu(item, item.kind === "series" ? "series" : "title", undefined, {
+          includeContinueWatching: false,
+          labelScope: Boolean(item.kind === "series" && (seasonNumber != null || seasons?.length)),
+        }));
+      }
+    }
     // The server supports favorites for movies and series. Episode identity is never sent to that endpoint.
     if (["movie", "series"].includes(item.kind)) {
       actions.push(option(item.isFavorite ? "Remove from Favorites" : "Add to Favorites", item.isFavorite ? "starSlash" : "star", async () => {

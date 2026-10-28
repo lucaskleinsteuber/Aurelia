@@ -595,11 +595,11 @@ function progressBar(progress) {
     h("div", { class: "progress-fill", style: { width: `${fraction * 100}%` } }));
 }
 
-function withMediaContextMenu(element, item, seasons) {
+function withMediaContextMenu(element, item, seasons, seasonNumber) {
   element.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    openMenu(element, catalog.mediaMenu(item, { seasons }));
+    openMenu(element, catalog.mediaMenu(item, { seasons, seasonNumber }));
   });
   return element;
 }
@@ -739,7 +739,7 @@ async function titleScreen(id) {
   const moreButton = h("button", { class: "player-round glass detail-more", "aria-label": "More Actions", "aria-haspopup": "menu" }, icon("more", { size: 20 }));
   moreButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    const actions = catalog.mediaMenu(item, { seasons });
+    const actions = catalog.mediaMenu(item, { seasons, seasonNumber: seasons[0]?.number });
     openMenu(moreButton, actions);
   });
 
@@ -808,7 +808,7 @@ function seasonsSection(item, seasons, target) {
     count.textContent = `${season.episodes.length} episode${season.episodes.length === 1 ? "" : "s"}`;
     const allWatched = season.episodes.length > 0 && season.episodes.every((entry) => entry.item.watchState === "completed");
     watched.replaceChildren(...(allWatched ? [icon("checkCircle", { size: 14 }), "Watched"] : []));
-    const rail = hrail(season.episodes.map((entry) => episodeCard(entry, seasons)), { label: "Episodes", className: "episodes" });
+    const rail = hrail(season.episodes.map((entry) => episodeCard(entry, seasons, season.number)), { label: "Episodes", className: "episodes" });
     if (animate) rail.classList.add("slide-in");
     holder.replaceChildren(...[rail, supplementRails(season.supplements, "", `${item.title} · ${logic.seasonTitle(season.number)}`)].filter(Boolean));
   };
@@ -818,6 +818,17 @@ function seasonsSection(item, seasons, target) {
       ...seasons.map((season) => menuOption(logic.seasonTitle(season.number), season === current, () => show(season, true))),
       h("div", { class: "menu-divider" }),
       ...watchMenu(item, "season", current.number),
+      h("div", { class: "menu-divider" }),
+      ...watchMenu(item, "series", undefined, { includeContinueWatching: false, labelScope: true }),
+    ]);
+  });
+  titleButton.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openMenu(titleButton, [
+      ...watchMenu(item, "season", current.number),
+      h("div", { class: "menu-divider" }),
+      ...watchMenu(item, "series", undefined, { includeContinueWatching: false, labelScope: true }),
     ]);
   });
   show(current, false);
@@ -826,7 +837,7 @@ function seasonsSection(item, seasons, target) {
     holder);
 }
 
-function episodeCard(entry, seasons) {
+function episodeCard(entry, seasons, seasonNumber) {
   const item = entry.item;
   const available = item.availability === "available";
   return withMediaContextMenu(h("button", { class: "episode-card card-hover", role: "listitem", disabled: !available, onclick: () => playTitle(item, seasons) },
@@ -841,7 +852,7 @@ function episodeCard(entry, seasons) {
         h("span", { class: "spacer" }),
         item.watchState === "completed" ? h("span", { class: "watched-label small" }, icon("checkCircle", { size: 13 }), "Watched") : null,
         available ? null : h("span", { class: "badge warning" }, "Offline"))),
-    progressBar(item.progress)), item, seasons);
+    progressBar(item.progress)), item, seasons, seasonNumber ?? entry.seasonNumber);
 }
 
 function supplementRails(supplements, prefix, parentTitle) {

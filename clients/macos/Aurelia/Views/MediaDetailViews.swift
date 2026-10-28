@@ -368,7 +368,11 @@ struct MediaDetailView: View {
           if let season = activeSeason(detail) {
             MediaWatchMenuItems(
               item: detail.item, controller: watchActions, scope: .season,
-              seasonNumber: season.number, includeContinueWatching: false)
+              seasonNumber: season.number, includeContinueWatching: false,
+              subjectPrefix: "Season")
+            MediaWatchMenuItems(
+              item: detail.item, controller: watchActions, scope: .series,
+              includeContinueWatching: false, subjectPrefix: "Series")
           }
         } label: {
           HStack(spacing: 6) {
@@ -385,6 +389,17 @@ struct MediaDetailView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityIdentifier("season-\(selectedSeason ?? detail.seasons.first?.number ?? 0)")
+        .contextMenu {
+          if let season = activeSeason(detail) {
+            MediaWatchMenuItems(
+              item: detail.item, controller: watchActions, scope: .season,
+              seasonNumber: season.number, includeContinueWatching: false,
+              subjectPrefix: "Season")
+            MediaWatchMenuItems(
+              item: detail.item, controller: watchActions, scope: .series,
+              includeContinueWatching: false, subjectPrefix: "Series")
+          }
+        }
         Spacer()
         if let season = activeSeason(detail) {
           if !season.episodes.isEmpty,
@@ -421,7 +436,7 @@ struct MediaDetailView: View {
             .buttonStyle(AureliaCardButtonStyle())
             .disabled(!MediaAvailabilityPresentation.canPlay(episode.item) || isStartingPlayback)
             .accessibilityIdentifier("episode-\(episode.seasonNumber)-\(episode.episodeNumber)")
-            .mediaActions(item: episode.item)
+            .mediaActions(item: episode.item, seasonNumber: season.number)
           }
         }
         .id(season.number)
@@ -787,7 +802,8 @@ private struct DetailHero: View {
             AureliaIconMenu(symbol: "ellipsis", label: "More Actions") {
               MediaContextMenuItems(
                 item: detail.item, controller: watchActions, onEdit: onEdit,
-                onRemove: onRemove, metadataReady: metadataReady)
+                onRemove: onRemove, metadataReady: metadataReady,
+                seasonNumber: detail.seasons.first?.number)
               if let onMatch {
                 Button("Find Metadata Match…", systemImage: "magnifyingglass", action: onMatch)
                   .disabled(!metadataReady)

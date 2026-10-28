@@ -7,6 +7,7 @@ struct MediaActionsModifier: ViewModifier {
   var onPlay: (() -> Void)?
   var onResume: (() -> Void)?
   var onGoToSeries: ((UUID) -> Void)?
+  var seasonNumber: Int? = nil
   @State private var editing: MediaMetadataSummary?
   @State private var removing = false
   @State private var error: String?
@@ -28,7 +29,7 @@ struct MediaActionsModifier: ViewModifier {
             }
           }
         }, onRemove: { removing = true }, onPlay: onPlay, onResume: onResume,
-        onGoToSeries: onGoToSeries)
+        onGoToSeries: onGoToSeries, seasonNumber: seasonNumber)
     }
     .modifier(MediaWatchActionConfirmation(controller: watchActions))
     .sheet(item: $editing) { metadata in
@@ -97,6 +98,7 @@ struct MediaContextMenuItems: View {
   var onPlay: (() -> Void)? = nil
   var onResume: (() -> Void)? = nil
   var onGoToSeries: ((UUID) -> Void)? = nil
+  var seasonNumber: Int? = nil
 
   var body: some View {
     Button("Play", systemImage: "play.fill") {
@@ -114,7 +116,34 @@ struct MediaContextMenuItems: View {
         if let onGoToSeries { onGoToSeries(series) } else { model.requestedMediaDetail = series }
       }
     }
-    MediaWatchMenuItems(item: item, controller: controller, includeContinueWatching: false)
+    if item.kind == .episode, let seriesId = item.parentId {
+      MediaWatchMenuItems(
+        item: item, controller: controller, scope: .title, includeContinueWatching: false)
+      let resolvedSeason = item.seasonNumber ?? seasonNumber
+      if let resolvedSeason {
+        let seriesSummary = CatalogItemSummary(
+          stubId: seriesId, kind: .series, title: item.parentTitle ?? item.title,
+          availability: item.availability, isFavorite: false)
+        MediaWatchMenuItems(
+          item: seriesSummary, controller: controller, scope: .season,
+          seasonNumber: resolvedSeason, includeContinueWatching: false, subjectPrefix: "Season")
+      }
+      let seriesSummary = CatalogItemSummary(
+        stubId: seriesId, kind: .series, title: item.parentTitle ?? item.title,
+        availability: item.availability, isFavorite: false)
+      MediaWatchMenuItems(
+        item: seriesSummary, controller: controller, scope: .series,
+        includeContinueWatching: false, subjectPrefix: "Series")
+    } else {
+      if item.kind == .series, let seasonNumber {
+        MediaWatchMenuItems(
+          item: item, controller: controller, scope: .season,
+          seasonNumber: seasonNumber, includeContinueWatching: false, subjectPrefix: "Season")
+      }
+      MediaWatchMenuItems(
+        item: item, controller: controller, includeContinueWatching: false,
+        subjectPrefix: item.kind == .series && seasonNumber != nil ? "Series" : nil)
+    }
     if MediaContextMenuPolicy.canFavorite(item) {
       Button(
         item.isFavorite ? "Remove from Favorites" : "Add to Favorites",
@@ -288,11 +317,13 @@ struct MediaWatchMenuItems: View {
   var scope: WatchStateScope? = nil
   var seasonNumber: Int? = nil
   var includeContinueWatching = true
+  var subjectPrefix: String? = nil
 
   private var resolvedScope: WatchStateScope { scope ?? (item.kind == .series ? .series : .title) }
   private var aggregate: Bool { resolvedScope == .series || resolvedScope == .season }
   private var subject: String {
-    resolvedScope == .season ? "Season " : ""
+    if let subjectPrefix { return "\(subjectPrefix) " }
+    return resolvedScope == .season ? "Season " : ""
   }
 
   var body: some View {
@@ -358,11 +389,12 @@ extension View {
   func mediaActions(
     item: CatalogItemSummary, onRemoved: (() -> Void)? = nil, onPlay: (() -> Void)? = nil,
     onResume: (() -> Void)? = nil,
-    onGoToSeries: ((UUID) -> Void)? = nil
+    onGoToSeries: ((UUID) -> Void)? = nil,
+    seasonNumber: Int? = nil
   ) -> some View {
     modifier(
       MediaActionsModifier(
         item: item, onRemoved: onRemoved, onPlay: onPlay, onResume: onResume,
-        onGoToSeries: onGoToSeries))
+        onGoToSeries: onGoToSeries, seasonNumber: seasonNumber))
   }
 }

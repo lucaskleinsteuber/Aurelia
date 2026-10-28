@@ -429,6 +429,30 @@ struct CatalogItemSummary: Codable, Identifiable, Equatable, Sendable {
     self.continueWatchingHidden = continueWatchingHidden
   }
 
+  init(
+    stubId id: UUID,
+    kind: MediaKind,
+    title: String = "",
+    availability: MediaAvailability = .available,
+    isFavorite: Bool = false
+  ) {
+    self.init(
+      id: id,
+      kind: kind,
+      title: title,
+      originalTitle: nil,
+      year: nil,
+      overview: nil,
+      genres: [],
+      poster: nil,
+      backdrop: nil,
+      availability: availability,
+      isFavorite: isFavorite,
+      progress: nil,
+      addedAt: ""
+    )
+  }
+
   private enum CodingKeys: String, CodingKey {
     case id, kind, title, originalTitle, year, overview, genres, poster, backdrop, availability
     case isFavorite, progress, addedAt, parentTitle, seasonNumber, episodeNumber
