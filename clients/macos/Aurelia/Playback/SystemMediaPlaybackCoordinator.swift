@@ -11,6 +11,20 @@ enum SystemMediaCommandResult: Equatable, Sendable {
   case success, unavailable
 }
 
+/// Framework handlers may run on MediaPlayer's private queues, even when registered on main.
+enum SystemMediaCallbacks {
+  nonisolated static func remoteCommandHandler(
+    _ handler: @escaping @Sendable () -> SystemMediaCommandResult
+  ) -> @Sendable (MPRemoteCommandEvent?) -> MPRemoteCommandHandlerStatus {
+    { @Sendable _ in
+      switch handler() {
+      case .success: .success
+      case .unavailable: .noActionableNowPlayingItem
+      }
+    }
+  }
+}
+
 struct SystemMediaNowPlayingInfo: Equatable, Sendable {
   enum State: Equatable, Sendable {
     case playing, paused, stopped
@@ -320,12 +334,7 @@ private final class NativeSystemMediaPlaybackTransport: SystemMediaPlaybackTrans
     handler: @escaping @Sendable () -> SystemMediaCommandResult
   ) -> UUID {
     let remote = remoteCommand(command)
-    let target = remote.addTarget { _ in
-      switch handler() {
-      case .success: .success
-      case .unavailable: .noActionableNowPlayingItem
-      }
-    }
+    let target = remote.addTarget(handler: SystemMediaCallbacks.remoteCommandHandler(handler))
     let token = UUID()
     targets[token] = (remote, target)
     return token
@@ -397,7 +406,13 @@ enum SystemMediaArtwork {
     }
     let bitmap = Bitmap(image: pixels)
     let source = NSSize(width: pixels.width, height: pixels.height)
-    return MPMediaItemArtwork(boundsSize: source) { requested in
+    return mediaItem(bitmap: bitmap, source: source)
+  }
+
+  // Construct the request handler outside MainActor so MediaPlayer can call it on accessQueue.
+  // Only immutable pixels and value geometry cross this boundary; no UI/model state is captured.
+  private nonisolated static func mediaItem(bitmap: Bitmap, source: NSSize) -> MPMediaItemArtwork {
+    MPMediaItemArtwork(boundsSize: source) { @Sendable requested in
       NSImage(
         cgImage: bitmap.image,
         size: fittedSize(source: source, requested: requested) ?? source)

@@ -19,11 +19,13 @@ struct AureliaApp: App {
         }
         .onReceive(
           NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
+            .receive(on: DispatchQueue.main)
         ) { _ in
           Task { await model.systemWillSleep() }
         }
         .onReceive(
           NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .receive(on: DispatchQueue.main)
         ) { _ in
           Task { await model.systemDidWake() }
         }

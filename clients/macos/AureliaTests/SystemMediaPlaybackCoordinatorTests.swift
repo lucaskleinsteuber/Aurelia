@@ -324,6 +324,49 @@ struct SystemMediaPlaybackCoordinatorTests {
     #expect(transport.handlers.isEmpty)
   }
 
+  @Test(arguments: [false, true])
+  func pendingArtworkDoesNotRetainRetiredCoordinatorOrPublishAfterDeallocation(
+    unregisterBeforeRelease: Bool
+  ) async throws {
+    let transport = FakeSystemMediaTransport()
+    let provider = ControlledSystemMediaArtwork()
+    var coordinator: SystemMediaPlaybackCoordinator? = SystemMediaPlaybackCoordinator(
+      transport: transport)
+    var controller: FakeSystemMediaController? = FakeSystemMediaController(
+      title: "Temporary invented title")
+    weak let weakCoordinator = coordinator
+    weak let weakController = controller
+    controller?.presentation = PlaybackPresentation(
+      mediaId: UUID(), title: "Temporary invented title", subtitle: nil, artwork: inventedArtwork())
+    coordinator?.register(try #require(controller), loadArtwork: provider.load)
+    try await provider.waitForRequests(1)
+    let handler = try #require(transport.handler(for: .play))
+    let callback = SystemMediaCallbacks.remoteCommandHandler(handler)
+    if unregisterBeforeRelease {
+      coordinator?.unregister(try #require(controller))
+      #expect(transport.info == nil && transport.artwork == nil)
+      #expect(transport.handlers.isEmpty)
+    }
+    let publicationCount = transport.publicationCount
+    coordinator = nil
+    controller = nil
+    #expect(weakCoordinator == nil)
+    #expect(weakController == nil)
+
+    let pixels = try #require(makeSystemMediaTestPixels())
+    provider.complete(0, image: NSImage(cgImage: pixels, size: NSSize(width: 16, height: 24)))
+    for _ in 0..<100 {
+      if provider.cancelled[0] != nil { break }
+      await Task.yield()
+    }
+    let retired = await invokeSystemMediaCommandOffMain(callback)
+    #expect(retired.invokedOffMain)
+    #expect(retired.result == Int(MPRemoteCommandHandlerStatus.noActionableNowPlayingItem.rawValue))
+    #expect(provider.cancelled[0] == true)
+    #expect(transport.publicationCount == publicationCount)
+    #expect(transport.artwork == nil)
+  }
+
   @Test func failedArtworkKeepsMetadataAndDoesNotRetryEachUpdate() async {
     let transport = FakeSystemMediaTransport()
     let coordinator = SystemMediaPlaybackCoordinator(transport: transport)
@@ -341,6 +384,78 @@ struct SystemMediaPlaybackCoordinatorTests {
     #expect(requests == 1)
     #expect(transport.info?.title == "Synthetic Movie")
     #expect(transport.artwork == nil)
+  }
+
+  @Test(arguments: [
+    (12.0, 12.0, 8.0, 12.0),
+    (64.0, 96.0, 16.0, 24.0),
+  ])
+  func productionArtworkRequestRunsOffMainWithFittedSizeAndImmutablePixels(
+    dimensions: (Double, Double, Double, Double)
+  ) async throws {
+    let pixels = try #require(makeSystemMediaTestPixels())
+    let source = NSImage(cgImage: pixels, size: NSSize(width: 16, height: 24))
+    let artwork = try #require(SystemMediaArtwork.mediaItem(source))
+    let captured = BackgroundSystemMediaArtwork(artwork)
+    let observation = await requestSystemMediaArtworkOffMain(
+      captured, width: dimensions.0, height: dimensions.1)
+
+    #expect(observation.invokedOffMain)
+    #expect(observation.returnedOffMain)
+    #expect(observation.width == dimensions.2)
+    #expect(observation.height == dimensions.3)
+    // The display size changes, while the bounded source bitmap remains intact.
+    #expect(observation.pixelWidth == 16)
+    #expect(observation.pixelHeight == 24)
+    #expect(observation.samples == [255, 0, 0, 255, 0, 0, 255, 255])
+  }
+
+  @Test func nativeRemoteCommandAdapterRunsItsHandlerOffMainAndMapsBothResults() async {
+    for result in [SystemMediaCommandResult.success, .unavailable] {
+      let probe = BackgroundSystemMediaCommandProbe()
+      let callback = SystemMediaCallbacks.remoteCommandHandler { @Sendable in
+        probe.record(offMain: !Thread.isMainThread)
+        return result
+      }
+      let observation = await invokeSystemMediaCommandOffMain(callback)
+      let expected: MPRemoteCommandHandlerStatus =
+        result == .success ? .success : .noActionableNowPlayingItem
+      #expect(observation.invokedOffMain)
+      #expect(observation.result == Int(expected.rawValue))
+      #expect(probe.offMainCalls == [true])
+    }
+  }
+
+  @Test func nativeRemoteCommandAdapterHopsToMainAndRejectsARetiredRegistration() async throws {
+    let transport = FakeSystemMediaTransport()
+    let coordinator = SystemMediaPlaybackCoordinator(transport: transport)
+    let first = FakeSystemMediaController(title: "First invented title")
+    let second = FakeSystemMediaController(title: "Second invented title")
+    coordinator.register(first)
+    let handler = try #require(transport.handler(for: .play))
+    let callback = SystemMediaCallbacks.remoteCommandHandler(handler)
+    let accepted = await invokeSystemMediaCommandOffMain(callback)
+    #expect(accepted.invokedOffMain)
+    #expect(accepted.result == Int(MPRemoteCommandHandlerStatus.success.rawValue))
+    for _ in 0..<100 {
+      if !first.commands.isEmpty { break }
+      await Task.yield()
+    }
+    #expect(first.commands == [.play])
+    #expect(first.playThreadsWereMain == [true])
+
+    coordinator.register(second)
+    defer { coordinator.unregister(second) }
+    let retired = await invokeSystemMediaCommandOffMain(callback)
+    #expect(retired.invokedOffMain)
+    #expect(retired.result == Int(MPRemoteCommandHandlerStatus.noActionableNowPlayingItem.rawValue))
+    for _ in 0..<8 { await Task.yield() }
+    #expect(second.commands.isEmpty)
+    #expect(second.playThreadsWereMain.isEmpty)
+  }
+
+  @Test func nativeArtworkWithoutPixelsDoesNotCreateMediaItem() {
+    #expect(SystemMediaArtwork.mediaItem(NSImage()) == nil)
   }
 
   @Test func nativeArtworkSizesPreserveAspectRatioAndRejectInvalidRequests() {
@@ -389,6 +504,7 @@ private final class FakeSystemMediaTransport: SystemMediaPlaybackTransport {
   var enabled: [SystemMediaCommand: Bool] = [:]
   var info: SystemMediaNowPlayingInfo?
   var artwork: NSImage?
+  var publicationCount = 0
 
   func addHandler(
     for command: SystemMediaCommand,
@@ -409,6 +525,7 @@ private final class FakeSystemMediaTransport: SystemMediaPlaybackTransport {
   }
 
   func publish(_ info: SystemMediaNowPlayingInfo?, artwork: NSImage?) {
+    publicationCount += 1
     self.info = info
     self.artwork = artwork
   }
@@ -436,6 +553,7 @@ private final class FakeSystemMediaController: SystemMediaPlaybackControlling {
   var canPlayNext = false
   var seeks: [Int64] = []
   var commands: [SystemMediaCommand] = []
+  var playThreadsWereMain: [Bool] = []
 
   init(title: String) {
     presentation = PlaybackPresentation(mediaId: UUID(), title: title, subtitle: nil)
@@ -456,6 +574,7 @@ private final class FakeSystemMediaController: SystemMediaPlaybackControlling {
 
   func play() -> Bool {
     guard canPlay else { return false }
+    playThreadsWereMain.append(Thread.isMainThread)
     commands.append(.play)
     isPlaying = true
     return true
@@ -503,5 +622,116 @@ private final class ControlledSystemMediaArtwork {
     }
     Issue.record("The invented artwork provider did not receive its request.")
     throw CancellationError()
+  }
+}
+
+// These observations cross the queue boundary; NSImage never does. The artwork wrapper is
+// immutable after the production factory captures its immutable, generated CGImage pixels.
+private struct BackgroundSystemMediaArtworkObservation: Sendable {
+  let invokedOffMain: Bool
+  let returnedOffMain: Bool
+  let width: Double
+  let height: Double
+  let pixelWidth: Int
+  let pixelHeight: Int
+  let samples: [UInt8]
+}
+
+private final class BackgroundSystemMediaArtwork: @unchecked Sendable {
+  let value: MPMediaItemArtwork
+
+  init(_ value: MPMediaItemArtwork) {
+    self.value = value
+  }
+}
+
+private func makeSystemMediaTestPixels() -> CGImage? {
+  let width = 16
+  let height = 24
+  let bytes: [UInt8] = (0..<height).flatMap { _ in
+    (0..<width).flatMap { x -> [UInt8] in
+      x < width / 2 ? [255, 0, 0, 255] : [0, 0, 255, 255]
+    }
+  }
+  guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+  return CGImage(
+    width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+    bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+    bitmapInfo: CGBitmapInfo.byteOrder32Big.union(
+      CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)),
+    provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+}
+
+private func requestSystemMediaArtworkOffMain(
+  _ artwork: BackgroundSystemMediaArtwork, width: Double, height: Double
+) async -> BackgroundSystemMediaArtworkObservation {
+  await withCheckedContinuation { continuation in
+    DispatchQueue.global(qos: .userInitiated).async { @Sendable in
+      let invokedOffMain = !Thread.isMainThread
+      guard let image = artwork.value.image(at: NSSize(width: width, height: height)),
+        let pixels = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+      else {
+        continuation.resume(
+          returning: BackgroundSystemMediaArtworkObservation(
+            invokedOffMain: invokedOffMain, returnedOffMain: !Thread.isMainThread,
+            width: 0, height: 0, pixelWidth: 0, pixelHeight: 0, samples: []))
+        return
+      }
+      // Inspect only the newly returned CGImage-backed image on this same background queue.
+      // Rendering its immutable pixels does not use a window, player or Now Playing session.
+      var bytes = [UInt8](repeating: 0, count: pixels.width * pixels.height * 4)
+      let samples = bytes.withUnsafeMutableBytes { buffer -> [UInt8] in
+        guard
+          let context = CGContext(
+            data: buffer.baseAddress, width: pixels.width, height: pixels.height,
+            bitsPerComponent: 8, bytesPerRow: pixels.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue
+              | CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return [] }
+        context.interpolationQuality = .none
+        context.draw(
+          pixels, in: CGRect(x: 0, y: 0, width: pixels.width, height: pixels.height))
+        let rgba = buffer.bindMemory(to: UInt8.self)
+        let left = ((pixels.height / 2) * pixels.width + pixels.width / 4) * 4
+        let right = ((pixels.height / 2) * pixels.width + 3 * pixels.width / 4) * 4
+        return Array(rgba[left..<(left + 4)]) + Array(rgba[right..<(right + 4)])
+      }
+      continuation.resume(
+        returning: BackgroundSystemMediaArtworkObservation(
+          invokedOffMain: invokedOffMain, returnedOffMain: !Thread.isMainThread,
+          width: Double(image.size.width), height: Double(image.size.height),
+          pixelWidth: pixels.width, pixelHeight: pixels.height, samples: samples))
+    }
+  }
+}
+
+private struct BackgroundSystemMediaCommandObservation: Sendable {
+  let invokedOffMain: Bool
+  let result: Int
+}
+
+private final class BackgroundSystemMediaCommandProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var calls: [Bool] = []
+
+  var offMainCalls: [Bool] { lock.withLock { calls } }
+
+  func record(offMain: Bool) {
+    lock.withLock { calls.append(offMain) }
+  }
+}
+
+private func invokeSystemMediaCommandOffMain(
+  _ callback: @escaping @Sendable (MPRemoteCommandEvent?) -> MPRemoteCommandHandlerStatus
+) async -> BackgroundSystemMediaCommandObservation {
+  await withCheckedContinuation { continuation in
+    DispatchQueue.global(qos: .userInitiated).async { @Sendable in
+      let offMain = !Thread.isMainThread
+      let result = callback(nil)
+      continuation.resume(
+        returning: BackgroundSystemMediaCommandObservation(
+          invokedOffMain: offMain, result: Int(result.rawValue)))
+    }
   }
 }

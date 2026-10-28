@@ -57,6 +57,11 @@ These rules apply to every task in this repository.
   the same design system. Do not revive the Classic app's inconsistent menus.
 - Keep player controls restrained, accessible, keyboard-operable, and hidden
   after inactivity only when interaction state permits it.
+- System-framework callbacks must have an explicit queue/actor contract. For
+  callbacks that may run off-main, use nonisolated factories and `@Sendable`
+  closures with Sendable captures, then hop to MainActor for UI/model access.
+  Exercise the production callback from a background queue in regression tests;
+  fake transports alone do not test framework adapters. See `docs/SYSTEM_CALLBACKS.md`.
 
 ## Repository and workspace hygiene
 
