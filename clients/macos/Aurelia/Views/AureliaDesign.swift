@@ -214,6 +214,7 @@ struct AureliaWindowChrome: NSViewRepresentable {
 
   final class WindowChromeView: NSView {
     private var configuredFixtureSize = false
+    private let controls = AureliaWindowControls()
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
@@ -235,9 +236,7 @@ struct AureliaWindowChrome: NSViewRepresentable {
       window.toolbar?.isVisible = false
       window.isMovableByWindowBackground = true
       window.backgroundColor = NSColor(AureliaDesign.canvas)
-      window.standardWindowButton(.closeButton)?.isHidden = false
-      window.standardWindowButton(.miniaturizeButton)?.isHidden = false
-      window.standardWindowButton(.zoomButton)?.isHidden = false
+      controls.attach(to: window)
       window.contentView?.needsLayout = true
       #if DEBUG
         if !configuredFixtureSize, ShowcaseUITestFixture.enabled {

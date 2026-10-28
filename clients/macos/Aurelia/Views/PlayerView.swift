@@ -117,6 +117,7 @@ struct PlayerView: View {
       PlayerWindowAccessor { window in
         guard !cursor.isRetired else { return }
         windowPresentation.apply(to: window)
+        isNativeFullScreen = window.styleMask.contains(.fullScreen)
         fullScreenKeyboard.install(
           on: window,
           isBlocked: {
@@ -1221,7 +1222,7 @@ private final class PlayerWindowPresentation {
     originalBackgroundColor = window.backgroundColor
     originalTitle = window.title
     originalToolbarVisibility = window.toolbar?.isVisible
-    originalFrame = window.frame
+    originalFrame = window.styleMask.contains(.fullScreen) ? nil : window.frame
     originalLevel = window.level
     originalCollectionBehavior = window.collectionBehavior
     originalAspectRatio = window.contentAspectRatio
@@ -1232,6 +1233,7 @@ private final class PlayerWindowPresentation {
     window.backgroundColor = .black
     window.title = "\u{2060}"
     window.toolbar?.isVisible = false
+    AureliaWindowControls.revealIfWindowed(window)
   }
 
   @discardableResult
@@ -1283,7 +1285,9 @@ private final class PlayerWindowPresentation {
   func restore() {
     guard let window else { return }
     if isPictureInPicture { _ = togglePictureInPicture() }
-    if window.styleMask.contains(.fullScreen) {
+    if AureliaWindowRestorePolicy.shouldExitFullScreen(
+      original: originalStyleMask, current: window.styleMask)
+    {
       if fullscreenExitObserver == nil {
         fullscreenExitObserver = NotificationCenter.default.addObserver(
           forName: NSWindow.didExitFullScreenNotification,
@@ -1301,7 +1305,10 @@ private final class PlayerWindowPresentation {
 
   private func restoreWindowPresentation() {
     guard let window else { return }
-    if let originalStyleMask { window.styleMask = originalStyleMask }
+    if let originalStyleMask {
+      window.styleMask = AureliaWindowRestorePolicy.restoredStyle(
+        original: originalStyleMask, current: window.styleMask)
+    }
     if let originalTitleVisibility { window.titleVisibility = originalTitleVisibility }
     if let originalTitlebarAppearsTransparent {
       window.titlebarAppearsTransparent = originalTitlebarAppearsTransparent
@@ -1312,11 +1319,15 @@ private final class PlayerWindowPresentation {
     if let originalBackgroundColor { window.backgroundColor = originalBackgroundColor }
     if let originalTitle { window.title = originalTitle }
     if let originalToolbarVisibility { window.toolbar?.isVisible = originalToolbarVisibility }
+    AureliaWindowControls.revealIfWindowed(window)
     if let originalLevel { window.level = originalLevel }
     if let originalCollectionBehavior { window.collectionBehavior = originalCollectionBehavior }
-    if let originalFrame {
+    if let originalFrame, !window.styleMask.contains(.fullScreen) {
       window.setFrame(originalFrame, display: true)
-      DispatchQueue.main.async { [weak window] in window?.setFrame(originalFrame, display: true) }
+      DispatchQueue.main.async { [weak window] in
+        guard let window, !window.styleMask.contains(.fullScreen) else { return }
+        window.setFrame(originalFrame, display: true)
+      }
     }
     if let fullscreenExitObserver {
       NotificationCenter.default.removeObserver(fullscreenExitObserver)
