@@ -24,7 +24,7 @@ public sealed class WebAppAssets
 
     public sealed record Asset(byte[] Content, string ContentType, string EntityTag);
 
-    private readonly Dictionary<string, Asset> assets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Lazy<Asset>> assets = new(StringComparer.Ordinal);
 
     public WebAppAssets()
     {
@@ -33,16 +33,22 @@ public sealed class WebAppAssets
         {
             var path = name.Replace('\\', '/');
             if (!path.StartsWith(ResourcePrefix, StringComparison.Ordinal)) continue;
-            using var stream = assembly.GetManifestResourceStream(name)!;
-            using var buffer = new MemoryStream();
-            stream.CopyTo(buffer);
-            var content = buffer.ToArray();
-            var tag = "\"" + Convert.ToHexString(SHA256.HashData(content).AsSpan(0, 12)) + "\"";
-            assets[path[ResourcePrefix.Length..]] = new Asset(content, ContentType(path), tag);
+            // The compiled resource set is fixed. Load only the requested asset, once,
+            // so opening HTML does not read/hash unused icons or JavaScript modules.
+            assets[path[ResourcePrefix.Length..]] = new(() => ReadAsset(name, path), LazyThreadSafetyMode.ExecutionAndPublication);
         }
     }
 
-    public Asset? Find(string path) => assets.GetValueOrDefault(path);
+    public Asset? Find(string path) => assets.GetValueOrDefault(path)?.Value;
+
+    private static Asset ReadAsset(string name, string path)
+    {
+        using var stream = typeof(WebAppAssets).Assembly.GetManifestResourceStream(name)!;
+        var content = new byte[checked((int)stream.Length)];
+        stream.ReadExactly(content);
+        var tag = "\"" + Convert.ToHexString(SHA256.HashData(content).AsSpan(0, 12)) + "\"";
+        return new Asset(content, ContentType(path), tag);
+    }
 
     private static string ContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
     {

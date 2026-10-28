@@ -16,6 +16,25 @@ namespace Aurelia.Server.Tests;
 public sealed class WebAppTests
 {
     [Fact]
+    public void EmbeddedAssetsLoadOnlyOnDemandAndConcurrentReadersShareOneValue()
+    {
+        var assets = new Aurelia.Server.Services.WebAppAssets();
+        var field = typeof(Aurelia.Server.Services.WebAppAssets).GetField("assets", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var cache = Assert.IsType<Dictionary<string, Lazy<Aurelia.Server.Services.WebAppAssets.Asset>>>(field.GetValue(assets));
+        Assert.All(cache.Values, value => Assert.False(value.IsValueCreated));
+        var results = new Aurelia.Server.Services.WebAppAssets.Asset?[32];
+        Parallel.For(0, results.Length, index => results[index] = assets.Find("js/app.js"));
+        var first = Assert.IsType<Aurelia.Server.Services.WebAppAssets.Asset>(results[0]);
+        Assert.All(results, result => Assert.Same(first, result));
+        Assert.Equal("text/javascript; charset=utf-8", first.ContentType);
+        Assert.Single(cache.Values, value => value.IsValueCreated);
+        Assert.Null(assets.Find("missing.js"));
+        Assert.All(cache.Where(value => value.Key.StartsWith("icons/", StringComparison.Ordinal)), value => Assert.False(value.Value.IsValueCreated));
+        Assert.NotNull(assets.Find("index.html"));
+        Assert.Equal(2, cache.Values.Count(value => value.IsValueCreated));
+    }
+
+    [Fact]
     public async Task BrowserSignsInWithAnApprovedCodeAndNeverReceivesAToken()
     {
         var clock = new WebClock();
@@ -270,6 +289,62 @@ public sealed class WebAppTests
         }
         using var info = await client.GetAsync("/api/v1/server/info");
         Assert.Equal("default-src 'none'; frame-ancestors 'none'", Assert.Single(info.Headers.GetValues("Content-Security-Policy")));
+    }
+
+    [Fact]
+    public async Task HomeScreenAssetsArePublicAndCacheableButCatalogAndManagementStayPrivate()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        using var manifest = await client.GetAsync("/web/manifest.webmanifest");
+        Assert.Equal(HttpStatusCode.OK, manifest.StatusCode);
+        Assert.Equal("application/manifest+json", manifest.Content.Headers.ContentType?.MediaType);
+        using var document = System.Text.Json.JsonDocument.Parse(await manifest.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.Equal("Aurelia", root.GetProperty("name").GetString());
+        Assert.Equal("/", root.GetProperty("id").GetString());
+        Assert.Equal("/", root.GetProperty("start_url").GetString());
+        Assert.Equal("/", root.GetProperty("scope").GetString());
+        Assert.Equal("standalone", root.GetProperty("display").GetString());
+        var icons = root.GetProperty("icons").EnumerateArray().ToArray();
+        foreach (var size in new[] { 192, 512 })
+        {
+            var icon = Assert.Single(icons, value => value.GetProperty("sizes").GetString() == $"{size}x{size}");
+            Assert.Equal($"/web/icons/icon-{size}.png", icon.GetProperty("src").GetString());
+            Assert.Equal("image/png", icon.GetProperty("type").GetString());
+            Assert.Equal("any maskable", icon.GetProperty("purpose").GetString());
+        }
+        foreach (var size in new[] { 180, 192, 512 })
+        {
+            var path = $"/web/icons/icon-{size}.png";
+            using var image = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, image.StatusCode);
+            Assert.Equal("image/png", image.Content.Headers.ContentType?.MediaType);
+            var bytes = await image.Content.ReadAsByteArrayAsync();
+            Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, bytes[..8]);
+            Assert.Equal(size, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(16, 4)));
+            Assert.Equal(size, System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(20, 4)));
+            using var conditional = new HttpRequestMessage(HttpMethod.Get, path);
+            conditional.Headers.IfNoneMatch.Add(image.Headers.ETag!);
+            using var unchanged = await client.SendAsync(conditional);
+            Assert.Equal(HttpStatusCode.NotModified, unchanged.StatusCode);
+            using var head = new HttpRequestMessage(HttpMethod.Head, path);
+            using var headResponse = await client.SendAsync(head);
+            Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
+            Assert.Equal(bytes.Length, headResponse.Content.Headers.ContentLength);
+            Assert.Empty(await headResponse.Content.ReadAsByteArrayAsync());
+        }
+        var page = await client.GetStringAsync("/");
+        Assert.Contains("apple-touch-icon", page, StringComparison.Ordinal);
+        Assert.Contains("/web/icons/icon-180.png", page, StringComparison.Ordinal);
+        Assert.Contains("apple-mobile-web-app-capable", page, StringComparison.Ordinal);
+        foreach (var path in new[] { "/api/v1/catalog/items", "/api/v1/server/status" })
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+        using var worker = await client.GetAsync("/web/service-worker.js");
+        Assert.Equal(HttpStatusCode.NotFound, worker.StatusCode);
     }
 
     private static void AssertProtected(string cookie)

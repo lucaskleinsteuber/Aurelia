@@ -182,6 +182,22 @@ body. If the management window expires while editing, the browser keeps the draf
 an inline unlock. Switching profiles or navigating away closes editors and cancels outstanding
 reads; closing an editor with unsaved changes asks before discarding them.
 
+## Add Aurelia to the home screen
+
+Open the server's HTTPS address on the phone or tablet and accept its certificate when prompted.
+In Safari, choose **Share › Add to Home Screen**; in Chrome on Android, choose **Add to Home
+Screen** or **Install App** from the browser menu. Open the resulting Aurelia icon to use the
+app in its own window without the browser toolbar. Pair that window with the server if it
+asks to sign in; a home-screen app can keep a separate browser session.
+
+The manifest and 192/512-pixel icons support standalone installation; Safari uses its
+180-pixel touch icon, title and status-bar settings. The icons are derived from Aurelia's
+existing vector icon with `swift scripts/make-web-icons.swift
+src/Aurelia.Server/WebApp/icon.svg src/Aurelia.Server/WebApp/icons`. They contain no library
+artwork. The public manifest, icons and app shell reveal no account, library or management
+data. Those still require authentication through the same API. Aurelia uses no service worker
+and no offline cache: the server must be reachable.
+
 ## How it is built
 
 - The files are in `src/Aurelia.Server/WebApp`: plain HTML, CSS and JavaScript modules, with
