@@ -11,12 +11,24 @@ public static class IncrementalSearchIndex
             {
                 var row = action == "DELETE" ? "OLD" : "NEW";
                 var id = $"{row}.{key}";
-                var affected = $"(m.Id = {id} OR m.ParentId = {id})";
+                var guardedMediaUpdate = table == "MediaItems" && action == "UPDATE";
+                var affected = guardedMediaUpdate
+                    ? "(m.Id IN (OLD.Id, NEW.Id) OR m.ParentId IN (OLD.Id, NEW.Id))"
+                    : $"(m.Id = {id} OR m.ParentId = {id})";
+                var deleted = guardedMediaUpdate
+                    ? "MediaId IN (OLD.Id, NEW.Id) OR MediaId IN (SELECT Id FROM MediaItems WHERE ParentId IN (OLD.Id, NEW.Id))"
+                    : $"MediaId = {id} OR MediaId IN (SELECT Id FROM MediaItems WHERE ParentId = {id})";
+                // A rescan changes bookkeeping on every row. None of these document inputs changed,
+                // so its UPDATE must not scan/delete/rebuild the full-text index.
+                var when = guardedMediaUpdate
+                    ? " WHEN OLD.Id IS NOT NEW.Id OR OLD.Kind IS NOT NEW.Kind OR OLD.ParentId IS NOT NEW.ParentId"
+                        + " OR OLD.DetectedTitle IS NOT NEW.DetectedTitle OR OLD.OverrideTitle IS NOT NEW.OverrideTitle"
+                        + " OR OLD.SeasonNumber IS NOT NEW.SeasonNumber OR OLD.EpisodeNumber IS NOT NEW.EpisodeNumber"
+                    : string.Empty;
                 var name = $"search_{table}_{action}";
                 yield return (name, $"""
-                CREATE TRIGGER {name} AFTER {action} ON {table} BEGIN
-                    DELETE FROM MediaSearchIndex WHERE MediaId = {id}
-                        OR MediaId IN (SELECT Id FROM MediaItems WHERE ParentId = {id});
+                CREATE TRIGGER {name} AFTER {action} ON {table}{when} BEGIN
+                    DELETE FROM MediaSearchIndex WHERE {deleted};
                     INSERT INTO MediaSearchIndex(MediaId, Title, OriginalTitle, Details)
                     SELECT m.Id,
                         trim(coalesce(md.ManualTitle, md.ProviderTitle, m.OverrideTitle, m.DetectedTitle)),
