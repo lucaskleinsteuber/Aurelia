@@ -336,6 +336,31 @@ public sealed class LibraryStateTests
     }
 
     [Fact]
+    public async Task CatalogLocationMemoEndsAtEachRequestAndEveryFileIsStillChecked()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        await fixture.Progress(fixture.Episodes[3], 45_000);
+        var first = await fixture.Get<PagedResponse<CatalogItemSummary>>("/api/v1/catalog/items?limit=500");
+        Assert.All(first.Items, item => Assert.Equal(LibraryAvailability.Available, item.LibraryAvailability));
+        File.Delete(fixture.Movie.SourcePath); // Invented fixture only.
+        var missing = await fixture.Get<PagedResponse<CatalogItemSummary>>("/api/v1/catalog/items?limit=500");
+        Assert.Equal(MediaAvailability.Missing, Assert.Single(missing.Items, item => item.Id == fixture.Movie.Id).Availability);
+        Assert.Equal(LibraryAvailability.Available, Assert.Single(missing.Items, item => item.Id == fixture.Series.Id).LibraryAvailability);
+        var detached = fixture.MediaRoot + "-detached";
+        Directory.Move(fixture.MediaRoot, detached); // Invented fixture only, restored immediately below.
+        try
+        {
+            var offline = await fixture.Get<PagedResponse<CatalogItemSummary>>("/api/v1/catalog/items?limit=500");
+            Assert.Equal(first.Items.Select(item => item.Id), offline.Items.Select(item => item.Id));
+            Assert.All(offline.Items, item => Assert.Equal(LibraryAvailability.Unavailable, item.LibraryAvailability));
+        }
+        finally { Directory.Move(detached, fixture.MediaRoot); }
+        var restored = await fixture.Get<PagedResponse<CatalogItemSummary>>("/api/v1/catalog/items?limit=500");
+        Assert.All(restored.Items, item => Assert.Equal(LibraryAvailability.Available, item.LibraryAvailability));
+        Assert.Equal(45_000, (await fixture.Get<PlaybackProgressResponse>($"/api/v1/media/{fixture.Episodes[3].Id}/progress")).PositionMilliseconds);
+    }
+
+    [Fact]
     public async Task ReachabilityWorksWithoutScansAndTitleChecksAreBoundedToRequestedFiles()
     {
         using var fixture = await Fixture.CreateAsync();

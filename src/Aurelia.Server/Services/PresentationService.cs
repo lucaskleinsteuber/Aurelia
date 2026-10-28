@@ -371,12 +371,16 @@ public sealed class PresentationService(
         });
     }
 
-    private static CatalogItemSummary ToCatalog(MediaItem item, Guid userId)
+    // PresentationService is scoped to one request. Reuse the location probe within
+    // that response, while every file is still checked and the next request probes afresh.
+    private readonly Dictionary<string, LibraryAvailability> libraryAvailabilityByPath = new(StringComparer.Ordinal);
+
+    private CatalogItemSummary ToCatalog(MediaItem item, Guid userId)
     {
         var metadata = MetadataPresentation.ToSummary(item);
         var progress = item.PlaybackProgress.FirstOrDefault(value => value.UserId == userId);
         var libraryAvailability = string.IsNullOrEmpty(item.LibraryRoot?.Path) ? item.LibraryRoot?.Availability ?? LibraryAvailability.Unknown
-            : LibraryReachabilityService.Probe(item.LibraryRoot.Path);
+            : LibraryAvailabilityFor(item.LibraryRoot.Path);
         var availability = item.Kind != MediaKind.Series && libraryAvailability == LibraryAvailability.Available && !string.IsNullOrEmpty(item.SourcePath)
             ? LibraryReachabilityService.ProbeFile(item.SourcePath) : item.Availability;
         return new CatalogItemSummary(
@@ -393,6 +397,16 @@ public sealed class PresentationService(
                 : progress is { IsCompleted: true } ? CatalogWatchState.Completed : progress is { PositionMilliseconds: > 0 } ? CatalogWatchState.InProgress : CatalogWatchState.Unplayed),
             libraryAvailability,
             (item.Kind == MediaKind.Episode ? item.Parent?.ContinueWatchingStates : item.ContinueWatchingStates)?.Any(state => state.IsHidden) ?? false);
+    }
+
+    private LibraryAvailability LibraryAvailabilityFor(string path)
+    {
+        if (!libraryAvailabilityByPath.TryGetValue(path, out var availability))
+        {
+            availability = LibraryReachabilityService.Probe(path);
+            libraryAvailabilityByPath.Add(path, availability);
+        }
+        return availability;
     }
 
     private IQueryable<MediaItem> ApplyFilters(

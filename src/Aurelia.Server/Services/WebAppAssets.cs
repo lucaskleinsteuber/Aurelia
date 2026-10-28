@@ -4,7 +4,7 @@ namespace Aurelia.Server.Services;
 
 /// <summary>
 /// The browser app's files, built into the server from src/Aurelia.Server/WebApp. They are read
-/// once at start; every answer carries an ETag, so a browser checks them cheaply on each visit
+/// once on first request for each asset; every answer carries an ETag, so a browser checks them cheaply on each visit
 /// and gets the new files right after a server update.
 /// </summary>
 public sealed class WebAppAssets
