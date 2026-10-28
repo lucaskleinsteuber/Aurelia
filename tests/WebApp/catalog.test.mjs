@@ -89,15 +89,15 @@ const state = { scope: "series", seasonNumber: null, affectedCount: 12, stateTok
 test("whole-show watch changes confirm the count and keep the exact fetched state token", async (t) => {
   const writes = []; const f = fixture(t, { watchState: async () => state, setWatchState: async (_id, body) => writes.push(body) });
   const menu = h("div", {}, f.view.watchMenu({ id: "show", kind: "series" }, "series"));
-  button(menu, "Mark Show as Unwatched").click(); await flush(); assert.equal(writes.length, 0); assert.match(f.dialog.textContent, /Mark 12 episodes as unwatched/);
+  button(menu, "Mark as Unwatched").click(); await flush(); assert.equal(writes.length, 0); assert.match(f.dialog.textContent, /Mark 12 episodes as unwatched/);
   button(f.dialog, "Cancel").click(); await flush(); assert.equal(writes.length, 0);
-  button(menu, "Mark Show as Unwatched").click(); await flush(); button(f.dialog, "Mark as Unwatched").click(); await flush();
+  button(menu, "Mark as Unwatched").click(); await flush(); button(f.dialog, "Mark as Unwatched").click(); await flush();
   assert.equal(writes.length, 1); assert.equal(writes[0].stateToken, state.stateToken); assert.equal(writes[0].scope, "series"); assert.equal(writes[0].isWatched, false);
   assert.match(writes[0].clientMutationId, /^[0-9a-f-]{36}$/); assert.equal(f.changed, 1);
 });
 test("route or profile change closes confirmation without issuing a watched write", async (t) => {
   let writes = 0; const f = fixture(t, { watchState: async () => state, setWatchState: async () => { writes++; } });
-  const menu = h("div", {}, f.view.watchMenu({ id: "show", kind: "series" }, "series")); button(menu, "Mark Show as Watched").click(); await flush();
+  const menu = h("div", {}, f.view.watchMenu({ id: "show", kind: "series" }, "series")); button(menu, "Mark as Watched").click(); await flush();
   f.view.close(); await flush(); assert.equal(f.dialog, null); assert.equal(writes, 0);
 });
 test("Continue Watching uses fresh title visibility and token without resetting progress", async (t) => {

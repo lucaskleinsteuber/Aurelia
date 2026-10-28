@@ -6,7 +6,7 @@ import { browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS } from "./logic.
 const TITLES = { library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows" };
 const PAGE_SIZE = 100;
 
-export function createCatalogView({ api, navigate, replaceRoute, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast, onChanged }) {
+export function createCatalogView({ api, navigate, replaceRoute, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast, onChanged, play, canManage = () => false, editMetadata }) {
   let lifetime = new AbortController();
   let dialog = null;
   let debounce;
@@ -238,7 +238,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     });
   }
 
-  function watchMenu(item, scope = "title", seasonNumber) {
+  function watchMenu(item, scope = "title", seasonNumber, { includeContinueWatching = true } = {}) {
     const signal = current();
     const run = async (watched) => {
       if (actionWorking || signal.aborted) return;
@@ -254,25 +254,58 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       } catch (error) { report(error, signal); }
       finally { if (!signal.aborted) actionWorking = false; }
     };
-    const label = scope === "season" ? "Season" : item.kind === "series" ? "Show" : "";
-    const intendedHidden = !item.continueWatchingHidden;
+    const label = scope === "season" ? "Season" : "";
     const actions = [
-      h("button", { class: "menu-item", onclick: () => run(true) }, `Mark ${label ? `${label} ` : ""}as Watched`),
-      h("button", { class: "menu-item", onclick: () => run(false) }, `Mark ${label ? `${label} ` : ""}as Unwatched`),
+      h("button", { class: "menu-item", onclick: () => run(true) }, icon("checkCircle", { size: 16 }), `Mark ${label ? `${label} ` : ""}as Watched`),
+      h("button", { class: "menu-item", onclick: () => run(false) }, icon("circle", { size: 16 }), `Mark ${label ? `${label} ` : ""}as Unwatched`),
     ];
-    if (scope !== "season" && ["movie", "series", "episode"].includes(item.kind)) actions.push(h("div", { class: "menu-divider" }),
-      h("button", { class: "menu-item", onclick: async () => {
-        if (actionWorking || signal.aborted) return;
-        actionWorking = true;
-        try {
-          const state = await api.watchState(item.id, "title", undefined, { signal });
-          if (signal.aborted) return;
-          await api.setContinueWatching(item.id, { isHidden: intendedHidden, stateToken: state.stateToken, clientMutationId: crypto.randomUUID() }, { signal });
-          if (!signal.aborted) onChanged();
-        } catch (error) { report(error, signal); }
-        finally { if (!signal.aborted) actionWorking = false; }
-      } }, item.continueWatchingHidden ? "Show in Continue Watching" : "Remove from Continue Watching"));
+    if (includeContinueWatching && scope !== "season") actions.push(...continueWatchingMenu(item));
     return actions;
   }
-  return { close, browse, search, collections, collection, watchMenu };
+  function continueWatchingMenu(item) {
+    if (!["movie", "series", "episode"].includes(item.kind)) return [];
+    const signal = current();
+    const intendedHidden = !item.continueWatchingHidden;
+    return [h("button", { class: "menu-item", onclick: async () => {
+      if (actionWorking || signal.aborted) return;
+      actionWorking = true;
+      try {
+        const snapshot = await api.watchState(item.id, "title", undefined, { signal });
+        if (signal.aborted) return;
+        await api.setContinueWatching(item.id, { isHidden: intendedHidden, stateToken: snapshot.stateToken, clientMutationId: crypto.randomUUID() }, { signal });
+        if (!signal.aborted) onChanged();
+      } catch (error) { report(error, signal); }
+      finally { if (!signal.aborted) actionWorking = false; }
+    } }, icon(intendedHidden ? "hide" : "eye", { size: 16 }), intendedHidden ? "Remove from Continue Watching" : "Show in Continue Watching")];
+  }
+
+  function mediaMenu(item, { seasons, onGoToSeries } = {}) {
+    const signal = current();
+    const option = (label, symbol, action, disabled = false) => h("button", {
+      class: "menu-item", disabled, onclick: () => { if (!signal.aborted) action(); },
+    }, icon(symbol, { size: 16 }), label);
+    const available = item.kind === "series" || item.availability === "available";
+    const actions = [option("Play", "play", () => play?.(item, seasons, { intent: "play" }), !available)];
+    if (!item.progress?.isCompleted && item.watchState !== "completed" && (item.progress?.positionMilliseconds > 0 || item.watchState === "inProgress"))
+      actions.push(option("Resume", "play", () => play?.(item, seasons, { intent: "resume" }), !available));
+    if (item.kind === "episode" && item.parentId)
+      actions.push(option("Go to Series", "tv", () => onGoToSeries ? onGoToSeries(item.parentId) : navigate({ name: "title", id: item.parentId })));
+    if (["movie", "series", "episode"].includes(item.kind)) actions.push(h("div", { class: "menu-divider" }),
+      ...watchMenu(item, item.kind === "series" ? "series" : "title", undefined, { includeContinueWatching: false }));
+    // The server supports favorites for movies and series. Episode identity is never sent to that endpoint.
+    if (["movie", "series"].includes(item.kind)) actions.push(option(item.isFavorite ? "Remove from Favorites" : "Add to Favorites", item.isFavorite ? "starSlash" : "star", async () => {
+      if (actionWorking) return;
+      actionWorking = true;
+      try { await api.setFavorite(item.id, !item.isFavorite, { signal }); if (!signal.aborted) onChanged(); }
+      catch (error) { report(error, signal); }
+      finally { if (!signal.aborted) actionWorking = false; }
+    }));
+    actions.push(...continueWatchingMenu(item));
+    if (canManage() && editMetadata) actions.push(h("div", { class: "menu-divider" }), option("Edit Metadata…", "pencil", () => {
+      if (canManage()) editMetadata(item);
+    }));
+    return actions;
+  }
+  return { close, browse, search, collections, collection, watchMenu, mediaMenu };
+
 }

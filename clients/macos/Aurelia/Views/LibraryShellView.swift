@@ -150,6 +150,11 @@ struct LibraryShellView: View {
     .onChange(of: scenePhase) {
       if scenePhase == .active { Task { await model.refreshHome() } }
     }
+    .onChange(of: model.requestedMediaDetail) { _, id in
+      guard let id else { return }
+      selection = .media(id)
+      model.requestedMediaDetail = nil
+    }
     .onChange(of: model.catalogVisibilityRevision) {
       if case .media(let id) = selection, !model.catalogItems.contains(where: { $0.id == id }) {
         selection = nil
@@ -429,24 +434,7 @@ private struct HomePage: View {
                 .compactMap { $0 }.joined(separator: ", ")
             )
             .accessibilityIdentifier("continue-\(item.id.uuidString.lowercased())")
-            .contextMenu {
-              Button("Remove from Continue Watching") {
-                let profile = model.profile
-                Task {
-                  do {
-                    try await model.setContinueWatchingHidden(mediaId: item.id, isHidden: true)
-                  } catch {
-                    guard !(error is CancellationError),
-                      profile?.sessionId == model.profile?.sessionId,
-                      profile?.serverId == model.profile?.serverId
-                    else { return }
-                    continueWatchingError = error.localizedDescription
-                  }
-                }
-              }
-              .disabled(!model.supportsLibraryState)
-              if !model.supportsLibraryState { Text("Requires server version 1.5.3") }
-            }
+            .mediaActions(item: item)
           }
         }
       }

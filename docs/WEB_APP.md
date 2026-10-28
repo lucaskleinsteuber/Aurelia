@@ -275,3 +275,7 @@ without `--web-only` retains its existing native capture behavior.
 
 Developer fixture and wrapper guards run with `node --test "tests/WebShowcase/*.test.mjs"`.
 They use synthetic files and simulated media objects, with no browser launch or native tests.
+
+### Consistent title actions
+
+Title cards, Continue Watching and episode cards use the same context-menu ordering: Play, Resume when progress exists, Go to Series for episodes, watched status, supported favorites, Continue Watching visibility and administrator metadata editing. Play starts at the beginning; Resume keeps progress. Missing titles retain navigation and management actions while playback stays disabled. Favorite actions retain the server's movie/series scope; watch-state changes keep the existing confirmation and exact state token. Route/profile changes retire open actions.

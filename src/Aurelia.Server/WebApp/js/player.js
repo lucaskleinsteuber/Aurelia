@@ -86,7 +86,7 @@ export class Player {
    * @param {string} [options.preferenceScope] server/profile identity for private track choices
    * @param {boolean} [options.canConvert]  the server reports live conversion
    */
-  constructor({ api, item, next, previous, intent = "play", onPlayNext, onClose, onSessionEnded, canConvert = false, preferenceScope }) {
+  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onClose, onSessionEnded, canConvert = false, preferenceScope }) {
     this.api = api;
     this.item = item;
     this.next = next;
@@ -94,6 +94,7 @@ export class Player {
     this.startIntent = intent === "resume" ? "resume" : "play";
     this.navigationPending = false;
     this.onPlayNext = onPlayNext;
+    this.onMediaMenu = onMediaMenu;
     this.onClose = onClose;
     this.onSessionEnded = onSessionEnded;
     this.canConvert = canConvert && liveSupported();
@@ -167,6 +168,13 @@ export class Player {
     this.controls = h("div", { class: "player-controls" }, h("div", { class: "player-shade" }), this.top, this.transport, this.bottom);
     this.popover = h("div", { class: "player-popover glass", role: "menu", hidden: true });
     this.upNext = h("div", { class: "up-next glass", hidden: true });
+    this.upNext.addEventListener("contextmenu", (event) => {
+      if (this.closed || !this.upNextItem || !this.onMediaMenu) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.showControls();
+      this.onMediaMenu(this.upNext, this.upNextItem);
+    });
     this.cue = h("div", { class: "note-cue glass", hidden: true, "aria-live": "polite" });
     this.notice = h("div", { class: "player-notice glass", role: "status", hidden: true });
 
@@ -376,7 +384,7 @@ export class Player {
     const target = event.target;
     const dialog = target?.closest?.('dialog, [role="dialog"]');
     if (dialog && dialog !== this.element) return;
-    if (/^[np]$/i.test(event.key) && this.popover?.hidden === false) return;
+    if (/^[np]$/i.test(event.key) && (this.popover?.hidden === false || target?.closest?.('[role="menu"]'))) return;
     if (target?.isContentEditable || target?.tagName === "SELECT") return;
     if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
     const seconds = this.preferences.seekInterval;

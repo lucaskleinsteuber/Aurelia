@@ -757,17 +757,12 @@ private struct DetailHero: View {
                 .accessibilityIdentifier("media-edit-metadata")
             }
             AureliaIconMenu(symbol: "ellipsis", label: "More Actions") {
-              MediaWatchMenuItems(item: detail.item, controller: watchActions)
-              if onEdit != nil || onMatch != nil { Divider() }
-              if let onEdit {
-                Button("Edit Metadata", action: onEdit).disabled(!metadataReady)
-              }
+              MediaContextMenuItems(
+                item: detail.item, controller: watchActions, onEdit: onEdit,
+                onRemove: onRemove, metadataReady: metadataReady)
               if let onMatch {
-                Button("Find Metadata Match", action: onMatch).disabled(!metadataReady)
-              }
-              if let onRemove {
-                Divider()
-                Button("Remove from Library…", role: .destructive, action: onRemove)
+                Button("Find Metadata Match…", systemImage: "magnifyingglass", action: onMatch)
+                  .disabled(!metadataReady)
               }
             }
             .help("More Actions")

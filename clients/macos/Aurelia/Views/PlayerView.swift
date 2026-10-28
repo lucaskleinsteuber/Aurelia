@@ -10,6 +10,7 @@ struct PlayerView: View {
   @StateObject private var previews = ScrubPreviewController()
   @State private var hoverPosition: Double?
   @State private var notesPresented = false
+  @State private var upNextMedia: CatalogItemSummary?
   @State private var notesNavigationRevision: UInt64 = 0
   @ObservedObject private var preferencesStore = PlaybackPreferencesStore.shared
   @State private var controlsVisible = true
@@ -728,6 +729,42 @@ struct PlayerView: View {
     .onHover { interaction("up-next-hover", active: $0) }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("player-up-next")
+    .modifier(
+      PlayerUpNextActions(
+        item: upNextMedia?.id == controller.nextQueueItem?.mediaId ? upNextMedia : nil,
+        nextID: controller.nextQueueItem?.mediaId, seriesID: controller.presentation.trackScope,
+        onPlay: { id in
+          guard controller.nextQueueItem?.mediaId == id else { return }
+          controller.playNextNow()
+        },
+        onResume: { id in
+          guard controller.nextQueueItem?.mediaId == id else { return }
+          _ = controller.resumeNextNow()
+        },
+        onGoToSeries: { id in
+          closePlayer()
+          model.requestedMediaDetail = id
+        })
+    )
+    .task(id: controller.nextQueueItem?.mediaId) {
+      upNextMedia = nil
+      guard let next = controller.nextQueueItem,
+        model.profile?.sessionId == profile.sessionId
+      else { return }
+      if let listed = model.listedItem(id: next.mediaId) {
+        upNextMedia = listed
+        return
+      }
+      do {
+        let detail = try await model.catalogDetail(id: next.mediaId)
+        guard !Task.isCancelled, model.profile?.sessionId == profile.sessionId,
+          controller.nextQueueItem?.mediaId == next.mediaId
+        else { return }
+        upNextMedia = detail.item
+      } catch {
+        // Do not invent favorite/progress/permission state if the catalog request fails.
+      }
+    }
   }
 
   private var startScreenVisible: Bool {
@@ -1286,5 +1323,28 @@ private final class PlayerWindowPresentation {
       self.fullscreenExitObserver = nil
     }
     self.window = nil
+  }
+}
+
+/// Up Next shares the catalog's real item menu without manufacturing state from a queue label.
+private struct PlayerUpNextActions: ViewModifier {
+  let item: CatalogItemSummary?
+  let nextID: UUID?
+  let seriesID: UUID?
+  let onPlay: (UUID) -> Void
+  let onResume: (UUID) -> Void
+  let onGoToSeries: (UUID) -> Void
+
+  @ViewBuilder func body(content: Content) -> some View {
+    if let item {
+      content.mediaActions(
+        item: item, onPlay: { onPlay(item.id) }, onResume: { onResume(item.id) },
+        onGoToSeries: onGoToSeries)
+    } else {
+      content.contextMenu {
+        if let nextID { Button("Play", systemImage: "play.fill") { onPlay(nextID) } }
+        if let seriesID { Button("Go to Series", systemImage: "tv") { onGoToSeries(seriesID) } }
+      }
+    }
   }
 }

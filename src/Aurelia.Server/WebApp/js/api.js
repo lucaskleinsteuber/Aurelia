@@ -84,7 +84,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     detail: (mediaId) => request(`/api/v1/catalog/items/${id(mediaId)}`),
     collections: (parameters = { limit: 200 }, options = {}) => request(`/api/v1/catalog/collections?${new URLSearchParams(parameters)}`, options),
     playbackPlan: (mediaId) => request(`/api/v1/media/${id(mediaId)}/playback-plan`),
-    setFavorite: (mediaId, isFavorite) => request(`/api/v1/media/${id(mediaId)}/favorite`, { method: "PUT", body: { isFavorite } }),
+    setFavorite: (mediaId, isFavorite, options = {}) => request(`/api/v1/media/${id(mediaId)}/favorite`, { method: "PUT", body: { isFavorite }, signal: options.signal }),
     watchState: (mediaId, scope = "title", seasonNumber, options = {}) =>
       request(`/api/v1/media/${id(mediaId)}/watch-state?${new URLSearchParams(seasonNumber == null ? { scope } : { scope, seasonNumber })}`, options),
     setWatchState: (mediaId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/watch-state`, { ...options, method: "PUT", body }),

@@ -4,6 +4,9 @@ import OSLog
 
 @MainActor
 final class AppModel: ObservableObject {
+  /// A one-shot detail route shared by library menus and the player.
+  @Published var requestedMediaDetail: UUID?
+
   static var active: AppModel?
   @Published private(set) var operatingMode: OperatingMode?
   @Published private(set) var profile: StoredServerProfile? {

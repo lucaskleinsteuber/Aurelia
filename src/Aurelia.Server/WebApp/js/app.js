@@ -66,6 +66,8 @@ function showServerOff() {
 const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut });
 
 const catalog = createCatalogView({ api, navigate, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast,
+  play: playTitle, canManage: () => logic.managementPermissions(state.profile).administrator,
+  editMetadata: (item) => settings.editMetadata(item),
   replaceRoute: (route) => { state.route = route; history.replaceState(null, "", logic.routePath(route)); },
   onChanged: () => renderRoute({ quiet: true }),
 });
@@ -554,14 +556,23 @@ function progressBar(progress) {
     h("div", { class: "progress-fill", style: { width: `${fraction * 100}%` } }));
 }
 
+function withMediaContextMenu(element, item, seasons) {
+  element.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openMenu(element, catalog.mediaMenu(item, { seasons }));
+  });
+  return element;
+}
+
 function posterCard(item, index = 0) {
-  return h("a", { class: "poster-card card-hover", href: titleHref(item), "data-route": true, style: { "--stagger": Math.min(index, 24) } },
+  return withMediaContextMenu(h("a", { class: "poster-card card-hover", href: titleHref(item), "data-route": true, style: { "--stagger": Math.min(index, 24) } },
     h("div", { class: "poster-frame" },
       artwork(item.poster, 320, "poster-art", ""),
       item.poster ? null : h("div", { class: "poster-fallback" }, item.title),
       badges(item), progressBar(item.progress)),
     h("div", { class: "card-title" }, item.kind === "episode" ? item.parentTitle ?? item.title : item.title),
-    h("div", { class: "card-subtitle" }, item.kind === "episode" ? logic.eyebrow(item) : item.year ?? ""));
+    h("div", { class: "card-subtitle" }, item.kind === "episode" ? logic.eyebrow(item) : item.year ?? "")), item);
 }
 
 function continueCard(item) {
@@ -576,9 +587,9 @@ function continueCard(item) {
       progressBar(item.progress)));
   const more = h("button", { class: "icon-button continue-actions", "aria-label": `More Actions for ${item.parentTitle ?? item.title}`, "aria-haspopup": "menu", onclick: (event) => {
     event.stopPropagation();
-    openMenu(more, watchMenu(item, item.kind === "series" ? "series" : "title"));
+    openMenu(more, catalog.mediaMenu(item));
   } }, icon("more"));
-  return h("div", { class: "continue-card" }, play, more);
+  return withMediaContextMenu(h("div", { class: "continue-card" }, play, more), item);
 }
 
 function collectionCard(collection, offset = 0) {
@@ -663,9 +674,7 @@ async function titleScreen(id) {
   const moreButton = h("button", { class: "player-round glass detail-more", "aria-label": "More Actions", "aria-haspopup": "menu" }, icon("more", { size: 20 }));
   moreButton.addEventListener("click", (event) => {
     event.stopPropagation();
-    const actions = watchMenu(item, item.kind === "series" ? "series" : "title");
-    if (logic.managementPermissions(state.profile).administrator)
-      actions.push(h("button", { class: "menu-item", onclick: () => settings.editMetadata(item) }, "Edit Metadata…"));
+    const actions = catalog.mediaMenu(item, { seasons });
     openMenu(moreButton, actions);
   });
 
@@ -754,7 +763,7 @@ function seasonsSection(item, seasons, target) {
 function episodeCard(entry, seasons) {
   const item = entry.item;
   const available = item.availability === "available";
-  return h("button", { class: "episode-card card-hover", role: "listitem", disabled: !available, onclick: () => playTitle(item, seasons) },
+  return withMediaContextMenu(h("button", { class: "episode-card card-hover", role: "listitem", disabled: !available, onclick: () => playTitle(item, seasons) },
     artwork(item.backdrop ?? item.poster, 640, "episode-art", ""),
     h("div", { class: "episode-shade" }),
     h("div", { class: "episode-text" },
@@ -766,7 +775,7 @@ function episodeCard(entry, seasons) {
         h("span", { class: "spacer" }),
         item.watchState === "completed" ? h("span", { class: "watched-label small" }, icon("checkCircle", { size: 13 }), "Watched") : null,
         available ? null : h("span", { class: "badge warning" }, "Offline"))),
-    progressBar(item.progress));
+    progressBar(item.progress)), item, seasons);
 }
 
 function supplementRails(supplements, prefix, parentTitle) {
@@ -779,14 +788,14 @@ function supplementRails(supplements, prefix, parentTitle) {
 
 function supplementCard(entry, parentTitle) {
   const item = { ...entry.item, parentTitle: entry.item.parentTitle ?? parentTitle };
-  return h("button", { class: "supplement-card card-hover", role: "listitem", disabled: item.availability !== "available", onclick: () => playTitle(item) },
+  return withMediaContextMenu(h("button", { class: "supplement-card card-hover", role: "listitem", disabled: item.availability !== "available", onclick: () => playTitle(item) },
     artwork(item.backdrop ?? item.poster, 640, "episode-art", ""),
     h("div", { class: "episode-shade" }),
     h("div", { class: "supplement-play glass" }, icon("play", { size: 20 })),
     h("div", { class: "episode-text" },
       h("div", { class: "eyebrow" }, entry.category),
       h("div", { class: "episode-title" }, item.title),
-      h("div", { class: "card-subtitle" }, logic.eyebrow(item) || "Extra")));
+      h("div", { class: "card-subtitle" }, logic.eyebrow(item) || "Extra"))), item);
 }
 
 function castRail(credits) {
@@ -841,6 +850,9 @@ async function playTitle(item, seasons, { intent = "play" } = {}) {
       if (state.profile) renderRoute({ quiet: true });
     },
     onSessionEnded: () => sessionEnded(),
+    onMediaMenu: (anchor, item) => openMenu(anchor, catalog.mediaMenu(item, {
+      seasons, onGoToSeries: (id) => { closePlayer(); navigate({ name: "title", id }); },
+    })),
     canConvert: Boolean(state.server?.capabilities?.includes(LIVE_FEATURE)),
   });
   state.player = player;
