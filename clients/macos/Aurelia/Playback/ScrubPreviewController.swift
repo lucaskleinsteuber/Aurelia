@@ -5,15 +5,16 @@ import ImageIO
 import UniformTypeIdentifiers
 @preconcurrency import VLCKit
 
-/// Timeline preview frames decoded live from the playing source, like Infuse. Shortly after a
-/// title starts, frames for the whole timeline are prepared in the background, coarse to fine,
-/// so hovering shows them at once; the pointer's own position is always decoded first. Frames
-/// stay compressed in memory for the open title only: another title discards them, and nothing
-/// is written to disk or the server.
+/// Debounced timeline stills from the playing source. A small coarse pass and
+/// nearby frames prepare likely requests; displayed compressed frames stay in a
+/// bounded memory LRU for this title. Nothing is written to disk or the server.
 @MainActor
 final class ScrubPreviewController: NSObject, ObservableObject {
   static let minimumInterval: Int64 = 10_000
   static let maximumFrames = 720
+  static let memoryFrameLimit = 120
+  static let maximumCachedBytes = 8 * 1024 * 1024
+  static let backgroundPreparationLimit = 24
   /// While the exact frame is still on its way, a prepared frame up to this many steps away
   /// stands in for it.
   static let standInReach: Int64 = 4
@@ -35,17 +36,21 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   private var prefetchFailures = 0
   static let failuresBeforeBackoff = 3
   private let prefetchAllowed: () -> Bool
+  private let interactiveDelay: Duration
+  private let decoderFactory: @MainActor () -> any ScrubPreviewDecoding
+  private var interactiveStart: Task<Void, Never>?
+  private var neighboringBuckets: [Int64] = []
 
   private var mediaID: UUID?
   private var source: URL?
   private var duration: Int64 = 0
-  private var frames: [Int64: Data] = [:]
+  private var frames: ScrubPreviewMemoryCache
   private var failed: Set<Int64> = []
   private var requested: Int64?
   /// The step whose frame `image` actually shows.
   private var shownFrame: Int64?
   private var pendingInteractive: Int64?
-  private var jobs: [ObjectIdentifier: Job] = [:]
+  private var jobs: [UUID: Job] = [:]
   private var prefetchOrder: [Int64] = []
   private var prefetchIndex = 0
   private var prefetchBusy = 0
@@ -55,15 +60,14 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   private var generation = 0
 
   private struct Job {
-    let thumbnailer: VLCMediaThumbnailer
+    let decoder: any ScrubPreviewDecoding
     let bucket: Int64
     let interactive: Bool
     let timeout: Task<Void, Never>
   }
 
-  /// Decoders for the background work, beside the pointer's own. Where the server gives
-  /// previews their own budget, several cores work briefly so a whole episode is ready in
-  /// seconds; older servers would count previews as playback streams, so they get one.
+  /// Existing preview budgets cap simultaneous background decoders beside the
+  /// pointer's own. The initial coarse pass itself has a separate work limit.
   static var parallelWorkers: Int {
     min(6, max(2, ProcessInfo.processInfo.activeProcessorCount - 4))
   }
@@ -77,13 +81,22 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   init(
     prefetchWorkers: Int? = nil, prefetchDelay: Duration = .seconds(4),
     prefetchPause: Duration = .zero, prefetchBackoff: Duration = .seconds(60),
-    prefetchAllowed: @escaping () -> Bool = { !ProcessInfo.processInfo.isLowPowerModeEnabled }
+    prefetchAllowed: @escaping () -> Bool = { !ProcessInfo.processInfo.isLowPowerModeEnabled },
+    interactiveDelay: Duration = .milliseconds(90),
+    cacheFrameLimit: Int = ScrubPreviewController.memoryFrameLimit,
+    cacheByteLimit: Int = ScrubPreviewController.maximumCachedBytes,
+    decoderFactory: @escaping @MainActor () -> any ScrubPreviewDecoding = {
+      NativeScrubPreviewDecoder()
+    }
   ) {
     self.workerOverride = prefetchWorkers
     self.prefetchDelay = prefetchDelay
     self.prefetchPause = prefetchPause
     self.prefetchBackoff = prefetchBackoff
     self.prefetchAllowed = prefetchAllowed
+    self.interactiveDelay = interactiveDelay
+    self.decoderFactory = decoderFactory
+    self.frames = ScrubPreviewMemoryCache(frameLimit: cacheFrameLimit, byteLimit: cacheByteLimit)
   }
 
   /// Frames belong to `mediaID`. A new source for the same title, after a reconnect, keeps
@@ -105,13 +118,23 @@ final class ScrubPreviewController: NSObject, ObservableObject {
         discardFrames()
         self.interval = interval
       }
-      prefetchOrder = Self.prefetchOrder(duration: duration, interval: interval)
+      prefetchOrder = Array(
+        Self.prefetchOrder(duration: duration, interval: interval).prefix(
+          Self.backgroundPreparationLimit))
       prefetchIndex = 0
       fillPrefetchSlots()
     }
     if source != self.source {
       self.source = source
+      generation += 1
+      interactiveStart?.cancel()
+      interactiveStart = nil
       cancelJobs()
+      pendingInteractive = requested.flatMap { frames.contains($0) ? nil : $0 }
+      neighboringBuckets =
+        requested.map {
+          Self.neighbors(of: $0, interval: self.interval, duration: self.duration)
+        } ?? []
       prefetchStart?.cancel()
       prefetchStart = nil
       prefetchReady = false
@@ -160,19 +183,34 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   func request(at milliseconds: Int64) {
     guard source != nil, duration > 0 else { return }
     let bucket = bucket(for: min(milliseconds, duration - 1))
+    let changed = requested != bucket
     requested = bucket
     showBest(for: bucket)
-    guard frames[bucket] == nil, !jobs.values.contains(where: { $0.bucket == bucket }) else {
-      return
+    guard changed else { return }
+    interactiveStart?.cancel()
+    pendingInteractive = nil
+    let expected = generation
+    interactiveStart = Task { [weak self, interactiveDelay] in
+      try? await Task.sleep(for: interactiveDelay)
+      guard let self, !Task.isCancelled, self.generation == expected, self.requested == bucket
+      else { return }
+      self.interactiveStart = nil
+      self.neighboringBuckets = Self.neighbors(
+        of: bucket, interval: self.interval, duration: self.duration)
+      if !self.frames.contains(bucket), !self.jobs.values.contains(where: { $0.bucket == bucket }) {
+        self.pendingInteractive = bucket
+        self.startInteractiveIfIdle()
+      }
+      self.fillPrefetchSlots()
     }
-    pendingInteractive = bucket
-    startInteractiveIfIdle()
   }
 
   func reset() {
     generation += 1
     prefetchStart?.cancel()
     prefetchStart = nil
+    interactiveStart?.cancel()
+    interactiveStart = nil
     prefetchReady = false
     cancelJobs()
     discardFrames()
@@ -184,7 +222,8 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
 
   private func discardFrames() {
-    frames = [:]
+    frames.removeAll()
+    neighboringBuckets = []
     failed = []
     requested = nil
     shownFrame = nil
@@ -198,7 +237,7 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   private func cancelJobs() {
     for job in jobs.values {
       job.timeout.cancel()
-      job.thumbnailer.delegate = nil
+      job.decoder.cancel()
     }
     jobs = [:]
     // Resting background slots belong to the cancelled work.
@@ -209,10 +248,10 @@ final class ScrubPreviewController: NSObject, ObservableObject {
 
   /// The exact frame for `bucket`, else the closest prepared one within reach.
   func nearestFrame(to bucket: Int64) -> Int64? {
-    if frames[bucket] != nil { return bucket }
+    if frames.contains(bucket) { return bucket }
     for steps in 1...Self.standInReach {
       for candidate in [bucket - steps * interval, bucket + steps * interval]
-      where frames[candidate] != nil {
+      where frames.contains(candidate) {
         return candidate
       }
     }
@@ -220,7 +259,7 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
 
   private func showBest(for bucket: Int64) {
-    guard let chosen = nearestFrame(to: bucket), let data = frames[chosen] else {
+    guard let chosen = nearestFrame(to: bucket), let data = frames.data(for: chosen) else {
       if imageBucket != bucket {
         image = nil
         imageBucket = nil
@@ -228,9 +267,11 @@ final class ScrubPreviewController: NSObject, ObservableObject {
       }
       return
     }
-    guard chosen != shownFrame || imageBucket != bucket, let decoded = Self.decode(data) else {
+    if chosen == shownFrame, image != nil {
+      imageBucket = bucket
       return
     }
+    guard let decoded = Self.decode(data) else { return }
     image = decoded
     imageBucket = bucket
     shownFrame = chosen
@@ -241,14 +282,14 @@ final class ScrubPreviewController: NSObject, ObservableObject {
       return
     }
     pendingInteractive = nil
-    guard frames[bucket] == nil, !jobs.values.contains(where: { $0.bucket == bucket }) else {
+    guard !frames.contains(bucket), !jobs.values.contains(where: { $0.bucket == bucket }) else {
       return
     }
     start(bucket: bucket, interactive: true)
   }
 
   private func fillPrefetchSlots() {
-    guard prefetchReady, source != nil, restingUntil == nil, prefetchAllowed() else { return }
+    guard source != nil, restingUntil == nil, prefetchAllowed() else { return }
     while prefetchBusy < backgroundWorkers, let bucket = nextPrefetchBucket() {
       prefetchBusy += 1
       start(bucket: bucket, interactive: false)
@@ -256,10 +297,19 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
 
   private func nextPrefetchBucket() -> Int64? {
+    while !neighboringBuckets.isEmpty {
+      let bucket = neighboringBuckets.removeFirst()
+      if !frames.contains(bucket), !failed.contains(bucket),
+        !jobs.values.contains(where: { $0.bucket == bucket })
+      {
+        return bucket
+      }
+    }
+    guard prefetchReady else { return nil }
     while prefetchIndex < prefetchOrder.count {
       let bucket = prefetchOrder[prefetchIndex]
       prefetchIndex += 1
-      if frames[bucket] == nil, !failed.contains(bucket),
+      if !frames.contains(bucket), !failed.contains(bucket),
         !jobs.values.contains(where: { $0.bucket == bucket })
       {
         return bucket
@@ -270,16 +320,8 @@ final class ScrubPreviewController: NSObject, ObservableObject {
 
   private func start(bucket: Int64, interactive: Bool) {
     guard let source, duration > 0 else { return }
-    let media = VLCMedia(url: source)
-    media.addOption(":no-audio")
-    media.addOption(":no-spu")
-    let thumbnailer = VLCMediaThumbnailer(media: media, andDelegate: self)
-    // The thumbnailer keeps the source's aspect ratio inside this box.
-    thumbnailer.thumbnailWidth = 320
-    thumbnailer.thumbnailHeight = 320
-    let middle = Self.snapshotPosition(bucket: bucket, interval: interval, duration: duration)
-    thumbnailer.snapshotPosition = Float(Double(middle) / Double(duration))
-    let key = ObjectIdentifier(thumbnailer)
+    let decoder = decoderFactory()
+    let key = UUID()
     let expected = generation
     let timeout = Task { [weak self] in
       try? await Task.sleep(for: Self.timeout)
@@ -287,16 +329,20 @@ final class ScrubPreviewController: NSObject, ObservableObject {
       self.finish(key, image: nil)
     }
     jobs[key] = Job(
-      thumbnailer: thumbnailer, bucket: bucket, interactive: interactive, timeout: timeout)
-    thumbnailer.fetchThumbnail()
+      decoder: decoder, bucket: bucket, interactive: interactive, timeout: timeout)
+    let middle = Self.snapshotPosition(bucket: bucket, interval: interval, duration: duration)
+    decoder.start(source: source, position: Float(Double(middle) / Double(duration))) {
+      [weak self] image in
+      self?.finish(key, image: image)
+    }
   }
 
-  private func finish(_ key: ObjectIdentifier, image: CGImage?) {
+  private func finish(_ key: UUID, image: CGImage?) {
     guard let job = jobs.removeValue(forKey: key) else { return }
     job.timeout.cancel()
-    job.thumbnailer.delegate = nil
+    job.decoder.cancel()
     if let image, let data = Self.encode(image) {
-      frames[job.bucket] = data
+      frames.insert(data, for: job.bucket)
       failed.remove(job.bucket)
       preparedCount = frames.count
       if let requested, shownFrame != requested { showBest(for: requested) }
@@ -306,7 +352,7 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     if job.interactive {
       startInteractiveIfIdle()
     } else {
-      prefetchFailures = frames[job.bucket] == nil ? prefetchFailures + 1 : 0
+      prefetchFailures = !frames.contains(job.bucket) ? prefetchFailures + 1 : 0
       let epoch = slotEpoch
       if prefetchFailures >= Self.failuresBeforeBackoff, restingUntil == nil {
         // All background decoders rest together; hovering keeps working.
@@ -328,9 +374,19 @@ final class ScrubPreviewController: NSObject, ObservableObject {
     }
   }
 
-  private func complete(_ thumbnailer: VLCMediaThumbnailer, image: CGImage?) {
-    finish(ObjectIdentifier(thumbnailer), image: image)
+  static func neighbors(of bucket: Int64, interval: Int64, duration: Int64) -> [Int64] {
+    guard interval > 0, duration > 0 else { return [] }
+    return [1, -1, 2, -2].compactMap { distance in
+      let (offset, multiplicationOverflow) = interval.multipliedReportingOverflow(
+        by: Int64(distance))
+      let (candidate, additionOverflow) = bucket.addingReportingOverflow(offset)
+      guard !multiplicationOverflow, !additionOverflow, candidate >= 0, candidate < duration
+      else { return nil }
+      return candidate
+    }
   }
+
+  var cachedByteCount: Int { frames.byteCount }
 
   /// Where a step's frame is taken: its middle, but never in the last seconds, where VLC finds
   /// no frame to decode after the seek.
@@ -358,7 +414,49 @@ final class ScrubPreviewController: NSObject, ObservableObject {
   }
 }
 
-extension ScrubPreviewController: VLCMediaThumbnailerDelegate {
+/// A controllable decode boundary lets scheduling and lifetime tests use generated
+/// images without opening a media engine, network connection or real media file.
+@MainActor
+protocol ScrubPreviewDecoding: AnyObject {
+  func start(source: URL, position: Float, completion: @escaping @MainActor (CGImage?) -> Void)
+  func cancel()
+}
+
+@MainActor
+private final class NativeScrubPreviewDecoder: NSObject, ScrubPreviewDecoding {
+  private var thumbnailer: VLCMediaThumbnailer?
+  private var completion: (@MainActor (CGImage?) -> Void)?
+
+  isolated deinit { cancel() }
+
+  func start(source: URL, position: Float, completion: @escaping @MainActor (CGImage?) -> Void) {
+    self.completion = completion
+    let media = VLCMedia(url: source)
+    media.addOption(":no-audio")
+    media.addOption(":no-spu")
+    let thumbnailer = VLCMediaThumbnailer(media: media, andDelegate: self)
+    thumbnailer.thumbnailWidth = 320
+    thumbnailer.thumbnailHeight = 320
+    thumbnailer.snapshotPosition = position
+    self.thumbnailer = thumbnailer
+    thumbnailer.fetchThumbnail()
+  }
+
+  func cancel() {
+    thumbnailer?.delegate = nil
+    thumbnailer = nil
+    completion = nil
+  }
+
+  private func complete(_ thumbnailer: VLCMediaThumbnailer, image: CGImage?) {
+    guard self.thumbnailer === thumbnailer else { return }
+    let completion = completion
+    cancel()
+    completion?(image)
+  }
+}
+
+extension NativeScrubPreviewDecoder: VLCMediaThumbnailerDelegate {
   nonisolated func mediaThumbnailerDidTimeOut(_ mediaThumbnailer: VLCMediaThumbnailer) {
     let box = UncheckedThumbnailer(value: mediaThumbnailer)
     Task { @MainActor [weak self] in self?.complete(box.value, image: nil) }
