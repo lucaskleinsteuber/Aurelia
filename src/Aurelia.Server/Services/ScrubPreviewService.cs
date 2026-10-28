@@ -632,6 +632,10 @@ public sealed class ScrubPreviewService : BackgroundService
                 // Near the end of a short container without a trailing keyframe, fall back to 0s.
                 frame = await RunFfmpegFrameAsync(tools.Ffmpeg, FrameArguments(input, 0, videoStreamIndex, fastSeek: false), idlePriority, cancellationToken);
             }
+            if (frame is not null)
+            {
+                LiveConversionService.EnsureInputMatchesHandle(sourceStream.SafeFileHandle, checkedPath);
+            }
             return frame;
         }
         finally

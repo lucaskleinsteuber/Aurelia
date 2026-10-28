@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace Aurelia.Server.Services;
 
@@ -139,16 +140,29 @@ public sealed partial class LiveConversionService : IDisposable
             File.SetUnixFileMode(quietDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
     }
 
+    public static void EnsureInputMatchesHandle(SafeFileHandle handle, string checkedPath)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        if (!UnixFileIdentity.Matches(handle, checkedPath))
+        {
+            throw new IOException("The media file at the checked path has changed, been replaced, or is no longer the pinned file.");
+        }
+    }
+
     /// <summary>The path under which ffmpeg reads the open file.</summary>
     /// <remarks>
     /// On Linux this is the server's own descriptor in /proc, so ffmpeg reaches exactly the file
     /// that was checked and opened, even if the path changed meanwhile. Elsewhere it is the checked
-    /// path, which the server keeps open while ffmpeg runs.
+    /// path, which the server keeps open while ffmpeg runs, failing closed if its identity or symlink
+    /// state differs from the pinned descriptor.
     /// </remarks>
-    public static string InputPath(FileStream stream, string checkedPath) =>
-        OperatingSystem.IsLinux()
+    public static string InputPath(FileStream stream, string checkedPath)
+    {
+        EnsureInputMatchesHandle(stream.SafeFileHandle, checkedPath);
+        return OperatingSystem.IsLinux()
             ? $"/proc/{Environment.ProcessId}/fd/{stream.SafeFileHandle.DangerousGetHandle()}"
             : checkedPath;
+    }
 
     /// <summary>The file's header description, from memory while size and modification time are unchanged.</summary>
     public async Task<MediaProbeResult> ProbeAsync(FfmpegTools tools, OpenMediaFile file, string checkedPath, Guid mediaId, CancellationToken cancellationToken)
@@ -168,6 +182,7 @@ public sealed partial class LiveConversionService : IDisposable
             {
                 json = Encoding.UTF8.GetString(await ReadLimitedAsync(process.StandardOutput.BaseStream, MaximumProbeBytes, timeout.Token));
                 await process.WaitForExitAsync(timeout.Token);
+                EnsureInputMatchesHandle(file.Stream.SafeFileHandle, checkedPath);
             }
             catch (OperationCanceledException)
             {
@@ -209,6 +224,7 @@ public sealed partial class LiveConversionService : IDisposable
         {
             var output = await ReadLimitedAsync(process.StandardOutput.BaseStream, LiveSubtitles.MaximumBytes, timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
+            EnsureInputMatchesHandle(file.Stream.SafeFileHandle, checkedPath);
             if (process.ExitCode == 0 && output.AsSpan().StartsWith("WEBVTT"u8)) return output;
             LogFailed(logger, "ffmpeg subtitles", process.ExitCode, await errors);
             throw new PlaybackException("subtitle_conversion_failed", "The server couldn’t read this subtitle track.", StatusCodes.Status422UnprocessableEntity);

@@ -12,9 +12,21 @@ internal static partial class UnixFileIdentity
     {
         [FieldOffset(4)] public int Mode;
         [FieldOffset(8)] public uint Uid;
+        [FieldOffset(56)] public ulong Dev;
+        [FieldOffset(64)] public ulong Ino;
     }
     public static bool IsRegular(SafeFileHandle handle) =>
         FStat(handle.DangerousGetHandle(), out var status) == 0 && (status.Mode & 0xF000) == 0x8000;
+    public static bool Matches(SafeFileHandle handle, string path)
+    {
+        if (OperatingSystem.IsWindows()) return true;
+        if (FStat(handle.DangerousGetHandle(), out var handleStatus) != 0) return false;
+        if (LStat(path, out var pathStatus) != 0) return false;
+        // The path must refer to the exact same device and inode, and cannot be a symbolic link.
+        return (pathStatus.Mode & 0xF000) == 0x8000
+            && handleStatus.Dev == pathStatus.Dev
+            && handleStatus.Ino == pathStatus.Ino;
+    }
     public static void RequireOwned(string path)
     {
         if (OperatingSystem.IsWindows()) return;

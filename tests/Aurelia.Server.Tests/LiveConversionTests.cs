@@ -25,6 +25,46 @@ public sealed partial class LiveConversionTests
     private static readonly LiveConversionRequest Browser = new(["h264", "hevc"], ["aac", "mp3"]);
 
     [Fact]
+    public void InputPathFailsClosedWhenIdentityChangesOrIsSymlinked()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "aurelia-identity-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        var originalFile = Path.Combine(tempDir, "original.mkv");
+        var replacedFile = Path.Combine(tempDir, "replaced.mkv");
+        var symlinkFile = Path.Combine(tempDir, "symlink.mkv");
+
+        try
+        {
+            File.WriteAllBytes(originalFile, [1, 2, 3, 4]);
+            File.WriteAllBytes(replacedFile, [5, 6, 7, 8]);
+
+            using var stream = new FileStream(originalFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+            // Valid file and path match
+            var input = LiveConversionService.InputPath(stream, originalFile);
+            Assert.NotEmpty(input);
+
+            // Path replaced with a different file
+            Assert.Throws<IOException>(() => LiveConversionService.InputPath(stream, replacedFile));
+
+            // Path replaced with a symlink (on Unix)
+            if (!OperatingSystem.IsWindows())
+            {
+                File.CreateSymbolicLink(symlinkFile, originalFile);
+                Assert.Throws<IOException>(() => LiveConversionService.InputPath(stream, symlinkFile));
+
+                // Path deleted/missing
+                var missingFile = Path.Combine(tempDir, "missing.mkv");
+                Assert.Throws<IOException>(() => LiveConversionService.InputPath(stream, missingFile));
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void H264WithDtsIsRepackagedAndItsSoundConverted()
     {
         var probe = new MediaProbeResult("matroska,webm", 5400.5, Video("h264", "High", 41),
