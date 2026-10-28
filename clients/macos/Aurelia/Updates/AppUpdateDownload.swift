@@ -122,6 +122,12 @@ struct AppUpdateTransferAccumulator {
 }
 
 struct AppUpdateURLSessionTransport: AppUpdateTransport {
+  let sessionConfiguration: URLSessionConfiguration?
+
+  init(sessionConfiguration: URLSessionConfiguration? = nil) {
+    self.sessionConfiguration = sessionConfiguration
+  }
+
   private final class Redirects: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(
       _ session: URLSession, task: URLSessionTask,
@@ -135,12 +141,17 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
   func transfer(_ request: URLRequest, maximumBytes: Int64, destination: URL?) async throws
     -> AppUpdateTransfer
   {
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.httpCookieStorage = nil
-    configuration.urlCredentialStorage = nil
-    configuration.urlCache = nil
-    configuration.timeoutIntervalForRequest = 30
-    configuration.timeoutIntervalForResource = 600
+    let configuration =
+      sessionConfiguration
+      ?? {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieStorage = nil
+        config.urlCredentialStorage = nil
+        config.urlCache = nil
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 600
+        return config
+      }()
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
     var handle: FileHandle?

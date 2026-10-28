@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 
@@ -469,5 +470,466 @@ private actor StubUpdateTransport: AppUpdateTransport {
       try accumulator.consume(data)
       return try accumulator.finish()
     }
+  }
+}
+
+final class FakeGitHubURLProtocol: URLProtocol, @unchecked Sendable {
+  enum Action: Sendable {
+    case respond(status: Int, headers: [String: String], body: Data?)
+    case redirect(to: URL, status: Int)
+    case cutOff(status: Int, headers: [String: String], partialBody: Data, error: Error)
+    case fail(Error)
+  }
+
+  static let lock = NSLock()
+  nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> Action)?
+  nonisolated(unsafe) static var recordedRequests: [URLRequest] = []
+
+  static func configure(_ responder: @escaping @Sendable (URLRequest) -> Action) {
+    lock.lock()
+    defer { lock.unlock() }
+    self.responder = responder
+    recordedRequests = []
+  }
+
+  static func requests() -> [URLRequest] {
+    lock.lock()
+    defer { lock.unlock() }
+    return recordedRequests
+  }
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    guard let host = request.url?.host?.lowercased() else { return false }
+    return host == "api.github.com" || host == "objects.githubusercontent.com"
+  }
+
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    request
+  }
+
+  override func startLoading() {
+    Self.lock.lock()
+    Self.recordedRequests.append(request)
+    let currentResponder = Self.responder
+    Self.lock.unlock()
+
+    guard let currentResponder else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+      return
+    }
+
+    switch currentResponder(request) {
+    case .respond(let status, let headers, let body):
+      let response = HTTPURLResponse(
+        url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      if let body { client?.urlProtocol(self, didLoad: body) }
+      client?.urlProtocolDidFinishLoading(self)
+
+    case .redirect(let to, let status):
+      let headers = ["Location": to.absoluteString]
+      let response = HTTPURLResponse(
+        url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+      var nextRequest = URLRequest(url: to)
+      nextRequest.allHTTPHeaderFields = request.allHTTPHeaderFields
+      client?.urlProtocol(self, wasRedirectedTo: nextRequest, redirectResponse: response)
+
+    case .cutOff(let status, let headers, let partialBody, let error):
+      let response = HTTPURLResponse(
+        url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: partialBody)
+      client?.urlProtocol(self, didFailWithError: error)
+
+    case .fail(let error):
+      client?.urlProtocol(self, didFailWithError: error)
+    }
+  }
+
+  override func stopLoading() {}
+}
+
+@Suite(.serialized)
+struct AppUpdateFakeGitHubHarnessTests {
+  private func makeClient() -> AppUpdateClient {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [FakeGitHubURLProtocol.self]
+    return AppUpdateClient(transport: AppUpdateURLSessionTransport(sessionConfiguration: config))
+  }
+
+  private func testRunFolder() throws -> URL {
+    let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent(
+        "Aurelia/TestRuns/fake-github-harness-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root
+  }
+
+  @Test
+  func harnessSimulatesFullReleaseLifecycleWithRedirectAndRemovesAuthorizationOnRedirect()
+    async throws
+  {
+    let folder = try testRunFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let client = makeClient()
+    let syntheticDmgData = Data("synthetic-universal-macos-dmg-content-109".utf8)
+    let syntheticDigest = SHA256.hash(data: syntheticDmgData).map { String(format: "%02x", $0) }
+      .joined()
+
+    let releaseJson = """
+      {
+        "tag_name": "1.19.0-109",
+        "draft": false,
+        "html_url": "https://github.com/owner/repo/releases/tag/1.19.0-109",
+        "assets": [
+          {
+            "name": "Aurelia-1.19.0-109-macOS-universal.dmg",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/101",
+            "size": \(syntheticDmgData.count)
+          },
+          {
+            "name": "SHA256SUMS",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/102"
+          }
+        ]
+      }
+      """
+    let sumsText = "\(syntheticDigest)  Aurelia-1.19.0-109-macOS-universal.dmg\n"
+
+    FakeGitHubURLProtocol.configure { req in
+      let path = req.url?.path ?? ""
+      let host = req.url?.host ?? ""
+
+      if host == "api.github.com" && path.hasSuffix("/releases/latest") {
+        return .respond(
+          status: 200,
+          headers: ["Content-Type": "application/json", "Content-Length": "\(releaseJson.count)"],
+          body: Data(releaseJson.utf8))
+      }
+
+      if host == "api.github.com" && path.hasSuffix("/assets/102") {
+        return .respond(
+          status: 200,
+          headers: [
+            "Content-Type": "application/octet-stream", "Content-Length": "\(sumsText.count)",
+          ],
+          body: Data(sumsText.utf8))
+      }
+
+      if host == "api.github.com" && path.hasSuffix("/assets/101") {
+        return .redirect(
+          to: URL(
+            string:
+              "https://objects.githubusercontent.com/github-production-release-asset/Aurelia-1.19.0-109.dmg"
+          )!, status: 302)
+      }
+
+      if host == "objects.githubusercontent.com" {
+        return .respond(
+          status: 200,
+          headers: [
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "\(syntheticDmgData.count)",
+          ],
+          body: syntheticDmgData)
+      }
+
+      return .respond(status: 404, headers: [:], body: nil)
+    }
+
+    let release = try await client.latest(
+      repository: "owner/repo", token: "synthetic-secret-token")
+    #expect(release.version == "1.19.0")
+    #expect(release.build == 109)
+
+    let destination = try await client.download(
+      release, repository: "owner/repo", token: "synthetic-secret-token", currentBuild: 108,
+      folder: folder)
+
+    #expect(FileManager.default.fileExists(atPath: destination.path))
+    #expect(try Data(contentsOf: destination) == syntheticDmgData)
+
+    let requests = FakeGitHubURLProtocol.requests()
+    #expect(requests.count == 4)
+
+    // Initial requests to api.github.com carry Authorization
+    let apiRequests = requests.filter { $0.url?.host == "api.github.com" }
+    #expect(!apiRequests.isEmpty)
+    for req in apiRequests {
+      #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic-secret-token")
+    }
+
+    // The redirected request to objects.githubusercontent.com must NEVER carry Authorization or Cookie
+    let redirectRequests = requests.filter { $0.url?.host == "objects.githubusercontent.com" }
+    #expect(redirectRequests.count == 1)
+    for req in redirectRequests {
+      #expect(req.value(forHTTPHeaderField: "Authorization") == nil)
+      #expect(req.value(forHTTPHeaderField: "Cookie") == nil)
+      #expect(req.value(forHTTPHeaderField: "Proxy-Authorization") == nil)
+    }
+  }
+
+  @Test
+  func harnessEnforcesSha256BeforeStartingHelperAndDeletesCorruptImage() async throws {
+    let folder = try testRunFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let client = makeClient()
+    let tamperedDmgData = Data("tampered-content".utf8)
+    let legitimateDigest = String(repeating: "f", count: 64)
+
+    let releaseJson = """
+      {
+        "tag_name": "1.19.0-109",
+        "draft": false,
+        "assets": [
+          {
+            "name": "Aurelia-1.19.0-109-macOS-universal.dmg",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/201"
+          },
+          {
+            "name": "SHA256SUMS",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/202"
+          }
+        ]
+      }
+      """
+    let sumsText = "\(legitimateDigest)  Aurelia-1.19.0-109-macOS-universal.dmg\n"
+
+    FakeGitHubURLProtocol.configure { req in
+      let path = req.url?.path ?? ""
+      let host = req.url?.host ?? ""
+
+      if host == "api.github.com" && path.hasSuffix("/releases/latest") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/json"], body: Data(releaseJson.utf8))
+      }
+      if host == "api.github.com" && path.hasSuffix("/assets/202") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/octet-stream"],
+          body: Data(sumsText.utf8))
+      }
+      if host == "api.github.com" && path.hasSuffix("/assets/201") {
+        return .redirect(
+          to: URL(string: "https://objects.githubusercontent.com/download/dmg")!, status: 302)
+      }
+      if host == "objects.githubusercontent.com" {
+        return .respond(
+          status: 200,
+          headers: [
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "\(tamperedDmgData.count)",
+          ],
+          body: tamperedDmgData)
+      }
+      return .respond(status: 404, headers: [:], body: nil)
+    }
+
+    let release = try await client.latest(repository: "owner/repo")
+    do {
+      _ = try await client.download(
+        release, repository: "owner/repo", currentBuild: 108, folder: folder)
+      Issue.record("A corrupted download must fail before starting helper.")
+    } catch let error as AppUpdateError {
+      #expect(error == .checksumMismatch)
+    }
+
+    // Verify partial or corrupt file was removed
+    let remaining = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+    #expect(remaining.isEmpty)
+  }
+
+  @Test
+  func harnessRemovesPartialDownloadsOnCutOffConnection() async throws {
+    let folder = try testRunFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let client = makeClient()
+    let releaseJson = """
+      {
+        "tag_name": "1.19.0-109",
+        "draft": false,
+        "assets": [
+          {
+            "name": "Aurelia-1.19.0-109-macOS-universal.dmg",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/301"
+          },
+          {
+            "name": "SHA256SUMS",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/302"
+          }
+        ]
+      }
+      """
+    let sumsText =
+      "\(String(repeating: "a", count: 64))  Aurelia-1.19.0-109-macOS-universal.dmg\n"
+
+    FakeGitHubURLProtocol.configure { req in
+      let path = req.url?.path ?? ""
+      let host = req.url?.host ?? ""
+
+      if host == "api.github.com" && path.hasSuffix("/releases/latest") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/json"], body: Data(releaseJson.utf8))
+      }
+      if host == "api.github.com" && path.hasSuffix("/assets/302") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/octet-stream"],
+          body: Data(sumsText.utf8))
+      }
+      if host == "api.github.com" && path.hasSuffix("/assets/301") {
+        return .redirect(
+          to: URL(string: "https://objects.githubusercontent.com/download/cutoff")!, status: 302)
+      }
+      if host == "objects.githubusercontent.com" {
+        // Cut-off: reports 10,000 bytes expected, sends only 100 bytes, then disconnects
+        return .cutOff(
+          status: 200,
+          headers: ["Content-Type": "application/octet-stream", "Content-Length": "10000"],
+          partialBody: Data(repeating: 0x41, count: 100),
+          error: URLError(.networkConnectionLost))
+      }
+      return .respond(status: 404, headers: [:], body: nil)
+    }
+
+    let release = try await client.latest(repository: "owner/repo")
+    do {
+      _ = try await client.download(
+        release, repository: "owner/repo", currentBuild: 108, folder: folder)
+      Issue.record("A cut-off download must fail.")
+    } catch let error as AppUpdateError {
+      #expect(error == .connectionLost || error == .incompleteDownload)
+    }
+
+    // Partial file must be deleted
+    let remaining = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+    #expect(remaining.isEmpty)
+  }
+
+  @Test
+  func harnessRejectsHtmlErrorPageWithInvalidResponse() async throws {
+    let client = makeClient()
+    let htmlError = "<!DOCTYPE html><html><body>Error 404 Not Found</body></html>"
+
+    FakeGitHubURLProtocol.configure { _ in
+      .respond(
+        status: 200,
+        headers: ["Content-Type": "text/html; charset=utf-8"],
+        body: Data(htmlError.utf8))
+    }
+
+    do {
+      _ = try await client.latest(repository: "owner/repo")
+      Issue.record("HTML responses must be rejected as invalid.")
+    } catch let error as AppUpdateError {
+      #expect(error == .invalidResponse)
+    }
+  }
+
+  @Test(arguments: [401, 403, 404, 429])
+  func harnessClassifiesHttpRateLimitAndStatusErrors(statusCode: Int) async throws {
+    let client = makeClient()
+
+    FakeGitHubURLProtocol.configure { _ in
+      .respond(
+        status: statusCode,
+        headers: ["Content-Type": "application/json"],
+        body: Data("{\"message\": \"error\"}".utf8))
+    }
+
+    do {
+      _ = try await client.latest(repository: "owner/repo")
+      Issue.record("HTTP error \(statusCode) must fail.")
+    } catch let error as AppUpdateError {
+      #expect(error == .github(statusCode))
+    }
+  }
+
+  @Test
+  func harnessNeverOffersOrDownloadsOlderOrEqualBuild() async throws {
+    let client = makeClient()
+    let releaseJson = """
+      {
+        "tag_name": "1.18.0-108",
+        "draft": false,
+        "assets": [
+          {
+            "name": "Aurelia-1.18.0-108-macOS-universal.dmg",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/501"
+          },
+          {
+            "name": "SHA256SUMS",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/502"
+          }
+        ]
+      }
+      """
+
+    FakeGitHubURLProtocol.configure { req in
+      let path = req.url?.path ?? ""
+      if path.hasSuffix("/releases/latest") {
+        return .respond(
+          status: 200, headers: ["Content-Type": "application/json"], body: Data(releaseJson.utf8))
+      }
+      Issue.record("Download assets should never be requested for an older/equal release.")
+      return .respond(status: 404, headers: [:], body: nil)
+    }
+
+    let release = try await client.latest(repository: "owner/repo")
+    #expect(release.build == 108)
+
+    // Equal build is rejected
+    do {
+      _ = try await client.download(
+        release, repository: "owner/repo", currentBuild: 108,
+        folder: URL(fileURLWithPath: "/tmp"))
+      Issue.record("Equal build must not be downloaded.")
+    } catch let error as AppUpdateError {
+      #expect(error == .notNewer)
+    }
+
+    // Older build is rejected
+    do {
+      _ = try await client.download(
+        release, repository: "owner/repo", currentBuild: 109,
+        folder: URL(fileURLWithPath: "/tmp"))
+      Issue.record("Older build must not be downloaded.")
+    } catch let error as AppUpdateError {
+      #expect(error == .notNewer)
+    }
+  }
+
+  @Test
+  func harnessValidatesSkipThisVersionAndAutomaticCheckSwitch() throws {
+    let suite = "FakeGitHubHarnessTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    // Initial state: automatic checks enabled, version 1.19.0 not skipped
+    #expect(AppUpdatePreferences.checksAutomatically(in: defaults))
+    #expect(
+      AppUpdatePreferences.shouldOffer(version: "1.19.0", userInitiated: false, defaults: defaults))
+
+    // Skip version 1.19.0
+    AppUpdatePreferences.skip(version: "1.19.0", in: defaults)
+    #expect(
+      !AppUpdatePreferences.shouldOffer(version: "1.19.0", userInitiated: false, defaults: defaults)
+    )
+    // Manual check still offers it
+    #expect(
+      AppUpdatePreferences.shouldOffer(version: "1.19.0", userInitiated: true, defaults: defaults))
+    // Newer version 1.20.0 is still offered
+    #expect(
+      AppUpdatePreferences.shouldOffer(version: "1.20.0", userInitiated: false, defaults: defaults))
+
+    // Disable automatic checks
+    defaults.set(false, forKey: AppUpdatePreferences.automaticChecksKey)
+    #expect(!AppUpdatePreferences.checksAutomatically(in: defaults))
+    #expect(
+      !AppUpdatePreferences.shouldOffer(version: "1.20.0", userInitiated: false, defaults: defaults)
+    )
+    #expect(
+      AppUpdatePreferences.shouldOffer(version: "1.20.0", userInitiated: true, defaults: defaults))
   }
 }
