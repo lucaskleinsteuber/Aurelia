@@ -102,6 +102,7 @@ protocol PlaybackEngine: AnyObject {
   var onEnded: (() -> Void)? { get set }
   var onError: ((String) -> Void)? { get set }
   var isPlaying: Bool { get }
+  var isSeekable: Bool { get }
   var currentTimeMilliseconds: Int64 { get }
   var durationMilliseconds: Int64 { get }
   var volume: Double { get set }
@@ -133,6 +134,7 @@ protocol PlaybackEngine: AnyObject {
 }
 
 extension PlaybackEngine {
+  var isSeekable: Bool { false }
   func load(url: URL, startAt milliseconds: Int64) { load(url: url) }
   var opensAtStartPosition: Bool { false }
 
@@ -271,6 +273,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   var isPlaying: Bool { player.isPlaying }
+  var isSeekable: Bool { player.isSeekable }
 
   var currentTimeMilliseconds: Int64 {
     captureProgress()

@@ -260,7 +260,9 @@ struct MediaDetailView: View {
     if model.supportsLibraryState {
       requestPlannedPlayback(mediaId: detail.item.id)
     } else if detail.item.kind == .movie {
-      model.startPlayback(mediaId: detail.item.id, title: detail.item.title)
+      model.startPlayback(
+        mediaId: detail.item.id, title: detail.item.title,
+        artwork: CatalogPlaybackLogic.artwork(for: detail.item))
     } else {
       let availableEpisodes = episodes(in: detail)
       if let episode = availableEpisodes.first {
@@ -292,7 +294,8 @@ struct MediaDetailView: View {
       subtitle:
         "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))",
       queue: queue,
-      trackScope: episode.item.parentId
+      trackScope: episode.item.parentId,
+      artwork: CatalogPlaybackLogic.artwork(for: episode.item)
     )
   }
 
@@ -325,7 +328,8 @@ struct MediaDetailView: View {
       mediaId: episode.item.id,
       title: episode.item.title,
       subtitle:
-        "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))"
+        "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))",
+      artwork: CatalogPlaybackLogic.artwork(for: episode.item)
     )
   }
 
@@ -441,7 +445,7 @@ struct MediaDetailView: View {
               model.startPlayback(
                 mediaId: supplement.item.id,
                 title: supplement.item.title,
-                subtitle: parentTitle)
+                subtitle: parentTitle, artwork: CatalogPlaybackLogic.artwork(for: supplement.item))
             } label: {
               ZStack {
                 LandscapeMediaCard(

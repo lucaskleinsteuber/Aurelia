@@ -132,6 +132,7 @@ final class PlaybackController: ObservableObject {
   /// The next episode's card in a title's last seconds.
   @Published private(set) var upNext: PlaybackUpNext?
   @Published private(set) var isPlaying = false
+  @Published private(set) var isSeekable = false
   @Published private(set) var currentTimeMilliseconds: Int64 = 0
   @Published private(set) var navigationRevision: UInt64 = 0
   @Published private(set) var durationMilliseconds: Int64 = 0
@@ -477,6 +478,23 @@ final class PlaybackController: ObservableObject {
 
   var canPlay: Bool { started && !stopped && !authorizationFailed && !terminalFailure }
   var canPause: Bool { started && !stopped && !terminalFailure }
+  var canSeek: Bool {
+    started && !stopped && !authorizationFailed && !terminalFailure && !recovering
+      && !isPreparing && nextItemTask == nil && activePlayback != nil
+      && durationMilliseconds > 0 && engine.isSeekable
+  }
+  var canPlayNext: Bool {
+    started && !stopped && !authorizationFailed && !terminalFailure && !recovering
+      && !isPreparing && !endHandled && nextItemTask == nil && activePlayback != nil
+      && !queuedItems.isEmpty
+  }
+
+  @discardableResult
+  func playNextFromSystemMedia() -> Bool {
+    guard canPlayNext else { return false }
+    playNextNow()
+    return true
+  }
 
   @discardableResult
   func play() -> Bool {
@@ -832,7 +850,7 @@ final class PlaybackController: ObservableObject {
       presentation = PlaybackPresentation(
         mediaId: presentation.mediaId, title: presentation.title,
         subtitle: presentation.subtitle, queue: queuedItems,
-        trackScope: presentation.trackScope)
+        trackScope: presentation.trackScope, artwork: presentation.artwork)
     }
     engine.trackScope = presentation.trackScope
     engine.load(url: localURL, startAt: resumePositionMilliseconds)
@@ -861,6 +879,7 @@ final class PlaybackController: ObservableObject {
     guard !stopped, !authorizationFailed, !terminalFailure, !recovering, !endHandled else { return }
     applyPausedIntentIfNeeded()
     assignIfChanged(&isPlaying, wantsPlayback && engine.isPlaying)
+    assignIfChanged(&isSeekable, engine.isSeekable)
     if appliedResumePosition {
       assignIfChanged(&currentTimeMilliseconds, engine.currentTimeMilliseconds)
     }
@@ -1074,7 +1093,7 @@ final class PlaybackController: ObservableObject {
       title: item.title,
       subtitle: item.subtitle,
       queue: queuedItems,
-      trackScope: presentation.trackScope)
+      trackScope: presentation.trackScope, artwork: item.artwork)
     isPreparing = true
     showsStartScreen = true
     upNext = nil

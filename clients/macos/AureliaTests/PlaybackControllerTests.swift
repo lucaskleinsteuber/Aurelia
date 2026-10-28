@@ -81,6 +81,30 @@ final class PlaybackControllerTests: XCTestCase {
       relayFactory: { _, _ in relay })
   }
 
+  func testSystemMediaSeekEligibilityRequiresAStartedSeekableInputAndStopsOnShutdown() async {
+    let engine = FakePlaybackEngine()
+    let controller = resumingController(engine: engine)
+    XCTAssertFalse(controller.canSeek)
+    XCTAssertFalse(controller.canPlayNext)
+    XCTAssertFalse(controller.playNextFromSystemMedia())
+    await controller.start()
+    XCTAssertTrue(controller.canSeek)
+    engine.isSeekable = false
+    engine.onUpdate?()
+    XCTAssertFalse(controller.isSeekable)
+    XCTAssertFalse(controller.canSeek)
+    engine.isSeekable = true
+    engine.onUpdate?()
+    XCTAssertTrue(controller.isSeekable)
+    XCTAssertTrue(controller.canSeek)
+    engine.durationMilliseconds = 0
+    engine.onUpdate?()
+    XCTAssertFalse(controller.canSeek)
+    await controller.shutdown(saveProgress: false)
+    XCTAssertFalse(controller.canSeek)
+    XCTAssertFalse(controller.canPlayNext)
+  }
+
   func testResumeOpensAtThePositionAndKeepsTheStartScreenUntilThePictureMoves() async {
     let engine = FakePlaybackEngine()
     engine.opensAtStartPosition = true
@@ -419,6 +443,12 @@ final class PlaybackControllerTests: XCTestCase {
   func testEndOfEpisodeAdvancesOnlyWhenEnabled() async throws {
     let source = Self.source(position: 0, completed: false)
     let nextID = UUID()
+    let currentArtwork = ArtworkSummary(
+      id: UUID(), kind: .poster, path: "/api/v1/artwork/current", contentType: "image/png",
+      contentLength: 64)
+    let nextArtwork = ArtworkSummary(
+      id: UUID(), kind: .poster, path: "/api/v1/artwork/next", contentType: "image/png",
+      contentLength: 64)
     let client = FakePlaybackClient(source: source)
     let engine = FakePlaybackEngine()
     let relay = FakePlaybackRelay()
@@ -432,15 +462,20 @@ final class PlaybackControllerTests: XCTestCase {
         subtitle: "Series · S01 E01",
         queue: [
           PlaybackQueueItem(
+            mediaId: source.mediaId, title: "Episode 1", subtitle: nil, artwork: currentArtwork),
+          PlaybackQueueItem(
             mediaId: nextID,
             title: "Episode 2",
-            subtitle: "Series · S01 E02")
-        ]),
+            subtitle: "Series · S01 E02", artwork: nextArtwork),
+        ], artwork: currentArtwork),
       engine: engine,
       preferences: preferences,
       relayFactory: { _, _ in relay })
 
+    XCTAssertFalse(controller.canPlayNext)
     await controller.start()
+    XCTAssertEqual(controller.presentation.artwork, currentArtwork)
+    XCTAssertTrue(controller.canPlayNext)
     engine.currentTimeMilliseconds = engine.durationMilliseconds
     engine.isPlaying = false
     engine.onEnded?()
@@ -450,6 +485,7 @@ final class PlaybackControllerTests: XCTestCase {
     }
 
     XCTAssertEqual(controller.presentation.mediaId, nextID)
+    XCTAssertEqual(controller.presentation.artwork, nextArtwork)
     XCTAssertEqual(client.createdMediaIDs, [source.mediaId, nextID])
     await controller.shutdown()
   }
@@ -846,6 +882,7 @@ final class FakePlaybackEngine: PlaybackEngine {
   var onEnded: (() -> Void)?
   var onError: ((String) -> Void)?
   var isPlaying = false
+  var isSeekable = true
   var currentTimeMilliseconds: Int64 = 0
   var durationMilliseconds: Int64 = 120_000
   var volume: Double = 1

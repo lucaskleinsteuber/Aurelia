@@ -743,6 +743,14 @@ struct PlaybackQueueItem: Identifiable, Equatable, Sendable {
   let mediaId: UUID
   let title: String
   let subtitle: String?
+  let artwork: ArtworkSummary?
+
+  init(mediaId: UUID, title: String, subtitle: String?, artwork: ArtworkSummary? = nil) {
+    self.mediaId = mediaId
+    self.title = title
+    self.subtitle = subtitle
+    self.artwork = artwork
+  }
 
   var id: UUID { mediaId }
 }
@@ -754,19 +762,22 @@ struct PlaybackPresentation: Identifiable, Equatable, Sendable {
   let queue: [PlaybackQueueItem]
   /// The series whose episodes share audio and subtitle choices; nil for a movie.
   let trackScope: UUID?
+  let artwork: ArtworkSummary?
 
   init(
     mediaId: UUID,
     title: String,
     subtitle: String?,
     queue: [PlaybackQueueItem] = [],
-    trackScope: UUID? = nil
+    trackScope: UUID? = nil,
+    artwork: ArtworkSummary? = nil
   ) {
     self.mediaId = mediaId
     self.title = title
     self.subtitle = subtitle
     self.queue = queue
     self.trackScope = trackScope
+    self.artwork = artwork
   }
 
   var id: UUID { mediaId }

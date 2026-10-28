@@ -71,7 +71,12 @@ enum CatalogPlaybackLogic {
   static func presentation(for item: CatalogItemSummary) -> PlaybackPresentation? {
     guard item.isPlayable else { return nil }
     return PlaybackPresentation(
-      mediaId: item.id, title: item.title, subtitle: subtitle(for: item))
+      mediaId: item.id, title: item.title, subtitle: subtitle(for: item),
+      artwork: artwork(for: item))
+  }
+
+  static func artwork(for item: CatalogItemSummary) -> ArtworkSummary? {
+    item.poster ?? item.backdrop
   }
 
   static func subtitle(for item: CatalogItemSummary) -> String? {

@@ -172,3 +172,24 @@ synthetic server, `AURELIA_TEST_SERVER_URL`, `AURELIA_TEST_PAIRING_CODE`,
 paired owner's profile is used. It verifies that the device cannot read the
 catalog before PIN unlock and revokes its newly paired test device on completion
 or failure. Never point it at personal library state.
+
+## macOS Now Playing and media commands
+
+The native player publishes its title, episode/series subtitle, artwork, duration, position
+and rate through the system Now Playing session while registered. Play, pause, toggle and
+stop preserve the current position. Skip Back and Skip Forward move exactly ten seconds,
+clamped to the title's bounds, and are disabled for non-seekable or unavailable inputs.
+Next Track starts the next queued episode only when it is available. Unregistering or a
+stopped/unavailable controller clears Now Playing and disables the owned commands.
+
+Artwork comes from the catalog or playback plan already loaded for that title, through the
+existing artwork loader's bounded 640-pixel variant and cache. No additional catalog query
+is needed. Requests are cancelled when the title or registration changes; a late result
+cannot replace another title's artwork. Native artwork preserves aspect ratio and never
+allocates an enlarged bitmap for a system size request.
+
+`SystemMediaPlaybackCoordinatorTests` checks metadata mapping, command eligibility and bounds,
+retired callbacks, artwork completion/cancellation, and teardown using injected controllers,
+transports and invented in-memory images. It neither registers actual remote controls nor
+starts a video engine. Physical media keys, Control Center presentation and AirPods remain
+separate manual checks; these logic tests do not certify them.

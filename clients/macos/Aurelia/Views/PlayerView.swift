@@ -3,6 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct PlayerView: View {
+  private let profile: StoredServerProfile
   @EnvironmentObject private var model: AppModel
   @StateObject private var controller: PlaybackController
   @StateObject private var sceneNotes: SceneNotesController
@@ -28,6 +29,7 @@ struct PlayerView: View {
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
   init(profile: StoredServerProfile, presentation: PlaybackPresentation) {
+    self.profile = profile
     _sceneNotes = StateObject(
       wrappedValue: SceneNotesController(profile: profile, mediaId: presentation.mediaId))
     #if DEBUG
@@ -132,7 +134,10 @@ struct PlayerView: View {
     .task {
       PlaybackShutdownCoordinator.shared.register(controller)
       if ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil {
-        SystemMediaPlaybackCoordinator.shared.register(controller)
+        let loader = model.artworkLoader
+        SystemMediaPlaybackCoordinator.shared.register(controller) { artwork in
+          try await loader.image(for: artwork, profile: profile, width: 640)
+        }
       }
       revealControls()
       sceneNotes.reload()
