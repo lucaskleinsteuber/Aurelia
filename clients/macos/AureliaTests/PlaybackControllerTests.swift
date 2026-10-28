@@ -76,7 +76,8 @@ final class PlaybackControllerTests: XCTestCase {
     let relay = FakePlaybackRelay()
     return PlaybackController(
       client: FakePlaybackClient(source: source),
-      presentation: PlaybackPresentation(mediaId: mediaID, title: "Pilot", subtitle: nil),
+      presentation: PlaybackPresentation(
+        mediaId: mediaID, title: "Pilot", subtitle: nil, startIntent: .resume),
       engine: engine,
       relayFactory: { _, _ in relay })
   }
@@ -218,7 +219,7 @@ final class PlaybackControllerTests: XCTestCase {
       presentation: PlaybackPresentation(
         mediaId: mediaID,
         title: "Pilot",
-        subtitle: "Breaking Bad · S01 E01"),
+        subtitle: "Breaking Bad · S01 E01", startIntent: .resume),
       engine: engine,
       relayFactory: { _, _ in relay })
 
@@ -303,7 +304,8 @@ final class PlaybackControllerTests: XCTestCase {
     let relay = FakePlaybackRelay()
     let controller = PlaybackController(
       client: client,
-      presentation: PlaybackPresentation(mediaId: source.mediaId, title: "Movie", subtitle: nil),
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Movie", subtitle: nil, startIntent: .resume),
       engine: engine,
       relayFactory: { _, _ in relay })
 
@@ -441,7 +443,7 @@ final class PlaybackControllerTests: XCTestCase {
   }
 
   func testEndOfEpisodeAdvancesOnlyWhenEnabled() async throws {
-    let source = Self.source(position: 0, completed: false)
+    let source = Self.source(position: 42_000, completed: false)
     let nextID = UUID()
     let currentArtwork = ArtworkSummary(
       id: UUID(), kind: .poster, path: "/api/v1/artwork/current", contentType: "image/png",
@@ -487,7 +489,251 @@ final class PlaybackControllerTests: XCTestCase {
     XCTAssertEqual(controller.presentation.mediaId, nextID)
     XCTAssertEqual(controller.presentation.artwork, nextArtwork)
     XCTAssertEqual(client.createdMediaIDs, [source.mediaId, nextID])
+    XCTAssertEqual(engine.startPositions, [0, 0])
     await controller.shutdown()
+  }
+
+  func testPlayIgnoresStoredProgressWhileExplicitResumeUsesIt() async {
+    for intent in [PlaybackStartIntent.play, .resume] {
+      let source = Self.source(position: 42_000, completed: false)
+      let client = FakePlaybackClient(source: source)
+      let engine = FakePlaybackEngine()
+      let controller = PlaybackController(
+        client: client,
+        presentation: PlaybackPresentation(
+          mediaId: source.mediaId, title: "Synthetic", subtitle: nil, startIntent: intent),
+        engine: engine, relayFactory: { _, _ in FakePlaybackRelay() })
+      await controller.start()
+      XCTAssertEqual(engine.startPositions, [intent == .resume ? 42_000 : 0])
+      await controller.shutdown(saveProgress: false)
+    }
+  }
+
+  func testExplicitRetryAfterAnInitialFailureKeepsTheResumeIntent() async {
+    let source = Self.source(position: 42_000, completed: false)
+    let client = FakePlaybackClient(source: source)
+    client.nextCreationError = APIClientError.serverRejected(
+      code: "media_not_playable", message: "Synthetic initial failure")
+    let engine = FakePlaybackEngine()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Synthetic", subtitle: nil, startIntent: .resume),
+      engine: engine, relayFactory: { _, _ in FakePlaybackRelay() })
+    await controller.start()
+    XCTAssertNotNil(controller.errorMessage)
+    XCTAssertTrue(engine.startPositions.isEmpty)
+    await controller.retry()
+    XCTAssertEqual(engine.startPositions, [42_000])
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testExplicitResumeSurvivesInitialAndNextAuthorizationOrRelayStartupFailure() async {
+    for nextEpisode in [false, true] {
+      for relayFailure in [false, true] {
+        let source = Self.source(position: 42_000, completed: false)
+        let nextID = UUID()
+        let client = FakePlaybackClient(source: source)
+        let engine = FakePlaybackEngine()
+        var failRelay = false
+        let controller = PlaybackController(
+          client: client,
+          presentation: PlaybackPresentation(
+            mediaId: source.mediaId, title: "Synthetic", subtitle: nil,
+            queue: [PlaybackQueueItem(mediaId: nextID, title: "Next", subtitle: nil)],
+            startIntent: nextEpisode ? .play : .resume), engine: engine,
+          relayFactory: { _, _ in
+            if failRelay {
+              failRelay = false
+              throw URLError(.networkConnectionLost)
+            }
+            return FakePlaybackRelay()
+          }, recoverySleep: { _ in await Task.yield() })
+        if !nextEpisode {
+          if relayFailure { failRelay = true } else { client.failNextCreations = 1 }
+        }
+        await controller.start()
+        if nextEpisode {
+          if relayFailure { failRelay = true } else { client.failNextCreations = 1 }
+          XCTAssertTrue(controller.resumeNextNow())
+        }
+        let expected = nextEpisode ? 2 : 1
+        for _ in 0..<2_000 {
+          if engine.startPositions.count >= expected { break }
+          await Task.yield()
+        }
+        XCTAssertEqual(engine.startPositions, nextEpisode ? [0, 42_000] : [42_000])
+        XCTAssertEqual(controller.presentation.mediaId, nextEpisode ? nextID : source.mediaId)
+        await controller.shutdown(saveProgress: false)
+      }
+    }
+  }
+
+  func testAnAcknowledgedSeekToZeroOverridesOldResumeProgressDuringRecovery() async {
+    let source = Self.source(position: 42_000, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Synthetic", subtitle: nil, startIntent: .resume),
+      engine: engine, relayFactory: { _, _ in FakePlaybackRelay() },
+      recoverySleep: { _ in await Task.yield() })
+    await controller.start()
+    XCTAssertEqual(controller.currentTimeMilliseconds, 42_000)
+    controller.seek(to: 0)
+    engine.onError?("Synthetic failure after seeking to zero")
+    for _ in 0..<2_000 {
+      if engine.startPositions.count >= 2 { break }
+      await Task.yield()
+    }
+    XCTAssertEqual(engine.startPositions, [42_000, 0])
+    await controller.retry()
+    XCTAssertEqual(engine.startPositions, [42_000, 0, 0])
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testResumePositionSurvivesAnEngineFailureBeforeItsFirstClock() async {
+    let source = Self.source(position: 42_000, completed: false)
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    engine.opensAtStartPosition = true
+    engine.deferPlayStateChange = true
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Synthetic", subtitle: nil, startIntent: .resume),
+      engine: engine, relayFactory: { _, _ in FakePlaybackRelay() },
+      recoverySleep: { _ in await Task.yield() })
+    await controller.start()
+    XCTAssertEqual(controller.currentTimeMilliseconds, 0)
+    XCTAssertEqual(engine.startPositions, [42_000])
+    engine.onError?("Synthetic failure before the first clock")
+    for _ in 0..<2_000 {
+      if engine.startPositions.count >= 2 { break }
+      await Task.yield()
+    }
+    XCTAssertEqual(engine.startPositions, [42_000, 42_000])
+    await controller.retry()
+    XCTAssertEqual(engine.startPositions, [42_000, 42_000, 42_000])
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testOnlyTheExplicitUpNextResumeActionUsesTheNextEpisodesProgress() async {
+    for resume in [false, true] {
+      let source = Self.source(position: 42_000, completed: false)
+      let next = UUID()
+      let client = FakePlaybackClient(source: source)
+      let engine = FakePlaybackEngine()
+      let controller = PlaybackController(
+        client: client,
+        presentation: PlaybackPresentation(
+          mediaId: source.mediaId, title: "Episode 10", subtitle: nil,
+          queue: [PlaybackQueueItem(mediaId: next, title: "Episode 11", subtitle: nil)]),
+        engine: engine, relayFactory: { _, _ in FakePlaybackRelay() })
+      await controller.start()
+      if resume { XCTAssertTrue(controller.resumeNextNow()) } else { controller.playNextNow() }
+      for _ in 0..<1_000 {
+        if controller.presentation.mediaId == next && !controller.isPreparing { break }
+        await Task.yield()
+      }
+      XCTAssertEqual(controller.presentation.mediaId, next)
+      XCTAssertEqual(engine.startPositions, [0, resume ? 42_000 : 0])
+      XCTAssertEqual(controller.presentation.startIntent, resume ? .resume : .play)
+      XCTAssertTrue(controller.canPlayPrevious)
+      await controller.shutdown(saveProgress: false)
+    }
+  }
+
+  func testPauseAndShutdownDuringManualNavigationNeverMarkTheOldEpisodeFinished() async {
+    for closeImmediately in [false, true] {
+      let source = Self.source(position: 42_000, completed: false)
+      let client = FakePlaybackClient(source: source)
+      let engine = FakePlaybackEngine()
+      let outbox = PlaybackProgressOutbox()
+      let controller = PlaybackController(
+        client: client,
+        presentation: PlaybackPresentation(
+          mediaId: source.mediaId, title: "Episode 10", subtitle: nil,
+          queue: [PlaybackQueueItem(mediaId: UUID(), title: "Episode 11", subtitle: nil)],
+          startIntent: .resume), engine: engine, relayFactory: { _, _ in FakePlaybackRelay() },
+        progressOutbox: outbox)
+      await controller.start()
+      await outbox.flush()
+      client.updates.removeAll()
+      var pending: CheckedContinuation<Void, Never>?
+      var delayed = false
+      client.beforeProgressReturn = {
+        if !delayed {
+          delayed = true
+          await withCheckedContinuation { pending = $0 }
+        }
+      }
+      controller.playNextNow()
+      for _ in 0..<1_000 {
+        if pending != nil { break }
+        await Task.yield()
+      }
+      XCTAssertNotNil(pending)
+      if !closeImmediately { _ = controller.pause() }
+      let shutdown = Task { await controller.shutdown() }
+      await Task.yield()
+      pending?.resume()
+      await shutdown.value
+      XCTAssertFalse(client.updates.isEmpty)
+      XCTAssertFalse(client.updates.contains { $0.finished })
+      XCTAssertTrue(client.updates.allSatisfy { $0.position == 42_000 })
+      XCTAssertEqual(client.createdMediaIDs, [source.mediaId])
+    }
+  }
+
+  func testMiddleEpisodeCanNavigateBothDirectionsFromZeroAndRespectSeriesBoundaries() async throws {
+    let source = Self.source(position: 42_000, completed: false)
+    let firstID = UUID()
+    let lastID = UUID()
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Episode 10", subtitle: nil,
+        queue: [PlaybackQueueItem(mediaId: lastID, title: "Episode 11", subtitle: nil)],
+        previousItems: [PlaybackQueueItem(mediaId: firstID, title: "Episode 9", subtitle: nil)],
+        startIntent: .resume), engine: engine, relayFactory: { _, _ in FakePlaybackRelay() })
+    XCTAssertFalse(controller.canPlayPrevious)
+    await controller.start()
+    XCTAssertEqual(engine.startPositions, [42_000])
+    XCTAssertTrue(controller.canPlayPrevious && controller.canPlayNext)
+    XCTAssertTrue(controller.playPreviousFromSystemMedia())
+    // A second command during transition cannot duplicate a source request.
+    XCTAssertFalse(controller.playPreviousFromSystemMedia())
+    for _ in 0..<1_000 {
+      if controller.presentation.mediaId == firstID && !controller.isPreparing { break }
+      await Task.yield()
+    }
+    XCTAssertEqual(controller.presentation.mediaId, firstID)
+    XCTAssertEqual(engine.startPositions, [42_000, 0])
+    XCTAssertFalse(controller.canPlayPrevious)
+    XCTAssertTrue(controller.canPlayNext)
+    XCTAssertTrue(controller.playNextFromSystemMedia())
+    for _ in 0..<1_000 {
+      if controller.presentation.mediaId == source.mediaId && !controller.isPreparing { break }
+      await Task.yield()
+    }
+    XCTAssertEqual(engine.startPositions, [42_000, 0, 0])
+    XCTAssertTrue(controller.canPlayPrevious && controller.canPlayNext)
+    controller.playNextNow()
+    for _ in 0..<1_000 {
+      if controller.presentation.mediaId == lastID && !controller.isPreparing { break }
+      await Task.yield()
+    }
+    XCTAssertEqual(engine.startPositions, [42_000, 0, 0, 0])
+    XCTAssertEqual(client.createdMediaIDs, [source.mediaId, firstID, source.mediaId, lastID])
+    XCTAssertFalse(controller.canPlayNext)
+    XCTAssertTrue(controller.canPlayPrevious)
+    XCTAssertFalse(client.updates.contains { $0.finished })
+    await controller.shutdown(saveProgress: false)
+    XCTAssertFalse(controller.canPlayPrevious || controller.canPlayNext)
   }
 
   private func upNextController(
@@ -531,8 +777,9 @@ final class PlaybackControllerTests: XCTestCase {
       try await Task.sleep(for: .milliseconds(5))
     }
     XCTAssertEqual(controller.presentation.mediaId, nextID)
-    // The episode left early counts as watched.
-    XCTAssertEqual(client.updates.last(where: { $0.finished })?.position, 2_685_000)
+    // Manual navigation preserves the position; only the actual end marks an episode watched.
+    XCTAssertFalse(client.updates.contains { $0.finished })
+    XCTAssertEqual(client.updates.last?.position, 2_685_000)
     await controller.shutdown()
   }
 
@@ -800,6 +1047,9 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
   var revokedIDs: [UUID] = []
   var createdMediaIDs: [UUID] = []
   var sleepTimerSignals = 0
+  var failNextCreations = 0
+  var nextCreationError: Error?
+  var beforeProgressReturn: (() async -> Void)?
 
   func sleepTimerEnded() async { sleepTimerSignals += 1 }
 
@@ -809,6 +1059,14 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
 
   func createPlayback(mediaId: UUID) async throws -> PlaybackSourceResponse {
     createdMediaIDs.append(mediaId)
+    if let error = nextCreationError {
+      nextCreationError = nil
+      throw error
+    }
+    if failNextCreations > 0 {
+      failNextCreations -= 1
+      throw URLError(.networkConnectionLost)
+    }
     if mediaId == source.mediaId { return source }
     return PlaybackSourceResponse(
       id: UUID(),
@@ -837,6 +1095,7 @@ private final class FakePlaybackClient: PlaybackClientProtocol {
         position: positionMilliseconds,
         duration: durationMilliseconds,
         finished: isFinished))
+    await beforeProgressReturn?()
     return PlaybackProgressResponse(
       mediaId: mediaId,
       positionMilliseconds: positionMilliseconds,

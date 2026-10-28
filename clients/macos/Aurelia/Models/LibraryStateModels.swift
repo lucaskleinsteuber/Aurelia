@@ -19,16 +19,21 @@ struct PlaybackPlanResponse: Codable, Equatable, Sendable {
   let action: PlaybackPlanAction
   let continueWatchingEligible: Bool
 
-  var presentation: PlaybackPresentation? {
+  var presentation: PlaybackPresentation? { makePresentation() }
+
+  func makePresentation(
+    intent: PlaybackStartIntent? = nil, previousItems: [PlaybackQueueItem] = []
+  ) -> PlaybackPresentation? {
     guard let target, target.isPlayable else { return nil }
     return PlaybackPresentation(
       mediaId: target.id, title: target.title,
       subtitle: CatalogPlaybackLogic.subtitle(for: target),
-      queue: queue.map {
+      queue: queue.filter { $0.isPlayable }.map {
         PlaybackQueueItem(
           mediaId: $0.id, title: $0.title, subtitle: CatalogPlaybackLogic.subtitle(for: $0),
           artwork: CatalogPlaybackLogic.artwork(for: $0))
-      }, trackScope: seriesId, artwork: CatalogPlaybackLogic.artwork(for: target))
+      }, previousItems: previousItems, startIntent: intent ?? (action == .resume ? .resume : .play),
+      trackScope: seriesId, artwork: CatalogPlaybackLogic.artwork(for: target))
   }
 }
 

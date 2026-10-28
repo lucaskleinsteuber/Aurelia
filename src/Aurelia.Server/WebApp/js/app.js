@@ -512,7 +512,7 @@ function heroBanner(item) {
       item.genres?.length ? h("div", { class: "hero-meta" }, item.genres.slice(0, 3).join(" · ")) : null,
       item.overview ? h("p", { class: "hero-overview" }, item.overview) : null,
       h("div", { class: "button-row" },
-        h("button", { class: "primary-button", onclick: () => playTitle(item) }, icon("play", { size: 16 }), started ? "Resume" : "Play"),
+        h("button", { class: "primary-button", onclick: () => playTitle(item, undefined, { intent: started ? "resume" : "play" }) }, icon("play", { size: 16 }), started ? "Resume" : "Play"),
         h("a", { class: "secondary-button", href: `/title/${target}`, "data-route": true }, "Details"))));
 }
 
@@ -565,7 +565,7 @@ function posterCard(item, index = 0) {
 }
 
 function continueCard(item) {
-  const play = h("button", { class: "landscape-card", onclick: () => playTitle(item), "aria-label": `Resume ${item.parentTitle ?? item.title}` },
+  const play = h("button", { class: "landscape-card", onclick: () => playTitle(item, undefined, { intent: "resume" }), "aria-label": `Resume ${item.parentTitle ?? item.title}` },
     h("div", { class: "landscape-frame" },
       artwork(item.backdrop ?? item.poster, 640, "landscape-art", ""),
       h("div", { class: "landscape-shade" }),
@@ -638,7 +638,7 @@ async function titleScreen(id) {
   const target = plan?.target ?? (item.kind === "series" ? null : item);
 
   const playButton = target && target.availability === "available"
-    ? h("button", { class: "primary-button large", onclick: () => playTitle(target, seasons) }, icon("play", { size: 17 }), logic.detailPlayLabel(item, plan))
+    ? h("button", { class: "primary-button large", onclick: () => playTitle(target, seasons, { intent: plan?.action === "resume" ? "resume" : "play" }) }, icon("play", { size: 17 }), logic.detailPlayLabel(item, plan))
     : h("button", { class: "primary-button large", disabled: true }, icon("play", { size: 17 }), target ? "Unavailable" : "No Episodes");
 
   let isFavorite = item.isFavorite;
@@ -812,7 +812,7 @@ function aboutSection(detail) {
 
 // MARK: Playing
 
-async function playTitle(item, seasons) {
+async function playTitle(item, seasons, { intent = "play" } = {}) {
   let target = item;
   try {
     // A show starts where its plan says: the next or the started episode.
@@ -820,6 +820,7 @@ async function playTitle(item, seasons) {
       const plan = await api.playbackPlan(item.id);
       if (!plan?.target) return toast("This show has no episode to play.");
       target = plan.target;
+      if (intent === "resume" && plan.action !== "resume") intent = "play";
     }
     if (target.kind === "episode" && !seasons && target.parentId) seasons = (await api.detail(target.parentId)).seasons;
   } catch (error) {
@@ -829,10 +830,11 @@ async function playTitle(item, seasons) {
   closePlayer();
   const player = new Player({
     api,
-    item: target,
+    item: target, intent,
     preferenceScope: `${state.server?.serverId ?? location.origin}:${state.profile?.id ?? ""}`,
     next: async () => (target.kind === "episode" ? logic.nextEpisode(seasons, target.id) : null),
-    onPlayNext: (next) => playTitle(next, seasons),
+    previous: async () => (target.kind === "episode" ? logic.previousEpisode(seasons, target.id) : null),
+    onPlayNext: (next, options) => playTitle(next, seasons, options),
     onClose: () => {
       if (state.player === player) state.player = null;
       // Progress and Continue Watching changed; show them without jumping to the top.

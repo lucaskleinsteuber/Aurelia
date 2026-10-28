@@ -183,6 +183,7 @@ final class PlaybackController: ObservableObject {
   private var authorizationFailed = false
   private var terminalFailure = false
   private var appliedResumePosition = false
+  private var hasPreparedCurrentItem = false
   /// The engine was asked to open at the resume position, so it usually needs no seek.
   private var openedAtResume = false
   private var upNextDismissed = false
@@ -191,6 +192,7 @@ final class PlaybackController: ObservableObject {
   private var resumePositionMilliseconds: Int64 = 0
   private var lastPeriodicSave = Date.distantPast
   private var queuedItems: [PlaybackQueueItem]
+  private var previousItems: [PlaybackQueueItem]
   private var sleepTask: Task<Void, Never>?
   private var sleepTimerSleep: @MainActor (TimeInterval) async throws -> Void = { delay in
     try await Task.sleep(for: .seconds(delay))
@@ -205,6 +207,8 @@ final class PlaybackController: ObservableObject {
   private var pauseRequestPending = false
   private var recovering = false
   private var endHandled = false
+  // Queue navigation also retires engine callbacks; it is not proof of a natural media end.
+  private var naturalEndReached = false
   private var lastMovementAt = Date()
   private var observedPosition: Int64 = 0
   private var recoveryAttempt = 0
@@ -250,6 +254,7 @@ final class PlaybackController: ObservableObject {
     self.playbackRate = preferences.normalized.defaultPlaybackRate
     self.volume = preferences.normalized.defaultVolume
     self.queuedItems = presentation.queue
+    self.previousItems = presentation.previousItems
     self.relayFactory = { url, fingerprint in
       try LoopbackStreamRelay(
         sourceURL: url,
@@ -301,6 +306,7 @@ final class PlaybackController: ObservableObject {
     self.playbackRate = preferences.normalized.defaultPlaybackRate
     self.volume = preferences.normalized.defaultVolume
     self.queuedItems = presentation.queue
+    self.previousItems = presentation.previousItems
     self.relayFactory = relayFactory
     self.previewRelayFactory = previewRelayFactory
     self.renewalClock = renewalClock
@@ -357,7 +363,7 @@ final class PlaybackController: ObservableObject {
 
   func useCurrentProgress() async {
     guard hasProgressConflict else { return }
-    enqueueProgressSave(isFinished: endHandled)
+    enqueueProgressSave(isFinished: naturalEndReached)
     do {
       try await progressOutbox.resolveConflict(media: presentation.mediaId, profile: client.profile)
     } catch {
@@ -430,8 +436,13 @@ final class PlaybackController: ObservableObject {
     }
   }
 
+  private var preservedInputPosition: Int64? {
+    hasPreparedCurrentItem
+      ? (appliedResumePosition ? currentTimeMilliseconds : resumePositionMilliseconds) : nil
+  }
+
   func retry() async {
-    let position = currentTimeMilliseconds
+    let position = preservedInputPosition
     let operation = UUID()
     lifecycleID = operation
     await stopCurrentPlayback(saveProgress: false)
@@ -483,10 +494,19 @@ final class PlaybackController: ObservableObject {
       && !isPreparing && nextItemTask == nil && activePlayback != nil
       && durationMilliseconds > 0 && engine.isSeekable
   }
-  var canPlayNext: Bool {
+  private var canNavigateEpisodes: Bool {
     started && !stopped && !authorizationFailed && !terminalFailure && !recovering
       && !isPreparing && !endHandled && nextItemTask == nil && activePlayback != nil
-      && !queuedItems.isEmpty
+  }
+  var canPlayNext: Bool { canNavigateEpisodes && !queuedItems.isEmpty }
+  var canPlayPrevious: Bool { canNavigateEpisodes && !previousItems.isEmpty }
+  var nextQueueItem: PlaybackQueueItem? { queuedItems.first }
+
+  @discardableResult
+  func playPreviousFromSystemMedia() -> Bool {
+    guard canPlayPrevious, let previous = previousItems.last else { return false }
+    navigateNow(to: previous, backwards: true)
+    return true
   }
 
   @discardableResult
@@ -538,7 +558,7 @@ final class PlaybackController: ObservableObject {
     }
     // A paused title must not keep the Mac awake, for example after a sleep timer.
     endPlaybackActivity()
-    enqueueProgressSave(isFinished: endHandled)
+    enqueueProgressSave(isFinished: naturalEndReached)
     return true
   }
 
@@ -603,6 +623,7 @@ final class PlaybackController: ObservableObject {
     awaitingFirstMovement = true
     stableMovementStartedAt = nil
     lastMovementAt = recoveryClock()
+    hasPreparedCurrentItem = true
     engine.trackScope = presentation.trackScope
     engine.load(url: url, startAt: position)
     openedAtResume = engine.opensAtStartPosition && position > 0
@@ -685,6 +706,7 @@ final class PlaybackController: ObservableObject {
     // A completed VLC input and its relay generation cannot be reused. Explicit
     // replay uses fresh authorization/load, but never competes with auto-next.
     guard endHandled, !recovering, nextItemTask == nil else { return }
+    naturalEndReached = false
     currentTimeMilliseconds = position
     observedPosition = position
     lastMovementAt = recoveryClock()
@@ -776,7 +798,7 @@ final class PlaybackController: ObservableObject {
     playbackIDs.removeAll()
 
     if saveProgress {
-      enqueueProgressSave(isFinished: endHandled)
+      enqueueProgressSave(isFinished: naturalEndReached)
       await progressOutbox.flush()
     }
     await revokeTickets(retiredIDs)
@@ -831,13 +853,14 @@ final class PlaybackController: ObservableObject {
     playbackIDs.insert(source.id)
     resumePositionMilliseconds =
       resumeOverride
-      ?? (preferences.automaticResume && !source.progress.isCompleted
-        ? source.progress.positionMilliseconds : 0)
+      ?? presentation.startIntent.position(
+        progress: source.progress, automaticResume: preferences.automaticResume)
     appliedResumePosition = resumePositionMilliseconds == 0
     recovering = false
     recoveryMessage = nil
     errorMessage = nil
     endHandled = false
+    naturalEndReached = false
     lastMovementAt = recoveryClock()
     preparedAt = lastMovementAt
     stableMovementStartedAt = nil
@@ -849,9 +872,11 @@ final class PlaybackController: ObservableObject {
       queuedItems.removeFirst()
       presentation = PlaybackPresentation(
         mediaId: presentation.mediaId, title: presentation.title,
-        subtitle: presentation.subtitle, queue: queuedItems,
+        subtitle: presentation.subtitle, queue: queuedItems, previousItems: previousItems,
+        startIntent: presentation.startIntent,
         trackScope: presentation.trackScope, artwork: presentation.artwork)
     }
+    hasPreparedCurrentItem = true
     engine.trackScope = presentation.trackScope
     engine.load(url: localURL, startAt: resumePositionMilliseconds)
     openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
@@ -974,6 +999,7 @@ final class PlaybackController: ObservableObject {
       return
     }
     endHandled = true
+    naturalEndReached = true
     loadID = UUID()
     watchdogTask?.cancel()
     watchdogTask = nil
@@ -1001,11 +1027,24 @@ final class PlaybackController: ObservableObject {
     nextItemTask = Task { [weak self] in await self?.advance(to: next) }
   }
 
-  /// Starts the next episode now from the Up Next card; this title counts as finished.
+  /// Manual navigation keeps the position being left; only a real input end marks it watched.
   func playNextNow() {
-    guard !stopped, !authorizationFailed, !terminalFailure, !recovering, !endHandled,
-      let next = queuedItems.first
-    else { return }
+    guard canPlayNext, let next = queuedItems.first else { return }
+    navigateNow(to: next, backwards: false)
+  }
+
+  /// An explicit Resume menu action keeps this player/window and the series queue alive.
+  @discardableResult
+  func resumeNextNow() -> Bool {
+    guard canPlayNext, let next = queuedItems.first else { return false }
+    navigateNow(to: next, backwards: false, intent: .resume)
+    return true
+  }
+
+  private func navigateNow(
+    to item: PlaybackQueueItem, backwards: Bool, intent: PlaybackStartIntent = .play
+  ) {
+    naturalEndReached = false
     endHandled = true
     loadID = UUID()
     watchdogTask?.cancel()
@@ -1013,8 +1052,10 @@ final class PlaybackController: ObservableObject {
     isPlaying = false
     upNext = nil
     record(.ended)
-    enqueueProgressSave(isFinished: true)
-    nextItemTask = Task { [weak self] in await self?.advance(to: next) }
+    enqueueProgressSave(isFinished: false)
+    nextItemTask = Task { [weak self] in
+      await self?.advance(to: item, backwards: backwards, intent: intent)
+    }
   }
 
   /// Hides the Up Next card; the player then stops at the end instead of continuing.
@@ -1068,7 +1109,9 @@ final class PlaybackController: ObservableObject {
     }
   }
 
-  private func advance(to item: PlaybackQueueItem) async {
+  private func advance(
+    to item: PlaybackQueueItem, backwards: Bool = false, intent: PlaybackStartIntent = .play
+  ) async {
     guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
     let operation = lifecycleID
     loadID = UUID()
@@ -1088,11 +1131,20 @@ final class PlaybackController: ObservableObject {
     guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
     playbackIDs.removeAll()
     activePlayback = nil
+    let current = PlaybackQueueItem(
+      mediaId: presentation.mediaId, title: presentation.title,
+      subtitle: presentation.subtitle, artwork: presentation.artwork)
+    if backwards {
+      previousItems.removeLast()
+      queuedItems.insert(current, at: 0)
+    } else {
+      previousItems.append(current)
+    }
     presentation = PlaybackPresentation(
       mediaId: item.mediaId,
       title: item.title,
       subtitle: item.subtitle,
-      queue: queuedItems,
+      queue: queuedItems, previousItems: previousItems, startIntent: intent,
       trackScope: presentation.trackScope, artwork: item.artwork)
     isPreparing = true
     showsStartScreen = true
@@ -1104,6 +1156,7 @@ final class PlaybackController: ObservableObject {
     opaqueTicketRetryUsed = false
     stableMovementStartedAt = nil
     recoveryAttempt = 0
+    hasPreparedCurrentItem = false
     currentTimeMilliseconds = 0
     durationMilliseconds = 0
     appliedResumePosition = false
@@ -1116,7 +1169,7 @@ final class PlaybackController: ObservableObject {
         await revokeTickets([source.id])
         return
       }
-      try await begin(source)
+      try await begin(source, resumeOverride: intent == .play ? 0 : nil)
     } catch {
       guard !stopped, !authorizationFailed, !Task.isCancelled else { return }
       let context = PlaybackFailureContext(error: error, phase: .ticketAuthorization)
@@ -1128,7 +1181,7 @@ final class PlaybackController: ObservableObject {
         wantsPlayback = false
         recoveryCause = context.cause
         isPreparing = false
-        errorMessage = "The next episode could not start. \(context.cause.message)"
+        errorMessage = "The episode could not start. \(context.cause.message)"
       }
     }
   }
@@ -1334,7 +1387,9 @@ final class PlaybackController: ObservableObject {
 
   private func recoverPlayback(message: String) {
     guard !stopped, !authorizationFailed, !terminalFailure, !recovering else { return }
-    let position = currentTimeMilliseconds
+    // Before authorization/relay setup there is no input clock to override the requested
+    // Play/Resume intent. A chosen but unapplied resume position must survive an early failure.
+    let position = preservedInputPosition
     if incidentStartedAt == nil { incidentStartedAt = recoveryClock() }
     incidentPausedAt = nil
     stableMovementStartedAt = nil

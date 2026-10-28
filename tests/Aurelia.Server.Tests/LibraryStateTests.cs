@@ -63,6 +63,29 @@ public sealed class LibraryStateTests
     }
 
     [Fact]
+    public async Task ResumeTargetReturnsToTheEpisodeActuallyRevisitedInsteadOfTheLaterEpisode()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var earlier = fixture.Episodes[2];
+        var later = fixture.Episodes[3];
+        await fixture.Progress(earlier, 42_000);
+        await fixture.Progress(later, 39_000);
+        var plan = await fixture.Get<PlaybackPlanResponse>($"/api/v1/media/{fixture.Series.Id}/playback-plan");
+        Assert.Equal(later.Id, plan.Target!.Id);
+        // Going back and watching the earlier episode makes it the new real viewing target.
+        await fixture.Progress(earlier, 45_000);
+        plan = await fixture.Get<PlaybackPlanResponse>($"/api/v1/media/{fixture.Series.Id}/playback-plan");
+        Assert.Equal(earlier.Id, plan.Target!.Id);
+        Assert.Equal(PlaybackPlanAction.Resume, plan.Action);
+        Assert.Equal(45_000, plan.Target.Progress!.PositionMilliseconds);
+        Assert.Equal(earlier.Id, Assert.Single((await fixture.Get<HomeResponse>("/api/v1/home")).ContinueWatching).Id);
+        // A real end, in contrast to manual navigation, deliberately advances the series target.
+        await fixture.Progress(earlier, 300_000, true);
+        plan = await fixture.Get<PlaybackPlanResponse>($"/api/v1/media/{fixture.Series.Id}/playback-plan");
+        Assert.Equal(later.Id, plan.Target!.Id);
+    }
+
+    [Fact]
     public async Task AtomicMarksPreserveDurationAndLastPlayUseDurableReceiptsAndRejectStaleOutbox()
     {
         using var fixture = await Fixture.CreateAsync();

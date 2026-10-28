@@ -5,6 +5,7 @@ struct AureliaApp: App {
   @NSApplicationDelegateAdaptor(AureliaAppDelegate.self) private var appDelegate
   @StateObject private var model = AppModel()
   @Environment(\.scenePhase) private var scenePhase
+  @FocusedObject private var player: PlaybackController?
 
   var body: some Scene {
     WindowGroup {
@@ -37,6 +38,20 @@ struct AureliaApp: App {
         Button("Check for Updates…") {
           Task { await AppUpdater.shared.check(userInitiated: true) }
         }
+      }
+      CommandMenu("Playback") {
+        Button("Previous Episode") {
+          guard EpisodeKeyboardPolicy.allowsMenu else { return }
+          _ = player?.playPreviousFromSystemMedia()
+        }
+        .keyboardShortcut(.leftArrow, modifiers: [.command, .shift])
+        .disabled(player?.canPlayPrevious != true || !EpisodeKeyboardPolicy.allowsMenu)
+        Button("Next Episode") {
+          guard EpisodeKeyboardPolicy.allowsMenu else { return }
+          _ = player?.playNextFromSystemMedia()
+        }
+        .keyboardShortcut(.rightArrow, modifiers: [.command, .shift])
+        .disabled(player?.canPlayNext != true || !EpisodeKeyboardPolicy.allowsMenu)
       }
       CommandGroup(after: .newItem) {
         Button("Add Media…") { model.showMediaManager() }

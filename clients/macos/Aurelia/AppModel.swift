@@ -1661,15 +1661,30 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func startPlannedPlayback(mediaId: UUID) async throws {
-    let intent = beginPlaybackIntent()
+  func startPlannedPlayback(mediaId: UUID, intent: PlaybackStartIntent? = nil) async throws {
+    let request = beginPlaybackIntent()
     let plan = try await playbackPlan(mediaId: mediaId)
-    guard !Task.isCancelled, playbackPlanningGeneration == intent else { throw CancellationError() }
-    guard let presentation = plan.presentation else {
+    let previous = await previousPlaybackItems(for: plan)
+    guard !Task.isCancelled, playbackPlanningGeneration == request else {
+      throw CancellationError()
+    }
+    guard let presentation = plan.makePresentation(intent: intent, previousItems: previous) else {
       throw APIClientError.serverRejected(
         code: "media_unavailable", message: "This media is currently unavailable.")
     }
     playback = presentation
+  }
+
+  private func previousPlaybackItems(for plan: PlaybackPlanResponse) async -> [PlaybackQueueItem] {
+    guard let target = plan.target, target.kind == .episode, (target.seasonNumber ?? 0) > 0,
+      let seriesID = plan.seriesId
+    else { return [] }
+    if let cached = preparedDetail(id: seriesID)?.detail {
+      return CatalogPlaybackLogic.previousEpisodes(in: cached, before: target.id)
+    }
+    // Older/offline servers can still start the requested title if this optional catalog read fails.
+    guard let detail = try? await seriesDetail(id: seriesID), !Task.isCancelled else { return [] }
+    return CatalogPlaybackLogic.previousEpisodes(in: detail, before: target.id)
   }
 
   func watchState(mediaId: UUID, scope: WatchStateScope = .title, seasonNumber: Int? = nil)
@@ -2204,6 +2219,8 @@ final class AppModel: ObservableObject {
     title: String,
     subtitle: String? = nil,
     queue: [PlaybackQueueItem] = [],
+    previousItems: [PlaybackQueueItem] = [],
+    startIntent: PlaybackStartIntent = .play,
     trackScope: UUID? = nil,
     artwork: ArtworkSummary? = nil
   ) {
@@ -2213,11 +2230,11 @@ final class AppModel: ObservableObject {
       mediaId: mediaId,
       title: title,
       subtitle: subtitle,
-      queue: queue,
+      queue: queue, previousItems: previousItems, startIntent: startIntent,
       trackScope: trackScope, artwork: artwork)
   }
 
-  func startPlayback(item: CatalogItemSummary) {
+  func startPlayback(item: CatalogItemSummary, intent: PlaybackStartIntent? = nil) {
     if supportsLibraryState {
       guard item.kind == .series || item.isPlayable else { return }
       let request = beginPlaybackIntent()
@@ -2225,8 +2242,10 @@ final class AppModel: ObservableObject {
         guard let self else { return }
         do {
           let plan = try await self.playbackPlan(mediaId: item.id)
+          let previous = await self.previousPlaybackItems(for: plan)
           guard !Task.isCancelled, self.playbackPlanningGeneration == request else { return }
-          guard let presentation = plan.presentation else { return }
+          guard let presentation = plan.makePresentation(intent: intent, previousItems: previous)
+          else { return }
           self.playback = presentation
         } catch {
           if !Task.isCancelled, self.playbackPlanningGeneration == request,
@@ -2238,7 +2257,9 @@ final class AppModel: ObservableObject {
       }
       return
     }
-    guard profile != nil, let presentation = CatalogPlaybackLogic.presentation(for: item) else {
+    guard profile != nil,
+      let presentation = CatalogPlaybackLogic.presentation(for: item, intent: intent ?? .play)
+    else {
       return
     }
     beginPlaybackIntent()

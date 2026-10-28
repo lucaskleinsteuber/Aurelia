@@ -10,7 +10,7 @@ import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
-  playerSubtitle, rateLabel, resumeSeconds, showsUpNext, upNextSeconds,
+  playerSubtitle, rateLabel, playbackStartSeconds, showsUpNext, upNextSeconds,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
@@ -78,16 +78,21 @@ export class Player {
    * @param {ReturnType<import("./api.js").createApi>} options.api
    * @param {object} options.item       the title to play (a catalog summary)
    * @param {() => Promise<object|null>} [options.next]  finds the episode after this one
-   * @param {(item: object) => void} [options.onPlayNext]
+   * @param {() => Promise<object|null>} [options.previous] finds the preceding normal episode
+   * @param {"play"|"resume"} [options.intent] only Resume may use saved progress
+   * @param {(item: object, options: {intent: "play"}) => void} [options.onPlayNext]
    * @param {() => void} options.onClose
    * @param {(error: ApiError) => void} [options.onSessionEnded]
    * @param {string} [options.preferenceScope] server/profile identity for private track choices
    * @param {boolean} [options.canConvert]  the server reports live conversion
    */
-  constructor({ api, item, next, onPlayNext, onClose, onSessionEnded, canConvert = false, preferenceScope }) {
+  constructor({ api, item, next, previous, intent = "play", onPlayNext, onClose, onSessionEnded, canConvert = false, preferenceScope }) {
     this.api = api;
     this.item = item;
     this.next = next;
+    this.previous = previous;
+    this.startIntent = intent === "resume" ? "resume" : "play";
+    this.navigationPending = false;
     this.onPlayNext = onPlayNext;
     this.onClose = onClose;
     this.onSessionEnded = onSessionEnded;
@@ -132,10 +137,14 @@ export class Player {
 
     // Middle: back, play and forward in one capsule.
     this.playButton = h("button", { class: "transport-play", "aria-label": "Play", onclick: () => this.toggle() }, icon("play", { size: 22 }));
-    this.transport = h("div", { class: "player-transport glass" },
+    this.previousButton = h("button", { class: "transport-seek", "aria-label": "Previous Episode", title: "Previous Episode (P)", disabled: true,
+      onclick: () => this.navigateEpisode("previous") }, icon("previous", { size: 18 }));
+    this.nextButton = h("button", { class: "transport-seek", "aria-label": "Next Episode", title: "Next Episode (N)", disabled: true,
+      onclick: () => this.navigateEpisode("next") }, icon("next", { size: 18 }));
+    this.transport = h("div", { class: "player-transport glass" }, this.previousButton,
       h("button", { class: "transport-seek", "aria-label": `Back ${seconds} Seconds`, onclick: () => this.skip(-seconds) }, seekGlyph(false, seconds)),
       this.playButton,
-      h("button", { class: "transport-seek", "aria-label": `Forward ${seconds} Seconds`, onclick: () => this.skip(seconds) }, seekGlyph(true, seconds)));
+      h("button", { class: "transport-seek", "aria-label": `Forward ${seconds} Seconds`, onclick: () => this.skip(seconds) }, seekGlyph(true, seconds)), this.nextButton);
 
     // Bottom: title on the left, sound and window controls on the right, then the timeline.
     this.subtitleLine = h("div", { class: "player-subtitle" }, playerSubtitle(this.item));
@@ -197,9 +206,10 @@ export class Player {
       revision: this.source.progress?.revision ?? 0,
       send: (mediaId, body, options) => this.api.saveProgress(mediaId, body, options),
     });
-    this.resumeAt = this.preferences.automaticResume ? resumeSeconds(this.source.progress) : 0;
+    this.resumeAt = playbackStartSeconds(this.startIntent, this.source.progress, this.preferences.automaticResume);
     this.scheduleRenewal();
     this.loadNotes();
+    void this.updateEpisodeButtons();
     if (this.canConvert && !triesDirectPlay(this.source.contentType)) {
       const at = this.resumeAt;
       this.resumeAt = 0;
@@ -362,7 +372,12 @@ export class Player {
 
   key(event) {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (this.closed || (event.repeat && /^[np]$/i.test(event.key))) return;
     const target = event.target;
+    const dialog = target?.closest?.('dialog, [role="dialog"]');
+    if (dialog && dialog !== this.element) return;
+    if (/^[np]$/i.test(event.key) && this.popover?.hidden === false) return;
+    if (target?.isContentEditable || target?.tagName === "SELECT") return;
     if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
     const seconds = this.preferences.seekInterval;
     switch (event.key) {
@@ -372,6 +387,16 @@ export class Player {
         if (target instanceof HTMLButtonElement) return;
         event.preventDefault();
         this.toggle();
+        break;
+      case "n":
+      case "N":
+        event.preventDefault();
+        void this.navigateEpisode("next");
+        break;
+      case "p":
+      case "P":
+        event.preventDefault();
+        void this.navigateEpisode("previous");
         break;
       case "ArrowLeft":
       case "j":
@@ -823,9 +848,33 @@ export class Player {
     else this.close();
   }
 
+  async updateEpisodeButtons() {
+    const lookups = [[this.previous, this.previousButton], [this.next, this.nextButton]];
+    await Promise.all(lookups.map(async ([lookup, button]) => {
+      const item = lookup ? await lookup().catch(() => null) : null;
+      if (!this.closed && button) button.disabled = !item;
+    }));
+  }
+
+  async navigateEpisode(direction) {
+    if (this.closed || this.navigationPending || !this.source) return;
+    const lookup = direction === "previous" ? this.previous : this.next;
+    if (!lookup) return;
+    this.navigationPending = true;
+    try {
+      const item = await lookup();
+      if (!this.closed && item) this.playNext(item);
+    } catch {
+      if (!this.closed) this.showNotice("The episode could not be opened. Try again.");
+    } finally {
+      this.navigationPending = false;
+    }
+  }
+
   playNext(next) {
+    if (this.closed || !next) return;
     this.close();
-    this.onPlayNext?.(next);
+    this.onPlayNext?.(next, { intent: "play" });
   }
 
   // MARK: Problems

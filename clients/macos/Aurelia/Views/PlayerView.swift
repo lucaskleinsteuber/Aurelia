@@ -127,6 +127,7 @@ struct PlayerView: View {
       }
     )
     .preferredColorScheme(.dark)
+    .focusedSceneObject(episodeShortcutController)
     .contextMenu {
       Button("Export Playback Diagnostics…") { exportPlaybackDiagnostics() }
         .accessibilityIdentifier("player-export-diagnostics")
@@ -284,6 +285,14 @@ struct PlayerView: View {
 
       if !controller.isPreparing, !startScreenVisible, controller.errorMessage == nil {
         HStack(spacing: 4) {
+          Button {
+            _ = controller.playPreviousFromSystemMedia()
+            revealControls()
+          } label: {
+            Image(systemName: "backward.end.fill").frame(width: 36, height: 44)
+          }
+          .buttonStyle(.plain).disabled(!controller.canPlayPrevious)
+          .accessibilityLabel("Previous Episode").help("Previous Episode (P)")
           seekButton(forward: false)
           Button {
             controller.togglePlayback()
@@ -301,6 +310,14 @@ struct PlayerView: View {
           .accessibilityIdentifier("player-play-pause")
           .focused($focusedControl, equals: "play")
           seekButton(forward: true)
+          Button {
+            _ = controller.playNextFromSystemMedia()
+            revealControls()
+          } label: {
+            Image(systemName: "forward.end.fill").frame(width: 36, height: 44)
+          }
+          .buttonStyle(.plain).disabled(!controller.canPlayNext)
+          .accessibilityLabel("Next Episode").help("Next Episode (N)")
         }
         .padding(6)
         .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
@@ -759,8 +776,30 @@ struct PlayerView: View {
     }
   }
 
+  private var episodeShortcutController: PlaybackController? {
+    let blocked =
+      notesPresented || confirmProgressReplacement
+      || controlsPolicy.holds.contains("diagnostics-export")
+      || controlsPolicy.holds.contains { $0.hasPrefix("menu-") }
+    return blocked ? nil : controller
+  }
+
   private func handleKey(_ event: NSEvent) -> Bool {
     revealControls()
+    guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+      return false
+    }
+    // Only the video surface calls this handler, so text fields keep their normal typing behavior.
+    if let command = SystemMediaCommand.episodeShortcut(
+      characters: event.charactersIgnoringModifiers, modified: false, isRepeat: event.isARepeat)
+    {
+      if command == .previousEpisode {
+        _ = controller.playPreviousFromSystemMedia()
+      } else {
+        _ = controller.playNextFromSystemMedia()
+      }
+      return true
+    }
     switch event.keyCode {
     case 49:
       controller.togglePlayback()

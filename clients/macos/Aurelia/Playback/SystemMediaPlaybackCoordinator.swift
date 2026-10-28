@@ -4,7 +4,38 @@ import Foundation
 @preconcurrency import MediaPlayer
 
 enum SystemMediaCommand: CaseIterable, Hashable, Sendable {
-  case play, pause, toggle, stop, skipBackward, skipForward, nextEpisode
+  case play, pause, toggle, stop, skipBackward, skipForward, previousEpisode, nextEpisode
+
+  nonisolated static func episodeShortcut(
+    characters: String?, modified: Bool, isRepeat: Bool = false
+  ) -> Self? {
+    guard !modified, !isRepeat else { return nil }
+    switch characters?.lowercased() {
+    case "p": return .previousEpisode
+    case "n": return .nextEpisode
+    default: return nil
+    }
+  }
+}
+
+/// In-window commands must leave the field editor and sheets their standard shortcuts.
+@MainActor
+enum EpisodeKeyboardPolicy {
+  static func permits(isKeyWindow: Bool, hasSheet: Bool, isTextEditing: Bool, isBlocked: Bool)
+    -> Bool
+  {
+    isKeyWindow && !hasSheet && !isTextEditing && !isBlocked
+  }
+
+  static var allowsMenu: Bool {
+    guard NSApplication.shared.isActive, let window = NSApplication.shared.keyWindow else {
+      return false
+    }
+    return permits(
+      isKeyWindow: window.isKeyWindow, hasSheet: window.attachedSheet != nil,
+      isTextEditing: window.firstResponder is NSTextView || window.firstResponder is NSTextField,
+      isBlocked: false)
+  }
 }
 
 enum SystemMediaCommandResult: Equatable, Sendable {
@@ -64,8 +95,10 @@ protocol SystemMediaPlaybackControlling: AnyObject {
   var canPause: Bool { get }
   var canSeek: Bool { get }
   var canPlayNext: Bool { get }
+  var canPlayPrevious: Bool { get }
   func seek(to milliseconds: Int64)
   @discardableResult func playNextFromSystemMedia() -> Bool
+  @discardableResult func playPreviousFromSystemMedia() -> Bool
   @discardableResult func play() -> Bool
   @discardableResult func pause() -> Bool
   @discardableResult func togglePlayback() -> Bool
@@ -176,6 +209,7 @@ final class SystemMediaPlaybackCoordinator {
       .skipBackward: active && controller.canSeek,
       .skipForward: active && controller.canSeek,
       .nextEpisode: active && controller.canPlayNext,
+      .previousEpisode: active && controller.canPlayPrevious,
     ]
     commandGate.update(owner: controller, generation: generation, enabled: enabled)
     for command in SystemMediaCommand.allCases {
@@ -223,6 +257,11 @@ final class SystemMediaPlaybackCoordinator {
       else { return .unavailable }
       controller.seek(to: target)
       accepted = true
+    case .previousEpisode:
+      guard controller.canPlayPrevious,
+        controller.canPlay || controller.canPause || controller.isPlaying
+      else { return .unavailable }
+      accepted = controller.playPreviousFromSystemMedia()
     case .nextEpisode:
       guard controller.canPlayNext,
         controller.canPlay || controller.canPause || controller.isPlaying
@@ -379,6 +418,7 @@ private final class NativeSystemMediaPlaybackTransport: SystemMediaPlaybackTrans
     case .stop: commands.stopCommand
     case .skipBackward: commands.skipBackwardCommand
     case .skipForward: commands.skipForwardCommand
+    case .previousEpisode: commands.previousTrackCommand
     case .nextEpisode: commands.nextTrackCommand
     }
   }

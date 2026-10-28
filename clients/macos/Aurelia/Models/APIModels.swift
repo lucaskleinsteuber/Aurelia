@@ -755,11 +755,23 @@ struct PlaybackQueueItem: Identifiable, Equatable, Sendable {
   var id: UUID { mediaId }
 }
 
+/// Progress is used only by an explicit Resume action. Episode navigation always plays from zero.
+enum PlaybackStartIntent: Equatable, Sendable {
+  case play, resume
+
+  func position(progress: PlaybackProgressResponse, automaticResume: Bool) -> Int64 {
+    self == .resume && automaticResume && !progress.isCompleted
+      ? max(0, progress.positionMilliseconds) : 0
+  }
+}
+
 struct PlaybackPresentation: Identifiable, Equatable, Sendable {
   let mediaId: UUID
   let title: String
   let subtitle: String?
   let queue: [PlaybackQueueItem]
+  let previousItems: [PlaybackQueueItem]
+  let startIntent: PlaybackStartIntent
   /// The series whose episodes share audio and subtitle choices; nil for a movie.
   let trackScope: UUID?
   let artwork: ArtworkSummary?
@@ -769,6 +781,8 @@ struct PlaybackPresentation: Identifiable, Equatable, Sendable {
     title: String,
     subtitle: String?,
     queue: [PlaybackQueueItem] = [],
+    previousItems: [PlaybackQueueItem] = [],
+    startIntent: PlaybackStartIntent = .play,
     trackScope: UUID? = nil,
     artwork: ArtworkSummary? = nil
   ) {
@@ -776,6 +790,8 @@ struct PlaybackPresentation: Identifiable, Equatable, Sendable {
     self.title = title
     self.subtitle = subtitle
     self.queue = queue
+    self.previousItems = previousItems
+    self.startIntent = startIntent
     self.trackScope = trackScope
     self.artwork = artwork
   }

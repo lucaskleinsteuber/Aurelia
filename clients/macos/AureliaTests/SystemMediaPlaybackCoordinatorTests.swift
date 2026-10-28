@@ -58,6 +58,53 @@ struct SystemMediaPlaybackCoordinatorTests {
     #expect(SystemMediaCommand.allCases.allSatisfy { transport.enabled[$0] == false })
   }
 
+  @Test func episodeMenuPolicyRejectsFieldsSheetsAndInactiveWindows() {
+    #expect(
+      EpisodeKeyboardPolicy.permits(
+        isKeyWindow: true, hasSheet: false, isTextEditing: false, isBlocked: false))
+    #expect(
+      !EpisodeKeyboardPolicy.permits(
+        isKeyWindow: false, hasSheet: false, isTextEditing: false, isBlocked: false))
+    #expect(
+      !EpisodeKeyboardPolicy.permits(
+        isKeyWindow: true, hasSheet: true, isTextEditing: false, isBlocked: false))
+    #expect(
+      !EpisodeKeyboardPolicy.permits(
+        isKeyWindow: true, hasSheet: false, isTextEditing: true, isBlocked: false))
+    #expect(
+      !EpisodeKeyboardPolicy.permits(
+        isKeyWindow: true, hasSheet: false, isTextEditing: false, isBlocked: true))
+  }
+
+  @Test func videoSurfaceEpisodeShortcutsLeaveModifiedKeysAlone() {
+    #expect(SystemMediaCommand.episodeShortcut(characters: "n", modified: false) == .nextEpisode)
+    #expect(
+      SystemMediaCommand.episodeShortcut(characters: "P", modified: false) == .previousEpisode)
+    #expect(SystemMediaCommand.episodeShortcut(characters: "n", modified: true) == nil)
+    #expect(
+      SystemMediaCommand.episodeShortcut(characters: "n", modified: false, isRepeat: true) == nil)
+    #expect(SystemMediaCommand.episodeShortcut(characters: "p", modified: true) == nil)
+    #expect(SystemMediaCommand.episodeShortcut(characters: nil, modified: false) == nil)
+    #expect(SystemMediaCommand.episodeShortcut(characters: "m", modified: false) == nil)
+  }
+
+  @Test func previousAndNextCommandsFollowTheFirstMiddleAndLastEpisodeBoundaries() {
+    let transport = FakeSystemMediaTransport()
+    let coordinator = SystemMediaPlaybackCoordinator(transport: transport)
+    let controller = FakeSystemMediaController(title: "Synthetic episode")
+    coordinator.register(controller)
+    defer { coordinator.unregister(controller) }
+    for (previous, next) in [(false, true), (true, true), (true, false)] {
+      controller.canPlayPrevious = previous
+      controller.canPlayNext = next
+      coordinator.update(controller)
+      #expect(transport.enabled[.previousEpisode] == previous)
+      #expect(transport.enabled[.nextEpisode] == next)
+      #expect(transport.send(.previousEpisode) == (previous ? .success : .unavailable))
+      #expect(transport.send(.nextEpisode) == (next ? .success : .unavailable))
+    }
+  }
+
   @Test
   func nativePlayPauseToggleAndStopRetainTheCurrentPosition() {
     let transport = FakeSystemMediaTransport()
@@ -551,6 +598,7 @@ private final class FakeSystemMediaController: SystemMediaPlaybackControlling {
   var canPause = true
   var canSeek = true
   var canPlayNext = false
+  var canPlayPrevious = false
   var seeks: [Int64] = []
   var commands: [SystemMediaCommand] = []
   var playThreadsWereMain: [Bool] = []
@@ -563,6 +611,13 @@ private final class FakeSystemMediaController: SystemMediaPlaybackControlling {
     guard canSeek else { return }
     seeks.append(milliseconds)
     currentTimeMilliseconds = milliseconds
+  }
+
+  func playPreviousFromSystemMedia() -> Bool {
+    guard canPlayPrevious else { return false }
+    commands.append(.previousEpisode)
+    canPlayPrevious = false
+    return true
   }
 
   func playNextFromSystemMedia() -> Bool {

@@ -114,6 +114,13 @@ conflict failures remain visible; a conflict never replaces another device’s e
 The sleep timer stops playback and informs the server when it actually ends, so the server’s
 existing sleep mode can take effect. Closing the player manually does not send that signal.
 
+Play starts a title at 0:00. Resume and Continue Watching may use its saved position when
+Automatic Resume is enabled. Previous Episode and Next Episode, including Up Next and
+natural episode changes, always start at 0:00. The N and P keys invoke those episode actions;
+text fields, open menus and dialogs keep their normal keys. Episode buttons are disabled at
+the beginning or end of the available series. Specials are kept outside that normal queue.
+Manual navigation saves the position being left; only an actual end marks it watched.
+
 The player saves the position every ten seconds, when pausing and when closing. Each save
 names the revision it builds on, so it never overwrites newer progress from another
 device. If another device saved meanwhile, that position wins quietly and the browser

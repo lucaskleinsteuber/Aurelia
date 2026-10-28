@@ -68,11 +68,39 @@ enum HomePresentationLogic {
 }
 
 enum CatalogPlaybackLogic {
-  static func presentation(for item: CatalogItemSummary) -> PlaybackPresentation? {
+  static func presentation(
+    for item: CatalogItemSummary, intent: PlaybackStartIntent = .play
+  ) -> PlaybackPresentation? {
     guard item.isPlayable else { return nil }
     return PlaybackPresentation(
-      mediaId: item.id, title: item.title, subtitle: subtitle(for: item),
+      mediaId: item.id, title: item.title, subtitle: subtitle(for: item), startIntent: intent,
       artwork: artwork(for: item))
+  }
+
+  static func previousEpisodes(in detail: CatalogDetailPresentation, before mediaID: UUID)
+    -> [PlaybackQueueItem]
+  {
+    let episodes = detail.seasons.filter { $0.number > 0 }.sorted { $0.number < $1.number }
+      .flatMap { $0.episodes.sorted { $0.episodeNumber < $1.episodeNumber } }.map(\.item)
+    guard let index = episodes.firstIndex(where: { $0.id == mediaID }) else { return [] }
+    return episodes.prefix(index).filter(\.isPlayable).map {
+      PlaybackQueueItem(
+        mediaId: $0.id, title: $0.title, subtitle: subtitle(for: $0), artwork: artwork(for: $0))
+    }
+  }
+
+  /// The series response is already access-filtered; never invent previous items outside it.
+  static func previousEpisodes(in series: SeriesDetailResponse, before mediaID: UUID)
+    -> [PlaybackQueueItem]
+  {
+    let episodes = series.seasons.filter { $0.number > 0 }.sorted { $0.number < $1.number }
+      .flatMap { $0.episodes.sorted { $0.episodeNumber < $1.episodeNumber } }
+    guard let index = episodes.firstIndex(where: { $0.id == mediaID }) else { return [] }
+    return episodes.prefix(index).filter { $0.availability == .available }.map {
+      PlaybackQueueItem(
+        mediaId: $0.id, title: $0.title,
+        subtitle: "\(series.title) · Season \($0.seasonNumber) · Episode \($0.episodeNumber)")
+    }
   }
 
   static func artwork(for item: CatalogItemSummary) -> ArtworkSummary? {

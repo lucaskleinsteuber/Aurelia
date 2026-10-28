@@ -277,7 +277,7 @@ struct MediaDetailView: View {
     allEpisodes: [EpisodePresentation]
   ) {
     if model.supportsLibraryState {
-      requestPlannedPlayback(mediaId: episode.id)
+      requestPlannedPlayback(mediaId: episode.id, intent: .play)
       return
     }
     let queue =
@@ -294,17 +294,23 @@ struct MediaDetailView: View {
       subtitle:
         "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))",
       queue: queue,
+      previousItems: episode.seasonNumber == 0
+        ? []
+        : allEpisodes.filter { $0.seasonNumber > 0 }
+          .prefix(while: { $0.id != episode.id }).map {
+            queuedEpisode($0, seriesTitle: seriesTitle)
+          },
       trackScope: episode.item.parentId,
       artwork: CatalogPlaybackLogic.artwork(for: episode.item)
     )
   }
 
-  private func requestPlannedPlayback(mediaId: UUID) {
+  private func requestPlannedPlayback(mediaId: UUID, intent: PlaybackStartIntent? = nil) {
     guard !isStartingPlayback else { return }
     isStartingPlayback = true
     let profile = model.profile
     playbackTask = Task {
-      do { try await model.startPlannedPlayback(mediaId: mediaId) } catch {
+      do { try await model.startPlannedPlayback(mediaId: mediaId, intent: intent) } catch {
         if model.profile == profile, !Task.isCancelled, !(error is CancellationError) {
           errorMessage = error.localizedDescription
         }

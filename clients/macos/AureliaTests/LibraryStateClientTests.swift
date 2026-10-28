@@ -16,6 +16,49 @@ import Testing
     #expect(!item.continueWatchingHidden)
   }
 
+  @Test func plannedActionAndExplicitMenuIntentNeverConfusePlayAndResume() throws {
+    for action in [PlaybackPlanAction.play, .resume, .playAgain] {
+      let plan = PlaybackPlanResponse(
+        target: item(), seriesId: nil, queue: [], action: action, continueWatchingEligible: true)
+      #expect(plan.presentation?.startIntent == (action == .resume ? .resume : .play))
+      #expect(plan.makePresentation(intent: .play)?.startIntent == .play)
+      #expect(plan.makePresentation(intent: .resume)?.startIntent == .resume)
+    }
+  }
+
+  @Test func previousEpisodeLookupOrdersSeasonsSkipsOfflineAndExcludesSpecials() {
+    let special = UUID()
+    let first = UUID()
+    let offline = UUID()
+    let middle = UUID()
+    let last = UUID()
+    func episode(_ id: UUID, _ season: Int, _ number: Int, _ available: Bool = true)
+      -> EpisodeSummary
+    {
+      EpisodeSummary(
+        id: id, title: "Synthetic \(number)", seasonNumber: season,
+        episodeNumber: number, availability: available ? .available : .missing)
+    }
+    let detail = SeriesDetailResponse(
+      id: UUID(), title: "Invented Series", availability: .available,
+      seasons: [
+        SeasonSummary(
+          number: 2, episodes: [episode(last, 2, 2), episode(middle, 2, 1)], supplements: []),
+        SeasonSummary(number: 0, episodes: [episode(special, 0, 1)], supplements: []),
+        SeasonSummary(
+          number: 1, episodes: [episode(offline, 1, 2, false), episode(first, 1, 1)],
+          supplements: []),
+      ], supplements: [])
+    #expect(
+      CatalogPlaybackLogic.previousEpisodes(in: detail, before: middle).map(\.mediaId) == [first])
+    #expect(
+      CatalogPlaybackLogic.previousEpisodes(in: detail, before: last).map(\.mediaId) == [
+        first, middle,
+      ])
+    #expect(CatalogPlaybackLogic.previousEpisodes(in: detail, before: first).isEmpty)
+    #expect(CatalogPlaybackLogic.previousEpisodes(in: detail, before: UUID()).isEmpty)
+  }
+
   @Test func combinedQueryEncodesReservedCharactersAndExplicitSearchSorting() throws {
     let query = CatalogBrowseQuery(
       favoritesOnly: true, genre: "Crime & Drama+",

@@ -424,12 +424,30 @@ function sameValues(left, right) {
     && left.isFinished === right.isFinished;
 }
 
-/** The episode after `current` in a season list, or the first one of the next season. */
-export function nextEpisode(seasons, currentId) {
-  const episodes = (seasons ?? []).flatMap((season) => season.episodes ?? []).map((entry) => entry.item);
+/** Normal episodes only, in explicit season/episode order; special features stay separate. */
+function orderedEpisodes(seasons) {
+  return (seasons ?? []).filter((season) => (season.number ?? season.seasonNumber ?? 1) > 0)
+    .slice().sort((a, b) => (a.number ?? a.seasonNumber) - (b.number ?? b.seasonNumber))
+    .flatMap((season) => (season.episodes ?? []).slice().sort((a, b) =>
+      (a.episodeNumber ?? a.item?.episodeNumber ?? 0) - (b.episodeNumber ?? b.item?.episodeNumber ?? 0)))
+    .map((entry) => entry.item).filter(Boolean);
+}
+
+export function adjacentEpisode(seasons, currentId, direction) {
+  const episodes = orderedEpisodes(seasons);
   const index = episodes.findIndex((item) => item.id === currentId);
   if (index < 0) return null;
-  return episodes.slice(index + 1).find((item) => item.availability === "available") ?? null;
+  const candidates = direction === "previous" ? episodes.slice(0, index).reverse() : episodes.slice(index + 1);
+  return candidates.find((item) => item.availability === "available") ?? null;
+}
+
+/** The episode after `current`, including the next season and skipping offline files. */
+export function nextEpisode(seasons, currentId) { return adjacentEpisode(seasons, currentId, "next"); }
+export function previousEpisode(seasons, currentId) { return adjacentEpisode(seasons, currentId, "previous"); }
+
+/** Resume is the only user action allowed to use persisted progress. */
+export function playbackStartSeconds(intent, progress, automaticResume = true) {
+  return intent === "resume" && automaticResume ? resumeSeconds(progress) : 0;
 }
 
 // MARK: Player, as in the Mac app

@@ -418,7 +418,7 @@ private struct HomePage: View {
         ) {
           ForEach(items) { item in
             Button {
-              model.startPlayback(item: item)
+              model.startPlayback(item: item, intent: .resume)
             } label: {
               LandscapeMediaCard(item: item, eyebrow: eyebrow)
             }
@@ -883,7 +883,7 @@ private struct LibraryPage: View {
     ) {
       ForEach(episodes) { episode in
         Button {
-          model.startPlayback(item: episode)
+          model.startPlayback(item: episode, intent: .play)
         } label: {
           LandscapeMediaCard(item: episode, width: 300, eyebrow: episodeSearchEyebrow(episode))
         }
