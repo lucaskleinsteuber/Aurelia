@@ -46,7 +46,8 @@ public static class LiveConversionPlanner
         => Plan(probe, request, canEncodeVideo, () => toneMapping);
 
     public static LiveConversionPlanResponse? Plan(MediaProbeResult probe, LiveConversionRequest request, bool canEncodeVideo,
-        Func<HdrToneMapping> resolveToneMapping)
+        Func<HdrToneMapping> resolveToneMapping,
+        IReadOnlyList<DiscoveredSidecarSubtitle>? sidecars = null)
     {
         if (probe.Video is not { Width: > 0, Height: > 0 } video) return null;
         var videoCodecs = Normalize(request.VideoCodecs);
@@ -62,6 +63,22 @@ public static class LiveConversionPlanner
                 copyAudio ? "copy" : "aac", copyAudio ? AudioCodec(track) : ConvertedAudioCodec);
         }).ToList();
         var first = tracks.FirstOrDefault(track => track.IsDefault) ?? tracks.FirstOrDefault();
+
+        var subtitleTracks = (probe.Subtitles ?? []).Select(track => new LiveSubtitleTrack(
+            track.Index, track.Codec, track.Language, track.Title, track.IsDefault, track.IsForced,
+            LiveSubtitles.CanConvert(track.Codec), IsSidecar: false)).ToList();
+
+        if (sidecars is not null)
+        {
+            for (var i = 0; i < sidecars.Count; i++)
+            {
+                var sc = sidecars[i];
+                subtitleTracks.Add(new LiveSubtitleTrack(
+                    1000 + i, sc.Format, sc.Language, sc.Title, sc.IsDefault, sc.IsForced, sc.Supported,
+                    IsSidecar: true, IsSdh: sc.IsSdh));
+            }
+        }
+
         return new LiveConversionPlanResponse(
             copy ? "copy" : "h264",
             copy ? VideoCodec(video) : ConvertedVideoCodec,
@@ -70,8 +87,7 @@ public static class LiveConversionPlanner
             probe.DurationSeconds,
             tracks,
             first?.Index,
-            (probe.Subtitles ?? []).Select(track => new LiveSubtitleTrack(track.Index, track.Codec, track.Language,
-                track.Title, track.IsDefault, track.IsForced, LiveSubtitles.CanConvert(track.Codec))).ToList());
+            subtitleTracks);
     }
 
     public static bool CanCopyVideo(ProbedVideo video, IReadOnlySet<string> playerCodecs)

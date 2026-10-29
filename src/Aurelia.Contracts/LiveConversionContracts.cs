@@ -36,7 +36,7 @@ public sealed record LiveAudioTrack(
     string Mode,
     string Codec);
 
-/// <summary>An embedded subtitle stream; bitmap formats are listed but cannot become WebVTT.</summary>
+/// <summary>An embedded or sidecar subtitle track; bitmap formats are listed but cannot become WebVTT.</summary>
 public sealed record LiveSubtitleTrack(
     int Index,
     string Format,
@@ -44,4 +44,6 @@ public sealed record LiveSubtitleTrack(
     string? Title,
     bool IsDefault,
     bool IsForced,
-    bool Supported);
+    bool Supported,
+    bool IsSidecar = false,
+    bool IsSdh = false);

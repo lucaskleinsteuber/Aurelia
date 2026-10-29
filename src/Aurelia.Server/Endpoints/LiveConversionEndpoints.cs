@@ -23,9 +23,12 @@ public static partial class LiveConversionEndpoints
         app.MapGet("/api/v1/streams/{ticket}/live", StreamAsync)
             .RequireAuthorization()
             .WithDisplayName("Stream converted media");
+        app.MapGet("/api/v1/streams/{ticket}/subtitles", ListSubtitlesAsync)
+            .RequireAuthorization()
+            .WithDisplayName("List available subtitle tracks");
         app.MapGet("/api/v1/streams/{ticket}/subtitles/{index:int}", SubtitlesAsync)
             .RequireAuthorization()
-            .WithDisplayName("Read embedded subtitles");
+            .WithDisplayName("Read embedded or sidecar subtitles");
     }
 
     private static async Task<IResult> PlanAsync(
@@ -49,7 +52,8 @@ public static partial class LiveConversionEndpoints
             var file = MediaFileAccess.OpenRead(media);
             await using var stream = file.Stream;
             var probe = await live.ProbeAsync(tools, file, Path.GetFullPath(media.SourcePath), media.Id, cancellationToken);
-            return LiveConversionPlanner.Plan(probe, request, tools.Encoder is not null, () => tools.ToneMapping) is { } plan
+            var sidecars = SidecarSubtitles.Discover(Path.GetFullPath(media.SourcePath));
+            return LiveConversionPlanner.Plan(probe, request, tools.Encoder is not null, () => tools.ToneMapping, sidecars) is { } plan
                 ? Results.Ok(plan)
                 : NotPossible();
         }
