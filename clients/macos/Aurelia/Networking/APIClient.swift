@@ -1509,6 +1509,14 @@ struct APIClient: Sendable {
           response = "{\"scans\":[],\"metadata\":[]}"
         }
       case "/api/v1/server/operations/current": response = "null"
+      case "/api/v1/server/health":
+        response = """
+          {"uptimeSeconds":3600,"freeDiskBytes":10737418240,"databaseBytes":1048576,
+          "scrubPreviewTitleCount":0,"scrubPreviewBytes":0,"scrubPreviewPendingCount":0,
+          "activeLiveConversions":0,"activeStreams":0,"offlineMediaCount":0,
+          "lastScan":null,"backgroundJobs":{"activeScans":0,"activeMetadataJobs":0,"activeScrubPreviewJobs":0},
+          "recentIssues":[],"backup":null}
+          """
       case "/api/v1/server/scrub-previews":
         response = """
           {"available":true,"mode":"off","intervalSeconds":15,"storageCapMegabytes":500,
