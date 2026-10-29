@@ -99,7 +99,7 @@ struct LibraryMaintenanceView: View {
   }
 }
 
-private struct LibraryResetSheet: View {
+struct LibraryResetSheet: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.dismiss) private var dismiss
   @State private var selected: Set<UUID> = []

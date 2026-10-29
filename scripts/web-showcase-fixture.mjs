@@ -64,6 +64,7 @@ export async function startShowcaseFixture({ webRoot, showcaseRoot, version = "S
     if (path.startsWith("/api/v1/streams/")) { violations.push("A media stream was requested."); return send(res, 403, { code: "showcase_no_media", message: "Showcase captures never load media." }); }
     if (req.method === "GET" && path === "/api/v1/server/info") return send(res, 200, { serverId: "00000000-0000-0000-0000-000000000004", name: "Home Server", version, isSetup: true, capabilities: ["live-conversion-v1", "library-state-v1"] });
     if (req.method === "GET" && path === "/api/v1/auth/me") return send(res, 200, profile);
+    if (req.method === "GET" && path === "/api/v1/watchlist") return send(res, 200, { items: [], totalCount: 0 });
     if (req.method === "GET" && path === "/api/v1/home") return send(res, 200, model.home);
     if (req.method === "GET" && path === "/api/v1/catalog/collections") return send(res, 200, model.collections.slice(Number(url.searchParams.get("offset") ?? 0), Number(url.searchParams.get("offset") ?? 0) + Number(url.searchParams.get("limit") ?? 100)));
     if (req.method === "GET" && model.artwork.has(path)) return send(res, 200, model.artwork.get(path), "image/jpeg");

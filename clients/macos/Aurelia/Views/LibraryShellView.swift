@@ -22,6 +22,13 @@ struct LibraryShellView: View {
   @State private var resizeStartWidth: CGFloat?
   @State private var findRequest: FindRequest?
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @AppStorage(GeneralPreferenceKeys.showMoviesInSidebar) private var showMoviesInSidebar = true
+  @AppStorage(GeneralPreferenceKeys.showSeriesInSidebar) private var showSeriesInSidebar = true
+  @AppStorage(GeneralPreferenceKeys.showWatchlistInSidebar) private var showWatchlistInSidebar =
+    true
+  @AppStorage(GeneralPreferenceKeys.showCollectionsInSidebar) private var showCollectionsInSidebar =
+    true
+  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen = "movies"
 
   var body: some View {
     GeometryReader { geometry in
@@ -156,7 +163,15 @@ struct LibraryShellView: View {
       defaults: LibraryBrowsePreferenceStore.applicationDefaults)
     let restored = store.load(
       serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
-    if restored == .watchlist && !model.supportsWatchlist {
+    if restored == .home {
+      switch defaultStartScreen {
+      case "movies": destination = .movies
+      case "series": destination = .tvShows
+      case "watchlist": destination = model.supportsWatchlist ? .watchlist : .home
+      case "recentlyAdded": destination = .recentlyAdded
+      default: destination = .home
+      }
+    } else if restored == .watchlist && !model.supportsWatchlist {
       destination = .home
     } else {
       destination = restored
@@ -178,13 +193,19 @@ struct LibraryShellView: View {
           sidebarButton(.home)
         }
         Section("Library") {
-          sidebarButton(.library)
-          if model.supportsWatchlist {
+          if showCollectionsInSidebar {
+            sidebarButton(.library)
+          }
+          if model.supportsWatchlist && showWatchlistInSidebar {
             sidebarButton(.watchlist)
           }
           sidebarButton(.recentlyAdded)
-          sidebarButton(.tvShows)
-          sidebarButton(.movies)
+          if showSeriesInSidebar {
+            sidebarButton(.tvShows)
+          }
+          if showMoviesInSidebar {
+            sidebarButton(.movies)
+          }
         }
       }
       .listStyle(.sidebar)

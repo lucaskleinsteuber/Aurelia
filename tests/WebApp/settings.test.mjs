@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { libraryPayload, loadManagementSections, managementPermissions, metadataPayload, profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, waitForLibraryOperation } from "../../src/Aurelia.Server/WebApp/js/logic.js";
+import {
+  GENERAL_DEFAULTS, PLAYBACK_DEFAULTS, SETTINGS_PAGES, libraryPayload, loadManagementSections,
+  managementPermissions, metadataPayload, normalizeGeneralPreferences, normalizePreferences,
+  profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, waitForLibraryOperation
+} from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
   assert.deepEqual(managementPermissions({ role: "owner", accessMode: "selectedTitles" }), { owner: true, administrator: true, storage: true });
@@ -203,4 +207,59 @@ test("server health loads metrics and background jobs for administrators", async
   assert.equal(sections.health.uptimeSeconds, 3600);
   assert.equal(sections.health.activeStreams, 1);
   assert.equal(sections.health.backup.totalBackups, 3);
+});
+
+test("playback and general preferences normalization preserves valid settings and applies defaults", () => {
+  const playback = normalizePreferences({});
+  assert.equal(playback.upNextCountdownSeconds, 15);
+  assert.equal(playback.resumeThresholdSeconds, 10);
+  assert.equal(playback.markWatchedThresholdPercent, 90);
+  assert.equal(playback.defaultAudioLanguage, "original");
+  assert.equal(playback.defaultSubtitleLanguage, "off");
+  assert.equal(playback.subtitleSize, "medium");
+  assert.equal(playback.subtitleBackground, "transparent");
+
+  const customPlayback = normalizePreferences({
+    upNextCountdownSeconds: 25,
+    resumeThresholdSeconds: 5,
+    markWatchedThresholdPercent: 95,
+    defaultAudioLanguage: "de",
+    defaultSubtitleLanguage: "en",
+    subtitleSize: "large",
+    subtitleBackground: "solid",
+  });
+  assert.equal(customPlayback.upNextCountdownSeconds, 25);
+  assert.equal(customPlayback.resumeThresholdSeconds, 5);
+  assert.equal(customPlayback.markWatchedThresholdPercent, 95);
+  assert.equal(customPlayback.defaultAudioLanguage, "de");
+  assert.equal(customPlayback.defaultSubtitleLanguage, "en");
+  assert.equal(customPlayback.subtitleSize, "large");
+  assert.equal(customPlayback.subtitleBackground, "solid");
+
+  const general = normalizeGeneralPreferences({});
+  assert.equal(general.defaultStartScreen, "continueWatching");
+  assert.equal(general.posterSize, "standard");
+  assert.equal(general.showWatchedInRows, true);
+  assert.equal(general.reduceHeroMotion, false);
+  assert.equal(general.rescanInterval, "1h");
+
+  const customGeneral = normalizeGeneralPreferences({
+    defaultStartScreen: "watchlist",
+    posterSize: "compact",
+    showWatchedInRows: false,
+    reduceHeroMotion: true,
+    rescanInterval: "15m",
+  });
+  assert.equal(customGeneral.defaultStartScreen, "watchlist");
+  assert.equal(customGeneral.posterSize, "compact");
+  assert.equal(customGeneral.showWatchedInRows, false);
+  assert.equal(customGeneral.reduceHeroMotion, true);
+  assert.equal(customGeneral.rescanInterval, "15m");
+});
+
+test("settings pages include all 8 structured categories and account alias", () => {
+  const expected = ["general", "playback", "library", "metadata", "profiles", "server", "updates", "advanced", "account"];
+  for (const page of expected) {
+    assert.ok(SETTINGS_PAGES.includes(page), `Page ${page} should be present in SETTINGS_PAGES`);
+  }
 });

@@ -155,7 +155,7 @@ enum UpNextPolicy {
 
   static func shows(
     position: Int64, duration: Int64, hasNext: Bool, autoplay: Bool, stopsAtEnd: Bool,
-    dismissed: Bool
+    dismissed: Bool, lead: Int64 = lead
   ) -> Bool {
     guard hasNext, autoplay, !stopsAtEnd, !dismissed, duration >= 300_000, position > 0 else {
       return false

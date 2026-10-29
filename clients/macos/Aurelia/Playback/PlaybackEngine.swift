@@ -49,7 +49,14 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     seekInterval: 10,
     preventSleepDuringPlayback: true,
     automaticallyPlayNextEpisode: true,
-    nightMode: false)
+    nightMode: false,
+    upNextCountdownSeconds: 15,
+    resumeThresholdSeconds: 10,
+    markWatchedThresholdPercent: 90,
+    defaultAudioLanguage: "original",
+    defaultSubtitleLanguage: "off",
+    subtitleSize: "medium",
+    subtitleBackground: "transparent")
 
   var automaticResume: Bool
   var defaultPlaybackRate: Double
@@ -60,6 +67,47 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var automaticallyPlayNextEpisode: Bool
   /// Softens loud scenes and lifts quiet dialogue.
   var nightMode: Bool
+  var upNextCountdownSeconds: Int
+  var resumeThresholdSeconds: Int
+  var markWatchedThresholdPercent: Int
+  var defaultAudioLanguage: String
+  var defaultSubtitleLanguage: String
+  var subtitleSize: String
+  var subtitleBackground: String
+
+  init(
+    automaticResume: Bool,
+    defaultPlaybackRate: Double,
+    defaultVolume: Double,
+    controlsAutoHideDelay: Double,
+    seekInterval: Int,
+    preventSleepDuringPlayback: Bool,
+    automaticallyPlayNextEpisode: Bool,
+    nightMode: Bool,
+    upNextCountdownSeconds: Int = 15,
+    resumeThresholdSeconds: Int = 10,
+    markWatchedThresholdPercent: Int = 90,
+    defaultAudioLanguage: String = "original",
+    defaultSubtitleLanguage: String = "off",
+    subtitleSize: String = "medium",
+    subtitleBackground: String = "transparent"
+  ) {
+    self.automaticResume = automaticResume
+    self.defaultPlaybackRate = defaultPlaybackRate
+    self.defaultVolume = defaultVolume
+    self.controlsAutoHideDelay = controlsAutoHideDelay
+    self.seekInterval = seekInterval
+    self.preventSleepDuringPlayback = preventSleepDuringPlayback
+    self.automaticallyPlayNextEpisode = automaticallyPlayNextEpisode
+    self.nightMode = nightMode
+    self.upNextCountdownSeconds = upNextCountdownSeconds
+    self.resumeThresholdSeconds = resumeThresholdSeconds
+    self.markWatchedThresholdPercent = markWatchedThresholdPercent
+    self.defaultAudioLanguage = defaultAudioLanguage
+    self.defaultSubtitleLanguage = defaultSubtitleLanguage
+    self.subtitleSize = subtitleSize
+    self.subtitleBackground = subtitleBackground
+  }
 
   var normalized: PlaybackPreferences {
     var value = self
@@ -69,6 +117,9 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     value.defaultVolume = min(max(value.defaultVolume, 0), 1)
     value.controlsAutoHideDelay = min(max(value.controlsAutoHideDelay, 1), 10)
     value.seekInterval = min(max(value.seekInterval, 5), 60)
+    value.upNextCountdownSeconds = min(max(value.upNextCountdownSeconds, 5), 30)
+    value.resumeThresholdSeconds = min(max(value.resumeThresholdSeconds, 0), 120)
+    value.markWatchedThresholdPercent = min(max(value.markWatchedThresholdPercent, 50), 99)
     return value
   }
 }
@@ -77,6 +128,8 @@ extension PlaybackPreferences {
   private enum CodingKeys: String, CodingKey {
     case automaticResume, defaultPlaybackRate, defaultVolume, controlsAutoHideDelay
     case seekInterval, preventSleepDuringPlayback, automaticallyPlayNextEpisode, nightMode
+    case upNextCountdownSeconds, resumeThresholdSeconds, markWatchedThresholdPercent
+    case defaultAudioLanguage, defaultSubtitleLanguage, subtitleSize, subtitleBackground
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -92,7 +145,22 @@ extension PlaybackPreferences {
         Bool.self, forKey: .preventSleepDuringPlayback),
       automaticallyPlayNextEpisode: try container.decode(
         Bool.self, forKey: .automaticallyPlayNextEpisode),
-      nightMode: try container.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false)
+      nightMode: try container.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false,
+      upNextCountdownSeconds: try container.decodeIfPresent(
+        Int.self, forKey: .upNextCountdownSeconds)
+        ?? 15,
+      resumeThresholdSeconds: try container.decodeIfPresent(
+        Int.self, forKey: .resumeThresholdSeconds)
+        ?? 10,
+      markWatchedThresholdPercent: try container.decodeIfPresent(
+        Int.self, forKey: .markWatchedThresholdPercent) ?? 90,
+      defaultAudioLanguage: try container.decodeIfPresent(
+        String.self, forKey: .defaultAudioLanguage) ?? "original",
+      defaultSubtitleLanguage: try container.decodeIfPresent(
+        String.self, forKey: .defaultSubtitleLanguage) ?? "off",
+      subtitleSize: try container.decodeIfPresent(String.self, forKey: .subtitleSize) ?? "medium",
+      subtitleBackground: try container.decodeIfPresent(
+        String.self, forKey: .subtitleBackground) ?? "transparent")
   }
 }
 

@@ -852,10 +852,12 @@ final class PlaybackController: ObservableObject {
     authorizationFailed = false
     terminalFailure = false
     playbackIDs.insert(source.id)
-    resumePositionMilliseconds =
+    let calculated =
       resumeOverride
       ?? presentation.startIntent.position(
         progress: source.progress, automaticResume: preferences.automaticResume)
+    let threshold = Int64(preferences.resumeThresholdSeconds) * 1_000
+    resumePositionMilliseconds = calculated < threshold ? 0 : calculated
     appliedResumePosition = resumePositionMilliseconds == 0
     recovering = false
     recoveryMessage = nil
@@ -1068,10 +1070,11 @@ final class PlaybackController: ObservableObject {
 
   private func updateUpNext() {
     let next = queuedItems.first
+    let leadMs = Int64(preferences.upNextCountdownSeconds) * 1_000
     let shown = UpNextPolicy.shows(
       position: currentTimeMilliseconds, duration: durationMilliseconds, hasNext: next != nil,
       autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,
-      dismissed: upNextDismissed)
+      dismissed: upNextDismissed, lead: leadMs)
     let card = next.flatMap { next in
       shown
         ? PlaybackUpNext(

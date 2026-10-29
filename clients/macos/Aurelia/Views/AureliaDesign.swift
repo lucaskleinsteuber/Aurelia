@@ -401,6 +401,54 @@ struct AureliaSettingsSection<Content: View>: View {
   }
 }
 
+struct AureliaDangerZoneSection<Content: View>: View {
+  let title: String
+  let description: String?
+  let content: Content
+
+  init(
+    _ title: String = "Danger Zone",
+    description: String? =
+      "These actions are destructive and cannot be undone. They require the Server Password.",
+    @ViewBuilder content: () -> Content
+  ) {
+    self.title = title
+    self.description = description
+    self.content = content()
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack(spacing: 10) {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .font(.system(size: 16, weight: .semibold))
+          .foregroundStyle(.red)
+          .frame(width: 22)
+        Text(title)
+          .font(AureliaDesign.sectionTitle)
+          .foregroundStyle(.red)
+      }
+      if let description {
+        Text(description)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      content
+    }
+    .padding(20)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(
+      AureliaDesign.canvas,
+      in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)
+        .stroke(Color.red.opacity(0.35), lineWidth: 1)
+    )
+  }
+}
+
 struct AureliaSearchField: View {
   let prompt: String
   @Binding var text: String

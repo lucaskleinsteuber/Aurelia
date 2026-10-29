@@ -267,7 +267,7 @@ export function scrubPreviewUsageText(settings) {
 }
 
 const BROWSE_SECTIONS = ["library", "recent", "movies", "shows"];
-const SETTINGS_PAGES = ["general", "playback", "account", "server"];
+export const SETTINGS_PAGES = ["general", "playback", "library", "metadata", "profiles", "server", "updates", "advanced", "account"];
 
 /** Library filters from an address's query, without the defaults. */
 function parseFilters(query) {
@@ -326,7 +326,8 @@ export function parseRoute(pathname = "/", search = "") {
   if (parts.length === 1 && parts[0] === "collections") return { name: "collections" };
   if (parts.length === 1 && parts[0] === "search") return { name: "search", query: query.get("q") ?? "" };
   if (parts[0] === "settings" && parts.length <= 2) {
-    const page = parts[1] ?? "general";
+    let page = parts[1] ?? "general";
+    if (page === "account") page = "profiles";
     return SETTINGS_PAGES.includes(page) ? { name: "settings", page } : { name: "settings", page: "general" };
   }
   if (parts.length === 2 && parts[0] === "title" && uuid.test(parts[1])) return { name: "title", id: parts[1].toLowerCase() };
@@ -548,6 +549,13 @@ export const PLAYBACK_DEFAULTS = Object.freeze({
   automaticallyPlayNextEpisode: true,
   keepScreenOn: true,
   nightMode: false,
+  upNextCountdownSeconds: 15,
+  resumeThresholdSeconds: 10,
+  markWatchedThresholdPercent: 90,
+  defaultAudioLanguage: "original",
+  defaultSubtitleLanguage: "off",
+  subtitleSize: "medium",
+  subtitleBackground: "transparent",
 });
 
 /** Playback preferences of this browser, kept within the same limits as on the Mac. */
@@ -563,6 +571,42 @@ export function normalizePreferences(value) {
     automaticallyPlayNextEpisode: merged.automaticallyPlayNextEpisode !== false,
     keepScreenOn: merged.keepScreenOn !== false,
     nightMode: merged.nightMode === true,
+    upNextCountdownSeconds: Math.round(number(merged.upNextCountdownSeconds, 5, 30, 15)),
+    resumeThresholdSeconds: Math.round(number(merged.resumeThresholdSeconds, 0, 120, 10)),
+    markWatchedThresholdPercent: Math.round(number(merged.markWatchedThresholdPercent, 50, 99, 90)),
+    defaultAudioLanguage: typeof merged.defaultAudioLanguage === "string" ? merged.defaultAudioLanguage : "original",
+    defaultSubtitleLanguage: typeof merged.defaultSubtitleLanguage === "string" ? merged.defaultSubtitleLanguage : "off",
+    subtitleSize: ["small", "medium", "large"].includes(merged.subtitleSize) ? merged.subtitleSize : "medium",
+    subtitleBackground: ["transparent", "semiTransparent", "solid"].includes(merged.subtitleBackground) ? merged.subtitleBackground : "transparent",
+  };
+}
+
+export const GENERAL_DEFAULTS = Object.freeze({
+  defaultStartScreen: "continueWatching",
+  posterSize: "standard",
+  showWatchedInRows: true,
+  reduceHeroMotion: false,
+  showMoviesInSidebar: true,
+  showSeriesInSidebar: true,
+  showWatchlistInSidebar: true,
+  showCollectionsInSidebar: true,
+  hideOfflineTitles: false,
+  rescanInterval: "1h",
+});
+
+export function normalizeGeneralPreferences(value) {
+  const merged = { ...GENERAL_DEFAULTS, ...(value && typeof value === "object" ? value : {}) };
+  return {
+    defaultStartScreen: ["movies", "shows", "continueWatching", "watchlist"].includes(merged.defaultStartScreen) ? merged.defaultStartScreen : "continueWatching",
+    posterSize: ["compact", "standard", "large"].includes(merged.posterSize) ? merged.posterSize : "standard",
+    showWatchedInRows: merged.showWatchedInRows !== false,
+    reduceHeroMotion: merged.reduceHeroMotion === true,
+    showMoviesInSidebar: merged.showMoviesInSidebar !== false,
+    showSeriesInSidebar: merged.showSeriesInSidebar !== false,
+    showWatchlistInSidebar: merged.showWatchlistInSidebar !== false,
+    showCollectionsInSidebar: merged.showCollectionsInSidebar !== false,
+    hideOfflineTitles: merged.hideOfflineTitles === true,
+    rescanInterval: ["manual", "15m", "1h", "6h", "24h"].includes(merged.rescanInterval) ? merged.rescanInterval : "1h",
   };
 }
 
