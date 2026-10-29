@@ -82,7 +82,7 @@ struct TVBrowseQuery: Codable, Equatable, Sendable {
 }
 
 enum TVBrowseSection: String, Codable, Sendable {
-  case movies, shows, search, favorites, recentlyAdded, continueWatching
+  case movies, shows, search, favorites, recentlyAdded, continueWatching, watchlist
   var fixedKind: TVMediaKind? {
     switch self {
     case .movies: .movie
@@ -98,6 +98,7 @@ enum TVBrowseSection: String, Codable, Sendable {
     case .favorites: "Favorites"
     case .recentlyAdded: "Recently Added"
     case .continueWatching: "Continue Watching"
+    case .watchlist: "Watchlist"
     }
   }
   var defaultQuery: TVBrowseQuery {

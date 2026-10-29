@@ -26,7 +26,13 @@ final class TVAppModel: ObservableObject {
   let shows = TVLibraryListing(kind: .series)
   let artwork = TVArtworkPipeline()
   @Published var progressWarning: String?
+  @Published private(set) var capabilities: TVCapabilities?
+  @Published private(set) var watchlistItems: [TVCatalogItem] = []
+  @Published private(set) var watchlistIds: Set<UUID> = []
   @Published private(set) var home: TVHome?
+
+  var supportsWatchlist: Bool { capabilities?.supportsWatchlistAndPeople ?? false }
+  var supportsScrubPreviews: Bool { capabilities?.supportsScrubPreviews ?? false }
   @Published private(set) var homeLoading = false
   @Published private(set) var homeError: String?
   @Published private(set) var libraryRefresh = UUID()
@@ -67,6 +73,12 @@ final class TVAppModel: ObservableObject {
     #if DEBUG
       if let scenario = TVUITestScenario.current {
         connection = TVUITestFixtures.connection
+        capabilities = TVCapabilities(
+          formatVersion: 2, minimumClientVersion: "1.0",
+          capabilities: [
+            "device-authorization-v1", "library-state-v1", "watchlist-people-v1",
+            "scrub-previews-v1",
+          ])
         if scenario == .profiles {
           phase = .profiles
           await refreshProfiles()
@@ -106,6 +118,7 @@ final class TVAppModel: ObservableObject {
         let capabilities = try await makeClient(inspected: candidate).capabilities()
         try validate(capabilities)
         guard current(run) else { return }
+        self.capabilities = capabilities
         guard candidate.info.isSetup else {
           throw TVCoreError.server(
             status: 409, code: "setup_required",
@@ -137,7 +150,9 @@ final class TVAppModel: ObservableObject {
       let candidate = try await inspectKnownServer(saved, run: run)
       guard current(run) else { return }
       var relocated = saved.relocating(to: candidate.baseURL)
-      try validate(try await makeClient(connection: relocated).capabilities())
+      let caps = try await makeClient(connection: relocated).capabilities()
+      try validate(caps)
+      self.capabilities = caps
       if let pending = relocated.pendingAcknowledgement {
         let receipt = try await makeClient(connection: relocated).acknowledgePairing(
           id: pending.id, secret: pending.secret)
@@ -568,6 +583,8 @@ final class TVAppModel: ObservableObject {
     pendingProgress.removeAll()
     acknowledgedProgress.removeAll()
     mutationSummaries.removeAll()
+    watchlistItems = []
+    watchlistIds = []
     syncTask?.cancel()
     syncTask = nil
     progressObserver?.cancel()
@@ -614,12 +631,49 @@ final class TVAppModel: ObservableObject {
       if let item = value.recommendation { mutationSummaries[item.id] = nil }
       home = value
       homeError = nil
+      if supportsWatchlist {
+        await loadWatchlist()
+      }
     } catch {
       guard !Task.isCancelled, session?.sessionId == sessionID, homeRequest == request else {
         return
       }
       homeError = error.localizedDescription
       handleSessionFailure(error)
+    }
+  }
+
+  func isWatchlisted(_ mediaId: UUID) -> Bool {
+    watchlistIds.contains(mediaId)
+  }
+
+  func loadWatchlist() async {
+    guard let api = client, let sessionID = session?.sessionId, supportsWatchlist else { return }
+    do {
+      let response = try await api.watchlist()
+      guard !Task.isCancelled, session?.sessionId == sessionID else { return }
+      watchlistItems = response.items
+      watchlistIds = Set(response.mediaIds)
+    } catch {
+      handleSessionFailure(error)
+    }
+  }
+
+  func setWatchlist(mediaId: UUID, isWatchlisted: Bool) async -> Bool {
+    guard let api = client, supportsWatchlist else { return false }
+    do {
+      let state = try await api.setWatchlist(mediaID: mediaId, isWatchlisted: isWatchlisted)
+      if state.isWatchlisted {
+        watchlistIds.insert(mediaId)
+      } else {
+        watchlistIds.remove(mediaId)
+        watchlistItems.removeAll { $0.id == mediaId }
+      }
+      Task { await loadWatchlist() }
+      return true
+    } catch {
+      handleSessionFailure(error)
+      return false
     }
   }
 

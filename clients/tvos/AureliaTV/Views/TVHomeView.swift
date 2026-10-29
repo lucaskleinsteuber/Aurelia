@@ -24,11 +24,14 @@ struct TVHomeView: View {
           }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
+          if model.supportsWatchlist && !model.watchlistItems.isEmpty {
+            shelf("Watchlist", items: model.watchlistItems, section: .watchlist)
+          }
           ForEach(model.homeGenres) { row in genreShelf(row) }
           shelf("Favorites", items: home.favorites, section: .favorites)
           if !home.collections.isEmpty { collections(home.collections) }
           shelf("Recently Added", items: home.recentlyAdded, section: .recentlyAdded)
-          if home.continueWatching.isEmpty && home.favorites.isEmpty && home.recentlyAdded.isEmpty {
+          if home.continueWatching.isEmpty && model.watchlistItems.isEmpty && home.favorites.isEmpty && home.recentlyAdded.isEmpty {
             ContentUnavailableView("Your Library Is Empty", systemImage: "film")
           }
         }

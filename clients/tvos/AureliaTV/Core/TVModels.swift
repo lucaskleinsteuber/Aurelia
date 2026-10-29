@@ -141,6 +141,8 @@ struct TVCapabilities: Codable, Equatable, Sendable {
     else { throw TVCoreError.unsupportedServer }
   }
   var supportsArtworkVariants: Bool { capabilities?.contains("artwork-variants-v1") == true }
+  var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
+  var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
 }
 
 struct TVUser: Codable, Equatable, Sendable {
@@ -366,6 +368,27 @@ struct TVPage<Item: Codable & Sendable>: Codable, Sendable {
   let limit: Int
   let total: Int
   let revision: String?
+}
+
+struct TVSetWatchlistRequest: Encodable, Sendable {
+  let isWatchlisted: Bool
+}
+
+struct TVWatchlistItemState: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let isWatchlisted: Bool
+}
+
+struct TVWatchlistResponse: Codable, Equatable, Sendable {
+  let items: [TVCatalogItem]
+  let mediaIds: [UUID]
+}
+
+struct TVPersonDetailResponse: Codable, Equatable, Sendable {
+  let name: String
+  let subtitle: String?
+  let profile: TVArtwork?
+  let items: [TVCatalogItem]
 }
 
 enum TVCatalogPageValidator {

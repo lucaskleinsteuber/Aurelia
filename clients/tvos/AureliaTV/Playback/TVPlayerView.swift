@@ -77,6 +77,7 @@ struct TVPlayerView: View {
     .onChange(of: controller.duration) { _, _ in configurePreviews() }
     .onChange(of: controller.currentMediaID) { _, _ in configurePreviews() }
     .onChange(of: controller.previewsParallel) { _, _ in configurePreviews() }
+    .onChange(of: controller.supportsServerScrubPreviews) { _, _ in configurePreviews() }
     .onChange(of: controller.scrubPosition) { _, position in
       if let position { previews.request(at: position) }
     }
@@ -91,16 +92,19 @@ struct TVPlayerView: View {
       }
       if value != .timeline { controller.cancelScrub() }
     }
-    .task(id: controller.controlsVisible) {
-      let visible = controller.controlsVisible
+    .task(id: "\(controller.controlsVisible)-\(controller.isStarting)") {
+      let visible = controller.controlsVisible && !controller.isStarting
       await Task.yield()
       await Task.yield()
-      guard !Task.isCancelled, controller.controlsVisible == visible, controller.trackMenu == nil
+      guard !Task.isCancelled, (controller.controlsVisible && !controller.isStarting) == visible,
+        controller.trackMenu == nil
       else { return }
       focus = visible ? .play : .surface
     }
-    .task(id: controller.isLoading) {
-      guard !controller.isLoading, controller.controlsVisible, controller.trackMenu == nil else {
+    .task(id: "\(controller.isLoading)-\(controller.isStarting)") {
+      guard !controller.isLoading, controller.controlsVisible, !controller.isStarting,
+        controller.trackMenu == nil
+      else {
         return
       }
       await Task.yield()
@@ -310,7 +314,7 @@ struct TVPlayerView: View {
       }
       .accessibilityIdentifier("player-timeline").accessibilityLabel("Playback position")
       .accessibilityValue(
-        "\(TVPlayerPolicy.timeLabel(milliseconds: controller.position)) of \(TVPlayerPolicy.timeLabel(milliseconds: controller.duration))"
+        "\(TVPlayerPolicy.timeLabel(milliseconds: controller.scrubPosition ?? controller.position)) of \(TVPlayerPolicy.timeLabel(milliseconds: controller.duration))"
       )
       .accessibilityAdjustableAction { direction in
         switch direction {
@@ -336,9 +340,18 @@ struct TVPlayerView: View {
   }
 
   private func configurePreviews() {
+    let fetcher: (@MainActor (UUID, Int64) async -> Data?)?
+    if controller.supportsServerScrubPreviews {
+      fetcher = { [weak controller] id, sec in
+        await controller?.fetchScrubPreviewFrame(mediaID: id, seconds: Int(sec))
+      }
+    } else {
+      fetcher = nil
+    }
     previews.configure(
       mediaID: controller.currentMediaID, source: controller.previewSourceURL,
-      duration: controller.duration, parallel: controller.previewsParallel)
+      duration: controller.duration, parallel: controller.previewsParallel,
+      serverFrameFetcher: fetcher)
   }
 
   /// The frame at the scrub position above the timeline; it never leaves memory.

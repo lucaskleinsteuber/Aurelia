@@ -160,6 +160,7 @@
     private var favorites = Set<UUID>()
     private var hidden = Set<UUID>()
     private var watched = Set<UUID>()
+    private var watchlist = Set<UUID>()
     private var revision = 1
     private func item(_ value: [String: Any]) -> [String: Any] {
       var value = value
@@ -360,6 +361,33 @@
           saved[id]?["isCompleted"] = payload["isFinished"] as? Bool ?? false
         }
         body = saved[id] ?? TVUITestFixtures.progress(id: id)
+      } else if path == "/api/v1/watchlist" {
+        let items = watchlist.map { id in
+          item(id == TVUITestFixtures.seriesID ? TVUITestFixtures.series() : TVUITestFixtures.movie())
+        }
+        body = [
+          "items": items,
+          "mediaIds": Array(watchlist).map(\.uuidString),
+        ]
+      } else if path.hasSuffix("/watchlist") && request.httpMethod == "PUT" {
+        let id = UUID(uuidString: url.pathComponents[url.pathComponents.count - 2])!
+        let isWatchlisted = payload["isWatchlisted"] as? Bool ?? false
+        if isWatchlisted { watchlist.insert(id) } else { watchlist.remove(id) }
+        body = [
+          "mediaId": id.uuidString,
+          "isWatchlisted": isWatchlisted,
+        ]
+      } else if path == "/api/v1/catalog/person" {
+        let name = parameter("name") ?? "Unknown"
+        body = [
+          "name": name,
+          "subtitle": "Actor",
+          "profile": NSNull(),
+          "items": [item(TVUITestFixtures.movie())],
+        ]
+      } else if path.contains("/scrub-previews/") {
+        return TVHTTPResponse(
+          statusCode: 503, headers: [:], body: Data(), fingerprint: TVUITestFixtures.fingerprint)
       } else if request.httpMethod == "DELETE" || path == "/api/v1/profile/end" {
         return TVHTTPResponse(
           statusCode: 204, headers: [:], body: Data(), fingerprint: TVUITestFixtures.fingerprint)

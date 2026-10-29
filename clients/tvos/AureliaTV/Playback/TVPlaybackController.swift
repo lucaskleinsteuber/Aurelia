@@ -38,6 +38,7 @@ final class TVPlaybackController: ObservableObject {
   /// the server counts apart from playback, and its failures never touch playback.
   @Published private(set) var previewSourceURL: URL?
   @Published private(set) var previewsParallel = false
+  @Published private(set) var supportsServerScrubPreviews = false
   @Published private(set) var currentMediaID: UUID
   @Published var trackMenu: TrackMenu? {
     didSet { userInteracted() }
@@ -145,6 +146,7 @@ final class TVPlaybackController: ObservableObject {
     Task { [weak self, api] in
       let features = (try? await api.capabilities())?.capabilities ?? []
       self?.previewsParallel = features.contains(TVScrubPreviewPlan.serverFeature)
+      self?.supportsServerScrubPreviews = features.contains(TVScrubPreviewPlan.serverScrubPreviewsFeature)
     }
     progressTask = Task { [weak self] in
       while !Task.isCancelled {
@@ -157,6 +159,7 @@ final class TVPlaybackController: ObservableObject {
 
   func togglePlayPause() {
     guard !closed, errorMessage == nil else { return }
+    if scrubPosition != nil { commitScrub() }
     wantsPlayback.toggle()
     if !wantsPlayback { isStarting = false }
     if wantsPlayback { engine.play() } else { engine.pause() }
@@ -372,6 +375,11 @@ final class TVPlaybackController: ObservableObject {
     userInteracted()
   }
 
+  func fetchScrubPreviewFrame(mediaID: UUID, seconds: Int) async -> Data? {
+    guard supportsServerScrubPreviews else { return nil }
+    return try? await api.scrubPreviewFrame(mediaID: mediaID, seconds: seconds)
+  }
+
   /// Starts the next episode now from the Up Next card.
   func playNextNow() {
     guard !closed, !finished, let next = queue.first else { return }
@@ -551,13 +559,8 @@ final class TVPlaybackController: ObservableObject {
     let quietSkip = wantsPlayback && ProcessInfo.processInfo.systemUptime < quietSkipUntil
     if quietSkip { return }
     if isStarting, engine.hasObservedPlayback {
-      // The picture moves: the ring gives way to a clear picture without controls.
       isStarting = false
-      if trackMenu == nil, errorMessage == nil {
-        controlsTask?.cancel()
-        controlsVisible = false
-        return
-      }
+      userInteracted()
     }
     updateUpNext()
     if wasPlaying != isPlaying || wasLoading != isLoading { userInteracted() }

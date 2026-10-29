@@ -10,6 +10,8 @@ enum TVScrubPreviewPlan {
   static let endMargin: Int64 = 3_000
   /// The server feature that keeps preview reads apart from playback streams.
   static let serverFeature = "preview-streams-v1"
+  /// The server feature for pre-generated scrub preview strips.
+  static let serverScrubPreviewsFeature = "scrub-previews-v1"
 
   static func interval(for duration: Int64) -> Int64 {
     let spread = (max(0, duration) + Int64(maximumFrames) - 1) / Int64(maximumFrames)

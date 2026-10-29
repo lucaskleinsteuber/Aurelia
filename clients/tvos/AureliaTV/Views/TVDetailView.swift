@@ -293,12 +293,22 @@ struct TVDetailView: View {
         ScrollView(.horizontal) {
           LazyHStack(alignment: .top, spacing: 40) {
             ForEach(people) { person in
-              Button {
-              } label: {
-                TVPersonLabel(person: person)
-              }.buttonStyle(TVPortraitButtonStyle())
-                .focused($focused, equals: .person(person.id))
-                .accessibilityIdentifier("person-\(person.id)")
+              if model.supportsWatchlist {
+                NavigationLink {
+                  TVPersonDetailView(name: person.name)
+                } label: {
+                  TVPersonLabel(person: person)
+                }.buttonStyle(TVPortraitButtonStyle())
+                  .focused($focused, equals: .person(person.id))
+                  .accessibilityIdentifier("person-\(person.id)")
+              } else {
+                Button {
+                } label: {
+                  TVPersonLabel(person: person)
+                }.buttonStyle(TVPortraitButtonStyle())
+                  .focused($focused, equals: .person(person.id))
+                  .accessibilityIdentifier("person-\(person.id)")
+              }
             }
           }.padding(.horizontal, TVDesign.pagePadding).padding(.vertical, 16)
         }.scrollIndicators(.hidden).scrollClipDisabled()
@@ -404,12 +414,37 @@ struct TVDetailView: View {
     open(supplement, queue: [], origin: .supplement(supplement.id))
   }
   private func playTarget(startOver: Bool = false) {
-    guard let target = plan?.target else { return }
-    guard target.isPlayable else {
-      unavailable = target
+    if let target = plan?.target {
+      guard target.isPlayable else {
+        unavailable = target
+        return
+      }
+      open(target, queue: plan?.queue ?? [], origin: .play, startOver: startOver)
       return
     }
-    open(target, queue: plan?.queue ?? [], origin: .play, startOver: startOver)
+    guard !launching, playing == nil, let api = model.client else { return }
+    launching = true
+    let sessionID = model.session?.sessionId
+    let navigation = navigationID
+    Task {
+      defer { launching = false }
+      do {
+        let selected = try await api.playbackPlan(mediaID: selectedEpisodeID ?? id)
+        guard !Task.isCancelled, navigationID == navigation, model.session?.sessionId == sessionID,
+          let target = selected.target
+        else { return }
+        plan = selected
+        guard target.isPlayable else {
+          unavailable = target
+          return
+        }
+        open(target, queue: selected.queue, origin: .play, startOver: startOver)
+      } catch {
+        guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
+        self.error = error.localizedDescription
+        model.handleSessionFailure(error)
+      }
+    }
   }
   private func openEpisode(_ episode: TVCatalogItem) async {
     guard episode.isPlayable else {

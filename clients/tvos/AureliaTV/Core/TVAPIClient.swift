@@ -206,6 +206,27 @@ struct TVAPIClient: Sendable {
       body: JSONEncoder().encode(Payload(isFavorite: isFavorite)))
     return try Self.decode(Bool.self, data: data)
   }
+  func watchlist() async throws -> TVWatchlistResponse {
+    let data = try await send("/api/v1/watchlist")
+    return try Self.decode(TVWatchlistResponse.self, data: data)
+  }
+  func setWatchlist(mediaID: UUID, isWatchlisted: Bool) async throws -> TVWatchlistItemState {
+    let data = try await send(
+      "/api/v1/media/\(mediaID.uuidString)/watchlist", method: "PUT",
+      body: JSONEncoder().encode(TVSetWatchlistRequest(isWatchlisted: isWatchlisted)))
+    return try Self.decode(TVWatchlistItemState.self, data: data)
+  }
+  func personDetail(name: String, key: String? = nil) async throws -> TVPersonDetailResponse {
+    var query = [URLQueryItem(name: "name", value: name)]
+    if let key, !key.isEmpty { query.append(URLQueryItem(name: "key", value: key)) }
+    let data = try await send("/api/v1/catalog/person", query: query)
+    return try Self.decode(TVPersonDetailResponse.self, data: data)
+  }
+  func scrubPreviewFrame(mediaID: UUID, seconds: Int) async throws -> Data {
+    try await send(
+      "/api/v1/media/\(mediaID.uuidString.lowercased())/scrub-previews/\(max(0, seconds))",
+      method: "GET")
+  }
   func watchState(mediaID: UUID, scope: TVWatchScope = .title, season: Int? = nil) async throws
     -> TVWatchState
   {

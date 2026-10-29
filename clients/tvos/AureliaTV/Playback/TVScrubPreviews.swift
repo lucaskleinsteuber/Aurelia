@@ -32,7 +32,8 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   private var requested: Int64?
   private var shownFrame: Int64?
   private var pendingInteractive: Int64?
-  private var jobs: [ObjectIdentifier: Job] = [:]
+  private var jobs: [UUID: Job] = [:]
+  private var thumbnailerKeys: [ObjectIdentifier: UUID] = [:]
   private var order: [Int64] = []
   private var orderIndex = 0
   private var busy = 0
@@ -41,9 +42,11 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   private var ready = false
   private var startTask: Task<Void, Never>?
   private var epoch = 0
+  private var serverFrameFetcher: (@MainActor (UUID, Int64) async -> Data?)?
 
   private struct Job {
-    let thumbnailer: VLCMediaThumbnailer
+    var thumbnailer: VLCMediaThumbnailer?
+    var task: Task<Void, Never>?
     let bucket: Int64
     let interactive: Bool
     let timeout: Task<Void, Never>
@@ -57,11 +60,15 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   var backgroundWorkers: Int { TVScrubPreviewPlan.workers(parallel: parallel) }
 
   /// Frames belong to `mediaID`; a reconnect to the same title keeps them.
-  func configure(mediaID: UUID?, source: URL?, duration: Int64, parallel: Bool) {
+  func configure(
+    mediaID: UUID?, source: URL?, duration: Int64, parallel: Bool,
+    serverFrameFetcher: (@MainActor (UUID, Int64) async -> Data?)? = nil
+  ) {
     if mediaID != self.mediaID {
       reset()
       self.mediaID = mediaID
     }
+    self.serverFrameFetcher = serverFrameFetcher
     self.parallel = parallel
     let duration = max(0, duration)
     if duration != self.duration {
@@ -78,8 +85,10 @@ final class TVScrubPreviews: NSObject, ObservableObject {
       self.source = source
       cancelJobs()
       startTask?.cancel()
+      startTask = nil
       ready = false
-      guard source != nil else { return }
+    }
+    if startTask == nil && !ready && (source != nil || serverFrameFetcher != nil) {
       let expected = epoch
       startTask = Task { [weak self, prefetchDelay] in
         try? await Task.sleep(for: prefetchDelay)
@@ -88,8 +97,9 @@ final class TVScrubPreviews: NSObject, ObservableObject {
         self.fill()
       }
       startInteractiveIfIdle()
+    } else if ready {
+      fill()
     }
-    fill()
   }
 
   func bucket(for milliseconds: Int64) -> Int64 {
@@ -98,7 +108,7 @@ final class TVScrubPreviews: NSObject, ObservableObject {
 
   /// Shows the frame for `milliseconds`, or a nearby prepared one until it is decoded.
   func request(at milliseconds: Int64) {
-    guard source != nil, duration > 0 else { return }
+    guard source != nil || serverFrameFetcher != nil, duration > 0 else { return }
     let bucket = bucket(for: min(milliseconds, duration - 1))
     requested = bucket
     show(bucket)
@@ -111,11 +121,13 @@ final class TVScrubPreviews: NSObject, ObservableObject {
 
   func reset() {
     startTask?.cancel()
+    startTask = nil
     ready = false
     cancelJobs()
     discardFrames()
     mediaID = nil
     source = nil
+    serverFrameFetcher = nil
     duration = 0
     interval = TVScrubPreviewPlan.minimumInterval
     order = []
@@ -136,9 +148,11 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   private func cancelJobs() {
     for job in jobs.values {
       job.timeout.cancel()
-      job.thumbnailer.delegate = nil
+      job.task?.cancel()
+      job.thumbnailer?.delegate = nil
     }
     jobs = [:]
+    thumbnailerKeys = [:]
     busy = 0
     resting = false
     failures = 0
@@ -178,7 +192,9 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   }
 
   private func fill() {
-    guard ready, source != nil, !resting, !ProcessInfo.processInfo.isLowPowerModeEnabled else {
+    guard ready, (source != nil || serverFrameFetcher != nil), !resting,
+      !ProcessInfo.processInfo.isLowPowerModeEnabled
+    else {
       return
     }
     while busy < backgroundWorkers, let bucket = nextBucket() {
@@ -201,7 +217,41 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   }
 
   private func start(bucket: Int64, interactive: Bool) {
-    guard let source, duration > 0 else { return }
+    guard duration > 0 else { return }
+    let key = UUID()
+    let expected = epoch
+    let timeout = Task { [weak self] in
+      try? await Task.sleep(for: Self.timeout)
+      guard let self, !Task.isCancelled, self.epoch == expected else { return }
+      self.finish(key, image: nil)
+    }
+    let position = TVScrubPreviewPlan.snapshotPosition(
+      bucket: bucket, interval: interval, duration: duration)
+    if let mediaID, let fetcher = serverFrameFetcher {
+      let seconds = max(0, position / 1_000)
+      let task = Task { [weak self] in
+        if let data = await fetcher(mediaID, seconds), Self.decode(data) != nil {
+          guard let self, !Task.isCancelled, self.epoch == expected else { return }
+          self.finishData(key, data: data)
+          return
+        }
+        guard let self, !Task.isCancelled, self.epoch == expected else { return }
+        self.startLocalThumbnailer(key: key, bucket: bucket)
+      }
+      jobs[key] = Job(
+        thumbnailer: nil, task: task, bucket: bucket, interactive: interactive, timeout: timeout)
+      return
+    }
+    jobs[key] = Job(
+      thumbnailer: nil, task: nil, bucket: bucket, interactive: interactive, timeout: timeout)
+    startLocalThumbnailer(key: key, bucket: bucket)
+  }
+
+  private func startLocalThumbnailer(key: UUID, bucket: Int64) {
+    guard var job = jobs[key], let source, duration > 0 else {
+      finish(key, image: nil)
+      return
+    }
     let media = VLCMedia(url: source)
     media.addOption(":no-audio")
     media.addOption(":no-spu")
@@ -211,22 +261,42 @@ final class TVScrubPreviews: NSObject, ObservableObject {
     let position = TVScrubPreviewPlan.snapshotPosition(
       bucket: bucket, interval: interval, duration: duration)
     thumbnailer.snapshotPosition = Float(Double(position) / Double(duration))
-    let key = ObjectIdentifier(thumbnailer)
-    let expected = epoch
-    let timeout = Task { [weak self] in
-      try? await Task.sleep(for: Self.timeout)
-      guard let self, !Task.isCancelled, self.epoch == expected else { return }
-      self.finish(key, image: nil)
-    }
-    jobs[key] = Job(
-      thumbnailer: thumbnailer, bucket: bucket, interactive: interactive, timeout: timeout)
+    thumbnailerKeys[ObjectIdentifier(thumbnailer)] = key
+    job.thumbnailer = thumbnailer
+    job.task = nil
+    jobs[key] = job
     thumbnailer.fetchThumbnail()
   }
 
-  private func finish(_ key: ObjectIdentifier, image: CGImage?) {
+  private func finishData(_ key: UUID, data: Data) {
     guard let job = jobs.removeValue(forKey: key) else { return }
     job.timeout.cancel()
-    job.thumbnailer.delegate = nil
+    job.task?.cancel()
+    if let thumbnailer = job.thumbnailer {
+      thumbnailerKeys.removeValue(forKey: ObjectIdentifier(thumbnailer))
+      thumbnailer.delegate = nil
+    }
+    frames[job.bucket] = data
+    failed.remove(job.bucket)
+    preparedCount = frames.count
+    if let requested, shownFrame != requested { show(requested) }
+    if job.interactive {
+      startInteractiveIfIdle()
+      return
+    }
+    busy = max(0, busy - 1)
+    failures = 0
+    fill()
+  }
+
+  private func finish(_ key: UUID, image: CGImage?) {
+    guard let job = jobs.removeValue(forKey: key) else { return }
+    job.timeout.cancel()
+    job.task?.cancel()
+    if let thumbnailer = job.thumbnailer {
+      thumbnailerKeys.removeValue(forKey: ObjectIdentifier(thumbnailer))
+      thumbnailer.delegate = nil
+    }
     if let image, let data = Self.encode(image) {
       frames[job.bucket] = data
       failed.remove(job.bucket)
@@ -258,7 +328,10 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   }
 
   private func complete(_ thumbnailer: VLCMediaThumbnailer, image: CGImage?) {
-    finish(ObjectIdentifier(thumbnailer), image: image)
+    guard let key = thumbnailerKeys.removeValue(forKey: ObjectIdentifier(thumbnailer)) else {
+      return
+    }
+    finish(key, image: image)
   }
 
   /// Compressed in memory: an hour-long episode needs about 30 MB.

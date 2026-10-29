@@ -31,7 +31,7 @@ build_number=$(awk '/^CURRENT_PROJECT_VERSION = / {print $3}' "$repository_root/
 build_root=${AURELIA_TV_BUILD_ROOT:-"$other_root/Build/tvOS/$version-$build_number"}
 mkdir -p "$build_root" "$other_root/Logs"
 build_root=${build_root:A}
-if [[ "$build_root" == "$repository_root" || "$build_root" == "$repository_root/"* ]]; then
+if [[ "$build_root" == "$repository_root" || ( "$build_root" == "$repository_root/"* && "$build_root" != "$repository_root/Local/"* ) ]]; then
   print -u2 "TV build output must be outside the checkout."
   exit 1
 fi

@@ -402,6 +402,93 @@ struct TVCoreTests {
     #expect(payload["clientMutationId"] as? String == Self.mutationID.uuidString)
   }
 
+  @Test func capabilitiesExposeWatchlistAndScrubPreviews() throws {
+    let caps = try decode(
+      TVCapabilities.self,
+      """
+      {"formatVersion":2,"minimumClientVersion":"1.0",
+       "capabilities":["device-authorization-v1","library-state-v1","watchlist-people-v1","scrub-previews-v1"]}
+      """)
+    #expect(caps.supportsWatchlistAndPeople)
+    #expect(caps.supportsScrubPreviews)
+
+    let plain = try decode(
+      TVCapabilities.self,
+      """
+      {"formatVersion":2,"minimumClientVersion":"1.0",
+       "capabilities":["device-authorization-v1","library-state-v1"]}
+      """)
+    #expect(!plain.supportsWatchlistAndPeople)
+    #expect(!plain.supportsScrubPreviews)
+  }
+
+  @Test func watchlistEndpointsRequestCorrectPathsAndDecodePayloads() async throws {
+    let watchlistJSON = """
+      {"items":[\(itemJSON)],"mediaIds":["\(Self.mediaID.uuidString)"]}
+      """
+    let updateJSON = """
+      {"mediaId":"\(Self.mediaID.uuidString)","isWatchlisted":true}
+      """
+    let transport = TVCoreFakeTransport(responses: [
+      response(watchlistJSON),
+      response(updateJSON),
+    ])
+    let client = TVAPIClient(connection: Self.connection, session: Self.session, transport: transport)
+
+    let list = try await client.watchlist()
+    #expect(list.items.count == 1)
+    #expect(list.mediaIds == [Self.mediaID])
+
+    let updated = try await client.setWatchlist(mediaID: Self.mediaID, isWatchlisted: true)
+    #expect(updated.mediaId == Self.mediaID)
+    #expect(updated.isWatchlisted == true)
+
+    let requests = await transport.requests
+    #expect(requests.count == 2)
+    #expect(requests[0].request.url?.path == "/api/v1/watchlist")
+    #expect(requests[0].request.httpMethod == "GET")
+    #expect(requests[1].request.url?.path == "/api/v1/media/\(Self.mediaID.uuidString)/watchlist")
+    #expect(requests[1].request.httpMethod == "PUT")
+  }
+
+  @Test func personDetailEndpointRequestsEncodedNameAndDecodesResponse() async throws {
+    let personJSON = """
+      {"name":"Jane Doe","subtitle":"Actor","profile":null,"items":[\(itemJSON)]}
+      """
+    let transport = TVCoreFakeTransport(responses: [response(personJSON)])
+    let client = TVAPIClient(connection: Self.connection, session: Self.session, transport: transport)
+
+    let person = try await client.personDetail(name: "Jane Doe")
+    #expect(person.name == "Jane Doe")
+    #expect(person.subtitle == "Actor")
+    #expect(person.items.count == 1)
+
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(requests[0].request.url?.path == "/api/v1/catalog/person")
+    #expect(requests[0].request.url?.query == "name=Jane%20Doe")
+  }
+
+  @Test func scrubPreviewFrameRequestsCorrectPath() async throws {
+    let jpegBytes = Data([0xFF, 0xD8, 0xFF, 0xE0])
+    let transport = TVCoreFakeTransport(responses: [
+      TVHTTPResponse(
+        statusCode: 200, headers: ["Content-Type": "image/jpeg"],
+        body: jpegBytes, fingerprint: Self.fingerprint)
+    ])
+    let client = TVAPIClient(connection: Self.connection, session: Self.session, transport: transport)
+
+    let frame = try await client.scrubPreviewFrame(mediaID: Self.mediaID, seconds: 45)
+    #expect(frame == jpegBytes)
+
+    let requests = await transport.requests
+    #expect(requests.count == 1)
+    #expect(
+      requests[0].request.url?.path
+        == "/api/v1/media/\(Self.mediaID.uuidString.lowercased())/scrub-previews/45")
+    #expect(requests[0].request.httpMethod == "GET")
+  }
+
   @Test func serviceResolutionUsesActualHostAndPortAndMergesInterfaces() throws {
     let service = TVBonjourService(
       name: "Display Name Is Not A Host", type: "_aurelia._tcp", domain: "local.",

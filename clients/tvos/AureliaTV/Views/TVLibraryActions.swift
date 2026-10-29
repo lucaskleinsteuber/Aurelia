@@ -159,6 +159,12 @@ struct TVMediaContextActions: View {
           item, scope: item.kind == .series ? .series : .title, watched: !watched, model: model)
       }
     }.disabled(actions.busy)
+    if model.supportsWatchlist, item.kind == .movie || item.kind == .series {
+      let watchlisted = model.isWatchlisted(item.id)
+      Button(watchlisted ? "Remove from Watchlist" : "Add to Watchlist") {
+        Task { _ = await model.setWatchlist(mediaId: item.id, isWatchlisted: !watchlisted) }
+      }.disabled(actions.busy)
+    }
     if continuation || item.kind == .movie || item.kind == .series {
       let hidden = item.continueWatchingHidden == true
       Button(hidden ? "Show in Continue Watching" : "Remove from Continue Watching") {
