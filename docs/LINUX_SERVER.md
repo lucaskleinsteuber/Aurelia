@@ -55,9 +55,10 @@ checks the download against the release's `SHA256SUMS` and runs the package's in
 accounts, library, progress and settings stay. It never installs an older version. When power
 saving has stopped Aurelia, the update starts it again; power saving then continues as set.
 
-A private repository needs a read-only token. On GitHub, open Settings › Developer settings ›
-Personal access tokens › Fine-grained tokens, generate a token for only this repository with
-the permission Contents: Read-only, and save it on the server:
+For public repositories, updates download directly without requiring any API token.
+If a private fork or mirror is used, a read-only token can be configured. On GitHub, open
+Settings › Developer settings › Personal access tokens › Fine-grained tokens, generate a token
+for only this repository with the permission Contents: Read-only, and save it on the server:
 
 ```sh
 sudo aurelia update --set-token   # paste the token; it is not shown

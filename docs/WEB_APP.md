@@ -104,10 +104,13 @@ Picture conversion of 4K titles can still be too slow on older servers. HDR conv
 work even after reducing the picture size; direct playback or repackaging avoids that cost.
 
 The player looks and works like the Mac app's: back and the menus at the top (playback
-speed, sound tracks with Night Mode, subtitles, sleep timer, scene notes), back/play/forward
+speed, chapters, sound tracks with Night Mode, subtitles, sleep timer, scene notes), back/play/forward
 in the middle, title, volume, Picture in Picture and full screen at the bottom, the timeline
-with scene notes and "Ends at". In the last 20 seconds of an episode, *Up Next* counts down
-to the next one. Scene notes are private to the profile, as on the Mac. Mark a Moment or a
+with chapter ticks, scene notes and "Ends at". Hovering or scrubbing along the timeline shows preview
+stills above the playhead. If the file contains chapter markers, a Chapter menu lists them with start
+and end times; during an intro, recap or credits chapter (in English or German), a quick "Skip Intro",
+"Skip Recap" or "Skip Credits" button appears and jumps past it. In the last 20 seconds of an episode,
+*Up Next* counts down to the next one. Scene notes are private to the profile, as on the Mac. Mark a Moment or a
 Time Range, edit Start and End as m:ss or h:mm:ss (optional milliseconds), or use the current
 position. Reload updates the list while preserving an unsaved draft. Load, remove and revision
 conflict failures remain visible; a conflict never replaces another device’s edit automatically.
@@ -151,8 +154,10 @@ without changing its playback position. Continue Watching cards offer the same m
 whole show or season watched or unwatched asks for confirmation with the number of episodes;
 marking it unwatched resets the selected episodes’ positions, as in the Mac app.
 
-Watchlist and navigable cast/person pages are not current features in the Mac or browser app;
-Favorites and Cast & Crew cards remain available.
+The **Watchlist** shelf appears on the Home page whenever titles are marked for later viewing.
+A title can be added or removed from the Watchlist from its detail page or context menu. Clicking
+any Cast & Crew card opens a dedicated **Person** page showing the person's portrait, role and an
+"Appears In" horizontal shelf with their titles in the library.
 
 *Settings* in the profile menu has three pages:
 
@@ -163,7 +168,10 @@ Favorites and Cast & Crew cards remain available.
   how long controls stay and the seek interval.
 - **Server** (owners and administrators): unlocked with the Server Password for ten minutes,
   as on the Mac; the browser doesn't keep the password or ask again while management is
-  unlocked. Owners add storage locations using an absolute folder path on the server,
+  unlocked. Features a **Server Health** diagnostics panel displaying server uptime, data
+  folder free space, scrub preview cache and live conversion status, last scan outcome,
+  background job progress, automatic database backup status, and the 20 most recent
+  redacted server warnings. Owners add storage locations using an absolute folder path on the server,
   remove locations after confirmation and manage profiles. Location removal waits for the
   server's operation to complete; media files are never changed. Full-library administrators
   can rescan locations and change monitoring; selected-title administrators manage only their

@@ -29,21 +29,27 @@ where they are, and nothing leaves your home network unless you want it to.
 trailers are recognized from your folders. An import preview shows what Aurelia found
 before anything is added, and you can correct it first. Titles, descriptions, cast and
 crew, covers and backgrounds can all be edited, and your corrections stay after later
-scans. Online details are optional and use your own TMDB token.
+scans. Dedicated cast and crew pages show a person's profile and linked filmography across
+the library. A Watchlist keeps titles you plan to watch across all apps and browsers.
+Online details are optional and use your own TMDB token.
 
-**Made for watching.** Fullscreen playback of the original files, audio and subtitle
-choices, Continue Watching, scene notes, a sleep timer and Night Mode, which keeps loud
-scenes calm and dialogue clear. On Apple TV, scrubbing shows preview frames and the next
-episode counts down in an Up Next card.
+**Made for watching.** Fullscreen playback of the original files, remembered audio and
+subtitle language choices per profile and series, Continue Watching, chapter markers
+with instant Skip Intro, Skip Recap and Skip Credits buttons, scene notes, a sleep timer,
+timeline scrub preview frames, and Night Mode to keep dialogue clear. On Apple TV,
+the next episode counts down in an Up Next card.
 
-**Everyone gets their own profile.** Favorites, progress and notes are separate for each
-person. Profiles can be protected with a PIN; owner and administrator profiles always
-are.
+**Everyone gets their own profile.** Favorites, Watchlist, progress and notes are separate
+for each person. Profiles can be protected with a PIN; owner and administrator profiles
+always are.
 
 **A server that gets out of the way.** Run it inside the Mac app or on its own on a Linux
 computer, such as an old PC without a screen. On Linux it can sleep when nobody watches
-and wakes again by Wake-on-LAN when you open Aurelia. Updates, power saving, accounts,
-library permissions, devices and backups are all managed from the Mac app.
+and wakes again by Wake-on-LAN when you open Aurelia. A Server Health page shows real-time
+system uptime, disk space, conversion status, background jobs and redacted server diagnostics.
+Automatic daily database backups keep the library safe with integrity verification. Updates,
+power saving, accounts, library permissions, devices and backups are all managed from the Mac
+app or the browser settings.
 
 ## Screenshots
 

@@ -133,8 +133,9 @@ unnecessary with one-year profiles.
 
 *Aurelia › Check for Updates…* asks GitHub for the newest release of the repository the app
 was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
-app's Info.plist; builds made in Xcode have none and cannot update). With a token saved, the
-app also looks at launch when at least 24 hours have passed since its last successful check.
+app's Info.plist; builds made in Xcode have none and cannot update). Because the repository is
+public, updates download without requiring personal access tokens. The app also looks at launch
+when at least 24 hours have passed since its last successful check.
 *Settings › App › Updates › Check for updates automatically* is on by default; turning it
 off stops background checks. *Check for Updates…* continues to work manually.
 
@@ -143,11 +144,6 @@ field, together with the disk image's published download size when available. *L
 dismisses the offer; *Skip This Version* remembers that version on this Mac and suppresses
 its automatic offers, including another build of the same version. Future versions are
 still offered. A manual check also offers skipped versions, so they can still be installed.
-
-A private repository needs a read-only token, made like the one for
-[the Linux server](LINUX_SERVER.md): a fine-grained token for only this repository with
-Contents: Read-only. Paste it under *Settings › App › Updates*. It stays in this Mac's
-Keychain and is sent only to GitHub's API.
 
 The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
 checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
