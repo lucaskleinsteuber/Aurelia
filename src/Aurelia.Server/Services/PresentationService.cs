@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
 using Microsoft.EntityFrameworkCore;
@@ -71,8 +72,37 @@ public sealed class PresentationService(
                 && (child.Kind is MediaKind.Extra or MediaKind.Trailer))
             .Select(child => new SupplementPresentation(ToCatalog(child, userId), child.Category, child.SeasonNumber))
             .ToList();
+
+        CollectionSummary? franchiseSummary = null;
+        if (item.Kind == MediaKind.Movie)
+        {
+            var franchise = await database.MediaCollections.AsNoTracking()
+                .Where(c => c.Provider == "tmdb" && c.Members.Any(m => m.MediaItemId == mediaId))
+                .Select(c => new
+                {
+                    c.Id,
+                    c.Name,
+                    Ids = c.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList()
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (franchise is not null && franchise.Ids.Count >= 2)
+            {
+                var franchiseCards = await SummariesAsync(userId, franchise.Ids, cancellationToken);
+                var poster = franchiseCards.Select(c => c.Poster).FirstOrDefault(p => p is not null);
+                franchiseSummary = new CollectionSummary(
+                    franchise.Id,
+                    franchise.Name,
+                    poster,
+                    franchiseCards,
+                    IsSmart: false,
+                    TotalCount: franchiseCards.Count,
+                    IsShared: true);
+            }
+        }
+
         return new CatalogDetailPresentation(
-            ToCatalog(item, userId), MetadataPresentation.ToSummary(item), seasons, supplements);
+            ToCatalog(item, userId), MetadataPresentation.ToSummary(item), seasons, supplements, franchiseSummary);
     }
 
     public async Task<CatalogItemSummary> SummaryAsync(Guid userId, Guid mediaId, CancellationToken cancellationToken)
@@ -289,23 +319,65 @@ public sealed class PresentationService(
     {
         ValidatePage(offset, limit);
         var collections = await database.MediaCollections.AsNoTracking()
-            .Where(collection => collection.Members.Count >= 2)
+            .Where(collection => (collection.UserId == null || collection.UserId == userId)
+                && (collection.IsManual || collection.IsSmart || collection.Members.Count >= 2))
             .OrderBy(collection => collection.Name).ThenBy(collection => collection.Id).Skip(offset).Take(limit)
             .Select(collection => new
             {
                 collection.Id,
                 collection.Name,
+                collection.IsSmart,
+                collection.SmartRulesJson,
+                collection.UserId,
                 Ids = collection.Members.OrderBy(member => member.SortOrder).Select(member => member.MediaItemId).ToList()
             })
             .ToListAsync(cancellationToken);
-        var ids = collections.SelectMany(collection => collection.Ids).Distinct().ToList();
-        var cards = ids.Count == 0 ? [] : await SummariesAsync(userId, ids, cancellationToken);
+
+        var normalIds = collections.Where(c => !c.IsSmart).SelectMany(collection => collection.Ids).Distinct().ToList();
+        var cards = normalIds.Count == 0 ? [] : await SummariesAsync(userId, normalIds, cancellationToken);
         var byId = cards.ToDictionary(item => item.Id);
-        return collections.Select(collection =>
+
+        var results = new List<CollectionSummary>();
+        foreach (var collection in collections)
         {
-            var members = collection.Ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
-            return new CollectionSummary(collection.Id, collection.Name, members.Select(item => item.Poster).FirstOrDefault(poster => poster is not null), members);
-        }).ToList();
+            if (collection.IsSmart)
+            {
+                SmartCollectionRules? rules = null;
+                if (!string.IsNullOrWhiteSpace(collection.SmartRulesJson))
+                {
+                    try { rules = JsonSerializer.Deserialize<SmartCollectionRules>(collection.SmartRulesJson); } catch { }
+                }
+                rules ??= new SmartCollectionRules();
+                var (smartItems, totalCount) = await SmartListEvaluator.EvaluateAsync(database, userId, rules, 0, 50, cancellationToken);
+                var memberSummaries = smartItems.Select(item => ToCatalog(item, userId)).ToList();
+                var poster = memberSummaries.Select(item => item.Poster).FirstOrDefault(p => p is not null);
+                results.Add(new CollectionSummary(
+                    collection.Id,
+                    collection.Name,
+                    poster,
+                    memberSummaries,
+                    IsSmart: true,
+                    TotalCount: totalCount,
+                    IsShared: collection.UserId == null,
+                    UserId: collection.UserId,
+                    RulesJson: collection.SmartRulesJson));
+            }
+            else
+            {
+                var members = collection.Ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+                results.Add(new CollectionSummary(
+                    collection.Id,
+                    collection.Name,
+                    members.Select(item => item.Poster).FirstOrDefault(poster => poster is not null),
+                    members,
+                    IsSmart: false,
+                    TotalCount: members.Count,
+                    IsShared: collection.UserId == null,
+                    UserId: collection.UserId,
+                    RulesJson: null));
+            }
+        }
+        return results;
     }
 
     public async Task<bool> SetFavoriteAsync(Guid userId, Guid mediaId, bool isFavorite, CancellationToken cancellationToken)
@@ -322,10 +394,17 @@ public sealed class PresentationService(
 
     public async Task<CollectionSummary> CreateCollectionAsync(Guid userId, SaveCollectionRequest request, CancellationToken cancellationToken)
     {
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+        if (request.IsShared && !isAdmin)
+            throw new MetadataException("forbidden", "Only administrators can create shared collections.", StatusCodes.Status403Forbidden);
+
         var collection = new MediaCollectionRecord
         {
             Id = Guid.NewGuid(),
             IsManual = true,
+            IsSmart = request.IsSmart,
+            SmartRulesJson = request.IsSmart ? request.RulesJson : null,
+            UserId = request.IsShared ? null : userId,
             CreatedAt = DateTimeOffset.UtcNow,
         };
         await ApplyCollectionAsync(collection, request, cancellationToken);
@@ -337,32 +416,178 @@ public sealed class PresentationService(
     public async Task<CollectionSummary> UpdateCollectionAsync(Guid userId, Guid id, SaveCollectionRequest request, CancellationToken cancellationToken)
     {
         var collection = await database.MediaCollections.Include(value => value.Members)
-            .SingleOrDefaultAsync(value => value.Id == id && value.IsManual, cancellationToken)
+            .SingleOrDefaultAsync(value => value.Id == id && (value.IsManual || value.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
+
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+        if (collection.UserId == null)
+        {
+            if (!isAdmin) throw new MetadataException("forbidden", "Only administrators can edit shared collections.", StatusCodes.Status403Forbidden);
+        }
+        else if (collection.UserId != userId && !isAdmin)
+        {
+            throw new MetadataException("forbidden", "You cannot edit another user's collection.", StatusCodes.Status403Forbidden);
+        }
+
+        if (request.IsShared && !isAdmin)
+            throw new MetadataException("forbidden", "Only administrators can make collections shared.", StatusCodes.Status403Forbidden);
+
+        collection.UserId = request.IsShared ? null : userId;
+        collection.IsSmart = request.IsSmart;
+        collection.SmartRulesJson = request.IsSmart ? request.RulesJson : null;
+
         await ApplyCollectionAsync(collection, request, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
         return (await CollectionsAsync(userId, 0, 200, cancellationToken)).Single(value => value.Id == collection.Id);
     }
 
-    public async Task DeleteCollectionAsync(Guid id, CancellationToken cancellationToken)
+    public async Task DeleteCollectionAsync(Guid userId, Guid id, CancellationToken cancellationToken)
     {
-        var collection = await database.MediaCollections.SingleOrDefaultAsync(value => value.Id == id && value.IsManual, cancellationToken)
+        var collection = await database.MediaCollections.SingleOrDefaultAsync(value => value.Id == id && (value.IsManual || value.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
+
+        if (userId != Guid.Empty)
+        {
+            var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+            if (collection.UserId == null)
+            {
+                if (!isAdmin) throw new MetadataException("forbidden", "Only administrators can delete shared collections.", StatusCodes.Status403Forbidden);
+            }
+            else if (collection.UserId != userId && !isAdmin)
+            {
+                throw new MetadataException("forbidden", "You cannot delete another user's collection.", StatusCodes.Status403Forbidden);
+            }
+        }
+
         database.MediaCollections.Remove(collection);
         await database.SaveChangesAsync(cancellationToken);
     }
 
+    public Task DeleteCollectionAsync(Guid id, CancellationToken cancellationToken) =>
+        DeleteCollectionAsync(Guid.Empty, id, cancellationToken);
+
+    public async Task AddCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken)
+    {
+        var collection = await database.MediaCollections.Include(c => c.Members)
+            .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
+            ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);
+
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+        if (collection.UserId == null && !isAdmin)
+            throw new MetadataException("forbidden", "Only administrators can edit shared collections.", StatusCodes.Status403Forbidden);
+        if (collection.UserId != null && collection.UserId != userId && !isAdmin)
+            throw new MetadataException("forbidden", "You cannot edit another user's collection.", StatusCodes.Status403Forbidden);
+
+        if (!await database.MediaItems.AnyAsync(m => m.Id == mediaId && (m.Kind == MediaKind.Movie || m.Kind == MediaKind.Series), cancellationToken))
+            throw new MetadataException("media_not_found", "Media item not found.", StatusCodes.Status404NotFound);
+
+        if (!collection.Members.Any(m => m.MediaItemId == mediaId))
+        {
+            var nextOrder = collection.Members.Count == 0 ? 0 : collection.Members.Max(m => m.SortOrder) + 1;
+            collection.Members.Add(new MediaCollectionMember
+            {
+                CollectionId = collection.Id,
+                MediaItemId = mediaId,
+                SortOrder = nextOrder
+            });
+            collection.UpdatedAt = DateTimeOffset.UtcNow;
+            await database.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task RemoveCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken)
+    {
+        var collection = await database.MediaCollections.Include(c => c.Members)
+            .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
+            ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);
+
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+        if (collection.UserId == null && !isAdmin)
+            throw new MetadataException("forbidden", "Only administrators can edit shared collections.", StatusCodes.Status403Forbidden);
+        if (collection.UserId != null && collection.UserId != userId && !isAdmin)
+            throw new MetadataException("forbidden", "You cannot edit another user's collection.", StatusCodes.Status403Forbidden);
+
+        var member = collection.Members.FirstOrDefault(m => m.MediaItemId == mediaId);
+        if (member is not null)
+        {
+            collection.Members.Remove(member);
+            database.MediaCollectionMembers.Remove(member);
+            collection.UpdatedAt = DateTimeOffset.UtcNow;
+            await database.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task<IReadOnlyList<CollectionSummary>> FranchisesAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken)
+    {
+        ValidatePage(offset, limit);
+        var franchises = await database.MediaCollections.AsNoTracking()
+            .Where(c => c.Provider == "tmdb" && c.Members.Count >= 1)
+            .OrderBy(c => c.Name).ThenBy(c => c.Id)
+            .Skip(offset).Take(limit)
+            .Select(c => new
+            {
+                c.Id,
+                c.Name,
+                Ids = c.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList()
+            })
+            .ToListAsync(cancellationToken);
+
+        var ids = franchises.SelectMany(f => f.Ids).Distinct().ToList();
+        var cards = ids.Count == 0 ? [] : await SummariesAsync(userId, ids, cancellationToken);
+        var byId = cards.ToDictionary(item => item.Id);
+
+        return franchises.Select(f =>
+        {
+            var members = f.Ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+            var poster = members.Select(m => m.Poster).FirstOrDefault(p => p is not null);
+            return new CollectionSummary(f.Id, f.Name, poster, members, IsSmart: false, TotalCount: members.Count, IsShared: true);
+        }).ToList();
+    }
+
+    public async Task<CollectionSummary> CreateCollectionFromFranchiseAsync(Guid userId, Guid franchiseId, CancellationToken cancellationToken)
+    {
+        var franchise = await database.MediaCollections.AsNoTracking()
+            .Include(c => c.Members)
+            .SingleOrDefaultAsync(c => c.Id == franchiseId, cancellationToken)
+            ?? throw new MetadataException("franchise_not_found", "Franchise collection not found.", StatusCodes.Status404NotFound);
+
+        var memberIds = franchise.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList();
+        var request = new SaveCollectionRequest(franchise.Name, memberIds, IsSmart: false, IsShared: false);
+        return await CreateCollectionAsync(userId, request, cancellationToken);
+    }
+
+    private async Task<bool> IsAdminUserAsync(Guid userId, CancellationToken cancellationToken) =>
+        userId != Guid.Empty && await database.Users.AnyAsync(u => u.Id == userId && u.IsEnabled && (u.Role == UserRole.Owner || u.Role == UserRole.Admin), cancellationToken);
+
     private async Task ApplyCollectionAsync(MediaCollectionRecord collection, SaveCollectionRequest request, CancellationToken cancellationToken)
     {
         var name = request.Name.Trim();
-        var ids = request.MediaIds.Distinct().ToList();
-        if (name.Length is < 1 or > 512 || ids.Count is < 2 or > 500)
-            throw new MetadataException("invalid_collection", "A collection needs a name and between 2 and 500 unique movies or series.", StatusCodes.Status400BadRequest);
-        var validIds = await database.MediaItems.Where(item => ids.Contains(item.Id) && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)).Select(item => item.Id).ToListAsync(cancellationToken);
-        if (validIds.Count != ids.Count)
-            throw new MetadataException("invalid_collection_items", "Every collection item must be an existing movie or series.", StatusCodes.Status400BadRequest);
+        if (name.Length is < 1 or > 512)
+            throw new MetadataException("invalid_collection", "A collection needs a name between 1 and 512 characters.", StatusCodes.Status400BadRequest);
+
         collection.Name = name;
         collection.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (request.IsSmart)
+        {
+            collection.IsSmart = true;
+            collection.SmartRulesJson = request.RulesJson;
+            foreach (var member in collection.Members.ToList())
+            {
+                collection.Members.Remove(member);
+                database.MediaCollectionMembers.Remove(member);
+            }
+            return;
+        }
+
+        var ids = request.MediaIds.Distinct().ToList();
+        if (ids.Count > 500)
+            throw new MetadataException("invalid_collection", "A collection cannot contain more than 500 items.", StatusCodes.Status400BadRequest);
+
+        var validIds = ids.Count == 0 ? [] : await database.MediaItems.Where(item => ids.Contains(item.Id) && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)).Select(item => item.Id).ToListAsync(cancellationToken);
+        if (validIds.Count != ids.Count)
+            throw new MetadataException("invalid_collection_items", "Every collection item must be an existing movie or series.", StatusCodes.Status400BadRequest);
+
         var desired = ids.Select((mediaId, index) => (mediaId, index)).ToDictionary(value => value.mediaId, value => value.index);
         foreach (var member in collection.Members.ToList())
         {

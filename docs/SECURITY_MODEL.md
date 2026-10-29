@@ -30,8 +30,9 @@ Normal viewing activities do not require administrative elevation:
 - **Personal Scene Notes**: Creating, viewing, editing, and deleting personal timestamps and notes (`/api/v1/media/{id}/notes`).
 - **Playback & Conversion Choices**: Selecting preferred audio streams, subtitle languages, and live conversion qualities (`/api/v1/media/{id}/playback`, `/api/v1/media/{id}/conversion`).
 - **Scrub Previews**: Retrieving timeline preview frames for scrubbing (`/api/v1/media/{id}/scrub-previews`).
-- **Streaming & Media Delivery**: Requesting stream tickets, video playback, and artwork (`/api/v1/streams`, `/api/v1/artwork`).
-- **Catalog Browsing**: Searching and browsing movies, series, episodes, collections, and people (`/api/v1/catalog`, `/api/v1/collections`).
+- **Streaming & Media Delivery**: Requesting stream tickets, video playback, embedded/sidecar subtitles, and artwork (`/api/v1/streams`, `/api/v1/streams/{ticket}/subtitles`, `/api/v1/artwork`).
+- **Catalog & Collections**: Searching and browsing movies, series, episodes, franchises, and people (`/api/v1/catalog`, `/api/v1/franchises`). Creating, renaming, reordering, updating, and deleting own personal collections and smart lists; adding/removing collection items; creating personal collections from franchises (`/api/v1/collections`, `POST/DELETE /api/v1/collections/{id}/items/{mediaId}`, `POST /api/v1/collections/from-franchise/{id}`).
+- **Watch History & Statistics**: Viewing personal watch history, deleting single history items, clearing own history (`GET/DELETE /api/v1/history`, `DELETE /api/v1/history/{id}`); viewing personal statistics and Year in Review (`GET /api/v1/statistics`, `GET /api/v1/statistics/year/{year}`). Strictly private to the authenticated profile (administrators cannot view other profiles' viewing history).
 - **Own Profile Settings**: Changing own profile PIN or PIN protection toggle (`/api/v1/profile/pin`, `/api/v1/profile/pin-protection`).
 
 ### 2. Admin Actions
@@ -39,6 +40,8 @@ Normal viewing activities do not require administrative elevation:
 *No Server Password. No unlock required. No approval tokens.*
 
 Server configuration and library management are directly accessible to administrators once signed into their PIN-protected profile:
+- **Shared Collections Management**: Creating, editing, or deleting shared collections visible to all users (`POST /api/v1/collections` with `IsShared: true`, `PUT/DELETE /api/v1/collections/{id}`).
+- **Library Health & Maintenance**: Inspecting duplicate media side-by-side, offline titles, and unmatched titles (`GET /api/v1/library/health/duplicates`, `/offline`, `/unmatched`); merging entries without touching disk files (`POST /api/v1/library/health/merge`); setting preferred duplicate versions (`POST /api/v1/library/health/preferred-version`); removing library database entries (`DELETE /api/v1/library/health/entries/{id}`).
 - **Metadata Configuration**: TMDB API key management (`PUT/DELETE /api/v1/metadata/provider`, `/api/v1/metadata/provider/token`).
 - **Storage Locations**: Adding storage folders, toggling directory monitoring, and scanning libraries (`/api/v1/libraries`, `POST /api/v1/libraries`, `PUT /api/v1/libraries/{id}/monitoring`, `/api/v1/libraries/{id}/scans`, `/api/v1/scans`).
 - **Metadata Editing & Matching**: Editing title metadata, poster artwork, episode information, and triggering catalog search rebuilds (`/api/v1/media/{id}/editor`, `/api/v1/metadata/jobs`, `/api/v1/catalog/search/rebuild`).

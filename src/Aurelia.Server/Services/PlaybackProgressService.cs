@@ -106,6 +106,7 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
             var logicalId = media.Kind == MediaKind.Episode && media.SeasonNumber > 0 && media.ParentId.HasValue ? media.ParentId.Value : media.Id;
             var hidden = await database.ContinueWatchingStates.SingleOrDefaultAsync(state => state.UserId == userId && state.MediaItemId == logicalId, cancellationToken);
             if (hidden is { IsHidden: true }) { hidden.IsHidden = false; hidden.Revision = checked(hidden.Revision + 1); }
+            await RecordWatchEventAsync(userId, media.Id, request.PositionMilliseconds, request.DurationMilliseconds, completed, now, cancellationToken);
         }
         progress.UpdatedAt = now;
         progress.Revision = checked(progress.Revision + 1);
@@ -190,4 +191,59 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
         progress.UpdatedAt,
         progress.Revision,
         progress.LastMutationId);
+
+    private async Task RecordWatchEventAsync(
+        Guid userId,
+        Guid mediaId,
+        long positionMs,
+        long durationMs,
+        bool isCompleted,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var windowStart = now.AddMinutes(-30);
+        var recentEvent = await database.WatchEvents
+            .Where(e => e.UserId == userId && e.MediaItemId == mediaId && e.Timestamp >= windowStart)
+            .OrderByDescending(e => e.Timestamp)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (recentEvent is not null)
+        {
+            var deltaSeconds = Math.Max(0, (long)(now - recentEvent.Timestamp).TotalSeconds);
+            deltaSeconds = Math.Min(deltaSeconds, 1800);
+            recentEvent.SecondsWatched += deltaSeconds;
+            recentEvent.PositionMilliseconds = positionMs;
+            recentEvent.DurationMilliseconds = durationMs;
+            recentEvent.IsCompleted = recentEvent.IsCompleted || isCompleted;
+            recentEvent.Timestamp = now;
+        }
+        else
+        {
+            var initialSeconds = Math.Clamp(positionMs / 1000, 10, 60);
+            database.WatchEvents.Add(new WatchEvent
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                MediaItemId = mediaId,
+                Timestamp = now,
+                PositionMilliseconds = positionMs,
+                DurationMilliseconds = durationMs,
+                SecondsWatched = initialSeconds,
+                IsCompleted = isCompleted
+            });
+        }
+
+        if (Random.Shared.Next(0, 50) == 0)
+        {
+            var retentionCutoff = now.AddYears(-3);
+            var staleEvents = await database.WatchEvents
+                .Where(e => e.Timestamp < retentionCutoff)
+                .Take(100)
+                .ToListAsync(cancellationToken);
+            if (staleEvents.Count > 0)
+            {
+                database.WatchEvents.RemoveRange(staleEvents);
+            }
+        }
+    }
 }

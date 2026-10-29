@@ -197,13 +197,13 @@ segment and no temporary file.
    direct one and ends with its ticket, session or profile. The server runs at most three
    conversions at once, at most one of them re-encoding the picture, and answers
    `429 conversion_busy` with `Retry-After` beyond that.
-3. An embedded text track is read with `GET {streamPath}/subtitles/{index}` under the same
-   ticket, session and profile rules. The response is `text/vtt; charset=utf-8`, private and
-   uncached, and contains the full track in normalized title time. Do not add the live stream's
-   seek offset to its cues. SubRip, ASS/SSA, `mov_text`, WebVTT and plain text are supported;
-   bitmap tracks return `422 subtitle_not_supported`, an unknown index
-   `404 invalid_subtitle_track`. Extraction runs through the same conversion budget and is
-   limited to 8 MiB in request memory and 30 seconds. No subtitle file is written or cached.
+3. An embedded or sidecar text track is read with `GET {streamPath}/subtitles/{index}` under the same
+   ticket, session and profile rules. Track indices `0..999` refer to embedded subtitle tracks; indices
+   `1000+` refer to sidecar subtitle tracks discovered next to the video or in `Subs/` or `Subtitles/`
+   directories. The response is `text/vtt; charset=utf-8`, private and uncached. SubRip (`.srt`),
+   ASS/SSA (`.ass`, `.ssa`), `mov_text`, WebVTT (`.vtt`) and plain text are supported and converted
+   in-memory; bitmap tracks (`.sub`/`.idx`) return `422 subtitle_not_supported`. All converted text
+   subtitles are capped at 5 MB in memory with an LRU cache; no converted files are ever written to disk.
 
 Reading paces the conversion: when the player stops reading, ffmpeg waits. Closing the
 connection ends ffmpeg. PQ/HLG pictures re-encoded to H.264 are tone- and gamut-mapped to SDR
@@ -212,6 +212,39 @@ The server detects a usable mapper when discovering ffmpeg: native perceptual `s
 in FFmpeg 9, or the older `zscale` plus `tonemap` filters. If neither is present, a request that
 needs HDR picture re-encoding returns `422 hdr_conversion_unavailable`; original picture
 copying remains available. Picture conversion beyond 1080p is not part of `live-conversion-v1`.
+
+## Collections v2 and Smart Lists
+
+The server reports capability `collections-v2`. Clients can interact with collections via:
+- `GET /api/v1/collections`: returns shared collections (`UserId == null`) and own collections (`UserId == caller`).
+- `POST /api/v1/collections`: creates a new manual collection or smart list. Viewers create personal collections; administrators can create personal or shared collections (`isShared: true`).
+- `PUT /api/v1/collections/{id}`: updates collection name, rules, or item list. Viewers can only modify own collections; administrators can modify own and shared collections.
+- `DELETE /api/v1/collections/{id}`: deletes collection. Viewers can only delete own collections; administrators can delete own and shared collections.
+- `POST /api/v1/collections/{id}/items/{mediaId}`: adds an item to a collection.
+- `DELETE /api/v1/collections/{id}/items/{mediaId}`: removes an item from a collection.
+- `GET /api/v1/franchises`: returns all discovered TMDB franchise collections (`belongs_to_collection`).
+- `POST /api/v1/collections/from-franchise/{id}`: creates a personal/shared collection pre-populated with all available franchise items.
+- Smart lists include `isSmart: true` and a `rulesJson` string containing `SmartCollectionRules` (`kind`, `genres`, `yearMin`, `yearMax`, `decade`, `ratingMin`, `ratingMax`, `watchedState`, `addedWithinDays`, `favoritesOnly`, `textContains`, `combination`). Evaluations are cached in memory for 60 seconds with lazy paging.
+
+## Watch History and Statistics
+
+Each playback progress update automatically appends or updates a `WatchEvent` record.
+- `GET /api/v1/history?offset=0&limit=20`: returns paged watch history for the authenticated profile.
+- `DELETE /api/v1/history/{id}`: deletes a single history item for the authenticated profile.
+- `DELETE /api/v1/history`: clears all watch history for the authenticated profile.
+- `GET /api/v1/statistics`: returns personal viewing statistics (total hours watched, weekly and monthly hours, top genres, top titles, viewing streaks, busiest day and time of day, completion rate).
+- `GET /api/v1/statistics/year/{year}`: returns Year in Review statistics for a specific year.
+All history and statistics are strictly private to the profile session. Admins and other profiles cannot access them. Records are pruned automatically after 3 years.
+
+## Library Maintenance and Health
+
+Administrators can inspect and maintain the media library without touching any files on disk:
+- `GET /api/v1/library/health/duplicates`: returns groups of duplicate titles detected by TMDB ID or normalized title and year.
+- `GET /api/v1/library/health/offline?days=7`: returns media items that are offline or have not been seen in the specified number of days.
+- `GET /api/v1/library/health/unmatched`: returns media items needing metadata matching or missing artwork/overview.
+- `POST /api/v1/library/health/merge`: merges progress, favorites, watch events, and collection memberships from a source entry to a target entry, then removes the source entry from the database.
+- `POST /api/v1/library/health/preferred-version`: marks a duplicate item as the preferred version.
+- `DELETE /api/v1/library/health/entries/{id}`: deletes an obsolete entry from the server database. Media files on disk are never deleted or modified.
 
 ## Minimum new-client acceptance
 

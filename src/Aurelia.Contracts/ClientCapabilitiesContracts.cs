@@ -12,6 +12,11 @@ public static class ServerFeatures
     });
 
     /// <summary>
+    /// User-created collections, smart lists, franchises, and collection management ("collections-v2").
+    /// </summary>
+    public const string CollectionsV2 = "collections-v2";
+
+    /// <summary>
     /// Stream reads marked "X-Aurelia-Stream-Purpose: preview" have their own concurrency and
     /// request budget, so clients may prepare timeline previews on several decoders.
     /// </summary>
@@ -40,8 +45,8 @@ public static class ServerFeatures
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
     public static IReadOnlyList<string> Reported(bool liveConversion) =>
         liveConversion
-            ? Array.AsReadOnly([.. All, WatchlistAndPeople, LiveConversion, ScrubPreviews])
-            : Array.AsReadOnly([.. All, WatchlistAndPeople]);
+            ? Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, LiveConversion, ScrubPreviews])
+            : Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2]);
 }
 
 public sealed record ClientCapabilitiesResponse(

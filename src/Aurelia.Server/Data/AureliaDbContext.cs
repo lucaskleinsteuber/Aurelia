@@ -55,6 +55,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<UserFavorite> UserFavorites => Set<UserFavorite>();
     public DbSet<MediaCollectionRecord> MediaCollections => Set<MediaCollectionRecord>();
     public DbSet<MediaCollectionMember> MediaCollectionMembers => Set<MediaCollectionMember>();
+    public DbSet<WatchEvent> WatchEvents => Set<WatchEvent>();
     public DbSet<SyncChange> SyncChanges => Set<SyncChange>();
     public DbSet<MediaExclusion> MediaExclusions => Set<MediaExclusion>();
     public DbSet<LibraryMutation> LibraryMutations => Set<LibraryMutation>();
@@ -712,6 +713,21 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(collection => collection.UpdatedAt).HasConversion(dateTimeOffsetConverter);
             entity.HasIndex(collection => new { collection.Provider, collection.ProviderCollectionId });
             entity.HasIndex(collection => collection.SourceKey);
+            entity.HasIndex(collection => collection.UserId);
+            entity.HasOne(collection => collection.User).WithMany()
+                .HasForeignKey(collection => collection.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WatchEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Timestamp).HasConversion(dateTimeOffsetConverter);
+            entity.HasIndex(e => new { e.UserId, e.Timestamp });
+            entity.HasIndex(e => e.MediaItemId);
+            entity.HasOne(e => e.User).WithMany()
+                .HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.MediaItem).WithMany()
+                .HasForeignKey(e => e.MediaItemId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MediaCollectionMember>(entity =>

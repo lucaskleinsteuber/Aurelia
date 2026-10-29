@@ -153,6 +153,10 @@ public sealed class MediaCollectionRecord
     public string? ProviderCollectionId { get; set; }
     public string? SourceKey { get; set; }
     public bool IsManual { get; set; }
+    public Guid? UserId { get; set; }
+    public ServerUser? User { get; set; }
+    public bool IsSmart { get; set; }
+    public string? SmartRulesJson { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public List<MediaCollectionMember> Members { get; set; } = [];

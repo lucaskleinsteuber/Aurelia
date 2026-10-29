@@ -82,11 +82,33 @@ public static class ApiEndpointMappings
         catalog.MapPost("/search/rebuild", RebuildCatalogSearchAsync)
             .RequireAuthorization("Owner");
         catalog.MapGet("/collections", ListCollectionsAsync);
+        catalog.MapGet("/franchises", ListFranchisesAsync);
 
-        var collections = api.MapGroup("/collections").RequireAuthorization("Owner");
+        var collections = api.MapGroup("/collections").RequireAuthorization();
+        collections.MapGet(string.Empty, ListCollectionsAsync);
         collections.MapPost(string.Empty, CreateCollectionAsync);
         collections.MapPut("/{collectionId:guid}", UpdateCollectionAsync);
         collections.MapDelete("/{collectionId:guid}", DeleteCollectionAsync);
+        collections.MapPost("/{collectionId:guid}/items/{mediaId:guid}", AddCollectionItemAsync);
+        collections.MapDelete("/{collectionId:guid}/items/{mediaId:guid}", RemoveCollectionItemAsync);
+        collections.MapPost("/from-franchise/{franchiseId:guid}", CreateCollectionFromFranchiseAsync);
+
+        var history = api.MapGroup("/history").RequireAuthorization();
+        history.MapGet(string.Empty, GetWatchHistoryAsync);
+        history.MapDelete("/{id:guid}", DeleteWatchHistoryItemAsync);
+        history.MapDelete(string.Empty, ClearWatchHistoryAsync);
+
+        var statistics = api.MapGroup("/statistics").RequireAuthorization();
+        statistics.MapGet(string.Empty, GetUserStatisticsAsync);
+        statistics.MapGet("/year/{year:int}", GetYearInReviewAsync);
+
+        var health = api.MapGroup("/library/health").RequireAuthorization("Administrator");
+        health.MapGet("/duplicates", GetHealthDuplicatesAsync);
+        health.MapGet("/offline", GetHealthOfflineAsync);
+        health.MapGet("/unmatched", GetHealthUnmatchedAsync);
+        health.MapPost("/merge", MergeHealthMediaAsync);
+        health.MapPost("/preferred-version", SetPreferredVersionAsync);
+        health.MapDelete("/entries/{mediaId:guid}", RemoveHealthEntryAsync);
 
         api.MapGet("/home", GetHomeAsync).RequireAuthorization();
         api.MapGet("/watchlist", GetWatchlistAsync).RequireAuthorization();
@@ -617,14 +639,59 @@ public static class ApiEndpointMappings
     private static Task<IResult> GetHomeAsync(HttpContext context, PresentationService presentation, SyncChangeService changes, CancellationToken cancellationToken) =>
         ExecuteRevisionedAsync(context, changes, () => presentation.HomeAsync(context.User.RequireUserId(), cancellationToken));
 
+    private static Task<IResult> ListFranchisesAsync(HttpContext context, int? offset, int? limit, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.FranchisesAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 100, cancellationToken));
+
     private static Task<IResult> CreateCollectionAsync(HttpContext context, SaveCollectionRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.CreateCollectionAsync(context.User.RequireUserId(), request, cancellationToken));
 
     private static Task<IResult> UpdateCollectionAsync(HttpContext context, Guid collectionId, SaveCollectionRequest request, PresentationService presentation, CancellationToken cancellationToken) =>
         ExecuteAsync(() => presentation.UpdateCollectionAsync(context.User.RequireUserId(), collectionId, request, cancellationToken));
 
-    private static Task<IResult> DeleteCollectionAsync(Guid collectionId, PresentationService presentation, CancellationToken cancellationToken) =>
-        ExecuteNoContentAsync(() => presentation.DeleteCollectionAsync(collectionId, cancellationToken));
+    private static Task<IResult> DeleteCollectionAsync(HttpContext context, Guid collectionId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => presentation.DeleteCollectionAsync(context.User.RequireUserId(), collectionId, cancellationToken));
+
+    private static Task<IResult> AddCollectionItemAsync(HttpContext context, Guid collectionId, Guid mediaId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => presentation.AddCollectionItemAsync(context.User.RequireUserId(), collectionId, mediaId, cancellationToken));
+
+    private static Task<IResult> RemoveCollectionItemAsync(HttpContext context, Guid collectionId, Guid mediaId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => presentation.RemoveCollectionItemAsync(context.User.RequireUserId(), collectionId, mediaId, cancellationToken));
+
+    private static Task<IResult> CreateCollectionFromFranchiseAsync(HttpContext context, Guid franchiseId, PresentationService presentation, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => presentation.CreateCollectionFromFranchiseAsync(context.User.RequireUserId(), franchiseId, cancellationToken));
+
+    private static Task<IResult> GetWatchHistoryAsync(HttpContext context, int? offset, int? limit, WatchHistoryService history, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => history.GetHistoryAsync(context.User.RequireUserId(), offset ?? 0, limit ?? 20, cancellationToken));
+
+    private static Task<IResult> DeleteWatchHistoryItemAsync(HttpContext context, Guid id, WatchHistoryService history, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => history.DeleteHistoryItemAsync(context.User.RequireUserId(), id, cancellationToken));
+
+    private static Task<IResult> ClearWatchHistoryAsync(HttpContext context, WatchHistoryService history, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => history.ClearHistoryAsync(context.User.RequireUserId(), cancellationToken));
+
+    private static Task<IResult> GetUserStatisticsAsync(HttpContext context, WatchHistoryService history, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => history.GetStatisticsAsync(context.User.RequireUserId(), cancellationToken));
+
+    private static Task<IResult> GetYearInReviewAsync(HttpContext context, int year, WatchHistoryService history, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => history.GetYearInReviewAsync(context.User.RequireUserId(), year, cancellationToken));
+
+    private static Task<IResult> GetHealthDuplicatesAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => health.GetDuplicatesAsync(offset ?? 0, limit ?? 50, cancellationToken));
+
+    private static Task<IResult> GetHealthOfflineAsync(int? days, int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => health.GetOfflineAsync(days ?? 7, offset ?? 0, limit ?? 50, cancellationToken));
+
+    private static Task<IResult> GetHealthUnmatchedAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => health.GetUnmatchedAsync(offset ?? 0, limit ?? 50, cancellationToken));
+
+    private static Task<IResult> MergeHealthMediaAsync(MergeMediaRequest request, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => health.MergeAsync(request.SourceMediaId, request.TargetMediaId, cancellationToken));
+
+    private static Task<IResult> SetPreferredVersionAsync(PreferredVersionRequest request, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => health.SetPreferredVersionAsync(request.PreferredMediaId, cancellationToken));
+
+    private static Task<IResult> RemoveHealthEntryAsync(Guid mediaId, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => health.RemoveEntryAsync(mediaId, cancellationToken));
 
     private static Task<IResult> GetMetadataProviderAsync(MetadataService metadata, CancellationToken cancellationToken) =>
         ExecuteAsync(() => metadata.GetStatusAsync(cancellationToken));

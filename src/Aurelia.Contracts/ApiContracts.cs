@@ -603,17 +603,128 @@ public sealed record CatalogDetailPresentation(
     CatalogItemSummary Item,
     MediaMetadataSummary Metadata,
     IReadOnlyList<SeasonPresentation> Seasons,
-    IReadOnlyList<SupplementPresentation> Supplements);
+    IReadOnlyList<SupplementPresentation> Supplements,
+    CollectionSummary? Franchise = null);
 
 public sealed record CollectionSummary(
     Guid Id,
     string Name,
     ArtworkSummary? Poster,
-    IReadOnlyList<CatalogItemSummary> Items);
+    IReadOnlyList<CatalogItemSummary> Items,
+    bool IsSmart = false,
+    int TotalCount = 0,
+    bool IsShared = true,
+    Guid? UserId = null,
+    string? RulesJson = null);
 
 public sealed record SaveCollectionRequest(
     string Name,
-    IReadOnlyList<Guid> MediaIds);
+    IReadOnlyList<Guid> MediaIds,
+    bool IsSmart = false,
+    bool IsShared = false,
+    string? RulesJson = null);
+
+public sealed record SmartCollectionRules(
+    string? Kind = null,
+    IReadOnlyList<string>? Genres = null,
+    int? YearMin = null,
+    int? YearMax = null,
+    int? Decade = null,
+    double? RatingMin = null,
+    double? RatingMax = null,
+    string? WatchedState = null,
+    int? AddedWithinDays = null,
+    bool? FavoritesOnly = null,
+    bool? WatchlistOnly = null,
+    string? TextContains = null,
+    string Combination = "and");
+
+public sealed record WatchHistoryItem(
+    Guid Id,
+    Guid MediaId,
+    string Title,
+    string? Eyebrow,
+    int? Year,
+    MediaKind Kind,
+    ArtworkSummary? Poster,
+    DateTimeOffset Timestamp,
+    long PositionMilliseconds,
+    long DurationMilliseconds,
+    long SecondsWatched,
+    bool IsCompleted);
+
+public sealed record WatchHistoryPage(
+    IReadOnlyList<WatchHistoryItem> Items,
+    int Offset,
+    int Limit,
+    int Total);
+
+public sealed record UserStatistics(
+    double TotalHoursWatched,
+    IReadOnlyList<PeriodHours> HoursByWeek,
+    IReadOnlyList<PeriodHours> HoursByMonth,
+    IReadOnlyList<NamedCount> TopGenres,
+    IReadOnlyList<NamedCount> TopTitles,
+    int CurrentStreakDays,
+    int LongestStreakDays,
+    string BusiestWeekday,
+    string BusiestTimeOfDay,
+    double CompletionRate);
+
+public sealed record PeriodHours(string Period, double Hours);
+public sealed record NamedCount(string Name, int Count, double? Hours = null);
+
+public sealed record YearInReview(
+    int Year,
+    double TotalHoursWatched,
+    int TitlesWatched,
+    int MoviesWatched,
+    int EpisodesWatched,
+    string? TopGenre,
+    string? TopTitle,
+    string? BusiestDay,
+    double? BusiestDayHours);
+
+public sealed record DuplicateItemSummary(
+    Guid MediaId,
+    string Title,
+    int? Year,
+    string RelativePath,
+    long? FileSize,
+    string? Resolution,
+    string? VideoCodec,
+    string? AudioCodec,
+    long? DurationMilliseconds,
+    DateTimeOffset CreatedAt);
+
+public sealed record DuplicateGroup(
+    string GroupKey,
+    string Title,
+    int? Year,
+    IReadOnlyList<DuplicateItemSummary> Items);
+
+public sealed record OfflineTitleSummary(
+    Guid MediaId,
+    string Title,
+    int? Year,
+    MediaKind Kind,
+    string RelativePath,
+    DateTimeOffset LastSeenAt,
+    int DaysOffline);
+
+public sealed record UnmatchedTitleSummary(
+    Guid MediaId,
+    string DetectedTitle,
+    string SourcePath,
+    MediaKind Kind,
+    string IssueReason);
+
+public sealed record MergeMediaRequest(
+    Guid SourceMediaId,
+    Guid TargetMediaId);
+
+public sealed record PreferredVersionRequest(
+    Guid PreferredMediaId);
 
 public sealed record HomeResponse(
     CatalogItemSummary? Recommendation,
