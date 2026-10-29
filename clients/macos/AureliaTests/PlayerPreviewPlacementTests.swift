@@ -30,6 +30,11 @@ struct PlayerPreviewPlacementTests {
         #expect(!bubble.intersects(controls))
         #expect(bubble.maxY < controls.minY)
         #expect(bubble.maxY < 0)
+
+        let vertical = PlayerPreviewPlacement.verticalOffset(
+          previewHeight: bubbleHeight, controlsHeight: controlHeight + 9)
+        #expect(vertical == -offset)
+        #expect(vertical < 0)
       }
     }
   }

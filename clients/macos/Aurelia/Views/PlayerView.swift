@@ -1060,12 +1060,11 @@ private struct PlayerTimeline: View {
           let x = PlayerPreviewPlacement.leading(
             timelineWidth: proxy.size.width, position: preview.position, duration: duration,
             previewWidth: width)
+          let bubbleHeight = width * 9 / 16 + 32
+          let y = PlayerPreviewPlacement.verticalOffset(
+            previewHeight: bubbleHeight, controlsHeight: previewClearance)
           PlayerPreviewBubble(preview: preview, width: width)
-            .alignmentGuide(.top) { dimensions in
-              PlayerPreviewPlacement.topAlignment(
-                previewHeight: dimensions.height, controlsHeight: previewClearance)
-            }
-            .offset(x: x)
+            .offset(x: x, y: y)
             .allowsHitTesting(false)
         }
       }

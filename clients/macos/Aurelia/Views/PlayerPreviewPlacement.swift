@@ -20,4 +20,8 @@ enum PlayerPreviewPlacement {
   static func topAlignment(previewHeight: CGFloat, controlsHeight: CGFloat) -> CGFloat {
     max(0, previewHeight) + max(0, controlsHeight) + 8
   }
+
+  static func verticalOffset(previewHeight: CGFloat, controlsHeight: CGFloat) -> CGFloat {
+    -topAlignment(previewHeight: previewHeight, controlsHeight: controlsHeight)
+  }
 }
