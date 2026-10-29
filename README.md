@@ -34,8 +34,7 @@ the library. A Watchlist keeps titles you plan to watch across all apps and brow
 Online details are optional and use your own TMDB token.
 
 **Made for watching.** Fullscreen playback of the original files, remembered audio and
-subtitle language choices per profile and series, Continue Watching, chapter markers
-with instant Skip Intro, Skip Recap and Skip Credits buttons, scene notes, a sleep timer,
+subtitle language choices per profile and series, Continue Watching, scene notes, a sleep timer,
 timeline scrub preview frames, and Night Mode to keep dialogue clear. On Apple TV,
 the next episode counts down in an Up Next card.
 
