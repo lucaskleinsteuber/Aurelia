@@ -147,6 +147,37 @@ struct MediaContextMenuItems: View {
           Task { _ = await model.setWatchlist(mediaId: item.id, isWatchlisted: !watchlisted) }
         }
       }
+      let editableCollections = model.collections.filter {
+        !$0.isSmart
+          && ($0.userId == model.profile?.user?.id || ($0.isShared && model.canManageMedia))
+      }
+      Menu("Add to Collection…") {
+        ForEach(editableCollections) { col in
+          let inCollection = col.items.contains(where: { $0.id == item.id })
+          Button {
+            Task {
+              if inCollection {
+                await model.removeMediaFromCollection(collectionId: col.id, mediaId: item.id)
+              } else {
+                await model.addMediaToCollection(collectionId: col.id, mediaId: item.id)
+              }
+            }
+          } label: {
+            HStack {
+              Text(col.name)
+              if inCollection {
+                Image(systemName: "checkmark")
+              }
+            }
+          }
+        }
+        if !editableCollections.isEmpty {
+          Divider()
+        }
+        Button("New Collection…") {
+          model.presentNewCollection(with: item)
+        }
+      }
     }
     MediaContinueWatchingMenuItem(item: item, controller: controller)
     if model.canEditMetadata, let onEdit {

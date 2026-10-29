@@ -174,7 +174,7 @@ export function subtitleLabel(track, position = 0, locale = "en") {
   const title = track.title && track.title !== language ? track.title : "";
   const format = { subrip: "SubRip", srt: "SubRip", ass: "ASS", ssa: "SSA", mov_text: "Text", webvtt: "WebVTT", hdmv_pgs_subtitle: "PGS", dvd_subtitle: "VobSub" }[track.format]
     ?? String(track.format ?? "").toUpperCase();
-  return [language || `Subtitle ${position + 1}`, title, format, track.isForced ? "Forced" : "", track.supported === false ? "Not supported in this browser" : ""].filter(Boolean).join(" · ");
+  return [language || `Subtitle ${position + 1}`, title, format, track.isForced ? "Forced" : "", track.isSdh ? "SDH" : "", track.supported === false ? "Not supported in this browser" : ""].filter(Boolean).join(" · ");
 }
 
 /** A complete WebVTT track uses title timestamps, independent of the video's current seek offset. */

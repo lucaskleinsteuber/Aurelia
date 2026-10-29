@@ -19,8 +19,13 @@ protocol PlaybackClientProtocol: AnyObject {
   ) async throws -> PlaybackProgressResponse
   func revokePlayback(id: UUID) async throws
   func streamURL(path: String) throws -> URL
+  func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack]
   /// Tells the server a sleep timer ended, so a server in sleep mode can sleep if nothing plays.
   func sleepTimerEnded() async
+}
+
+extension PlaybackClientProtocol {
+  func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack] { [] }
 }
 
 extension PlaybackClientProtocol {
@@ -98,11 +103,13 @@ final class APIPlaybackClient: PlaybackClientProtocol {
 protocol PlaybackRelayProtocol: AnyObject {
   func start() async throws -> URL
   func updateSourceURL(_ url: URL)
+  func subtitleURL(index: Int) -> URL?
   func setFailureHandler(_ handler: @escaping @MainActor @Sendable (PlaybackStreamFailure) -> Void)
   func stop()
 }
 
 extension PlaybackRelayProtocol {
+  func subtitleURL(index: Int) -> URL? { nil }
   func setFailureHandler(_ handler: @escaping @MainActor @Sendable (PlaybackStreamFailure) -> Void)
   {}
 }
@@ -885,6 +892,16 @@ final class PlaybackController: ObservableObject {
     openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
     playbackURL = localURL
     startPreviewRelay(from: sourceURL)
+    Task { [weak self] in
+      guard let self, let relay = self.relay else { return }
+      if let tracks = try? await self.client.streamSubtitles(ticket: source.id) {
+        for track in tracks where track.isSidecar {
+          if let subURL = relay.subtitleURL(index: track.index) {
+            self.engine.addSubtitleSlave(url: subURL)
+          }
+        }
+      }
+    }
     engine.volume = volume
     engine.isMuted = isMuted
     engine.playbackRate = playbackRate

@@ -152,10 +152,13 @@ struct LibraryBrowsePreferenceStore {
 enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
   case home
   case library
+  case collections
   case watchlist
   case recentlyAdded
   case tvShows
   case movies
+  case history
+  case statistics
 
   var id: String { rawValue }
 
@@ -163,10 +166,13 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
     switch self {
     case .home: "Home"
     case .library: "Library"
+    case .collections: "Collections"
     case .watchlist: "Watchlist"
     case .recentlyAdded: "Recently Added"
     case .tvShows: "TV Shows"
     case .movies: "Movies"
+    case .history: "History"
+    case .statistics: "Statistics"
     }
   }
 
@@ -174,10 +180,13 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
     switch self {
     case .home: "house.fill"
     case .library: "rectangle.stack.fill"
+    case .collections: "square.stack.3d.up.fill"
     case .watchlist: "bookmark.fill"
     case .recentlyAdded: "clock"
     case .tvShows: "tv"
     case .movies: "film.stack"
+    case .history: "clock.arrow.circlepath"
+    case .statistics: "chart.bar.xaxis"
     }
   }
 }

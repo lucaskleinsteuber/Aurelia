@@ -67,6 +67,7 @@ struct AppSettingsView: View {
   @State private var showingReviewQueue = false
   @State private var showingMediaManager = false
   @State private var showingResetSheet = false
+  @State private var showingLibraryHealth = false
 
   var body: some View {
     HStack(spacing: 0) {
@@ -146,6 +147,9 @@ struct AppSettingsView: View {
     }
     .sheet(isPresented: $showingResetSheet) {
       LibraryResetSheet().environmentObject(model)
+    }
+    .sheet(isPresented: $showingLibraryHealth) {
+      LibraryHealthView().environmentObject(model)
     }
   }
 
@@ -792,8 +796,26 @@ struct AppSettingsView: View {
   @ViewBuilder
   private var librarySections: some View {
     storageLocationsSection
+    libraryHealthSection
     scanningAndAutomationSection
     catalogVisibilitySection
+  }
+
+  private var libraryHealthSection: some View {
+    AureliaSettingsSection(
+      "Library Health & Maintenance",
+      symbol: "stethoscope",
+      description:
+        "Inspect duplicate titles, manage missing or offline files, and resolve unmatched metadata."
+    ) {
+      VStack(alignment: .leading, spacing: 10) {
+        Button("Open Library Health…") {
+          showingLibraryHealth = true
+        }
+        .accessibilityIdentifier("open-library-health")
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
   }
 
   private var storageLocationsSection: some View {

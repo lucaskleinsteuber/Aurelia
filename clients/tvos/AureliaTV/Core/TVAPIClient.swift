@@ -301,6 +301,10 @@ struct TVAPIClient: Sendable {
   func revokeTicket(id: UUID) async throws {
     _ = try await send("/api/v1/playback/\(id.uuidString)", method: "DELETE")
   }
+  func streamSubtitles(ticketID: UUID) async throws -> [TVLiveSubtitleTrack] {
+    let data = try await send("/api/v1/streams/\(ticketID.uuidString)/subtitles", method: "GET")
+    return try Self.decode([TVLiveSubtitleTrack].self, data: data)
+  }
   /// A player's sleep timer ended: a server in sleep mode may sleep if nothing else plays.
   func sleepTimerEnded() async throws {
     _ = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")

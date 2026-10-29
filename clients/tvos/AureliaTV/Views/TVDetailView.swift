@@ -57,6 +57,9 @@ struct TVDetailView: View {
             }
           }
           if let detail {
+            if let franchise = detail.franchise, !franchise.items.isEmpty {
+              franchiseRail(franchise)
+            }
             supplementRails(detail.supplements, prefix: "")
             castAndCrew(detail.metadata.credits ?? [])
             about(detail)
@@ -280,6 +283,32 @@ struct TVDetailView: View {
           )
           .focusSection()
       }
+    }
+  }
+
+  @ViewBuilder
+  private func franchiseRail(_ franchise: TVCollection) -> some View {
+    VStack(alignment: .leading, spacing: 24) {
+      TVSectionHeader(title: "Part of the \(franchise.name)", count: franchise.items.count)
+        .padding(.horizontal, TVDesign.pagePadding)
+      ScrollView(.horizontal) {
+        LazyHStack(alignment: .top, spacing: 44) {
+          ForEach(franchise.items, id: \.id) { film in
+            let value = model.overlay(film)
+            NavigationLink {
+              TVDetailView(id: value.detailID, initial: value)
+            } label: {
+              TVPosterLabel(item: value).frame(width: TVDesign.posterWidth)
+            }
+            .buttonStyle(.borderless)
+          }
+        }
+        .padding(.horizontal, TVDesign.pagePadding)
+        .padding(.vertical, 16)
+      }
+      .scrollIndicators(.hidden)
+      .scrollClipDisabled()
+      .focusSection()
     }
   }
 

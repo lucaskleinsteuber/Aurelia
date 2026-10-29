@@ -151,6 +151,43 @@ struct TVCollection: Codable, Identifiable, Equatable, Sendable {
   let name: String
   let poster: TVArtwork?
   let items: [TVCatalogItem]
+  let isSmart: Bool
+  let totalCount: Int
+  let isShared: Bool
+
+  init(
+    id: UUID,
+    name: String,
+    poster: TVArtwork?,
+    items: [TVCatalogItem],
+    isSmart: Bool = false,
+    totalCount: Int = 0,
+    isShared: Bool = true
+  ) {
+    self.id = id
+    self.name = name
+    self.poster = poster
+    self.items = items
+    self.isSmart = isSmart
+    self.totalCount = totalCount == 0 ? items.count : totalCount
+    self.isShared = isShared
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case id, name, poster, items, isSmart, totalCount, isShared
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    name = try container.decode(String.self, forKey: .name)
+    poster = try container.decodeIfPresent(TVArtwork.self, forKey: .poster)
+    items = try container.decodeIfPresent([TVCatalogItem].self, forKey: .items) ?? []
+    isSmart = try container.decodeIfPresent(Bool.self, forKey: .isSmart) ?? false
+    let count = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? 0
+    totalCount = count == 0 ? items.count : count
+    isShared = try container.decodeIfPresent(Bool.self, forKey: .isShared) ?? true
+  }
 }
 struct TVHome: Codable, Equatable, Sendable {
   let recommendation: TVCatalogItem?

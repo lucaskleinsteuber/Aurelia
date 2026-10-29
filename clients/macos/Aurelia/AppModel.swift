@@ -7,6 +7,13 @@ final class AppModel: ObservableObject {
   /// A one-shot detail route shared by library menus and the player.
   @Published var requestedMediaDetail: UUID?
   @Published var requestedPersonDetail: PersonSelection?
+  @Published var preselectedCollectionItem: CatalogItemSummary?
+  @Published var showingCollectionEditor = false
+
+  func presentNewCollection(with item: CatalogItemSummary? = nil) {
+    preselectedCollectionItem = item
+    showingCollectionEditor = true
+  }
 
   static var active: AppModel?
   @Published private(set) var operatingMode: OperatingMode?
@@ -2101,17 +2108,59 @@ final class AppModel: ObservableObject {
     return try await currentConnection { try await APIClient(profile: profile).metadataReviews() }
   }
 
-  func saveCollection(id: UUID?, name: String, mediaIds: [UUID]) async throws {
+  func saveCollection(
+    id: UUID?,
+    name: String,
+    mediaIds: [UUID],
+    isSmart: Bool = false,
+    isShared: Bool = false,
+    rulesJson: String? = nil
+  ) async throws {
     guard let profile else { throw APIClientError.invalidResponse }
     let generation = connectionGeneration
     let client = APIClient(profile: profile)
     if let id {
-      _ = try await client.updateCollection(id: id, name: name, mediaIds: mediaIds)
+      _ = try await client.updateCollection(
+        id: id, name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared,
+        rulesJson: rulesJson)
     } else {
-      _ = try await client.createCollection(name: name, mediaIds: mediaIds)
+      _ = try await client.createCollection(
+        name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared, rulesJson: rulesJson)
     }
     guard isCurrent(generation) else { throw CancellationError() }
     try await refresh()
+  }
+
+  func addMediaToCollection(collectionId: UUID, mediaId: UUID) async {
+    guard let profile else { return }
+    let generation = connectionGeneration
+    do {
+      try await APIClient(profile: profile).addCollectionItem(
+        collectionId: collectionId, mediaId: mediaId)
+      guard isCurrent(generation) else { return }
+      try await refresh()
+    } catch {}
+  }
+
+  func removeMediaFromCollection(collectionId: UUID, mediaId: UUID) async {
+    guard let profile else { return }
+    let generation = connectionGeneration
+    do {
+      try await APIClient(profile: profile).removeCollectionItem(
+        collectionId: collectionId, mediaId: mediaId)
+      guard isCurrent(generation) else { return }
+      try await refresh()
+    } catch {}
+  }
+
+  func createCollectionFromFranchise(_ franchiseId: String) async throws -> CollectionSummary {
+    guard let profile else { throw APIClientError.invalidResponse }
+    let generation = connectionGeneration
+    let result = try await APIClient(profile: profile).createCollectionFromFranchise(
+      franchiseId: franchiseId)
+    guard isCurrent(generation) else { throw CancellationError() }
+    try await refresh()
+    return result
   }
 
   func deleteCollection(id: UUID) async throws {

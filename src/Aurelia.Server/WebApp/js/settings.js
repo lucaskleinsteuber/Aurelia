@@ -471,7 +471,10 @@ export function createSettings(app) {
           ["24h", "Every 24 Hours"],
         ], general.rescanInterval, (val) => saveG({ rescanInterval: val }), "Automatic Rescan Interval")),
         row("Hide Offline Titles", toggle(general.hideOfflineTitles, (on) => saveG({ hideOfflineTitles: on }), "Hide Offline Titles"),
-          "Hides titles whose media drive is currently disconnected.")),
+          "Hides titles whose media drive is currently disconnected."),
+        row("Library Health & Maintenance",
+          openButton("View Library Health…", () => openLibraryHealthDialog(refresh)),
+          "Review duplicates, offline/missing titles and unmatched metadata.")),
     ];
   }
 
@@ -717,6 +720,188 @@ export function createSettings(app) {
 
   function advancedPage(sections, refresh) {
     return h("div", { class: "settings-stack" }, ...advancedSections(sections, refresh));
+  }
+
+  // MARK: Library Health Dialog
+
+  function openLibraryHealthDialog(refresh) {
+    const dialog = h("div", { class: "modal-backdrop" });
+    let activeTab = "duplicates";
+    let offlineDays = 30;
+
+    const tabContainer = h("div", { class: "health-tabs" });
+    const contentContainer = h("div", { class: "health-tab-content", style: { minHeight: "260px" } });
+
+    const closeBtn = h("button", { type: "button", class: "secondary-button", onclick: () => dialog.remove() }, "Close");
+
+    const tabs = [
+      { id: "duplicates", label: "Duplicates" },
+      { id: "offline", label: "Offline Titles" },
+      { id: "unmatched", label: "Unmatched Metadata" },
+    ];
+
+    function renderTabs() {
+      clear(tabContainer);
+      for (const t of tabs) {
+        const btn = h("button", {
+          type: "button",
+          class: `health-tab-button ${activeTab === t.id ? "selected" : ""}`,
+          onclick: () => {
+            activeTab = t.id;
+            renderTabs();
+            renderContent();
+          }
+        }, t.label);
+        tabContainer.append(btn);
+      }
+    }
+
+    async function renderContent() {
+      clear(contentContainer);
+      contentContainer.append(h("div", { class: "spinner visible" }));
+
+      if (activeTab === "duplicates") {
+        try {
+          const res = await api.healthDuplicates();
+          clear(contentContainer);
+          const groups = res.items ?? [];
+          if (!groups.length) {
+            contentContainer.append(h("p", { class: "muted" }, "No duplicate media found. Your library is clean!"));
+            return;
+          }
+          for (const g of groups) {
+            const groupEl = h("div", { class: "health-group" },
+              h("div", { style: { fontWeight: "600", fontSize: "16px" } }, g.title ?? "Unknown Title"),
+              g.items.map((item) => h("div", { class: "health-item-row" },
+                h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
+                  h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.path),
+                  h("div", { class: "muted small" }, `${item.resolution ?? "Unknown res"} · ${item.bitrateKbps ? `${Math.round(item.bitrateKbps)} kbps` : ""} · ${bytes(item.bytes)} ${item.isPreferred ? "★ Preferred" : ""}`)),
+                h("div", { class: "button-row" },
+                  !item.isPreferred ? h("button", {
+                    type: "button",
+                    class: "secondary-button small",
+                    onclick: async () => {
+                      try {
+                        await api.setPreferredHealthVersion(item.mediaId);
+                        app.toast("Preferred version updated.");
+                        renderContent();
+                      } catch (e) {
+                        app.toast(e.message);
+                      }
+                    }
+                  }, "Set Preferred") : null,
+                  !item.isPreferred ? h("button", {
+                    type: "button",
+                    class: "secondary-button small danger",
+                    onclick: async () => {
+                      const pref = g.items.find((x) => x.isPreferred) ?? g.items[0];
+                      if (!confirm(`Merge this duplicate into ${pref.resolution ?? "preferred"}?`)) return;
+                      try {
+                        await api.mergeHealthDuplicates(item.mediaId, pref.mediaId);
+                        app.toast("Duplicate merged.");
+                        renderContent();
+                      } catch (e) {
+                        app.toast(e.message);
+                      }
+                    }
+                  }, "Merge") : null))));
+            contentContainer.append(groupEl);
+          }
+        } catch (e) {
+          clear(contentContainer);
+          contentContainer.append(h("p", { class: "error-text" }, e.message));
+        }
+      } else if (activeTab === "offline") {
+        try {
+          const filterSelect = h("select", {
+            class: "select-input",
+            "aria-label": "Offline Days Filter",
+            onchange: (e) => {
+              offlineDays = Number(e.target.value);
+              renderContent();
+            }
+          },
+            h("option", { value: "30", selected: offlineDays === 30 }, "Missing 30+ Days"),
+            h("option", { value: "60", selected: offlineDays === 60 }, "Missing 60+ Days"),
+            h("option", { value: "90", selected: offlineDays === 90 }, "Missing 90+ Days"));
+
+          const res = await api.healthOffline({ days: offlineDays });
+          clear(contentContainer);
+          contentContainer.append(h("div", { style: { marginBottom: "16px" } }, filterSelect));
+
+          const items = res.items ?? [];
+          if (!items.length) {
+            contentContainer.append(h("p", { class: "muted" }, "No offline titles found matching this filter."));
+            return;
+          }
+
+          for (const item of items) {
+            const row = h("div", { class: "health-item-row" },
+              h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
+                h("div", { style: { fontWeight: "600" } }, item.title),
+                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.path),
+                h("div", { class: "muted small" }, `Offline for ${item.daysMissing} days (since ${new Date(item.lastSeen).toLocaleDateString()})`)),
+              h("button", {
+                type: "button",
+                class: "secondary-button danger small",
+                onclick: async () => {
+                  if (!confirm(`Remove “${item.title}” from library? Media files are not touched.`)) return;
+                  try {
+                    await api.removeHealthEntry(item.mediaId);
+                    app.toast("Entry removed.");
+                    renderContent();
+                  } catch (e) {
+                    app.toast(e.message);
+                  }
+                }
+              }, "Remove Entry"));
+            contentContainer.append(row);
+          }
+        } catch (e) {
+          clear(contentContainer);
+          contentContainer.append(h("p", { class: "error-text" }, e.message));
+        }
+      } else if (activeTab === "unmatched") {
+        try {
+          const res = await api.healthUnmatched();
+          clear(contentContainer);
+          const items = res.items ?? [];
+          if (!items.length) {
+            contentContainer.append(h("p", { class: "muted" }, "All media items are matched with metadata!"));
+            return;
+          }
+          for (const item of items) {
+            const row = h("div", { class: "health-item-row" },
+              h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
+                h("div", { style: { fontWeight: "600" } }, item.title),
+                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.path)),
+              h("button", {
+                type: "button",
+                class: "secondary-button small",
+                onclick: () => {
+                  dialog.remove();
+                  editors.editMetadata({ id: item.mediaId, kind: item.kind, title: item.title });
+                }
+              }, "Edit Metadata…"));
+            contentContainer.append(row);
+          }
+        } catch (e) {
+          clear(contentContainer);
+          contentContainer.append(h("p", { class: "error-text" }, e.message));
+        }
+      }
+    }
+
+    const modal = h("div", { class: "editor-form", style: { maxWidth: "800px", width: "90vw", maxHeight: "85vh", overflowY: "auto" } },
+      h("h2", {}, "Library Health & Maintenance"),
+      tabContainer,
+      contentContainer,
+      h("div", { class: "button-row end", style: { marginTop: "20px" } }, closeBtn));
+
+    dialog.append(modal);
+    document.body.append(dialog);
+    renderTabs();
+    renderContent();
   }
 
   // MARK: Reset Library Dialog

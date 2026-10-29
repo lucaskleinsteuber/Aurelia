@@ -234,6 +234,11 @@ export class Player {
       return;
     }
     this.video.src = this.source.streamPath;
+    this.api.streamSubtitles?.(this.source.id).then((tracks) => {
+      if (this.closed || !Array.isArray(tracks)) return;
+      this.embeddedSubtitles = tracks;
+      this.restoreTrackChoices();
+    }).catch(() => {});
     await this.play();
   }
 

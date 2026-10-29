@@ -146,7 +146,8 @@ final class TVPlaybackController: ObservableObject {
     Task { [weak self, api] in
       let features = (try? await api.capabilities())?.capabilities ?? []
       self?.previewsParallel = features.contains(TVScrubPreviewPlan.serverFeature)
-      self?.supportsServerScrubPreviews = features.contains(TVScrubPreviewPlan.serverScrubPreviewsFeature)
+      self?.supportsServerScrubPreviews = features.contains(
+        TVScrubPreviewPlan.serverScrubPreviewsFeature)
     }
     progressTask = Task { [weak self] in
       while !Task.isCancelled {
@@ -516,6 +517,19 @@ final class TVPlaybackController: ObservableObject {
       engine.applyPreferences(effectivePreferences)
       engine.playbackRate = desiredRate
       engine.load(url: localURL, resumeAt: resumeAt ?? resumePosition)
+      Task { [weak self, api] in
+        guard let tracks = try? await api.streamSubtitles(ticketID: created.id) else { return }
+        await MainActor.run {
+          guard let self, !self.closed, self.generation == operation,
+            self.relayGeneration == relayOperation
+          else { return }
+          for track in tracks {
+            if let subURL = secureRelay.subtitleURL(index: track.index) {
+              self.engine.addSubtitleSlave(url: subURL)
+            }
+          }
+        }
+      }
       startWatchdog(operation: operation)
       scheduleRenewal(created, operation: operation)
       userInteracted()

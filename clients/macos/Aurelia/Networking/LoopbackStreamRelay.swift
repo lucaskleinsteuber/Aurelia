@@ -23,6 +23,7 @@ struct RelayRequest: Equatable, Sendable {
   let method: String
   let range: String?
   let ifRange: String?
+  var subtitleIndex: Int? = nil
 }
 
 enum PlaybackStreamFailure: Equatable, Sendable {
@@ -126,6 +127,13 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     }
   }
 
+  func subtitleURL(index: Int) -> URL? {
+    lock.withLock {
+      guard let listener, let port = listener.port else { return nil }
+      return URL(string: "http://127.0.0.1:\(port.rawValue)/subtitles/\(secret)/\(index)")
+    }
+  }
+
   func setFailureHandler(
     _ handler: @escaping @MainActor @Sendable (PlaybackStreamFailure) -> Void
   ) {
@@ -174,12 +182,22 @@ final class LoopbackStreamRelay: @unchecked Sendable {
       throw StreamRelayError.invalidRequest
     }
     let requestParts = requestLine.split(separator: " ", omittingEmptySubsequences: false)
+    let isStream = requestParts.count == 3 && requestParts[1] == Substring("/stream/\(secret)")
+    let subPrefix = "/subtitles/\(secret)/"
+    let isSubtitles = requestParts.count == 3 && requestParts[1].starts(with: subPrefix)
     guard requestParts.count == 3,
       requestParts[2] == "HTTP/1.1",
       requestParts[0] == "GET" || requestParts[0] == "HEAD",
-      requestParts[1] == Substring("/stream/\(secret)")
+      isStream || isSubtitles
     else {
       throw StreamRelayError.invalidRequest
+    }
+
+    var subtitleIndex: Int? = nil
+    if isSubtitles {
+      let indexStr = String(requestParts[1].dropFirst(subPrefix.count))
+      guard let parsed = Int(indexStr) else { throw StreamRelayError.invalidRequest }
+      subtitleIndex = parsed
     }
 
     var headers: [String: String] = [:]
@@ -215,7 +233,8 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     return RelayRequest(
       method: String(requestParts[0]),
       range: headers["range"],
-      ifRange: headers["if-range"])
+      ifRange: headers["if-range"],
+      subtitleIndex: subtitleIndex)
   }
 
   private func listenerChanged(_ state: NWListener.State) {
@@ -307,7 +326,21 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     connection: NWConnection,
     id: UUID
   ) {
-    let url = lock.withLock { sourceURL }
+    let url: URL
+    if let subIndex = relayRequest.subtitleIndex {
+      let baseSource = lock.withLock { sourceURL }
+      var comps = URLComponents(url: baseSource, resolvingAgainstBaseURL: false)
+      let parts = (comps?.path ?? "").components(separatedBy: "/")
+      if let streamsIndex = parts.firstIndex(of: "streams"),
+        parts.indices.contains(streamsIndex + 1)
+      {
+        let ticket = parts[streamsIndex + 1]
+        comps?.path = "/api/v1/streams/\(ticket)/subtitles/\(subIndex)"
+      }
+      url = comps?.url ?? baseSource
+    } else {
+      url = lock.withLock { sourceURL }
+    }
     guard url.scheme?.lowercased() == "https", let host = url.host else {
       reportFailure(.invalidResponse, connectionID: id)
       reject(connection, id: id, status: 502, reason: "Bad Gateway")

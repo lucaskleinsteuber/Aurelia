@@ -80,10 +80,16 @@ struct TVPlayerLogicTests {
       secret: "secret")
     #expect(request.method == "GET")
     #expect(request.range == "bytes=10-20")
+    #expect(request.subtitleIndex == nil)
     let head = try TVRelayRequest.parse(
       Data("HEAD /stream/secret HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=-500\r\n\r\n".utf8),
       secret: "secret")
     #expect(head.method == "HEAD")
+    let sub = try TVRelayRequest.parse(
+      Data("GET /subtitles/secret/3 HTTP/1.1\r\nHost: 127.0.0.1:12345\r\n\r\n".utf8),
+      secret: "secret")
+    #expect(sub.method == "GET")
+    #expect(sub.subtitleIndex == 3)
   }
 
   @Test(arguments: [

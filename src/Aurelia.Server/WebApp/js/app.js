@@ -457,10 +457,13 @@ function shell(content) {
     ["recent", "Recently Added", "/recent"],
     ["shows", "TV Shows", "/shows"],
     ["movies", "Movies", "/movies"],
+    ["collections", "Collections", "/collections"],
   ];
   const current = state.route.name;
   const menu = h("div", { class: "profile-menu", hidden: true },
     h("div", { class: "menu-header" }, profilePicture(state.profile.id, state.profile.username), h("span", {}, state.profile.username)),
+    h("a", { class: "menu-item", href: "/history", "data-route": true }, "Watch History"),
+    h("a", { class: "menu-item", href: "/statistics", "data-route": true }, "Statistics"),
     h("a", { class: "menu-item", href: "/settings", "data-route": true }, "Settings…"),
     h("button", { class: "menu-item", onclick: () => showShortcutsDialog() }, "Keyboard Shortcuts"),
     h("button", { class: "menu-item", onclick: () => switchProfile() }, "Switch Profile"),
@@ -521,7 +524,7 @@ async function renderRoute({ quiet = false, restoreScroll = false } = {}) {
     }
   }
   isRenderingRoute = false;
-  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", settings: "Settings" }[route.name];
+  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
 }
 
@@ -546,6 +549,10 @@ function screenFor(route, token) {
       return catalog.collections();
     case "collection":
       return catalog.collection(route);
+    case "history":
+      return historyScreen();
+    case "statistics":
+      return statisticsScreen();
     default:
       return homeScreen();
   }
@@ -659,12 +666,14 @@ function continueCard(item) {
 }
 
 function collectionCard(collection, offset = 0) {
+  const count = collection.totalCount ?? collection.items?.length ?? 0;
   return h("a", { class: "poster-card", href: logic.routePath({ name: "collection", id: collection.id, ...(offset ? { offset } : {}) }), "data-route": true },
     h("div", { class: "poster-frame" },
       artwork(collection.poster ?? collection.items?.[0]?.poster, 320, "poster-art", ""),
-      h("span", { class: "badge count-badge" }, String(collection.items?.length ?? 0))),
+      collection.isSmart ? h("span", { class: "badge", style: { top: "8px", left: "8px" } }, "Smart") : null,
+      h("span", { class: "badge count-badge" }, String(count))),
     h("div", { class: "card-title" }, collection.name),
-    h("div", { class: "card-subtitle" }, "Collection"));
+    h("div", { class: "card-subtitle" }, collection.isSmart ? "Smart List" : "Collection"));
 }
 
 function emptyState(symbol, title, text, action) {
@@ -791,10 +800,34 @@ async function titleScreen(id) {
 
   const body = h("div", { class: "detail-sections" },
     seasons.length ? seasonsSection(item, seasons, target) : null,
+    detail.franchise ? franchiseRail(detail.franchise) : null,
     supplementRails(detail.supplements, item.kind === "series" ? "Series " : "", item.title),
     castRail(metadata.credits),
     aboutSection(detail));
   return h("div", { class: "detail page-enter" }, hero, body);
+}
+
+function franchiseRail(franchise) {
+  const cards = (franchise.items ?? []).map((film) => posterCard(film));
+  const saveButton = state.profile?.isOwner || state.profile?.isAdmin
+    ? h("button", {
+        class: "text-button",
+        onclick: async () => {
+          try {
+            await api.createCollectionFromFranchise(franchise.id);
+            toast(`Created collection “${franchise.name}”`);
+          } catch (e) {
+            toast(e.message);
+          }
+        }
+      }, "Save as Collection")
+    : null;
+  return h("section", { class: "rail" },
+    h("div", { class: "section-header" },
+      h("h2", {}, `Part of the ${franchise.name}`),
+      h("span", { class: "count" }, String(cards.length)),
+      saveButton),
+    h("div", { class: "rail-track poster" }, cards));
 }
 
 function watchMenu(item, scope, seasonNumber) {
@@ -944,6 +977,190 @@ async function personScreen(route) {
     items.length
       ? h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index)))
       : emptyState("search", "No Titles Found", "No accessible movies or TV shows in this library match this person."));
+}
+
+// MARK: Watch History
+
+async function historyScreen() {
+  let offset = 0;
+  const limit = 50;
+  let items = [];
+  let total = 0;
+
+  const container = h("div", { class: "history-page library page-enter" });
+  const listContainer = h("div", { class: "history-list" });
+
+  const clearButton = h("button", {
+    class: "secondary-button danger",
+    onclick: async () => {
+      if (!confirm("Clear your entire watch history? This cannot be undone.")) return;
+      try {
+        await api.clearHistory();
+        toast("Watch history cleared.");
+        items = [];
+        total = 0;
+        renderList();
+      } catch (e) {
+        toast(e.message);
+      }
+    }
+  }, "Clear History…");
+
+  const header = h("div", { class: "page-header" },
+    h("h1", {}, "Watch History"),
+    h("div", { class: "button-row" }, clearButton));
+
+  function renderList() {
+    clear(listContainer);
+    if (items.length === 0) {
+      clearButton.hidden = true;
+      listContainer.append(emptyState("clock", "No Watch History Yet", "Titles you watch will appear here."));
+      return;
+    }
+    clearButton.hidden = false;
+    for (const item of items) {
+      const row = h("div", { class: "history-item-row" },
+        h("a", { class: "history-item-poster", href: `/title/${item.mediaItemId}`, "data-route": true },
+          artwork(item.poster, 160, "poster-art", "")),
+        h("div", { class: "history-item-info" },
+          h("a", { class: "history-item-title", href: `/title/${item.mediaItemId}`, "data-route": true },
+            item.parentTitle ? `${item.parentTitle}: ${item.title}` : item.title),
+          h("div", { class: "history-item-meta muted small" },
+            item.seasonNumber ? `S${item.seasonNumber} · E${item.episodeNumber} · ` : "",
+            item.year ? `${item.year} · ` : "",
+            new Date(item.watchedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
+          progressBar(item.progressFraction)),
+        h("button", {
+          class: "icon-button danger",
+          "aria-label": `Remove ${item.title} from history`,
+          onclick: async () => {
+            try {
+              await api.deleteHistoryItem(item.id);
+              items = items.filter((x) => x.id !== item.id);
+              renderList();
+            } catch (e) {
+              toast(e.message);
+            }
+          }
+        }, icon("trash", { size: 16 })));
+      listContainer.append(row);
+    }
+    if (items.length < total) {
+      const loadMoreBtn = h("button", {
+        class: "secondary-button load-more",
+        onclick: async () => {
+          loadMoreBtn.disabled = true;
+          try {
+            offset += limit;
+            const res = await api.history({ offset, limit });
+            items.push(...res.items);
+            total = res.total;
+            renderList();
+          } catch (e) {
+            toast(e.message);
+          }
+        }
+      }, "Load More");
+      listContainer.append(loadMoreBtn);
+    }
+  }
+
+  try {
+    const res = await api.history({ offset, limit });
+    items = res.items ?? [];
+    total = res.total ?? 0;
+  } catch (e) {
+    return emptyState("warning", "Couldn’t Load History", e.message);
+  }
+
+  renderList();
+  container.append(header, listContainer);
+  return container;
+}
+
+// MARK: Statistics
+
+async function statisticsScreen() {
+  const container = h("div", { class: "statistics-page library page-enter" });
+  let stats;
+  try {
+    stats = await api.statistics();
+  } catch (e) {
+    return emptyState("warning", "Couldn’t Load Statistics", e.message);
+  }
+
+  const statCard = (title, value, subtitle) => h("div", { class: "stat-card" },
+    h("div", { class: "stat-card-title muted small" }, title),
+    h("div", { class: "stat-card-value" }, value),
+    subtitle ? h("div", { class: "stat-card-subtitle muted small" }, subtitle) : null);
+
+  const totalHours = Math.round(stats.totalHoursWatched);
+  const weekHours = Math.round(stats.hoursPast7Days * 10) / 10;
+  const monthHours = Math.round(stats.hoursPast30Days * 10) / 10;
+  const completionPercent = Math.round(stats.completionRate * 100);
+
+  const cardsGrid = h("div", { class: "stat-cards-grid" },
+    statCard("Total Watch Time", `${totalHours} hrs`, "All-time viewed"),
+    statCard("Past 7 Days", `${weekHours} hrs`, "Recent activity"),
+    statCard("Past 30 Days", `${monthHours} hrs`, "Monthly volume"),
+    statCard("Watch Streak", `${stats.dayStreak} ${stats.dayStreak === 1 ? "day" : "days"}`, `Best: ${stats.bestDayStreak} days`),
+    statCard("Completion Rate", `${completionPercent}%`, "Titles finished"),
+    statCard("Most Active Time", stats.busiestDayOfWeek ?? "—", stats.busiestHourOfDay != null ? `Around ${stats.busiestHourOfDay}:00` : ""));
+
+  const weeklyBars = (stats.hoursByWeek ?? []).map((week) => {
+    const maxWeek = Math.max(1, ...(stats.hoursByWeek ?? []).map((w) => w.hours));
+    const pct = Math.min(100, Math.round((week.hours / maxWeek) * 100));
+    return h("div", { class: "chart-bar-col", title: `${week.periodLabel}: ${week.hours} hrs` },
+      h("div", { class: "chart-bar", style: { height: `${Math.max(4, pct)}%` } }),
+      h("div", { class: "chart-label muted small" }, week.periodLabel.slice(5)));
+  });
+  const weeklySection = h("div", { class: "stat-section" },
+    h("h2", {}, "Activity Over the Past 12 Weeks"),
+    h("div", { class: "weekly-chart" }, weeklyBars));
+
+  const genrePills = (stats.topGenres ?? []).map((g) =>
+    h("span", { class: "genre-pill" }, `${g.name} `, h("span", { class: "genre-count" }, String(g.count))));
+  const genresSection = h("div", { class: "stat-section" },
+    h("h2", {}, "Top Genres"),
+    h("div", { class: "genre-pills" }, genrePills.length ? genrePills : h("p", { class: "muted" }, "No genre data yet.")));
+
+  const currentYear = new Date().getFullYear();
+  const yearSelect = h("select", { class: "select-input", "aria-label": "Year in Review" },
+    [currentYear, currentYear - 1, currentYear - 2].map((y) => h("option", { value: String(y) }, String(y))));
+  const yearContainer = h("div", { class: "year-in-review-content" });
+
+  async function loadYear(year) {
+    clear(yearContainer);
+    yearContainer.append(h("div", { class: "spinner visible" }));
+    try {
+      const yData = await api.yearInReview(year);
+      clear(yearContainer);
+      yearContainer.append(h("div", { class: "stat-cards-grid" },
+        statCard("Hours Watched", `${Math.round(yData.totalHoursWatched)} hrs`),
+        statCard("Titles Completed", String(yData.totalTitlesWatched), `${yData.totalMoviesWatched} movies, ${yData.totalEpisodesWatched} episodes`),
+        statCard("Longest Streak", `${yData.longestDayStreak} days`),
+        yData.mostWatchedTitle ? statCard("Most Watched", yData.mostWatchedTitle) : null));
+    } catch (e) {
+      clear(yearContainer);
+      yearContainer.append(h("p", { class: "muted" }, "No activity recorded for this year."));
+    }
+  }
+
+  yearSelect.addEventListener("change", () => loadYear(Number(yearSelect.value)));
+  loadYear(currentYear);
+
+  const yearSection = h("div", { class: "stat-section" },
+    h("div", { class: "section-header" }, h("h2", {}, "Year in Review"), yearSelect),
+    yearContainer);
+
+  container.append(
+    h("div", { class: "page-header" }, h("h1", {}, "Watching Statistics")),
+    cardsGrid,
+    weeklySection,
+    genresSection,
+    yearSection);
+
+  return container;
 }
 
 function aboutSection(detail) {

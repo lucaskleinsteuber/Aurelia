@@ -32,6 +32,11 @@ protocol TVPlaybackEngine: AnyObject {
   func seek(to milliseconds: Int64)
   func selectAudioTrack(_ id: Int32)
   func selectSubtitleTrack(_ id: Int32)
+  func addSubtitleSlave(url: URL)
+}
+
+extension TVPlaybackEngine {
+  func addSubtitleSlave(url: URL) {}
 }
 
 protocol TVPlaybackRelay: AnyObject, Sendable {
@@ -39,6 +44,11 @@ protocol TVPlaybackRelay: AnyObject, Sendable {
   func stop()
   func updateSourceURL(_ url: URL)
   func setFailureHandler(_ handler: @escaping @MainActor @Sendable (TVStreamFailure) -> Void)
+  func subtitleURL(index: Int) -> URL?
+}
+
+extension TVPlaybackRelay {
+  func subtitleURL(index: Int) -> URL? { nil }
 }
 
 extension TVStreamRelay: TVPlaybackRelay {}

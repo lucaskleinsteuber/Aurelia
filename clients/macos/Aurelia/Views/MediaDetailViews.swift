@@ -88,6 +88,9 @@ struct MediaDetailView: View {
               if !detail.seasons.isEmpty {
                 seasons(detail)
               }
+              if let franchise = detail.franchise {
+                franchiseRail(franchise)
+              }
               supplementSections(
                 detail.supplements, parentTitle: detail.item.title,
                 headingPrefix: detail.item.kind == .series ? "Series " : "")
@@ -346,6 +349,48 @@ struct MediaDetailView: View {
         "\(seriesTitle) · S\(String(format: "%02d", episode.seasonNumber)) E\(String(format: "%02d", episode.episodeNumber))",
       artwork: CatalogPlaybackLogic.artwork(for: episode.item)
     )
+  }
+
+  @ViewBuilder
+  private func franchiseRail(_ franchise: CollectionSummary) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Part of the \(franchise.name)")
+            .font(AureliaDesign.sectionTitle)
+          Text("\(franchise.items.count) titles in your library")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("Save as Collection") {
+          Task {
+            _ = try? await model.createCollectionFromFranchise(franchise.id.uuidString)
+          }
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("save-franchise-collection")
+      }
+      .padding(.horizontal, AureliaDesign.detailRailLeadingInset)
+
+      AureliaHorizontalRail(
+        leadingInset: AureliaDesign.detailRailLeadingInset,
+        cardWidth: 170,
+        itemCount: franchise.items.count,
+        title: franchise.name
+      ) {
+        ForEach(franchise.items) { item in
+          Button {
+            model.requestedMediaDetail = item.id
+          } label: {
+            MediaPosterCard(item: item)
+          }
+          .buttonStyle(AureliaCardButtonStyle())
+          .accessibilityIdentifier("franchise-media-\(item.id.uuidString)")
+          .mediaActions(item: item)
+        }
+      }
+    }
   }
 
   private func seasons(_ detail: CatalogDetailPresentation) -> some View {

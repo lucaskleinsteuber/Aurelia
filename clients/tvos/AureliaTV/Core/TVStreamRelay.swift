@@ -77,6 +77,12 @@ final class TVStreamRelay: @unchecked Sendable {
     }
   }
 
+  func subtitleURL(index: Int) -> URL? {
+    let port = lock.withLock { listener?.port?.rawValue }
+    guard let port else { return nil }
+    return URL(string: "http://127.0.0.1:\(port)/subtitles/\(secret)/\(index)")
+  }
+
   private func startListener() async throws -> URL {
     try Task.checkCancellation()
     return try await withCheckedThrowingContinuation { continuation in
@@ -249,7 +255,20 @@ final class TVStreamRelay: @unchecked Sendable {
     connection: NWConnection,
     id: UUID
   ) {
-    let url = lock.withLock { sourceURL }
+    var url = lock.withLock { sourceURL }
+    if let subIdx = relayRequest.subtitleIndex {
+      let pathComponents = url.pathComponents
+      if let streamIdx = pathComponents.firstIndex(of: "streams"),
+        streamIdx + 1 < pathComponents.count
+      {
+        let ticket = pathComponents[streamIdx + 1]
+        var comp = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        comp?.path = "/api/v1/streams/\(ticket)/subtitles/\(subIdx)"
+        if let subURL = comp?.url {
+          url = subURL
+        }
+      }
+    }
     guard url.scheme?.lowercased() == "https", let host = url.host else {
       reportFailure(.invalidResponse, connectionID: id)
       reject(connection, id: id, status: 502, reason: "Bad Gateway")

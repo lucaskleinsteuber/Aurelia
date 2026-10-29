@@ -324,6 +324,8 @@ export function parseRoute(pathname = "/", search = "") {
     }
   }
   if (parts.length === 1 && parts[0] === "collections") return { name: "collections" };
+  if (parts.length === 1 && parts[0] === "history") return { name: "history" };
+  if (parts.length === 1 && parts[0] === "statistics") return { name: "statistics" };
   if (parts.length === 1 && parts[0] === "search") return { name: "search", query: query.get("q") ?? "" };
   if (parts[0] === "settings" && parts.length <= 2) {
     let page = parts[1] ?? "general";
@@ -364,6 +366,10 @@ export function routePath(route) {
     }
     case "collections":
       return "/collections";
+    case "history":
+      return "/history";
+    case "statistics":
+      return "/statistics";
     case "collection":
       return `/collection/${route.id}${route.offset ? `?offset=${route.offset}` : ""}`;
     default:

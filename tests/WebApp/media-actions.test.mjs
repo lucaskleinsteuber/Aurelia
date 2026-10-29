@@ -21,7 +21,7 @@ const labels = (menu) => all(menu).filter((node) => node.tagName === "BUTTON").m
 
 test("movie menus share ordered labels and send explicit Play versus Resume intent", (t) => {
   const f = fixture(t), menu = f.menu(movie);
-  assert.deepEqual(labels(menu), ["Play", "Resume", "Mark as Watched", "Mark as Unwatched", "Add to Favorites", "Remove from Continue Watching", "Edit Metadata…"]);
+  assert.deepEqual(labels(menu), ["Play", "Resume", "Mark as Watched", "Mark as Unwatched", "Add to Collection…", "Add to Favorites", "Remove from Continue Watching", "Edit Metadata…"]);
   button(menu, "Play").click(); button(menu, "Resume").click();
   assert.deepEqual(f.calls.map((call) => call[2]), [{ intent: "play" }, { intent: "resume" }]);
   assert.ok(all(menu).filter((node) => node.tagName === "SVG").length >= 7);

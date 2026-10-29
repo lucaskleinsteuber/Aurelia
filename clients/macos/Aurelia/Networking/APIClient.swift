@@ -778,16 +778,26 @@ struct APIClient: Sendable {
     try await get("/api/v1/catalog/collections?offset=0&limit=200")
   }
 
-  func createCollection(name: String, mediaIds: [UUID]) async throws -> CollectionSummary {
-    let body = try JSONEncoder().encode(SaveCollectionRequest(name: name, mediaIds: mediaIds))
+  func createCollection(
+    name: String, mediaIds: [UUID], isSmart: Bool = false, isShared: Bool = false,
+    rulesJson: String? = nil
+  ) async throws -> CollectionSummary {
+    let body = try JSONEncoder().encode(
+      SaveCollectionRequest(
+        name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared, rulesJson: rulesJson))
     let data = try await perform(path: "/api/v1/collections", method: "POST", body: body)
     return try Self.decode(CollectionSummary.self, from: data)
   }
 
-  func updateCollection(id: UUID, name: String, mediaIds: [UUID]) async throws
+  func updateCollection(
+    id: UUID, name: String, mediaIds: [UUID], isSmart: Bool = false, isShared: Bool = false,
+    rulesJson: String? = nil
+  ) async throws
     -> CollectionSummary
   {
-    let body = try JSONEncoder().encode(SaveCollectionRequest(name: name, mediaIds: mediaIds))
+    let body = try JSONEncoder().encode(
+      SaveCollectionRequest(
+        name: name, mediaIds: mediaIds, isSmart: isSmart, isShared: isShared, rulesJson: rulesJson))
     let data = try await perform(
       path: "/api/v1/collections/\(id.uuidString.lowercased())", method: "PUT", body: body)
     return try Self.decode(CollectionSummary.self, from: data)
@@ -796,6 +806,96 @@ struct APIClient: Sendable {
   func deleteCollection(id: UUID) async throws {
     _ = try await perform(
       path: "/api/v1/collections/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func addCollectionItem(collectionId: UUID, mediaId: UUID) async throws {
+    _ = try await perform(
+      path:
+        "/api/v1/collections/\(collectionId.uuidString.lowercased())/items/\(mediaId.uuidString.lowercased())",
+      method: "POST")
+  }
+
+  func removeCollectionItem(collectionId: UUID, mediaId: UUID) async throws {
+    _ = try await perform(
+      path:
+        "/api/v1/collections/\(collectionId.uuidString.lowercased())/items/\(mediaId.uuidString.lowercased())",
+      method: "DELETE")
+  }
+
+  func franchises() async throws -> [CollectionSummary] {
+    try await get("/api/v1/franchises")
+  }
+
+  func createCollectionFromFranchise(franchiseId: String) async throws -> CollectionSummary {
+    let data = try await perform(
+      path: "/api/v1/franchises/\(franchiseId)/collection",
+      method: "POST")
+    return try Self.decode(CollectionSummary.self, from: data)
+  }
+
+  func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack] {
+    try await get("/api/v1/streams/\(ticket.uuidString.lowercased())/subtitles")
+  }
+
+  func history(offset: Int = 0, limit: Int = 50) async throws -> WatchHistoryPage {
+    try await get("/api/v1/history?offset=\(offset)&limit=\(limit)")
+  }
+
+  func deleteHistoryItem(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/history/\(id.uuidString.lowercased())",
+      method: "DELETE")
+  }
+
+  func clearHistory() async throws {
+    _ = try await perform(
+      path: "/api/v1/history",
+      method: "DELETE")
+  }
+
+  func statistics() async throws -> UserStatistics {
+    try await get("/api/v1/statistics")
+  }
+
+  func yearInReview(year: Int) async throws -> YearInReview {
+    try await get("/api/v1/statistics/year/\(year)")
+  }
+
+  func healthDuplicates(offset: Int = 0, limit: Int = 50) async throws -> [DuplicateGroup] {
+    try await get("/api/v1/library/health/duplicates?offset=\(offset)&limit=\(limit)")
+  }
+
+  func healthOffline(days: Int = 30, offset: Int = 0, limit: Int = 50) async throws
+    -> [OfflineTitleSummary]
+  {
+    try await get("/api/v1/library/health/offline?days=\(days)&offset=\(offset)&limit=\(limit)")
+  }
+
+  func healthUnmatched(offset: Int = 0, limit: Int = 50) async throws -> [UnmatchedTitleSummary] {
+    try await get("/api/v1/library/health/unmatched?offset=\(offset)&limit=\(limit)")
+  }
+
+  func healthMerge(sourceId: UUID, targetId: UUID) async throws {
+    let body = try JSONEncoder().encode(
+      MergeMediaRequest(sourceMediaId: sourceId, targetMediaId: targetId))
+    _ = try await perform(
+      path: "/api/v1/library/health/merge",
+      method: "POST",
+      body: body)
+  }
+
+  func healthSetPreferred(preferredId: UUID) async throws {
+    let body = try JSONEncoder().encode(PreferredVersionRequest(preferredMediaId: preferredId))
+    _ = try await perform(
+      path: "/api/v1/library/health/preferred",
+      method: "PUT",
+      body: body)
+  }
+
+  func healthRemoveEntry(mediaId: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/library/health/entries/\(mediaId.uuidString.lowercased())",
+      method: "DELETE")
   }
 
   func setFavorite(mediaId: UUID, isFavorite: Bool) async throws -> Bool {
@@ -1522,6 +1622,22 @@ struct APIClient: Sendable {
           {"available":true,"mode":"off","intervalSeconds":15,"storageCapMegabytes":500,
           "storedTitleCount":0,"storedBytes":0,"activeCount":0,"pendingCount":0,
           "completedCount":0,"totalScheduledCount":0,"pausedForPlayback":false}
+          """
+      case let p where p.hasPrefix("/api/v1/library/health/duplicates"):
+        response = "[]"
+      case let p where p.hasPrefix("/api/v1/library/health/offline"):
+        response = "[]"
+      case let p where p.hasPrefix("/api/v1/library/health/unmatched"):
+        response = "[]"
+      case "/api/v1/franchises":
+        response = "[]"
+      case let p where p.hasPrefix("/api/v1/history"):
+        response = "{\"items\":[],\"totalCount\":0,\"offset\":0,\"limit\":50}"
+      case "/api/v1/statistics":
+        response = """
+          {"totalHoursWatched":0,"hoursPast7Days":0,"hoursPast30Days":0,"weeklyHours":[],
+          "monthlyHours":[],"topGenres":[],"currentStreakDays":0,"longestStreakDays":0,
+          "completionRatePercent":0,"busiestDayOfWeek":"Sunday","busiestHourOfDay":20,"yearsAvailable":[]}
           """
       default: throw APIClientError.invalidResponse
       }

@@ -31,7 +31,9 @@ struct TVHomeView: View {
           shelf("Favorites", items: home.favorites, section: .favorites)
           if !home.collections.isEmpty { collections(home.collections) }
           shelf("Recently Added", items: home.recentlyAdded, section: .recentlyAdded)
-          if home.continueWatching.isEmpty && model.watchlistItems.isEmpty && home.favorites.isEmpty && home.recentlyAdded.isEmpty {
+          if home.continueWatching.isEmpty && model.watchlistItems.isEmpty && home.favorites.isEmpty
+            && home.recentlyAdded.isEmpty
+          {
             ContentUnavailableView("Your Library Is Empty", systemImage: "film")
           }
         }
@@ -345,13 +347,24 @@ struct TVCollectionCard: View {
   let collection: TVCollection
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      TVArtworkView(artwork: collection.poster, width: 640, symbol: "rectangle.stack")
-        .aspectRatio(2 / 3, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
-        .hoverEffect(.highlight)
+      ZStack(alignment: .topLeading) {
+        TVArtworkView(artwork: collection.poster, width: 640, symbol: "rectangle.stack")
+          .aspectRatio(2 / 3, contentMode: .fit)
+          .clipShape(RoundedRectangle(cornerRadius: TVDesign.cardRadius, style: .continuous))
+          .hoverEffect(.highlight)
+        if collection.isSmart {
+          Text("Smart")
+            .font(.system(size: 16, weight: .bold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(12)
+        }
+      }
       VStack(alignment: .leading, spacing: 6) {
         Text(collection.name).font(.system(size: 24, weight: .semibold)).lineLimit(1)
-        Text(collection.items.count == 1 ? "1 title" : "\(collection.items.count) titles")
+        let count = collection.totalCount > 0 ? collection.totalCount : collection.items.count
+        Text(count == 1 ? "1 title" : "\(count) titles")
           .font(.system(size: 20)).foregroundStyle(.secondary)
       }
     }

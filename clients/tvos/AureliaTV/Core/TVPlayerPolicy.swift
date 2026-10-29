@@ -108,6 +108,7 @@ struct TVPlaybackRecoveryBudget: Sendable {
 
 struct TVRelayRequest: Equatable, Sendable {
   let method: String
+  let subtitleIndex: Int?
   let range: String?
   let ifRange: String?
 
@@ -118,8 +119,22 @@ struct TVRelayRequest: Equatable, Sendable {
     let lines = text.components(separatedBy: "\r\n")
     let parts = (lines.first ?? "").split(separator: " ", omittingEmptySubsequences: false)
     guard parts.count == 3, parts[2] == "HTTP/1.1",
-      parts[0] == "GET" || parts[0] == "HEAD", parts[1] == Substring("/stream/\(secret)")
+      parts[0] == "GET" || parts[0] == "HEAD"
     else { throw TVRelayRequestError.invalidRequest }
+
+    let streamPrefix = "/stream/\(secret)"
+    let subtitlePrefix = "/subtitles/\(secret)/"
+    var subtitleIndex: Int?
+    if parts[1] == Substring(streamPrefix) {
+      subtitleIndex = nil
+    } else if parts[1].hasPrefix(subtitlePrefix) {
+      let suffix = parts[1].dropFirst(subtitlePrefix.count)
+      guard digits(suffix), let idx = Int(suffix) else { throw TVRelayRequestError.invalidRequest }
+      subtitleIndex = idx
+    } else {
+      throw TVRelayRequestError.invalidRequest
+    }
+
     var headers: [String: String] = [:]
     for line in lines.dropFirst() where !line.isEmpty {
       guard let colon = line.firstIndex(of: ":") else { throw TVRelayRequestError.invalidRequest }
@@ -133,7 +148,9 @@ struct TVRelayRequest: Equatable, Sendable {
       headers["transfer-encoding"] == nil, headers["upgrade"] == nil,
       headers["range"].map(validRange) ?? true
     else { throw TVRelayRequestError.invalidRequest }
-    return Self(method: String(parts[0]), range: headers["range"], ifRange: headers["if-range"])
+    return Self(
+      method: String(parts[0]), subtitleIndex: subtitleIndex, range: headers["range"],
+      ifRange: headers["if-range"])
   }
 
   private static func digits(_ value: Substring) -> Bool {

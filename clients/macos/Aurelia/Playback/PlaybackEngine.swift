@@ -200,12 +200,14 @@ protocol PlaybackEngine: AnyObject {
   func seek(to milliseconds: Int64)
   func selectAudioTrack(id: Int32)
   func selectSubtitleTrack(id: Int32?)
+  func addSubtitleSlave(url: URL)
   func selectChapter(index: Int32)
 }
 
 extension PlaybackEngine {
   var isSeekable: Bool { false }
   func load(url: URL, startAt milliseconds: Int64) { load(url: url) }
+  func addSubtitleSlave(url: URL) {}
   var opensAtStartPosition: Bool { false }
 
   var trackScope: UUID? {
@@ -509,6 +511,10 @@ final class VLCPlaybackEngine: PlaybackEngine {
         subtitleTracks.first(where: { $0.id == selected })?.preference
       }, scope: trackScope, profileId: profileScope)
     onUpdate?()
+  }
+
+  func addSubtitleSlave(url: URL) {
+    player.addPlaybackSlave(url, type: .subtitle, enforce: false)
   }
 
   func selectChapter(index: Int32) {

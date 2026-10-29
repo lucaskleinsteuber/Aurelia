@@ -220,3 +220,80 @@ test("settings refresh reads forward cancellation without changing credential mo
     assert.equal(call.headers["X-Aurelia-Web"], "profile");
   }
 });
+
+test("collections v2, subtitles, history, statistics and health API endpoints use correct routes and methods", async () => {
+  const calls = [];
+  const api = createApi(async (path, options) => {
+    calls.push({ path, ...options });
+    return json(200, {});
+  });
+
+  await api.createCollection({ name: "Favorites", isSmart: false });
+  assert.equal(calls.at(-1).path, "/api/v1/collections");
+  assert.equal(calls.at(-1).method, "POST");
+
+  await api.updateCollection("col-1", { name: "Sci-Fi", isSmart: true });
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1");
+  assert.equal(calls.at(-1).method, "PUT");
+
+  await api.deleteCollection("col-1");
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1");
+  assert.equal(calls.at(-1).method, "DELETE");
+
+  await api.addCollectionItem("col-1", "med-1");
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/items/med-1");
+  assert.equal(calls.at(-1).method, "POST");
+
+  await api.removeCollectionItem("col-1", "med-1");
+  assert.equal(calls.at(-1).path, "/api/v1/collections/col-1/items/med-1");
+  assert.equal(calls.at(-1).method, "DELETE");
+
+  await api.franchises();
+  assert.equal(calls.at(-1).path, "/api/v1/franchises");
+  assert.equal(calls.at(-1).method, "GET");
+
+  await api.createCollectionFromFranchise("fran-1");
+  assert.equal(calls.at(-1).path, "/api/v1/collections/from-franchise/fran-1");
+  assert.equal(calls.at(-1).method, "POST");
+
+  await api.streamSubtitles("ticket-1");
+  assert.equal(calls.at(-1).path, "/api/v1/streams/ticket-1/subtitles");
+
+  await api.history({ offset: 10, limit: 25 });
+  assert.equal(calls.at(-1).path, "/api/v1/history?offset=10&limit=25");
+
+  await api.deleteHistoryItem("hist-1");
+  assert.equal(calls.at(-1).path, "/api/v1/history/hist-1");
+  assert.equal(calls.at(-1).method, "DELETE");
+
+  await api.clearHistory();
+  assert.equal(calls.at(-1).path, "/api/v1/history");
+  assert.equal(calls.at(-1).method, "DELETE");
+
+  await api.statistics();
+  assert.equal(calls.at(-1).path, "/api/v1/statistics");
+
+  await api.yearInReview(2025);
+  assert.equal(calls.at(-1).path, "/api/v1/statistics/year/2025");
+
+  await api.healthDuplicates();
+  assert.equal(calls.at(-1).path, "/api/v1/library/health/duplicates?offset=0&limit=50");
+
+  await api.healthOffline({ days: 60, offset: 0, limit: 20 });
+  assert.equal(calls.at(-1).path, "/api/v1/library/health/offline?days=60&offset=0&limit=20");
+
+  await api.healthUnmatched();
+  assert.equal(calls.at(-1).path, "/api/v1/library/health/unmatched?offset=0&limit=50");
+
+  await api.mergeHealthDuplicates("src-1", "tgt-1");
+  assert.equal(calls.at(-1).path, "/api/v1/library/health/merge");
+  assert.equal(calls.at(-1).method, "POST");
+
+  await api.setPreferredHealthVersion("pref-1");
+  assert.equal(calls.at(-1).path, "/api/v1/library/health/preferred");
+  assert.equal(calls.at(-1).method, "PUT");
+
+  await api.removeHealthEntry("med-1");
+  assert.equal(calls.at(-1).path, "/api/v1/library/health/entries/med-1");
+  assert.equal(calls.at(-1).method, "DELETE");
+});

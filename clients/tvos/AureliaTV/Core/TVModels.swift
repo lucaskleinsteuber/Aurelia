@@ -465,6 +465,44 @@ struct TVCatalogDetail: Codable, Equatable, Sendable {
   let metadata: TVMediaMetadata
   let seasons: [TVSeason]
   let supplements: [TVSupplement]
+  let franchise: TVCollection?
+
+  init(
+    item: TVCatalogItem,
+    metadata: TVMediaMetadata,
+    seasons: [TVSeason],
+    supplements: [TVSupplement],
+    franchise: TVCollection? = nil
+  ) {
+    self.item = item
+    self.metadata = metadata
+    self.seasons = seasons
+    self.supplements = supplements
+    self.franchise = franchise
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case item, metadata, seasons, supplements, franchise
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    item = try container.decode(TVCatalogItem.self, forKey: .item)
+    metadata = try container.decode(TVMediaMetadata.self, forKey: .metadata)
+    seasons = try container.decodeIfPresent([TVSeason].self, forKey: .seasons) ?? []
+    supplements = try container.decodeIfPresent([TVSupplement].self, forKey: .supplements) ?? []
+    franchise = try container.decodeIfPresent(TVCollection.self, forKey: .franchise)
+  }
+}
+
+struct TVLiveSubtitleTrack: Codable, Equatable, Sendable {
+  let index: Int
+  let title: String
+  let language: String?
+  let isDefault: Bool
+  let isForced: Bool
+  let isSdh: Bool
+  let isSidecar: Bool
 }
 
 enum TVPlaybackAction: String, Codable, Sendable { case play, resume, playAgain }

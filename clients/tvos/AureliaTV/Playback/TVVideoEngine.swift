@@ -169,6 +169,10 @@ final class TVVideoEngine: TVPlaybackEngine {
     sample()
   }
 
+  func addSubtitleSlave(url: URL) {
+    player.addPlaybackSlave(url, type: .subtitle, enforce: false)
+  }
+
   func sample() { sample(notify: true) }
 
   private func sample(notify: Bool) {

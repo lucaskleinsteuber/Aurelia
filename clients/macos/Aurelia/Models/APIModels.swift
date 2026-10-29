@@ -525,6 +525,32 @@ struct CatalogDetailPresentation: Codable, Equatable, Sendable {
   let metadata: MediaMetadataSummary
   let seasons: [SeasonPresentation]
   let supplements: [SupplementPresentation]
+  var franchise: CollectionSummary? = nil
+
+  enum CodingKeys: String, CodingKey {
+    case item, metadata, seasons, supplements, franchise
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    item = try container.decode(CatalogItemSummary.self, forKey: .item)
+    metadata = try container.decode(MediaMetadataSummary.self, forKey: .metadata)
+    seasons = try container.decodeIfPresent([SeasonPresentation].self, forKey: .seasons) ?? []
+    supplements =
+      try container.decodeIfPresent([SupplementPresentation].self, forKey: .supplements) ?? []
+    franchise = try container.decodeIfPresent(CollectionSummary.self, forKey: .franchise)
+  }
+
+  init(
+    item: CatalogItemSummary, metadata: MediaMetadataSummary, seasons: [SeasonPresentation] = [],
+    supplements: [SupplementPresentation] = [], franchise: CollectionSummary? = nil
+  ) {
+    self.item = item
+    self.metadata = metadata
+    self.seasons = seasons
+    self.supplements = supplements
+    self.franchise = franchise
+  }
 }
 
 struct CollectionSummary: Codable, Identifiable, Equatable, Sendable {
@@ -532,6 +558,225 @@ struct CollectionSummary: Codable, Identifiable, Equatable, Sendable {
   let name: String
   let poster: ArtworkSummary?
   let items: [CatalogItemSummary]
+  var isSmart: Bool = false
+  var totalCount: Int = 0
+  var isShared: Bool = true
+  var userId: UUID? = nil
+  var rulesJson: String? = nil
+
+  enum CodingKeys: String, CodingKey {
+    case id, name, poster, items, isSmart, totalCount, isShared, userId, rulesJson
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    name = try container.decode(String.self, forKey: .name)
+    poster = try container.decodeIfPresent(ArtworkSummary.self, forKey: .poster)
+    items = try container.decodeIfPresent([CatalogItemSummary].self, forKey: .items) ?? []
+    isSmart = try container.decodeIfPresent(Bool.self, forKey: .isSmart) ?? false
+    let rawCount = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? items.count
+    totalCount = rawCount > 0 ? rawCount : items.count
+    isShared = try container.decodeIfPresent(Bool.self, forKey: .isShared) ?? true
+    userId = try container.decodeIfPresent(UUID.self, forKey: .userId)
+    rulesJson = try container.decodeIfPresent(String.self, forKey: .rulesJson)
+  }
+
+  init(
+    id: UUID, name: String, poster: ArtworkSummary? = nil, items: [CatalogItemSummary] = [],
+    isSmart: Bool = false, totalCount: Int = 0, isShared: Bool = true, userId: UUID? = nil,
+    rulesJson: String? = nil
+  ) {
+    self.id = id
+    self.name = name
+    self.poster = poster
+    self.items = items
+    self.isSmart = isSmart
+    self.totalCount = totalCount > 0 ? totalCount : items.count
+    self.isShared = isShared
+    self.userId = userId
+    self.rulesJson = rulesJson
+  }
+}
+
+struct SmartCollectionRules: Codable, Equatable, Sendable {
+  var kind: String? = nil
+  var genres: [String]? = nil
+  var yearMin: Int? = nil
+  var yearMax: Int? = nil
+  var ratingMin: Double? = nil
+  var ratingMax: Double? = nil
+  var watched: String? = nil
+  var addedWithinDays: Int? = nil
+  var favoritesOnly: Bool? = nil
+  var search: String? = nil
+  var match: String? = nil
+}
+
+struct LiveSubtitleTrack: Codable, Identifiable, Equatable, Sendable {
+  var id: Int { index }
+  let index: Int
+  let codec: String
+  let language: String
+  let title: String
+  let isDefault: Bool
+  let isForced: Bool
+  let supported: Bool
+  let isSidecar: Bool
+  let isSdh: Bool
+
+  enum CodingKeys: String, CodingKey {
+    case index, codec, language, title, isDefault, isForced, supported, isSidecar, isSdh
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    index = try container.decode(Int.self, forKey: .index)
+    codec = try container.decodeIfPresent(String.self, forKey: .codec) ?? ""
+    language = try container.decodeIfPresent(String.self, forKey: .language) ?? "und"
+    title = try container.decodeIfPresent(String.self, forKey: .title) ?? ""
+    isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+    isForced = try container.decodeIfPresent(Bool.self, forKey: .isForced) ?? false
+    supported = try container.decodeIfPresent(Bool.self, forKey: .supported) ?? true
+    isSidecar = try container.decodeIfPresent(Bool.self, forKey: .isSidecar) ?? false
+    isSdh = try container.decodeIfPresent(Bool.self, forKey: .isSdh) ?? false
+  }
+
+  init(
+    index: Int, codec: String = "", language: String = "und", title: String = "",
+    isDefault: Bool = false, isForced: Bool = false, supported: Bool = true,
+    isSidecar: Bool = false, isSdh: Bool = false
+  ) {
+    self.index = index
+    self.codec = codec
+    self.language = language
+    self.title = title
+    self.isDefault = isDefault
+    self.isForced = isForced
+    self.supported = supported
+    self.isSidecar = isSidecar
+    self.isSdh = isSdh
+  }
+}
+
+struct WatchHistoryItem: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let mediaId: UUID
+  let title: String
+  let kind: String
+  let year: Int?
+  let seasonNumber: Int?
+  let episodeNumber: Int?
+  let watchedAt: String
+  let durationSeconds: Double
+  let completedSeconds: Double
+  let completionPercentage: Double
+  let poster: ArtworkSummary?
+  let backdrop: ArtworkSummary?
+
+  var watchedDate: Date? { ServerDate.parse(watchedAt) }
+}
+
+struct WatchHistoryPage: Codable, Equatable, Sendable {
+  let items: [WatchHistoryItem]
+  let totalCount: Int
+  let offset: Int
+  let limit: Int
+}
+
+struct PeriodHours: Codable, Equatable, Sendable {
+  let period: String
+  let hours: Double
+}
+
+struct NamedCount: Codable, Equatable, Sendable {
+  let name: String
+  let count: Int
+}
+
+struct YearInReview: Codable, Equatable, Sendable {
+  let year: Int
+  let totalHours: Double
+  let totalTitles: Int
+  let movieCount: Int
+  let episodeCount: Int
+  let topGenres: [NamedCount]
+  let topTitles: [NamedCount]
+}
+
+struct UserStatistics: Codable, Equatable, Sendable {
+  let totalHoursWatched: Double
+  let hoursPast7Days: Double
+  let hoursPast30Days: Double
+  let weeklyHours: [PeriodHours]
+  let monthlyHours: [PeriodHours]
+  let topGenres: [NamedCount]
+  let currentStreakDays: Int
+  let longestStreakDays: Int
+  let completionRatePercent: Double
+  let busiestDayOfWeek: String
+  let busiestHourOfDay: Int
+  let yearsAvailable: [Int]
+}
+
+struct DuplicateItemSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let title: String
+  let kind: String
+  let year: Int?
+  let sourcePath: String
+  let fileSize: Int64
+  let videoCodec: String?
+  let videoResolution: String?
+  let audioCodec: String?
+  let audioChannels: Int?
+  let durationSeconds: Double
+  let availability: String
+  let isPreferred: Bool
+}
+
+struct DuplicateGroup: Codable, Identifiable, Equatable, Sendable {
+  var id: String { key }
+  let key: String
+  let title: String
+  let kind: String
+  let year: Int?
+  let tmdbId: String?
+  let items: [DuplicateItemSummary]
+}
+
+struct OfflineTitleSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let title: String
+  let kind: String
+  let year: Int?
+  let libraryName: String
+  let sourcePath: String
+  let lastSeenAt: String?
+  let daysOffline: Int
+  let poster: ArtworkSummary?
+
+  var lastSeenDate: Date? { lastSeenAt.flatMap(ServerDate.parse) }
+}
+
+struct UnmatchedTitleSummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let title: String
+  let kind: String
+  let year: Int?
+  let sourcePath: String
+  let detectedTitle: String?
+  let detectedYear: Int?
+  let poster: ArtworkSummary?
+}
+
+struct MergeMediaRequest: Encodable, Sendable {
+  let sourceMediaId: UUID
+  let targetMediaId: UUID
+}
+
+struct PreferredVersionRequest: Encodable, Sendable {
+  let preferredMediaId: UUID
 }
 
 struct HomeResponse: Codable, Equatable, Sendable {
@@ -570,6 +815,9 @@ struct MetadataReviewSummary: Codable, Identifiable, Equatable, Sendable {
 struct SaveCollectionRequest: Encodable, Sendable {
   let name: String
   let mediaIds: [UUID]
+  var isSmart: Bool = false
+  var isShared: Bool = false
+  var rulesJson: String? = nil
 }
 
 struct SetFavoriteRequest: Encodable, Sendable {

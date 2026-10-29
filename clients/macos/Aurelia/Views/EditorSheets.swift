@@ -140,6 +140,18 @@ struct CollectionEditorSheet: View {
   let collection: CollectionSummary?
   @State private var name: String
   @State private var mediaIds: [UUID]
+  @State private var isSmart: Bool
+  @State private var isShared: Bool
+  @State private var smartKind: String = "all"
+  @State private var smartGenre: String = ""
+  @State private var smartYearMin: String = ""
+  @State private var smartYearMax: String = ""
+  @State private var smartRatingMin: String = ""
+  @State private var smartWatched: String = "any"
+  @State private var smartDays: String = "any"
+  @State private var smartFavoritesOnly: Bool = false
+  @State private var smartSearch: String = ""
+  @State private var smartMatch: String = "all"
   @State private var errorMessage: String?
   @State private var showingDeleteConfirmation = false
 
@@ -147,60 +159,86 @@ struct CollectionEditorSheet: View {
     self.collection = collection
     _name = State(initialValue: collection?.name ?? "")
     _mediaIds = State(initialValue: collection?.items.map(\.id) ?? [])
+    _isSmart = State(initialValue: collection?.isSmart ?? false)
+    _isShared = State(initialValue: collection?.isShared ?? false)
+    if let rulesJson = collection?.rulesJson,
+      let data = rulesJson.data(using: .utf8),
+      let rules = try? JSONDecoder().decode(SmartCollectionRules.self, from: data)
+    {
+      _smartKind = State(initialValue: rules.kind ?? "all")
+      _smartGenre = State(initialValue: rules.genres?.joined(separator: ", ") ?? "")
+      _smartYearMin = State(initialValue: rules.yearMin.map(String.init) ?? "")
+      _smartYearMax = State(initialValue: rules.yearMax.map(String.init) ?? "")
+      _smartRatingMin = State(
+        initialValue: rules.ratingMin.map { String(format: "%.1f", $0) } ?? "")
+      _smartWatched = State(initialValue: rules.watched ?? "any")
+      _smartDays = State(initialValue: rules.addedWithinDays.map(String.init) ?? "any")
+      _smartFavoritesOnly = State(initialValue: rules.favoritesOnly ?? false)
+      _smartSearch = State(initialValue: rules.search ?? "")
+      _smartMatch = State(initialValue: rules.match ?? "all")
+    }
   }
 
   var body: some View {
     VStack(spacing: 0) {
       sheetHeader(
         collection == nil ? "New Collection" : "Edit Collection",
-        subtitle: "Choose at least two movies or TV shows.",
-        symbol: "rectangle.stack.badge.plus")
+        subtitle: isSmart
+          ? "Define automatic rules for this smart list."
+          : "Choose at least two movies or TV shows.",
+        symbol: isSmart ? "sparkles.rectangle.stack" : "rectangle.stack.badge.plus")
       Divider()
       VStack(alignment: .leading, spacing: 14) {
         TextField("Collection Name", text: $name).textFieldStyle(.roundedBorder)
-        List(model.catalogItems) { item in
-          HStack {
-            Image(systemName: mediaIds.contains(item.id) ? "checkmark.circle.fill" : "circle")
-              .foregroundStyle(mediaIds.contains(item.id) ? Color.accentColor : .secondary)
-            Text(item.title)
-            Spacer()
-            Text(item.kind == .movie ? "Movie" : "TV Show")
-              .font(.caption).foregroundStyle(.secondary)
-            if let index = mediaIds.firstIndex(of: item.id) {
-              Button {
-                move(index, by: -1)
-              } label: {
-                Image(systemName: "arrow.up")
-              }
-              .buttonStyle(.borderless).disabled(index == 0)
-              Button {
-                move(index, by: 1)
-              } label: {
-                Image(systemName: "arrow.down")
-              }
-              .buttonStyle(.borderless).disabled(index == mediaIds.count - 1)
-            }
-          }
-          .contentShape(Rectangle())
-          .onTapGesture { toggle(item.id) }
+
+        Picker("Collection Type", selection: $isSmart) {
+          Text("Standard Collection").tag(false)
+          Text("Smart List").tag(true)
         }
-        .listStyle(.inset)
+        .pickerStyle(.segmented)
+
+        if isSmart {
+          smartListRuleBuilder
+        } else {
+          standardItemPicker
+        }
+
+        if model.canManageMedia {
+          Toggle("Shared Collection (visible to all profiles)", isOn: $isShared)
+            .font(.caption)
+        }
+
         if let errorMessage { Text(errorMessage).font(.callout).foregroundStyle(.orange) }
-      }.padding(24)
+      }
+      .padding(24)
       Divider()
       HStack {
         if collection != nil {
           Button("Delete Collection", role: .destructive) { showingDeleteConfirmation = true }
         }
         Spacer()
-        Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button("Cancel") {
+          model.preselectedCollectionItem = nil
+          dismiss()
+        }.keyboardShortcut(.cancelAction)
         Button("Save") { Task { await save() } }
           .buttonStyle(AureliaPrimaryActionButtonStyle()).keyboardShortcut(.defaultAction)
           .disabled(!isValid)
-      }.padding(16)
+      }
+      .padding(16)
     }
-    .frame(width: 720, height: 640)
+    .frame(width: 720, height: 680)
     .background(AureliaBackdrop())
+    .onAppear {
+      if collection == nil, let preselected = model.preselectedCollectionItem,
+        !mediaIds.contains(preselected.id)
+      {
+        mediaIds.append(preselected.id)
+      }
+    }
+    .onDisappear {
+      model.preselectedCollectionItem = nil
+    }
     .confirmationDialog(
       "Delete \(collection?.name ?? "Collection")?",
       isPresented: $showingDeleteConfirmation,
@@ -213,9 +251,160 @@ struct CollectionEditorSheet: View {
     .accessibilityIdentifier("collection-editor")
   }
 
-  private var isValid: Bool {
-    !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && mediaIds.count >= 2
+  private var standardItemPicker: some View {
+    List(model.catalogItems) { item in
+      HStack {
+        Image(systemName: mediaIds.contains(item.id) ? "checkmark.circle.fill" : "circle")
+          .foregroundStyle(mediaIds.contains(item.id) ? Color.accentColor : .secondary)
+        Text(item.title)
+        Spacer()
+        Text(item.kind == .movie ? "Movie" : "TV Show")
+          .font(.caption).foregroundStyle(.secondary)
+        if let index = mediaIds.firstIndex(of: item.id) {
+          Button {
+            move(index, by: -1)
+          } label: {
+            Image(systemName: "arrow.up")
+          }
+          .buttonStyle(.borderless).disabled(index == 0)
+          Button {
+            move(index, by: 1)
+          } label: {
+            Image(systemName: "arrow.down")
+          }
+          .buttonStyle(.borderless).disabled(index == mediaIds.count - 1)
+        }
+      }
+      .contentShape(Rectangle())
+      .onTapGesture { toggle(item.id) }
+    }
+    .listStyle(.inset)
   }
+
+  private var smartListRuleBuilder: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Text("Rules").font(.headline)
+        Spacer()
+        Picker("Match", selection: $smartMatch) {
+          Text("All rules (AND)").tag("all")
+          Text("Any rule (OR)").tag("any")
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 220)
+      }
+
+      Form {
+        Picker("Media Type", selection: $smartKind) {
+          Text("All Titles").tag("all")
+          Text("Movies Only").tag("movies")
+          Text("TV Shows Only").tag("series")
+        }
+
+        TextField("Genre (comma separated)", text: $smartGenre)
+
+        HStack {
+          TextField("Min Year", text: $smartYearMin)
+          TextField("Max Year", text: $smartYearMax)
+        }
+
+        HStack {
+          TextField("Min Rating (0.0 - 10.0)", text: $smartRatingMin)
+          Picker("Watched", selection: $smartWatched) {
+            Text("Any").tag("any")
+            Text("Unwatched").tag("unwatched")
+            Text("Watched").tag("watched")
+          }
+        }
+
+        HStack {
+          Picker("Added Within", selection: $smartDays) {
+            Text("Anytime").tag("any")
+            Text("Past 30 Days").tag("30")
+            Text("Past 90 Days").tag("90")
+            Text("Past 365 Days").tag("365")
+          }
+          Toggle("Favorites Only", isOn: $smartFavoritesOnly)
+        }
+
+        TextField("Search Title Query", text: $smartSearch)
+      }
+      .formStyle(.grouped)
+
+      HStack {
+        Image(systemName: "sparkles")
+          .foregroundStyle(.tint)
+        Text("Matching \(previewMatchCount) titles in your library")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      }
+      .padding(.top, 4)
+    }
+  }
+
+  private var previewMatchCount: Int {
+    model.catalogItems.filter { item in
+      var matches: [Bool] = []
+      if smartKind == "movies" {
+        matches.append(item.kind == .movie)
+      } else if smartKind == "series" {
+        matches.append(item.kind == .series)
+      }
+      if let yMin = Int(smartYearMin), let itemYear = item.year { matches.append(itemYear >= yMin) }
+      if let yMax = Int(smartYearMax), let itemYear = item.year { matches.append(itemYear <= yMax) }
+      if !smartGenre.isEmpty {
+        let targets = smartGenre.components(separatedBy: ",").map {
+          $0.trimmingCharacters(in: .whitespaces).lowercased()
+        }.filter { !$0.isEmpty }
+        if !targets.isEmpty {
+          matches.append(
+            item.genres.contains { g in targets.contains(where: { g.lowercased().contains($0) }) })
+        }
+      }
+      if smartWatched == "watched" {
+        matches.append(item.watchState == .completed)
+      } else if smartWatched == "unwatched" {
+        matches.append(item.watchState != .completed)
+      }
+      if smartFavoritesOnly { matches.append(item.isFavorite) }
+      if !smartSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        matches.append(
+          item.title.localizedCaseInsensitiveContains(
+            smartSearch.trimmingCharacters(in: .whitespacesAndNewlines)))
+      }
+      if matches.isEmpty { return true }
+      return smartMatch == "any" ? matches.contains(true) : !matches.contains(false)
+    }.count
+  }
+
+  private var builtRulesJson: String? {
+    let genresList = smartGenre.components(separatedBy: ",").map {
+      $0.trimmingCharacters(in: .whitespaces)
+    }.filter { !$0.isEmpty }
+    let rules = SmartCollectionRules(
+      kind: smartKind == "all" ? nil : smartKind,
+      genres: genresList.isEmpty ? nil : genresList,
+      yearMin: Int(smartYearMin),
+      yearMax: Int(smartYearMax),
+      ratingMin: Double(smartRatingMin),
+      ratingMax: nil,
+      watched: smartWatched == "any" ? nil : smartWatched,
+      addedWithinDays: Int(smartDays),
+      favoritesOnly: smartFavoritesOnly ? true : nil,
+      search: smartSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        ? nil : smartSearch.trimmingCharacters(in: .whitespacesAndNewlines),
+      match: smartMatch
+    )
+    guard let data = try? JSONEncoder().encode(rules) else { return nil }
+    return String(data: data, encoding: .utf8)
+  }
+
+  private var isValid: Bool {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return false }
+    return isSmart || mediaIds.count >= 2
+  }
+
   private func toggle(_ id: UUID) {
     if let index = mediaIds.firstIndex(of: id) {
       mediaIds.remove(at: index)
@@ -223,21 +412,33 @@ struct CollectionEditorSheet: View {
       mediaIds.append(id)
     }
   }
+
   private func move(_ index: Int, by offset: Int) {
     let target = index + offset
     guard mediaIds.indices.contains(target) else { return }
     mediaIds.swapAt(index, target)
   }
+
   private func save() async {
     do {
-      try await model.saveCollection(id: collection?.id, name: name, mediaIds: mediaIds)
+      try await model.saveCollection(
+        id: collection?.id,
+        name: name,
+        mediaIds: isSmart ? [] : mediaIds,
+        isSmart: isSmart,
+        isShared: isShared,
+        rulesJson: isSmart ? builtRulesJson : nil
+      )
+      model.preselectedCollectionItem = nil
       dismiss()
     } catch { errorMessage = error.localizedDescription }
   }
+
   private func deleteCollection() async {
     guard let collection else { return }
     do {
       try await model.deleteCollection(id: collection.id)
+      model.preselectedCollectionItem = nil
       dismiss()
     } catch { errorMessage = error.localizedDescription }
   }

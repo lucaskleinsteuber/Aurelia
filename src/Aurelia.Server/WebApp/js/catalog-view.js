@@ -204,10 +204,175 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     return h("div", { class: "search" }, h("div", { class: "page-header" }, h("h1", {}, "Search")), h("div", { class: "search-bar" }, icon("search"), input), list.element);
   }
 
+  function openCollectionEditor(target = {}) {
+    dialog?.close();
+    const isEdit = Boolean(target.id);
+    const existingRules = target.rulesJson ? JSON.parse(target.rulesJson) : {};
+
+    const nameInput = h("input", { class: "text-field", type: "text", value: target.name ?? "", placeholder: "Collection Name", required: true });
+    let isSmart = Boolean(target.isSmart);
+    let isShared = Boolean(target.isShared);
+
+    const smartToggle = h("input", { type: "checkbox", checked: isSmart });
+    const sharedToggle = h("input", { type: "checkbox", checked: isShared });
+
+    const kindSelect = h("select", { class: "select-input" },
+      h("option", { value: "" }, "All"),
+      h("option", { value: "movie", selected: existingRules.kind === "movie" }, "Movies"),
+      h("option", { value: "series", selected: existingRules.kind === "series" }, "TV Shows"));
+    const genreInput = h("input", { class: "text-field", type: "text", value: (existingRules.genres ?? []).join(", "), placeholder: "Action, Comedy…" });
+    const yearMinInput = h("input", { class: "text-field", type: "number", value: existingRules.yearMin != null ? String(existingRules.yearMin) : "", placeholder: "e.g. 1990" });
+    const yearMaxInput = h("input", { class: "text-field", type: "number", value: existingRules.yearMax != null ? String(existingRules.yearMax) : "", placeholder: "e.g. 2025" });
+    const watchStateSelect = h("select", { class: "select-input" },
+      h("option", { value: "" }, "Any"),
+      h("option", { value: "unwatched", selected: existingRules.watchState === "unwatched" }, "Unwatched"),
+      h("option", { value: "inProgress", selected: existingRules.watchState === "inProgress" }, "In Progress"),
+      h("option", { value: "completed", selected: existingRules.watchState === "completed" }, "Watched"));
+    const addedDaysInput = h("input", { class: "text-field", type: "number", value: existingRules.addedWithinDays != null ? String(existingRules.addedWithinDays) : "", placeholder: "e.g. 30" });
+    const favoritesOnlyCheck = h("input", { type: "checkbox", checked: Boolean(existingRules.favoritesOnly) });
+    const searchInput = h("input", { class: "text-field", type: "text", value: existingRules.textContains ?? "", placeholder: "Title contains…" });
+    const matchAnyCheck = h("input", { type: "checkbox", checked: Boolean(existingRules.matchAny) });
+
+    const rulesSection = h("div", { class: "smart-rules-form", style: { display: isSmart ? "flex" : "none", flexDirection: "column", gap: "10px", marginTop: "12px" } },
+      h("h3", {}, "Smart List Rules"),
+      h("label", { class: "form-row" }, h("span", {}, "Media Type:"), kindSelect),
+      h("label", { class: "form-row" }, h("span", {}, "Genres:"), genreInput),
+      h("div", { class: "form-row-pair", style: { display: "flex", gap: "10px" } },
+        h("label", { style: { flex: 1 } }, h("span", {}, "From Year:"), yearMinInput),
+        h("label", { style: { flex: 1 } }, h("span", {}, "To Year:"), yearMaxInput)),
+      h("label", { class: "form-row" }, h("span", {}, "Watched State:"), watchStateSelect),
+      h("label", { class: "form-row" }, h("span", {}, "Added Within (Days):"), addedDaysInput),
+      h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px" } }, favoritesOnlyCheck, h("span", {}, "Favorites Only")),
+      h("label", { class: "form-row" }, h("span", {}, "Search Contains:"), searchInput),
+      h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px" } }, matchAnyCheck, h("span", {}, "Match Any Rule (OR instead of AND)")));
+
+    smartToggle.addEventListener("change", () => {
+      isSmart = smartToggle.checked;
+      rulesSection.style.display = isSmart ? "flex" : "none";
+    });
+
+    const form = h("form", { class: "editor-form" },
+      h("h2", {}, isEdit ? "Edit Collection" : "New Collection"),
+      h("label", { class: "form-row" }, h("span", {}, "Name:"), nameInput),
+      h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" } }, smartToggle, h("span", {}, "Smart List (Rule-based)")),
+      canManage() ? h("label", { class: "checkbox-row", style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" } }, sharedToggle, h("span", {}, "Shared Collection (Visible to all profiles)")) : null,
+      rulesSection,
+      h("div", { class: "button-row end", style: { marginTop: "16px" } },
+        h("button", { type: "button", class: "secondary-button", onclick: () => sheet.close() }, "Cancel"),
+        h("button", { type: "submit", class: "primary-button" }, isEdit ? "Save Changes" : "Create Collection")));
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = nameInput.value.trim();
+      if (!name) return;
+      let rulesJson = null;
+      if (isSmart) {
+        const genres = genreInput.value.split(",").map((g) => g.trim()).filter(Boolean);
+        const rules = {
+          kind: kindSelect.value || null,
+          genres: genres.length ? genres : null,
+          yearMin: yearMinInput.value ? Number(yearMinInput.value) : null,
+          yearMax: yearMaxInput.value ? Number(yearMaxInput.value) : null,
+          watchState: watchStateSelect.value || null,
+          addedWithinDays: addedDaysInput.value ? Number(addedDaysInput.value) : null,
+          favoritesOnly: favoritesOnlyCheck.checked || null,
+          textContains: searchInput.value.trim() || null,
+          matchAny: matchAnyCheck.checked || false,
+        };
+        rulesJson = JSON.stringify(rules);
+      }
+
+      try {
+        let saved;
+        if (isEdit) {
+          saved = await api.updateCollection(target.id, { name, isSmart, rulesJson, isShared: sharedToggle.checked });
+          toast(`Updated “${name}”`);
+        } else {
+          saved = await api.createCollection({ name, isSmart, rulesJson, isShared: sharedToggle.checked });
+          if (target.initialItem) {
+            await api.addCollectionItem(saved.id, target.initialItem.id);
+          }
+          toast(`Created collection “${name}”`);
+        }
+        sheet.close();
+        onChanged();
+      } catch (err) {
+        toast(err.message);
+      }
+    });
+
+    const sheet = h("dialog", { class: "sheet" }, form);
+    dialog = sheet;
+    sheet.addEventListener("close", () => { sheet.remove(); if (dialog === sheet) dialog = null; }, { once: true });
+    document.body.append(sheet);
+    sheet.showModal();
+    nameInput.focus();
+  }
+
+  async function openAddToCollectionDialog(item) {
+    dialog?.close();
+    let collectionsList = [];
+    try {
+      collectionsList = (await api.collections({ limit: 100 })) ?? [];
+    } catch (e) {
+      toast("Couldn’t load collections.");
+      return;
+    }
+
+    const standardCollections = collectionsList.filter((c) => !c.isSmart);
+
+    const sheet = h("dialog", { class: "sheet add-to-collection-dialog" },
+      h("h2", {}, `Add “${item.title}” to Collection`),
+      standardCollections.length ? h("div", { class: "collection-picker-list", style: { display: "flex", flexDirection: "column", gap: "8px", maxHeight: "240px", overflowY: "auto", margin: "16px 0" } },
+        standardCollections.map((col) => h("button", {
+          class: "menu-item",
+          onclick: async () => {
+            try {
+              await api.addCollectionItem(col.id, item.id);
+              toast(`Added to “${col.name}”`);
+              sheet.close();
+            } catch (err) {
+              toast(err.message);
+            }
+          }
+        }, col.name))) : h("p", { class: "muted", style: { margin: "16px 0" } }, "No collections yet."),
+      h("div", { class: "button-row end" },
+        h("button", { class: "secondary-button", onclick: () => sheet.close() }, "Cancel"),
+        h("button", { class: "primary-button", onclick: () => { sheet.close(); openCollectionEditor({ initialItem: item }); } }, "+ New Collection…")));
+
+    dialog = sheet;
+    sheet.addEventListener("close", () => { sheet.remove(); if (dialog === sheet) dialog = null; }, { once: true });
+    document.body.append(sheet);
+    sheet.showModal();
+  }
+
   async function collections() {
+    const headerActions = h("div", { class: "button-row" },
+      h("button", {
+        class: "primary-button",
+        onclick: () => openCollectionEditor()
+      }, "+ New Collection"));
+
     const list = pagedList(api.collections, {}, current(), { collection: true });
     await list.load(true);
-    return h("div", { class: "library" }, h("div", { class: "page-header" }, h("h1", {}, "Collections")), list.element);
+
+    const franchisesContainer = h("div", { class: "franchises-section", style: { marginTop: "40px" } });
+    if (typeof api.franchises === "function") {
+      api.franchises().then((franchises) => {
+        if (!franchises || !franchises.length) return;
+        const cards = franchises.map((f) => collectionCard(f));
+        franchisesContainer.append(
+          h("div", { class: "section-header" },
+            h("h2", {}, "Franchises in Library"),
+            h("span", { class: "count" }, String(franchises.length))),
+          h("div", { class: "poster-grid" }, cards));
+      }).catch(() => {});
+    }
+
+    return h("div", { class: "library page-enter" },
+      h("div", { class: "page-header" }, h("h1", {}, "Collections"), headerActions),
+      list.element,
+      franchisesContainer);
   }
 
   async function collection(route) {
@@ -218,8 +383,30 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     const indexLink = h("a", { class: "secondary-button", href: "/collections", "data-route": true }, "All Collections");
     if (!value) return emptyState("search", "Collection Not Found", "It may have moved or been removed. Find it in All Collections.", indexLink);
     document.title = `${value.name} · Aurelia`;
-    return h("div", { class: "library" }, h("div", { class: "page-header" }, h("h1", {}, value.name), h("span", { class: "count" }, String(value.items.length)), indexLink),
-      h("div", { class: "poster-grid" }, value.items.map((item, index) => posterCard(item, index))));
+
+    const editBtn = h("button", { class: "secondary-button", onclick: () => openCollectionEditor(value) }, "Edit…");
+    const deleteBtn = h("button", {
+      class: "secondary-button danger",
+      onclick: async () => {
+        if (!confirm(`Delete collection “${value.name}”? Media files are not affected.`)) return;
+        try {
+          await api.deleteCollection(value.id);
+          toast(`Deleted “${value.name}”`);
+          navigate({ name: "collections" });
+        } catch (err) {
+          toast(err.message);
+        }
+      }
+    }, "Delete");
+
+    return h("div", { class: "library" },
+      h("div", { class: "page-header" },
+        h("div", { style: { display: "flex", alignItems: "center", gap: "10px" } },
+          h("h1", {}, value.name),
+          value.isSmart ? h("span", { class: "badge", style: { position: "static" } }, "Smart List") : null,
+          h("span", { class: "count" }, String(value.totalCount ?? value.items?.length ?? 0))),
+        h("div", { class: "button-row" }, editBtn, deleteBtn, indexLink)),
+      h("div", { class: "poster-grid" }, (value.items ?? []).map((item, index) => posterCard(item, index))));
   }
 
   function confirmWatch(state, watched, signal) {
@@ -315,6 +502,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     }
     // The server supports favorites for movies and series. Episode identity is never sent to that endpoint.
     if (["movie", "series"].includes(item.kind)) {
+      actions.push(option("Add to Collection…", "plus", () => openAddToCollectionDialog(item)));
       actions.push(option(item.isFavorite ? "Remove from Favorites" : "Add to Favorites", item.isFavorite ? "starSlash" : "star", async () => {
         if (actionWorking) return;
         actionWorking = true;
