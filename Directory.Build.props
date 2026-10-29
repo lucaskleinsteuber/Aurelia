@@ -6,10 +6,10 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <AureliaBuildNumber>108</AureliaBuildNumber>
-    <Version>1.18.0</Version>
-    <FileVersion>1.18.0.$(AureliaBuildNumber)</FileVersion>
-    <InformationalVersion>1.18.0+build.$(AureliaBuildNumber)</InformationalVersion>
+    <AureliaBuildNumber>109</AureliaBuildNumber>
+    <Version>1.19.0</Version>
+    <FileVersion>1.19.0.$(AureliaBuildNumber)</FileVersion>
+    <InformationalVersion>1.19.0+build.$(AureliaBuildNumber)</InformationalVersion>
     <!-- Generated output goes to the git-ignored Local folder unless AURELIA_OTHER_ROOT is set. -->
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == ''">$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'Local'))</AureliaOtherRoot>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' != ''">$(AURELIA_OTHER_ROOT)</AureliaOtherRoot>
