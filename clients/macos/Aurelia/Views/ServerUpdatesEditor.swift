@@ -100,7 +100,6 @@ struct ServerUpdatesEditor: View {
 
   private func load(quietly: Bool = false) async {
     let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
-    guard model.managementUnlocked else { return }
     do {
       status = try await model.currentAdministration {
         try await scope.request { try await client.serverUpdates() }

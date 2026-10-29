@@ -202,7 +202,6 @@ struct ServerEssentialsEditor: View {
     .task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
-      guard model.managementUnlocked else { return }
       do {
         lastBackup = try await model.currentAdministration {
           try await scope.request { try await client.serverBackups() }

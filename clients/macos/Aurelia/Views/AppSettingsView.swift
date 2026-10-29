@@ -45,9 +45,7 @@ struct AppSettingsView: View {
         .tag(SettingsPage.playback)
 
       settingsPage {
-        if model.profile?.user?.role.canManageLibraries == true, !model.managementUnlocked {
-          ManagementUnlockView()
-        } else if model.canManageStorage {
+        if model.canManageStorage {
           storage
           LibraryMaintenanceView()
         } else if model.profile != nil {
@@ -63,9 +61,7 @@ struct AppSettingsView: View {
       .tag(SettingsPage.library)
 
       settingsPage {
-        if model.profile?.user?.role.canManageLibraries == true, !model.managementUnlocked {
-          ManagementUnlockView()
-        } else if model.canManageMedia {
+        if model.canManageMedia {
           metadata
         } else if model.profile != nil {
           ContentUnavailableView(
@@ -83,10 +79,7 @@ struct AppSettingsView: View {
         if let profile = model.profile {
           if profile.user?.role == .owner {
             ServerManagementView()
-          } else if profile.user?.role.canManageLibraries == true, !model.managementUnlocked {
-            ManagementUnlockView()
-          } else if model.managementUnlocked {
-            if profile.isViewingSession { ManagementStatusView() }
+          } else if profile.user?.role.canManageLibraries == true {
             ServerDevicesSection()
           } else {
             ContentUnavailableView(
@@ -174,7 +167,7 @@ struct AppSettingsView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
         content()
-        if selectedPage != .playback, model.managementUnlocked,
+        if selectedPage != .playback,
           let error = model.administrationErrorMessage
         {
           Text(error)
@@ -560,8 +553,8 @@ struct AppSettingsView: View {
         }
         Divider()
         if model.operatingMode == .host {
-          if profile.user?.role != .owner || !model.managementUnlocked {
-            // Owners with unlocked management restart from the Your Server summary.
+          if profile.user?.role != .owner {
+            // Owners restart from the Your Server summary.
             LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
             Button("Restart Server") { Task { await model.restartNativeHost() } }
           }

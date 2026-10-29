@@ -75,20 +75,33 @@ public sealed class ServerRequestGuard
         // Removing a temporary encrypted transfer is not a restore or persistent backup deletion.
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/server/backups/transfers/", StringComparison.Ordinal)) return false;
         if (path.Contains("/exclusions/", StringComparison.Ordinal)) return false;
+
+        // 1. Critical: Library reset and permanent media removal from library database
         if (path == "/api/v1/libraries/reset") return true;
-        if (path == "/api/v1/auth/pairings") return true;
-        if (path == "/api/v1/server/device-pairings/lookup") return false;
-        if (path.StartsWith("/api/v1/server/device-pairings/", StringComparison.Ordinal)) return true;
-        if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/auth/sessions/", StringComparison.Ordinal)) return true;
         if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/media/", StringComparison.Ordinal)
             && path.Split('/').Length == 5) return true;
-        return path == "/api/v1/server/settings" || path == "/api/v1/server/updates/install"
-            || path.StartsWith("/api/v1/server/operations", StringComparison.Ordinal)
-            || path.StartsWith("/api/v1/server/backups", StringComparison.Ordinal)
-            || path.StartsWith("/api/v1/server/sessions", StringComparison.Ordinal)
-            || path.StartsWith("/api/v1/users", StringComparison.Ordinal)
-            || path.StartsWith("/api/v1/metadata/provider", StringComparison.Ordinal)
-            || (path.StartsWith("/api/v1/libraries", StringComparison.Ordinal) && (HttpMethods.IsDelete(request.Method) || path == "/api/v1/libraries"));
+
+        // 2. Critical: Backup restore (overwrites database)
+        if (path.StartsWith("/api/v1/server/backups/restore", StringComparison.Ordinal)) return true;
+
+        // 3. Critical: Factory reset / destructive reset operations
+        if (path == "/api/v1/server/reset"
+            || (path.StartsWith("/api/v1/server/operations", StringComparison.Ordinal) && path.Contains("reset", StringComparison.Ordinal)))
+            return true;
+
+        // 4. Critical: Server password modification
+        if (path == "/api/v1/server/password") return true;
+
+        // 5. Critical: Changing user role (who is owner/admin) or resetting owner/admin password
+        if (HttpMethods.IsPut(request.Method) && path.StartsWith("/api/v1/users/", StringComparison.Ordinal)
+            && (path.EndsWith("/role", StringComparison.Ordinal) || path.EndsWith("/password", StringComparison.Ordinal)))
+            return true;
+
+        // 6. Critical: Deleting user (owner/admin user deletion is critical; ordinary user deletion does not require approval)
+        if (HttpMethods.IsDelete(request.Method) && path.StartsWith("/api/v1/users/", StringComparison.Ordinal))
+            return true;
+
+        return false;
     }
 
     public static bool IsManagementRequest(HttpRequest request)
@@ -106,7 +119,8 @@ public sealed class ServerRequestGuard
                     && !path.EndsWith("/playback", StringComparison.Ordinal) && !path.EndsWith("/conversion", StringComparison.Ordinal)
                     && !path.EndsWith("/progress", StringComparison.Ordinal)
                     && !path.EndsWith("/watch-state", StringComparison.Ordinal) && !path.EndsWith("/continue-watching", StringComparison.Ordinal)
-                    && !path.EndsWith("/favorite", StringComparison.Ordinal) && !path.Contains("/notes", StringComparison.Ordinal))));
+                    && !path.EndsWith("/favorite", StringComparison.Ordinal) && !path.EndsWith("/watchlist", StringComparison.Ordinal)
+                    && !path.Contains("/scrub-previews", StringComparison.Ordinal) && !path.Contains("/notes", StringComparison.Ordinal))));
     }
 
     public static string ApprovalAction(HttpRequest request)
@@ -120,8 +134,6 @@ public sealed class ServerRequestGuard
         if (!IsManagementRequest(context.Request)) return;
         if (!context.User.IsInRole(UserRole.Owner.ToString()) && !context.User.IsInRole(UserRole.Admin.ToString()))
             throw new AccountException("administration_required", "This profile cannot manage the server.", 403);
-        if (!sessions.ManagementUnlocked(context.User.RequireProfileSessionId()))
-            throw new AccountException("management_locked", "Unlock server management with the Server Password. Access lasts ten minutes.", 403);
         var path = (context.Request.Path.Value ?? "").ToLowerInvariant();
         if (!context.User.IsInRole(UserRole.Owner.ToString()) && context.User.FindFirst("aurelia_access_mode")?.Value == nameof(ProfileAccessMode.SelectedTitles)
             && (path.StartsWith("/api/v1/libraries", StringComparison.Ordinal) || path.StartsWith("/api/v1/scans", StringComparison.Ordinal)
@@ -133,20 +145,22 @@ public sealed class ServerRequestGuard
     {
         var database = context.RequestServices.GetRequiredService<AureliaDbContext>();
         var required = RequiresApproval(context.Request);
-        // Legacy device routes must obey the same exact-action policy as current routes.
-        if (!required && HttpMethods.IsDelete(context.Request.Method)
-            && context.Request.Path.StartsWithSegments("/api/v1/auth/sessions", StringComparison.OrdinalIgnoreCase, out var remaining)
-            && Guid.TryParse(remaining.Value?.Trim('/'), out var targetId)
-            && context.User.Identity?.IsAuthenticated == true)
+        if (required && HttpMethods.IsDelete(context.Request.Method)
+            && context.Request.Path.StartsWithSegments("/api/v1/users", StringComparison.OrdinalIgnoreCase, out var remainingUser)
+            && Guid.TryParse(remainingUser.Value?.Trim('/'), out var targetUserId))
         {
-            var currentDeviceId = context.User.RequireSessionId();
-            required = await database.DeviceSessions.AnyAsync(session => session.Id == targetId && session.Id != currentDeviceId, context.RequestAborted);
+            required = await database.Users.AsNoTracking().AnyAsync(u => u.Id == targetUserId && (u.Role == UserRole.Owner || u.Role == UserRole.Admin), context.RequestAborted);
         }
         if (!required) return;
         var reset = context.Request.Path.Equals(new PathString("/api/v1/libraries/reset"));
         var removal = HttpMethods.IsDelete(context.Request.Method) && context.Request.Path.StartsWithSegments("/api/v1/media") && (context.Request.Path.Value ?? "").Split('/').Length == 5;
         if (!context.User.IsInRole(UserRole.Owner.ToString()) && !((reset || removal) && context.User.IsInRole(UserRole.Admin.ToString())))
             throw new AccountException("owner_required", "Only an owner may change global server settings.", 403);
+
+        var sessions = context.RequestServices.GetRequiredService<ProfileSessionStore>();
+        if (!sessions.ManagementUnlocked(context.User.RequireProfileSessionId()))
+            throw new AccountException("management_locked", "Unlock server management with the Server Password. Access lasts ten minutes.", 403);
+
         context.Request.EnableBuffering(bufferThreshold: 65_536, bufferLimit: MaximumJsonBytes + 1);
         using var payload = new MemoryStream();
         var buffer = new byte[8192];

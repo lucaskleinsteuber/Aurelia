@@ -42,20 +42,17 @@ public static class DeviceAuthorizationEndpoints
         {
             RequirePrivateTransport(context);
             return ExecuteAsync(() => service.DecideAsync(id, true, context.User.RequireUserId(), context.User.RequireSessionId(),
-                context.User.RequireProfileSessionId(), ApprovedGeneration(context), context.RequestAborted));
+                context.User.RequireProfileSessionId(), context.RequestAborted));
         });
         management.MapPost("/{id:guid}/deny", (Guid id, DeviceAuthorizationService service, HttpContext context) =>
         {
             RequirePrivateTransport(context);
             return ExecuteAsync(() => service.DecideAsync(id, false, context.User.RequireUserId(), context.User.RequireSessionId(),
-                context.User.RequireProfileSessionId(), ApprovedGeneration(context), context.RequestAborted));
+                context.User.RequireProfileSessionId(), context.RequestAborted));
         });
     }
 
     private static string Address(HttpContext context) => context.Connection.RemoteIpAddress?.ToString() ?? "local";
-
-    private static Guid ApprovedGeneration(HttpContext context) => context.Items["Aurelia.AdministrationGeneration"] is Guid generation
-        ? generation : throw new AccountException("approval_required", "Authorize this exact device approval before continuing.", 403);
 
     private static async Task<T> ExecuteAsync<T>(Func<Task<T>> action)
     {

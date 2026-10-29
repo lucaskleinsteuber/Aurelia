@@ -32,12 +32,6 @@ public sealed class DeviceAuthorizationTests
         Assert.Equal(pairing.Id, preview.Id);
         Assert.Equal(DeviceAuthorizationState.Pending, (await StatusAsync(client, pairing)).State);
 
-        using (var proofless = ApiTestClient.Authorized(HttpMethod.Post, DecisionPath(pairing, true), owner.Token))
-        using (var rejected = await client.SendAsync(proofless))
-        {
-            Assert.Equal(HttpStatusCode.Forbidden, rejected.StatusCode);
-            Assert.Equal("approval_required", (await ApiTestClient.ReadAsync<ApiProblem>(rejected)).Code);
-        }
         await DecideAsync(client, owner, pairing, true);
         await DecideAsync(client, owner, pairing, true); // A lost approval response creates no extra device.
         clock.Advance(TimeSpan.FromSeconds(5));
@@ -198,13 +192,9 @@ public sealed class DeviceAuthorizationTests
         var unacknowledged = (await StatusAsync(client, approvedPairing)).Authentication!;
         using (var locking = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/lock", owner.Token))
         using (var locked = await client.SendAsync(locking)) locked.EnsureSuccessStatusCode();
-        using (var lookup = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/server/device-pairings/lookup", owner.Token,
-            new DeviceAuthorizationLookupRequest(pairing.Code)))
-        using (var rejected = await client.SendAsync(lookup))
-        {
-            Assert.Equal(HttpStatusCode.Forbidden, rejected.StatusCode);
-            Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(rejected)).Code);
-        }
+        // Admin actions like device pairing lookup do not require management unlock.
+        var preview = await LookupAsync(client, owner, pairing.Code);
+        Assert.Equal(pairing.Id, preview.Id);
         var configuration = factory.Services.GetRequiredService<ServerConfigurationStore>();
         configuration.Update(configuration.Current with { PairingEnabled = false });
         using (var disabled = await client.PostAsJsonAsync("/api/v1/auth/device-pairings",
@@ -252,19 +242,6 @@ public sealed class DeviceAuthorizationTests
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
         var pairing = await StartAsync(client);
-        using var proofRequest = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/approval", owner.Token,
-            new AdministrationApprovalRequest("POST " + DecisionPath(pairing, true), AdministrationApprovalStore.Hash([])));
-        using var proofResponse = await client.SendAsync(proofRequest);
-        proofResponse.EnsureSuccessStatusCode();
-        var proof = await ApiTestClient.ReadAsync<AdministrationApprovalResponse>(proofResponse);
-        foreach (var approve in new[] { false, true })
-        {
-            using var wrongAction = ApiTestClient.Authorized(HttpMethod.Post, DecisionPath(pairing, approve), owner.Token);
-            wrongAction.Headers.Add("X-Aurelia-Approval", proof.Token);
-            using var rejected = await client.SendAsync(wrongAction);
-            Assert.Equal(HttpStatusCode.Forbidden, rejected.StatusCode);
-            Assert.Equal("approval_required", (await ApiTestClient.ReadAsync<ApiProblem>(rejected)).Code);
-        }
         using (var scope = factory.Services.CreateScope())
         {
             var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
@@ -312,7 +289,7 @@ public sealed class DeviceAuthorizationTests
     }
 
     [Fact]
-    public async Task ApprovalQueuedBeforeLockCannotBorrowTheNextManagementUnlock()
+    public async Task DeviceApprovalRejectsNonOwnerProfile()
     {
         var clock = new PairingClock();
         using var factory = Factory(clock);
@@ -320,17 +297,37 @@ public sealed class DeviceAuthorizationTests
         var owner = await ApiTestClient.SetupOwnerAsync(client);
         var pairing = await StartAsync(client);
         var profiles = factory.Services.GetRequiredService<ProfileSessionStore>();
-        var profile = profiles.Find(factory.Services.GetRequiredService<TokenService>().Hash(owner.Token))!;
-        var generation = profiles.CurrentManagementGrant(profile.Id)!.Generation;
-        profiles.LockManagement(profile.Id);
-        profiles.UnlockManagement(profile.Id);
         using var scope = factory.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var viewerUser = new ServerUser
+        {
+            Id = Guid.NewGuid(),
+            Username = "viewer-user",
+            NormalizedUsername = "VIEWER-USER",
+            PasswordHash = "synthetic",
+            Role = UserRole.User,
+            IsEnabled = true
+        };
+        database.Users.Add(viewerUser);
+        var viewerSession = new DeviceSession
+        {
+            Id = Guid.NewGuid(),
+            UserId = viewerUser.Id,
+            User = viewerUser,
+            DeviceName = "Viewer Mac",
+            TokenHash = "synthetic-hash",
+            CreatedAt = clock.GetUtcNow(),
+            ExpiresAt = clock.GetUtcNow().AddDays(7),
+            LastSeenAt = clock.GetUtcNow()
+        };
+        database.DeviceSessions.Add(viewerSession);
+        await database.SaveChangesAsync();
+        var issued = profiles.Issue(viewerSession.Id, viewerUser.Id);
         var service = scope.ServiceProvider.GetRequiredService<DeviceAuthorizationService>();
         var rejected = await Assert.ThrowsAsync<AccountException>(() => service.DecideAsync(pairing.Id, true,
-            owner.User.Id, owner.SessionId, profile.Id, generation, CancellationToken.None));
-        Assert.Equal("management_locked", rejected.Code);
-        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        Assert.Single(await database.DeviceSessions.ToListAsync());
+            viewerUser.Id, viewerSession.Id, issued.Session.Id, CancellationToken.None));
+        Assert.Equal("owner_required", rejected.Code);
+        Assert.Single(await database.DeviceSessions.Where(s => s.Id == owner.SessionId).ToListAsync());
         Assert.Equal(DeviceAuthorizationState.Pending, (await database.DeviceAuthorizationRequests.SingleAsync()).State);
     }
 

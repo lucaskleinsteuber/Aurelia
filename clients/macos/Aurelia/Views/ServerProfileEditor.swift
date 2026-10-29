@@ -44,7 +44,7 @@ struct ServerProfileEditor: View {
       && ((pin.isEmpty && pinConfirmation.isEmpty) || pin == pinConfirmation)
   }
   private var canSave: Bool {
-    model.managementUnlocked && !working && (creating || snapshot != nil)
+    !working && (creating || snapshot != nil)
       && name.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 && hasValidPIN
   }
   private var titles: [CatalogItemSummary] {
@@ -69,24 +69,16 @@ struct ServerProfileEditor: View {
       Divider()
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
-          if model.managementUnlocked {
-            ManagementStatusView()
-          } else {
-            ManagementUnlockView()
-          }
-          if !creating, snapshot == nil, model.managementUnlocked {
+          if !creating, snapshot == nil {
             ProgressView("Loading profile…")
           }
-          profileSection.disabled(
-            !model.managementUnlocked || working || (!creating && snapshot == nil))
-          protectionSection.disabled(
-            !model.managementUnlocked || working || (!creating && snapshot == nil))
-          contentSection.disabled(
-            !model.managementUnlocked || working || (!creating && snapshot == nil))
+          profileSection.disabled(working || (!creating && snapshot == nil))
+          protectionSection.disabled(working || (!creating && snapshot == nil))
+          contentSection.disabled(working || (!creating && snapshot == nil))
           if let error {
             Text(error).foregroundStyle(.orange).textSelection(.enabled)
               .accessibilityIdentifier("profile-editor-error")
-            if !creating, snapshot == nil, model.managementUnlocked {
+            if !creating, snapshot == nil {
               Button("Reload Profile") { Task { await load() } }
             }
           }
@@ -113,7 +105,7 @@ struct ServerProfileEditor: View {
       .accessibilityElement(children: .contain)
       .accessibilityIdentifier("profile-editor")
       .task(id: model.administrationGeneration) {
-        if model.managementUnlocked, snapshot == nil { await load() }
+        if snapshot == nil { await load() }
       }
       .onChange(of: role) { _, updated in
         if updated.canManageLibraries { pinProtected = true }
@@ -257,7 +249,7 @@ struct ServerProfileEditor: View {
   }
 
   @MainActor private func load() async {
-    guard let existing, model.managementUnlocked else { return }
+    guard let existing else { return }
     let generation = model.administrationGeneration
     do {
       let loaded = try await model.currentAdministration {
@@ -321,6 +313,18 @@ struct ServerProfileEditor: View {
       } catch is CancellationError {
       } catch {
         guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+        if let failure = error as? APIClientError, failure.isManagementLocked {
+          do {
+            let password = try AdministrationPasswordPrompt.confirm(
+              serverName: model.profile?.name ?? "Aurelia")
+            _ = await model.unlockManagement(password: password)
+            save()
+            return
+          } catch {
+            self.error = error.localizedDescription
+            return
+          }
+        }
         if reportManagementFailure(error, generation: generation) { return }
         self.error = error.localizedDescription
       }

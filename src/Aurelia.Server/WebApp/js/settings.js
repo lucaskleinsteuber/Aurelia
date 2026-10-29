@@ -193,7 +193,7 @@ export function createSettings(app) {
     });
 
     return h("div", { class: "settings-stack" },
-      section("Your Server", "library", permissions.owner ? null : "Server management is unlocked. Administrators manage their allowed content.",
+      section("Your Server", "library", permissions.owner ? null : "Administrators manage their allowed content.",
         row("Name", value(state.server?.name ?? "Aurelia")),
         status ? [row("Status", value(status.readiness?.state === "ready" || status.state === "ok" ? "Running" : capitalize(status.readiness?.state ?? status.state))),
           row("Version", value(status.version)), row("Running For", value(duration(status.uptimeSeconds))),

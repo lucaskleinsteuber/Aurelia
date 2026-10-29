@@ -47,23 +47,19 @@ public sealed class ServerAccessFoundationTests
     [Theory]
     [InlineData("/api/v1/auth/sessions/")]
     [InlineData("/api/v1/server/sessions/")]
-    public async Task OwnerCannotRevokeAnotherAccountsDeviceWithoutExactApproval(string route)
+    public async Task OwnerCanRevokeAnotherAccountsDeviceWithoutPasswordUnlock(string route)
     {
         using var factory = new AureliaServerFactory();
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
         var viewer = await CreateViewerAsync(client, owner, "device-viewer");
         var path = route + viewer.SessionId;
-        using var missing = ApiTestClient.Authorized(HttpMethod.Delete, path, owner.Token);
-        using var denied = await client.SendAsync(missing);
-        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        using var approval = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/server/approval", owner.Token,
-            new AdministrationApprovalRequest("DELETE " + path, AdministrationApprovalStore.Hash([]), "correct horse battery staple"));
-        using var approved = await client.SendAsync(approval);
-        approved.EnsureSuccessStatusCode();
-        var grant = await ApiTestClient.ReadAsync<AdministrationApprovalResponse>(approved);
+        // Non-owners cannot revoke devices
+        using var viewerRevoke = ApiTestClient.Authorized(HttpMethod.Delete, path, viewer.Token);
+        using var viewerDenied = await client.SendAsync(viewerRevoke);
+        Assert.Equal(HttpStatusCode.Forbidden, viewerDenied.StatusCode);
+        // Owner can revoke directly without password unlock or approval
         using var revoke = ApiTestClient.Authorized(HttpMethod.Delete, path, owner.Token);
-        revoke.Headers.Add("X-Aurelia-Approval", grant.Token);
         using var revoked = await client.SendAsync(revoke);
         Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
         using var account = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/auth/me", viewer.Token);
@@ -171,13 +167,15 @@ public sealed class ServerAccessFoundationTests
         using var factory = new AureliaServerFactory();
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
-        using var missing = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("blocked", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
+        var viewer = await CreateViewerAsync(client, owner, "role-target");
+        var rolePath = $"/api/v1/users/{viewer.User.Id}/role";
+        using var missing = ApiTestClient.Authorized(HttpMethod.Put, rolePath, owner.Token, new ChangeUserRoleRequest(UserRole.Admin));
         using var denied = await client.SendAsync(missing);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        using var change = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("approved", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
+        using var change = ApiTestClient.Authorized(HttpMethod.Put, rolePath, owner.Token, new ChangeUserRoleRequest(UserRole.Admin));
         var payload = await change.Content!.ReadAsByteArrayAsync();
         using var approve = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/server/approval", owner.Token,
-            new AdministrationApprovalRequest("POST /api/v1/users", AdministrationApprovalStore.Hash(payload), "correct horse battery staple"));
+            new AdministrationApprovalRequest($"PUT {rolePath}", AdministrationApprovalStore.Hash(payload), "correct horse battery staple"));
         using var approved = await client.SendAsync(approve);
         approved.EnsureSuccessStatusCode();
         var grant = await ApiTestClient.ReadAsync<AdministrationApprovalResponse>(approved);
@@ -185,7 +183,7 @@ public sealed class ServerAccessFoundationTests
         change.Headers.Add("X-Aurelia-Approval", grant.Token);
         using var success = await client.SendAsync(change);
         success.EnsureSuccessStatusCode();
-        using var replay = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token, new CreateUserRequest("replayed", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
+        using var replay = ApiTestClient.Authorized(HttpMethod.Put, rolePath, owner.Token, new ChangeUserRoleRequest(UserRole.Admin));
         replay.Headers.Add("X-Aurelia-Approval", grant.Token);
         using var replayed = await client.SendAsync(replay);
         Assert.Equal(HttpStatusCode.Forbidden, replayed.StatusCode);
@@ -257,12 +255,15 @@ public sealed class ServerAccessFoundationTests
         using var factory = new AureliaServerFactory();
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
-        using var uppercase = ApiTestClient.Authorized(HttpMethod.Post, "/API/v1/Users/", owner.Token,
-            new CreateUserRequest("not-approved", "secure viewer password", UserRole.User, ApiTestClient.TestPin));
+        var viewer = await CreateViewerAsync(client, owner, "route-target");
+        var uppercaseRoute = $"/API/v1/Users/{viewer.User.Id}/Role";
+        using var uppercase = ApiTestClient.Authorized(HttpMethod.Put, uppercaseRoute, owner.Token,
+            new ChangeUserRoleRequest(UserRole.Admin));
         using var denied = await client.SendAsync(uppercase);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        using var tooLarge = ApiTestClient.Authorized(HttpMethod.Put, "/api/v1/server/settings", owner.Token);
-        tooLarge.Content = new StringContent(new string(' ', 65_537));
+        using var tooLarge = ApiTestClient.Authorized(HttpMethod.Put, uppercaseRoute, owner.Token);
+        tooLarge.Content = new ByteArrayContent(new byte[65_537]);
+        tooLarge.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
         using var oversized = await client.SendAsync(tooLarge);
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversized.StatusCode);
     }

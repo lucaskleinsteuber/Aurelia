@@ -296,7 +296,6 @@ struct ServerHostingEditor: View {
     }.task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
-      guard model.managementUnlocked else { return }
       if available {
         do {
           let active = try await model.currentAdministration {
@@ -468,7 +467,6 @@ struct ServerLibraryJobsEditor: View {
     }.task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
-      guard model.managementUnlocked else { return }
       do { try await model.currentAdministration { try await refresh(scope) } } catch {
         if let failure = scope.message(for: error) { message = failure }
       }
@@ -629,7 +627,6 @@ struct ServerBackupsEditor: View {
     }.task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
-      guard model.managementUnlocked else { return }
       do {
         backups = try await model.currentAdministration {
           try await scope.request { try await client.serverBackups() }
@@ -732,7 +729,6 @@ struct ServerDiagnosticsEditor: View {
     }.task(id: model.administrationGeneration) {
       let scope = ServerAdministrationScope(
         model: model, generation: model.administrationGeneration)
-      guard model.managementUnlocked else { return }
       do {
         events = try await model.currentAdministration {
           try await scope.request { try await client.serverDiagnostics() }

@@ -76,14 +76,13 @@ public sealed class DeviceAuthorizationService(
     }
 
     public async Task<DeviceAuthorizationPreview> DecideAsync(Guid id, bool approve, Guid ownerId, Guid deviceId, Guid profileId,
-        Guid managementGeneration, CancellationToken token)
+        CancellationToken token)
     {
         using var lease = await guard.EnterAsync(token);
         using var mutation = await mutations.EnterAsync(token);
         await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, token);
         RequireEnabled();
         var owner = await RequireOwnerAsync(ownerId, deviceId, profileId, token);
-        if (!profiles.ManagementGrantActive(profileId, managementGeneration)) throw ManagementLocked();
         var request = await database.DeviceAuthorizationRequests.Include(value => value.DeviceSession).ThenInclude(session => session!.User)
             .SingleOrDefaultAsync(value => value.Id == id, token) ?? throw Missing();
         await ExpireAsync(request, token);
@@ -115,8 +114,8 @@ public sealed class DeviceAuthorizationService(
             }
             request.State = desired;
             RequireEnabled();
-            if (!profiles.IsActive(profileId, deviceId, ownerId) || !profiles.ManagementGrantActive(profileId, managementGeneration))
-                throw ManagementLocked();
+            if (!profiles.IsActive(profileId, deviceId, ownerId))
+                throw new AccountException("profile_session_expired", "Unlock the owner profile again before approving a device.", 403);
             await database.SaveChangesAsync(token);
         }
         await transaction.CommitAsync(token);
@@ -226,7 +225,6 @@ public sealed class DeviceAuthorizationService(
         var now = clock.GetUtcNow();
         if (!profiles.IsActive(profileId, deviceId, ownerId))
             throw new AccountException("profile_session_expired", "Unlock the owner profile again before approving a device.", 403);
-        if (!profiles.ManagementUnlocked(profileId)) throw ManagementLocked();
         if (!await database.DeviceSessions.AnyAsync(session => session.Id == deviceId && session.RevokedAt == null
             && session.ExpiresAt > now && session.User.IsEnabled, token))
             throw new AccountException("device_session_revoked", "The paired device is no longer authorized.", 403);

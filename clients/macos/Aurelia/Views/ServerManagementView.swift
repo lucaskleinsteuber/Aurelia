@@ -27,80 +27,73 @@ struct ServerManagementView: View {
   }
 
   var body: some View {
-    Group {
-      if model.managementUnlocked {
-        VStack(alignment: .leading, spacing: 20) {
-          ManagementStatusView()
-          if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-          if loading && status == nil { ProgressView("Loading server settings…") }
-          if let status {
-            ServerSummaryCard(
-              status: status, configuration: configuration, client: client,
-              nativeHostAvailable: capabilities?.nativeHostOperations == true,
-              hosting: hosting,
-              refreshing: loading || deletingProfile != nil
-            ) { Task { await reload() } }
-          }
-          if let health {
-            ServerHealthCard(health: health)
-          }
-          // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
-          // power saving and updates of the Linux package.
-          if let client, capabilities != nil || model.isLocalHost {
-            if hosting.hostsOnMac {
-              ServerHostingEditor(
-                client: client, available: capabilities?.nativeHostOperations == true)
-            } else if hosting == .linuxPackage {
-              ServerUpdatesEditor(client: client)
-              ServerPowerEditor(client: client)
-            }
-          }
-          if let configuration, let client {
-            ServerEssentialsEditor(configuration: configuration, client: client) {
-              self.configuration = $0
-            }
-            .id("essentials-\(configuration.stored.revision)")
-            ServerScrubPreviewsEditor(client: client)
-          }
-          profiles
-          ServerDevicesSection()
-          ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
-            if let status { ServerDetailsBox(status: status) }
-            if let configuration, let client {
-              if hosting == .linuxPackage {
-                ServerLinuxNetworkBox(configuration: configuration)
-              } else {
-                ServerNetworkEditor(
-                  configuration: configuration, client: client,
-                  nativeHostAvailable: capabilities?.nativeHostOperations == true
-                ) { Task { await reload() } }
-                .id("network-\(configuration.stored.revision)")
-              }
-              ServerSecurityEditor(configuration: configuration, client: client) { configuration in
-                self.configuration = configuration
-              }.id(configuration.stored.revision)
-              ServerLibraryJobsEditor(configuration: configuration, client: client) {
-                self.configuration = $0
-              }
-              .id("jobs-\(configuration.stored.revision)")
-              ServerBackupsEditor(
-                configuration: configuration, client: client,
-                nativeHostAvailable: capabilities?.nativeHostOperations == true
-              ) { self.configuration = $0 }
-              .id("backups-\(configuration.stored.revision)")
-              ServerDiagnosticsEditor(configuration: configuration, client: client) {
-                self.configuration = $0
-              }
-              .id("diagnostics-\(configuration.stored.revision)")
-            }
-          }
+    VStack(alignment: .leading, spacing: 20) {
+      if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+      if loading && status == nil { ProgressView("Loading server settings…") }
+      if let status {
+        ServerSummaryCard(
+          status: status, configuration: configuration, client: client,
+          nativeHostAvailable: capabilities?.nativeHostOperations == true,
+          hosting: hosting,
+          refreshing: loading || deletingProfile != nil
+        ) { Task { await reload() } }
+      }
+      if let health {
+        ServerHealthCard(health: health)
+      }
+      // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
+      // power saving and updates of the Linux package.
+      if let client, capabilities != nil || model.isLocalHost {
+        if hosting.hostsOnMac {
+          ServerHostingEditor(
+            client: client, available: capabilities?.nativeHostOperations == true)
+        } else if hosting == .linuxPackage {
+          ServerUpdatesEditor(client: client)
+          ServerPowerEditor(client: client)
         }
-      } else {
-        ManagementUnlockView()
+      }
+      if let configuration, let client {
+        ServerEssentialsEditor(configuration: configuration, client: client) {
+          self.configuration = $0
+        }
+        .id("essentials-\(configuration.stored.revision)")
+        ServerScrubPreviewsEditor(client: client)
+      }
+      profiles
+      ServerDevicesSection()
+      ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
+        if let status { ServerDetailsBox(status: status) }
+        if let configuration, let client {
+          if hosting == .linuxPackage {
+            ServerLinuxNetworkBox(configuration: configuration)
+          } else {
+            ServerNetworkEditor(
+              configuration: configuration, client: client,
+              nativeHostAvailable: capabilities?.nativeHostOperations == true
+            ) { Task { await reload() } }
+            .id("network-\(configuration.stored.revision)")
+          }
+          ServerSecurityEditor(configuration: configuration, client: client) { configuration in
+            self.configuration = configuration
+          }.id(configuration.stored.revision)
+          ServerLibraryJobsEditor(configuration: configuration, client: client) {
+            self.configuration = $0
+          }
+          .id("jobs-\(configuration.stored.revision)")
+          ServerBackupsEditor(
+            configuration: configuration, client: client,
+            nativeHostAvailable: capabilities?.nativeHostOperations == true
+          ) { self.configuration = $0 }
+          .id("backups-\(configuration.stored.revision)")
+          ServerDiagnosticsEditor(configuration: configuration, client: client) {
+            self.configuration = $0
+          }
+          .id("diagnostics-\(configuration.stored.revision)")
+        }
       }
     }
     .task(id: model.administrationGeneration) {
-      if model.managementUnlocked { await reload() }
+      await reload()
     }
     .onChange(of: model.administrationGeneration) { _, _ in
       cancelDeletion()
@@ -205,7 +198,7 @@ struct ServerManagementView: View {
   }
 
   private func canDelete(_ access: UserAccessSummary) -> Bool {
-    guard model.managementUnlocked, model.profile?.user?.role == .owner,
+    guard model.profile?.user?.role == .owner,
       access.id != model.profile?.user?.id
     else { return false }
     return access.user.role != .owner || !access.isEnabled
@@ -244,9 +237,19 @@ struct ServerManagementView: View {
       } catch {
         guard deletionRun == run, model.isCurrentAdministration(generation), !Task.isCancelled
         else { return }
-        if let failure = error as? APIClientError,
-          failure.isManagementLocked || failure == .serverIdentityMismatch
-        {
+        if let failure = error as? APIClientError, failure.isManagementLocked {
+          do {
+            let password = try AdministrationPasswordPrompt.confirm(
+              serverName: model.profile?.name ?? "Aurelia")
+            _ = await model.unlockManagement(password: password)
+            delete(access)
+            return
+          } catch {
+            self.error = error.localizedDescription
+            return
+          }
+        }
+        if let failure = error as? APIClientError, failure == .serverIdentityMismatch {
           model.handleAdministrationFailure(error, generation: generation)
         } else {
           self.error = error.localizedDescription
@@ -256,7 +259,7 @@ struct ServerManagementView: View {
   }
 
   @MainActor private func reload() async {
-    guard let client, model.managementUnlocked else { return }
+    guard let client else { return }
     let generation = model.administrationGeneration
     loading = true
     defer { loading = false }

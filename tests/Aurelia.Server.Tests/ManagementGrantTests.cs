@@ -80,12 +80,13 @@ public sealed class ManagementGrantTests
         using var factory = new AureliaServerFactory();
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
-        using (var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
-            new CreateUserRequest("not-created-without-proof", "", UserRole.User, null)))
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/libraries/reset", owner.Token,
+            new ResetLibraryRequest([], "rev-1")))
         using (var response = await client.SendAsync(request)) Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         using (var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/lock", owner.Token))
         using (var response = await client.SendAsync(request)) response.EnsureSuccessStatusCode();
-        using (var request = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/server/users", owner.Token))
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/approval", owner.Token,
+            new AdministrationApprovalRequest("POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash([]))))
         using (var response = await client.SendAsync(request)) Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         var diagnostics = factory.Services.GetRequiredService<ServerDiagnosticsStore>();
         await diagnostics.FlushAsync(CancellationToken.None);
@@ -192,9 +193,10 @@ public sealed class ManagementGrantTests
         using var late = await pending.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(HttpStatusCode.Conflict, late.StatusCode);
         Assert.Equal("management_unlock_superseded", (await ApiTestClient.ReadAsync<ApiProblem>(late)).Code);
-        using var usersRequest = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/server/users", owner.Token);
-        using var users = await client.SendAsync(usersRequest);
-        Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(users)).Code);
+        using var approvalRequest = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/approval", owner.Token,
+            new AdministrationApprovalRequest("POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash([])));
+        using var approvalResp = await client.SendAsync(approvalRequest);
+        Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(approvalResp)).Code);
     }
 
     [Fact]
@@ -240,7 +242,7 @@ public sealed class ManagementGrantTests
         var profiles = factory.Services.GetRequiredService<ProfileSessionStore>();
         var session = profiles.Find(factory.Services.GetRequiredService<TokenService>().Hash(owner.Token))!;
         var approvals = factory.Services.GetRequiredService<AdministrationApprovalStore>();
-        var proof = approvals.Issue(session.Id, "POST /api/v1/users", AdministrationApprovalStore.Hash([]));
+        var proof = approvals.Issue(session.Id, "POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash([]));
         using var scope = factory.Services.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
         var user = await database.Users.SingleAsync(value => value.Id == owner.User.Id);
@@ -254,11 +256,11 @@ public sealed class ManagementGrantTests
             new Claim(DeviceTokenAuthenticationHandler.ProfileSessionIdClaim, session.Id.ToString()),
         ], "synthetic"));
         context.Request.Method = "POST";
-        context.Request.Path = "/api/v1/users";
+        context.Request.Path = "/api/v1/libraries/reset";
         context.Request.Headers["X-Aurelia-Approval"] = proof.Token;
         var error = await Assert.ThrowsAsync<AccountException>(() => ServerRequestGuard.RequireApprovalAsync(context, approvals));
         Assert.Equal("profile_session_revoked", error.Code);
-        Assert.False(approvals.Consume(proof.Token, session.Id, "POST /api/v1/users", AdministrationApprovalStore.Hash([])));
+        Assert.False(approvals.Consume(proof.Token, session.Id, "POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash([])));
     }
 
     [Fact]
@@ -274,14 +276,15 @@ public sealed class ManagementGrantTests
         var owner = await ApiTestClient.SetupOwnerAsync(client);
         clock.Advance(TimeSpan.FromMinutes(9));
         using var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/approval", owner.Token,
-            new AdministrationApprovalRequest("POST /api/v1/users", AdministrationApprovalStore.Hash([])));
+            new AdministrationApprovalRequest("POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash([])));
         using var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();
         Assert.Equal(clock.GetUtcNow().AddMinutes(1), (await ApiTestClient.ReadAsync<AdministrationApprovalResponse>(response)).ExpiresAt);
         clock.Advance(TimeSpan.FromMinutes(1));
-        using var usersRequest = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/server/users", owner.Token);
-        using var users = await client.SendAsync(usersRequest);
-        Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(users)).Code);
+        using var expiredApprovalRequest = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/approval", owner.Token,
+            new AdministrationApprovalRequest("POST /api/v1/libraries/reset", AdministrationApprovalStore.Hash([])));
+        using var expired = await client.SendAsync(expiredApprovalRequest);
+        Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(expired)).Code);
         using var homeRequest = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/home", owner.Token);
         using var home = await client.SendAsync(homeRequest);
         home.EnsureSuccessStatusCode();

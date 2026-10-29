@@ -62,12 +62,15 @@ public sealed class ProfileAndSceneNoteTests
         var active = await ApiTestClient.ReadAsync<ProfileSessionResponse>(unlock);
         using var home = await SendAsync(client, active.Token, HttpMethod.Get, "/api/v1/home");
         Assert.Equal(HttpStatusCode.OK, home.StatusCode);
-        using var locked = await SendAsync(client, active.Token, HttpMethod.Get, "/api/v1/server/users");
-        Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(locked)).Code);
-        using var administration = await SendAsync(client, active.Token, HttpMethod.Post, "/api/v1/management/unlock", new UnlockManagementRequest("correct horse battery staple"));
-        administration.EnsureSuccessStatusCode();
+        // Admin actions succeed directly once the owner profile is unlocked with PIN
         using var users = await SendAsync(client, active.Token, HttpMethod.Get, "/api/v1/server/users");
         Assert.Equal(HttpStatusCode.OK, users.StatusCode);
+        // Critical actions require management unlock with the server password
+        using var criticalLocked = await SendAsync(client, active.Token, HttpMethod.Post, "/api/v1/libraries/reset", new ResetLibraryRequest([], "preview"));
+        Assert.Equal(HttpStatusCode.Forbidden, criticalLocked.StatusCode);
+        Assert.Equal("management_locked", (await ApiTestClient.ReadAsync<ApiProblem>(criticalLocked)).Code);
+        using var administration = await SendAsync(client, active.Token, HttpMethod.Post, "/api/v1/management/unlock", new UnlockManagementRequest("correct horse battery staple"));
+        administration.EnsureSuccessStatusCode();
     }
 
     [Fact]

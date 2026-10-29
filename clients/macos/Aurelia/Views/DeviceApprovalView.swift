@@ -51,7 +51,6 @@ struct DeviceApprovalView: View {
     .onAppear { codeFocused = true }
     .onDisappear { request?.cancel() }
     .onChange(of: model.administrationGeneration) { _, _ in dismiss() }
-    .onChange(of: model.managementUnlocked) { _, unlocked in if !unlocked { dismiss() } }
   }
 
   private var validCode: Bool {
@@ -59,8 +58,7 @@ struct DeviceApprovalView: View {
   }
 
   private func start(approve: Bool?) {
-    guard !busy, validCode, let profile = model.profile, profile.user?.role == .owner,
-      model.managementUnlocked
+    guard !busy, validCode, let profile = model.profile, profile.user?.role == .owner
     else { return }
     let generation = model.administrationGeneration
     let target = preview

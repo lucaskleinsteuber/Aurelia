@@ -206,8 +206,18 @@ private struct LibraryResetSheet: View {
     defer { working = false }
     do {
       let client = APIClient(profile: profile)
-      let accepted = try await model.currentAdministration {
-        try await client.resetLibrary(preview: preview)
+      let accepted: LibraryMutationResult
+      do {
+        accepted = try await model.currentAdministration {
+          try await client.resetLibrary(preview: preview)
+        }
+      } catch let failure as APIClientError where failure.isManagementLocked {
+        let password = try AdministrationPasswordPrompt.confirm(
+          serverName: model.profile?.name ?? "Aurelia")
+        _ = await model.unlockManagement(password: password)
+        accepted = try await model.currentAdministration {
+          try await client.resetLibrary(preview: preview)
+        }
       }
       guard model.isCurrentAdministration(generation) else { return }
       result = accepted

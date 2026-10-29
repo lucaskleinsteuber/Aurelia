@@ -76,7 +76,6 @@ struct ServerPowerEditor: View {
 
   private func load() async {
     let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
-    guard model.managementUnlocked else { return }
     do {
       let settings = try await model.currentAdministration {
         try await scope.request { try await client.serverPower() }
@@ -254,7 +253,6 @@ struct ServerScrubPreviewsEditor: View {
 
   private func load() async {
     let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
-    guard model.managementUnlocked else { return }
     do {
       let settings = try await model.currentAdministration {
         try await scope.request { try await client.serverScrubPreviews() }

@@ -30,14 +30,17 @@ Viewing sessions expire after at most twelve hours and are invalidated by server
 restart. A device credential never substitutes for an expired viewing token.
 Check `/api/v1/capabilities` for minimum client version and feature support.
 
-Administration additionally requires the shared Server Password through
-`/api/v1/management/unlock`. Its ten-minute window does not extend with activity.
-On `403 approval_required`, obtain a single-use proof through
-`/api/v1/management/approval` and retry once with `X-Aurelia-Approval`.
-Proofs bind the action, exact request bytes, session and unlock generation and
-expire within two minutes or at the unlock deadline. `403 management_locked`
-ends management work without ending viewing. Locking or switching profiles must
-cancel pending administration work and discard old proofs.
+See [SECURITY_MODEL.md](SECURITY_MODEL.md) for the three-tier action classification
+(Viewer, Admin, and Critical actions). Routine administrative configuration (TMDB key,
+storage folders, scans, metadata editing, ordinary profiles, power, updates, scrub previews)
+requires an active Owner or Administrator profile session and no Server Password.
+Critical actions (library reset, backup restore, modifying/deleting owner or admin accounts,
+changing the Server Password) require explicit confirmation with the Server Password.
+When a critical action returns HTTP `403 approval_required` or when requesting approval,
+the client obtains a single-use proof through `/api/v1/management/approval` (with the Server
+Password) and retries with `X-Aurelia-Approval`. Proofs bind the action, exact request
+bytes, session and unlock generation, expiring within two minutes. Locking or switching
+profiles cancels pending administration work and discards old proofs.
 
 Profile editors use `GET/PUT /api/v1/users/{id}/profile` and a revision; stale
 saves return `409 profile_conflict` without partial changes. Omitted access

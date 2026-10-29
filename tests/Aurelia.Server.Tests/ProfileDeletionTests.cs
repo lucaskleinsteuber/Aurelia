@@ -79,7 +79,7 @@ public sealed class ProfileDeletionTests
         using var factory = new AureliaServerFactory();
         using var client = factory.CreateClient();
         var owner = await ApiTestClient.SetupOwnerAsync(client);
-        var target = await CreateProfileAsync(client, owner.Token, "Protected from accidental deletion");
+        var target = await CreateProfileAsync(client, owner.Token, "Protected from accidental deletion", UserRole.Admin);
         var route = $"/api/v1/users/{target.Id}";
         using (var request = ApiTestClient.Authorized(HttpMethod.Delete, route, owner.Token))
         using (var denied = await client.SendAsync(request))

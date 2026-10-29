@@ -5,9 +5,10 @@ import Testing
 
 @MainActor
 struct StorageManagementLifecycleTests {
-  @Test func lockedStoragePairingAndDeviceActionsDoNotSendRequestsOrPublishFailures() async {
+  @Test func nonAdminCannotExerciseStoragePairingOrDeviceActions() async {
     let model = AppModel(
-      store: InMemoryServerProfileStore(), initialProfile: profile(), profileSelectionEnabled: true)
+      store: InMemoryServerProfileStore(), initialProfile: profile(role: .user),
+      profileSelectionEnabled: true)
     await exerciseStorageActions(model)
     await model.generatePairingCode()
     await model.revokeSession(id: UUID())

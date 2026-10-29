@@ -38,7 +38,7 @@ struct RootView: View {
             .accessibilityIdentifier("profile-switch-progress")
         } else if model.requiresProfileSelection {
           ProfilePickerView()
-        } else if model.needsInitialLibrarySetup, model.managementUnlocked {
+        } else if model.needsInitialLibrarySetup, model.canManageStorage {
           InitialLibrarySetupView()
         } else if model.profile == nil {
           ConnectionView()

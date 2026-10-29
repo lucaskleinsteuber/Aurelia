@@ -5,16 +5,32 @@ import Testing
 
 @MainActor
 struct ManagementLifecycleTests {
-  @Test func lockedAdministrationDoesNotFetchOrPublishAGlobalFailure() async {
+  @Test func nonAdminDoesNotFetchOrPublishAGlobalFailure() async {
     var requests = 0
     let model = AppModel(
-      store: InMemoryServerProfileStore(), initialProfile: profile(), profileSelectionEnabled: true,
+      store: InMemoryServerProfileStore(), initialProfile: profile(role: .user),
+      profileSelectionEnabled: true,
       administrationFetcher: { _ in
         requests += 1
         throw APIClientError.invalidResponse
       })
     await model.reloadAdministration()
     #expect(requests == 0)
+    #expect(model.visibleErrorMessage == nil)
+    #expect(model.administrationErrorMessage == nil)
+  }
+
+  @Test func adminFetchesAdministrationWithoutPasswordUnlock() async {
+    var requests = 0
+    let model = AppModel(
+      store: InMemoryServerProfileStore(), initialProfile: profile(role: .admin),
+      profileSelectionEnabled: true,
+      administrationFetcher: { _ in
+        requests += 1
+        return AppModel.AdministrationSnapshot()
+      })
+    await model.reloadAdministration()
+    #expect(requests == 1)
     #expect(model.visibleErrorMessage == nil)
     #expect(model.administrationErrorMessage == nil)
   }
@@ -87,14 +103,14 @@ struct ManagementLifecycleTests {
     #expect(model.administrationErrorMessage == nil)
   }
 
-  private func profile() -> StoredServerProfile {
+  private func profile(role: UserRole = .owner) -> StoredServerProfile {
     StoredServerProfile(
       serverId: UUID(), name: "Synthetic Server", baseURL: URL(string: "https://fixture.invalid")!,
       publicKeyFingerprint: String(repeating: "A", count: 64),
       token: "synthetic-only-viewing-token",
       sessionId: UUID(), expiresAt: "2099-01-01T00:00:00Z",
       user: UserSummary(
-        id: UUID(), username: "Owner", role: .owner, createdAt: "2026-01-01T00:00:00Z"),
+        id: UUID(), username: "Owner", role: role, createdAt: "2026-01-01T00:00:00Z"),
       viewingSession: true)
   }
   private func library() -> LibrarySummary {
