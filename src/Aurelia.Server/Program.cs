@@ -171,6 +171,7 @@ builder.Services.AddScoped<MediaSearchIndexService>();
 builder.Services.AddScoped<ServerHealthService>();
 builder.Services.AddScoped<WatchHistoryService>();
 builder.Services.AddScoped<LibraryHealthService>();
+builder.Services.AddSingleton<RemotePlaybackService>();
 builder.Services.AddSingleton<MetadataProviderSettingsStore>();
 builder.Services.AddSingleton<ArtworkStore>();
 builder.Services.AddSingleton<ArtworkVariantStore>();
@@ -380,6 +381,7 @@ app.MapDeviceAuthorization();
 app.MapWebApp();
 app.MapLiveConversion();
 app.MapScrubPreviews();
+app.MapRemotePlayback();
 
 try
 {

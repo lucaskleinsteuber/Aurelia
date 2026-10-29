@@ -17,6 +17,11 @@ public static class ServerFeatures
     public const string CollectionsV2 = "collections-v2";
 
     /// <summary>
+    /// Remote playback command queue and active player reporting ("remote-playback-v1").
+    /// </summary>
+    public const string RemotePlayback = "remote-playback-v1";
+
+    /// <summary>
     /// Stream reads marked "X-Aurelia-Stream-Purpose: preview" have their own concurrency and
     /// request budget, so clients may prepare timeline previews on several decoders.
     /// </summary>
@@ -45,8 +50,8 @@ public static class ServerFeatures
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
     public static IReadOnlyList<string> Reported(bool liveConversion) =>
         liveConversion
-            ? Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, LiveConversion, ScrubPreviews])
-            : Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2]);
+            ? Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews])
+            : Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback]);
 }
 
 public sealed record ClientCapabilitiesResponse(
