@@ -54,6 +54,31 @@ struct AppUpdateLogicTests {
     #expect(!AppUpdateLogic.isRepository("x/y/z"))
   }
 
+  @Test
+  func publicAssetURLsRequireMatchingRepository() {
+    let valid = URL(
+      string: "https://github.com/owner/repo/releases/download/1.20.0-110/Aurelia-1.20.0-110.dmg")!
+    #expect(AppUpdateLogic.isPublicAssetURL(valid, repository: "owner/repo"))
+    #expect(AppUpdateLogic.isPublicAssetURL(valid, repository: nil))
+    #expect(!AppUpdateLogic.isPublicAssetURL(valid, repository: "other/repo"))
+
+    let wrongHost = URL(
+      string: "https://evil.github.com/owner/repo/releases/download/1.20.0-110/Aurelia.dmg")!
+    #expect(!AppUpdateLogic.isPublicAssetURL(wrongHost, repository: "owner/repo"))
+
+    let http = URL(
+      string: "http://github.com/owner/repo/releases/download/1.20.0-110/Aurelia.dmg")!
+    #expect(!AppUpdateLogic.isPublicAssetURL(http, repository: "owner/repo"))
+
+    let wrongPath = URL(
+      string: "https://github.com/owner/repo/releases/1.20.0-110/Aurelia.dmg")!
+    #expect(!AppUpdateLogic.isPublicAssetURL(wrongPath, repository: "owner/repo"))
+
+    let queryParam = URL(
+      string: "https://github.com/owner/repo/releases/download/1.20.0-110/Aurelia.dmg?token=123")!
+    #expect(!AppUpdateLogic.isPublicAssetURL(queryParam, repository: "owner/repo"))
+  }
+
   @Test func releaseErrorsDistinguishMissingAssetsAndMalformedData() throws {
     #expect(throws: AppUpdateError.noDiskImage) {
       try AppUpdateLogic.validatedRelease(fromLatest: releaseData(imageName: "Other.dmg"))
@@ -501,6 +526,7 @@ final class FakeGitHubURLProtocol: URLProtocol, @unchecked Sendable {
   override class func canInit(with request: URLRequest) -> Bool {
     guard let host = request.url?.host?.lowercased() else { return false }
     return host == "api.github.com" || host == "objects.githubusercontent.com"
+      || host == "github.com"
   }
 
   override class func canonicalRequest(for request: URLRequest) -> URLRequest {
@@ -827,8 +853,8 @@ struct AppUpdateFakeGitHubHarnessTests {
     }
   }
 
-  @Test(arguments: [401, 403, 404, 429])
-  func harnessClassifiesHttpRateLimitAndStatusErrors(statusCode: Int) async throws {
+  @Test(arguments: [401, 500, 502, 503])
+  func harnessClassifiesGenericHttpErrors(statusCode: Int) async throws {
     let client = makeClient()
 
     FakeGitHubURLProtocol.configure { _ in
@@ -843,6 +869,208 @@ struct AppUpdateFakeGitHubHarnessTests {
       Issue.record("HTTP error \(statusCode) must fail.")
     } catch let error as AppUpdateError {
       #expect(error == .github(statusCode))
+    }
+  }
+
+  @Test
+  func harnessClassifiesRateLimitingViaStatus429AndHeaderOn403() async throws {
+    let client = makeClient()
+
+    // 429 Too Many Requests
+    FakeGitHubURLProtocol.configure { _ in
+      .respond(
+        status: 429,
+        headers: ["Content-Type": "application/json"],
+        body: Data("{\"message\": \"rate limited\"}".utf8))
+    }
+    do {
+      _ = try await client.latest(repository: "owner/repo")
+      Issue.record("429 must throw rateLimited")
+    } catch let error as AppUpdateError {
+      #expect(error == .rateLimited)
+    }
+
+    // 403 with x-ratelimit-remaining: 0
+    FakeGitHubURLProtocol.configure { _ in
+      .respond(
+        status: 403,
+        headers: [
+          "Content-Type": "application/json",
+          "x-ratelimit-remaining": "0",
+        ],
+        body: Data("{\"message\": \"rate limit exceeded\"}".utf8))
+    }
+    do {
+      _ = try await client.latest(repository: "owner/repo")
+      Issue.record("403 with 0 remaining must throw rateLimited")
+    } catch let error as AppUpdateError {
+      #expect(error == .rateLimited)
+    }
+
+    // 403 with positive remaining quota is a normal github error
+    FakeGitHubURLProtocol.configure { _ in
+      .respond(
+        status: 403,
+        headers: [
+          "Content-Type": "application/json",
+          "x-ratelimit-remaining": "42",
+        ],
+        body: Data("{\"message\": \"forbidden\"}".utf8))
+    }
+    do {
+      _ = try await client.latest(repository: "owner/repo")
+      Issue.record("403 with remaining quota must throw github(403)")
+    } catch let error as AppUpdateError {
+      #expect(error == .github(403))
+    }
+  }
+
+  @Test
+  func harnessClassifies404AsPrivateRepositoryWhenAnonymousAndGithub404WhenTokenPresent()
+    async throws
+  {
+    let client = makeClient()
+
+    FakeGitHubURLProtocol.configure { _ in
+      .respond(
+        status: 404,
+        headers: ["Content-Type": "application/json"],
+        body: Data("{\"message\": \"Not Found\"}".utf8))
+    }
+
+    // Anonymous check gets privateRepository
+    do {
+      _ = try await client.latest(repository: "owner/repo", token: nil)
+      Issue.record("Anonymous 404 must throw privateRepository")
+    } catch let error as AppUpdateError {
+      #expect(error == .privateRepository)
+    }
+
+    // Token-bearing check gets github(404)
+    do {
+      _ = try await client.latest(repository: "owner/repo", token: "synthetic-token")
+      Issue.record("Token-bearing 404 must throw github(404)")
+    } catch let error as AppUpdateError {
+      #expect(error == .github(404))
+    }
+  }
+
+  @Test
+  func harnessHonorsETag304NotModified() async throws {
+    let client = makeClient()
+
+    FakeGitHubURLProtocol.configure { req in
+      #expect(req.value(forHTTPHeaderField: "If-None-Match") == "W/\"etag-abc\"")
+      return .respond(status: 304, headers: [:], body: nil)
+    }
+
+    do {
+      _ = try await client.latest(
+        repository: "owner/repo", token: nil, ifNoneMatch: "W/\"etag-abc\"")
+      Issue.record("304 must throw notModified")
+    } catch let error as AppUpdateError {
+      #expect(error == .notModified)
+    }
+  }
+
+  @Test
+  func harnessSimulatesAnonymousReleaseLifecycleWithBrowserDownloadUrl() async throws {
+    let folder = try testRunFolder()
+    defer { try? FileManager.default.removeItem(at: folder) }
+
+    let client = makeClient()
+    let syntheticDmgData = Data("synthetic-universal-macos-dmg-content-110".utf8)
+    let syntheticDigest = SHA256.hash(data: syntheticDmgData).map { String(format: "%02x", $0) }
+      .joined()
+
+    let releaseJson = """
+      {
+        "tag_name": "1.20.0-110",
+        "draft": false,
+        "html_url": "https://github.com/owner/repo/releases/tag/1.20.0-110",
+        "assets": [
+          {
+            "name": "Aurelia-1.20.0-110-macOS-universal.dmg",
+            "browser_download_url": "https://github.com/owner/repo/releases/download/1.20.0-110/Aurelia-1.20.0-110-macOS-universal.dmg",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/501",
+            "size": \(syntheticDmgData.count)
+          },
+          {
+            "name": "SHA256SUMS",
+            "browser_download_url": "https://github.com/owner/repo/releases/download/1.20.0-110/SHA256SUMS",
+            "url": "https://api.github.com/repos/owner/repo/releases/assets/502"
+          }
+        ]
+      }
+      """
+    let sumsText = "\(syntheticDigest)  Aurelia-1.20.0-110-macOS-universal.dmg\n"
+
+    FakeGitHubURLProtocol.configure { req in
+      let path = req.url?.path ?? ""
+      let host = req.url?.host ?? ""
+
+      if host == "api.github.com" && path.hasSuffix("/releases/latest") {
+        return .respond(
+          status: 200,
+          headers: [
+            "Content-Type": "application/json",
+            "Content-Length": "\(releaseJson.count)",
+            "ETag": "W/\"etag-release-110\"",
+          ],
+          body: Data(releaseJson.utf8))
+      }
+
+      if host == "github.com" && path.hasSuffix("/SHA256SUMS") {
+        return .respond(
+          status: 200,
+          headers: [
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "\(sumsText.count)",
+          ],
+          body: Data(sumsText.utf8))
+      }
+
+      if host == "github.com" && path.hasSuffix("/Aurelia-1.20.0-110-macOS-universal.dmg") {
+        return .redirect(
+          to: URL(
+            string:
+              "https://objects.githubusercontent.com/github-production-release-asset/Aurelia-1.20.0-110.dmg"
+          )!, status: 302)
+      }
+
+      if host == "objects.githubusercontent.com" {
+        return .respond(
+          status: 200,
+          headers: [
+            "Content-Type": "application/octet-stream",
+            "Content-Length": "\(syntheticDmgData.count)",
+          ],
+          body: syntheticDmgData)
+      }
+
+      return .respond(status: 404, headers: [:], body: nil)
+    }
+
+    let (release, etag) = try await client.latestRelease(
+      repository: "owner/repo", token: nil)
+    #expect(release.version == "1.20.0")
+    #expect(release.build == 110)
+    #expect(etag == "W/\"etag-release-110\"")
+    #expect(
+      release.diskImageURL.absoluteString
+        == "https://github.com/owner/repo/releases/download/1.20.0-110/Aurelia-1.20.0-110-macOS-universal.dmg"
+    )
+
+    let destination = try await client.download(
+      release, repository: "owner/repo", token: nil, currentBuild: 109, folder: folder)
+
+    #expect(FileManager.default.fileExists(atPath: destination.path))
+    #expect(try Data(contentsOf: destination) == syntheticDmgData)
+
+    let recorded = FakeGitHubURLProtocol.requests()
+    // Verify that NO request carried an Authorization header
+    for req in recorded {
+      #expect(req.value(forHTTPHeaderField: "Authorization") == nil)
     }
   }
 

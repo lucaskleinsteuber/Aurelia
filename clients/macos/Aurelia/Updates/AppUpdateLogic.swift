@@ -34,6 +34,7 @@ enum AppUpdatePreferences {
   static let automaticChecksKey = "AureliaAutomaticUpdateChecks"
   static let skippedVersionsKey = "AureliaSkippedUpdateVersions"
   static let lastCheckKey = "AureliaLastUpdateCheck"
+  static let latestETagKey = "AureliaUpdateLatestETag"
   static let checkInterval: TimeInterval = 24 * 3_600
 
   static func checksAutomatically(in defaults: UserDefaults) -> Bool {
@@ -118,18 +119,28 @@ enum AppUpdateLogic {
     else { throw AppUpdateError.invalidRelease }
     guard let parsed = parseTag(tag) else { throw AppUpdateError.invalidTag }
     let imageName = diskImageName(tag: tag)
-    func assetURL(_ name: String) -> URL? {
-      assets.first { $0["name"] as? String == name }
-        .flatMap { $0["url"] as? String }
-        .flatMap(URL.init(string:))
-    }
-    guard let image = assetURL(imageName) else { throw AppUpdateError.noDiskImage }
-    let imageAsset = assets.first { $0["name"] as? String == imageName }
-    let bytes = downloadBytes(from: imageAsset?["size"])
-    guard let sums = assetURL("SHA256SUMS") else { throw AppUpdateError.noChecksum }
-    guard isAssetURL(image, repository: repository), isAssetURL(sums, repository: repository) else {
+    func assetURL(_ name: String) throws -> URL {
+      guard let asset = assets.first(where: { $0["name"] as? String == name }) else {
+        throw (name == imageName ? AppUpdateError.noDiskImage : AppUpdateError.noChecksum)
+      }
+      if let publicStr = asset["browser_download_url"] as? String,
+        let publicURL = URL(string: publicStr),
+        isPublicAssetURL(publicURL, repository: repository)
+      {
+        return publicURL
+      }
+      if let apiStr = asset["url"] as? String,
+        let apiURL = URL(string: apiStr),
+        isAssetURL(apiURL, repository: repository)
+      {
+        return apiURL
+      }
       throw AppUpdateError.invalidURL
     }
+    let image = try assetURL(imageName)
+    let imageAsset = assets.first { $0["name"] as? String == imageName }
+    let bytes = downloadBytes(from: imageAsset?["size"])
+    let sums = try assetURL("SHA256SUMS")
     let page = (object["html_url"] as? String).flatMap(URL.init(string:))
     return AppRelease(
       tag: tag, version: parsed.version, build: parsed.build, diskImageName: imageName,
@@ -167,6 +178,21 @@ enum AppUpdateLogic {
     return repository == nil || "\(parts[2])/\(parts[3])".lowercased() == repository?.lowercased()
   }
 
+  static func isPublicAssetURL(_ url: URL, repository: String? = nil) -> Bool {
+    guard isHTTPS(url), url.host?.lowercased() == "github.com", url.query == nil else {
+      return false
+    }
+    let parts = url.path.split(separator: "/")
+    guard parts.count == 6, parts[2] == "releases", parts[3] == "download",
+      !parts[0].isEmpty, !parts[1].isEmpty, !parts[4].isEmpty, !parts[5].isEmpty
+    else { return false }
+    return repository == nil || "\(parts[0])/\(parts[1])".lowercased() == repository?.lowercased()
+  }
+
+  static func isAnyAssetURL(_ url: URL, repository: String? = nil) -> Bool {
+    isAssetURL(url, repository: repository) || isPublicAssetURL(url, repository: repository)
+  }
+
   static func isHTTPS(_ url: URL) -> Bool {
     url.scheme?.lowercased() == "https" && url.user == nil && url.password == nil
       && (url.port == nil || url.port == 443) && url.fragment == nil
@@ -184,7 +210,7 @@ enum AppUpdateLogic {
   /// Redirects never retain a token, cookies or other credentials, including same-host redirects.
   static func redirectedRequest(_ request: URLRequest) -> URLRequest? {
     guard let url = request.url, isHTTPS(url),
-      isAssetURL(url)
+      isAnyAssetURL(url)
         || ["release-assets.githubusercontent.com", "objects.githubusercontent.com"].contains(
           url.host?.lowercased() ?? "")
     else { return nil }

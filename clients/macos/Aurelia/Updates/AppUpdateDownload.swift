@@ -3,6 +3,7 @@ import Foundation
 
 enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
   case github(Int)
+  case rateLimited, notModified, privateRepository
   case invalidRelease, invalidTag, noDiskImage, noChecksum, checksumMismatch, noFolder
   case invalidURL, invalidResponse, tooLarge, emptyDownload, incompleteDownload, notNewer
   case timedOut, connectionLost, diskFull, writeFailed
@@ -11,6 +12,12 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
 
   var message: String {
     switch self {
+    case .rateLimited:
+      "GitHub's rate limit was reached. Try again later, or add a GitHub token under Settings › Updates › Advanced."
+    case .notModified:
+      "Aurelia is up to date."
+    case .privateRepository:
+      "The repository couldn't be found (404). It may be private. You can add a GitHub token under Settings › Updates › Advanced."
     case .github(let status) where status == 401 || status == 403:
       "GitHub answered with an error (\(status)). Try again later."
     case .github(404):
@@ -61,6 +68,13 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
 struct AppUpdateTransfer: Sendable {
   let data: Data
   let sha256: String
+  let etag: String?
+
+  init(data: Data, sha256: String, etag: String? = nil) {
+    self.data = data
+    self.sha256 = sha256
+    self.etag = etag
+  }
 }
 
 /// The production transport and deterministic test transports share the same bounded contract.
@@ -79,9 +93,16 @@ struct AppUpdateTransferAccumulator {
   private var digest = SHA256()
   private var count: Int64 = 0
   private var prefix = Data()
+  private let etag: String?
 
   init(response: URLResponse, maximumBytes: Int64, write: ((Data) throws -> Void)? = nil) throws {
     guard let http = response as? HTTPURLResponse else { throw AppUpdateError.invalidResponse }
+    if http.statusCode == 304 { throw AppUpdateError.notModified }
+    if http.statusCode == 429
+      || (http.statusCode == 403 && http.value(forHTTPHeaderField: "x-ratelimit-remaining") == "0")
+    {
+      throw AppUpdateError.rateLimited
+    }
     guard http.statusCode == 200 else { throw AppUpdateError.github(http.statusCode) }
     let type = (response.mimeType ?? "").lowercased()
     guard !type.contains("html") else { throw AppUpdateError.invalidResponse }
@@ -92,6 +113,7 @@ struct AppUpdateTransferAccumulator {
       response.expectedContentLength >= 0 && (encoding == nil || encoding == "identity")
       ? response.expectedContentLength : nil
     self.write = write
+    self.etag = http.value(forHTTPHeaderField: "ETag")
   }
 
   mutating func consume(_ chunk: Data) throws {
@@ -117,7 +139,8 @@ struct AppUpdateTransferAccumulator {
       throw AppUpdateError.incompleteDownload
     }
     return AppUpdateTransfer(
-      data: data, sha256: digest.finalize().map { String(format: "%02x", $0) }.joined())
+      data: data, sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(),
+      etag: etag)
   }
 }
 
@@ -204,12 +227,28 @@ struct AppUpdateClient: Sendable {
     self.transport = transport
   }
 
-  func latest(repository: String, token: String? = nil) async throws -> AppRelease {
+  func latestRelease(
+    repository: String, token: String? = nil, ifNoneMatch: String? = nil
+  ) async throws -> (release: AppRelease, etag: String?) {
     guard AppUpdateLogic.isRepository(repository),
       let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")
     else { throw AppUpdateError.invalidURL }
-    let result = try await transfer(url, token: token, maximumBytes: 2 * 1_024 * 1_024)
-    return try AppUpdateLogic.validatedRelease(fromLatest: result.data, repository: repository)
+    let result: AppUpdateTransfer
+    do {
+      result = try await transfer(
+        url, token: token, ifNoneMatch: ifNoneMatch, maximumBytes: 2 * 1_024 * 1_024)
+    } catch AppUpdateError.github(404) where token == nil || token?.isEmpty == true {
+      throw AppUpdateError.privateRepository
+    }
+    let release = try AppUpdateLogic.validatedRelease(
+      fromLatest: result.data, repository: repository)
+    return (release, result.etag)
+  }
+
+  func latest(
+    repository: String, token: String? = nil, ifNoneMatch: String? = nil
+  ) async throws -> AppRelease {
+    try await latestRelease(repository: repository, token: token, ifNoneMatch: ifNoneMatch).release
   }
 
   func download(
@@ -218,8 +257,8 @@ struct AppUpdateClient: Sendable {
     guard let tag = AppUpdateLogic.parseTag(release.tag), tag.build == release.build,
       tag.version == release.version,
       release.diskImageName == AppUpdateLogic.diskImageName(tag: release.tag),
-      AppUpdateLogic.isAssetURL(release.diskImageURL, repository: repository),
-      AppUpdateLogic.isAssetURL(release.checksumsURL, repository: repository)
+      AppUpdateLogic.isAnyAssetURL(release.diskImageURL, repository: repository),
+      AppUpdateLogic.isAnyAssetURL(release.checksumsURL, repository: repository)
     else { throw AppUpdateError.invalidRelease }
     guard AppUpdateLogic.isNewer(build: release.build, than: currentBuild) else {
       throw AppUpdateError.notNewer
@@ -248,18 +287,23 @@ struct AppUpdateClient: Sendable {
   }
 
   private func transfer(
-    _ url: URL, token: String? = nil, maximumBytes: Int64, destination: URL? = nil
+    _ url: URL, token: String? = nil, ifNoneMatch: String? = nil, maximumBytes: Int64,
+    destination: URL? = nil
   ) async throws -> AppUpdateTransfer {
     var request = URLRequest(
       url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-    if let token, !token.isEmpty {
+    // Never send the token to any host except api.github.com
+    if let token, !token.isEmpty, url.host?.lowercased() == "api.github.com" {
       request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+    if let ifNoneMatch, !ifNoneMatch.isEmpty {
+      request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match")
     }
     request.setValue(
       destination == nil ? "application/vnd.github+json" : "application/octet-stream",
       forHTTPHeaderField: "Accept")
-    // Release assets, including checksums, must use GitHub's binary asset endpoint.
-    if AppUpdateLogic.isAssetURL(url) {
+    // Release assets, including checksums, must use binary asset accept header.
+    if AppUpdateLogic.isAssetURL(url) || AppUpdateLogic.isPublicAssetURL(url) {
       request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
     }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")

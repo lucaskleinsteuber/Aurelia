@@ -384,7 +384,10 @@ struct AppSettingsView: View {
         serverNetworkSection
         let _ = { foundAny = true }()
       }
-      if queryMatches(query, "updates check new version mac app server release notes") {
+      if queryMatches(
+        query,
+        "updates check new version mac app server release notes token github pat private"
+      ) {
         updatesSections
         let _ = { foundAny = true }()
       }
@@ -1143,6 +1146,15 @@ struct AppSettingsView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
       }
     }
+
+    AureliaSettingsSection(
+      "Advanced",
+      symbol: "key.fill",
+      description: "Only needed while the repository is private."
+    ) {
+      GitHubTokenSettingsView(updater: updater)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
   }
 
   private var updateStatusText: String {
@@ -1442,6 +1454,87 @@ private struct ServerProfileManagementList: View {
     let client = APIClient(profile: profile)
     if let fetched = try? await client.serverUsers() {
       users = fetched
+    }
+  }
+}
+
+private struct GitHubTokenSettingsView: View {
+  @ObservedObject var updater: AppUpdater
+  @State private var tokenInput = ""
+  @State private var isEditing = false
+  @State private var statusMessage: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      if updater.hasToken && !isEditing {
+        HStack(spacing: 12) {
+          Label("GitHub token saved in Keychain", systemImage: "checkmark.shield.fill")
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("updates-token-status")
+
+          Spacer()
+
+          Button("Change…") {
+            isEditing = true
+            tokenInput = ""
+            statusMessage = nil
+          }
+          .accessibilityIdentifier("updates-token-change")
+
+          Button("Remove", role: .destructive) {
+            do {
+              try updater.deleteToken()
+              statusMessage = "Token removed."
+            } catch {
+              statusMessage = error.localizedDescription
+            }
+          }
+          .accessibilityIdentifier("updates-token-remove")
+        }
+      } else {
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(spacing: 8) {
+            SecureField("Personal Access Token (ghp_…)", text: $tokenInput)
+              .textFieldStyle(.roundedBorder)
+              .accessibilityLabel("GitHub Personal Access Token")
+              .accessibilityIdentifier("updates-token-input")
+
+            Button("Save Token") {
+              do {
+                try updater.saveToken(tokenInput)
+                isEditing = false
+                tokenInput = ""
+                statusMessage = "Token saved in Keychain."
+              } catch {
+                statusMessage = error.localizedDescription
+              }
+            }
+            .disabled(tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityIdentifier("updates-token-save")
+
+            if isEditing {
+              Button("Cancel") {
+                isEditing = false
+                tokenInput = ""
+              }
+            }
+          }
+
+          Text(
+            "Only needed while the Aurelia repository is private. Leave blank for public releases."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+      }
+
+      if let statusMessage {
+        Text(statusMessage)
+          .font(.caption)
+          .foregroundStyle(
+            statusMessage.contains("failed") || statusMessage.contains("error")
+              ? .red : .secondary)
+      }
     }
   }
 }

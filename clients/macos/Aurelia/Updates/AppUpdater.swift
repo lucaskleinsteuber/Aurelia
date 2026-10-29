@@ -22,10 +22,12 @@ final class AppUpdater: ObservableObject {
   private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "updates")
 
   @Published private(set) var state: State = .idle
+  @Published private(set) var hasToken: Bool = false
   /// "owner/name" baked in by build-macos-release.sh; builds from Xcode have none.
   let repository: String?
   let currentVersion: String
   let currentBuild: Int
+  let tokenStore: AppUpdateTokenStore
   private let client: AppUpdateClient
   private let defaults: UserDefaults
 
@@ -33,17 +35,30 @@ final class AppUpdater: ObservableObject {
     tokens: AppUpdateTokenStore = AppUpdateTokenStore(), bundle: Bundle = .main,
     client: AppUpdateClient = AppUpdateClient(), defaults: UserDefaults = .standard
   ) {
+    self.tokenStore = tokens
     self.client = client
     self.defaults = defaults
+    self.hasToken = tokens.load() != nil
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
     repository = configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
     currentVersion =
       bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
-    // Clean up any legacy token stored in the Keychain.
-    if !AppModel.isTestProcess {
-      try? tokens.delete()
+  }
+
+  func saveToken(_ token: String) throws {
+    let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      try deleteToken()
+      return
     }
+    try tokenStore.save(trimmed)
+    hasToken = true
+  }
+
+  func deleteToken() throws {
+    try tokenStore.delete()
+    hasToken = false
   }
 
   var canCheck: Bool { repository != nil }
@@ -69,7 +84,13 @@ final class AppUpdater: ObservableObject {
     }
     state = .checking
     do {
-      let release = try await client.latest(repository: repository)
+      let token = tokenStore.load()
+      let cachedETag = defaults.string(forKey: AppUpdatePreferences.latestETagKey)
+      let (release, etag) = try await client.latestRelease(
+        repository: repository, token: token, ifNoneMatch: cachedETag)
+      if let etag {
+        defaults.set(etag, forKey: AppUpdatePreferences.latestETagKey)
+      }
       defaults.set(Date(), forKey: AppUpdatePreferences.lastCheckKey)
       if AppUpdateLogic.isNewer(build: release.build, than: currentBuild) {
         state = .available(release)
@@ -87,6 +108,21 @@ final class AppUpdater: ObservableObject {
             "You have the newest version, \(currentVersion) (\(currentBuild)).")
         }
       }
+    } catch AppUpdateError.notModified {
+      defaults.set(Date(), forKey: AppUpdatePreferences.lastCheckKey)
+      state = .upToDate
+      if userInitiated {
+        alert(
+          "Aurelia Is Up to Date",
+          "You have the newest version, \(currentVersion) (\(currentBuild)).")
+      }
+    } catch AppUpdateError.privateRepository {
+      let message = AppUpdateError.privateRepository.message
+      state = .failed(message)
+      Self.logger.notice("Update check got 404 for repository; may be private.")
+      if userInitiated {
+        offerPrivateRepoTokenAlert()
+      }
     } catch {
       let message =
         (error as? AppUpdateError)?.message
@@ -94,6 +130,18 @@ final class AppUpdater: ObservableObject {
       state = .failed(message)
       Self.logger.error("Update check failed: \(message, privacy: .public)")
       if userInitiated { alert("Couldn't Check for Updates", message) }
+    }
+  }
+
+  private func offerPrivateRepoTokenAlert() {
+    let alert = NSAlert()
+    alert.messageText = "Repository May Be Private"
+    alert.informativeText =
+      "The repository couldn't be found (404). If it is private, you can add a GitHub token in Settings › Updates › Advanced."
+    alert.addButton(withTitle: "Open Settings")
+    alert.addButton(withTitle: "OK")
+    if alert.runModal() == .alertFirstButtonReturn {
+      NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
   }
 
@@ -152,8 +200,9 @@ final class AppUpdater: ObservableObject {
     var downloadedImage: URL?
     do {
       let folder = try Self.updatesDirectory()
+      let token = tokenStore.load()
       let destination = try await client.download(
-        release, repository: repository, currentBuild: currentBuild, folder: folder)
+        release, repository: repository, token: token, currentBuild: currentBuild, folder: folder)
       downloadedImage = destination
 
       state = .installing

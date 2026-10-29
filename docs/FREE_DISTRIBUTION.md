@@ -133,11 +133,24 @@ unnecessary with one-year profiles.
 
 *Aurelia › Check for Updates…* asks GitHub for the newest release of the repository the app
 was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
-app's Info.plist; builds made in Xcode have none and cannot update). Because the repository is
-public, updates download without requiring personal access tokens. The app also looks at launch
-when at least 24 hours have passed since its last successful check.
-*Settings › App › Updates › Check for updates automatically* is on by default; turning it
-off stops background checks. *Check for Updates…* continues to work manually.
+app's Info.plist; builds made in Xcode have none and cannot update). For public repositories,
+updates check and download anonymously without requiring any personal access token. The app
+also looks at launch when at least 24 hours have passed since its last successful check.
+*Settings › Updates › Check for updates automatically* is on by default; turning it off stops
+background checks. *Check for Updates…* continues to work manually.
+
+To protect GitHub's anonymous rate limit (60 requests per hour per IP), checks send the HTTP
+`If-None-Match` header with the cached release `ETag`. When no newer release is published,
+GitHub answers with `304 Not Modified`, which consumes minimal quota and completes instantly.
+If rate limits are reached, the app displays a friendly notice suggesting the user try again later
+or configure a personal access token.
+
+When a repository is private, a GitHub personal access token can optionally be saved in the macOS
+Keychain under *Settings › Updates › Advanced* ("Only needed while the repository is private").
+If an anonymous check returns `404 Not Found`, the app informs the user that the repository may be
+private and offers to open the Settings window. Any configured token is sent exclusively to
+`api.github.com` over HTTPS and is never forwarded to redirect targets, asset CDNs, or public
+download mirrors (`github.com`).
 
 The update dialog shows GitHub's release notes as selectable plain text in a scrollable
 field, together with the disk image's published download size when available. *Later*
@@ -147,14 +160,15 @@ still offered. A manual check also offers skipped versions, so they can still be
 
 The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
 checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
-they are not buffered in memory. Release descriptions and checksum lists are limited to 2 MiB
-and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject HTML and oversized
-or incomplete responses, and remove partial files after failures. Consumed images and their empty managed UUID folders
-are also removed after installation failures, including the diagnostic no-relaunch path.
-Cleanup preserves unexpected files and rejects linked download folders. Expired tokens, invalid
-releases, checksum mismatches, interrupted downloads and insufficient disk space have specific
-error messages. Asset URLs must belong to the configured GitHub repository; storage redirects
-use HTTPS and never retain the token or cookies.
+they are not buffered in memory. Public releases prefer `browser_download_url` on `github.com`,
+while API asset URLs are supported for private releases. Release descriptions and checksum lists
+are limited to 2 MiB and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject
+HTML and oversized or incomplete responses, and remove partial files after failures. Consumed images
+and their empty managed UUID folders are also removed after installation failures, including the
+diagnostic no-relaunch path. Cleanup preserves unexpected files and rejects linked download folders.
+Rate limiting, private repositories, invalid releases, checksum mismatches, interrupted downloads
+and insufficient disk space have specific error messages. Asset URLs must belong to the configured
+GitHub repository; storage redirects use HTTPS and never retain the token or cookies.
 
 It then quits and hands the image to the server host helper, which runs outside
 the sandbox. The helper waits until the app and its server have stopped, then mounts the
