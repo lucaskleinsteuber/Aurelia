@@ -104,6 +104,11 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     mergeHealthDuplicates: (sourceMediaId, targetMediaId) => request("/api/v1/library/health/merge", { method: "POST", body: { sourceMediaId, targetMediaId } }),
     setPreferredHealthVersion: (preferredMediaId) => request("/api/v1/library/health/preferred", { method: "PUT", body: { preferredMediaId } }),
     removeHealthEntry: (mediaId) => request(`/api/v1/library/health/entries/${id(mediaId)}`, { method: "DELETE" }),
+    activePlayers: (currentDeviceId) => request(`/api/v1/devices/players${currentDeviceId ? `?currentDeviceId=${encodeURIComponent(currentDeviceId)}` : ""}`),
+    playerStatus: (deviceId) => request(`/api/v1/devices/players/${id(deviceId)}/status`),
+    sendPlayerCommand: (deviceId, body) => request(`/api/v1/devices/players/${id(deviceId)}/commands`, { method: "POST", body }),
+    playerCommands: (deviceId, waitMs = 0) => request(`/api/v1/devices/player/commands?deviceId=${encodeURIComponent(deviceId)}&waitMs=${waitMs}`),
+    playerHeartbeat: (body) => request("/api/v1/devices/player/heartbeat", { method: "POST", body }),
     watchlist: (options = {}) => request("/api/v1/watchlist", options),
     setWatchlist: (mediaId, isWatchlisted, options = {}) =>
       request(`/api/v1/media/${id(mediaId)}/watchlist`, { method: "PUT", body: { isWatchlisted }, signal: options.signal }),

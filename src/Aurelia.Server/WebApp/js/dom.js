@@ -73,6 +73,7 @@ const PATHS = {
   tv: ["M3 7h18v13H3zM8 3l4 4 4-4", "stroke"],
   star: ["M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z", "stroke"],
   starFill: ["M12 4l2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z", "fill"],
+  airplay: ["M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1M12 15l5 6H7l5-6z", "stroke"],
 };
 
 export function icon(name, { size = 20, label } = {}) {

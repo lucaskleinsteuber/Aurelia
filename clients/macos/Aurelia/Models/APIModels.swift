@@ -1164,3 +1164,58 @@ struct InspectedServer: Equatable, Sendable {
     FingerprintFormatter.display(publicKeyFingerprint)
   }
 }
+
+// MARK: Remote Playback Models
+
+struct PlayerHeartbeatRequest: Codable, Sendable {
+  let deviceId: String
+  let deviceName: String
+  let clientType: String
+  let isPlaying: Bool
+  let mediaId: UUID?
+  let title: String?
+  let positionSeconds: Double?
+  let durationSeconds: Double?
+  let isPaused: Bool
+}
+
+struct PlayerHeartbeatResponse: Codable, Sendable {
+  let success: Bool
+  let timestamp: Date
+}
+
+struct RemotePlayerDevice: Codable, Identifiable, Equatable, Sendable {
+  var id: String { deviceId }
+  let deviceId: String
+  let deviceName: String
+  let clientType: String
+  let isPlaying: Bool
+  let mediaId: UUID?
+  let title: String?
+  let positionSeconds: Double?
+  let durationSeconds: Double?
+  let isPaused: Bool
+  let lastSeen: Date
+}
+
+struct RemotePlaybackCommandRequest: Codable, Sendable {
+  let action: String
+  let mediaId: UUID?
+  let positionSeconds: Double?
+  let skipSeconds: Double?
+}
+
+struct RemotePlaybackCommandResponse: Codable, Sendable {
+  let commandId: UUID
+  let status: String
+}
+
+struct RemotePlaybackCommand: Codable, Identifiable, Sendable {
+  var id: UUID { commandId }
+  let commandId: UUID
+  let action: String
+  let mediaId: UUID?
+  let positionSeconds: Double?
+  let skipSeconds: Double?
+  let createdAt: Date
+}

@@ -898,6 +898,50 @@ struct APIClient: Sendable {
       method: "DELETE")
   }
 
+  func sendPlayerHeartbeat(_ request: PlayerHeartbeatRequest) async throws
+    -> PlayerHeartbeatResponse
+  {
+    let body = try JSONEncoder().encode(request)
+    let data = try await perform(
+      path: "/api/v1/devices/player/heartbeat", method: "POST", body: body)
+    return try Self.decode(PlayerHeartbeatResponse.self, from: data)
+  }
+
+  func activePlayers(currentDeviceId: String? = nil) async throws -> [RemotePlayerDevice] {
+    var path = "/api/v1/devices/players"
+    if let currentDeviceId, !currentDeviceId.isEmpty {
+      path +=
+        "?currentDeviceId=\(currentDeviceId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? currentDeviceId)"
+    }
+    return try await get(path)
+  }
+
+  func playerStatus(deviceId: String) async throws -> RemotePlayerDevice {
+    let encoded = deviceId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? deviceId
+    return try await get("/api/v1/devices/players/\(encoded)/status")
+  }
+
+  func sendPlayerCommand(
+    deviceId: String, action: String, mediaId: UUID? = nil, positionSeconds: Double? = nil,
+    skipSeconds: Double? = nil
+  ) async throws -> RemotePlaybackCommandResponse {
+    let body = try JSONEncoder().encode(
+      RemotePlaybackCommandRequest(
+        action: action, mediaId: mediaId, positionSeconds: positionSeconds, skipSeconds: skipSeconds
+      ))
+    let encoded = deviceId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? deviceId
+    let data = try await perform(
+      path: "/api/v1/devices/players/\(encoded)/commands", method: "POST", body: body)
+    return try Self.decode(RemotePlaybackCommandResponse.self, from: data)
+  }
+
+  func pollPlayerCommands(deviceId: String, waitMs: Int = 0) async throws -> [RemotePlaybackCommand]
+  {
+    let encoded =
+      deviceId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? deviceId
+    return try await get("/api/v1/devices/player/commands?deviceId=\(encoded)&waitMs=\(waitMs)")
+  }
+
   func setFavorite(mediaId: UUID, isFavorite: Bool) async throws -> Bool {
     let body = try JSONEncoder().encode(SetFavoriteRequest(isFavorite: isFavorite))
     let data = try await perform(

@@ -103,23 +103,30 @@ struct LibraryShellView: View {
       .frame(width: 0, height: 0)
     }
     .overlay(alignment: .bottom) {
-      if let error = model.visibleErrorMessage {
-        ErrorBanner(
-          message: error,
-          retry: {
-            Task {
-              if model.canRestoreLocalHosting {
-                await model.restoreLocalHosting()
-              } else {
-                await model.refreshFromUI()
+      VStack(spacing: 12) {
+        if let device = model.activeRemotePlayer {
+          MacMiniRemoteView(device: device)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        if let error = model.visibleErrorMessage {
+          ErrorBanner(
+            message: error,
+            retry: {
+              Task {
+                if model.canRestoreLocalHosting {
+                  await model.restoreLocalHosting()
+                } else {
+                  await model.refreshFromUI()
+                }
               }
-            }
-          },
-          retryLabel: model.canRestoreLocalHosting ? "Start Local Server" : "Try Again",
-          retryDisabled: model.isRecoveringLocalHost
-        )
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+            },
+            retryLabel: model.canRestoreLocalHosting ? "Start Local Server" : "Try Again",
+            retryDisabled: model.isRecoveringLocalHost
+          )
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
       }
+      .padding(.bottom, 24)
     }
     .animation(
       reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.42, dampingFraction: 0.82),
@@ -1747,5 +1754,86 @@ private struct StatisticsPage: View {
   private func loadYear(_ year: Int) async {
     guard let profile = model.profile else { return }
     yearReview = try? await APIClient(profile: profile).yearInReview(year: year)
+  }
+}
+
+struct MacMiniRemoteView: View {
+  @EnvironmentObject private var model: AppModel
+  let device: RemotePlayerDevice
+
+  var body: some View {
+    HStack(spacing: 16) {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 6) {
+          Image(systemName: "airplayvideo")
+            .foregroundStyle(Color.accentColor)
+          Text("Playing on \(device.deviceName)")
+            .font(.caption.bold())
+            .foregroundStyle(Color.accentColor)
+        }
+        if let title = model.remotePlaybackTitle {
+          Text(title)
+            .font(.subheadline.bold())
+            .lineLimit(1)
+            .foregroundStyle(.white)
+        }
+      }
+      .frame(minWidth: 140, maxWidth: 220, alignment: .leading)
+
+      HStack(spacing: 12) {
+        Button {
+          model.sendRemotePlaybackCommand(action: "skip", skipSeconds: -10)
+        } label: {
+          Image(systemName: "gobackward.10")
+            .font(.system(size: 14))
+        }
+        .buttonStyle(.plain)
+
+        Button {
+          model.sendRemotePlaybackCommand(action: model.isRemotePlaying ? "pause" : "resume")
+        } label: {
+          Image(systemName: model.isRemotePlaying ? "pause.fill" : "play.fill")
+            .font(.system(size: 18))
+        }
+        .buttonStyle(.plain)
+
+        Button {
+          model.sendRemotePlaybackCommand(action: "skip", skipSeconds: 10)
+        } label: {
+          Image(systemName: "goforward.10")
+            .font(.system(size: 14))
+        }
+        .buttonStyle(.plain)
+      }
+
+      if model.remotePlaybackDuration > 0 {
+        Slider(
+          value: Binding(
+            get: { model.remotePlaybackPosition },
+            set: { model.sendRemotePlaybackCommand(action: "seek", positionSeconds: $0) }
+          ),
+          in: 0...model.remotePlaybackDuration
+        )
+        .frame(minWidth: 160, maxWidth: 280)
+      }
+
+      Button {
+        model.stopRemotePlayback()
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+          .font(.system(size: 16))
+          .foregroundStyle(.secondary)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Stop remote playback")
+    }
+    .padding(.horizontal, 20)
+    .padding(.vertical, 12)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    .overlay(
+      RoundedRectangle(cornerRadius: 16)
+        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+    )
+    .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
   }
 }

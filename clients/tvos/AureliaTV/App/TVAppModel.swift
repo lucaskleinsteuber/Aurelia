@@ -39,13 +39,25 @@ final class TVAppModel: ObservableObject {
   @Published private(set) var pendingProgress: [UUID: TVProgressSnapshot] = [:]
   @Published private(set) var acknowledgedProgress: [UUID: TVPlaybackProgress] = [:]
   @Published private var mutationSummaries: [UUID: TVCatalogItem] = [:]
+  @Published var remotePlaybackItem: TVCatalogItem?
   private var syncTask: Task<Void, Never>?
   private var progressObserver: Task<Void, Never>?
   private var refreshTask: Task<Void, Never>?
+  private var remoteDeviceHeartbeatTask: Task<Void, Never>?
+  private var remoteDeviceCommandTask: Task<Void, Never>?
   private var deferredRefresh = false
   private var homeRequest = UUID()
   var playerPresented = false {
     didSet { if !playerPresented && deferredRefresh { scheduleLibraryRefresh() } }
+  }
+
+  var tvDeviceId: String {
+    if let saved = UserDefaults.standard.string(forKey: "AureliaTVDeviceId") {
+      return saved
+    }
+    let newId = UUID().uuidString
+    UserDefaults.standard.set(newId, forKey: "AureliaTVDeviceId")
+    return newId
   }
   private let credentials = TVCredentialStore()
   let environment = TVAppEnvironment.current()
@@ -721,9 +733,52 @@ final class TVAppModel: ObservableObject {
   private func observePersonalState(connection: TVStoredConnection, session: TVProfileSession) {
     syncTask?.cancel()
     progressObserver?.cancel()
+    remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceCommandTask?.cancel()
     let api = makeClient(connection: connection, session: session)
     let sessionID = session.sessionId
     let scope = TVProgressScope(connection: connection, session: session)
+    let deviceId = tvDeviceId
+    let deviceName = UIDevice.current.name
+
+    remoteDeviceHeartbeatTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self, self.session?.sessionId == sessionID else { return }
+        _ = try? await api.sendPlayerHeartbeat(
+          deviceId: deviceId,
+          deviceName: deviceName,
+          clientType: "tvos",
+          isPlaying: self.playerPresented
+        )
+        do { try await Task.sleep(for: .seconds(15)) } catch { return }
+      }
+    }
+
+    remoteDeviceCommandTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self, self.session?.sessionId == sessionID else { return }
+        do {
+          let commands = try await api.pollPlayerCommands(deviceId: deviceId, waitMs: 10000)
+          guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
+          for cmd in commands {
+            if cmd.action.lowercased() == "play", let mediaId = cmd.mediaId {
+              if let item = try? await api.summary(id: mediaId) {
+                await MainActor.run { [weak self] in
+                  self?.remotePlaybackItem = item
+                }
+              }
+            } else if cmd.action.lowercased() == "stop" {
+              await MainActor.run { [weak self] in
+                self?.remotePlaybackItem = nil
+                self?.playerPresented = false
+              }
+            }
+          }
+        } catch {
+          do { try await Task.sleep(for: .seconds(2)) } catch { return }
+        }
+      }
+    }
     progressObserver = Task { [weak self] in
       guard let self else { return }
       let stream = await environment.outbox.changes(scope: scope)
@@ -789,6 +844,10 @@ final class TVAppModel: ObservableObject {
     syncTask = nil
     progressObserver?.cancel()
     progressObserver = nil
+    remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceHeartbeatTask = nil
+    remoteDeviceCommandTask?.cancel()
+    remoteDeviceCommandTask = nil
     let previous = outboxTransition
     outboxTransition = Task {
       await previous?.value

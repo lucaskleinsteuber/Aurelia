@@ -18,6 +18,7 @@ struct MediaDetailView: View {
   @State private var primarySeasonApplied = false
   @State private var playbackTask: Task<Void, Never>?
   @State private var usedPreparedDetail = false
+  @State private var remoteDevices: [RemotePlayerDevice] = []
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @StateObject private var watchActions = MediaWatchActionController()
 
@@ -52,6 +53,8 @@ struct MediaDetailView: View {
             watchActions: watchActions,
             onBack: onBack,
             onPlay: { playPrimary(detail) },
+            remoteDevices: remoteDevices,
+            onPlayOnDevice: { playOnDevice($0, detail) },
             onFavorite: {
               Task {
                 if await model.setFavorite(
@@ -254,6 +257,7 @@ struct MediaDetailView: View {
         guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
         apply(plan, to: loadedDetail)
       }
+      remoteDevices = await model.activeRemotePlayers()
       isLoadingPlaybackPlan = false
     } catch {
       guard loadGeneration == request, model.profile == profile, !Task.isCancelled else { return }
@@ -266,6 +270,14 @@ struct MediaDetailView: View {
     if model.supportsLibraryState { return shownPlan?.target }
     if detail.item.kind != .series { return detail.item }
     return episodes(in: detail).first?.item
+  }
+
+  private func playOnDevice(_ device: RemotePlayerDevice, _ detail: CatalogDetailPresentation) {
+    let target = primaryTarget(detail) ?? detail.item
+    let position =
+      shownPlan?.action == .resume
+      ? (Double(target.progress?.positionMilliseconds ?? 0) / 1000.0) : 0
+    model.startRemotePlayback(on: device, item: target, startPosition: position)
   }
 
   private func playPrimary(_ detail: CatalogDetailPresentation) {
@@ -701,6 +713,8 @@ private struct DetailHero: View {
   @ObservedObject var watchActions: MediaWatchActionController
   let onBack: () -> Void
   let onPlay: () -> Void
+  var remoteDevices: [RemotePlayerDevice] = []
+  var onPlayOnDevice: ((RemotePlayerDevice) -> Void)? = nil
   let onFavorite: () -> Void
   var isWatchlisted = false
   var onWatchlist: (() -> Void)? = nil
@@ -773,6 +787,20 @@ private struct DetailHero: View {
           .buttonStyle(AureliaPrimaryActionButtonStyle())
           .disabled(!canPlay || isPlayLoading)
           .accessibilityIdentifier("play-media")
+          if !remoteDevices.isEmpty, let onPlayOnDevice {
+            Menu {
+              ForEach(remoteDevices) { device in
+                Button(device.deviceName) {
+                  onPlayOnDevice(device)
+                }
+              }
+            } label: {
+              Label("Play on…", systemImage: "airplayvideo")
+                .font(.headline)
+            }
+            .buttonStyle(.bordered).controlSize(.large)
+            .accessibilityIdentifier("play-on-device")
+          }
           Button(action: onFavorite) {
             Label(
               detail.item.isFavorite ? "Remove from Favorites" : "Add to Favorites",

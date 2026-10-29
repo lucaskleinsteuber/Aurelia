@@ -296,4 +296,21 @@ test("collections v2, subtitles, history, statistics and health API endpoints us
   await api.removeHealthEntry("med-1");
   assert.equal(calls.at(-1).path, "/api/v1/library/health/entries/med-1");
   assert.equal(calls.at(-1).method, "DELETE");
+
+  await api.activePlayers("my-dev");
+  assert.equal(calls.at(-1).path, "/api/v1/devices/players?currentDeviceId=my-dev");
+
+  await api.playerStatus("target-dev");
+  assert.equal(calls.at(-1).path, "/api/v1/devices/players/target-dev/status");
+
+  await api.sendPlayerCommand("target-dev", { action: "play", mediaId: "med-1", positionSeconds: 120 });
+  assert.equal(calls.at(-1).path, "/api/v1/devices/players/target-dev/commands");
+  assert.equal(calls.at(-1).method, "POST");
+
+  await api.playerCommands("target-dev", 5000);
+  assert.equal(calls.at(-1).path, "/api/v1/devices/player/commands?deviceId=target-dev&waitMs=5000");
+
+  await api.playerHeartbeat({ deviceId: "my-dev", deviceName: "Safari", clientType: "web", isPlaying: false });
+  assert.equal(calls.at(-1).path, "/api/v1/devices/player/heartbeat");
+  assert.equal(calls.at(-1).method, "POST");
 });

@@ -532,3 +532,14 @@ struct TVPlaybackTicket: Codable, Equatable, Sendable {
   let expiresAt: String
   let progress: TVPlaybackProgress
 }
+
+// MARK: Remote Playback Commands
+
+public struct TVRemotePlaybackCommand: Decodable, Sendable {
+  public let commandId: UUID
+  public let action: String
+  public let mediaId: UUID?
+  public let positionSeconds: Double?
+  public let skipSeconds: Double?
+  public let createdAt: Date
+}

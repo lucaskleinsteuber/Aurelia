@@ -1,3 +1,4 @@
+import AVKit
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -450,6 +451,13 @@ struct PlayerView: View {
           notes: sceneNotes, currentPosition: { controller.currentTimeMilliseconds },
           seek: { controller.seek(to: $0) })
       }
+
+      PlayerControlLabel(height: 30, minWidth: 38) {
+        AirPlayRoutePickerButton()
+          .frame(width: 22, height: 22)
+      }
+      .accessibilityLabel("AirPlay")
+      .accessibilityIdentifier("player-airplay")
 
     }
     .padding(4)
@@ -1406,4 +1414,14 @@ private struct PlayerUpNextActions: ViewModifier {
       }
     }
   }
+}
+
+struct AirPlayRoutePickerButton: NSViewRepresentable {
+  func makeNSView(context: Context) -> AVRoutePickerView {
+    let picker = AVRoutePickerView()
+    picker.isRoutePickerButtonBordered = false
+    return picker
+  }
+
+  func updateNSView(_ nsView: AVRoutePickerView, context: Context) {}
 }

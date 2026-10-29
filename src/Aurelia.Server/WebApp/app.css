@@ -1169,3 +1169,75 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .health-item-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
 .health-item-row:last-child { border-bottom: none; }
 
+
+/* Mini-Remote for remote playback control */
+.mini-remote {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-radius: 16px;
+  background: rgba(28, 28, 30, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  max-width: 680px;
+  width: calc(100% - 48px);
+}
+.mini-remote-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  max-width: 220px;
+}
+.mini-remote-device {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent, #3894ff);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mini-remote-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mini-remote-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mini-remote-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.mini-remote-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.mini-remote-scrub {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.mini-remote-slider {
+  width: 100%;
+}

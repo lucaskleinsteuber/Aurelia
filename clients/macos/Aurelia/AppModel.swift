@@ -108,6 +108,26 @@ final class AppModel: ObservableObject {
   @Published private(set) var activeScans: [LibraryScanSummary] = []
   @Published private(set) var scanStatusUnavailable: Set<UUID> = []
   @Published private(set) var recentScans: [LibraryScanSummary] = []
+
+  // MARK: Remote Playback / Device Coordination
+  @Published private(set) var activeRemotePlayer: RemotePlayerDevice?
+  @Published private(set) var remotePlaybackTitle: String?
+  @Published private(set) var remotePlaybackPosition: Double = 0
+  @Published private(set) var remotePlaybackDuration: Double = 0
+  @Published private(set) var isRemotePlaying: Bool = false
+
+  private var remoteDeviceHeartbeatTask: Task<Void, Never>?
+  private var remoteDeviceCommandTask: Task<Void, Never>?
+  private var remoteDeviceStatusTask: Task<Void, Never>?
+
+  var macDeviceId: String {
+    if let saved = UserDefaults.standard.string(forKey: "AureliaMacDeviceId") {
+      return saved
+    }
+    let newId = UUID().uuidString
+    UserDefaults.standard.set(newId, forKey: "AureliaMacDeviceId")
+    return newId
+  }
   @Published private(set) var libraryDiscoveries: [LibraryDiscoverySummary] = []
   @Published private(set) var libraryImportReviews: [LibraryImportReviewSummary] = []
   @Published private(set) var pairingCode: PairingCodeResponse?
@@ -288,6 +308,12 @@ final class AppModel: ObservableObject {
     scanStatusUnavailable = []
     syncStartTask?.cancel()
     syncStartTask = nil
+    remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceHeartbeatTask = nil
+    remoteDeviceCommandTask?.cancel()
+    remoteDeviceCommandTask = nil
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
   }
   private var isTerminationProtectionActive = false
   private var hostHealth = HostHealthPolicy()
@@ -3188,6 +3214,7 @@ final class AppModel: ObservableObject {
   private func startSync() {
     guard !requiresProfileSelection, !isResting else { return }
     guard let profile else { return }
+    startRemoteDeviceService()
     let generation = connectionGeneration
     syncStartTask?.cancel()
     syncStartTask = Task { [weak self, profile] in
@@ -3657,5 +3684,167 @@ final class AppModel: ObservableObject {
     #else
       return false
     #endif
+  }
+
+  // MARK: Remote Playback Controls
+
+  func activeRemotePlayers() async -> [RemotePlayerDevice] {
+    guard let profile else { return [] }
+    return (try? await APIClient(profile: profile).activePlayers(currentDeviceId: macDeviceId))
+      ?? []
+  }
+
+  func startRemotePlayback(
+    on device: RemotePlayerDevice, item: CatalogItemSummary, startPosition: Double = 0
+  ) {
+    guard let profile else { return }
+    activeRemotePlayer = device
+    remotePlaybackTitle = item.title
+    remotePlaybackPosition = startPosition
+    remotePlaybackDuration = Double(item.progress?.durationMilliseconds ?? 0) / 1000.0
+    isRemotePlaying = true
+
+    Task { [weak self] in
+      guard let self else { return }
+      do {
+        _ = try await APIClient(profile: profile).sendPlayerCommand(
+          deviceId: device.deviceId,
+          action: "play",
+          mediaId: item.id,
+          positionSeconds: startPosition
+        )
+      } catch {
+        await MainActor.run {
+          self.stopRemotePlayback()
+          self.errorMessage = error.localizedDescription
+        }
+      }
+    }
+
+    startRemoteStatusPolling(device: device)
+  }
+
+  func sendRemotePlaybackCommand(
+    action: String, positionSeconds: Double? = nil, skipSeconds: Double? = nil
+  ) {
+    guard let profile, let device = activeRemotePlayer else { return }
+    if action == "pause" { isRemotePlaying = false }
+    if action == "resume" { isRemotePlaying = true }
+    if let pos = positionSeconds { remotePlaybackPosition = pos }
+    if let skip = skipSeconds { remotePlaybackPosition = max(0, remotePlaybackPosition + skip) }
+
+    Task {
+      _ = try? await APIClient(profile: profile).sendPlayerCommand(
+        deviceId: device.deviceId,
+        action: action,
+        positionSeconds: positionSeconds,
+        skipSeconds: skipSeconds
+      )
+    }
+  }
+
+  func stopRemotePlayback() {
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = nil
+    if let device = activeRemotePlayer, let profile {
+      Task {
+        _ = try? await APIClient(profile: profile).sendPlayerCommand(
+          deviceId: device.deviceId, action: "stop")
+      }
+    }
+    activeRemotePlayer = nil
+    remotePlaybackTitle = nil
+    isRemotePlaying = false
+  }
+
+  private func startRemoteStatusPolling(device: RemotePlayerDevice) {
+    remoteDeviceStatusTask?.cancel()
+    remoteDeviceStatusTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        guard let self, let profile = self.profile else { return }
+        do {
+          let status = try await APIClient(profile: profile).playerStatus(deviceId: device.deviceId)
+          await MainActor.run {
+            self.isRemotePlaying = status.isPlaying && !status.isPaused
+            if let pos = status.positionSeconds { self.remotePlaybackPosition = pos }
+            if let dur = status.durationSeconds, dur > 0 { self.remotePlaybackDuration = dur }
+          }
+        } catch let err as APIClientError where err.httpStatus == 404 || err.httpStatus == 409 {
+          await MainActor.run {
+            self.stopRemotePlayback()
+            self.errorMessage = err.localizedDescription
+          }
+          break
+        } catch {}
+      }
+    }
+  }
+
+  func startRemoteDeviceService() {
+    remoteDeviceHeartbeatTask?.cancel()
+    remoteDeviceCommandTask?.cancel()
+    guard profile != nil else { return }
+    let deviceId = macDeviceId
+    let deviceName = Host.current().localizedName ?? "Mac"
+
+    remoteDeviceHeartbeatTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self, let profile = self.profile else { return }
+        let isPlaying = self.playback != nil
+        let mediaId = self.playback?.mediaId
+        let title = self.playback?.title
+        let req = PlayerHeartbeatRequest(
+          deviceId: deviceId,
+          deviceName: deviceName,
+          clientType: "macos",
+          isPlaying: isPlaying,
+          mediaId: mediaId,
+          title: title,
+          positionSeconds: nil,
+          durationSeconds: nil,
+          isPaused: false
+        )
+        _ = try? await APIClient(profile: profile).sendPlayerHeartbeat(req)
+        try? await Task.sleep(nanoseconds: 15_000_000_000)
+      }
+    }
+
+    remoteDeviceCommandTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self, let profile = self.profile else { return }
+        do {
+          let commands = try await APIClient(profile: profile).pollPlayerCommands(
+            deviceId: deviceId, waitMs: 10000)
+          for cmd in commands {
+            self.handleIncomingRemoteCommand(cmd)
+          }
+        } catch {
+          try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+      }
+    }
+  }
+
+  private func handleIncomingRemoteCommand(_ command: RemotePlaybackCommand) {
+    switch command.action.lowercased() {
+    case "play":
+      if let mediaId = command.mediaId {
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          self.startPlayback(
+            mediaId: mediaId,
+            title: "",
+            startIntent: (command.positionSeconds ?? 0) > 0 ? .resume : .play
+          )
+        }
+      }
+    case "stop":
+      Task { @MainActor [weak self] in
+        self?.dismissPlayback()
+      }
+    default:
+      break
+    }
   }
 }

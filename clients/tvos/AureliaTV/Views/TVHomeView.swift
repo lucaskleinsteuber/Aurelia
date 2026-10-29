@@ -87,6 +87,12 @@ struct TVHomeView: View {
       }
     )
     .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
+    .onChange(of: model.remotePlaybackItem) { _, item in
+      if let item {
+        playback = TVHomePlayback(target: item, queue: [], title: item.title)
+        model.remotePlaybackItem = nil
+      }
+    }
     .alert(
       "Not Available",
       isPresented: Binding(get: { unavailable != nil }, set: { if !$0 { unavailable = nil } }),

@@ -732,6 +732,34 @@ async function titleScreen(id) {
     ? h("button", { class: "primary-button large", onclick: () => playTitle(target, seasons, { intent: plan?.action === "resume" ? "resume" : "play" }) }, icon("play", { size: 17 }), logic.detailPlayLabel(item, plan))
     : h("button", { class: "primary-button large", disabled: true }, icon("play", { size: 17 }), target ? "Unavailable" : "No Episodes");
 
+  const playOnButton = target && target.availability === "available"
+    ? h("button", { class: "secondary-button large play-on-btn", "aria-label": "Play on another device", "aria-haspopup": "menu" }, icon("airplay", { size: 17 }), "Play on…")
+    : null;
+  if (playOnButton) {
+    playOnButton.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      playOnButton.disabled = true;
+      try {
+        const devices = await api.activePlayers();
+        if (!devices || devices.length === 0) {
+          toast("No active Aurelia devices found.");
+          return;
+        }
+        const items = devices.map((device) => {
+          return h("button", { class: "menu-item", onclick: () => {
+            document.querySelector(".popup-menu")?.remove();
+            startRemotePlayback(device, target, plan);
+          }}, icon("airplay", { size: 16 }), device.deviceName);
+        });
+        openMenu(playOnButton, items);
+      } catch (error) {
+        if (!handleError(error)) toast(error.message);
+      } finally {
+        playOnButton.disabled = false;
+      }
+    });
+  }
+
   let isFavorite = item.isFavorite;
   const favoriteButton = h("button", { class: "secondary-button large favorite-button" });
   const showFavorite = () => favoriteButton.replaceChildren(icon(isFavorite ? "starFill" : "star", { size: 17 }), isFavorite ? "Remove from Favorites" : "Add to Favorites");
@@ -792,7 +820,7 @@ async function titleScreen(id) {
       h("h1", { class: "hero-title rise", style: { "--rise": 1 } }, metadata.title ?? item.title),
       (metadata.genres ?? item.genres ?? []).length ? h("div", { class: "hero-genres rise", style: { "--rise": 2 } }, (metadata.genres ?? item.genres).slice(0, 3).join("  ·  ")) : null,
       metadata.overview ?? item.overview ? h("p", { class: "hero-overview rise", style: { "--rise": 3 } }, metadata.overview ?? item.overview) : null,
-      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, favoriteButton, watchlistButton,
+      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, playOnButton, favoriteButton, watchlistButton,
         logic.isTitleOffline(item, target) ? h("span", { class: "detail-offline-notice" }, icon("warning", { size: 14 }), logic.OFFLINE_FILE_NOTICE) : null,
         item.watchState === "completed" ? h("span", { class: "watched-label" }, icon("checkCircle", { size: 15 }), "Watched") : null),
       target ? progressLine(target) : null),
@@ -1171,6 +1199,133 @@ function aboutSection(detail) {
     h("h2", {}, "Information"),
     h("div", { class: `info-grid ${detail.item.kind === "series" ? "series" : ""}` }, logic.informationFields(detail).map((field) =>
       h("div", { class: "info-value" }, h("div", { class: "info-title" }, field.title), h("div", {}, field.value ?? "—")))));
+}
+
+let activeMiniRemote = null;
+
+async function startRemotePlayback(device, target, plan) {
+  try {
+    const position = plan?.action === "resume" ? (target?.progress?.positionMilliseconds ?? 0) / 1000 : 0;
+    await api.sendPlayerCommand(device.deviceId, {
+      action: "play",
+      mediaId: target.id,
+      positionSeconds: position,
+    });
+    showMiniRemote(device, target);
+  } catch (error) {
+    if (!handleError(error)) toast(error.message || "Failed to start playback on remote device.");
+  }
+}
+
+function showMiniRemote(device, target) {
+  if (activeMiniRemote) activeMiniRemote.close();
+
+  let isPlaying = true;
+  let currentPosition = 0;
+  let duration = (target.progress?.durationMilliseconds ? target.progress.durationMilliseconds / 1000 : 0) || 1;
+  let pollTimer = null;
+
+  const titleEl = h("div", { class: "mini-remote-title" }, target.title);
+  const deviceEl = h("div", { class: "mini-remote-device" }, icon("airplay", { size: 14 }), `Playing on ${device.deviceName}`);
+  const playBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Pause" }, icon("pause", { size: 18 }));
+  const skipBackBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Back 10 Seconds" }, icon("previous", { size: 16 }));
+  const skipForwardBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Forward 10 Seconds" }, icon("next", { size: 16 }));
+  const closeBtn = h("button", { class: "icon-button mini-remote-btn", "aria-label": "Stop Remote Playback" }, icon("delete", { size: 16 }));
+
+  const progressSlider = h("input", {
+    class: "timeline mini-remote-slider",
+    type: "range",
+    min: "0",
+    max: "1000",
+    value: "0",
+    "aria-label": "Remote Playback Position",
+  });
+
+  playBtn.addEventListener("click", async () => {
+    try {
+      const action = isPlaying ? "pause" : "resume";
+      await api.sendPlayerCommand(device.deviceId, { action });
+      isPlaying = !isPlaying;
+      playBtn.replaceChildren(icon(isPlaying ? "pause" : "play", { size: 18 }));
+      playBtn.setAttribute("aria-label", isPlaying ? "Pause" : "Play");
+    } catch (e) {
+      if (!handleError(e)) toast(e.message);
+    }
+  });
+
+  skipBackBtn.addEventListener("click", async () => {
+    try {
+      await api.sendPlayerCommand(device.deviceId, { action: "skip", skipSeconds: -10 });
+    } catch (e) {
+      if (!handleError(e)) toast(e.message);
+    }
+  });
+
+  skipForwardBtn.addEventListener("click", async () => {
+    try {
+      await api.sendPlayerCommand(device.deviceId, { action: "skip", skipSeconds: 10 });
+    } catch (e) {
+      if (!handleError(e)) toast(e.message);
+    }
+  });
+
+  progressSlider.addEventListener("change", async () => {
+    try {
+      const fraction = Number(progressSlider.value) / 1000;
+      const seekPos = fraction * duration;
+      await api.sendPlayerCommand(device.deviceId, { action: "seek", positionSeconds: seekPos });
+    } catch (e) {
+      if (!handleError(e)) toast(e.message);
+    }
+  });
+
+  const remoteWidget = h("div", { class: "mini-remote glass slide-up", role: "region", "aria-label": `Remote Control for ${device.deviceName}` },
+    h("div", { class: "mini-remote-meta" }, deviceEl, titleEl),
+    h("div", { class: "mini-remote-controls" }, skipBackBtn, playBtn, skipForwardBtn),
+    h("div", { class: "mini-remote-scrub" }, progressSlider),
+    closeBtn);
+
+  const close = async (sendStop = false) => {
+    clearInterval(pollTimer);
+    remoteWidget.remove();
+    activeMiniRemote = null;
+    if (sendStop) {
+      try {
+        await api.sendPlayerCommand(device.deviceId, { action: "stop" });
+      } catch {}
+    }
+  };
+
+  closeBtn.addEventListener("click", () => close(true));
+
+  pollTimer = setInterval(async () => {
+    try {
+      const status = await api.playerStatus(device.deviceId);
+      if (status) {
+        isPlaying = status.isPlaying && !status.isPaused;
+        playBtn.replaceChildren(icon(isPlaying ? "pause" : "play", { size: 18 }));
+        if (status.durationSeconds && status.durationSeconds > 0) {
+          duration = status.durationSeconds;
+          if (status.positionSeconds !== undefined && status.positionSeconds !== null) {
+            currentPosition = status.positionSeconds;
+            const fraction = Math.min(1, Math.max(0, currentPosition / duration));
+            progressSlider.value = String(Math.round(fraction * 1000));
+          }
+        }
+      }
+    } catch (error) {
+      if (error?.status === 404 || error?.code === "target_offline") {
+        toast(`${device.deviceName} went offline.`);
+        close(false);
+      } else if (error?.status === 409 || error?.code === "target_profile_mismatch") {
+        toast(`Profile changed on ${device.deviceName}.`);
+        close(false);
+      }
+    }
+  }, 2500);
+
+  activeMiniRemote = { close };
+  document.body.append(remoteWidget);
 }
 
 // MARK: Playing

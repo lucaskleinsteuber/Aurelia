@@ -309,6 +309,38 @@ struct TVAPIClient: Sendable {
   func sleepTimerEnded() async throws {
     _ = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")
   }
+
+  func sendPlayerHeartbeat(
+    deviceId: String, deviceName: String, clientType: String, isPlaying: Bool, mediaId: UUID? = nil,
+    title: String? = nil, positionSeconds: Double? = nil, durationSeconds: Double? = nil,
+    isPaused: Bool = false
+  ) async throws {
+    struct HeartbeatBody: Encodable {
+      let deviceId: String
+      let deviceName: String
+      let clientType: String
+      let isPlaying: Bool
+      let mediaId: UUID?
+      let title: String?
+      let positionSeconds: Double?
+      let durationSeconds: Double?
+      let isPaused: Bool
+    }
+    let body = HeartbeatBody(
+      deviceId: deviceId, deviceName: deviceName, clientType: clientType, isPlaying: isPlaying,
+      mediaId: mediaId, title: title, positionSeconds: positionSeconds,
+      durationSeconds: durationSeconds, isPaused: isPaused)
+    _ = try await send(
+      "/api/v1/devices/player/heartbeat", method: "POST", body: try JSONEncoder().encode(body))
+  }
+
+  func pollPlayerCommands(deviceId: String, waitMs: Int = 0) async throws
+    -> [TVRemotePlaybackCommand]
+  {
+    let encoded =
+      deviceId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? deviceId
+    return try await get("/api/v1/devices/player/commands?deviceId=\(encoded)&waitMs=\(waitMs)")
+  }
   func progress(mediaID: UUID) async throws -> TVPlaybackProgress {
     let value: TVPlaybackProgress = try await get("/api/v1/media/\(mediaID.uuidString)/progress")
     try value.validate(mediaID: mediaID)

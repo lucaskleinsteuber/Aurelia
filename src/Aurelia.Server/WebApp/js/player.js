@@ -157,8 +157,9 @@ export class Player {
     this.muteButton = h("button", { class: "player-icon", "aria-label": "Mute", onclick: () => this.toggleMute() }, icon("volume", { size: 18 }));
     this.volume = h("input", { class: "volume", type: "range", min: "0", max: "1", step: "0.02", value: String(this.preferences.defaultVolume), "aria-label": "Volume", "aria-valuetext": volumeValueText(this.preferences.defaultVolume, false) });
     this.pipButton = h("button", { class: "player-icon", "aria-label": "Enter Picture in Picture", hidden: !document.pictureInPictureEnabled, onclick: () => this.togglePictureInPicture() }, icon("pip", { size: 18 }));
+    this.airplayButton = h("button", { class: "player-icon airplay-btn", "aria-label": "AirPlay", hidden: true, onclick: () => this.showAirPlayPicker() }, icon("airplay", { size: 18 }));
     this.fullscreenButton = h("button", { class: "player-icon", "aria-label": "Enter Full Screen", onclick: () => this.toggleFullscreen() }, icon("fullscreen", { size: 18 }));
-    this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.pipButton, this.fullscreenButton);
+    this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.airplayButton, this.pipButton, this.fullscreenButton);
     this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Playback Position", "aria-valuetext": timelineValueText(0, 0) });
     this.noteMarks = h("div", { class: "note-marks", "aria-hidden": "true" });
     this.previewImg = h("img", { class: "scrub-preview-img", alt: "" });
@@ -357,6 +358,15 @@ export class Player {
     on(video, "seeked", () => this.saveNow());
     on(video, "volumechange", () => this.updateVolume());
     on(video, "ratechange", () => this.updateRate());
+    if (typeof window !== "undefined" && window.WebKitPlaybackTargetAvailabilityEvent) {
+      on(video, "webkitplaybacktargetavailabilitychanged", (event) => {
+        this.airplayButton.hidden = (event.availability !== "available");
+      });
+    } else if (video.remote && typeof video.remote.watchAvailability === "function") {
+      video.remote.watchAvailability((available) => {
+        this.airplayButton.hidden = !available;
+      }).catch(() => {});
+    }
     on(video, "ended", () => this.finish());
     on(video, "error", () => this.videoFailed());
     on(this.timeline, "input", () => {
@@ -511,6 +521,14 @@ export class Player {
     const full = Boolean(document.fullscreenElement);
     this.fullscreenButton.replaceChildren(icon(full ? "exitFullscreen" : "fullscreen", { size: 18 }));
     this.fullscreenButton.setAttribute("aria-label", full ? "Exit Full Screen" : "Enter Full Screen");
+  }
+
+  showAirPlayPicker() {
+    if (typeof this.video.webkitShowPlaybackTargetPicker === "function") {
+      this.video.webkitShowPlaybackTargetPicker();
+    } else if (this.video.remote && typeof this.video.remote.prompt === "function") {
+      this.video.remote.prompt().catch(() => {});
+    }
   }
 
   updatePictureInPicture() {
