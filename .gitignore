@@ -9,6 +9,7 @@ xcuserdata/
 *.xcuserstate
 clients/macos/Dependencies/
 clients/tvos/Dependencies/
+clients/ios/Dependencies/
 *.user
 *.suo
 
