@@ -1,52 +1,56 @@
-# Aurelia iOS & iPadOS Native Client
+# Aurelia for iPhone and iPad
 
-Aurelia includes a dedicated, native client for iPhone and iPad in `clients/ios/`.
+`clients/ios` holds the iPhone and iPad client. It is a preview: it builds and its logic is
+tested, but it has not been installed on a real device or played a real title yet.
 
-## Architecture & Constraints
+## How it is built
 
-1. **Independent Project & Codebase:**
-   - In accordance with the AGENTS.md rules, `clients/ios/AureliaIOS.xcodeproj` is a completely isolated Xcode project with zero references to macOS or tvOS source trees or shared product libraries.
-   - Independent release lifecycle and SemVer counter starting at **1.0.0 (1)**, configured via `clients/ios/Configuration/BuildNumber.xcconfig`.
-   - Built with Swift 6 and strict concurrency checking (`SWIFT_STRICT_CONCURRENCY = complete`), passing all builds and logic tests warning-free.
+The app shares its behavior with the Apple TV app, which plays on a real TV every day. Its
+code is a copy of the Apple TV app's, adapted for touch and smaller screens, not a link to it:
+`clients/ios` has its own Xcode project with no references into `clients/tvos` or
+`clients/macos`, as `AGENTS.md` requires.
 
-2. **Universal Design & Interface:**
-   - **iPhone:** Clean, focused four-tab bar (`Home`, `Library`, `Search`, `Settings`).
-   - **iPad:** Native `NavigationSplitView` sidebar providing full multi-column browsing and details inspection.
-   - **Visual Language:** Translucent dark Aurelia design system respecting the safe area and status bar chrome.
+- **Connecting** works exactly like on the Apple TV: the app finds servers with Bonjour or
+  takes an address, shows the server's fingerprint to confirm, and shows a code that you enter
+  on the Mac under *Enter Code from Apple TV or Browser…*. The server's certificate is pinned
+  to that fingerprint.
+- **Profiles** open with their PIN; Home, Movies, TV Shows, Search, title pages, the Watchlist
+  and people pages work like on the Apple TV.
+- **Playback** runs through MobileVLCKit and a small relay on `127.0.0.1` that adds the
+  sign-in to each request and streams the bytes through; nothing is stored. Progress, sound
+  tracks, subtitles (including subtitle files next to the video), scrub previews, Up Next and
+  the sleep timer behave as on the Apple TV.
+- **Sizes**: the screens are the Apple TV's, scaled to half size on iPhone and three quarters
+  on iPad (`IOSDesign.scale`). Touch controls the player; a hardware keyboard adds the
+  arrow keys, Space and Escape.
 
-3. **Secure Protocol & Discovery:**
-   - **Bonjour Discovery:** Automatically browses `_aurelia._tcp` services using Network.framework's `NWBrowser`.
-   - **TLS Pinning:** Pinning against the server's SPKI P-256 SHA-256 fingerprint, protecting against LAN man-in-the-middle attacks.
-   - **Multi-Profile Support:** Profile picker grid with 4-digit PIN authentication sheets for restricted profiles.
-   - **Wake-on-LAN:** Broadcasts UDP magic packets to wake sleeping Linux servers on demand.
+## Building and testing
 
-4. **Playback Engine & Zero-Disk Loopback Relay:**
-   - **Direct Playback:** Direct decoding of container media formats via official MobileVLCKit 3.7.3 (`scripts/prepare-ios-vlckit.sh`).
-   - **Loopback Relay (`IOSStreamRelay`):** A lightweight, ephemeral in-memory HTTP proxy (`127.0.0.1`) that translates VLC's unauthenticated range requests into authenticated, pinned TLS requests to the Aurelia server.
-   - **Zero Converted Video Storage:** Converted video or transcoded files are never written to disk or device flash storage.
-   - **Sidecar Subtitles:** Dynamically mapped on the loopback relay (`/subtitles/{secret}/{index}`) and attached directly as VLC playback slaves.
-   - **Scrub Previews & Up Next:** Live timeline scrub preview plan and automated countdown banner for episodic titles.
+```bash
+zsh scripts/test-ios-logic.sh
+```
 
-5. **Remote Playback & AirPlay:**
-   - **Play on Device:** Directly command other active Aurelia clients (such as Apple TV or Mac) from the title detail screen.
-   - **AirPlay:** Embedded `AVRoutePickerView` allowing system-level streaming to Apple TV or AirPlay 2 speakers.
+Runs the logic tests on the Mac without a simulator.
 
-## Scripts & Verification
+```bash
+zsh scripts/build-ios.sh
+```
 
-- **Dependency Preparation:**
-  ```bash
-  sh scripts/prepare-ios-vlckit.sh
-  ```
-  Downloads, verifies SHA-256, and links the pinned MobileVLCKit xcframework into `clients/ios/Dependencies/`.
+Builds the app for the iOS Simulator in Release, with warnings as errors.
 
-- **Host Logic Tests:**
-  ```bash
-  zsh scripts/test-ios-logic.sh
-  ```
-  Executes the host-executable unit test suite on macOS in sub-second time without needing simulator boots.
+To look at the app without a server, build the Debug configuration and launch it with the
+argument `--aurelia-ui-testing` and the environment variable
+`AURELIA_IOS_UI_SCENARIO=library`: it shows an invented library and a simulated player.
 
-- **Simulator Release Build:**
-  ```bash
-  zsh scripts/build-ios.sh
-  ```
-  Builds the universal iOS/iPadOS simulator bundle warning-free in Release configuration.
+## Installing on your own iPhone
+
+The app is signed for development like the Apple TV app. To install it, open
+`clients/ios/AureliaIOS.xcodeproj` in Xcode, choose your iPhone and press Run. A free
+development profile expires after seven days; the signing refresh job in
+`scripts/refresh-signing.sh` currently renews only the Mac and Apple TV apps.
+
+## Known limits
+
+- Not yet tried on a physical iPhone or iPad, and no real title has played in it.
+- No UI tests yet; the logic tests cover the shared core.
+- The app is not published on GitHub.

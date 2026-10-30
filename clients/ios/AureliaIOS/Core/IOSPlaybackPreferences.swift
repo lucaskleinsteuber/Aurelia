@@ -1,70 +1,177 @@
 import Foundation
 
-public struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
-  public static let defaultValue = IOSPlaybackPreferences()
+struct IOSPlaybackTrackPreference: Codable, Equatable, Sendable {
+  let language: String?
+  let title: String
 
-  public var automaticResume: Bool = true
-  public var automaticallyPlayNextEpisode: Bool = true
-  public var defaultPlaybackRate: Double = 1.0
-  public var seekInterval: Int = 10
-  public var upNextCountdownSeconds: Int = 15
-
-  public init(
-    automaticResume: Bool = true,
-    automaticallyPlayNextEpisode: Bool = true,
-    defaultPlaybackRate: Double = 1.0,
-    seekInterval: Int = 10,
-    upNextCountdownSeconds: Int = 15
-  ) {
-    self.automaticResume = automaticResume
-    self.automaticallyPlayNextEpisode = automaticallyPlayNextEpisode
-    self.defaultPlaybackRate = defaultPlaybackRate
-    self.seekInterval = seekInterval
-    self.upNextCountdownSeconds = upNextCountdownSeconds
+  init(language: String?, title: String) {
+    self.language = language.map {
+      String($0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(32))
+    }.flatMap { $0.isEmpty ? nil : $0 }
+    self.title = String(
+      title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().prefix(256))
   }
 }
 
-public actor IOSProgressOutbox {
-  private let apiClient: IOSAPIClient
-  private var pendingItemId: String?
-  private var pendingPositionSeconds: Double = 0
-  private var pendingDurationSeconds: Double = 0
-  private var pendingWatched: Bool = false
-  private var isSyncing = false
+struct IOSPlaybackTrack: Identifiable, Equatable, Sendable {
+  let id: Int32
+  let title: String
 
-  public init(apiClient: IOSAPIClient) {
-    self.apiClient = apiClient
-  }
-
-  public func record(
-    itemId: String, positionSeconds: Double, durationSeconds: Double, watched: Bool
-  ) {
-    self.pendingItemId = itemId
-    self.pendingPositionSeconds = positionSeconds
-    self.pendingDurationSeconds = durationSeconds
-    self.pendingWatched = watched
-  }
-
-  public func flush() async {
-    guard let itemId = pendingItemId, !isSyncing else { return }
-    isSyncing = true
-    let pos = pendingPositionSeconds
-    let dur = pendingDurationSeconds
-    let watched = pendingWatched
-
-    do {
-      try await apiClient.updatePlaybackProgress(
-        itemId: itemId,
-        positionSeconds: pos,
-        durationSeconds: dur,
-        watched: watched
-      )
-      if pendingItemId == itemId && pendingPositionSeconds == pos {
-        pendingItemId = nil
-      }
-    } catch {
-      // Keep pending for next flush attempt
+  var preference: IOSPlaybackTrackPreference {
+    var language: String?
+    if let open = title.lastIndex(of: "["), let close = title[open...].firstIndex(of: "]") {
+      language = String(title[title.index(after: open)..<close])
     }
-    isSyncing = false
+    return IOSPlaybackTrackPreference(language: language, title: title)
+  }
+
+  static func matching(
+    _ preference: IOSPlaybackTrackPreference?, in tracks: [Self]
+  ) -> Self? {
+    guard let preference else { return nil }
+    if let exact = tracks.first(where: { $0.preference.title == preference.title }) { return exact }
+    guard let language = preference.language else { return nil }
+    return tracks.first(where: { $0.preference.language == language })
+  }
+}
+
+struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
+  static let supportedRates: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
+  static let defaultValue = Self()
+
+  var automaticResume = true
+  var automaticallyPlayNextEpisode = true
+  var defaultPlaybackRate: Double = 1
+  var controlsDelay: TimeInterval = 4
+  var seekInterval = 10
+  var preferredAudioTrack: IOSPlaybackTrackPreference?
+  // nil explicitly means Off, matching the default on the Mac.
+  var preferredSubtitleTrack: IOSPlaybackTrackPreference?
+  /// Softens loud scenes and lifts quiet dialogue.
+  var nightMode = false
+
+  var normalized: Self {
+    var value = self
+    if !Self.supportedRates.contains(value.defaultPlaybackRate) { value.defaultPlaybackRate = 1 }
+    value.controlsDelay = value.controlsDelay.isFinite ? min(max(value.controlsDelay, 1), 10) : 4
+    value.seekInterval = min(max(value.seekInterval, 5), 60)
+    value.preferredAudioTrack = value.preferredAudioTrack.map {
+      IOSPlaybackTrackPreference(language: $0.language, title: $0.title)
+    }
+    value.preferredSubtitleTrack = value.preferredSubtitleTrack.map {
+      IOSPlaybackTrackPreference(language: $0.language, title: $0.title)
+    }
+    return value
+  }
+
+  init() {}
+
+  private enum CodingKeys: String, CodingKey {
+    case automaticResume, automaticallyPlayNextEpisode, defaultPlaybackRate, controlsDelay
+    case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    automaticResume = try values.decodeIfPresent(Bool.self, forKey: .automaticResume) ?? true
+    automaticallyPlayNextEpisode =
+      try values.decodeIfPresent(Bool.self, forKey: .automaticallyPlayNextEpisode) ?? true
+    defaultPlaybackRate = try values.decodeIfPresent(Double.self, forKey: .defaultPlaybackRate) ?? 1
+    controlsDelay = try values.decodeIfPresent(Double.self, forKey: .controlsDelay) ?? 4
+    seekInterval = try values.decodeIfPresent(Int.self, forKey: .seekInterval) ?? 10
+    preferredAudioTrack = try values.decodeIfPresent(
+      IOSPlaybackTrackPreference.self, forKey: .preferredAudioTrack)
+    preferredSubtitleTrack = try values.decodeIfPresent(
+      IOSPlaybackTrackPreference.self, forKey: .preferredSubtitleTrack)
+    nightMode = try values.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false
+  }
+
+  /// These preferences with a series' own track choices, where it has them.
+  func applying(_ choice: IOSSeriesTrackChoice?) -> Self {
+    guard let choice else { return self }
+    var value = self
+    if let audio = choice.audio { value.preferredAudioTrack = audio }
+    if choice.subtitleChosen { value.preferredSubtitleTrack = choice.subtitle }
+    return value
+  }
+}
+
+/// Audio and subtitle choices made in one series. `subtitleChosen` tells "subtitles off" apart
+/// from "never chosen here".
+struct IOSSeriesTrackChoice: Codable, Equatable, Sendable {
+  var audio: IOSPlaybackTrackPreference?
+  var subtitle: IOSPlaybackTrackPreference?
+  var subtitleChosen = false
+  var updatedAt: Date
+}
+
+@MainActor
+final class IOSPlaybackPreferencesStore {
+  static let shared = IOSPlaybackPreferencesStore()
+  private let defaults: UserDefaults
+
+  init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+  func preferences(serverID: UUID, profileID: UUID) -> IOSPlaybackPreferences {
+    guard let data = defaults.data(forKey: key(serverID: serverID, profileID: profileID)),
+      data.count <= 4_096,
+      let value = try? JSONDecoder().decode(IOSPlaybackPreferences.self, from: data)
+    else { return .defaultValue }
+    return value.normalized
+  }
+
+  @discardableResult
+  func save(_ value: IOSPlaybackPreferences, serverID: UUID, profileID: UUID) -> Bool {
+    guard let data = try? JSONEncoder().encode(value.normalized), data.count <= 4_096 else {
+      return false
+    }
+    let storageKey = key(serverID: serverID, profileID: profileID)
+    defaults.set(data, forKey: storageKey)
+    return defaults.data(forKey: storageKey) == data
+  }
+
+  /// The most recently used series are kept; older ones fall back to the profile's last choice.
+  static let seriesLimit = 200
+
+  func seriesChoice(seriesID: UUID, serverID: UUID, profileID: UUID) -> IOSSeriesTrackChoice? {
+    seriesChoices(serverID: serverID, profileID: profileID)[seriesID.uuidString]
+  }
+
+  func updateSeriesChoice(
+    seriesID: UUID, serverID: UUID, profileID: UUID, _ change: (inout IOSSeriesTrackChoice) -> Void
+  ) {
+    var choices = seriesChoices(serverID: serverID, profileID: profileID)
+    var choice = choices[seriesID.uuidString] ?? IOSSeriesTrackChoice(updatedAt: Date())
+    change(&choice)
+    choice.updatedAt = Date()
+    choices[seriesID.uuidString] = choice
+    if choices.count > Self.seriesLimit {
+      for key in choices.sorted(by: { $0.value.updatedAt < $1.value.updatedAt })
+        .prefix(choices.count - Self.seriesLimit).map(\.key)
+      {
+        choices.removeValue(forKey: key)
+      }
+    }
+    if let data = try? JSONEncoder().encode(choices) {
+      defaults.set(data, forKey: seriesKey(serverID: serverID, profileID: profileID))
+    }
+  }
+
+  func forgetSeriesChoices(serverID: UUID, profileID: UUID) {
+    defaults.removeObject(forKey: seriesKey(serverID: serverID, profileID: profileID))
+  }
+
+  private func seriesChoices(serverID: UUID, profileID: UUID) -> [String: IOSSeriesTrackChoice] {
+    defaults.data(forKey: seriesKey(serverID: serverID, profileID: profileID)).flatMap {
+      try? JSONDecoder().decode([String: IOSSeriesTrackChoice].self, from: $0)
+    } ?? [:]
+  }
+
+  private func key(serverID: UUID, profileID: UUID) -> String {
+    "tv.playback.preferences.v1.\(serverID.uuidString).\(profileID.uuidString)"
+  }
+
+  private func seriesKey(serverID: UUID, profileID: UUID) -> String {
+    "tv.playback.seriesTracks.v1.\(serverID.uuidString).\(profileID.uuidString)"
   }
 }

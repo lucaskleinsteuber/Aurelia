@@ -1,483 +1,545 @@
 import Foundation
 
-// MARK: - Server Info & Discovery
+enum IOSCoreError: LocalizedError, Equatable, Sendable {
+  case invalidAddress
+  case identityMismatch
+  case invalidResponse
+  case unsupportedServer
+  case profileRequired
+  case server(status: Int, code: String?, message: String?, retryAfter: TimeInterval?)
 
-public struct IOSServerInfo: Codable, Sendable, Equatable {
-  public let serverId: UUID
-  public let name: String
-  public let version: String
-  public let isSetup: Bool
-  public let lanAccessEnabled: Bool
-  public let lanHttpsPort: Int?
-  public let publicKeyFingerprint: String
-  public let displayFingerprint: String
-  public let capabilities: [String]
-  public let wakeOnLanAddresses: [String]?
-
-  public init(
-    serverId: UUID,
-    name: String,
-    version: String,
-    isSetup: Bool,
-    lanAccessEnabled: Bool,
-    lanHttpsPort: Int? = nil,
-    publicKeyFingerprint: String,
-    displayFingerprint: String,
-    capabilities: [String] = [],
-    wakeOnLanAddresses: [String]? = nil
-  ) {
-    self.serverId = serverId
-    self.name = name
-    self.version = version
-    self.isSetup = isSetup
-    self.lanAccessEnabled = lanAccessEnabled
-    self.lanHttpsPort = lanHttpsPort
-    self.publicKeyFingerprint = publicKeyFingerprint
-    self.displayFingerprint = displayFingerprint
-    self.capabilities = capabilities
-    self.wakeOnLanAddresses = wakeOnLanAddresses
+  var statusCode: Int? {
+    if case .server(let status, _, _, _) = self { return status }
+    return nil
+  }
+  var code: String? {
+    if case .server(_, let code, _, _) = self { return code }
+    return nil
+  }
+  var retryAfter: TimeInterval? {
+    if case .server(_, _, _, let delay) = self { return delay }
+    return nil
+  }
+  var isTransient: Bool {
+    guard let statusCode else { return false }
+    return statusCode == 408 || statusCode == 429 || statusCode >= 500
+  }
+  var httpStatus: Int? { statusCode }
+  var problemCode: String? { code }
+  var retryDelay: TimeInterval? { retryAfter }
+  var isConflict: Bool { statusCode == 409 }
+  var isAuthenticationFailure: Bool { statusCode == 401 || statusCode == 403 }
+  var errorDescription: String? {
+    switch self {
+    case .invalidAddress: "Enter a valid HTTPS server address."
+    case .identityMismatch:
+      "The server identity has changed. Confirm the server on your Mac before reconnecting."
+    case .invalidResponse: "The server returned an invalid response."
+    case .unsupportedServer: "Update Aurelia Server to 1.5.5 or later to connect this device."
+    case .profileRequired: "Choose a profile to continue."
+    case .server(_, _, let message, _): message ?? "The server request could not be completed."
+    }
   }
 }
 
-// MARK: - Pairing & Auth
-
-public struct IOSPairingStartResponse: Codable, Sendable, Equatable {
-  public let pairingId: String
-  public let code: String
-  public let expiresAt: Date
-  public let pollIntervalSeconds: Int
-
-  public init(pairingId: String, code: String, expiresAt: Date, pollIntervalSeconds: Int) {
-    self.pairingId = pairingId
-    self.code = code
-    self.expiresAt = expiresAt
-    self.pollIntervalSeconds = pollIntervalSeconds
+enum IOSServerDate {
+  static func parse(_ value: String) -> Date? {
+    let parser = ISO8601DateFormatter()
+    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = parser.date(from: value) { return date }
+    parser.formatOptions = [.withInternetDateTime]
+    return parser.date(from: value)
   }
 }
 
-public struct IOSPairingPollResponse: Codable, Sendable, Equatable {
-  public let status: String  // "pending", "approved", "rejected", "expired"
-  public let token: String?
-  public let profile: IOSUserProfile?
-
-  public init(status: String, token: String? = nil, profile: IOSUserProfile? = nil) {
-    self.status = status
-    self.token = token
-    self.profile = profile
+/// A saved server that answers not at all, as when its computer sleeps, unlike one that answers with
+/// an error. This device cannot wake a server; Aurelia on a Mac can.
+enum IOSServerReachability {
+  static func isUnreachable(_ error: Error) -> Bool {
+    guard let error = error as? URLError else { return false }
+    return [
+      .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed,
+      .notConnectedToInternet, .secureConnectionFailed,
+    ].contains(error.code)
   }
 }
 
-public struct IOSUserProfile: Codable, Sendable, Equatable, Identifiable, Hashable {
-  public let id: String
-  public let name: String
-  public let hasPin: Bool
-  public let isAdmin: Bool
-  public let avatarUrl: String?
+struct IOSStoredConnection: Codable, Equatable, Sendable {
+  let serverID: UUID
+  let name: String
+  let baseURL: URL
+  let fingerprint: String
+  let deviceToken: String
+  let deviceSessionID: UUID
+  var pendingAcknowledgement: IOSPendingPairingAcknowledgement? = nil
 
-  public init(
-    id: String, name: String, hasPin: Bool, isAdmin: Bool = false, avatarUrl: String? = nil
+  func validate() throws {
+    guard IOSServerAddress.isValid(baseURL), IOSServerIdentity.isValidFingerprint(fingerprint),
+      (32...256).contains(deviceToken.utf8.count), !deviceToken.contains(where: \.isWhitespace)
+    else { throw IOSCoreError.invalidResponse }
+  }
+
+  func relocating(to address: URL) -> Self {
+    Self(
+      serverID: serverID, name: name, baseURL: address, fingerprint: fingerprint,
+      deviceToken: deviceToken, deviceSessionID: deviceSessionID,
+      pendingAcknowledgement: pendingAcknowledgement)
+  }
+}
+
+struct IOSPendingPairingAcknowledgement: Codable, Equatable, Sendable {
+  let id: UUID
+  let secret: String
+  let expiresAt: String
+}
+
+struct IOSServerInfo: Codable, Equatable, Sendable {
+  let serverId: UUID
+  let name: String
+  let version: String
+  let isSetup: Bool
+  let lanAccessEnabled: Bool
+  let lanHttpsPort: Int?
+  let publicKeyFingerprint: String?
+  let displayFingerprint: String?
+  let capabilities: [String]?
+  /// Hardware addresses of the server's network cards, reported for Wake-on-LAN.
+  var wakeOnLanAddresses: [String]? = nil
+}
+
+struct IOSInspectedServer: Equatable, Sendable {
+  let baseURL: URL
+  let info: IOSServerInfo
+  let fingerprint: String
+
+  func connection(authentication: IOSAuthentication) throws -> IOSStoredConnection {
+    let connection = IOSStoredConnection(
+      serverID: info.serverId, name: info.name,
+      baseURL: baseURL, fingerprint: fingerprint, deviceToken: authentication.token,
+      deviceSessionID: authentication.sessionId)
+    try connection.validate()
+    return connection
+  }
+
+  func validate(against connection: IOSStoredConnection) throws {
+    guard info.serverId == connection.serverID,
+      fingerprint.caseInsensitiveCompare(connection.fingerprint) == .orderedSame
+    else { throw IOSCoreError.identityMismatch }
+  }
+}
+
+struct IOSCapabilities: Codable, Equatable, Sendable {
+  let formatVersion: Int
+  let minimumClientVersion: String
+  let capabilities: [String]?
+
+  func validate() throws {
+    // Marketing versions belong to different products. TV 0.1 implements the
+    // versioned protocol; it must not be compared with Mac minimumClientVersion.
+    guard (1...2).contains(formatVersion),
+      Set(capabilities ?? []).isSuperset(of: ["device-authorization-v1", "library-state-v1"])
+    else { throw IOSCoreError.unsupportedServer }
+  }
+  var supportsArtworkVariants: Bool { capabilities?.contains("artwork-variants-v1") == true }
+  var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
+  var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
+}
+
+struct IOSUser: Codable, Equatable, Sendable {
+  let id: UUID
+  let username: String
+  let role: String
+}
+
+struct IOSAuthentication: Codable, Equatable, Sendable {
+  let user: IOSUser
+  let sessionId: UUID
+  let token: String
+  let expiresAt: String
+}
+
+struct IOSProfileSession: Codable, Equatable, Sendable {
+  let user: IOSUser
+  let sessionId: UUID
+  let token: String
+  let expiresAt: String
+
+  func validate(profileID: UUID, now: Date = Date()) throws {
+    guard user.id == profileID, (32...256).contains(token.utf8.count),
+      !token.contains(where: \.isWhitespace),
+      let expiry = IOSServerDate.parse(expiresAt), expiry > now
+    else { throw IOSCoreError.invalidResponse }
+  }
+}
+
+struct IOSWatchingProfile: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let name: String
+  let role: String
+  let needsPinSetup: Bool
+  let pinProtectionEnabled: Bool
+
+  init(
+    id: UUID, name: String, role: String, needsPinSetup: Bool,
+    pinProtectionEnabled: Bool = true
   ) {
     self.id = id
     self.name = name
-    self.hasPin = hasPin
-    self.isAdmin = isAdmin
-    self.avatarUrl = avatarUrl
+    self.role = role
+    self.needsPinSetup = needsPinSetup
+    self.pinProtectionEnabled = pinProtectionEnabled
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, name, role, needsPinSetup, pinProtectionEnabled
+  }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decode(UUID.self, forKey: .id)
+    name = try values.decode(String.self, forKey: .name)
+    role = try values.decode(String.self, forKey: .role)
+    needsPinSetup = try values.decode(Bool.self, forKey: .needsPinSetup)
+    pinProtectionEnabled =
+      try values.decodeIfPresent(Bool.self, forKey: .pinProtectionEnabled) ?? true
   }
 }
 
-public struct IOSSwitchProfileResponse: Codable, Sendable, Equatable {
-  public let token: String
-  public let profile: IOSUserProfile
+struct IOSProfilePicker: Codable, Equatable, Sendable {
+  let formatVersion: Int
+  let minimumClientVersion: String
+  let managementSetupRequired: Bool
+  let profiles: [IOSWatchingProfile]
 
-  public init(token: String, profile: IOSUserProfile) {
-    self.token = token
-    self.profile = profile
+  func validate() throws {
+    guard (1...2).contains(formatVersion), Set(profiles.map(\.id)).count == profiles.count else {
+      throw IOSCoreError.unsupportedServer
+    }
   }
 }
 
-// MARK: - Catalog & Media
+enum IOSProfilePIN {
+  /// One answer for every rejected unlock, so the message never hints at the PIN's length.
+  static let incorrect = "The PIN is incorrect."
 
-public enum IOSMediaType: String, Codable, Sendable, Hashable {
-  case movie
-  case show
-  case season
-  case episode
-}
-
-public struct IOSCatalogItemSummary: Codable, Sendable, Equatable, Identifiable, Hashable {
-  public let id: String
-  public let type: IOSMediaType
-  public let title: String
-  public let originalTitle: String?
-  public let releaseYear: Int?
-  public let durationSeconds: Double?
-  public let posterUrl: String?
-  public let backdropUrl: String?
-  public let overview: String?
-  public let genres: [String]?
-  public let watched: Bool
-  public let positionSeconds: Double?
-  public let rating: Double?
-  public let seriesTitle: String?
-  public let seasonNumber: Int?
-  public let episodeNumber: Int?
-  public let franchiseId: String?
-  public let franchiseName: String?
-
-  public init(
-    id: String,
-    type: IOSMediaType,
-    title: String,
-    originalTitle: String? = nil,
-    releaseYear: Int? = nil,
-    durationSeconds: Double? = nil,
-    posterUrl: String? = nil,
-    backdropUrl: String? = nil,
-    overview: String? = nil,
-    genres: [String]? = nil,
-    watched: Bool = false,
-    positionSeconds: Double? = nil,
-    rating: Double? = nil,
-    seriesTitle: String? = nil,
-    seasonNumber: Int? = nil,
-    episodeNumber: Int? = nil,
-    franchiseId: String? = nil,
-    franchiseName: String? = nil
-  ) {
-    self.id = id
-    self.type = type
-    self.title = title
-    self.originalTitle = originalTitle
-    self.releaseYear = releaseYear
-    self.durationSeconds = durationSeconds
-    self.posterUrl = posterUrl
-    self.backdropUrl = backdropUrl
-    self.overview = overview
-    self.genres = genres
-    self.watched = watched
-    self.positionSeconds = positionSeconds
-    self.rating = rating
-    self.seriesTitle = seriesTitle
-    self.seasonNumber = seasonNumber
-    self.episodeNumber = episodeNumber
-    self.franchiseId = franchiseId
-    self.franchiseName = franchiseName
+  static func isValid(_ value: String) -> Bool {
+    (4...8).contains(value.utf8.count) && value.utf8.allSatisfy { (48...57).contains($0) }
   }
 }
 
-public struct IOSCatalogIndexResponse: Codable, Sendable, Equatable {
-  public let continueWatching: [IOSCatalogItemSummary]
-  public let upNext: [IOSCatalogItemSummary]
-  public let recentlyAdded: [IOSCatalogItemSummary]
-  public let movies: [IOSCatalogItemSummary]
-  public let shows: [IOSCatalogItemSummary]
+/// The avatar color of a profile, matching the Mac app's for the same profile.
+enum IOSProfileColor {
+  static let count = 7
 
-  public init(
-    continueWatching: [IOSCatalogItemSummary] = [],
-    upNext: [IOSCatalogItemSummary] = [],
-    recentlyAdded: [IOSCatalogItemSummary] = [],
-    movies: [IOSCatalogItemSummary] = [],
-    shows: [IOSCatalogItemSummary] = []
-  ) {
-    self.continueWatching = continueWatching
-    self.upNext = upNext
-    self.recentlyAdded = recentlyAdded
-    self.movies = movies
-    self.shows = shows
+  static func index(for id: UUID?) -> Int {
+    guard let id else { return 0 }
+    let sum = withUnsafeBytes(of: id.uuid) { $0.reduce(0) { $0 + Int($1) } }
+    return sum % count
+  }
+
+  static func initial(of name: String) -> String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() }
+      ?? "?"
   }
 }
 
-public struct IOSCatalogDetailResponse: Codable, Sendable, Equatable {
-  public let item: IOSCatalogItemSummary
-  public let seasons: [IOSSeasonSummary]?
-  public let franchise: IOSFranchiseSummary?
-  public let collections: [IOSCollectionSummary]?
+enum IOSPairingState: String, Codable, Sendable {
+  case pending, approved, denied, cancelled, expired, unknown
+  init(from decoder: Decoder) throws {
+    let value = try decoder.singleValueContainer().decode(String.self)
+    self = Self(rawValue: value) ?? .unknown
+  }
+}
 
-  public init(
-    item: IOSCatalogItemSummary,
-    seasons: [IOSSeasonSummary]? = nil,
-    franchise: IOSFranchiseSummary? = nil,
-    collections: [IOSCollectionSummary]? = nil
+struct IOSPairingStart: Codable, Equatable, Sendable {
+  let id: UUID
+  let code: String
+  let secret: String
+  let expiresAt: String
+  let pollIntervalSeconds: Int
+
+  func validate(now: Date = Date()) throws {
+    guard code.utf8.count == 8, code.utf8.allSatisfy({ (48...57).contains($0) }),
+      (32...256).contains(secret.utf8.count), !secret.contains(where: \.isWhitespace),
+      (5...300).contains(pollIntervalSeconds),
+      let expiry = IOSServerDate.parse(expiresAt), expiry > now
+    else { throw IOSCoreError.invalidResponse }
+  }
+}
+
+struct IOSPairingStatus: Codable, Equatable, Sendable {
+  let state: IOSPairingState
+  let expiresAt: String
+  let pollIntervalSeconds: Int
+  let authentication: IOSAuthentication?
+  let acknowledged: Bool
+}
+
+enum IOSMediaKind: String, Codable, Sendable {
+  case movie, series, episode, extra, trailer, unknown
+  init(from decoder: Decoder) throws {
+    self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+  }
+}
+
+enum IOSMediaAvailability: String, Codable, Sendable {
+  case available, missing, error, unknown
+  init(from decoder: Decoder) throws {
+    self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+  }
+}
+
+enum IOSLibraryAvailability: String, Codable, Sendable {
+  case unknown, available, unavailable, error
+  init(from decoder: Decoder) throws {
+    self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+  }
+}
+
+struct IOSArtwork: Codable, Equatable, Sendable {
+  let id: UUID
+  let kind: String
+  let path: String
+  let contentType: String
+  let contentLength: Int64
+  let revision: Int64?
+}
+
+struct IOSPlaybackProgress: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let positionMilliseconds: Int64
+  let durationMilliseconds: Int64
+  let isCompleted: Bool
+  let lastPlayedAt: String?
+  let updatedAt: String?
+  let revision: Int64
+  let lastMutationId: UUID?
+
+  func validate(mediaID: UUID) throws {
+    guard mediaId == mediaID, positionMilliseconds >= 0, durationMilliseconds >= 0,
+      positionMilliseconds <= durationMilliseconds, revision >= 0
+    else { throw IOSCoreError.invalidResponse }
+  }
+}
+
+struct IOSCatalogItem: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let kind: IOSMediaKind
+  let title: String
+  let originalTitle: String?
+  let year: Int?
+  let overview: String?
+  let genres: [String]
+  let poster: IOSArtwork?
+  let backdrop: IOSArtwork?
+  let availability: IOSMediaAvailability
+  let isFavorite: Bool
+  let progress: IOSPlaybackProgress?
+  let addedAt: String
+  let parentTitle: String?
+  let seasonNumber: Int?
+  let episodeNumber: Int?
+  let parentId: UUID?
+  let watchState: String?
+  let libraryAvailability: IOSLibraryAvailability?
+  var continueWatchingHidden: Bool? = nil
+
+  var isPlayable: Bool {
+    [.movie, .episode, .extra, .trailer].contains(kind) && availability == .available
+      && libraryAvailability != .unavailable && libraryAvailability != .error
+  }
+  var availabilityMessage: String? {
+    if libraryAvailability == .unavailable { return "Media drive disconnected" }
+    if libraryAvailability == .error || availability == .error {
+      return "Media could not be accessed"
+    }
+    if availability == .missing { return "Media file unavailable" }
+    if availability == .unknown { return "Media availability unknown" }
+    return nil
+  }
+  var episodeLabel: String? {
+    guard kind == .episode, let seasonNumber, let episodeNumber else { return nil }
+    return String(format: "S%02d E%02d", seasonNumber, episodeNumber)
+  }
+}
+
+struct IOSPage<Item: Codable & Sendable>: Codable, Sendable {
+  let items: [Item]
+  let offset: Int
+  let limit: Int
+  let total: Int
+  let revision: String?
+}
+
+struct IOSSetWatchlistRequest: Encodable, Sendable {
+  let isWatchlisted: Bool
+}
+
+struct IOSWatchlistItemState: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let isWatchlisted: Bool
+}
+
+struct IOSWatchlistResponse: Codable, Equatable, Sendable {
+  let items: [IOSCatalogItem]
+  let mediaIds: [UUID]
+}
+
+struct IOSPersonDetailResponse: Codable, Equatable, Sendable {
+  let name: String
+  let subtitle: String?
+  let profile: IOSArtwork?
+  let items: [IOSCatalogItem]
+}
+
+enum IOSCatalogPageValidator {
+  static func validate(
+    _ page: IOSPage<IOSCatalogItem>, kind: IOSMediaKind,
+    offset: Int, revision: String?, total: Int? = nil, existingIDs: Set<UUID> = []
+  ) throws {
+    guard page.offset == offset, page.limit > 0, page.total >= 0,
+      page.items.count <= page.limit, offset <= page.total,
+      page.items.count <= page.total - offset,
+      !page.items.isEmpty || offset == page.total,
+      page.items.allSatisfy({ $0.kind == kind }),
+      Set(page.items.map(\.id)).count == page.items.count,
+      existingIDs.isDisjoint(with: page.items.map(\.id))
+    else { throw IOSCoreError.invalidResponse }
+    if let revision, page.revision != revision {
+      throw IOSCoreError.server(
+        status: 409,
+        code: "catalog_changed", message: "The library changed. Reload this view.", retryAfter: nil)
+    }
+    if let total, page.total != total { throw IOSCoreError.invalidResponse }
+  }
+}
+
+struct IOSMediaMetadata: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let title: String
+  let originalTitle: String?
+  let overview: String?
+  let releaseDate: String?
+  let year: Int?
+  let runtimeMinutes: Int?
+  let rating: Double?
+  let contentRating: String?
+  let genres: [String]
+  let poster: IOSArtwork?
+  let backdrop: IOSArtwork?
+  let still: IOSArtwork?
+  // Optional so older servers without these fields still decode.
+  var credits: [IOSCredit]? = nil
+  var studios: [String]? = nil
+  var countries: [String]? = nil
+  var fskAge: Int? = nil
+}
+
+struct IOSCredit: Codable, Equatable, Sendable {
+  let name: String
+  let department: String
+  let job: String?
+  let character: String?
+  let order: Int
+  let profile: IOSArtwork?
+  var id: UUID? = nil
+  var personKey: String? = nil
+}
+
+struct IOSEpisode: Codable, Equatable, Sendable {
+  let item: IOSCatalogItem
+  let seasonNumber: Int
+  let episodeNumber: Int
+}
+struct IOSSupplement: Codable, Equatable, Sendable {
+  let item: IOSCatalogItem
+  let category: String
+  let seasonNumber: Int?
+}
+struct IOSSeason: Codable, Equatable, Sendable {
+  let number: Int
+  let episodes: [IOSEpisode]
+  let supplements: [IOSSupplement]
+}
+struct IOSCatalogDetail: Codable, Equatable, Sendable {
+  let item: IOSCatalogItem
+  let metadata: IOSMediaMetadata
+  let seasons: [IOSSeason]
+  let supplements: [IOSSupplement]
+  let franchise: IOSCollection?
+
+  init(
+    item: IOSCatalogItem,
+    metadata: IOSMediaMetadata,
+    seasons: [IOSSeason],
+    supplements: [IOSSupplement],
+    franchise: IOSCollection? = nil
   ) {
     self.item = item
+    self.metadata = metadata
     self.seasons = seasons
+    self.supplements = supplements
     self.franchise = franchise
-    self.collections = collections
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case item, metadata, seasons, supplements, franchise
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    item = try container.decode(IOSCatalogItem.self, forKey: .item)
+    metadata = try container.decode(IOSMediaMetadata.self, forKey: .metadata)
+    seasons = try container.decodeIfPresent([IOSSeason].self, forKey: .seasons) ?? []
+    supplements = try container.decodeIfPresent([IOSSupplement].self, forKey: .supplements) ?? []
+    franchise = try container.decodeIfPresent(IOSCollection.self, forKey: .franchise)
   }
 }
 
-public struct IOSSeasonSummary: Codable, Sendable, Equatable, Identifiable {
-  public let id: String
-  public let seasonNumber: Int
-  public let title: String
-  public let episodes: [IOSCatalogItemSummary]
+struct IOSLiveSubtitleTrack: Codable, Equatable, Sendable {
+  let index: Int
+  let title: String
+  let language: String?
+  let isDefault: Bool
+  let isForced: Bool
+  let isSdh: Bool
+  let isSidecar: Bool
+}
 
-  public init(id: String, seasonNumber: Int, title: String, episodes: [IOSCatalogItemSummary]) {
-    self.id = id
-    self.seasonNumber = seasonNumber
-    self.title = title
-    self.episodes = episodes
+enum IOSPlaybackAction: String, Codable, Sendable { case play, resume, playAgain }
+struct IOSPlaybackPlan: Codable, Equatable, Sendable {
+  let target: IOSCatalogItem?
+  let seriesId: UUID?
+  let queue: [IOSCatalogItem]
+  let action: IOSPlaybackAction
+  let continueWatchingEligible: Bool
+
+  func validate(requestedID: UUID) throws {
+    guard target?.kind != .series,
+      target == nil || target?.id == requestedID || seriesId == requestedID,
+      queue.allSatisfy({ $0.kind == .episode }),
+      Set(queue.map(\.id)).count == queue.count,
+      !queue.contains(where: { $0.id == target?.id })
+    else { throw IOSCoreError.invalidResponse }
   }
 }
 
-// MARK: - Collections & Franchises
-
-public struct IOSCollectionSummary: Codable, Sendable, Equatable, Identifiable {
-  public let id: String
-  public let name: String
-  public let isSmart: Bool
-  public let isShared: Bool
-  public let itemCount: Int
-  public let posterUrl: String?
-
-  public init(
-    id: String,
-    name: String,
-    isSmart: Bool = false,
-    isShared: Bool = false,
-    itemCount: Int = 0,
-    posterUrl: String? = nil
-  ) {
-    self.id = id
-    self.name = name
-    self.isSmart = isSmart
-    self.isShared = isShared
-    self.itemCount = itemCount
-    self.posterUrl = posterUrl
-  }
+struct IOSPlaybackTicket: Codable, Equatable, Sendable {
+  let id: UUID
+  let mediaId: UUID
+  let streamPath: String
+  let contentType: String
+  let contentLength: Int64
+  let expiresAt: String
+  let progress: IOSPlaybackProgress
 }
 
-public struct IOSCollectionDetailResponse: Codable, Sendable, Equatable {
-  public let collection: IOSCollectionSummary
-  public let items: [IOSCatalogItemSummary]
+// MARK: Remote Playback Commands
 
-  public init(collection: IOSCollectionSummary, items: [IOSCatalogItemSummary]) {
-    self.collection = collection
-    self.items = items
-  }
-}
-
-public struct IOSFranchiseSummary: Codable, Sendable, Equatable, Identifiable {
-  public let id: String
-  public let name: String
-  public let movieCount: Int
-  public let posterUrl: String?
-
-  public init(id: String, name: String, movieCount: Int, posterUrl: String? = nil) {
-    self.id = id
-    self.name = name
-    self.movieCount = movieCount
-    self.posterUrl = posterUrl
-  }
-}
-
-public struct IOSFranchiseDetailResponse: Codable, Sendable, Equatable {
-  public let franchise: IOSFranchiseSummary
-  public let movies: [IOSCatalogItemSummary]
-
-  public init(franchise: IOSFranchiseSummary, movies: [IOSCatalogItemSummary]) {
-    self.franchise = franchise
-    self.movies = movies
-  }
-}
-
-// MARK: - Playback & Streams
-
-public struct IOSStreamPlanResponse: Codable, Sendable, Equatable {
-  public let ticket: String
-  public let streamUrl: String
-  public let audioTracks: [IOSAudioTrack]
-  public let subtitleTracks: [IOSSubtitleTrack]
-  public let scrubPreviewIndexUrl: String?
-  public let resumePositionSeconds: Double?
-
-  public init(
-    ticket: String,
-    streamUrl: String,
-    audioTracks: [IOSAudioTrack] = [],
-    subtitleTracks: [IOSSubtitleTrack] = [],
-    scrubPreviewIndexUrl: String? = nil,
-    resumePositionSeconds: Double? = nil
-  ) {
-    self.ticket = ticket
-    self.streamUrl = streamUrl
-    self.audioTracks = audioTracks
-    self.subtitleTracks = subtitleTracks
-    self.scrubPreviewIndexUrl = scrubPreviewIndexUrl
-    self.resumePositionSeconds = resumePositionSeconds
-  }
-}
-
-public struct IOSAudioTrack: Codable, Sendable, Equatable, Identifiable {
-  public let id: Int
-  public let language: String?
-  public let title: String?
-  public let isDefault: Bool
-
-  public init(id: Int, language: String?, title: String?, isDefault: Bool = false) {
-    self.id = id
-    self.language = language
-    self.title = title
-    self.isDefault = isDefault
-  }
-}
-
-public struct IOSSubtitleTrack: Codable, Sendable, Equatable, Identifiable {
-  public let id: Int
-  public let language: String?
-  public let title: String?
-  public let isForced: Bool
-  public let isSdh: Bool
-  public let isSidecar: Bool
-  public let isDefault: Bool
-
-  public init(
-    id: Int,
-    language: String?,
-    title: String?,
-    isForced: Bool = false,
-    isSdh: Bool = false,
-    isSidecar: Bool = false,
-    isDefault: Bool = false
-  ) {
-    self.id = id
-    self.language = language
-    self.title = title
-    self.isForced = isForced
-    self.isSdh = isSdh
-    self.isSidecar = isSidecar
-    self.isDefault = isDefault
-  }
-}
-
-public struct IOSProgressUpdateRequest: Codable, Sendable, Equatable {
-  public let positionSeconds: Double
-  public let durationSeconds: Double
-  public let watched: Bool
-
-  public init(positionSeconds: Double, durationSeconds: Double, watched: Bool) {
-    self.positionSeconds = positionSeconds
-    self.durationSeconds = durationSeconds
-    self.watched = watched
-  }
-}
-
-// MARK: - History & Statistics
-
-public struct IOSWatchEvent: Codable, Sendable, Equatable, Identifiable {
-  public let id: String
-  public let itemId: String
-  public let title: String
-  public let itemType: IOSMediaType
-  public let watchedAt: Date
-  public let durationSeconds: Double
-  public let posterUrl: String?
-
-  public init(
-    id: String,
-    itemId: String,
-    title: String,
-    itemType: IOSMediaType,
-    watchedAt: Date,
-    durationSeconds: Double,
-    posterUrl: String? = nil
-  ) {
-    self.id = id
-    self.itemId = itemId
-    self.title = title
-    self.itemType = itemType
-    self.watchedAt = watchedAt
-    self.durationSeconds = durationSeconds
-    self.posterUrl = posterUrl
-  }
-}
-
-public struct IOSWatchHistoryResponse: Codable, Sendable, Equatable {
-  public let events: [IOSWatchEvent]
-  public let totalCount: Int
-  public let page: Int
-  public let pageSize: Int
-
-  public init(events: [IOSWatchEvent], totalCount: Int, page: Int, pageSize: Int) {
-    self.events = events
-    self.totalCount = totalCount
-    self.page = page
-    self.pageSize = pageSize
-  }
-}
-
-public struct IOSPersonalStatisticsResponse: Codable, Sendable, Equatable {
-  public let totalHours: Double
-  public let monthHours: Double
-  public let weekHours: Double
-  public let topGenres: [String]
-  public let currentStreakDays: Int
-  public let longestStreakDays: Int
-  public let busiestWeekday: String?
-  public let busiestHour: Int?
-  public let completionRate: Double
-
-  public init(
-    totalHours: Double,
-    monthHours: Double,
-    weekHours: Double,
-    topGenres: [String] = [],
-    currentStreakDays: Int = 0,
-    longestStreakDays: Int = 0,
-    busiestWeekday: String? = nil,
-    busiestHour: Int? = nil,
-    completionRate: Double = 0
-  ) {
-    self.totalHours = totalHours
-    self.monthHours = monthHours
-    self.weekHours = weekHours
-    self.topGenres = topGenres
-    self.currentStreakDays = currentStreakDays
-    self.longestStreakDays = longestStreakDays
-    self.busiestWeekday = busiestWeekday
-    self.busiestHour = busiestHour
-    self.completionRate = completionRate
-  }
-}
-
-// MARK: - Remote Playback
-
-public struct IOSRemotePlayerDevice: Codable, Sendable, Equatable, Identifiable {
-  public let deviceId: String
-  public let deviceName: String
-  public let platform: String
-  public let isPlaying: Bool
-  public let currentTitle: String?
-
-  public var id: String { deviceId }
-
-  public init(
-    deviceId: String,
-    deviceName: String,
-    platform: String,
-    isPlaying: Bool = false,
-    currentTitle: String? = nil
-  ) {
-    self.deviceId = deviceId
-    self.deviceName = deviceName
-    self.platform = platform
-    self.isPlaying = isPlaying
-    self.currentTitle = currentTitle
-  }
-}
-
-public struct IOSRemotePlaybackCommand: Codable, Sendable, Equatable {
-  public let action: String  // "play", "pause", "resume", "seek", "stop"
-  public let titleId: String?
-  public let title: String?
+public struct IOSRemotePlaybackCommand: Decodable, Sendable {
+  public let commandId: UUID
+  public let action: String
+  public let mediaId: UUID?
   public let positionSeconds: Double?
-
-  public init(
-    action: String, titleId: String? = nil, title: String? = nil, positionSeconds: Double? = nil
-  ) {
-    self.action = action
-    self.titleId = titleId
-    self.title = title
-    self.positionSeconds = positionSeconds
-  }
+  public let skipSeconds: Double?
+  public let createdAt: Date
 }

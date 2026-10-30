@@ -1,13 +1,11 @@
 import Foundation
 import Security
 
-public struct IOSCredentialStore: Sendable {
+struct IOSCredentialStore {
   private static let service = "com.lucas.aurelia.ios.connection"
   private static let account = "paired-server"
 
-  public init() {}
-
-  public func load() throws -> IOSStoredConnection? {
+  func load() throws -> IOSStoredConnection? {
     var query = baseQuery
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -20,7 +18,7 @@ public struct IOSCredentialStore: Sendable {
     return value
   }
 
-  public func save(_ connection: IOSStoredConnection) throws {
+  func save(_ connection: IOSStoredConnection) throws {
     try connection.validate()
     let data = try JSONEncoder().encode(connection)
     let update: [String: Any] = [
@@ -38,27 +36,22 @@ public struct IOSCredentialStore: Sendable {
     }
   }
 
-  public func delete() throws {
+  func delete() throws {
     let status = SecItemDelete(baseQuery as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else { throw failure(status) }
   }
 
   private var baseQuery: [String: Any] {
     [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: Self.service,
-      kSecAttrAccount as String: Self.account,
-      kSecAttrSynchronizable as String: false,
+      kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Self.service,
+      kSecAttrAccount as String: Self.account, kSecAttrSynchronizable as String: false,
     ]
   }
-
   private func failure(_ status: OSStatus) -> NSError {
     NSError(
-      domain: NSOSStatusErrorDomain,
-      code: Int(status),
+      domain: NSOSStatusErrorDomain, code: Int(status),
       userInfo: [
         NSLocalizedDescriptionKey: "The paired server could not be saved securely. Try again."
-      ]
-    )
+      ])
   }
 }

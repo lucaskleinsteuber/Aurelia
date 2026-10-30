@@ -1,124 +1,93 @@
 import SwiftUI
+import UIKit
 
-public struct IOSLibraryView: View {
-  @ObservedObject var model: IOSAppModel
-  @State private var selectedTab: IOSLibraryTab = .movies
-  @State private var selectedItem: IOSCatalogItemSummary?
-
-  private let columns = [
-    GridItem(.adaptive(minimum: 110, maximum: 160), spacing: 14)
-  ]
-
-  public init(model: IOSAppModel) {
-    self.model = model
-  }
-
-  public var body: some View {
-    NavigationStack {
-      VStack(spacing: 0) {
-        Picker("Category", selection: $selectedTab) {
-          ForEach(IOSLibraryTab.allCases) { tab in
-            Text(tab.rawValue).tag(tab)
+/// Mac-style poster card. Focus uses the native tvOS lift, shadow and sheen on
+/// the artwork, which stays visible on bright or white-edged posters.
+struct IOSPosterLabel: View {
+  let item: IOSCatalogItem
+  var body: some View {
+    VStack(alignment: .leading, spacing: IOSDesign.s(18)) {
+      IOSArtworkView(artwork: item.poster, width: 640, symbol: item.kind == .series ? "tv" : "film")
+        .aspectRatio(2 / 3, contentMode: .fit)
+        .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(IOSDesign.s(12)) }
+        .overlay(alignment: .bottom) {
+          if let fraction = item.progressFraction {
+            IOSProgressBar(fraction: fraction).padding(.horizontal, IOSDesign.s(14)).padding(
+              .bottom, IOSDesign.s(14))
           }
         }
-        .pickerStyle(.segmented)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
+        .hoverEffect(.highlight)
+      VStack(alignment: .leading, spacing: IOSDesign.s(6)) {
+        Text(item.title).font(.system(size: IOSDesign.s(24), weight: .semibold)).lineLimit(1)
+        Text(subtitle).font(.system(size: IOSDesign.s(20))).foregroundStyle(.secondary).lineLimit(1)
+      }
+    }.frame(maxWidth: .infinity, alignment: .leading)
+  }
+  private var subtitle: String {
+    item.availabilityMessage ?? item.year.map(String.init) ?? item.kindLabel
+  }
+}
 
-        ScrollView {
-          LazyVGrid(columns: columns, spacing: 18) {
-            switch selectedTab {
-            case .movies:
-              ForEach(model.movies) { item in
-                itemCard(item)
-              }
-            case .shows:
-              ForEach(model.shows) { item in
-                itemCard(item)
-              }
-            case .franchises:
-              ForEach(model.franchises) { fran in
-                franchiseCard(fran)
-              }
-            case .collections:
-              ForEach(model.collections) { coll in
-                collectionCard(coll)
-              }
-            }
-          }
-          .padding(16)
+/// Favorite, watched and unavailable markers in the artwork's top-right corner.
+struct IOSItemBadges: View {
+  let item: IOSCatalogItem
+  var body: some View {
+    let symbols =
+      [
+        item.availabilityMessage != nil ? "exclamationmark.triangle.fill" : nil,
+        item.isFavorite ? "star.fill" : nil, item.isWatched ? "checkmark.circle.fill" : nil,
+      ].compactMap { $0 }
+    if !symbols.isEmpty {
+      HStack(spacing: IOSDesign.s(8)) {
+        ForEach(symbols, id: \.self) { symbol in
+          Image(systemName: symbol).foregroundStyle(
+            symbol.hasPrefix("exclamation") ? Color.orange : Color.white)
         }
+      }.font(.system(size: IOSDesign.s(20), weight: .semibold)).padding(
+        .horizontal, IOSDesign.s(10)
+      ).padding(.vertical, IOSDesign.s(7))
+        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: IOSDesign.s(10)))
+        .accessibilityHidden(true)
+    }
+  }
+}
+
+struct IOSArtworkView: View {
+  @EnvironmentObject private var model: IOSAppModel
+  let artwork: IOSArtwork?
+  let width: Int
+  var symbol: String? = "film"
+  @State private var image: UIImage?
+
+  var body: some View {
+    ZStack {
+      IOSDesign.surface
+      if let image {
+        Image(uiImage: image).resizable().scaledToFill()
+      } else if let symbol {
+        Image(systemName: symbol).font(.system(size: IOSDesign.s(54))).foregroundStyle(.tertiary)
       }
-      .navigationTitle("Library")
-      .refreshable {
-        await model.refreshCatalog()
-      }
-      .navigationDestination(item: $selectedItem) { item in
-        IOSDetailView(model: model, item: item)
-      }
+    }.clipped().task(id: key) {
+      image = nil
+      guard let artwork, let api = model.client, key != nil else { return }
+      let sessionID = model.session?.sessionId
+      do {
+        let decoded = try await model.artwork.image(artwork: artwork, width: requestWidth, api: api)
+        guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
+        image = decoded
+      } catch {}
     }
   }
 
-  private func itemCard(_ item: IOSCatalogItemSummary) -> some View {
-    Button(action: { selectedItem = item }) {
-      VStack(alignment: .leading, spacing: 6) {
-        IOSAsyncImage(urlString: item.posterUrl, aspectRatio: 2 / 3)
-          .clipShape(RoundedRectangle(cornerRadius: 10))
+  /// The server renders only these widths; any other request is rejected.
+  private var requestWidth: Int { [320, 640, 1280, 1920].first { $0 >= width } ?? 1920 }
 
-        Text(item.title)
-          .font(.caption.bold())
-          .lineLimit(1)
-          .foregroundStyle(.primary)
-
-        if let year = item.releaseYear {
-          Text("\(year)")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-      }
+  private var key: String? {
+    guard let artwork, let connection = model.connection, let session = model.session else {
+      return nil
     }
-    .buttonStyle(.plain)
-  }
-
-  private func franchiseCard(_ fran: IOSFranchiseSummary) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      IOSAsyncImage(urlString: fran.posterUrl, aspectRatio: 2 / 3)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-
-      Text(fran.name)
-        .font(.caption.bold())
-        .lineLimit(1)
-
-      Text("\(fran.movieCount) movies")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-    }
-  }
-
-  private func collectionCard(_ coll: IOSCollectionSummary) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      ZStack(alignment: .topTrailing) {
-        IOSAsyncImage(urlString: coll.posterUrl, aspectRatio: 2 / 3)
-          .clipShape(RoundedRectangle(cornerRadius: 10))
-
-        if coll.isSmart {
-          Text("Smart")
-            .font(.system(size: 10, weight: .bold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(.ultraThinMaterial)
-            .clipShape(Capsule())
-            .padding(6)
-        }
-      }
-
-      Text(coll.name)
-        .font(.caption.bold())
-        .lineLimit(1)
-
-      Text("\(coll.itemCount) items")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-    }
+    return
+      "\(connection.serverID):\(session.sessionId):\(artwork.id):\(artwork.revision ?? 0):\(requestWidth)"
   }
 }

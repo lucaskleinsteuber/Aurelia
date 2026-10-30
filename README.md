@@ -74,7 +74,7 @@ app or the browser settings.
 | --- | --- | --- |
 | **Aurelia for Mac** | macOS 26 or later, Apple silicon and Intel | Watch, manage the library, host the server or connect to one |
 | **Aurelia for Apple TV** | tvOS 26 or later | Watch on the big screen; pairs with your server by code |
-| **Aurelia for iPhone & iPad** | iOS/iPadOS 26 or later | Watch, AirPlay, and remote control playback on Apple TV and Mac |
+| **Aurelia for iPhone & iPad** (preview) | iOS/iPadOS 26 or later | The Apple TV app for touch screens; not yet tested on a device, see [iPhone and iPad](docs/IOS_APP.md) |
 | **Aurelia Server for Linux** | x64 and arm64, with systemd | Runs the library on its own; updates from GitHub |
 | **Aurelia in a web browser** | Safari, Chrome, Edge or Firefox at home | Browse and watch without installing an app; the server serves it and converts MKV and other files live |
 

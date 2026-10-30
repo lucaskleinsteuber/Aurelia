@@ -1,162 +1,301 @@
 import Foundation
+@preconcurrency import MobileVLCKit
 import UIKit
 
-#if canImport(MobileVLCKit)
-  @preconcurrency import MobileVLCKit
-#endif
-
 @MainActor
-public protocol IOSPlaybackEngine: AnyObject {
-  var isPlaying: Bool { get }
-  var isLoading: Bool { get }
-  var positionMilliseconds: Int64 { get }
-  var durationMilliseconds: Int64 { get }
-  var onUpdate: (() -> Void)? { get set }
-  var onEnded: (() -> Void)? { get set }
+final class IOSVideoEngine: IOSPlaybackEngine {
+  typealias Terminal = IOSVideoTerminal
 
-  func attach(to view: UIView)
-  func play(url: URL, resumeMilliseconds: Int64?)
-  func addSubtitleSlave(url: URL)
-  func togglePlayPause()
-  func seek(toMilliseconds: Int64)
-  func stop()
-}
+  var onUpdate: (() -> Void)?
+  var onTerminal: ((Terminal) -> Void)?
 
-@MainActor
-public final class IOSVideoEngine: NSObject, IOSPlaybackEngine {
-  public var onUpdate: (() -> Void)?
-  public var onEnded: (() -> Void)?
+  private var player = IOSVideoEngine.makePlayer()
+  private weak var videoView: UIView?
+  private var observers: [NSObjectProtocol] = []
+  private var samplingTask: Task<Void, Never>?
+  private var generation = UUID()
+  private var acceptsEvents = false
+  private var deliveredTerminal = false
+  private var isSampling = false
+  private var pendingResume: Int64?
+  private var machine = IOSPlaybackStateMachine()
+  private var preferences = IOSPlaybackPreferences.defaultValue
+  private var requestedRate: Double = 1
+  private var appliedAudioPreference = false
+  private var appliedSubtitlePreference = false
+  private var pendingAudio: (id: Int32, deadline: TimeInterval)?
+  private var pendingSubtitle: (id: Int32, deadline: TimeInterval)?
+  private(set) var audioTracks: [IOSPlaybackTrack] = []
+  private(set) var subtitleTracks: [IOSPlaybackTrack] = []
+  private(set) var audioTrackID: Int32 = -1
+  private(set) var subtitleTrackID: Int32 = -1
 
-  #if canImport(MobileVLCKit)
-    private var player: VLCMediaPlayer?
-  #endif
-  private weak var targetView: UIView?
-  private var timer: Timer?
-  private var stateMachine = IOSPlaybackStateMachine()
-
-  public var isPlaying: Bool { stateMachine.state.isPlaying }
-  public var isLoading: Bool { stateMachine.state.isLoading }
-  public var positionMilliseconds: Int64 { stateMachine.state.positionMilliseconds }
-  public var durationMilliseconds: Int64 { stateMachine.state.durationMilliseconds }
-
-  public override init() {
-    super.init()
-    #if canImport(MobileVLCKit)
-      let p = VLCMediaPlayer(options: [
-        "--quiet",
-        "--no-video-title-show",
-        "--no-play-and-pause",
-        "--no-metadata-network-access",
-      ])
-      self.player = p
-    #endif
+  var isActive: Bool { acceptsEvents && player.media != nil }
+  var isPlaying: Bool { machine.state.isPlaying }
+  var isLoading: Bool { machine.state.isLoading }
+  var isSeekable: Bool { machine.state.isSeekable }
+  var position: Int64 { machine.state.position }
+  var duration: Int64 { machine.state.duration }
+  var hasObservedPlayback: Bool { machine.state.hasObservedPlayback }
+  var progressPosition: Int64? { machine.state.progressPosition }
+  var audioSelectionPending: Bool { pendingAudio != nil }
+  var subtitleSelectionPending: Bool { pendingSubtitle != nil }
+  var playbackRate: Double {
+    get { requestedRate }
+    set {
+      guard IOSPlaybackPreferences.supportedRates.contains(newValue) else { return }
+      requestedRate = newValue
+      if isActive { player.rate = Float(newValue) }
+    }
   }
 
-  public func attach(to view: UIView) {
-    self.targetView = view
-    #if canImport(MobileVLCKit)
-      player?.drawable = view
-    #endif
+  func applyPreferences(_ preferences: IOSPlaybackPreferences) {
+    self.preferences = preferences.normalized
+    playbackRate = preferences.normalized.defaultPlaybackRate
+    appliedAudioPreference = false
+    appliedSubtitlePreference = false
+    if isActive { sample() }
   }
 
-  public func play(url: URL, resumeMilliseconds: Int64?) {
-    stateMachine.reset(at: ProcessInfo.processInfo.systemUptime)
-    #if canImport(MobileVLCKit)
-      guard let player else { return }
-      let media = VLCMedia(url: url)
-      player.media = media
-      if let view = targetView {
-        player.drawable = view
+  func attach(to view: UIView) {
+    videoView = view
+    player.drawable = view
+  }
+
+  func load(url: URL, resumeAt: Int64) {
+    stop()
+    player = Self.makePlayer(nightMode: preferences.nightMode)
+    player.drawable = videoView
+    generation = UUID()
+    acceptsEvents = true
+    deliveredTerminal = false
+    pendingResume = resumeAt > 0 ? resumeAt : nil
+    appliedAudioPreference = false
+    appliedSubtitlePreference = false
+    machine.reset(at: now)
+    // The decoder opens at the resume position; its first clock there is not watched time.
+    if resumeAt > 0 { machine.seek(to: resumeAt, at: now) }
+    let operation = generation
+    for name in [VLCMediaPlayerTimeChanged, VLCMediaPlayerStateChanged] {
+      let observer = NotificationCenter.default.addObserver(
+        forName: Notification.Name(rawValue: name), object: player, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self, self.acceptsEvents, operation == self.generation else { return }
+          self.sample()
+        }
       }
-      player.play()
-      if let resume = resumeMilliseconds, resume > 0 {
-        player.time = VLCTime(int: Int32(resume))
-      }
-    #endif
-
-    startPolling()
-  }
-
-  public func addSubtitleSlave(url: URL) {
-    #if canImport(MobileVLCKit)
-      player?.addPlaybackSlave(url, type: .subtitle, enforce: true)
-    #endif
-  }
-
-  public func togglePlayPause() {
-    #if canImport(MobileVLCKit)
-      guard let player else { return }
-      if player.isPlaying {
-        player.pause()
-        stateMachine.setWantsPlayback(false)
-      } else {
-        player.play()
-        stateMachine.setWantsPlayback(true)
-      }
-    #endif
-    sample()
-  }
-
-  public func seek(toMilliseconds: Int64) {
-    #if canImport(MobileVLCKit)
-      player?.time = VLCTime(int: Int32(toMilliseconds))
-    #endif
-    sample()
-  }
-
-  public func stop() {
-    timer?.invalidate()
-    timer = nil
-    #if canImport(MobileVLCKit)
-      player?.stop()
-      player?.drawable = nil
-    #endif
-    stateMachine.stop()
-    onUpdate?()
-  }
-
-  private func startPolling() {
-    timer?.invalidate()
-    timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-      Task { @MainActor in
-        self?.sample()
+      observers.append(observer)
+    }
+    let media = VLCMedia(url: url)
+    // The decoder sees only a random loopback route. All remote TLS and
+    // authentication is performed by IOSStreamRelay, with no video disk cache.
+    // Half a second of prebuffer keeps seeks quick on a local network.
+    media.addOption(":network-caching=500")
+    if resumeAt > 0 {
+      // Opening at the resume position avoids buffering the beginning only to seek away.
+      media.addOption(":start-time=\(String(format: "%.3f", Double(resumeAt) / 1_000))")
+    }
+    player.media = media
+    player.play()
+    player.rate = Float(requestedRate)
+    samplingTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+        guard let self, self.acceptsEvents, operation == self.generation else { return }
+        self.sample()
       }
     }
   }
 
-  private func sample() {
-    #if canImport(MobileVLCKit)
-      guard let player else { return }
-      let posMs = Int64(player.time.intValue)
-      let durMs = Int64(player.media?.length.intValue ?? 0)
+  func play() {
+    guard isActive else { return }
+    machine.setWantsPlayback(true)
+    player.play()
+    player.rate = Float(requestedRate)
+    sample()
+  }
 
-      let decState: IOSDecoderState
-      switch player.state {
-      case .opening: decState = .opening
-      case .buffering: decState = .buffering
-      case .esAdded: decState = .streamsAdded
-      case .playing: decState = .playing
-      case .paused: decState = .paused
-      case .ended: decState = .ended
-      case .error: decState = .failed
-      default: decState = .stopped
+  func pause() {
+    guard isActive else { return }
+    // Capture the moving clock before the driver's pause notification can reset it.
+    sample(notify: false)
+    machine.setWantsPlayback(false)
+    player.pause()
+    sample()
+  }
+
+  func stop() {
+    if acceptsEvents { sample(notify: false) }
+    acceptsEvents = false
+    generation = UUID()
+    samplingTask?.cancel()
+    samplingTask = nil
+    observers.forEach(NotificationCenter.default.removeObserver)
+    observers.removeAll()
+    pendingResume = nil
+    pendingAudio = nil
+    pendingSubtitle = nil
+    machine.stop()
+    player.stop()
+    player.drawable = nil
+    player.media = nil
+    audioTracks = []
+    subtitleTracks = []
+  }
+
+  func seek(to milliseconds: Int64) {
+    guard isActive, player.isSeekable else { return }
+    pendingResume = nil
+    let target = IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration)
+    machine.seek(to: target, at: now)
+    player.time = VLCTime(number: NSNumber(value: target))
+    sample()
+  }
+
+  func selectAudioTrack(_ id: Int32) {
+    guard isActive, audioTracks.contains(where: { $0.id == id }) else { return }
+    appliedAudioPreference = true
+    pendingAudio = (id, now + 2)
+    player.currentAudioTrackIndex = id
+    sample()
+  }
+
+  func selectSubtitleTrack(_ id: Int32) {
+    guard isActive, id == -1 || subtitleTracks.contains(where: { $0.id == id }) else { return }
+    appliedSubtitlePreference = true
+    pendingSubtitle = (id, now + 2)
+    player.currentVideoSubTitleIndex = id
+    sample()
+  }
+
+  func addSubtitleSlave(url: URL) {
+    player.addPlaybackSlave(url, type: .subtitle, enforce: false)
+  }
+
+  func sample() { sample(notify: true) }
+
+  private func sample(notify: Bool) {
+    guard acceptsEvents, !isSampling else { return }
+    isSampling = true
+    defer { isSampling = false }
+    let rawState = decoderState
+    let time = now
+    machine.update(
+      IOSDecoderSnapshot(
+        state: rawState, position: player.time.value?.int64Value,
+        duration: player.media?.length.value?.int64Value,
+        isPlaying: player.isPlaying, isSeekable: player.isSeekable),
+      at: time, playbackRate: requestedRate)
+    applyResume()
+    if machine.state.isPlaying, abs(Double(player.rate) - requestedRate) > 0.01 {
+      player.rate = Float(requestedRate)
+    }
+    audioTracks = tracks(names: player.audioTrackNames, indexes: player.audioTrackIndexes)
+    subtitleTracks = tracks(
+      names: player.videoSubTitlesNames, indexes: player.videoSubTitlesIndexes)
+    audioTrackID = player.currentAudioTrackIndex
+    subtitleTrackID = player.currentVideoSubTitleIndex
+    if let pendingAudio, audioTrackID == pendingAudio.id || time >= pendingAudio.deadline {
+      self.pendingAudio = nil
+    }
+    if let pendingSubtitle,
+      subtitleTrackID == pendingSubtitle.id || time >= pendingSubtitle.deadline
+    {
+      self.pendingSubtitle = nil
+    }
+    applyTrackPreferences()
+    if notify { onUpdate?() }
+    guard notify, !deliveredTerminal, rawState == .ended || rawState == .failed else { return }
+    deliveredTerminal = true
+    onTerminal?(rawState == .ended ? .ended : .failed)
+  }
+
+  private func applyResume() {
+    guard let resume = pendingResume, player.isSeekable,
+      decoderState == .playing || decoderState == .paused || decoderState == .buffering
+    else { return }
+    // Wait for the first clock: near the resume position the decoder opened there; a clock
+    // far from it means the container ignored the start position, so seek as before.
+    guard let clock = player.time.value?.int64Value, clock > 0 else { return }
+    pendingResume = nil
+    guard !IOSPlayerPolicy.openedAtResume(clock: clock, resume: resume) else { return }
+    let target = IOSPlayerPolicy.seekPosition(current: 0, offset: resume, duration: duration)
+    machine.seek(to: target, at: now)
+    player.time = VLCTime(number: NSNumber(value: target))
+  }
+
+  private func applyTrackPreferences() {
+    if !appliedAudioPreference, !audioTracks.isEmpty {
+      if let track = IOSPlaybackTrack.matching(preferences.preferredAudioTrack, in: audioTracks) {
+        pendingAudio = (track.id, now + 2)
+        player.currentAudioTrackIndex = track.id
       }
-
-      let snapshot = IOSDecoderSnapshot(
-        state: decState,
-        positionMilliseconds: posMs,
-        durationMilliseconds: durMs,
-        isPlaying: player.isPlaying,
-        isSeekable: player.isSeekable
-      )
-      let now = ProcessInfo.processInfo.systemUptime
-      stateMachine.sample(snapshot, at: now)
-
-      if decState == .ended {
-        onEnded?()
+      // The matching track can arrive in a later parse update; keep checking
+      // until a match exists. No preference means the driver's default audio.
+      appliedAudioPreference = preferences.preferredAudioTrack == nil || pendingAudio != nil
+    }
+    if !appliedSubtitlePreference, !subtitleTracks.isEmpty {
+      if let preference = preferences.preferredSubtitleTrack {
+        if let track = IOSPlaybackTrack.matching(preference, in: subtitleTracks) {
+          pendingSubtitle = (track.id, now + 2)
+          player.currentVideoSubTitleIndex = track.id
+          appliedSubtitlePreference = true
+        }
+      } else {
+        pendingSubtitle = (-1, now + 2)
+        player.currentVideoSubTitleIndex = -1
+        appliedSubtitlePreference = true
       }
-    #endif
+    }
+  }
 
-    onUpdate?()
+  private var decoderState: IOSDecoderState {
+    switch player.state {
+    case .opening: .opening
+    case .buffering: .buffering
+    case .esAdded: .streamsAdded
+    case .playing: .playing
+    case .paused: .paused
+    case .ended: .ended
+    case .error: .failed
+    default: .stopped
+    }
+  }
+
+  private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
+  private func tracks(names: [Any], indexes: [Any]) -> [IOSPlaybackTrack] {
+    var seen = Set<Int32>()
+    return zip(names, indexes).compactMap { name, index in
+      guard let title = name as? String, let number = index as? NSNumber,
+        number.int32Value >= 0, seen.insert(number.int32Value).inserted
+      else { return nil }
+      let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+      return IOSPlaybackTrack(
+        id: number.int32Value, title: trimmed.isEmpty ? "Unknown track" : trimmed)
+    }
+  }
+
+  /// Night mode compresses the soundtrack: peaks above -24 dB are reduced 4:1 and the result is
+  /// raised by 12 dB, so explosions stay calmer and quiet speech becomes easier to hear.
+  static let nightModeOptions = [
+    "--compressor-rms-peak=0.2", "--compressor-attack=15", "--compressor-release=300",
+    "--compressor-threshold=-24", "--compressor-ratio=4", "--compressor-knee=6",
+    "--compressor-makeup-gain=12",
+  ]
+
+  /// Loads VLC's modules once after launch, so the first Play does not pay for it.
+  static func warmUp() {
+    _ = makePlayer().state
+  }
+
+  private static func makePlayer(nightMode: Bool = false) -> VLCMediaPlayer {
+    let player = VLCMediaPlayer(
+      options: [
+        "--quiet", "--no-video-title-show", "--no-play-and-pause", "--no-metadata-network-access",
+      ] + (nightMode ? nightModeOptions : []))
+    if nightMode { IOSAudioFilter.enable("compressor", on: player, output: "audiounit_ios") }
+    return player
   }
 }

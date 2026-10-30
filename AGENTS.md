@@ -105,6 +105,11 @@ These rules apply to every task in this repository.
   client is named Aurelia, requires tvOS 26, and is at 1.3.0 (23).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
+- The iPhone and iPad client (`clients/ios`, preview, 1.0.0 (1)) follows the same
+  rules as tvOS: its own Xcode project and version counter, code copied from the
+  Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
+  warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
+  no real playback in tests, and it is not published.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
   repository in `Local/Aurelia Desktop (archived)`. Do not
   restore, build or test it unless the user asks for it.
