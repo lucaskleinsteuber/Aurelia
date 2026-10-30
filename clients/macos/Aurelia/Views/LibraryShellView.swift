@@ -31,7 +31,8 @@ struct LibraryShellView: View {
     true
   @AppStorage(GeneralPreferenceKeys.showCollectionsInSidebar) private var showCollectionsInSidebar =
     true
-  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen = "movies"
+  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen =
+    StartScreenPreference.lastScreen.rawValue
 
   var body: some View {
     GeometryReader { geometry in

@@ -25,6 +25,9 @@ enum PosterSizePreference: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum StartScreenPreference: String, CaseIterable, Identifiable, Sendable {
+  /// The page that was open when Aurelia closed; Home the first time. This was the behavior
+  /// before the setting existed and stays the default.
+  case lastScreen
   case home
   case library
   case movies
@@ -38,6 +41,7 @@ enum StartScreenPreference: String, CaseIterable, Identifiable, Sendable {
 
   var label: String {
     switch self {
+    case .lastScreen: "Where I Left Off"
     case .home: "Home"
     case .library: "Library"
     case .movies: "Movies"

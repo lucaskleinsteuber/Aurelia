@@ -108,6 +108,7 @@ struct GeneralPreferencesTests {
     #expect(PosterSizePreference(rawValue: "compact") == .compact)
     #expect(PosterSizePreference(rawValue: "large") == .large)
 
+    #expect(StartScreenPreference.allCases.first == .lastScreen)
     #expect(StartScreenPreference(rawValue: "home") == .home)
     #expect(StartScreenPreference(rawValue: "library") == .library)
     #expect(StartScreenPreference(rawValue: "continueWatching") == .continueWatching)

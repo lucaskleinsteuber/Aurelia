@@ -212,8 +212,9 @@ public sealed class MetadataPresentationTests
                 new LoginRequest("viewer", "another correct horse password", "Viewer Mac"));
             using var loginResponse = await ApiTestClient.SendAsync(client, login);
             var authentication = await ApiTestClient.ReadAsync<AuthenticationResponse>(loginResponse);
+            // Another profile's private collection does not exist for this viewer, so it is not even revealed.
             using var forbidden = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/collections/{created.Id}", authentication.Token);
-            Assert.Equal(HttpStatusCode.Forbidden, (await ApiTestClient.SendAsync(client, forbidden)).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await ApiTestClient.SendAsync(client, forbidden)).StatusCode);
 
             using var delete = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/collections/{created.Id}", owner.Token);
             Assert.Equal(HttpStatusCode.NoContent, (await ApiTestClient.SendAsync(client, delete)).StatusCode);

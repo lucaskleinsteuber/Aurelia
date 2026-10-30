@@ -38,7 +38,8 @@ struct AppSettingsView: View {
   @ObservedObject private var updater = AppUpdater.shared
 
   // General & Interface preferences
-  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen = "movies"
+  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen =
+    StartScreenPreference.lastScreen.rawValue
   @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSize = "standard"
   @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedInRows = true
   @AppStorage(GeneralPreferenceKeys.reduceHeroMotion) private var reduceHeroMotion = false
@@ -1551,7 +1552,8 @@ private struct GitHubTokenSettingsView: View {
 // MARK: - Sidebar Customizer
 
 struct SidebarCustomizerView: View {
-  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen = "movies"
+  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen =
+    StartScreenPreference.lastScreen.rawValue
   @AppStorage(GeneralPreferenceKeys.sidebarVisibilityRevision) private var visibilityRevision = 0
   @State private var items: [LibraryDestination] = SidebarPreferences.loadOrder()
 
