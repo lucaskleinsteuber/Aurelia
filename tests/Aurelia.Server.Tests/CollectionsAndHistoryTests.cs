@@ -94,6 +94,15 @@ public sealed class CollectionsAndHistoryTests
             using var addItemResp = await ApiTestClient.SendAsync(client, addItem);
             Assert.Equal(HttpStatusCode.NoContent, addItemResp.StatusCode);
 
+            // The owner can neither change nor take over a viewer's private collection.
+            using var ownerEdit = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/collections/{own.Id}", owner.Token,
+                new SaveCollectionRequest("Taken", [movies[0].Id], IsSmart: false, IsShared: false));
+            using var ownerEditResp = await ApiTestClient.SendAsync(client, ownerEdit);
+            Assert.Equal(HttpStatusCode.NotFound, ownerEditResp.StatusCode);
+            using var ownerDelete = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/collections/{own.Id}", owner.Token);
+            using var ownerDeleteResp = await ApiTestClient.SendAsync(client, ownerDelete);
+            Assert.Equal(HttpStatusCode.NotFound, ownerDeleteResp.StatusCode);
+
             // Viewer deletes their own collection -> success
             using var deleteOwn = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/collections/{own.Id}", viewerAuth.Token);
             using var deleteOwnResp = await ApiTestClient.SendAsync(client, deleteOwn);

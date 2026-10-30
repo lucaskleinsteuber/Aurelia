@@ -5,8 +5,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Services;
 
-public sealed class WatchHistoryService(AureliaDbContext database)
+/// <summary>
+/// A profile's own viewing history and statistics. Days, weekdays and hours are counted in the
+/// server's time zone, which is the household's, so an evening show is not filed under the night.
+/// </summary>
+public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider clock)
 {
+    private DateTimeOffset Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, clock.LocalTimeZone);
+
     public async Task<WatchHistoryPage> GetHistoryAsync(
         Guid userId,
         int offset,
@@ -131,7 +137,7 @@ public sealed class WatchHistoryService(AureliaDbContext database)
         var totalSeconds = events.Sum(e => e.SecondsWatched);
         var totalHours = Math.Round(totalSeconds / 3600.0, 1);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         var sevenDaysAgo = now.AddDays(-7);
         var thirtyDaysAgo = now.AddDays(-30);
 
@@ -142,7 +148,7 @@ public sealed class WatchHistoryService(AureliaDbContext database)
         var hoursPast30Days = Math.Round(past30Seconds / 3600.0, 1);
 
         var yearsAvailable = events
-            .Select(e => e.Timestamp.Year)
+            .Select(e => Local(e.Timestamp).Year)
             .Distinct()
             .OrderByDescending(y => y)
             .ToList();
@@ -151,7 +157,7 @@ public sealed class WatchHistoryService(AureliaDbContext database)
         var hoursByWeek = events
             .GroupBy(e =>
             {
-                var dt = e.Timestamp.UtcDateTime;
+                var dt = Local(e.Timestamp).DateTime;
                 var week = ISOWeek.GetWeekOfYear(dt);
                 var year = ISOWeek.GetYear(dt);
                 return $"{year}-W{week:D2}";
@@ -163,7 +169,7 @@ public sealed class WatchHistoryService(AureliaDbContext database)
 
         // Group by month (yyyy-MM)
         var hoursByMonth = events
-            .GroupBy(e => e.Timestamp.ToString("yyyy-MM", CultureInfo.InvariantCulture))
+            .GroupBy(e => Local(e.Timestamp).ToString("yyyy-MM", CultureInfo.InvariantCulture))
             .OrderBy(g => g.Key)
             .Select(g => new PeriodHours(g.Key, Math.Round(g.Sum(e => e.SecondsWatched) / 3600.0, 1)))
             .TakeLast(12)
@@ -190,11 +196,7 @@ public sealed class WatchHistoryService(AureliaDbContext database)
 
         // Top titles
         var topTitles = events
-            .GroupBy(e =>
-            {
-                var summary = MetadataPresentation.ToSummary(e.MediaItem);
-                return summary.Title;
-            })
+            .GroupBy(e => DisplayTitle(e.MediaItem))
             .OrderByDescending(g => g.Sum(e => e.SecondsWatched))
             .Take(10)
             .Select(g => new NamedCount(g.Key, g.Count(), Math.Round(g.Sum(e => e.SecondsWatched) / 3600.0, 1)))
@@ -202,23 +204,23 @@ public sealed class WatchHistoryService(AureliaDbContext database)
 
         // Streaks
         var distinctDays = events
-            .Select(e => e.Timestamp.UtcDateTime.Date)
+            .Select(e => Local(e.Timestamp).Date)
             .Distinct()
             .OrderBy(d => d)
             .ToList();
 
-        var (currentStreak, longestStreak) = CalculateStreaks(distinctDays);
+        var (currentStreak, longestStreak) = CalculateStreaks(distinctDays, Local(now).Date);
 
         // Busiest weekday
         var busiestWeekday = events
-            .GroupBy(e => e.Timestamp.DayOfWeek)
+            .GroupBy(e => Local(e.Timestamp).DayOfWeek)
             .OrderByDescending(g => g.Sum(e => e.SecondsWatched))
             .Select(g => g.Key.ToString())
             .FirstOrDefault() ?? "Sunday";
 
         // Busiest time of day
         var busiestHour = events
-            .GroupBy(e => e.Timestamp.Hour)
+            .GroupBy(e => Local(e.Timestamp).Hour)
             .OrderByDescending(g => g.Sum(e => e.SecondsWatched))
             .Select(g => g.Key)
             .FirstOrDefault();
@@ -257,8 +259,11 @@ public sealed class WatchHistoryService(AureliaDbContext database)
         int year,
         CancellationToken cancellationToken)
     {
-        var start = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var end = new DateTimeOffset(year + 1, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        if (year is < 2000 or > 9998)
+            throw new MetadataException("invalid_year", "Choose a year between 2000 and 9998.", StatusCodes.Status400BadRequest);
+        var zone = clock.LocalTimeZone;
+        var start = new DateTimeOffset(new DateTime(year, 1, 1), zone.GetUtcOffset(new DateTime(year, 1, 1)));
+        var end = new DateTimeOffset(new DateTime(year + 1, 1, 1), zone.GetUtcOffset(new DateTime(year + 1, 1, 1)));
 
         var events = await database.WatchEvents.AsNoTracking()
             .Where(e => e.UserId == userId && e.Timestamp >= start && e.Timestamp < end)
@@ -294,14 +299,14 @@ public sealed class WatchHistoryService(AureliaDbContext database)
 
         // Top title
         var topTitle = events
-            .GroupBy(e => MetadataPresentation.ToSummary(e.MediaItem).Title)
+            .GroupBy(e => DisplayTitle(e.MediaItem))
             .OrderByDescending(g => g.Sum(e => e.SecondsWatched))
             .Select(g => g.Key)
             .FirstOrDefault();
 
         // Busiest day
         var busiestDayGroup = events
-            .GroupBy(e => e.Timestamp.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+            .GroupBy(e => Local(e.Timestamp).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
             .OrderByDescending(g => g.Sum(e => e.SecondsWatched))
             .FirstOrDefault();
 
@@ -322,7 +327,11 @@ public sealed class WatchHistoryService(AureliaDbContext database)
             busiestDayHours);
     }
 
-    private static (int CurrentStreak, int LongestStreak) CalculateStreaks(List<DateTime> distinctDays)
+    /// <summary>Episodes count for their series, so a binge shows up as the show, not one episode.</summary>
+    private static string DisplayTitle(MediaItem item) =>
+        MetadataPresentation.ToSummary(item.Kind == MediaKind.Episode && item.Parent is { } series ? series : item).Title;
+
+    private static (int CurrentStreak, int LongestStreak) CalculateStreaks(List<DateTime> distinctDays, DateTime today)
     {
         if (distinctDays.Count == 0) return (0, 0);
 
@@ -344,7 +353,6 @@ public sealed class WatchHistoryService(AureliaDbContext database)
         }
         longest = Math.Max(longest, temp);
 
-        var today = DateTime.UtcNow.Date;
         var lastDay = distinctDays[^1];
         if (lastDay == today || lastDay == today.AddDays(-1))
         {

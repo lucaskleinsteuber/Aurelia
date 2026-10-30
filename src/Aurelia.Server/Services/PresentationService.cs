@@ -419,20 +419,12 @@ public sealed class PresentationService(
             .SingleOrDefaultAsync(value => value.Id == id && (value.IsManual || value.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
 
-        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
-        if (collection.UserId == null)
-        {
-            if (!isAdmin) throw new MetadataException("forbidden", "Only administrators can edit shared collections.", StatusCodes.Status403Forbidden);
-        }
-        else if (collection.UserId != userId && !isAdmin)
-        {
-            throw new MetadataException("forbidden", "You cannot edit another user's collection.", StatusCodes.Status403Forbidden);
-        }
-
+        var isAdmin = await RequireEditableAsync(collection, userId, cancellationToken);
         if (request.IsShared && !isAdmin)
             throw new MetadataException("forbidden", "Only administrators can make collections shared.", StatusCodes.Status403Forbidden);
 
-        collection.UserId = request.IsShared ? null : userId;
+        // A private collection keeps its owner; un-sharing makes it the editor's own.
+        collection.UserId = request.IsShared ? null : collection.UserId ?? userId;
         collection.IsSmart = request.IsSmart;
         collection.SmartRulesJson = request.IsSmart ? request.RulesJson : null;
 
@@ -446,18 +438,7 @@ public sealed class PresentationService(
         var collection = await database.MediaCollections.SingleOrDefaultAsync(value => value.Id == id && (value.IsManual || value.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
 
-        if (userId != Guid.Empty)
-        {
-            var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
-            if (collection.UserId == null)
-            {
-                if (!isAdmin) throw new MetadataException("forbidden", "Only administrators can delete shared collections.", StatusCodes.Status403Forbidden);
-            }
-            else if (collection.UserId != userId && !isAdmin)
-            {
-                throw new MetadataException("forbidden", "You cannot delete another user's collection.", StatusCodes.Status403Forbidden);
-            }
-        }
+        if (userId != Guid.Empty) await RequireEditableAsync(collection, userId, cancellationToken);
 
         database.MediaCollections.Remove(collection);
         await database.SaveChangesAsync(cancellationToken);
@@ -472,11 +453,9 @@ public sealed class PresentationService(
             .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);
 
-        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
-        if (collection.UserId == null && !isAdmin)
-            throw new MetadataException("forbidden", "Only administrators can edit shared collections.", StatusCodes.Status403Forbidden);
-        if (collection.UserId != null && collection.UserId != userId && !isAdmin)
-            throw new MetadataException("forbidden", "You cannot edit another user's collection.", StatusCodes.Status403Forbidden);
+        await RequireEditableAsync(collection, userId, cancellationToken);
+        if (collection.IsSmart)
+            throw new MetadataException("smart_collection", "A smart list chooses its titles by its rules.", StatusCodes.Status409Conflict);
 
         if (!await database.MediaItems.AnyAsync(m => m.Id == mediaId && (m.Kind == MediaKind.Movie || m.Kind == MediaKind.Series), cancellationToken))
             throw new MetadataException("media_not_found", "Media item not found.", StatusCodes.Status404NotFound);
@@ -501,11 +480,7 @@ public sealed class PresentationService(
             .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);
 
-        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
-        if (collection.UserId == null && !isAdmin)
-            throw new MetadataException("forbidden", "Only administrators can edit shared collections.", StatusCodes.Status403Forbidden);
-        if (collection.UserId != null && collection.UserId != userId && !isAdmin)
-            throw new MetadataException("forbidden", "You cannot edit another user's collection.", StatusCodes.Status403Forbidden);
+        await RequireEditableAsync(collection, userId, cancellationToken);
 
         var member = collection.Members.FirstOrDefault(m => m.MediaItemId == mediaId);
         if (member is not null)
@@ -554,6 +529,21 @@ public sealed class PresentationService(
         var memberIds = franchise.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList();
         var request = new SaveCollectionRequest(franchise.Name, memberIds, IsSmart: false, IsShared: false);
         return await CreateCollectionAsync(userId, request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Shared collections belong to the administrators; a private collection only to its own
+    /// profile, which administrators can neither see nor change. Returns whether the editor is an
+    /// administrator.
+    /// </summary>
+    private async Task<bool> RequireEditableAsync(MediaCollectionRecord collection, Guid userId, CancellationToken cancellationToken)
+    {
+        var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
+        if (collection.UserId is null && !isAdmin)
+            throw new MetadataException("forbidden", "Only administrators can change shared collections.", StatusCodes.Status403Forbidden);
+        if (collection.UserId is { } owner && owner != userId)
+            throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
+        return isAdmin;
     }
 
     private async Task<bool> IsAdminUserAsync(Guid userId, CancellationToken cancellationToken) =>

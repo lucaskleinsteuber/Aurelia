@@ -209,9 +209,12 @@ public sealed class PlaybackProgressService(AureliaDbContext database)
 
         if (recentEvent is not null)
         {
-            var deltaSeconds = Math.Max(0, (long)(now - recentEvent.Timestamp).TotalSeconds);
-            deltaSeconds = Math.Min(deltaSeconds, 1800);
-            recentEvent.SecondsWatched += deltaSeconds;
+            // Count the time that actually played: the elapsed time, but never more than the
+            // position advanced (a long pause or rewinding adds nothing; faster playback adds the
+            // real time spent).
+            var elapsedSeconds = Math.Clamp((long)(now - recentEvent.Timestamp).TotalSeconds, 0, 1800);
+            var playedSeconds = (positionMs - recentEvent.PositionMilliseconds) / 1000;
+            recentEvent.SecondsWatched += playedSeconds > 0 ? Math.Min(elapsedSeconds, playedSeconds + 5) : 0;
             recentEvent.PositionMilliseconds = positionMs;
             recentEvent.DurationMilliseconds = durationMs;
             recentEvent.IsCompleted = recentEvent.IsCompleted || isCompleted;
