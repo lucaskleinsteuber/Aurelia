@@ -123,17 +123,19 @@ enum AppUpdateLogic {
       guard let asset = assets.first(where: { $0["name"] as? String == name }) else {
         throw (name == imageName ? AppUpdateError.noDiskImage : AppUpdateError.noChecksum)
       }
-      if let publicStr = asset["browser_download_url"] as? String,
-        let publicURL = URL(string: publicStr),
-        isPublicAssetURL(publicURL, repository: repository)
-      {
-        return publicURL
-      }
+      // The API address works for public and private repositories (with the token); the public
+      // download link only works while the repository is public.
       if let apiStr = asset["url"] as? String,
         let apiURL = URL(string: apiStr),
         isAssetURL(apiURL, repository: repository)
       {
         return apiURL
+      }
+      if let publicStr = asset["browser_download_url"] as? String,
+        let publicURL = URL(string: publicStr),
+        isPublicAssetURL(publicURL, repository: repository)
+      {
+        return publicURL
       }
       throw AppUpdateError.invalidURL
     }

@@ -35,6 +35,27 @@ struct AppUpdateLogicTests {
   }
 
   @Test
+  func assetsUseTheAPIAddressThatWorksForPrivateRepositoriesToo() throws {
+    let both = """
+      {"tag_name":"1.25.1-116","assets":[
+        {"name":"Aurelia-1.25.1-116-macOS-universal.dmg","url":"https://api.github.com/repos/owner/repo/releases/assets/7",
+         "browser_download_url":"https://github.com/owner/repo/releases/download/1.25.1-116/Aurelia-1.25.1-116-macOS-universal.dmg"},
+        {"name":"SHA256SUMS","url":"https://api.github.com/repos/owner/repo/releases/assets/8",
+         "browser_download_url":"https://github.com/owner/repo/releases/download/1.25.1-116/SHA256SUMS"}]}
+      """
+    let parsed = try AppUpdateLogic.validatedRelease(
+      fromLatest: Data(both.utf8), repository: "owner/repo")
+    #expect(parsed.diskImageURL.host == "api.github.com")
+    #expect(parsed.checksumsURL.host == "api.github.com")
+
+    let publicOnly = both.replacingOccurrences(
+      of: #""url":"https://api.github.com/repos/owner/repo/releases/assets/7","#, with: "")
+    let fallback = try AppUpdateLogic.validatedRelease(
+      fromLatest: Data(publicOnly.utf8), repository: "owner/repo")
+    #expect(fallback.diskImageURL.host == "github.com")
+  }
+
+  @Test
   func theLatestReleaseNeedsItsDiskImageAndChecksums() throws {
     let release = """
       {"tag_name":"1.13.0-100","draft":false,"html_url":"https://github.com/owner/repo/releases/tag/1.13.0-100",
@@ -1020,7 +1041,7 @@ struct AppUpdateFakeGitHubHarnessTests {
           body: Data(releaseJson.utf8))
       }
 
-      if host == "github.com" && path.hasSuffix("/SHA256SUMS") {
+      if host == "api.github.com" && path.hasSuffix("/releases/assets/502") {
         return .respond(
           status: 200,
           headers: [
@@ -1030,7 +1051,7 @@ struct AppUpdateFakeGitHubHarnessTests {
           body: Data(sumsText.utf8))
       }
 
-      if host == "github.com" && path.hasSuffix("/Aurelia-1.20.0-110-macOS-universal.dmg") {
+      if host == "api.github.com" && path.hasSuffix("/releases/assets/501") {
         return .redirect(
           to: URL(
             string:
@@ -1058,8 +1079,7 @@ struct AppUpdateFakeGitHubHarnessTests {
     #expect(etag == "W/\"etag-release-110\"")
     #expect(
       release.diskImageURL.absoluteString
-        == "https://github.com/owner/repo/releases/download/1.20.0-110/Aurelia-1.20.0-110-macOS-universal.dmg"
-    )
+        == "https://api.github.com/repos/owner/repo/releases/assets/501")
 
     let destination = try await client.download(
       release, repository: "owner/repo", token: nil, currentBuild: 109, folder: folder)
