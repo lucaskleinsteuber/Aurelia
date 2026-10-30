@@ -130,70 +130,51 @@ stops saving until the title is opened again.
 Keys: Space or K plays and pauses, the arrow keys (or J and L) skip by the seek interval,
 F switches full screen, M mutes and Escape closes a menu or the player.
 
-## Browsing and settings
+## Browsing
 
-The top bar has the Mac app's sections: Home, Library, Recently Added, TV Shows and Movies.
-The library sections have the same filters as on the Mac (kind, Favorites, watch state,
-genre, release year and sort order); they are part of the address, so Back and bookmarks
-keep them. Each section also searches within those filters. Release Year offers both From and
-To; leaving a bound empty keeps that side open. Genre suggestions come from loaded titles;
-Choose Genre also accepts a genre outside the current results without downloading the whole
-library. Library and search load 100 titles at a time, with Load More for the rest. A changed
-catalog restarts paging against a fresh revision rather than mixing old and new pages.
+The top bar has the Mac app's sections: Home, Library, Watchlist, Recently Added, TV Shows,
+Movies and Collections. The library sections have the Mac's filters (kind, Favorites, watch
+state, genre, release year and sort order); they are part of the address, so Back and
+bookmarks keep them, and each section searches within them. Titles load 100 at a time with
+Load More; a catalog that changes meanwhile restarts paging instead of mixing old and new
+pages.
 
-Collections has a complete, paged index, available from Library and See All on Home. Collection
-links remember the index page; if a collection moves after a rename or is removed, All
-Collections opens the index again. Collection editing remains management functionality in the
-Mac app. A title's page shows its seasons as a row of episodes, its trailers and extras,
-cast and crew, and its information, like the Mac's.
+A title's page shows seasons as a row of episodes, trailers and extras, cast and crew (each
+person opens a page with their titles in the library) and its information, like on the Mac.
+Title cards, Continue Watching and episodes share one context menu: Play (from the
+beginning), Resume, Go to Series, watched or unwatched (a whole season or show asks first and
+names the number of episodes), Favorites, Watchlist, Add to Collection, Remove from Continue
+Watching and, for administrators, Edit Metadata.
 
-A title’s More Actions menu can remove it from Continue Watching or show it there again,
-without changing its playback position. Continue Watching cards offer the same menu. Marking a
-whole show or season watched or unwatched asks for confirmation with the number of episodes;
-marking it unwatched resets the selected episodes’ positions, as in the Mac app.
+**Collections** lists shared collections and your own. You can create collections, smart lists
+that fill themselves by rules (genre, decade, rating, watch state, date added, text) and, as an
+administrator, shared collections; movie pages offer their TMDB franchise as a collection.
+**Watch History** and **Statistics** in the profile menu show only your own profile's viewing.
 
-The **Watchlist** shelf appears on the Home page whenever titles are marked for later viewing.
-A title can be added or removed from the Watchlist from its detail page or context menu. Clicking
-any Cast & Crew card opens a dedicated **Person** page showing the person's portrait, role and an
-"Appears In" horizontal shelf with their titles in the library.
+## Settings
 
-*Settings* in the profile menu has three pages:
+*Settings* in the profile menu has the Mac's categories; viewers see only their own.
 
-- **General**: the version (the browser app is part of the server and always has its
-  version), the server, the profile, Switch Profile and Sign Out of This Browser.
-- **Playback**: the Mac's playback preferences, kept in this browser: automatic resume,
-  playing the next episode, keeping the screen on, Night Mode, default speed and volume,
-  how long controls stay and the seek interval.
-- **Server** (owners and administrators): unlocked with the Server Password for ten minutes,
-  as on the Mac; the browser doesn't keep the password or ask again while management is
-  unlocked. Features a **Server Health** diagnostics panel displaying server uptime, data
-  folder free space, scrub preview cache and live conversion status, last scan outcome,
-  background job progress, automatic database backup status, and the 20 most recent
-  redacted server warnings. Owners add storage locations using an absolute folder path on the server,
-  remove locations after confirmation and manage profiles. Location removal waits for the
-  server's operation to complete; media files are never changed. Full-library administrators
-  can rescan locations and change monitoring; selected-title administrators manage only their
-  allowed titles. Owner-only status, updates, profile editing, device revocation, power and
-  backups keep the same server permissions.
+- **General** and **Playback** are kept in this browser: start page, poster size, which sections
+  the top bar shows, whether watched or offline titles appear, reduced motion, automatic resume,
+  starting over when a title was barely started, the next episode and its Up Next countdown,
+  default audio and subtitle languages (used until you choose tracks for a series), subtitle
+  size and background, Night Mode, speed, volume, how long controls stay and the skip interval.
+- **Library**, **Metadata**, **Profiles and Devices**, **Server** and **Updates** are for owners
+  and administrators, who are signed in with their PIN; they work without the server password.
+  They cover storage locations (added by their absolute path on the server), Library Health
+  (duplicates, missing titles and titles without details), the TMDB key, profiles and their
+  access, paired devices, power saving, backups, Server Health and server updates.
+- A few changes that cannot be undone ask for the server password once more, exactly as on the
+  Mac: resetting the library, removing a title, restoring a backup, changing the server
+  password and changing or removing the owner or an administrator. See
+  [Security model](SECURITY_MODEL.md).
 
-Profile forms use the Mac's role, enabled state, PIN protection and content access controls.
-PINs require matching 4–8 digit fields; leaving both empty preserves an existing PIN. Selected
-Titles uses a searchable list of films and series, and existing storage grants stay unchanged
-unless the owner changes the access mode. Saves use the profile's revision and one approval
-for the complete change.
-
-**Edit Metadata** is available from a title's More Actions menu and from Server › Movie Info.
-General and Production & Release fields match the Mac: title, release year, FSK, movie runtime,
-description, genres, studios and country. Manual changes survive scans and provider refreshes;
-Reset to Automatic removes the selected override. Existing cast, artwork and file associations
-are preserved. Provider matching can be searched, selected or cleared. The editor uses the
-server's revision; a conflict keeps the draft open until the user chooses to reload. Artwork,
-cast and source-file editing remain available in the Mac app.
-
-Every guarded change gets a one-time approval for exactly its method, address and serialized
-body. If the management window expires while editing, the browser keeps the draft and offers
-an inline unlock. Switching profiles or navigating away closes editors and cancels outstanding
-reads; closing an editor with unsaved changes asks before discarding them.
+**Edit Metadata** (a title's More Actions menu) edits title, year, rating, runtime,
+description, genres, studios and country, matches the title with TMDB, and can reset a field to
+the automatic value. Manual changes survive later scans. A conflict with a change made
+elsewhere keeps your draft until you reload. Artwork, cast and the title's files are edited in
+the Mac app.
 
 ## Add Aurelia to the home screen
 
@@ -237,20 +218,19 @@ node --test "tests/WebApp/*.test.mjs"
 Owners of a Linux server installed from the Aurelia package can check and install releases
 under Settings › Server › Updates. The section shows the installed/newest versions and the
 server updater's checking, installing, failed or completed state. Progress is indeterminate:
-the existing server contract does not provide a download percentage. Installation uses the
-existing exact-action management approval after a confirmation, and never resets server data.
+the existing server contract does not provide a download percentage. Installation asks for
+confirmation first and never resets server data.
 
 While checking, installing or reconnecting after a restart, only the update-status endpoint
 is polled, once every two seconds; the rest of Settings is not reloaded. Polling resumes if
 the section opens while an operation is already running, stops on navigation/profile change,
 and has a bounded wait with an explicit status retry. Reaching idle alone does not prove a
 new version was installed: the section reports the version actually returned by the server.
-A management expiry offers the existing Server Password unlock page; a retired profile after
-restart must be chosen again before progress can be checked. Passwords, tokens and cookies
-are never read by the component or retained in its state.
+A profile that ended with the server's restart must be chosen again before progress can be
+checked. Passwords, tokens and cookies are never read by the component or kept in its state.
 
 Headless Node tests use an invented updater and manual timer queue to cover progress, restart
-outages, failures, cancellation, approvals, unlock and duplicate clicks without a real server.
+outages, failures, cancellation and duplicate clicks without a real server.
 
 ## Reproducing the browser screenshots
 
@@ -282,43 +262,9 @@ without `--web-only` retains its existing native capture behavior.
 Developer fixture and wrapper guards run with `node --test "tests/WebShowcase/*.test.mjs"`.
 They use synthetic files and simulated media objects, with no browser launch or native tests.
 
-### Consistent title actions
+## Play on another device
 
-Title cards, Continue Watching and episode cards use the same context-menu ordering: Play, Resume when progress exists, Go to Series for episodes, watched status, supported favorites, Continue Watching visibility and administrator metadata editing. Play starts at the beginning; Resume keeps progress. Missing titles retain navigation and management actions while playback stays disabled. Favorite actions retain the server's movie/series scope; watch-state changes keep the existing confirmation and exact state token. Route/profile changes retire open actions.
-
-### Metadata editor layout
-
-Edit Metadata is available in the title's More Actions menu. Its poster/title header and settings sections match the Mac editor: Title and Year, Overview, Genres, Production and Release, Cast and Crew, Artwork, Match with TMDB and Source. Cancel and Save remain visible while the form scrolls; invalid fields explain the correction beside the control. Existing cast, artwork/crops and source associations remain read-only in the browser and are preserved by text edits. Revision conflicts keep the draft until an explicit reload, and management expiry uses the existing unlock flow. Native Mac editing retains its existing image/crop, cast and server-file controls.
-
-### Collections and Smart Lists
-
-The browser app supports full collections browsing and management:
-- View personal and shared collections in a dedicated Library tab and Home rails.
-- Create manual collections or dynamic Smart Lists with custom filtering rules (genres, decade, rating, watch state, date added, text search).
-- Add or remove titles via the card context menu ("Add to Collection...").
-- Suggested TMDB Franchise rails appear automatically on movie detail pages when part of a recognized franchise, with a one-click button for administrators to convert them into managed collections.
-
-### Sidecar Subtitles
-
-The browser player automatically lists both embedded subtitle tracks and sidecar `.srt`/`.ass`/`.vtt` files discovered next to the video. Subtitle tracks are selectable from the player audio/subtitle menu, streamed as in-memory WebVTT, and rendered with custom styling matching native platform captioning.
-
-### Watch History and Statistics
-
-Profiles can view their personal viewing history and rich aggregate statistics:
-- **History View:** Chronological log of watched titles with date, resume position, and clear/delete actions.
-- **Statistics View:** Aggregate viewing metrics including total hours watched, weekly breakdowns, top genres, most-watched titles, viewing streaks, and Year in Review recaps.
-All history and statistics are strictly private to the profile session.
-
-### Library Health and Maintenance
-
-Administrators can access the Library Health dashboard in Settings to inspect and resolve library issues:
-- **Duplicate Titles:** Grouped side-by-side view with media details, enabling administrators to set a preferred version or merge duplicate entries without deleting files on disk.
-- **Offline Items:** List of media entries whose physical files have been moved or are unavailable on disk, with options to clean database references.
-- **Unmatched Metadata:** Titles missing TMDB matches, descriptions, or artwork, with direct shortcuts to the metadata editor.
-
-### Remote Playback and AirPlay
-
-The browser app integrates remote playback capabilities:
-- **AirPlay Route Picker:** WebKit-native AirPlay button in the player control bar for casting playback directly to Apple TV and AirPlay-compatible receivers.
-- **Play on Device (Remote Control):** Device picker menu allows sending current titles or playback commands (play, pause, seek, stop) to other active Aurelia players (Apple TV, Mac app, or other browser sessions) on the server.
-- **Remote Player State:** When acting as a player, the browser app periodically reports its heartbeat and responds to remote control commands.
+A title's page has **Play on…**, which lists the profile's other open Aurelia players (Mac,
+Apple TV, iPhone or another browser) and starts the title there. While the browser plays, it
+reports itself as a player too, so the others can start, pause, seek or stop it. Safari shows an AirPlay button where the video can be
+sent to an Apple TV or AirPlay receiver; other browsers do not offer it.

@@ -160,8 +160,9 @@ still offered. A manual check also offers skipped versions, so they can still be
 
 The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
 checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
-they are not buffered in memory. Public releases prefer `browser_download_url` on `github.com`,
-while API asset URLs are supported for private releases. Release descriptions and checksum lists
+they are not buffered in memory. Files are downloaded through their API asset address on
+`api.github.com`, which works for a private repository with the token and for a public one
+without; the public `github.com` download link is used only when a release lacks the API address. Release descriptions and checksum lists
 are limited to 2 MiB and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject
 HTML and oversized or incomplete responses, and remove partial files after failures. Consumed images
 and their empty managed UUID folders are also removed after installation failures, including the

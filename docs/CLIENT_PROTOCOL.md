@@ -213,55 +213,81 @@ in FFmpeg 9, or the older `zscale` plus `tonemap` filters. If neither is present
 needs HDR picture re-encoding returns `422 hdr_conversion_unavailable`; original picture
 copying remains available. Picture conversion beyond 1080p is not part of `live-conversion-v1`.
 
-## Collections v2 and Smart Lists
+## Collections and smart lists
 
-The server reports capability `collections-v2`. Clients can interact with collections via:
-- `GET /api/v1/collections`: returns shared collections (`UserId == null`) and own collections (`UserId == caller`).
-- `POST /api/v1/collections`: creates a new manual collection or smart list. Viewers create personal collections; administrators can create personal or shared collections (`isShared: true`).
-- `PUT /api/v1/collections/{id}`: updates collection name, rules, or item list. Viewers can only modify own collections; administrators can modify own and shared collections.
-- `DELETE /api/v1/collections/{id}`: deletes collection. Viewers can only delete own collections; administrators can delete own and shared collections.
-- `POST /api/v1/collections/{id}/items/{mediaId}`: adds an item to a collection.
-- `DELETE /api/v1/collections/{id}/items/{mediaId}`: removes an item from a collection.
-- `GET /api/v1/franchises`: returns all discovered TMDB franchise collections (`belongs_to_collection`).
-- `POST /api/v1/collections/from-franchise/{id}`: creates a personal/shared collection pre-populated with all available franchise items.
-- Smart lists include `isSmart: true` and a `rulesJson` string containing `SmartCollectionRules` (`kind`, `genres`, `yearMin`, `yearMax`, `decade`, `ratingMin`, `ratingMax`, `watchedState`, `addedWithinDays`, `favoritesOnly`, `textContains`, `combination`). Evaluations are cached in memory for 60 seconds with lazy paging.
+The server reports capability `collections-v2`.
 
-## Watch History and Statistics
+- `GET /api/v1/collections` lists shared collections and the caller's own. A collection with
+  `isShared: true` belongs to the administrators; any other belongs to one profile, which is
+  the only one that can see or change it (administrators included).
+- `POST /api/v1/collections` creates one from `{ name, mediaIds, isSmart, isShared, rulesJson }`.
+  Only administrators may set `isShared`. `PUT /api/v1/collections/{id}` replaces name, items
+  or rules; `DELETE` removes the collection, never a title.
+- `POST` and `DELETE /api/v1/collections/{id}/items/{mediaId}` add or remove one movie or
+  series. A smart list answers `409 smart_collection`: its rules choose its titles.
+- A smart list's `rulesJson` is a `SmartCollectionRules` object: `kind`, `genres`, `yearMin`,
+  `yearMax`, `decade`, `ratingMin`, `ratingMax`, `watchedState`, `addedWithinDays`,
+  `favoritesOnly`, `watchlistOnly`, `textContains` and `combination` (`and`/`or`). Results are
+  evaluated per profile and kept for 60 seconds.
+- `GET /api/v1/catalog/franchises` lists franchises from TMDB (`belongs_to_collection`);
+  `POST /api/v1/collections/from-franchise/{id}` turns one into a personal collection.
 
-Each playback progress update automatically appends or updates a `WatchEvent` record.
-- `GET /api/v1/history?offset=0&limit=20`: returns paged watch history for the authenticated profile.
-- `DELETE /api/v1/history/{id}`: deletes a single history item for the authenticated profile.
-- `DELETE /api/v1/history`: clears all watch history for the authenticated profile.
-- `GET /api/v1/statistics`: returns personal viewing statistics (total hours watched, weekly and monthly hours, top genres, top titles, viewing streaks, busiest day and time of day, completion rate).
-- `GET /api/v1/statistics/year/{year}`: returns Year in Review statistics for a specific year.
-All history and statistics are strictly private to the profile session. Admins and other profiles cannot access them. Records are pruned automatically after 3 years.
+## Watch history and statistics
 
-## Library Maintenance and Health
+Saving playback progress records the viewing in a history entry (one per title and sitting;
+time counts only while the position advances, so a pause adds nothing).
 
-Administrators can inspect and maintain the media library without touching any files on disk:
-- `GET /api/v1/library/health/duplicates`: returns groups of duplicate titles detected by TMDB ID or normalized title and year.
-- `GET /api/v1/library/health/offline?days=7`: returns media items that are offline or have not been seen in the specified number of days.
-- `GET /api/v1/library/health/unmatched`: returns media items needing metadata matching or missing artwork/overview.
-- `POST /api/v1/library/health/merge`: merges progress, favorites, watch events, and collection memberships from a source entry to a target entry, then removes the source entry from the database.
-- `POST /api/v1/library/health/preferred-version`: marks a duplicate item as the preferred version.
-- `DELETE /api/v1/library/health/entries/{id}`: deletes an obsolete entry from the server database. Media files on disk are never deleted or modified.
+- `GET /api/v1/history?offset=0&limit=20` returns `{ items, offset, limit, total }`; each item
+  has `id`, `mediaId`, `title`, `eyebrow` (series and episode, or the year), `year`, `kind`,
+  `poster`, `watchedAt`, `positionMilliseconds`, `durationMilliseconds`, `secondsWatched` and
+  `isCompleted`.
+- `DELETE /api/v1/history/{id}` removes one entry; `DELETE /api/v1/history` clears them all.
+- `GET /api/v1/statistics` and `GET /api/v1/statistics/year/{year}` summarize the profile's
+  viewing. Days, weekdays and hours are counted in the server's time zone.
 
-## Remote Playback and Device Control
+History and statistics belong to the profile alone; no other profile, administrators
+included, can read them. Entries older than three years are pruned.
 
-Clients can discover active Aurelia player devices on the local server and control playback remotely ("Play on Device"):
-- `POST /api/v1/devices/player/heartbeat`: registers or refreshes player presence and current playback state. Active players send this periodically (every 5–10 s) while open or playing:
-  - `deviceId`, `deviceName`, `clientType` (`mac`, `tvos`, `ios`, `web`)
-  - `isPlaying`, `isPaused`, `mediaId`, `title`, `positionSeconds`, `durationSeconds`.
-- `GET /api/v1/devices/players?currentDeviceId={id}`: returns a list of other active remote player devices for the user/account seen within the last 30 seconds.
-- `GET /api/v1/devices/players/{deviceId}/status`: returns the detailed playback status of a specific player device.
-- `POST /api/v1/devices/players/{deviceId}/commands`: sends a playback command to a remote player. Supported actions:
-  - `play`: begins playing `mediaId` (with optional `positionSeconds` to resume)
-  - `pause`: toggles or forces pause
-  - `resume`: resumes paused playback
-  - `stop`: stops playback
-  - `seek`: seeks to `positionSeconds`
-  - `skip`: jumps relative `skipSeconds` (e.g. `+10` or `-10`).
-- `GET /api/v1/devices/player/commands?deviceId={id}&waitMs={timeout}`: long-polls for pending remote playback commands destined for this player device. Returns an array of `RemotePlaybackCommand` objects. The player processes the command and acknowledges its execution state in subsequent heartbeats.
+## Library Health
+
+For administrators. Nothing here changes a file on disk.
+
+- `GET /api/v1/library/health/duplicates` returns groups `{ key, title, kind, year, items }`:
+  movies with the same provider match (or, without one, the same title and year), and
+  episodes with several files for the same season and episode. Each item has `id`, `title`,
+  `kind`, `year`, `fileName`, `fileSize` and `availability`.
+- `GET /api/v1/library/health/offline?days=30` returns titles whose file has been missing for
+  at least that many days: `id`, `title`, `kind`, `year`, `libraryName`, `fileName`,
+  `lastSeenAt`, `daysOffline`.
+- `GET /api/v1/library/health/unmatched` returns movies and series without usable details:
+  `id`, `title`, `kind`, `year`, `fileName`, `issueReason`.
+- `POST /api/v1/library/health/merge` with `{ sourceMediaId, targetMediaId }` moves every
+  profile's favorites, progress, history and collection membership from a copy whose file is
+  missing to another copy of the same movie or episode, then removes the missing copy.
+- `DELETE /api/v1/library/health/entries/{id}` removes a title whose file is missing.
+
+Both changes refuse a title whose file is still available (`409 source_available`): the next
+scan would bring it back. Removing such a title is `DELETE /api/v1/media/{id}`, which needs the
+server password and keeps the file out of later scans. Paths are never returned, only file names.
+
+## Play on another device
+
+A player that can take commands announces itself while it is open:
+
+- `POST /api/v1/devices/player/heartbeat` with `deviceId` (at most 128 characters, chosen by
+  the client and kept per installation), `deviceName`, `clientType` (`mac`, `tvos`, `ios`,
+  `web`), `isPlaying`, `isPaused`, `mediaId`, `title`, `positionSeconds`, `durationSeconds`.
+  The first paired device that claims a `deviceId` owns it: another device sending the same id
+  while it is active gets `409 device_id_in_use`. Players not heard from for 45 seconds are no
+  longer offered; after ten minutes they are forgotten.
+- `GET /api/v1/devices/players?currentDeviceId={id}` lists the profile's other active players,
+  and `GET /api/v1/devices/players/{deviceId}/status` one of them.
+- `POST /api/v1/devices/players/{deviceId}/commands` queues `play` (with `mediaId` and optional
+  `positionSeconds`), `pause`, `resume`, `stop`, `seek` (`positionSeconds`) or `skip`
+  (`skipSeconds`). Only the profile signed in on that player can command it; commands expire
+  after 60 seconds, and switching the player's profile drops any still queued.
+- `GET /api/v1/devices/player/commands?deviceId={id}&waitMs={ms}` waits up to 15 seconds for
+  the player's commands. Only the device that registered the player may read them.
 
 ## Minimum new-client acceptance
 

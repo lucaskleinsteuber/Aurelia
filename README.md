@@ -44,11 +44,15 @@ always are.
 
 **A server that gets out of the way.** Run it inside the Mac app or on its own on a Linux
 computer, such as an old PC without a screen. On Linux it can sleep when nobody watches
-and wakes again by Wake-on-LAN when you open Aurelia. A Server Health page shows real-time
-system uptime, disk space, conversion status, background jobs and redacted server diagnostics.
-Automatic daily database backups keep the library safe with integrity verification. Updates,
-power saving, accounts, library permissions, devices and backups are all managed from the Mac
-app or the browser settings.
+and wakes again by Wake-on-LAN when you open Aurelia. Server Health shows uptime, free space,
+conversions, background jobs and recent warnings; Library Health finds duplicate files,
+missing titles and titles without details. The database is backed up every day and checked.
+Updates, power saving, profiles, devices and backups are managed from the Mac app or the
+browser, without the server password except for the few changes that cannot be undone.
+
+**Collections and history.** Make your own collections and smart lists that fill themselves,
+see all films of a franchise together, and look back at your own viewing history and
+statistics, which stay private to your profile.
 
 ## Screenshots
 
