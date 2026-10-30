@@ -34,75 +34,75 @@ public static partial class SidecarSubtitles
 
     private sealed record CachedSubtitle(long LastModifiedTicks, long FileLength, byte[] Content);
 
+    /// <summary>
+    /// Subtitle files that belong to a video, in a stable order (track numbers are positions in
+    /// this list). Next to the video they must be named after it ("Movie.srt", "Movie.en.forced.srt");
+    /// in a "Subs" or "Subtitles" folder they may also sit in a folder named after the video, and
+    /// when the video is alone in its folder any subtitle there counts. Links are never followed,
+    /// so a subtitle name cannot expose a file outside the media folder.
+    /// </summary>
     public static IReadOnlyList<DiscoveredSidecarSubtitle> Discover(string videoPath)
     {
-        if (string.IsNullOrWhiteSpace(videoPath) || !File.Exists(videoPath)) return [];
-        var directory = Path.GetDirectoryName(videoPath);
-        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) return [];
+        if (string.IsNullOrWhiteSpace(videoPath)) return [];
+        var video = new FileInfo(videoPath);
+        if (!video.Exists || video.Directory is not { Exists: true, LinkTarget: null } directory) return [];
 
-        var videoBaseName = Path.GetFileNameWithoutExtension(videoPath);
-        var results = new List<DiscoveredSidecarSubtitle>();
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void InspectCandidate(string path)
-        {
-            if (!File.Exists(path) || !seenPaths.Add(path)) return;
-            var ext = Path.GetExtension(path);
-            var isText = TextExtensions.Contains(ext);
-            var isBitmap = BitmapExtensions.Contains(ext);
-            if (!isText && !isBitmap) return;
-
-            var fileName = Path.GetFileNameWithoutExtension(path);
-            var (lang, isForced, isSdh, isDefault, title) = ParseTags(videoBaseName, fileName);
-            var format = ext.TrimStart('.').ToLowerInvariant();
-            if (format == "srt") format = "subrip";
-            else if (format == "vtt") format = "webvtt";
-            else if (format is "sub" or "idx") format = "vobsub";
-
-            results.Add(new DiscoveredSidecarSubtitle(
-                path,
-                format,
-                lang,
-                title,
-                isDefault,
-                isForced,
-                isSdh,
-                Supported: isText));
-        }
-
-        // 1. Check sibling files in the same folder
+        var baseName = Path.GetFileNameWithoutExtension(video.Name);
+        var candidates = new List<FileInfo>();
         try
         {
-            var dirInfo = new DirectoryInfo(directory);
-            foreach (var file in dirInfo.EnumerateFiles())
+            candidates.AddRange(directory.EnumerateFiles().Where(file => BelongsTo(file.Name, baseName)));
+            var alone = directory.EnumerateFiles().Count(file => MediaLibraryScanner.IsSupportedMediaPath(file.Name)) == 1;
+            foreach (var folder in directory.EnumerateDirectories().Where(IsSubtitleFolder))
             {
-                var name = Path.GetFileNameWithoutExtension(file.Name);
-                if (name.StartsWith(videoBaseName, StringComparison.OrdinalIgnoreCase))
-                {
-                    InspectCandidate(file.FullName);
-                }
-            }
-
-            // 2. Check "Subs" or "Subtitles" subdirectories
-            foreach (var subDirName in new[] { "Subs", "Subtitles", "subs", "subtitles" })
-            {
-                var subDirPath = Path.Combine(directory, subDirName);
-                if (Directory.Exists(subDirPath))
-                {
-                    var subDirInfo = new DirectoryInfo(subDirPath);
-                    foreach (var file in subDirInfo.EnumerateFiles())
-                    {
-                        InspectCandidate(file.FullName);
-                    }
-                }
+                candidates.AddRange(folder.EnumerateFiles().Where(file => alone || BelongsTo(file.Name, baseName)));
+                if (folder.EnumerateDirectories().FirstOrDefault(child => child.LinkTarget is null
+                        && string.Equals(child.Name, baseName, StringComparison.OrdinalIgnoreCase)) is { } named)
+                    candidates.AddRange(named.EnumerateFiles());
             }
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            // Read-only filesystem metadata inspection failure is handled gracefully
+            // An unreadable folder only means no sidecar subtitles.
         }
 
-        return results;
+        return candidates
+            .Where(file => file.LinkTarget is null && IsSubtitleExtension(file.Extension))
+            .DistinctBy(file => file.FullName, StringComparer.Ordinal)
+            .OrderBy(file => file.FullName, StringComparer.Ordinal)
+            .Select(file => Describe(file, baseName))
+            .ToList();
+    }
+
+    private static bool IsSubtitleFolder(DirectoryInfo folder) =>
+        folder.LinkTarget is null && (string.Equals(folder.Name, "Subs", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(folder.Name, "Subtitles", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSubtitleExtension(string extension) =>
+        TextExtensions.Contains(extension) || BitmapExtensions.Contains(extension);
+
+    /// <summary>"Movie.srt" and "Movie.en.srt" belong to "Movie.mkv"; "Movie 2.srt" does not.</summary>
+    private static bool BelongsTo(string fileName, string baseName)
+    {
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        return name.Length == baseName.Length
+            ? string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase)
+            : name.Length > baseName.Length && name[baseName.Length] == '.'
+                && name.StartsWith(baseName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static DiscoveredSidecarSubtitle Describe(FileInfo file, string baseName)
+    {
+        var (language, isForced, isSdh, isDefault, title) = ParseTags(baseName, Path.GetFileNameWithoutExtension(file.Name));
+        var format = file.Extension.TrimStart('.').ToLowerInvariant() switch
+        {
+            "srt" => "subrip",
+            "vtt" => "webvtt",
+            "sub" or "idx" => "vobsub",
+            var other => other,
+        };
+        return new DiscoveredSidecarSubtitle(file.FullName, format, language, title, isDefault, isForced, isSdh,
+            Supported: TextExtensions.Contains(file.Extension));
     }
 
     public static (string? Language, bool IsForced, bool IsSdh, bool IsDefault, string? Title) ParseTags(string videoBaseName, string subtitleBaseName)
@@ -267,6 +267,8 @@ public static partial class SidecarSubtitles
             throw new FileNotFoundException("Subtitle file not found.", filePath);
 
         var fileInfo = new FileInfo(filePath);
+        if (fileInfo.LinkTarget is not null)
+            throw new FileNotFoundException("Subtitle file not found.", filePath);
         if (fileInfo.Length > MaximumFileBytes)
             throw new InvalidOperationException($"Subtitle file exceeds maximum permitted size of {MaximumFileBytes} bytes.");
 
@@ -281,6 +283,8 @@ public static partial class SidecarSubtitles
         byte[] rawBytes;
         await using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan))
         {
+            if (stream.Length > MaximumFileBytes)
+                throw new InvalidOperationException($"Subtitle file exceeds maximum permitted size of {MaximumFileBytes} bytes.");
             rawBytes = new byte[stream.Length];
             var read = 0;
             while (read < rawBytes.Length)

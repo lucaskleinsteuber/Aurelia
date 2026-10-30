@@ -69,6 +69,61 @@ public sealed class SidecarSubtitleTests : IDisposable
     }
 
     [Fact]
+    public void IgnoresSubtitlesOfOtherVideosAndLinks()
+    {
+        var alien = Path.Combine(tempDir, "Alien.mkv");
+        File.WriteAllText(alien, "video");
+        File.WriteAllText(Path.Combine(tempDir, "Aliens.mkv"), "video");
+        File.WriteAllText(Path.Combine(tempDir, "Alien.en.srt"), "1\n00:00:01,000 --> 00:00:02,000\nA\n");
+        File.WriteAllText(Path.Combine(tempDir, "Aliens.en.srt"), "1\n00:00:01,000 --> 00:00:02,000\nB\n");
+        var secret = Path.Combine(tempDir, "outside.txt");
+        File.WriteAllText(secret, "secret");
+        File.CreateSymbolicLink(Path.Combine(tempDir, "Alien.de.srt"), secret);
+        var subs = Directory.CreateDirectory(Path.Combine(tempDir, "Subs"));
+        File.WriteAllText(Path.Combine(subs.FullName, "Aliens.fr.srt"), "x");
+        File.WriteAllText(Path.Combine(subs.FullName, "Alien.it.srt"), "x");
+
+        var discovered = SidecarSubtitles.Discover(alien);
+
+        Assert.Equal(["en", "it"], discovered.Select(track => track.Language).OrderBy(value => value));
+        Assert.All(discovered, track => Assert.DoesNotContain("Aliens", track.FilePath, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ALinkedSubtitleFolderIsNotFollowedAndOrderIsStable()
+    {
+        var video = Path.Combine(tempDir, "Film.mkv");
+        File.WriteAllText(video, "video");
+        var elsewhere = Directory.CreateDirectory(Path.Combine(tempDir, "..", "aurelia-elsewhere-" + Guid.NewGuid().ToString("N")));
+        try
+        {
+            File.WriteAllText(Path.Combine(elsewhere.FullName, "Film.en.srt"), "x");
+            Directory.CreateSymbolicLink(Path.Combine(tempDir, "Subs"), elsewhere.FullName);
+            File.WriteAllText(Path.Combine(tempDir, "Film.zh.srt"), "x");
+            File.WriteAllText(Path.Combine(tempDir, "Film.de.srt"), "x");
+
+            var first = SidecarSubtitles.Discover(video).Select(track => track.FilePath).ToArray();
+            var second = SidecarSubtitles.Discover(video).Select(track => track.FilePath).ToArray();
+
+            Assert.Equal(2, first.Length);
+            Assert.Equal(first, second);
+            Assert.Equal(first.OrderBy(path => path, StringComparer.Ordinal), first);
+        }
+        finally { elsewhere.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task ReadingRefusesALinkedSubtitle()
+    {
+        var target = Path.Combine(tempDir, "target.srt");
+        File.WriteAllText(target, "1\n00:00:01,000 --> 00:00:02,000\nA\n");
+        var link = Path.Combine(tempDir, "link.srt");
+        File.CreateSymbolicLink(link, target);
+
+        await Assert.ThrowsAsync<FileNotFoundException>(() => SidecarSubtitles.ReadAsWebVttAsync(link, CancellationToken.None));
+    }
+
+    [Fact]
     public void DiscoversSiblingAndSubfolderSubtitles()
     {
         var videoPath = Path.Combine(tempDir, "Movie (2020).mkv");
