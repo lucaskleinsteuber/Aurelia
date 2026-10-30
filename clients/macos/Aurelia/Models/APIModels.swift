@@ -696,27 +696,40 @@ struct NamedCount: Codable, Equatable, Sendable {
 
 struct YearInReview: Codable, Equatable, Sendable {
   let year: Int
-  let totalHours: Double
-  let totalTitles: Int
-  let movieCount: Int
-  let episodeCount: Int
-  let topGenres: [NamedCount]
-  let topTitles: [NamedCount]
+  let totalHoursWatched: Double?
+  let titlesWatched: Int?
+  let moviesWatched: Int?
+  let episodesWatched: Int?
+  let topGenre: String?
+  let topTitle: String?
+  let busiestDay: String?
+  let busiestDayHours: Double?
+
+  var totalHours: Double { totalHoursWatched ?? 0 }
+  var totalTitles: Int { titlesWatched ?? 0 }
+  var movieCount: Int { moviesWatched ?? 0 }
+  var episodeCount: Int { episodesWatched ?? 0 }
 }
 
 struct UserStatistics: Codable, Equatable, Sendable {
   let totalHoursWatched: Double
-  let hoursPast7Days: Double
-  let hoursPast30Days: Double
-  let weeklyHours: [PeriodHours]
-  let monthlyHours: [PeriodHours]
-  let topGenres: [NamedCount]
-  let currentStreakDays: Int
-  let longestStreakDays: Int
-  let completionRatePercent: Double
-  let busiestDayOfWeek: String
-  let busiestHourOfDay: Int
-  let yearsAvailable: [Int]
+  let hoursPast7Days: Double?
+  let hoursPast30Days: Double?
+  let hoursByWeek: [PeriodHours]?
+  let hoursByMonth: [PeriodHours]?
+  let topGenres: [NamedCount]?
+  let topTitles: [NamedCount]?
+  let currentStreakDays: Int?
+  let longestStreakDays: Int?
+  let busiestWeekday: String?
+  let busiestTimeOfDay: String?
+  let completionRate: Double?
+  let yearsAvailable: [Int]?
+
+  var weeklyHours: [PeriodHours] { hoursByWeek ?? [] }
+  var monthlyHours: [PeriodHours] { hoursByMonth ?? [] }
+  var completionRatePercent: Double { completionRate ?? 0 }
+  var busiestDayOfWeek: String { busiestWeekday ?? "—" }
 }
 
 struct DuplicateItemSummary: Codable, Identifiable, Equatable, Sendable {

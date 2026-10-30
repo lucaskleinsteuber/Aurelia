@@ -661,6 +661,8 @@ public sealed record WatchHistoryPage(
 
 public sealed record UserStatistics(
     double TotalHoursWatched,
+    double HoursPast7Days,
+    double HoursPast30Days,
     IReadOnlyList<PeriodHours> HoursByWeek,
     IReadOnlyList<PeriodHours> HoursByMonth,
     IReadOnlyList<NamedCount> TopGenres,
@@ -669,7 +671,8 @@ public sealed record UserStatistics(
     int LongestStreakDays,
     string BusiestWeekday,
     string BusiestTimeOfDay,
-    double CompletionRate);
+    double CompletionRate,
+    IReadOnlyList<int> YearsAvailable);
 
 public sealed record PeriodHours(string Period, double Hours);
 public sealed record NamedCount(string Name, int Count, double? Hours = null);

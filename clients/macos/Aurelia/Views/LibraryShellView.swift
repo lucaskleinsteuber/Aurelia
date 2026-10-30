@@ -22,6 +22,9 @@ struct LibraryShellView: View {
   @State private var resizeStartWidth: CGFloat?
   @State private var findRequest: FindRequest?
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @AppStorage(GeneralPreferenceKeys.sidebarVisibilityRevision) private
+    var sidebarVisibilityRevision = 0
+  @AppStorage(GeneralPreferenceKeys.sidebarItemOrder) private var sidebarItemOrder = ""
   @AppStorage(GeneralPreferenceKeys.showMoviesInSidebar) private var showMoviesInSidebar = true
   @AppStorage(GeneralPreferenceKeys.showSeriesInSidebar) private var showSeriesInSidebar = true
   @AppStorage(GeneralPreferenceKeys.showWatchlistInSidebar) private var showWatchlistInSidebar =
@@ -167,24 +170,44 @@ struct LibraryShellView: View {
     }
   }
 
+  private var visibleSidebarItems: [LibraryDestination] {
+    _ = sidebarVisibilityRevision
+    _ = sidebarItemOrder
+    let order = SidebarPreferences.loadOrder()
+    return order.filter { item in
+      guard SidebarPreferences.isVisible(item) else { return false }
+      if item == .watchlist && !model.supportsWatchlist { return false }
+      return true
+    }
+  }
+
   private func restoreDestination() {
     guard let profile = model.profile else { return }
-    let store = LibraryDestinationStore(
-      defaults: LibraryBrowsePreferenceStore.applicationDefaults)
-    let restored = store.load(
-      serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
-    if restored == .home {
-      switch defaultStartScreen {
-      case "movies": destination = .movies
-      case "series": destination = .tvShows
-      case "watchlist": destination = model.supportsWatchlist ? .watchlist : .home
-      case "recentlyAdded": destination = .recentlyAdded
-      default: destination = .home
-      }
-    } else if restored == .watchlist && !model.supportsWatchlist {
-      destination = .home
+    let targetDestination: LibraryDestination
+    switch defaultStartScreen {
+    case "home": targetDestination = .home
+    case "library": targetDestination = .library
+    case "movies": targetDestination = .movies
+    case "series": targetDestination = .tvShows
+    case "continueWatching": targetDestination = .home
+    case "collections": targetDestination = .collections
+    case "watchlist": targetDestination = model.supportsWatchlist ? .watchlist : .library
+    case "recentlyAdded": targetDestination = .recentlyAdded
+    default:
+      let store = LibraryDestinationStore(
+        defaults: LibraryBrowsePreferenceStore.applicationDefaults)
+      let restored = store.load(
+        serverId: profile.serverId, userId: profile.user?.id ?? profile.sessionId)
+      targetDestination = (restored == .watchlist && !model.supportsWatchlist) ? .home : restored
+    }
+
+    let visible = visibleSidebarItems
+    if visible.contains(targetDestination) {
+      destination = targetDestination
+    } else if let first = visible.first {
+      destination = first
     } else {
-      destination = restored
+      destination = .library
     }
   }
 
@@ -199,28 +222,8 @@ struct LibraryShellView: View {
   private var sidebar: some View {
     VStack(spacing: 0) {
       List(selection: $destination) {
-        Section {
-          sidebarButton(.home)
-        }
-        Section("Library") {
-          sidebarButton(.library)
-          if showCollectionsInSidebar {
-            sidebarButton(.collections)
-          }
-          if model.supportsWatchlist && showWatchlistInSidebar {
-            sidebarButton(.watchlist)
-          }
-          sidebarButton(.recentlyAdded)
-          if showSeriesInSidebar {
-            sidebarButton(.tvShows)
-          }
-          if showMoviesInSidebar {
-            sidebarButton(.movies)
-          }
-        }
-        Section("Activity") {
-          sidebarButton(.history)
-          sidebarButton(.statistics)
+        ForEach(visibleSidebarItems) { item in
+          sidebarButton(item)
         }
       }
       .listStyle(.sidebar)
@@ -1588,120 +1591,165 @@ private struct StatisticsPage: View {
         if isLoading && stats == nil {
           ProgressView("Loading statistics…")
             .frame(maxWidth: .infinity, minHeight: 280)
+        } else if let error = errorMessage, stats == nil {
+          VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+              .font(.system(size: 38))
+              .foregroundStyle(.orange)
+            Text("Could Not Load Statistics")
+              .font(.headline)
+            Text(error)
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .multilineTextAlignment(.center)
+              .frame(maxWidth: 400)
+            Button("Try Again") {
+              Task { await load() }
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 4)
+          }
+          .frame(maxWidth: .infinity, minHeight: 280)
         } else if let stats {
-          // Stat cards row
-          LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 16)], spacing: 16
-          ) {
-            statCard(
-              "Total Hours", value: String(format: "%.1f h", stats.totalHoursWatched),
-              icon: "clock.fill")
-            statCard(
-              "Past 7 Days", value: String(format: "%.1f h", stats.hoursPast7Days), icon: "calendar"
-            )
-            statCard(
-              "Past 30 Days", value: String(format: "%.1f h", stats.hoursPast30Days),
-              icon: "calendar.badge.clock")
-            statCard(
-              "Current Streak",
-              value: "\(stats.currentStreakDays) \(stats.currentStreakDays == 1 ? "day" : "days")",
-              icon: "flame.fill")
-            statCard(
-              "Longest Streak",
-              value: "\(stats.longestStreakDays) \(stats.longestStreakDays == 1 ? "day" : "days")",
-              icon: "trophy.fill")
-            statCard(
-              "Completion Rate", value: String(format: "%.0f%%", stats.completionRatePercent),
-              icon: "checkmark.seal.fill")
-          }
-
-          // Busiest watching times
-          HStack(spacing: 20) {
-            statCard("Busiest Day", value: stats.busiestDayOfWeek, icon: "calendar")
-            statCard("Busiest Hour", value: "\(stats.busiestHourOfDay):00", icon: "clock")
-          }
-
-          // Top Genres
-          if !stats.topGenres.isEmpty {
-            VStack(alignment: .leading, spacing: 14) {
-              Text("Top Genres").font(AureliaDesign.sectionTitle)
-              HStack(spacing: 10) {
-                ForEach(stats.topGenres.prefix(6), id: \.name) { genre in
-                  HStack(spacing: 6) {
-                    Text(genre.name).font(.body.weight(.medium))
-                    Text("\(genre.count)")
-                      .font(.caption)
-                      .foregroundStyle(.secondary)
-                      .padding(.horizontal, 6)
-                      .padding(.vertical, 2)
-                      .background(.white.opacity(0.1), in: Capsule())
-                  }
-                  .padding(.horizontal, 12)
-                  .padding(.vertical, 8)
-                  .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 10))
-                }
-              }
+          if stats.totalHoursWatched == 0 && (stats.topGenres ?? []).isEmpty {
+            VStack(spacing: 16) {
+              Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+              Text("No Viewing Activity Yet")
+                .font(.title3.weight(.semibold))
+              Text(
+                "Start watching movies or series in Aurelia to see your total watch time, streaks, and favorite genres here."
+              )
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .multilineTextAlignment(.center)
+              .frame(maxWidth: 380)
             }
-          }
-
-          // Weekly Hours Visual Bar
-          if !stats.weeklyHours.isEmpty {
-            VStack(alignment: .leading, spacing: 14) {
-              Text("Hours by Week").font(AureliaDesign.sectionTitle)
-              HStack(alignment: .bottom, spacing: 12) {
-                let maxHours = max(1.0, stats.weeklyHours.map(\.hours).max() ?? 1.0)
-                ForEach(stats.weeklyHours, id: \.period) { item in
-                  VStack(spacing: 6) {
-                    Text(String(format: "%.1f", item.hours))
-                      .font(.caption2)
-                      .foregroundStyle(.secondary)
-                    RoundedRectangle(cornerRadius: 4)
-                      .fill(Color.accentColor)
-                      .frame(width: 32, height: max(6, CGFloat(item.hours / maxHours) * 120))
-                    Text(item.period.components(separatedBy: "-W").last ?? item.period)
-                      .font(.caption2)
-                      .foregroundStyle(.secondary)
-                  }
-                }
-              }
-              .frame(height: 160)
+            .frame(maxWidth: .infinity, minHeight: 280)
+          } else {
+            // Stat cards row
+            LazyVGrid(
+              columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 16)], spacing: 16
+            ) {
+              statCard(
+                "Total Hours", value: String(format: "%.1f h", stats.totalHoursWatched),
+                icon: "clock.fill")
+              statCard(
+                "Past 7 Days",
+                value: String(format: "%.1f h", stats.hoursPast7Days ?? 0),
+                icon: "calendar")
+              statCard(
+                "Past 30 Days",
+                value: String(format: "%.1f h", stats.hoursPast30Days ?? 0),
+                icon: "calendar.badge.clock")
+              statCard(
+                "Current Streak",
+                value:
+                  "\(stats.currentStreakDays ?? 0) \((stats.currentStreakDays ?? 0) == 1 ? "day" : "days")",
+                icon: "flame.fill")
+              statCard(
+                "Longest Streak",
+                value:
+                  "\(stats.longestStreakDays ?? 0) \((stats.longestStreakDays ?? 0) == 1 ? "day" : "days")",
+                icon: "trophy.fill")
+              statCard(
+                "Completion Rate",
+                value: String(format: "%.0f%%", stats.completionRatePercent),
+                icon: "checkmark.seal.fill")
             }
-          }
 
-          // Year in Review
-          if !stats.yearsAvailable.isEmpty {
-            VStack(alignment: .leading, spacing: 14) {
-              HStack {
-                Text("Year in Review").font(AureliaDesign.sectionTitle)
-                Spacer()
-                Picker(
-                  "Year",
-                  selection: Binding(
-                    get: {
-                      selectedYear ?? stats.yearsAvailable.first
-                        ?? Calendar.current.component(.year, from: Date())
-                    },
-                    set: { year in
-                      selectedYear = year
-                      Task { await loadYear(year) }
+            // Busiest watching times
+            HStack(spacing: 20) {
+              statCard("Busiest Day", value: stats.busiestDayOfWeek, icon: "calendar")
+              statCard(
+                "Most Active Time", value: stats.busiestTimeOfDay ?? "—",
+                icon: "clock")
+            }
+
+            // Top Genres
+            if let genres = stats.topGenres, !genres.isEmpty {
+              VStack(alignment: .leading, spacing: 14) {
+                Text("Top Genres").font(AureliaDesign.sectionTitle)
+                HStack(spacing: 10) {
+                  ForEach(genres.prefix(6), id: \.name) { genre in
+                    HStack(spacing: 6) {
+                      Text(genre.name).font(.body.weight(.medium))
+                      Text("\(genre.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.white.opacity(0.1), in: Capsule())
                     }
-                  )
-                ) {
-                  ForEach(stats.yearsAvailable, id: \.self) { y in
-                    Text("\(y)").tag(y)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 10))
                   }
                 }
-                .frame(width: 120)
               }
+            }
 
-              if let review = yearReview {
-                HStack(spacing: 16) {
-                  statCard(
-                    "Total Hours", value: String(format: "%.1f h", review.totalHours), icon: "clock"
-                  )
-                  statCard("Total Titles", value: "\(review.totalTitles)", icon: "film.stack")
-                  statCard("Movies", value: "\(review.movieCount)", icon: "film")
-                  statCard("Episodes", value: "\(review.episodeCount)", icon: "tv")
+            // Weekly Hours Visual Bar
+            if !stats.weeklyHours.isEmpty {
+              VStack(alignment: .leading, spacing: 14) {
+                Text("Hours by Week").font(AureliaDesign.sectionTitle)
+                HStack(alignment: .bottom, spacing: 12) {
+                  let maxHours = max(1.0, stats.weeklyHours.map(\.hours).max() ?? 1.0)
+                  ForEach(stats.weeklyHours, id: \.period) { item in
+                    VStack(spacing: 6) {
+                      Text(String(format: "%.1f", item.hours))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                      RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.accentColor)
+                        .frame(width: 32, height: max(6, CGFloat(item.hours / maxHours) * 120))
+                      Text(item.period.components(separatedBy: "-W").last ?? item.period)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                  }
+                }
+                .frame(height: 160)
+              }
+            }
+
+            // Year in Review
+            if let years = stats.yearsAvailable, !years.isEmpty {
+              VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                  Text("Year in Review").font(AureliaDesign.sectionTitle)
+                  Spacer()
+                  Picker(
+                    "Year",
+                    selection: Binding(
+                      get: {
+                        selectedYear ?? years.first
+                          ?? Calendar.current.component(.year, from: Date())
+                      },
+                      set: { year in
+                        selectedYear = year
+                        Task { await loadYear(year) }
+                      }
+                    )
+                  ) {
+                    ForEach(years, id: \.self) { y in
+                      Text("\(y)").tag(y)
+                    }
+                  }
+                  .frame(width: 120)
+                }
+
+                if let review = yearReview {
+                  HStack(spacing: 16) {
+                    statCard(
+                      "Total Hours", value: String(format: "%.1f h", review.totalHours),
+                      icon: "clock"
+                    )
+                    statCard("Total Titles", value: "\(review.totalTitles)", icon: "film.stack")
+                    statCard("Movies", value: "\(review.movieCount)", icon: "film")
+                    statCard("Episodes", value: "\(review.episodeCount)", icon: "tv")
+                  }
                 }
               }
             }
@@ -1735,12 +1783,16 @@ private struct StatisticsPage: View {
   }
 
   private func load() async {
-    guard let profile = model.profile else { return }
+    guard let profile = model.profile else {
+      errorMessage = "No active profile session."
+      return
+    }
     isLoading = true
+    errorMessage = nil
     do {
       let loaded = try await APIClient(profile: profile).statistics()
       stats = loaded
-      if let firstYear = loaded.yearsAvailable.first {
+      if let years = loaded.yearsAvailable, let firstYear = years.first {
         selectedYear = firstYear
         await loadYear(firstYear)
       }

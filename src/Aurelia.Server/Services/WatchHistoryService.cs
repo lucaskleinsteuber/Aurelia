@@ -114,6 +114,8 @@ public sealed class WatchHistoryService(AureliaDbContext database)
         {
             return new UserStatistics(
                 0,
+                0,
+                0,
                 Array.Empty<PeriodHours>(),
                 Array.Empty<PeriodHours>(),
                 Array.Empty<NamedCount>(),
@@ -122,11 +124,28 @@ public sealed class WatchHistoryService(AureliaDbContext database)
                 0,
                 "Monday",
                 "Evening",
-                0);
+                0,
+                Array.Empty<int>());
         }
 
         var totalSeconds = events.Sum(e => e.SecondsWatched);
         var totalHours = Math.Round(totalSeconds / 3600.0, 1);
+
+        var now = DateTimeOffset.UtcNow;
+        var sevenDaysAgo = now.AddDays(-7);
+        var thirtyDaysAgo = now.AddDays(-30);
+
+        var past7Seconds = events.Where(e => e.Timestamp >= sevenDaysAgo).Sum(e => e.SecondsWatched);
+        var past30Seconds = events.Where(e => e.Timestamp >= thirtyDaysAgo).Sum(e => e.SecondsWatched);
+
+        var hoursPast7Days = Math.Round(past7Seconds / 3600.0, 1);
+        var hoursPast30Days = Math.Round(past30Seconds / 3600.0, 1);
+
+        var yearsAvailable = events
+            .Select(e => e.Timestamp.Year)
+            .Distinct()
+            .OrderByDescending(y => y)
+            .ToList();
 
         // Group by week (ISO 8601 week: yyyy-'W'ww)
         var hoursByWeek = events
@@ -219,6 +238,8 @@ public sealed class WatchHistoryService(AureliaDbContext database)
 
         return new UserStatistics(
             totalHours,
+            hoursPast7Days,
+            hoursPast30Days,
             hoursByWeek,
             hoursByMonth,
             topGenres,
@@ -227,7 +248,8 @@ public sealed class WatchHistoryService(AureliaDbContext database)
             longestStreak,
             busiestWeekday,
             busiestTimeOfDay,
-            completionRate);
+            completionRate,
+            yearsAvailable);
     }
 
     public async Task<YearInReview> GetYearInReviewAsync(

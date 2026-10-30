@@ -67,7 +67,10 @@ struct GeneralPreferencesTests {
     #expect(PosterSizePreference(rawValue: "compact") == .compact)
     #expect(PosterSizePreference(rawValue: "large") == .large)
 
+    #expect(StartScreenPreference(rawValue: "home") == .home)
+    #expect(StartScreenPreference(rawValue: "library") == .library)
     #expect(StartScreenPreference(rawValue: "continueWatching") == .continueWatching)
+    #expect(StartScreenPreference(rawValue: "collections") == .collections)
     #expect(StartScreenPreference(rawValue: "watchlist") == .watchlist)
     #expect(StartScreenPreference(rawValue: "movies") == .movies)
     #expect(StartScreenPreference(rawValue: "series") == .series)
@@ -76,5 +79,28 @@ struct GeneralPreferencesTests {
     #expect(SubtitleSizePreference(rawValue: "medium") == .medium)
     #expect(SubtitleBackgroundPreference(rawValue: "semiTransparent") == .semiTransparent)
     #expect(LibraryRescanInterval(rawValue: "1h") == .oneHour)
+  }
+
+  @Test func sidebarPreferencesOrderAndVisibility() {
+    SidebarPreferences.resetToDefaults()
+    let defaultOrder = SidebarPreferences.loadOrder()
+    #expect(defaultOrder.first == .home)
+    #expect(SidebarPreferences.isVisible(.home) == true)
+
+    var customOrder = defaultOrder
+    let home = customOrder.removeFirst()
+    customOrder.append(home)
+    SidebarPreferences.saveOrder(customOrder)
+
+    let loadedCustom = SidebarPreferences.loadOrder()
+    #expect(loadedCustom.last == .home)
+
+    SidebarPreferences.setVisible(.home, isVisible: false)
+    #expect(SidebarPreferences.isVisible(.home) == false)
+
+    SidebarPreferences.resetToDefaults()
+    let resetOrder = SidebarPreferences.loadOrder()
+    #expect(resetOrder.first == .home)
+    #expect(SidebarPreferences.isVisible(.home) == true)
   }
 }

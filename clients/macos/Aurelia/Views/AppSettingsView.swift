@@ -3,6 +3,8 @@ import SwiftUI
 
 enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
   case general = "General"
+  case sidebar = "Sidebar"
+  case activity = "Activity"
   case playback = "Playback"
   case library = "Library"
   case metadata = "Metadata"
@@ -16,6 +18,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
   var symbol: String {
     switch self {
     case .general: "gearshape.fill"
+    case .sidebar: "sidebar.left"
+    case .activity: "chart.bar.xaxis"
     case .playback: "play.rectangle.fill"
     case .library: "externaldrive.fill"
     case .metadata: "sparkles.rectangle.stack.fill"
@@ -162,51 +166,57 @@ struct AppSettingsView: View {
         .padding(.top, 14)
         .accessibilityIdentifier("settings-search-field")
 
-      List(selection: $selectedCategory) {
-        ForEach(SettingsCategory.allCases) { category in
-          if shouldShowCategory(category) {
-            Button {
-              selectedCategory = category
-              searchText = ""
-            } label: {
-              HStack(spacing: 10) {
-                Image(systemName: category.symbol)
-                  .font(.system(size: 15, weight: .medium))
-                  .frame(width: 20)
-                  .foregroundStyle(
-                    selectedCategory == category && searchText.isEmpty ? .primary : .secondary)
-                Text(category.rawValue)
-                  .font(
-                    .system(
-                      size: 13,
-                      weight: selectedCategory == category && searchText.isEmpty
-                        ? .semibold : .regular))
-                Spacer()
-              }
-              .contentShape(Rectangle())
+      ScrollView {
+        VStack(spacing: 2) {
+          ForEach(SettingsCategory.allCases) { category in
+            if shouldShowCategory(category) {
+              settingsSidebarButton(category)
             }
-            .buttonStyle(.plain)
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(
-                  selectedCategory == category && searchText.isEmpty
-                    ? AureliaDesign.raisedSurface : Color.clear)
-            )
-            .tag(category)
-            .accessibilityIdentifier("settings-tab-\(category.id.lowercased())")
           }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
       }
-      .listStyle(.sidebar)
       .scrollContentBackground(.hidden)
     }
   }
 
+  private func settingsSidebarButton(_ category: SettingsCategory) -> some View {
+    let isSelected = selectedCategory == category && searchText.isEmpty
+    return Button {
+      selectedCategory = category
+      searchText = ""
+    } label: {
+      HStack(spacing: 10) {
+        Image(systemName: category.symbol)
+          .font(.system(size: 14, weight: .medium))
+          .frame(width: 20)
+          .foregroundStyle(isSelected ? Color.white : .secondary)
+        Text(category.rawValue)
+          .font(
+            .system(
+              size: 13,
+              weight: isSelected ? .semibold : .regular)
+          )
+          .foregroundStyle(isSelected ? Color.white : .primary)
+        Spacer()
+      }
+      .padding(.vertical, 6)
+      .padding(.horizontal, 10)
+      .background(
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+          .fill(isSelected ? Color.accentColor : Color.clear)
+      )
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .focusable(false)
+    .accessibilityIdentifier("settings-tab-\(category.id.lowercased())")
+  }
+
   private func shouldShowCategory(_ category: SettingsCategory) -> Bool {
     switch category {
-    case .general, .playback, .profilesAndDevices, .updates, .advanced:
+    case .general, .sidebar, .activity, .playback, .profilesAndDevices, .updates, .advanced:
       return true
     case .library:
       return model.canManageStorage
@@ -219,29 +229,39 @@ struct AppSettingsView: View {
 
   @ViewBuilder
   private var detailArea: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 22) {
-        if !searchText.isEmpty {
-          searchResultsView
-        } else {
-          categoryView(selectedCategory)
-        }
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 22) {
+          Color.clear
+            .frame(height: 0)
+            .id("settings-top")
 
-        if let error = model.administrationErrorMessage {
-          Text(error)
-            .foregroundStyle(.orange)
-            .frame(maxWidth: .infinity, alignment: .leading)
+          if !searchText.isEmpty {
+            searchResultsView
+          } else {
+            categoryView(selectedCategory)
+          }
+
+          if let error = model.administrationErrorMessage {
+            Text(error)
+              .foregroundStyle(.orange)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          if let error = model.errorMessage {
+            Text(error)
+              .foregroundStyle(.orange)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
         }
-        if let error = model.errorMessage {
-          Text(error)
-            .foregroundStyle(.orange)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        .padding(26)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
       }
-      .padding(26)
-      .frame(maxWidth: .infinity, alignment: .topLeading)
+      .id(selectedCategory)
+      .scrollContentBackground(.hidden)
+      .onChange(of: selectedCategory) {
+        proxy.scrollTo("settings-top", anchor: .top)
+      }
     }
-    .scrollContentBackground(.hidden)
   }
 
   @ViewBuilder
@@ -249,6 +269,10 @@ struct AppSettingsView: View {
     switch category {
     case .general:
       generalSections
+    case .sidebar:
+      sidebarSections
+    case .activity:
+      activitySections
     case .playback:
       playbackSections
     case .library:
@@ -306,8 +330,17 @@ struct AppSettingsView: View {
         interfaceDisplaySection
         let _ = { foundAny = true }()
       }
-      if queryMatches(query, "sidebar navigation movies series tv shows watchlist collections") {
-        sidebarNavigationSection
+      if queryMatches(
+        query,
+        "sidebar navigation modular items order hide show movies series tv shows watchlist collections home"
+      ) {
+        sidebarSections
+        let _ = { foundAny = true }()
+      }
+      if queryMatches(
+        query, "activity statistics watch time hours streak stats genres habits history")
+      {
+        activitySections
         let _ = { foundAny = true }()
       }
       if queryMatches(query, "quit window close rest energy sleep power mac") {
@@ -475,21 +508,32 @@ struct AppSettingsView: View {
     AureliaSettingsSection(
       "Sidebar Navigation",
       symbol: "sidebar.left",
-      description: "Choose which media categories appear in the main navigation sidebar."
+      description: "Rearrange sections, hide items, and configure your default startup screen."
     ) {
-      VStack(alignment: .leading, spacing: 12) {
-        Toggle("Movies", isOn: $showMoviesInSidebar)
-          .accessibilityIdentifier("interface-sidebar-movies")
-        Toggle("TV Shows", isOn: $showSeriesInSidebar)
-          .accessibilityIdentifier("interface-sidebar-series")
-        Toggle("Watchlist", isOn: $showWatchlistInSidebar)
-          .accessibilityIdentifier("interface-sidebar-watchlist")
-        Toggle("Collections", isOn: $showCollectionsInSidebar)
-          .accessibilityIdentifier("interface-sidebar-collections")
+      HStack {
+        Text("Modular sidebar controls and custom order are available in Sidebar settings.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+        Spacer()
+        Button("Configure Sidebar…") {
+          selectedCategory = .sidebar
+        }
+        .buttonStyle(.borderedProminent)
+        .accessibilityIdentifier("interface-configure-sidebar-button")
       }
-      .toggleStyle(.switch)
-      .frame(maxWidth: .infinity, alignment: .leading)
     }
+  }
+
+  // MARK: - Sidebar & Activity
+
+  @ViewBuilder
+  private var sidebarSections: some View {
+    SidebarCustomizerView()
+  }
+
+  @ViewBuilder
+  private var activitySections: some View {
+    SettingsActivityView()
   }
 
   private var windowSystemSection: some View {
@@ -1558,5 +1602,393 @@ private struct GitHubTokenSettingsView: View {
               ? .red : .secondary)
       }
     }
+  }
+}
+
+// MARK: - Sidebar Customizer
+
+struct SidebarCustomizerView: View {
+  @AppStorage(GeneralPreferenceKeys.defaultStartScreen) private var defaultStartScreen = "movies"
+  @AppStorage(GeneralPreferenceKeys.sidebarVisibilityRevision) private var visibilityRevision = 0
+  @State private var items: [LibraryDestination] = SidebarPreferences.loadOrder()
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+      AureliaSettingsSection(
+        "Startup Screen",
+        symbol: "arrow.right.circle.fill",
+        description:
+          "Choose which section Aurelia opens automatically when starting the application."
+      ) {
+        LabeledContent("Default Start Screen") {
+          Picker("Default Start Screen", selection: $defaultStartScreen) {
+            ForEach(StartScreenPreference.allCases) { screen in
+              Text(screen.label).tag(screen.rawValue)
+            }
+          }
+          .labelsHidden()
+          .frame(width: 180)
+          .accessibilityIdentifier("sidebar-start-screen")
+        }
+      }
+
+      AureliaSettingsSection(
+        "Modular Sidebar Navigation",
+        symbol: "sidebar.left",
+        description:
+          "Customize which items appear in the sidebar and arrange them in any order you prefer. Use the up and down arrows to move items, or toggle an item off to hide it."
+      ) {
+        VStack(spacing: 8) {
+          ForEach(Array(items.enumerated()), id: \.element) { index, item in
+            HStack(spacing: 12) {
+              Image(systemName: item.symbol)
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 24)
+                .foregroundStyle(isItemVisible(item) ? Color.accentColor : Color.secondary)
+
+              Text(item.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isItemVisible(item) ? Color.primary : Color.secondary)
+
+              Spacer()
+
+              HStack(spacing: 4) {
+                Button {
+                  moveItem(from: index, to: index - 1)
+                } label: {
+                  Image(systemName: "arrow.up")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(index == 0)
+                .help("Move Up")
+                .accessibilityLabel("Move \(item.title) Up")
+                .accessibilityIdentifier("sidebar-move-up-\(item.rawValue)")
+
+                Button {
+                  moveItem(from: index, to: index + 1)
+                } label: {
+                  Image(systemName: "arrow.down")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(index == items.count - 1)
+                .help("Move Down")
+                .accessibilityLabel("Move \(item.title) Down")
+                .accessibilityIdentifier("sidebar-move-down-\(item.rawValue)")
+              }
+              .padding(.trailing, 8)
+
+              Toggle(
+                "",
+                isOn: Binding(
+                  get: { isItemVisible(item) },
+                  set: { newValue in
+                    toggleItemVisibility(item, isVisible: newValue)
+                  }
+                )
+              )
+              .labelsHidden()
+              .toggleStyle(.switch)
+              .disabled(isItemVisible(item) && visibleCount <= 1)
+              .accessibilityLabel("Show \(item.title) in Sidebar")
+              .accessibilityIdentifier("sidebar-toggle-\(item.rawValue)")
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(AureliaDesign.raisedSurface.opacity(isItemVisible(item) ? 1.0 : 0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+          }
+
+          HStack {
+            Spacer()
+            Button("Reset Sidebar to Defaults") {
+              SidebarPreferences.resetToDefaults()
+              items = SidebarPreferences.loadOrder()
+              visibilityRevision += 1
+            }
+            .buttonStyle(.bordered)
+            .padding(.top, 8)
+            .accessibilityIdentifier("sidebar-reset-defaults")
+          }
+        }
+      }
+    }
+    .onAppear {
+      items = SidebarPreferences.loadOrder()
+    }
+  }
+
+  private var visibleCount: Int {
+    items.filter { SidebarPreferences.isVisible($0) }.count
+  }
+
+  private func isItemVisible(_ destination: LibraryDestination) -> Bool {
+    SidebarPreferences.isVisible(destination)
+  }
+
+  private func toggleItemVisibility(_ destination: LibraryDestination, isVisible: Bool) {
+    if !isVisible && visibleCount <= 1 {
+      return
+    }
+    SidebarPreferences.setVisible(destination, isVisible: isVisible)
+    visibilityRevision += 1
+  }
+
+  private func moveItem(from: Int, to: Int) {
+    guard to >= 0 && to < items.count else { return }
+    items.swapAt(from, to)
+    SidebarPreferences.saveOrder(items)
+    visibilityRevision += 1
+  }
+}
+
+// MARK: - Settings Activity View
+
+struct SettingsActivityView: View {
+  @EnvironmentObject private var model: AppModel
+  @State private var stats: UserStatistics?
+  @State private var isLoading = false
+  @State private var errorMessage: String?
+  @State private var selectedYear: Int?
+  @State private var yearReview: YearInReview?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+      if isLoading && stats == nil {
+        AureliaSettingsSection(
+          "Viewing Activity",
+          symbol: "chart.bar.xaxis",
+          description: "Loading your watch history and statistics…"
+        ) {
+          ProgressView("Loading activity…")
+            .frame(maxWidth: .infinity, minHeight: 120)
+        }
+      } else if let error = errorMessage, stats == nil {
+        AureliaSettingsSection(
+          "Viewing Activity",
+          symbol: "exclamationmark.triangle.fill",
+          description: "Could not load viewing statistics."
+        ) {
+          VStack(alignment: .leading, spacing: 12) {
+            Text(error)
+              .foregroundStyle(.orange)
+              .font(.subheadline)
+            Button("Try Again") {
+              Task { await load() }
+            }
+            .buttonStyle(.borderedProminent)
+          }
+        }
+      } else if let stats {
+        if stats.totalHoursWatched == 0 && (stats.topGenres ?? []).isEmpty {
+          AureliaSettingsSection(
+            "Viewing Activity",
+            symbol: "chart.bar.xaxis",
+            description: "Your watch time, streaks, and viewing patterns."
+          ) {
+            VStack(alignment: .center, spacing: 14) {
+              Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 38))
+                .foregroundStyle(.secondary)
+              Text("No Viewing Activity Yet")
+                .font(.headline)
+              Text(
+                "Watch movies or series in Aurelia to track your watch time, streaks, and favorite genres here."
+              )
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .multilineTextAlignment(.center)
+              .frame(maxWidth: 360)
+            }
+            .frame(maxWidth: .infinity, minHeight: 140)
+          }
+        } else {
+          AureliaSettingsSection(
+            "Watch Time & Activity",
+            symbol: "clock.fill",
+            description: "Total time spent watching movies and series across your profile."
+          ) {
+            LazyVGrid(
+              columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: 12)], spacing: 12
+            ) {
+              activityStatCard(
+                "Total Hours",
+                value: String(format: "%.1f h", stats.totalHoursWatched),
+                icon: "clock.fill")
+              activityStatCard(
+                "Past 7 Days",
+                value: String(format: "%.1f h", stats.hoursPast7Days ?? 0),
+                icon: "calendar")
+              activityStatCard(
+                "Past 30 Days",
+                value: String(format: "%.1f h", stats.hoursPast30Days ?? 0),
+                icon: "calendar.badge.clock")
+              activityStatCard(
+                "Current Streak",
+                value:
+                  "\(stats.currentStreakDays ?? 0) \((stats.currentStreakDays ?? 0) == 1 ? "day" : "days")",
+                icon: "flame.fill")
+              activityStatCard(
+                "Longest Streak",
+                value:
+                  "\(stats.longestStreakDays ?? 0) \((stats.longestStreakDays ?? 0) == 1 ? "day" : "days")",
+                icon: "trophy.fill")
+              activityStatCard(
+                "Completion Rate",
+                value: String(format: "%.0f%%", stats.completionRatePercent),
+                icon: "checkmark.circle.fill")
+            }
+          }
+
+          if let genres = stats.topGenres, !genres.isEmpty {
+            AureliaSettingsSection(
+              "Favorite Genres",
+              symbol: "film.stack",
+              description: "Genres you watch most frequently based on title count."
+            ) {
+              VStack(spacing: 8) {
+                ForEach(genres.prefix(5), id: \.name) { genre in
+                  HStack {
+                    Text(genre.name)
+                      .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text("\(genre.count) \(genre.count == 1 ? "title" : "titles")")
+                      .font(.subheadline)
+                      .foregroundStyle(.secondary)
+                  }
+                  .padding(.vertical, 4)
+                  if genre.name != genres.prefix(5).last?.name {
+                    Divider()
+                  }
+                }
+              }
+            }
+          }
+
+          if stats.busiestWeekday != nil || stats.busiestTimeOfDay != nil {
+            AureliaSettingsSection(
+              "Viewing Habits",
+              symbol: "calendar.day.timeline.left",
+              description: "When you watch media most often."
+            ) {
+              VStack(alignment: .leading, spacing: 10) {
+                if let busiest = stats.busiestWeekday {
+                  LabeledContent("Most Active Day", value: busiest)
+                }
+                if let time = stats.busiestTimeOfDay {
+                  LabeledContent("Peak Watching Time", value: time.capitalized)
+                }
+              }
+            }
+          }
+
+          if let years = stats.yearsAvailable, !years.isEmpty {
+            AureliaSettingsSection(
+              "Year in Review",
+              symbol: "sparkles",
+              description: "Annual summary of your viewing activity."
+            ) {
+              VStack(alignment: .leading, spacing: 12) {
+                Picker(
+                  "Year",
+                  selection: Binding(
+                    get: {
+                      selectedYear ?? years.first ?? Calendar.current.component(.year, from: Date())
+                    },
+                    set: { newYear in
+                      selectedYear = newYear
+                      Task { await loadYear(newYear) }
+                    }
+                  )
+                ) {
+                  ForEach(years, id: \.self) { y in
+                    Text(String(y)).tag(y)
+                  }
+                }
+                .frame(width: 120)
+
+                if let review = yearReview {
+                  HStack(spacing: 24) {
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text("Total Time").font(.caption).foregroundStyle(.secondary)
+                      Text(String(format: "%.1f h", review.totalHours)).font(
+                        .title3.weight(.semibold))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text("Titles Watched").font(.caption).foregroundStyle(.secondary)
+                      Text("\(review.totalTitles)").font(.title3.weight(.semibold))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text("Movies").font(.caption).foregroundStyle(.secondary)
+                      Text("\(review.movieCount)").font(.title3.weight(.semibold))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text("Episodes").font(.caption).foregroundStyle(.secondary)
+                      Text("\(review.episodeCount)").font(.title3.weight(.semibold))
+                    }
+                  }
+                  .padding(.top, 4)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    .task {
+      await load()
+    }
+  }
+
+  private func activityStatCard(_ title: String, value: String, icon: String) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 6) {
+        Image(systemName: icon)
+          .font(.caption)
+          .foregroundStyle(.tint)
+        Text(title)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Text(value)
+        .font(.title3.weight(.semibold))
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(12)
+    .background(AureliaDesign.raisedSurface)
+    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+  }
+
+  private func load() async {
+    guard let profile = model.profile else {
+      errorMessage = "No active profile session."
+      return
+    }
+    isLoading = true
+    errorMessage = nil
+    do {
+      let loaded = try await APIClient(profile: profile).statistics()
+      stats = loaded
+      if let years = loaded.yearsAvailable, let firstYear = years.first {
+        selectedYear = firstYear
+        await loadYear(firstYear)
+      }
+      isLoading = false
+    } catch {
+      isLoading = false
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  private func loadYear(_ year: Int) async {
+    guard let profile = model.profile else { return }
+    yearReview = try? await APIClient(profile: profile).yearInReview(year: year)
   }
 }
