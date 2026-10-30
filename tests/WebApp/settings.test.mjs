@@ -211,9 +211,9 @@ test("server health loads metrics and background jobs for administrators", async
 
 test("playback and general preferences normalization preserves valid settings and applies defaults", () => {
   const playback = normalizePreferences({});
-  assert.equal(playback.upNextCountdownSeconds, 15);
-  assert.equal(playback.resumeThresholdSeconds, 10);
-  assert.equal(playback.markWatchedThresholdPercent, 90);
+  assert.equal(playback.upNextCountdownSeconds, 20, "the previous Up Next lead stays the default");
+  assert.equal(playback.resumeThresholdSeconds, 0);
+  assert.equal("markWatchedThresholdPercent" in playback, false, "the server decides when a title is finished");
   assert.equal(playback.defaultAudioLanguage, "original");
   assert.equal(playback.defaultSubtitleLanguage, "off");
   assert.equal(playback.subtitleSize, "medium");
@@ -221,40 +221,79 @@ test("playback and general preferences normalization preserves valid settings an
 
   const customPlayback = normalizePreferences({
     upNextCountdownSeconds: 25,
-    resumeThresholdSeconds: 5,
-    markWatchedThresholdPercent: 95,
+    resumeThresholdSeconds: 60,
     defaultAudioLanguage: "de",
     defaultSubtitleLanguage: "en",
     subtitleSize: "large",
     subtitleBackground: "solid",
   });
   assert.equal(customPlayback.upNextCountdownSeconds, 25);
-  assert.equal(customPlayback.resumeThresholdSeconds, 5);
-  assert.equal(customPlayback.markWatchedThresholdPercent, 95);
+  assert.equal(customPlayback.resumeThresholdSeconds, 60);
   assert.equal(customPlayback.defaultAudioLanguage, "de");
   assert.equal(customPlayback.defaultSubtitleLanguage, "en");
   assert.equal(customPlayback.subtitleSize, "large");
   assert.equal(customPlayback.subtitleBackground, "solid");
+  assert.equal(normalizePreferences({ defaultSubtitleLanguage: "auto" }).defaultSubtitleLanguage, "off");
 
   const general = normalizeGeneralPreferences({});
   assert.equal(general.defaultStartScreen, "continueWatching");
   assert.equal(general.posterSize, "standard");
   assert.equal(general.showWatchedInRows, true);
   assert.equal(general.reduceHeroMotion, false);
-  assert.equal(general.rescanInterval, "1h");
+  assert.equal("rescanInterval" in general, false, "rescanning is the server's Watch for Changes");
 
   const customGeneral = normalizeGeneralPreferences({
     defaultStartScreen: "watchlist",
     posterSize: "compact",
     showWatchedInRows: false,
     reduceHeroMotion: true,
-    rescanInterval: "15m",
   });
   assert.equal(customGeneral.defaultStartScreen, "watchlist");
   assert.equal(customGeneral.posterSize, "compact");
   assert.equal(customGeneral.showWatchedInRows, false);
   assert.equal(customGeneral.reduceHeroMotion, true);
-  assert.equal(customGeneral.rescanInterval, "15m");
+});
+
+test("general settings decide which titles, sidebar sections and start page show", async () => {
+  const { visibleTitles, startPath, sidebarShows } = await import("../../src/Aurelia.Server/WebApp/js/preferences.js");
+  const titles = [
+    { id: "a", kind: "movie", availability: "available", watchState: "completed" },
+    { id: "b", kind: "movie", availability: "missing", watchState: "unplayed" },
+    { id: "c", kind: "series", availability: "available", watchState: "inProgress" },
+  ];
+  const all = normalizeGeneralPreferences({});
+  assert.deepEqual(visibleTitles(titles, all).map((item) => item.id), ["a", "b", "c"]);
+  const strict = normalizeGeneralPreferences({ showWatchedInRows: false, hideOfflineTitles: true });
+  assert.deepEqual(visibleTitles(titles, strict).map((item) => item.id), ["c"]);
+  assert.deepEqual(visibleTitles(titles, strict, { keepWatched: true }).map((item) => item.id), ["a", "c"]);
+
+  assert.equal(startPath(normalizeGeneralPreferences({})), "/");
+  assert.equal(startPath(normalizeGeneralPreferences({ defaultStartScreen: "movies" })), "/movies");
+  const sparse = normalizeGeneralPreferences({ showMoviesInSidebar: false });
+  assert.equal(sidebarShows("movies", sparse), false);
+  assert.equal(sidebarShows("home", sparse), true);
+});
+
+test("playback settings choose the start position, Up Next lead and default languages", async () => {
+  const logic = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  const progress = { positionMilliseconds: 45_000, durationMilliseconds: 2_400_000, isCompleted: false };
+  assert.equal(logic.playbackStartSeconds("resume", progress, true, 0), 45);
+  assert.equal(logic.playbackStartSeconds("resume", progress, true, 60), 0);
+  assert.equal(logic.playbackStartSeconds("play", progress, true, 0), 0);
+
+  const base = { duration: 2400, hasNext: true, autoplay: true };
+  assert.equal(logic.showsUpNext({ ...base, position: 2385, lead: 10 }), false);
+  assert.equal(logic.showsUpNext({ ...base, position: 2385, lead: 20 }), true);
+
+  const tracks = [
+    { index: 1, language: "eng", isForced: false },
+    { index: 2, language: "ger", isForced: true },
+    { index: 3, language: "deu", isForced: false },
+  ];
+  assert.equal(logic.trackForLanguage(tracks, "de").index, 3, "full subtitles win over forced ones");
+  assert.equal(logic.trackForLanguage(tracks, "en").index, 1);
+  assert.equal(logic.trackForLanguage(tracks, "ja"), null);
+  assert.equal(logic.languageMatches("de-DE", "de"), true);
 });
 
 test("settings pages include all 8 structured categories and account alias", () => {

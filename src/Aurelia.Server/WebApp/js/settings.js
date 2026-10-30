@@ -5,31 +5,14 @@
 import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import {
-  PLAYBACK_DEFAULTS, PLAYBACK_RATES, GENERAL_DEFAULTS,
+  PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   loadManagementSections, managementPermissions, normalizeGeneralPreferences,
   rateLabel, scrubPreviewUsageText
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
+import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
 import { createManagementEditors } from "./settings-editors.js";
 import { createServerUpdates } from "./server-updates.js";
-
-const GENERAL_KEY = "aurelia.general";
-
-function loadGeneral() {
-  try {
-    return normalizeGeneralPreferences(JSON.parse(localStorage.getItem(GENERAL_KEY) ?? "null"));
-  } catch {
-    return normalizeGeneralPreferences(null);
-  }
-}
-
-function saveGeneral(value) {
-  const normalized = normalizeGeneralPreferences(value);
-  try {
-    localStorage.setItem(GENERAL_KEY, JSON.stringify(normalized));
-  } catch {}
-  return normalized;
-}
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -277,7 +260,7 @@ export function createSettings(app) {
     return [
       section("Start Screen & Layout", "gear", "Customize your default screen and poster display.",
         row("Default Start Screen", select([
-          ["continueWatching", "Continue Watching"],
+          ["continueWatching", "Home"],
           ["watchlist", "Watchlist"],
           ["movies", "Movies"],
           ["shows", "TV Shows"],
@@ -288,9 +271,9 @@ export function createSettings(app) {
           ["large", "Large"],
         ], general.posterSize, (val) => saveG({ posterSize: val }), "Poster Size")),
         row("Show Watched in Rows", toggle(general.showWatchedInRows, (on) => saveG({ showWatchedInRows: on }), "Show Watched in Rows"),
-          "Keep finished titles visible in continue watching and recently added."),
-        row("Reduce Hero Motion", toggle(general.reduceHeroMotion, (on) => saveG({ reduceHeroMotion: on }), "Reduce Hero Motion"),
-          "Stops featured artwork animation across header rails.")),
+          "Keep finished titles in Favorites and Recently Added on Home."),
+        row("Reduce Motion", toggle(general.reduceHeroMotion, (on) => saveG({ reduceHeroMotion: on }), "Reduce Motion"),
+          "Turns off the moving background and the cards sliding in, as the system setting does.")),
 
       section("Sidebar Navigation", "gear", "Choose which library categories appear in the navigation rail.",
         row("Movies", toggle(general.showMoviesInSidebar, (on) => saveG({ showMoviesInSidebar: on }), "Show Movies")),
@@ -322,6 +305,7 @@ export function createSettings(app) {
     let preferences = loadPreferences();
     const save = (change) => {
       preferences = savePreferences({ ...preferences, ...change });
+      applyAppearance(loadGeneral(), preferences);
       app.toast("Saved for this browser.");
       refresh();
     };
@@ -349,16 +333,14 @@ export function createSettings(app) {
       section("Playback Behavior", "play", "Choose how Aurelia resumes, controls and finishes titles in this browser.",
         row("Automatic Resume", toggle(preferences.automaticResume, (on) => save({ automaticResume: on }), "Automatic Resume")),
         row("Automatically Play Next Episode", toggle(preferences.automaticallyPlayNextEpisode, (on) => save({ automaticallyPlayNextEpisode: on }), "Automatically Play Next Episode")),
-        row("Up Next Countdown Delay", select([
+        row("Up Next Countdown", select([
           [5, "5 seconds"], [10, "10 seconds"], [15, "15 seconds"], [20, "20 seconds"], [30, "30 seconds"],
-        ], preferences.upNextCountdownSeconds ?? 15, (sec) => save({ upNextCountdownSeconds: Number(sec) }), "Up Next Countdown Delay")),
-        row("Restart If Near Start", select([
-          [0, "Never"], [5, "Within 5 seconds"], [10, "Within 10 seconds"], [15, "Within 15 seconds"], [30, "Within 30 seconds"],
-        ], preferences.resumeThresholdSeconds ?? 10, (sec) => save({ resumeThresholdSeconds: Number(sec) }), "Restart If Near Start"),
-          "Starts from the beginning when opened near the opening."),
-        row("Mark Watched Threshold", select([
-          [90, "90% completed"], [95, "95% completed"], [99, "99% completed"],
-        ], preferences.markWatchedThresholdPercent ?? 90, (pct) => save({ markWatchedThresholdPercent: Number(pct) }), "Mark Watched Threshold")),
+        ], preferences.upNextCountdownSeconds, (sec) => save({ upNextCountdownSeconds: Number(sec) }), "Up Next Countdown"),
+          "How long before the end the next episode is offered."),
+        row("Start Over If Barely Started", select([
+          [0, "Never"], [30, "Under 30 seconds"], [60, "Under 1 minute"], [120, "Under 2 minutes"],
+        ], preferences.resumeThresholdSeconds, (sec) => save({ resumeThresholdSeconds: Number(sec) }), "Start Over If Barely Started"),
+          "Resume starts from the beginning when less than this was watched."),
         row("Keep Screen On During Playback", toggle(preferences.keepScreenOn, (on) => save({ keepScreenOn: on }), "Keep Screen On During Playback")),
         row("Night Mode", toggle(preferences.nightMode, (on) => save({ nightMode: on }), "Night Mode"),
           "Softens loud explosions and lifts quiet dialogue.")),
@@ -372,17 +354,18 @@ export function createSettings(app) {
           ["es", "Spanish"],
           ["ja", "Japanese"],
           ["it", "Italian"],
-        ], preferences.defaultAudioLanguage ?? "original", (lang) => save({ defaultAudioLanguage: lang }), "Default Audio Language")),
+        ], preferences.defaultAudioLanguage, (lang) => save({ defaultAudioLanguage: lang }), "Default Audio Language"),
+          "Used until you choose a sound track for a series yourself."),
         row("Default Subtitle Language", select([
           ["off", "Off"],
-          ["auto", "Automatic"],
           ["en", "English"],
           ["de", "German"],
           ["fr", "French"],
           ["es", "Spanish"],
           ["ja", "Japanese"],
           ["it", "Italian"],
-        ], preferences.defaultSubtitleLanguage ?? "off", (lang) => save({ defaultSubtitleLanguage: lang }), "Default Subtitle Language")),
+        ], preferences.defaultSubtitleLanguage, (lang) => save({ defaultSubtitleLanguage: lang }), "Default Subtitle Language"),
+          "Used until you choose subtitles for a series yourself."),
         row("Subtitle Size", select([
           ["small", "Small"],
           ["medium", "Medium"],
@@ -462,16 +445,9 @@ export function createSettings(app) {
           libraries.length > 1 ? button("Scan All", () => api.scanAllLibraries(), "Scanning all storage locations…", "secondary-button", refresh) : null))
         : section("Storage Locations", "library", "Storage management requires full library access."),
 
-      section("Library Maintenance", "library", "Automatic scanning and offline title display options.",
-        row("Automatic Rescan Interval", select([
-          ["manual", "Manual Only"],
-          ["15m", "Every 15 Minutes"],
-          ["1h", "Every Hour"],
-          ["6h", "Every 6 Hours"],
-          ["24h", "Every 24 Hours"],
-        ], general.rescanInterval, (val) => saveG({ rescanInterval: val }), "Automatic Rescan Interval")),
+      section("Library Maintenance", "library", "Offline titles and the health of the library. Use Watch for Changes above to rescan automatically.",
         row("Hide Offline Titles", toggle(general.hideOfflineTitles, (on) => saveG({ hideOfflineTitles: on }), "Hide Offline Titles"),
-          "Hides titles whose media drive is currently disconnected."),
+          "In this browser, hides titles whose file or drive is unavailable. Their details and progress stay."),
         row("Library Health & Maintenance",
           openButton("View Library Health…", () => openLibraryHealthDialog(refresh)),
           "Review duplicates, offline/missing titles and unmatched metadata.")),

@@ -6,7 +6,7 @@ import { browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS } from "./logic.
 const TITLES = { library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows" };
 const PAGE_SIZE = 100;
 
-export function createCatalogView({ api, navigate, replaceRoute, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast, onChanged, play, canManage = () => false, editMetadata, isWatchlisted, toggleWatchlist }) {
+export function createCatalogView({ api, navigate, replaceRoute, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast, onChanged, play, canManage = () => false, editMetadata, isWatchlisted, toggleWatchlist, showsTitle = () => true }) {
   let lifetime = new AbortController();
   let dialog = null;
   let debounce;
@@ -72,7 +72,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
         revision = collection ? undefined : page.revision;
         const batchOffset = offset;
         for (const item of items) {
-          if (!item?.id || seen.has(item.id)) continue;
+          if (!item?.id || seen.has(item.id) || (!collection && !showsTitle(item))) continue;
           seen.add(item.id);
           grid.append(collection ? collectionCard(item, batchOffset) : posterCard(item, seen.size - 1));
         }

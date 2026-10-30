@@ -8,6 +8,7 @@ import * as logic from "./logic.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { createSettings } from "./settings.js";
+import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
 
 const api = createApi();
 const root = document.getElementById("app");
@@ -23,6 +24,13 @@ const state = {
   retryTimer: null,
   watchlistIds: new Set(),
 };
+
+// Settings › General: open on the chosen page when the app starts at Home.
+if (location.pathname === "/" && startPath() !== "/") {
+  history.replaceState(null, "", startPath());
+  state.route = logic.parseRoute(location.pathname, location.search);
+}
+applyAppearance();
 
 const scrollMemory = new logic.ScrollMemory();
 let isRenderingRoute = false;
@@ -86,6 +94,7 @@ const catalog = createCatalogView({ api, navigate, posterCard, collectionCard, e
   },
   replaceRoute: (route) => { state.route = route; history.replaceState(null, "", logic.routePath(route)); },
   onChanged: () => renderRoute({ quiet: true }),
+  showsTitle: (item) => visibleTitles([item], loadGeneral(), { keepWatched: true }).length > 0,
 });
 
 function settingsScreen(route) {
@@ -458,7 +467,7 @@ function shell(content) {
     ["shows", "TV Shows", "/shows"],
     ["movies", "Movies", "/movies"],
     ["collections", "Collections", "/collections"],
-  ];
+  ].filter(([name]) => sidebarShows(name));
   const current = state.route.name;
   const menu = h("div", { class: "profile-menu", hidden: true },
     h("div", { class: "menu-header" }, profilePicture(state.profile.id, state.profile.username), h("span", {}, state.profile.username)),
@@ -562,12 +571,15 @@ function screenFor(route, token) {
 
 async function homeScreen() {
   const home = await api.home();
-  const continuing = home.continueWatching ?? [];
-  const hero = home.recommendation ?? continuing[0] ?? home.recentlyAdded?.[0];
+  const general = loadGeneral();
+  const continuing = visibleTitles(home.continueWatching, general, { keepWatched: true });
+  const favorites = visibleTitles(home.favorites, general);
+  const recent = visibleTitles(home.recentlyAdded, general);
+  const hero = home.recommendation ?? continuing[0] ?? recent[0];
   const sections = [];
   if (continuing.length) sections.push(rail("Continue Watching", continuing.map((item) => continueCard(item)), "landscape"));
-  if (home.favorites?.length) sections.push(rail("Favorites", home.favorites.map((item) => posterCard(item))));
-  if (home.recentlyAdded?.length) sections.push(rail("Recently Added", home.recentlyAdded.map((item) => posterCard(item))));
+  if (favorites.length) sections.push(rail("Favorites", favorites.map((item) => posterCard(item))));
+  if (recent.length) sections.push(rail("Recently Added", recent.map((item) => posterCard(item))));
   if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
   if (!hero && sections.length === 0)
     return emptyState("search", "Nothing Here Yet", "Your library is empty or this profile has no titles. Add a library folder in Aurelia on your Mac.");
@@ -984,7 +996,7 @@ async function watchlistScreen() {
   }
   return h("div", { class: "library page-enter" },
     h("div", { class: "page-header" }, h("h1", {}, "Watchlist"), h("span", { class: "count" }, String(items.length))),
-    h("div", { class: "poster-grid" }, items.map((item, index) => posterCard(item, index))));
+    h("div", { class: "poster-grid" }, visibleTitles(items, loadGeneral(), { keepWatched: true }).map((item, index) => posterCard(item, index))));
 }
 
 async function personScreen(route) {

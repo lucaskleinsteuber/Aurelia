@@ -11,7 +11,7 @@ import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
   playerSubtitle, rateLabel, playbackStartSeconds, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
-  timelineValueText, volumeValueText,
+  timelineValueText, trackForLanguage, volumeValueText,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
@@ -224,7 +224,8 @@ export class Player {
       revision: this.source.progress?.revision ?? 0,
       send: (mediaId, body, options) => this.api.saveProgress(mediaId, body, options),
     });
-    this.resumeAt = playbackStartSeconds(this.startIntent, this.source.progress, this.preferences.automaticResume);
+    this.resumeAt = playbackStartSeconds(this.startIntent, this.source.progress, this.preferences.automaticResume,
+      this.preferences.resumeThresholdSeconds);
     this.scheduleRenewal();
     this.loadNotes();
     void this.updateEpisodeButtons();
@@ -268,7 +269,8 @@ export class Player {
     try {
       for (let attempt = 0; attempt < 3 && !plan; attempt += 1) {
         const candidate = await this.api.conversionPlan(this.item.id, codecSupport((type) => MediaSourceType.isTypeSupported(type), without));
-        const remembered = matchingTrack(candidate.audioTracks, this.trackChoices.audio());
+        const remembered = matchingTrack(candidate.audioTracks, this.trackChoices.audio())
+          ?? (this.preferredAudio == null ? trackForLanguage(candidate.audioTracks, this.preferences.defaultAudioLanguage) : null);
         const chosen = remembered ?? candidate.audioTracks.find((entry) => entry.index === startTrack(candidate, this.preferredAudio)) ?? null;
         if (isTypeSupported(mimeType(candidate, chosen))) {
           plan = candidate;
@@ -717,11 +719,22 @@ export class Player {
     this.restoringTracks = true;
     try {
       if (!this.live) {
-        const audio = matchingTrack(Array.from(this.video.audioTracks ?? []), this.trackChoices.audio());
+        const tracks = Array.from(this.video.audioTracks ?? []);
+        const audio = matchingTrack(tracks, this.trackChoices.audio())
+          ?? (this.trackChoices.audio() ? null : trackForLanguage(tracks, this.preferences.defaultAudioLanguage));
         if (audio) this.chooseNativeAudio(audio, false);
       }
       const preference = this.trackChoices.subtitle();
-      if (!preference.chosen) return;
+      if (!preference.chosen) {
+        // Without a remembered choice for this series, Settings › Playback picks the language.
+        const wanted = this.preferences.defaultSubtitleLanguage;
+        if (wanted === "off") return;
+        const embedded = trackForLanguage(this.embeddedSubtitles.filter((track) => track.supported), wanted);
+        if (embedded) { this.chooseSubtitle(embedded, false); return; }
+        const native = trackForLanguage(Array.from(this.video.textTracks).filter((track) => ["subtitles", "captions"].includes(track.kind)), wanted);
+        if (native) selectSubtitle(Array.from(this.video.textTracks), native);
+        return;
+      }
       const tracks = Array.from(this.video.textTracks);
       if (!preference.track) { selectSubtitle(tracks, null); return; }
       const embedded = matchingTrack(this.embeddedSubtitles.filter((track) => track.supported), preference.track);
@@ -891,6 +904,7 @@ export class Player {
       autoplay: this.preferences.automaticallyPlayNextEpisode,
       stopsAtEnd: this.sleep.mode === "end",
       dismissed: this.upNextDismissed,
+      lead: this.preferences.upNextCountdownSeconds,
     });
     if (!visible) {
       this.upNext.hidden = true;

@@ -678,6 +678,20 @@ img.artwork-missing { opacity: 0; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
 }
 
+/* Settings › General and Playback in this browser */
+body[data-poster-size="compact"] .poster-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(96px, 22vw, 132px), 1fr)); }
+body[data-poster-size="compact"] .rail-track.poster { grid-auto-columns: clamp(96px, 12vw, 136px); }
+body[data-poster-size="large"] .poster-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(132px, 34vw, 212px), 1fr)); }
+body[data-poster-size="large"] .rail-track.poster { grid-auto-columns: clamp(140px, 19vw, 216px); }
+body[data-hero-motion="reduced"] *, body[data-hero-motion="reduced"] *::before, body[data-hero-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important;
+}
+body[data-subtitle-size="small"] video::cue { font-size: 70%; }
+body[data-subtitle-size="large"] video::cue { font-size: 140%; }
+body[data-subtitle-background="transparent"] video::cue { background-color: transparent; text-shadow: 0 0 4px #000, 0 1px 2px #000; }
+body[data-subtitle-background="semiTransparent"] video::cue { background-color: rgba(0, 0, 0, 0.55); }
+body[data-subtitle-background="solid"] video::cue { background-color: #000; }
+
 /* MARK: Settings (the Mac app's pages) */
 
 .settings { max-width: 860px; padding-bottom: 48px; }

@@ -501,8 +501,32 @@ export function nextEpisode(seasons, currentId) { return adjacentEpisode(seasons
 export function previousEpisode(seasons, currentId) { return adjacentEpisode(seasons, currentId, "previous"); }
 
 /** Resume is the only user action allowed to use persisted progress. */
-export function playbackStartSeconds(intent, progress, automaticResume = true) {
-  return intent === "resume" && automaticResume ? resumeSeconds(progress) : 0;
+/**
+ * Where playback starts: the saved position for "resume" (unless automatic resume is off or
+ * the saved position is within the first restartWithinSeconds), otherwise the beginning.
+ */
+export function playbackStartSeconds(intent, progress, automaticResume = true, restartWithinSeconds = 0) {
+  if (intent !== "resume" || !automaticResume) return 0;
+  const seconds = resumeSeconds(progress);
+  return seconds < restartWithinSeconds ? 0 : seconds;
+}
+
+const LANGUAGE_ALIASES = {
+  en: ["en", "eng"], de: ["de", "deu", "ger"], fr: ["fr", "fra", "fre"], es: ["es", "spa"],
+  it: ["it", "ita"], ja: ["ja", "jpn"], nl: ["nl", "nld", "dut"], pt: ["pt", "por"],
+};
+
+/** Whether a track's language ("ger", "de", "de-DE") is the preferred one ("de"). */
+export function languageMatches(code, preferred) {
+  if (!code || !preferred) return false;
+  const base = String(code).toLowerCase().split(/[-_]/)[0];
+  return (LANGUAGE_ALIASES[preferred] ?? [preferred]).includes(base);
+}
+
+/** The first track in the preferred language, preferring full subtitles over forced ones. */
+export function trackForLanguage(tracks, preferred) {
+  const matching = (tracks ?? []).filter((track) => languageMatches(track?.language, preferred));
+  return matching.find((track) => !track.isForced) ?? matching[0] ?? null;
 }
 
 // MARK: Player, as in the Mac app
@@ -525,9 +549,9 @@ export function endsAt(position, duration, rate = 1, now = new Date(), locale = 
 }
 
 /** Whether the "Up Next" card shows: an episode-length title in its last seconds with a next one. */
-export function showsUpNext({ position, duration, hasNext, autoplay, stopsAtEnd, dismissed }) {
+export function showsUpNext({ position, duration, hasNext, autoplay, stopsAtEnd, dismissed, lead = UP_NEXT_LEAD }) {
   if (!hasNext || !autoplay || stopsAtEnd || dismissed || !(duration >= 300) || !(position > 0)) return false;
-  return duration - position <= UP_NEXT_LEAD;
+  return duration - position <= lead;
 }
 
 export function upNextSeconds(position, duration) {
@@ -555,9 +579,8 @@ export const PLAYBACK_DEFAULTS = Object.freeze({
   automaticallyPlayNextEpisode: true,
   keepScreenOn: true,
   nightMode: false,
-  upNextCountdownSeconds: 15,
-  resumeThresholdSeconds: 10,
-  markWatchedThresholdPercent: 90,
+  upNextCountdownSeconds: UP_NEXT_LEAD,
+  resumeThresholdSeconds: 0,
   defaultAudioLanguage: "original",
   defaultSubtitleLanguage: "off",
   subtitleSize: "medium",
@@ -577,11 +600,10 @@ export function normalizePreferences(value) {
     automaticallyPlayNextEpisode: merged.automaticallyPlayNextEpisode !== false,
     keepScreenOn: merged.keepScreenOn !== false,
     nightMode: merged.nightMode === true,
-    upNextCountdownSeconds: Math.round(number(merged.upNextCountdownSeconds, 5, 30, 15)),
-    resumeThresholdSeconds: Math.round(number(merged.resumeThresholdSeconds, 0, 120, 10)),
-    markWatchedThresholdPercent: Math.round(number(merged.markWatchedThresholdPercent, 50, 99, 90)),
-    defaultAudioLanguage: typeof merged.defaultAudioLanguage === "string" ? merged.defaultAudioLanguage : "original",
-    defaultSubtitleLanguage: typeof merged.defaultSubtitleLanguage === "string" ? merged.defaultSubtitleLanguage : "off",
+    upNextCountdownSeconds: Math.round(number(merged.upNextCountdownSeconds, 5, 30, UP_NEXT_LEAD)),
+    resumeThresholdSeconds: Math.round(number(merged.resumeThresholdSeconds, 0, 120, 0)),
+    defaultAudioLanguage: typeof merged.defaultAudioLanguage === "string" && /^(original|[a-z]{2})$/.test(merged.defaultAudioLanguage) ? merged.defaultAudioLanguage : "original",
+    defaultSubtitleLanguage: typeof merged.defaultSubtitleLanguage === "string" && /^(off|[a-z]{2})$/.test(merged.defaultSubtitleLanguage) ? merged.defaultSubtitleLanguage : "off",
     subtitleSize: ["small", "medium", "large"].includes(merged.subtitleSize) ? merged.subtitleSize : "medium",
     subtitleBackground: ["transparent", "semiTransparent", "solid"].includes(merged.subtitleBackground) ? merged.subtitleBackground : "transparent",
   };
@@ -597,7 +619,6 @@ export const GENERAL_DEFAULTS = Object.freeze({
   showWatchlistInSidebar: true,
   showCollectionsInSidebar: true,
   hideOfflineTitles: false,
-  rescanInterval: "1h",
 });
 
 export function normalizeGeneralPreferences(value) {
@@ -612,7 +633,6 @@ export function normalizeGeneralPreferences(value) {
     showWatchlistInSidebar: merged.showWatchlistInSidebar !== false,
     showCollectionsInSidebar: merged.showCollectionsInSidebar !== false,
     hideOfflineTitles: merged.hideOfflineTitles === true,
-    rescanInterval: ["manual", "15m", "1h", "6h", "24h"].includes(merged.rescanInterval) ? merged.rescanInterval : "1h",
   };
 }
 
