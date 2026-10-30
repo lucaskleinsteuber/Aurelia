@@ -884,14 +884,6 @@ struct APIClient: Sendable {
       body: body)
   }
 
-  func healthSetPreferred(preferredId: UUID) async throws {
-    let body = try JSONEncoder().encode(PreferredVersionRequest(preferredMediaId: preferredId))
-    _ = try await perform(
-      path: "/api/v1/library/health/preferred",
-      method: "PUT",
-      body: body)
-  }
-
   func healthRemoveEntry(mediaId: UUID) async throws {
     _ = try await perform(
       path: "/api/v1/library/health/entries/\(mediaId.uuidString.lowercased())",

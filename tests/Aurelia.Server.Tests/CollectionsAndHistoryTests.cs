@@ -356,16 +356,38 @@ public sealed class CollectionsAndHistoryTests
             var group = Assert.Single(duplicates);
             Assert.Equal("Same Movie", group.Title);
             Assert.Equal(2, group.Items.Count);
+            Assert.All(group.Items, item => Assert.DoesNotContain(Path.DirectorySeparatorChar, item.FileName));
 
-            // Merge item2 into item1
+            // A copy whose file still exists cannot be merged or removed here: the next scan would bring it back.
+            using var refusedMerge = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/library/health/merge", owner.Token,
+                new MergeMediaRequest(item2.Id, item1.Id));
+            using var refusedMergeResponse = await ApiTestClient.SendAsync(client, refusedMerge);
+            Assert.Equal(HttpStatusCode.Conflict, refusedMergeResponse.StatusCode);
+            using var refusedRemoval = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/library/health/entries/{item2.Id}", owner.Token);
+            using var refusedRemovalResponse = await ApiTestClient.SendAsync(client, refusedRemoval);
+            Assert.Equal(HttpStatusCode.Conflict, refusedRemovalResponse.StatusCode);
+            Assert.Empty(await SendAsync<List<OfflineTitleSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/library/health/offline?days=0"));
+
+            // Once its file is missing, the copy's favorite moves to the remaining copy.
+            await SendAsync<object>(client, owner.Token, HttpMethod.Put, $"/api/v1/media/{item2.Id}/favorite", new SetFavoriteRequest(true));
+            await db.MediaItems.Where(item => item.Id == item2.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(item => item.Availability, MediaAvailability.Missing));
+            var offline = await SendAsync<List<OfflineTitleSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/library/health/offline?days=0");
+            Assert.Equal(item2.Id, Assert.Single(offline).Id);
+            Assert.Equal("Duplicate 4K.mkv", offline[0].FileName);
+
             using var mergeReq = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/library/health/merge", owner.Token,
                 new MergeMediaRequest(item2.Id, item1.Id));
             using var mergeResp = await ApiTestClient.SendAsync(client, mergeReq);
             Assert.Equal(HttpStatusCode.NoContent, mergeResp.StatusCode);
 
-            // Verify item2 is removed from DB, item1 remains
             var remaining = await SendAsync<List<DuplicateGroup>>(client, owner.Token, HttpMethod.Get, "/api/v1/library/health/duplicates");
             Assert.Empty(remaining);
+            using var verify = factory.Services.CreateScope();
+            var verifyDb = verify.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            Assert.False(await verifyDb.MediaItems.AnyAsync(item => item.Id == item2.Id));
+            Assert.True(await verifyDb.UserFavorites.AnyAsync(favorite => favorite.MediaItemId == item1.Id));
+            Assert.True(await verifyDb.MediaExclusions.AnyAsync(), "The removed copy stays out of future scans.");
 
             // INVARIANT CHECK: Media files on disk MUST NOT be deleted, renamed, or modified!
             Assert.True(File.Exists(file1), "File 1 must still exist on disk!");

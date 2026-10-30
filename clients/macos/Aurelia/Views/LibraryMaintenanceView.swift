@@ -24,6 +24,7 @@ struct LibraryHealthView: View {
   @State private var offlineDays: Int = 30
   @State private var isLoadingOffline = false
   @State private var offlineError: String?
+  @State private var offlineRemoval: OfflineTitleSummary?
 
   // Unmatched State
   @State private var unmatchedTitles: [UnmatchedTitleSummary] = []
@@ -87,18 +88,18 @@ struct LibraryHealthView: View {
       await loadCurrentTab()
     }
     .confirmationDialog(
-      "Merge duplicates?",
+      "Move watch data to the available copy?",
       isPresented: $showingMergeConfirmation,
       titleVisibility: .visible
     ) {
-      Button("Merge into Preferred Version", role: .destructive) {
-        if let s = mergeSource, let t = mergeTarget {
-          Task { await executeMerge(source: s, target: t) }
+      Button("Move and Remove Missing Copy", role: .destructive) {
+        if let source = mergeSource, let target = mergeTarget {
+          Task { await executeMerge(source: source, target: target) }
         }
       }
     } message: {
       Text(
-        "Viewing history, favorites, progress and collection memberships will be combined into the preferred version. The duplicate entry will be removed from Aurelia. Media files on disk are NEVER touched or deleted."
+        "Favorites, progress, viewing history and collection memberships of every profile move to “\(mergeTarget?.fileName ?? "the available copy")”. The missing copy is then removed from the library. Files on disk are never touched."
       )
     }
     .sheet(item: $matchingTarget) { target in
@@ -118,7 +119,7 @@ struct LibraryHealthView: View {
       Text("Duplicate Titles")
         .font(.headline)
       Text(
-        "Titles with the same movie or episode match. You can designate a preferred version or merge watch records."
+        "Movies and episodes that exist as several files. Aurelia never deletes files: remove an unwanted file yourself, or move the watch data of a missing copy to the one you still have."
       )
       .font(.caption)
       .foregroundStyle(.secondary)
@@ -152,54 +153,33 @@ struct LibraryHealthView: View {
             VStack(spacing: 8) {
               ForEach(group.items) { item in
                 HStack(spacing: 12) {
-                  Image(systemName: item.isPreferred ? "star.fill" : "film")
-                    .foregroundStyle(item.isPreferred ? .yellow : .secondary)
+                  Image(systemName: item.isAvailable ? "film" : "exclamationmark.triangle")
+                    .foregroundStyle(item.isAvailable ? Color.secondary : Color.orange)
 
                   VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                      Text(item.sourcePath.components(separatedBy: "/").last ?? item.title)
-                        .font(.body.weight(.medium))
-                        .lineLimit(1)
-                      if item.isPreferred {
-                        Text("Preferred")
-                          .font(.caption2.weight(.bold))
-                          .padding(.horizontal, 6)
-                          .padding(.vertical, 2)
-                          .background(Color.yellow.opacity(0.2), in: Capsule())
-                          .foregroundStyle(.yellow)
-                      }
-                    }
-
+                    Text(item.fileName)
+                      .font(.body.weight(.medium))
+                      .lineLimit(1)
                     HStack(spacing: 10) {
-                      if let res = item.videoResolution { Text(res) }
-                      if let codec = item.videoCodec { Text(codec) }
-                      if let audio = item.audioCodec { Text(audio) }
-                      Text(
-                        ByteCountFormatter.string(fromByteCount: item.fileSize, countStyle: .file))
-                      Text(item.availability)
+                      if let size = item.fileSize {
+                        Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                      }
+                      Text(item.isAvailable ? "Available" : "File missing")
                     }
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(item.isAvailable ? Color.secondary : Color.orange)
                   }
 
                   Spacer()
 
-                  if !item.isPreferred {
-                    Button("Set Preferred") {
-                      Task { await setPreferred(item) }
+                  if !item.isAvailable, let available = group.items.first(where: \.isAvailable) {
+                    Button("Move Watch Data…") {
+                      mergeSource = item
+                      mergeTarget = available
+                      showingMergeConfirmation = true
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-
-                    if let preferred = group.items.first(where: { $0.isPreferred }) {
-                      Button("Merge into Preferred") {
-                        mergeSource = item
-                        mergeTarget = preferred
-                        showingMergeConfirmation = true
-                      }
-                      .buttonStyle(.borderedProminent)
-                      .controlSize(.small)
-                    }
                   }
                 }
                 .padding(10)
@@ -228,7 +208,7 @@ struct LibraryHealthView: View {
           Text("Missing & Offline Titles")
             .font(.headline)
           Text(
-            "Items whose source file is unreachable on disk. You can remove missing entries from the library catalog."
+            "Titles whose file has not been found for a while. Removing one deletes its favorites, progress and history for every profile; the file is never touched."
           )
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -258,13 +238,14 @@ struct LibraryHealthView: View {
       } else {
         ForEach(offlineTitles) { title in
           HStack(spacing: 12) {
-            AuthenticatedArtwork(artwork: title.poster, symbol: "exclamationmark.triangle")
-              .frame(width: 44, height: 60)
-              .clipShape(RoundedRectangle(cornerRadius: 4))
+            Image(systemName: "exclamationmark.triangle")
+              .font(.title2)
+              .foregroundStyle(.orange)
+              .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 4) {
               Text(title.title).font(.body.weight(.medium))
-              Text(title.sourcePath).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+              Text(title.fileName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
               HStack(spacing: 8) {
                 Text("Library: \(title.libraryName)")
                 Text("·")
@@ -276,8 +257,8 @@ struct LibraryHealthView: View {
 
             Spacer()
 
-            Button("Remove Entry", role: .destructive) {
-              Task { await removeOfflineEntry(title) }
+            Button("Remove…", role: .destructive) {
+              offlineRemoval = title
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -290,6 +271,20 @@ struct LibraryHealthView: View {
       if let offlineError {
         Text(offlineError).foregroundStyle(.orange).font(.caption)
       }
+    }
+    .confirmationDialog(
+      "Remove “\(offlineRemoval?.title ?? "")” from the library?",
+      isPresented: Binding(
+        get: { offlineRemoval != nil }, set: { if !$0 { offlineRemoval = nil } }),
+      titleVisibility: .visible
+    ) {
+      Button("Remove from Library", role: .destructive) {
+        if let title = offlineRemoval { Task { await removeOfflineEntry(title) } }
+      }
+    } message: {
+      Text(
+        "Its details, favorites, progress, history and collection memberships are deleted for every profile. If the file comes back, it stays excluded until you reimport it under Excluded Items."
+      )
     }
   }
 
@@ -324,12 +319,10 @@ struct LibraryHealthView: View {
 
             VStack(alignment: .leading, spacing: 4) {
               Text(title.title).font(.body.weight(.medium))
-              Text(title.sourcePath).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-              if let detected = title.detectedTitle {
-                Text("Detected: \(detected) \(title.detectedYear.map { "(\($0))" } ?? "")")
-                  .font(.caption2)
-                  .foregroundStyle(.secondary)
-              }
+              Text(title.fileName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+              Text(title.issueReason)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -491,16 +484,6 @@ struct LibraryHealthView: View {
       guard model.isCurrentAdministration(generation), self.library == library else { return }
       model.handleAdministrationFailure(error, generation: generation)
       self.exclusionError = error.localizedDescription
-    }
-  }
-
-  private func setPreferred(_ item: DuplicateItemSummary) async {
-    guard let profile = model.profile else { return }
-    do {
-      try await APIClient(profile: profile).healthSetPreferred(preferredId: item.id)
-      await loadDuplicates()
-    } catch {
-      duplicateError = error.localizedDescription
     }
   }
 

@@ -289,10 +289,6 @@ test("collections v2, subtitles, history, statistics and health API endpoints us
   assert.equal(calls.at(-1).path, "/api/v1/library/health/merge");
   assert.equal(calls.at(-1).method, "POST");
 
-  await api.setPreferredHealthVersion("pref-1");
-  assert.equal(calls.at(-1).path, "/api/v1/library/health/preferred");
-  assert.equal(calls.at(-1).method, "PUT");
-
   await api.removeHealthEntry("med-1");
   assert.equal(calls.at(-1).path, "/api/v1/library/health/entries/med-1");
   assert.equal(calls.at(-1).method, "DELETE");

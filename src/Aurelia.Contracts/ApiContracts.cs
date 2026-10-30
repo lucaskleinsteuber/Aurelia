@@ -688,46 +688,45 @@ public sealed record YearInReview(
     string? BusiestDay,
     double? BusiestDayHours);
 
+/// <summary>One file of a title that exists several times; the file name only, never the full path.</summary>
 public sealed record DuplicateItemSummary(
-    Guid MediaId,
+    Guid Id,
     string Title,
+    MediaKind Kind,
     int? Year,
-    string RelativePath,
+    string FileName,
     long? FileSize,
-    string? Resolution,
-    string? VideoCodec,
-    string? AudioCodec,
-    long? DurationMilliseconds,
-    DateTimeOffset CreatedAt);
+    MediaAvailability Availability);
 
 public sealed record DuplicateGroup(
-    string GroupKey,
+    string Key,
     string Title,
+    MediaKind Kind,
     int? Year,
     IReadOnlyList<DuplicateItemSummary> Items);
 
 public sealed record OfflineTitleSummary(
-    Guid MediaId,
+    Guid Id,
     string Title,
-    int? Year,
     MediaKind Kind,
-    string RelativePath,
+    int? Year,
+    string LibraryName,
+    string FileName,
     DateTimeOffset LastSeenAt,
     int DaysOffline);
 
 public sealed record UnmatchedTitleSummary(
-    Guid MediaId,
-    string DetectedTitle,
-    string SourcePath,
+    Guid Id,
+    string Title,
     MediaKind Kind,
+    int? Year,
+    string FileName,
     string IssueReason);
 
+/// <summary>Moves personal data from a copy whose file is missing to another copy, then removes the missing one.</summary>
 public sealed record MergeMediaRequest(
     Guid SourceMediaId,
     Guid TargetMediaId);
-
-public sealed record PreferredVersionRequest(
-    Guid PreferredMediaId);
 
 public sealed record HomeResponse(
     CatalogItemSummary? Recommendation,

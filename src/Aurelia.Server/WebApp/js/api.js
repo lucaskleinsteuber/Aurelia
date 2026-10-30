@@ -102,7 +102,6 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     healthOffline: (parameters = { days: 30, offset: 0, limit: 50 }, options = {}) => request(`/api/v1/library/health/offline?${new URLSearchParams(parameters)}`, options),
     healthUnmatched: (parameters = { offset: 0, limit: 50 }, options = {}) => request(`/api/v1/library/health/unmatched?${new URLSearchParams(parameters)}`, options),
     mergeHealthDuplicates: (sourceMediaId, targetMediaId) => request("/api/v1/library/health/merge", { method: "POST", body: { sourceMediaId, targetMediaId } }),
-    setPreferredHealthVersion: (preferredMediaId) => request("/api/v1/library/health/preferred", { method: "PUT", body: { preferredMediaId } }),
     removeHealthEntry: (mediaId) => request(`/api/v1/library/health/entries/${id(mediaId)}`, { method: "DELETE" }),
     activePlayers: (currentDeviceId) => request(`/api/v1/devices/players${currentDeviceId ? `?currentDeviceId=${encodeURIComponent(currentDeviceId)}` : ""}`),
     playerStatus: (deviceId) => request(`/api/v1/devices/players/${id(deviceId)}/status`),

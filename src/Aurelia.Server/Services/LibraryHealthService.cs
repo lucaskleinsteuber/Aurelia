@@ -4,273 +4,219 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Aurelia.Server.Services;
 
-public sealed class LibraryHealthService(AureliaDbContext database)
+/// <summary>
+/// Library Health for administrators: duplicate files, titles whose file went missing, and titles
+/// without usable metadata. Every action changes only the catalog, never a file on disk. A title
+/// whose file still exists cannot be removed or merged away here, because the next scan would
+/// import it again; that stays the explicit "Remove from Library" action.
+/// </summary>
+public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutationService mutations, TimeProvider clock)
 {
-    public async Task<IReadOnlyList<DuplicateGroup>> GetDuplicatesAsync(
-        int offset,
-        int limit,
-        CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<DuplicateGroup>> GetDuplicatesAsync(int offset, int limit, CancellationToken cancellationToken)
     {
         offset = Math.Max(0, offset);
         limit = Math.Clamp(limit, 1, 50);
 
-        // Group by ProviderMediaId (non-empty TMDB IDs)
-        var moviesAndEpisodes = await database.MediaItems.AsNoTracking()
-            .Where(m => m.Kind == MediaKind.Movie || m.Kind == MediaKind.Episode)
-            .Include(m => m.Metadata)
-            .Include(m => m.LibraryRoot)
+        // Movies match by provider identity (or, without one, by title and year); episodes only
+        // when the same series has several files for the same season and episode.
+        var movies = await database.MediaItems.AsNoTracking()
+            .Where(item => item.Kind == MediaKind.Movie)
+            .Include(item => item.Metadata)
             .ToListAsync(cancellationToken);
+        var movieGroups = movies
+            .GroupBy(item => item.Metadata is { ProviderMediaId: { Length: > 0 } providerId } metadata
+                ? $"movie:{metadata.Provider}:{providerId}"
+                : $"title:{NormalizeTitle(MetadataPresentation.ToSummary(item).Title)}:{MetadataPresentation.ToSummary(item).Year}")
+            .Where(group => group.Count() > 1);
 
-        var groups = new List<DuplicateGroup>();
+        var episodeKeys = await database.MediaItems.AsNoTracking()
+            .Where(item => item.Kind == MediaKind.Episode && item.ParentId != null && item.SeasonNumber != null && item.EpisodeNumber != null)
+            .GroupBy(item => new { item.ParentId, item.SeasonNumber, item.EpisodeNumber })
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToListAsync(cancellationToken);
+        var parents = episodeKeys.Select(key => key.ParentId).Distinct().ToList();
+        var episodes = episodeKeys.Count == 0 ? [] : await database.MediaItems.AsNoTracking()
+            .Where(item => item.Kind == MediaKind.Episode && parents.Contains(item.ParentId))
+            .Include(item => item.Metadata)
+            .Include(item => item.Parent).ThenInclude(parent => parent!.Metadata)
+            .ToListAsync(cancellationToken);
+        var episodeGroups = episodes
+            .GroupBy(item => $"episode:{item.ParentId}:{item.SeasonNumber}:{item.EpisodeNumber}")
+            .Where(group => group.Count() > 1);
 
-        // 1. Group by TMDB ID
-        var tmdbGroups = moviesAndEpisodes
-            .Where(m => !string.IsNullOrEmpty(m.Metadata?.ProviderMediaId))
-            .GroupBy(m => $"{m.Metadata!.Provider}:{m.Metadata.ProviderMediaId}")
-            .Where(g => g.Count() > 1);
-
-        var seenMediaIds = new HashSet<Guid>();
-
-        foreach (var group in tmdbGroups)
-        {
-            var first = group.First();
-            var title = MetadataPresentation.ToSummary(first).Title;
-            var year = MetadataPresentation.ToSummary(first).Year;
-            var items = group.Select(ToDuplicateItem).ToList();
-            foreach (var item in items) seenMediaIds.Add(item.MediaId);
-            groups.Add(new DuplicateGroup(group.Key, title, year, items));
-        }
-
-        // 2. Group by normalized title and year (for items not already grouped)
-        var titleGroups = moviesAndEpisodes
-            .Where(m => !seenMediaIds.Contains(m.Id))
-            .GroupBy(m => $"{NormalizeTitle(MetadataPresentation.ToSummary(m).Title)}:{MetadataPresentation.ToSummary(m).Year}:{m.Kind}")
-            .Where(g => g.Count() > 1);
-
-        foreach (var group in titleGroups)
-        {
-            var first = group.First();
-            var title = MetadataPresentation.ToSummary(first).Title;
-            var year = MetadataPresentation.ToSummary(first).Year;
-            var items = group.Select(ToDuplicateItem).ToList();
-            groups.Add(new DuplicateGroup($"title:{group.Key}", title, year, items));
-        }
-
-        return groups.Skip(offset).Take(limit).ToList();
+        return movieGroups.Concat(episodeGroups)
+            .Select(group => ToGroup(group.Key, group.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id).ToList()))
+            .OrderBy(group => group.Title, StringComparer.OrdinalIgnoreCase).ThenBy(group => group.Key, StringComparer.Ordinal)
+            .Skip(offset).Take(limit)
+            .ToList();
     }
 
-    public async Task<IReadOnlyList<OfflineTitleSummary>> GetOfflineAsync(
-        int days,
-        int offset,
-        int limit,
-        CancellationToken cancellationToken)
+    /// <summary>Titles whose file has been missing for at least the given number of days.</summary>
+    public async Task<IReadOnlyList<OfflineTitleSummary>> GetOfflineAsync(int days, int offset, int limit, CancellationToken cancellationToken)
     {
         offset = Math.Max(0, offset);
         limit = Math.Clamp(limit, 1, 100);
-        days = Math.Max(0, days);
-
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-days);
+        var now = clock.GetUtcNow();
+        var cutoff = now.AddDays(-Math.Max(0, days));
 
         var items = await database.MediaItems.AsNoTracking()
-            .Where(m => m.Availability == MediaAvailability.Missing || m.Availability == MediaAvailability.Error || m.UpdatedAt <= cutoff)
-            .Include(m => m.Metadata)
-            .OrderBy(m => m.UpdatedAt)
-            .Skip(offset)
-            .Take(limit)
+            .Where(item => item.Kind != MediaKind.Series && item.Availability != MediaAvailability.Available)
+            .Select(item => new
+            {
+                Item = item,
+                LibraryName = item.LibraryRoot.Name,
+                // The last scan that still saw the file; without one, when the entry last changed.
+                LastSeen = database.LibraryScans.Where(scan => scan.Id == item.LastSeenScanId)
+                    .Select(scan => scan.StartedAt).FirstOrDefault() ?? item.UpdatedAt,
+            })
             .ToListAsync(cancellationToken);
 
-        return items.Select(m =>
-        {
-            var summary = MetadataPresentation.ToSummary(m);
-            var daysOffline = (int)Math.Max(0, (DateTimeOffset.UtcNow - m.UpdatedAt).TotalDays);
-            var relPath = Path.GetFileName(m.SourcePath);
-            return new OfflineTitleSummary(
-                m.Id,
-                summary.Title,
-                summary.Year,
-                m.Kind,
-                relPath,
-                m.UpdatedAt,
-                daysOffline);
-        }).ToList();
+        return items.Where(value => value.LastSeen <= cutoff)
+            .OrderBy(value => value.LastSeen).ThenBy(value => value.Item.Id)
+            .Skip(offset).Take(limit)
+            .Select(value =>
+            {
+                var summary = MetadataPresentation.ToSummary(value.Item);
+                return new OfflineTitleSummary(value.Item.Id, summary.Title, value.Item.Kind, summary.Year, value.LibraryName,
+                    Path.GetFileName(value.Item.SourcePath), value.LastSeen, (int)Math.Max(0, (now - value.LastSeen).TotalDays));
+            })
+            .ToList();
     }
 
-    public async Task<IReadOnlyList<UnmatchedTitleSummary>> GetUnmatchedAsync(
-        int offset,
-        int limit,
-        CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<UnmatchedTitleSummary>> GetUnmatchedAsync(int offset, int limit, CancellationToken cancellationToken)
     {
         offset = Math.Max(0, offset);
         limit = Math.Clamp(limit, 1, 100);
 
+        // Episodes take their details from the series, so only movies and series need a match.
         var items = await database.MediaItems.AsNoTracking()
-            .Where(m => m.Metadata == null
-                || m.Metadata.ReviewState == MetadataReviewState.NeedsReview
-                || (string.IsNullOrEmpty(m.Metadata.ProviderOverview) && string.IsNullOrEmpty(m.Metadata.ManualOverview)))
-            .Include(m => m.Metadata)
-            .OrderBy(m => m.DetectedTitle)
+            .Where(item => (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series)
+                && (item.Metadata == null
+                    || item.Metadata.ReviewState == MetadataReviewState.NeedsReview
+                    || (string.IsNullOrEmpty(item.Metadata.ProviderOverview) && string.IsNullOrEmpty(item.Metadata.ManualOverview))))
+            .Include(item => item.Metadata)
+            .OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id)
             .Skip(offset)
             .Take(limit)
             .ToListAsync(cancellationToken);
 
-        return items.Select(m =>
-        {
-            string reason = m.Metadata switch
+        return items.Select(item => new UnmatchedTitleSummary(
+            item.Id,
+            MetadataPresentation.ToSummary(item).Title,
+            item.Kind,
+            item.Year,
+            Path.GetFileName(item.SourcePath),
+            item.Metadata switch
             {
                 null => "No metadata found",
-                { ReviewState: MetadataReviewState.NeedsReview } => "Pending review",
-                _ => "Missing overview or artwork"
-            };
-
-            return new UnmatchedTitleSummary(
-                m.Id,
-                m.DetectedTitle,
-                m.SourcePath,
-                m.Kind,
-                reason);
-        }).ToList();
+                { ReviewState: MetadataReviewState.NeedsReview } => "Match needs review",
+                _ => "No overview",
+            })).ToList();
     }
 
-    public async Task MergeAsync(
-        Guid sourceId,
-        Guid targetId,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Moves every profile's favorites, progress, history and collection membership from a copy
+    /// whose file is missing to another copy of the same movie or episode, then removes the missing
+    /// entry the same way "Remove from Library" does.
+    /// </summary>
+    public async Task MergeAsync(Guid userId, Guid sourceId, Guid targetId, CancellationToken cancellationToken)
     {
-        if (sourceId == targetId) return;
+        if (sourceId == targetId)
+            throw new MetadataException("invalid_merge", "Choose two different copies.", StatusCodes.Status400BadRequest);
 
         var source = await database.MediaItems
-            .Include(m => m.Favorites)
-            .Include(m => m.PlaybackProgress)
-            .Include(m => m.CollectionMemberships)
-            .Include(m => m.ContinueWatchingStates)
-            .SingleOrDefaultAsync(m => m.Id == sourceId, cancellationToken)
-            ?? throw new MetadataException("source_not_found", "Source item not found.", StatusCodes.Status404NotFound);
-
+            .Include(item => item.Favorites)
+            .Include(item => item.PlaybackProgress)
+            .Include(item => item.CollectionMemberships)
+            .SingleOrDefaultAsync(item => item.Id == sourceId, cancellationToken)
+            ?? throw new MetadataException("source_not_found", "The copy to merge was not found.", StatusCodes.Status404NotFound);
         var target = await database.MediaItems
-            .Include(m => m.Favorites)
-            .Include(m => m.PlaybackProgress)
-            .Include(m => m.CollectionMemberships)
-            .SingleOrDefaultAsync(m => m.Id == targetId, cancellationToken)
-            ?? throw new MetadataException("target_not_found", "Target item not found.", StatusCodes.Status404NotFound);
+            .Include(item => item.Favorites)
+            .Include(item => item.PlaybackProgress)
+            .Include(item => item.CollectionMemberships)
+            .SingleOrDefaultAsync(item => item.Id == targetId, cancellationToken)
+            ?? throw new MetadataException("target_not_found", "The copy to keep was not found.", StatusCodes.Status404NotFound);
 
-        // Move favorites
-        foreach (var fav in source.Favorites)
-        {
-            if (!target.Favorites.Any(f => f.UserId == fav.UserId))
-            {
-                target.Favorites.Add(new UserFavorite
-                {
-                    UserId = fav.UserId,
-                    MediaItemId = target.Id,
-                    CreatedAt = fav.CreatedAt
-                });
-            }
-        }
+        if (source.Kind != target.Kind || source.Kind is not (MediaKind.Movie or MediaKind.Episode))
+            throw new MetadataException("invalid_merge", "Only two copies of the same movie or episode can be merged.", StatusCodes.Status400BadRequest);
+        if (source.Availability == MediaAvailability.Available)
+            throw new MetadataException("source_available",
+                "This copy's file still exists, so the next scan would add it again. Only a missing copy can be merged into another one.",
+                StatusCodes.Status409Conflict);
 
-        // Move progress if target has none or source is further ahead
-        foreach (var prog in source.PlaybackProgress)
+        var now = clock.GetUtcNow();
+        foreach (var favorite in source.Favorites.Where(favorite => target.Favorites.All(existing => existing.UserId != favorite.UserId)))
+            database.UserFavorites.Add(new UserFavorite { Id = Guid.NewGuid(), UserId = favorite.UserId, MediaItemId = target.Id, CreatedAt = favorite.CreatedAt });
+
+        foreach (var progress in source.PlaybackProgress)
         {
-            var targetProg = target.PlaybackProgress.FirstOrDefault(p => p.UserId == prog.UserId);
-            if (targetProg == null)
+            var existing = target.PlaybackProgress.FirstOrDefault(value => value.UserId == progress.UserId);
+            if (existing is null)
             {
-                target.PlaybackProgress.Add(new PlaybackProgress
+                database.PlaybackProgress.Add(new PlaybackProgress
                 {
                     Id = Guid.NewGuid(),
-                    UserId = prog.UserId,
+                    UserId = progress.UserId,
+                    User = null!,
                     MediaItemId = target.Id,
                     MediaItem = target,
-                    User = null!,
-                    PositionMilliseconds = prog.PositionMilliseconds,
-                    DurationMilliseconds = prog.DurationMilliseconds,
-                    IsCompleted = prog.IsCompleted,
-                    LastPlayedAt = prog.LastPlayedAt,
-                    UpdatedAt = prog.UpdatedAt
+                    PositionMilliseconds = progress.PositionMilliseconds,
+                    DurationMilliseconds = progress.DurationMilliseconds,
+                    IsCompleted = progress.IsCompleted,
+                    LastPlayedAt = progress.LastPlayedAt,
+                    UpdatedAt = now,
+                    Revision = 1,
                 });
             }
-            else if (!targetProg.IsCompleted && prog.IsCompleted)
+            else if (progress.IsCompleted && !existing.IsCompleted)
             {
-                targetProg.IsCompleted = true;
-                targetProg.PositionMilliseconds = 0;
-                targetProg.UpdatedAt = DateTimeOffset.UtcNow;
+                existing.IsCompleted = true;
+                existing.PositionMilliseconds = 0;
+                existing.UpdatedAt = now;
+                existing.Revision = checked(existing.Revision + 1);
             }
         }
 
-        // Reassign watch events
-        var watchEvents = await database.WatchEvents
-            .Where(e => e.MediaItemId == sourceId)
-            .ToListAsync(cancellationToken);
-        foreach (var ev in watchEvents)
-        {
-            ev.MediaItemId = targetId;
-        }
+        foreach (var member in source.CollectionMemberships.Where(member => target.CollectionMemberships.All(existing => existing.CollectionId != member.CollectionId)))
+            database.MediaCollectionMembers.Add(new MediaCollectionMember { CollectionId = member.CollectionId, MediaItemId = target.Id, SortOrder = member.SortOrder });
 
-        // Reassign collection memberships
-        foreach (var member in source.CollectionMemberships)
-        {
-            if (!target.CollectionMemberships.Any(m => m.CollectionId == member.CollectionId))
-            {
-                target.CollectionMemberships.Add(new MediaCollectionMember
-                {
-                    CollectionId = member.CollectionId,
-                    MediaItemId = target.Id,
-                    SortOrder = member.SortOrder
-                });
-            }
-        }
-
-        // Remove source MediaItem (files on disk are NEVER touched)
-        database.MediaItems.Remove(source);
+        await database.WatchEvents.Where(watch => watch.MediaItemId == sourceId)
+            .ExecuteUpdateAsync(update => update.SetProperty(watch => watch.MediaItemId, targetId), cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
+        await mutations.RemoveAsync(userId, sourceId, cancellationToken);
     }
 
-    public async Task SetPreferredVersionAsync(
-        Guid preferredId,
-        CancellationToken cancellationToken)
+    /// <summary>Removes a title whose file is missing; a title with its file present needs "Remove from Library".</summary>
+    public async Task RemoveEntryAsync(Guid userId, Guid mediaId, CancellationToken cancellationToken)
     {
-        var item = await database.MediaItems
-            .SingleOrDefaultAsync(m => m.Id == preferredId, cancellationToken)
-            ?? throw new MetadataException("item_not_found", "Media item not found.", StatusCodes.Status404NotFound);
-
-        // Preference can be signified by updating UpdatedAt timestamp so it ranks first in duplicate listings
-        item.UpdatedAt = DateTimeOffset.UtcNow;
-        await database.SaveChangesAsync(cancellationToken);
+        var availability = await database.MediaItems.Where(item => item.Id == mediaId)
+            .Select(item => (MediaAvailability?)item.Availability).SingleOrDefaultAsync(cancellationToken)
+            ?? throw new MetadataException("item_not_found", "The title was not found.", StatusCodes.Status404NotFound);
+        if (availability == MediaAvailability.Available)
+            throw new MetadataException("source_available",
+                "This title's file is available. Use Remove from Library on the title to remove it and keep it out of future scans.",
+                StatusCodes.Status409Conflict);
+        await mutations.RemoveAsync(userId, mediaId, cancellationToken);
     }
 
-    public async Task RemoveEntryAsync(
-        Guid mediaId,
-        CancellationToken cancellationToken)
+    private static DuplicateGroup ToGroup(string key, List<MediaItem> items)
     {
-        var item = await database.MediaItems
-            .SingleOrDefaultAsync(m => m.Id == mediaId, cancellationToken)
-            ?? throw new MetadataException("item_not_found", "Media item not found.", StatusCodes.Status404NotFound);
-
-        // Delete from database only - NEVER delete media files from disk
-        database.MediaItems.Remove(item);
-        await database.SaveChangesAsync(cancellationToken);
-    }
-
-    private static DuplicateItemSummary ToDuplicateItem(MediaItem item)
-    {
-        var summary = MetadataPresentation.ToSummary(item);
-        var relPath = Path.GetFileName(item.SourcePath);
-        return new DuplicateItemSummary(
+        var first = items[0];
+        var summary = MetadataPresentation.ToSummary(first);
+        var title = first.Kind == MediaKind.Episode && first.Parent is { } parent
+            ? $"{MetadataPresentation.ToSummary(parent).Title} · S{first.SeasonNumber}E{first.EpisodeNumber}"
+            : summary.Title;
+        return new DuplicateGroup(key, title, first.Kind, summary.Year, items.Select(item => new DuplicateItemSummary(
             item.Id,
-            summary.Title,
-            summary.Year,
-            relPath,
+            MetadataPresentation.ToSummary(item).Title,
+            item.Kind,
+            item.Year,
+            Path.GetFileName(item.SourcePath),
             item.FileSize,
-            null,
-            null,
-            null,
-            null,
-            item.CreatedAt);
+            item.Availability)).ToList());
     }
 
-    private static string NormalizeTitle(string title)
-    {
-        return new string(title
-            .ToLowerInvariant()
-            .Where(char.IsLetterOrDigit)
-            .ToArray());
-    }
+    private static string NormalizeTitle(string title) =>
+        new(title.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 }

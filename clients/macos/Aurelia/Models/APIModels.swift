@@ -732,30 +732,27 @@ struct UserStatistics: Codable, Equatable, Sendable {
   var busiestDayOfWeek: String { busiestWeekday ?? "—" }
 }
 
+/// One file of a title that exists several times. Only the file name travels, never the path.
 struct DuplicateItemSummary: Codable, Identifiable, Equatable, Sendable {
   let id: UUID
   let title: String
   let kind: String
   let year: Int?
-  let sourcePath: String
-  let fileSize: Int64
-  let videoCodec: String?
-  let videoResolution: String?
-  let audioCodec: String?
-  let audioChannels: Int?
-  let durationSeconds: Double
+  let fileName: String
+  let fileSize: Int64?
   let availability: String
-  let isPreferred: Bool
+
+  var isAvailable: Bool { availability == "available" }
 }
 
 struct DuplicateGroup: Codable, Identifiable, Equatable, Sendable {
-  var id: String { key }
   let key: String
   let title: String
   let kind: String
   let year: Int?
-  let tmdbId: String?
   let items: [DuplicateItemSummary]
+
+  var id: String { key }
 }
 
 struct OfflineTitleSummary: Codable, Identifiable, Equatable, Sendable {
@@ -764,12 +761,11 @@ struct OfflineTitleSummary: Codable, Identifiable, Equatable, Sendable {
   let kind: String
   let year: Int?
   let libraryName: String
-  let sourcePath: String
-  let lastSeenAt: String?
+  let fileName: String
+  let lastSeenAt: String
   let daysOffline: Int
-  let poster: ArtworkSummary?
 
-  var lastSeenDate: Date? { lastSeenAt.flatMap(ServerDate.parse) }
+  var lastSeenDate: Date? { ServerDate.parse(lastSeenAt) }
 }
 
 struct UnmatchedTitleSummary: Codable, Identifiable, Equatable, Sendable {
@@ -777,19 +773,13 @@ struct UnmatchedTitleSummary: Codable, Identifiable, Equatable, Sendable {
   let title: String
   let kind: String
   let year: Int?
-  let sourcePath: String
-  let detectedTitle: String?
-  let detectedYear: Int?
-  let poster: ArtworkSummary?
+  let fileName: String
+  let issueReason: String
 }
 
 struct MergeMediaRequest: Encodable, Sendable {
   let sourceMediaId: UUID
   let targetMediaId: UUID
-}
-
-struct PreferredVersionRequest: Encodable, Sendable {
-  let preferredMediaId: UUID
 }
 
 struct HomeResponse: Codable, Equatable, Sendable {

@@ -727,7 +727,7 @@ export function createSettings(app) {
   function openLibraryHealthDialog(refresh) {
     const dialog = h("div", { class: "modal-backdrop" });
     let activeTab = "duplicates";
-    let offlineDays = 30;
+    let offlineDays = 0;
 
     const tabContainer = h("div", { class: "health-tabs" });
     const contentContainer = h("div", { class: "health-tab-content", style: { minHeight: "260px" } });
@@ -762,50 +762,37 @@ export function createSettings(app) {
 
       if (activeTab === "duplicates") {
         try {
-          const res = await api.healthDuplicates();
+          const groups = await api.healthDuplicates();
           clear(contentContainer);
-          const groups = res.items ?? [];
+          contentContainer.append(h("p", { class: "muted" },
+            "Movies and episodes that exist as several files. Aurelia never deletes files: remove an unwanted file yourself, or move the watch data of a missing copy to the one you still have."));
           if (!groups.length) {
-            contentContainer.append(h("p", { class: "muted" }, "No duplicate media found. Your library is clean!"));
+            contentContainer.append(h("p", { class: "muted" }, "No title exists more than once."));
             return;
           }
-          for (const g of groups) {
-            const groupEl = h("div", { class: "health-group" },
-              h("div", { style: { fontWeight: "600", fontSize: "16px" } }, g.title ?? "Unknown Title"),
-              g.items.map((item) => h("div", { class: "health-item-row" },
+          for (const group of groups) {
+            const available = group.items.find((item) => item.availability === "available");
+            contentContainer.append(h("div", { class: "health-group" },
+              h("div", { style: { fontWeight: "600", fontSize: "16px" } }, group.year ? `${group.title} (${group.year})` : group.title),
+              group.items.map((item) => h("div", { class: "health-item-row" },
                 h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
-                  h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.path),
-                  h("div", { class: "muted small" }, `${item.resolution ?? "Unknown res"} · ${item.bitrateKbps ? `${Math.round(item.bitrateKbps)} kbps` : ""} · ${bytes(item.bytes)} ${item.isPreferred ? "★ Preferred" : ""}`)),
-                h("div", { class: "button-row" },
-                  !item.isPreferred ? h("button", {
-                    type: "button",
-                    class: "secondary-button small",
-                    onclick: async () => {
-                      try {
-                        await api.setPreferredHealthVersion(item.mediaId);
-                        app.toast("Preferred version updated.");
-                        renderContent();
-                      } catch (e) {
-                        app.toast(e.message);
-                      }
+                  h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.fileName),
+                  h("div", { class: "muted small" },
+                    [item.fileSize ? bytes(item.fileSize) : null, item.availability === "available" ? "Available" : "File missing"].filter(Boolean).join(" · "))),
+                item.availability !== "available" && available ? h("button", {
+                  type: "button",
+                  class: "secondary-button small",
+                  onclick: async () => {
+                    if (!confirm(`Move favorites, progress, history and collections of every profile to “${available.fileName}” and remove the missing copy from the library? Files are never touched.`)) return;
+                    try {
+                      await api.mergeHealthDuplicates(item.id, available.id);
+                      app.toast("Watch data moved.");
+                      renderContent();
+                    } catch (e) {
+                      app.toast(e.message);
                     }
-                  }, "Set Preferred") : null,
-                  !item.isPreferred ? h("button", {
-                    type: "button",
-                    class: "secondary-button small danger",
-                    onclick: async () => {
-                      const pref = g.items.find((x) => x.isPreferred) ?? g.items[0];
-                      if (!confirm(`Merge this duplicate into ${pref.resolution ?? "preferred"}?`)) return;
-                      try {
-                        await api.mergeHealthDuplicates(item.mediaId, pref.mediaId);
-                        app.toast("Duplicate merged.");
-                        renderContent();
-                      } catch (e) {
-                        app.toast(e.message);
-                      }
-                    }
-                  }, "Merge") : null))));
-            contentContainer.append(groupEl);
+                  }
+                }, "Move Watch Data") : null))));
           }
         } catch (e) {
           clear(contentContainer);
@@ -815,47 +802,44 @@ export function createSettings(app) {
         try {
           const filterSelect = h("select", {
             class: "select-input",
-            "aria-label": "Offline Days Filter",
+            "aria-label": "Missing for",
             onchange: (e) => {
               offlineDays = Number(e.target.value);
               renderContent();
             }
           },
-            h("option", { value: "30", selected: offlineDays === 30 }, "Missing 30+ Days"),
-            h("option", { value: "60", selected: offlineDays === 60 }, "Missing 60+ Days"),
-            h("option", { value: "90", selected: offlineDays === 90 }, "Missing 90+ Days"));
+            h("option", { value: "0", selected: offlineDays === 0 }, "Missing now"),
+            h("option", { value: "30", selected: offlineDays === 30 }, "Missing 30+ days"),
+            h("option", { value: "90", selected: offlineDays === 90 }, "Missing 90+ days"));
 
-          const res = await api.healthOffline({ days: offlineDays });
+          const items = await api.healthOffline({ days: offlineDays });
           clear(contentContainer);
           contentContainer.append(h("div", { style: { marginBottom: "16px" } }, filterSelect));
-
-          const items = res.items ?? [];
           if (!items.length) {
-            contentContainer.append(h("p", { class: "muted" }, "No offline titles found matching this filter."));
+            contentContainer.append(h("p", { class: "muted" }, "No missing titles match this filter."));
             return;
           }
 
           for (const item of items) {
-            const row = h("div", { class: "health-item-row" },
+            contentContainer.append(h("div", { class: "health-item-row" },
               h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
                 h("div", { style: { fontWeight: "600" } }, item.title),
-                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.path),
-                h("div", { class: "muted small" }, `Offline for ${item.daysMissing} days (since ${new Date(item.lastSeen).toLocaleDateString()})`)),
+                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.fileName),
+                h("div", { class: "muted small" }, `${item.libraryName} · last seen ${new Date(item.lastSeenAt).toLocaleDateString()} (${item.daysOffline} days ago)`)),
               h("button", {
                 type: "button",
                 class: "secondary-button danger small",
                 onclick: async () => {
-                  if (!confirm(`Remove “${item.title}” from library? Media files are not touched.`)) return;
+                  if (!confirm(`Remove “${item.title}” from the library? Its details, favorites, progress and history are deleted for every profile. The file is never touched.`)) return;
                   try {
-                    await api.removeHealthEntry(item.mediaId);
-                    app.toast("Entry removed.");
+                    await api.removeHealthEntry(item.id);
+                    app.toast("Removed from the library.");
                     renderContent();
                   } catch (e) {
                     app.toast(e.message);
                   }
                 }
-              }, "Remove Entry"));
-            contentContainer.append(row);
+              }, "Remove…")));
           }
         } catch (e) {
           clear(contentContainer);
@@ -863,27 +847,26 @@ export function createSettings(app) {
         }
       } else if (activeTab === "unmatched") {
         try {
-          const res = await api.healthUnmatched();
+          const items = await api.healthUnmatched();
           clear(contentContainer);
-          const items = res.items ?? [];
           if (!items.length) {
-            contentContainer.append(h("p", { class: "muted" }, "All media items are matched with metadata!"));
+            contentContainer.append(h("p", { class: "muted" }, "Every movie and series has its details."));
             return;
           }
           for (const item of items) {
-            const row = h("div", { class: "health-item-row" },
+            contentContainer.append(h("div", { class: "health-item-row" },
               h("div", { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 } },
                 h("div", { style: { fontWeight: "600" } }, item.title),
-                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.path)),
+                h("div", { style: { fontSize: "13px", wordBreak: "break-all" } }, item.fileName),
+                h("div", { class: "muted small" }, item.issueReason)),
               h("button", {
                 type: "button",
                 class: "secondary-button small",
                 onclick: () => {
                   dialog.remove();
-                  editors.editMetadata({ id: item.mediaId, kind: item.kind, title: item.title });
+                  editors.editMetadata({ id: item.id, kind: item.kind, title: item.title });
                 }
-              }, "Edit Metadata…"));
-            contentContainer.append(row);
+              }, "Edit Metadata…")));
           }
         } catch (e) {
           clear(contentContainer);

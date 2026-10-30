@@ -107,7 +107,6 @@ public static class ApiEndpointMappings
         health.MapGet("/offline", GetHealthOfflineAsync);
         health.MapGet("/unmatched", GetHealthUnmatchedAsync);
         health.MapPost("/merge", MergeHealthMediaAsync);
-        health.MapPost("/preferred-version", SetPreferredVersionAsync);
         health.MapDelete("/entries/{mediaId:guid}", RemoveHealthEntryAsync);
 
         api.MapGet("/home", GetHomeAsync).RequireAuthorization();
@@ -684,14 +683,11 @@ public static class ApiEndpointMappings
     private static Task<IResult> GetHealthUnmatchedAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
         ExecuteAsync(() => health.GetUnmatchedAsync(offset ?? 0, limit ?? 50, cancellationToken));
 
-    private static Task<IResult> MergeHealthMediaAsync(MergeMediaRequest request, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteNoContentAsync(() => health.MergeAsync(request.SourceMediaId, request.TargetMediaId, cancellationToken));
+    private static Task<IResult> MergeHealthMediaAsync(HttpContext context, MergeMediaRequest request, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => health.MergeAsync(context.User.RequireUserId(), request.SourceMediaId, request.TargetMediaId, cancellationToken));
 
-    private static Task<IResult> SetPreferredVersionAsync(PreferredVersionRequest request, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteNoContentAsync(() => health.SetPreferredVersionAsync(request.PreferredMediaId, cancellationToken));
-
-    private static Task<IResult> RemoveHealthEntryAsync(Guid mediaId, LibraryHealthService health, CancellationToken cancellationToken) =>
-        ExecuteNoContentAsync(() => health.RemoveEntryAsync(mediaId, cancellationToken));
+    private static Task<IResult> RemoveHealthEntryAsync(HttpContext context, Guid mediaId, LibraryHealthService health, CancellationToken cancellationToken) =>
+        ExecuteNoContentAsync(() => health.RemoveEntryAsync(context.User.RequireUserId(), mediaId, cancellationToken));
 
     private static Task<IResult> GetMetadataProviderAsync(MetadataService metadata, CancellationToken cancellationToken) =>
         ExecuteAsync(() => metadata.GetStatusAsync(cancellationToken));
