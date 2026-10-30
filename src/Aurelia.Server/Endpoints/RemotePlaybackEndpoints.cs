@@ -12,7 +12,7 @@ public static class RemotePlaybackEndpoints
 
         group.MapPost("/player/heartbeat", (HttpContext context, PlayerHeartbeatRequest request, RemotePlaybackService service) =>
         {
-            return Execute(() => service.RecordHeartbeat(context.User.RequireUserId(), request));
+            return Execute(() => service.RecordHeartbeat(context.User.RequireUserId(), context.User.RequireSessionId(), request));
         });
 
         group.MapGet("/players", (HttpContext context, string? currentDeviceId, RemotePlaybackService service) =>
@@ -36,6 +36,7 @@ public static class RemotePlaybackEndpoints
             {
                 var commands = await service.GetCommandsAsync(
                     context.User.RequireUserId(),
+                    context.User.RequireSessionId(),
                     deviceId,
                     waitMs ?? 0,
                     context.RequestAborted);

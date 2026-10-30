@@ -7,6 +7,9 @@ namespace Aurelia.Server.Tests;
 
 public sealed class RemotePlaybackTests
 {
+    private static readonly Guid Session = Guid.NewGuid();
+    private static readonly Guid OtherSession = Guid.NewGuid();
+
     [Fact]
     public void DeviceHeartbeatRegistersAndUpdatesActivePlayer()
     {
@@ -19,7 +22,7 @@ public sealed class RemotePlaybackTests
             "tvos",
             IsPlaying: false);
 
-        var response = service.RecordHeartbeat(userA, initial);
+        var response = service.RecordHeartbeat(userA, Session, initial);
         Assert.True(response.Success);
 
         var active = service.GetActiveDevices(userA);
@@ -42,7 +45,7 @@ public sealed class RemotePlaybackTests
             DurationSeconds: 8880.0,
             IsPaused: false);
 
-        service.RecordHeartbeat(userA, update);
+        service.RecordHeartbeat(userA, Session, update);
 
         var status = service.GetDeviceStatus(userA, "device-apple-tv");
         Assert.True(status.IsPlaying);
@@ -60,9 +63,9 @@ public sealed class RemotePlaybackTests
         var userA = Guid.NewGuid();
         var userB = Guid.NewGuid();
 
-        service.RecordHeartbeat(userA, new PlayerHeartbeatRequest("dev-1", "MacBook", "macos", false));
-        service.RecordHeartbeat(userA, new PlayerHeartbeatRequest("dev-2", "Apple TV", "tvos", false));
-        service.RecordHeartbeat(userB, new PlayerHeartbeatRequest("dev-3", "iPad", "ios", false));
+        service.RecordHeartbeat(userA, Session, new PlayerHeartbeatRequest("dev-1", "MacBook", "macos", false));
+        service.RecordHeartbeat(userA, Session, new PlayerHeartbeatRequest("dev-2", "Apple TV", "tvos", false));
+        service.RecordHeartbeat(userB, OtherSession, new PlayerHeartbeatRequest("dev-3", "iPad", "ios", false));
 
         var userADevices = service.GetActiveDevices(userA);
         Assert.Equal(2, userADevices.Count);
@@ -88,7 +91,7 @@ public sealed class RemotePlaybackTests
         var userB = Guid.NewGuid();
         var mediaId = Guid.NewGuid();
 
-        service.RecordHeartbeat(userA, new PlayerHeartbeatRequest("target-tv", "Apple TV", "tvos", false));
+        service.RecordHeartbeat(userA, Session, new PlayerHeartbeatRequest("target-tv", "Apple TV", "tvos", false));
 
         // Invalid action
         var invalidActionEx = Assert.Throws<AccountException>(() =>
@@ -123,7 +126,7 @@ public sealed class RemotePlaybackTests
         var userA = Guid.NewGuid();
         var mediaId = Guid.NewGuid();
 
-        service.RecordHeartbeat(userA, new PlayerHeartbeatRequest("target-tv", "Apple TV", "tvos", false));
+        service.RecordHeartbeat(userA, Session, new PlayerHeartbeatRequest("target-tv", "Apple TV", "tvos", false));
 
         // Send play command
         var cmd1 = service.SendCommand(userA, "target-tv", new RemotePlaybackCommandRequest("play", MediaId: mediaId, PositionSeconds: 15.0));
@@ -131,7 +134,7 @@ public sealed class RemotePlaybackTests
         var cmd2 = service.SendCommand(userA, "target-tv", new RemotePlaybackCommandRequest("pause"));
 
         // Retrieve commands as target device
-        var received = await service.GetCommandsAsync(userA, "target-tv", waitMs: 0, CancellationToken.None);
+        var received = await service.GetCommandsAsync(userA, Session, "target-tv", waitMs: 0, CancellationToken.None);
         Assert.Equal(2, received.Count);
         Assert.Equal(cmd1.CommandId, received[0].CommandId);
         Assert.Equal("play", received[0].Action);
@@ -142,7 +145,7 @@ public sealed class RemotePlaybackTests
         Assert.Equal("pause", received[1].Action);
 
         // Next poll should be empty
-        var empty = await service.GetCommandsAsync(userA, "target-tv", waitMs: 0, CancellationToken.None);
+        var empty = await service.GetCommandsAsync(userA, Session, "target-tv", waitMs: 0, CancellationToken.None);
         Assert.Empty(empty);
     }
 
@@ -153,12 +156,12 @@ public sealed class RemotePlaybackTests
         var userA = Guid.NewGuid();
         var mediaId = Guid.NewGuid();
 
-        service.RecordHeartbeat(userA, new PlayerHeartbeatRequest("target-tv", "Apple TV", "tvos", false));
+        service.RecordHeartbeat(userA, Session, new PlayerHeartbeatRequest("target-tv", "Apple TV", "tvos", false));
 
         // Start long-poll in background task
         var pollTask = Task.Run(async () =>
         {
-            return await service.GetCommandsAsync(userA, "target-tv", waitMs: 5000, CancellationToken.None);
+            return await service.GetCommandsAsync(userA, Session, "target-tv", waitMs: 5000, CancellationToken.None);
         });
 
         // Small delay to ensure wait is entered
@@ -176,5 +179,50 @@ public sealed class RemotePlaybackTests
         var single = Assert.Single(result);
         Assert.Equal("seek", single.Action);
         Assert.Equal(300.0, single.PositionSeconds);
+    }
+
+    [Fact]
+    public async Task AnotherDeviceCannotTakeOverALivePlayerOrReadItsCommands()
+    {
+        var service = new RemotePlaybackService();
+        var owner = Guid.NewGuid();
+        var intruder = Guid.NewGuid();
+        service.RecordHeartbeat(owner, Session, new PlayerHeartbeatRequest("living-room", "Apple TV", "tvos", false));
+
+        var takeover = Assert.Throws<AccountException>(() =>
+            service.RecordHeartbeat(intruder, OtherSession, new PlayerHeartbeatRequest("living-room", "Fake", "web", false)));
+        Assert.Equal("device_id_in_use", takeover.Code);
+
+        service.SendCommand(owner, "living-room", new RemotePlaybackCommandRequest("pause"));
+        var read = await Assert.ThrowsAsync<AccountException>(() =>
+            service.GetCommandsAsync(owner, OtherSession, "living-room", 0, CancellationToken.None));
+        Assert.Equal("device_profile_mismatch", read.Code);
+        Assert.Single(await service.GetCommandsAsync(owner, Session, "living-room", 0, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SwitchingTheProfileOnAPlayerDropsCommandsForThePreviousProfile()
+    {
+        var service = new RemotePlaybackService();
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        service.RecordHeartbeat(first, Session, new PlayerHeartbeatRequest("tv", "Apple TV", "tvos", false));
+        service.SendCommand(first, "tv", new RemotePlaybackCommandRequest("play", MediaId: Guid.NewGuid()));
+
+        service.RecordHeartbeat(second, Session, new PlayerHeartbeatRequest("tv", "Apple TV", "tvos", false));
+
+        Assert.Empty(await service.GetCommandsAsync(second, Session, "tv", 0, CancellationToken.None));
+    }
+
+    [Fact]
+    public void OversizedIdentifiersAreRejectedAndLongNamesShortened()
+    {
+        var service = new RemotePlaybackService();
+        var user = Guid.NewGuid();
+        Assert.Equal("invalid_device_id", Assert.Throws<AccountException>(() => service.RecordHeartbeat(user, Session,
+            new PlayerHeartbeatRequest(new string('x', 129), "TV", "tvos", false))).Code);
+
+        service.RecordHeartbeat(user, Session, new PlayerHeartbeatRequest("tv", new string('n', 500), "tvos", false));
+        Assert.Equal(100, Assert.Single(service.GetActiveDevices(user)).DeviceName.Length);
     }
 }

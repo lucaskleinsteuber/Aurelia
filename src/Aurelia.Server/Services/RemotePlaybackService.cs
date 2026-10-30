@@ -4,52 +4,58 @@ using Aurelia.Server.Authentication;
 
 namespace Aurelia.Server.Services;
 
+/// <summary>
+/// "Play on…": players announce themselves with heartbeats and long-poll for commands that
+/// other devices of the same profile send them. A player id is chosen by the client, so it is
+/// bound to the paired device session that first claimed it: another device cannot take over
+/// a live registration or read its commands. Registrations live only in memory and expire.
+/// </summary>
 public sealed class RemotePlaybackService
 {
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>Registrations not heard from for this long are forgotten.</summary>
+    private static readonly TimeSpan RegistrationLifetime = TimeSpan.FromMinutes(10);
     private const int MaxPendingCommands = 50;
+    private const int MaxRegistrations = 256;
+    private const int MaxDeviceIdLength = 128;
+    private const int MaxNameLength = 100;
+    private const int MaxClientTypeLength = 32;
+    private const int MaxTitleLength = 512;
 
+    private readonly object registrationGate = new();
     private readonly ConcurrentDictionary<string, RegisteredPlayer> _devices = new(StringComparer.OrdinalIgnoreCase);
 
-    public PlayerHeartbeatResponse RecordHeartbeat(Guid userId, PlayerHeartbeatRequest request)
+    public PlayerHeartbeatResponse RecordHeartbeat(Guid userId, Guid deviceSessionId, PlayerHeartbeatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.DeviceId))
+        var deviceId = request.DeviceId?.Trim();
+        if (string.IsNullOrEmpty(deviceId) || deviceId.Length > MaxDeviceIdLength)
             throw new AccountException("invalid_device_id", "A valid device identifier is required.", 400);
 
         var now = DateTimeOffset.UtcNow;
-        var deviceId = request.DeviceId.Trim();
+        var name = Bounded(request.DeviceName, MaxNameLength) ?? "Unknown Device";
+        var clientType = Bounded(request.ClientType, MaxClientTypeLength) ?? "unknown";
+        var title = Bounded(request.Title, MaxTitleLength);
 
-        _devices.AddOrUpdate(
-            deviceId,
-            id => new RegisteredPlayer(
-                id,
-                request.DeviceName?.Trim() ?? "Unknown Device",
-                request.ClientType?.Trim() ?? "unknown",
-                userId,
-                now,
-                request.IsPlaying,
-                request.MediaId,
-                request.Title,
-                request.PositionSeconds,
-                request.DurationSeconds,
-                request.IsPaused),
-            (id, existing) =>
+        lock (registrationGate)
+        {
+            if (_devices.TryGetValue(deviceId, out var existing) && existing.LastSeen >= now - HeartbeatTimeout
+                && existing.DeviceSessionId != deviceSessionId)
+                throw new AccountException("device_id_in_use", "Another paired device is using this player identifier.", 409);
+
+            if (existing is null || existing.DeviceSessionId != deviceSessionId)
             {
-                existing.Update(
-                    request.DeviceName?.Trim() ?? existing.DeviceName,
-                    request.ClientType?.Trim() ?? existing.ClientType,
-                    userId,
-                    now,
-                    request.IsPlaying,
-                    request.MediaId,
-                    request.Title,
-                    request.PositionSeconds,
-                    request.DurationSeconds,
-                    request.IsPaused);
-                return existing;
-            });
+                PruneStaleRegistrations(now);
+                if (existing is null && _devices.Count >= MaxRegistrations)
+                    throw new AccountException("too_many_players", "Too many players are registered. Try again shortly.", 429);
+                existing = new RegisteredPlayer(deviceId, deviceSessionId, userId);
+                _devices[deviceId] = existing;
+            }
+
+            existing.Update(name, clientType, userId, now, request.IsPlaying, request.MediaId, title,
+                request.PositionSeconds, request.DurationSeconds, request.IsPaused);
+        }
 
         return new PlayerHeartbeatResponse(true, now);
     }
@@ -126,6 +132,7 @@ public sealed class RemotePlaybackService
 
     public async Task<IReadOnlyList<RemotePlaybackCommand>> GetCommandsAsync(
         Guid userId,
+        Guid deviceSessionId,
         string deviceId,
         int waitMs,
         CancellationToken cancellationToken)
@@ -136,7 +143,7 @@ public sealed class RemotePlaybackService
         if (!_devices.TryGetValue(deviceId, out var device))
             return Array.Empty<RemotePlaybackCommand>();
 
-        if (device.UserId != userId)
+        if (device.UserId != userId || device.DeviceSessionId != deviceSessionId)
             throw new AccountException("device_profile_mismatch", "The registered device does not belong to the current profile.", 403);
 
         // First check if pending commands already exist
@@ -151,6 +158,20 @@ public sealed class RemotePlaybackService
         return device.DrainPendingCommands();
     }
 
+    private void PruneStaleRegistrations(DateTimeOffset now)
+    {
+        foreach (var pair in _devices)
+            if (pair.Value.LastSeen < now - RegistrationLifetime)
+                _devices.TryRemove(pair);
+    }
+
+    private static string? Bounded(string? value, int maximumLength)
+    {
+        var trimmed = value?.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return null;
+        return trimmed.Length <= maximumLength ? trimmed : trimmed[..maximumLength];
+    }
+
     private sealed class RegisteredPlayer
     {
         private readonly object _sync = new();
@@ -158,6 +179,7 @@ public sealed class RemotePlaybackService
         private TaskCompletionSource<bool>? _waitSource;
 
         public string DeviceId { get; }
+        public Guid DeviceSessionId { get; }
         public string DeviceName { get; private set; }
         public string ClientType { get; private set; }
         public Guid UserId { get; private set; }
@@ -169,30 +191,13 @@ public sealed class RemotePlaybackService
         public double? DurationSeconds { get; private set; }
         public bool IsPaused { get; private set; }
 
-        public RegisteredPlayer(
-            string deviceId,
-            string deviceName,
-            string clientType,
-            Guid userId,
-            DateTimeOffset lastSeen,
-            bool isPlaying,
-            Guid? mediaId,
-            string? title,
-            double? positionSeconds,
-            double? durationSeconds,
-            bool isPaused)
+        public RegisteredPlayer(string deviceId, Guid deviceSessionId, Guid userId)
         {
             DeviceId = deviceId;
-            DeviceName = deviceName;
-            ClientType = clientType;
+            DeviceSessionId = deviceSessionId;
             UserId = userId;
-            LastSeen = lastSeen;
-            IsPlaying = isPlaying;
-            MediaId = mediaId;
-            Title = title;
-            PositionSeconds = positionSeconds;
-            DurationSeconds = durationSeconds;
-            IsPaused = isPaused;
+            DeviceName = "Unknown Device";
+            ClientType = "unknown";
         }
 
         public void Update(
@@ -209,6 +214,8 @@ public sealed class RemotePlaybackService
         {
             lock (_sync)
             {
+                // Commands sent to the previous profile must not run for the next one.
+                if (UserId != userId) _commandQueue.Clear();
                 DeviceName = deviceName;
                 ClientType = clientType;
                 UserId = userId;
