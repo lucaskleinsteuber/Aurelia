@@ -56,7 +56,9 @@ final class IOSBonjourBrowser: ObservableObject {
   func start() {
     guard browsers.isEmpty else { return }
     errorMessage = nil
-    for type in ["_aurelia._tcp", "_aurelia-home._tcp"] { browse(type: type, attempt: 0) }
+    // Every server this client supports advertises this type; iOS lets an app browse only the
+    // types its Info.plist declares.
+    browse(type: "_aurelia._tcp", attempt: 0)
   }
 
   func stop() {
