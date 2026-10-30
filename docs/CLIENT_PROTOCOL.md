@@ -246,6 +246,23 @@ Administrators can inspect and maintain the media library without touching any f
 - `POST /api/v1/library/health/preferred-version`: marks a duplicate item as the preferred version.
 - `DELETE /api/v1/library/health/entries/{id}`: deletes an obsolete entry from the server database. Media files on disk are never deleted or modified.
 
+## Remote Playback and Device Control
+
+Clients can discover active Aurelia player devices on the local server and control playback remotely ("Play on Device"):
+- `POST /api/v1/devices/player/heartbeat`: registers or refreshes player presence and current playback state. Active players send this periodically (every 5–10 s) while open or playing:
+  - `deviceId`, `deviceName`, `clientType` (`mac`, `tvos`, `ios`, `web`)
+  - `isPlaying`, `isPaused`, `mediaId`, `title`, `positionSeconds`, `durationSeconds`.
+- `GET /api/v1/devices/players?currentDeviceId={id}`: returns a list of other active remote player devices for the user/account seen within the last 30 seconds.
+- `GET /api/v1/devices/players/{deviceId}/status`: returns the detailed playback status of a specific player device.
+- `POST /api/v1/devices/players/{deviceId}/commands`: sends a playback command to a remote player. Supported actions:
+  - `play`: begins playing `mediaId` (with optional `positionSeconds` to resume)
+  - `pause`: toggles or forces pause
+  - `resume`: resumes paused playback
+  - `stop`: stops playback
+  - `seek`: seeks to `positionSeconds`
+  - `skip`: jumps relative `skipSeconds` (e.g. `+10` or `-10`).
+- `GET /api/v1/devices/player/commands?deviceId={id}&waitMs={timeout}`: long-polls for pending remote playback commands destined for this player device. Returns an array of `RemotePlaybackCommand` objects. The player processes the command and acknowledges its execution state in subsequent heartbeats.
+
 ## Minimum new-client acceptance
 
 Run isolated tests for trust rejection, pairing/login, two accounts with separate

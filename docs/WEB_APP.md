@@ -289,3 +289,36 @@ Title cards, Continue Watching and episode cards use the same context-menu order
 ### Metadata editor layout
 
 Edit Metadata is available in the title's More Actions menu. Its poster/title header and settings sections match the Mac editor: Title and Year, Overview, Genres, Production and Release, Cast and Crew, Artwork, Match with TMDB and Source. Cancel and Save remain visible while the form scrolls; invalid fields explain the correction beside the control. Existing cast, artwork/crops and source associations remain read-only in the browser and are preserved by text edits. Revision conflicts keep the draft until an explicit reload, and management expiry uses the existing unlock flow. Native Mac editing retains its existing image/crop, cast and server-file controls.
+
+### Collections and Smart Lists
+
+The browser app supports full collections browsing and management:
+- View personal and shared collections in a dedicated Library tab and Home rails.
+- Create manual collections or dynamic Smart Lists with custom filtering rules (genres, decade, rating, watch state, date added, text search).
+- Add or remove titles via the card context menu ("Add to Collection...").
+- Suggested TMDB Franchise rails appear automatically on movie detail pages when part of a recognized franchise, with a one-click button for administrators to convert them into managed collections.
+
+### Sidecar Subtitles
+
+The browser player automatically lists both embedded subtitle tracks and sidecar `.srt`/`.ass`/`.vtt` files discovered next to the video. Subtitle tracks are selectable from the player audio/subtitle menu, streamed as in-memory WebVTT, and rendered with custom styling matching native platform captioning.
+
+### Watch History and Statistics
+
+Profiles can view their personal viewing history and rich aggregate statistics:
+- **History View:** Chronological log of watched titles with date, resume position, and clear/delete actions.
+- **Statistics View:** Aggregate viewing metrics including total hours watched, weekly breakdowns, top genres, most-watched titles, viewing streaks, and Year in Review recaps.
+All history and statistics are strictly private to the profile session.
+
+### Library Health and Maintenance
+
+Administrators can access the Library Health dashboard in Settings to inspect and resolve library issues:
+- **Duplicate Titles:** Grouped side-by-side view with media details, enabling administrators to set a preferred version or merge duplicate entries without deleting files on disk.
+- **Offline Items:** List of media entries whose physical files have been moved or are unavailable on disk, with options to clean database references.
+- **Unmatched Metadata:** Titles missing TMDB matches, descriptions, or artwork, with direct shortcuts to the metadata editor.
+
+### Remote Playback and AirPlay
+
+The browser app integrates remote playback capabilities:
+- **AirPlay Route Picker:** WebKit-native AirPlay button in the player control bar for casting playback directly to Apple TV and AirPlay-compatible receivers.
+- **Play on Device (Remote Control):** Device picker menu allows sending current titles or playback commands (play, pause, seek, stop) to other active Aurelia players (Apple TV, Mac app, or other browser sessions) on the server.
+- **Remote Player State:** When acting as a player, the browser app periodically reports its heartbeat and responds to remote control commands.
