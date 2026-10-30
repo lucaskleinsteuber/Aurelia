@@ -192,7 +192,7 @@ final class TVScrubPreviews: NSObject, ObservableObject {
   }
 
   private func fill() {
-    guard ready, (source != nil || serverFrameFetcher != nil), !resting,
+    guard ready, source != nil || serverFrameFetcher != nil, !resting,
       !ProcessInfo.processInfo.isLowPowerModeEnabled
     else {
       return

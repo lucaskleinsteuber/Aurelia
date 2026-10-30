@@ -433,7 +433,8 @@ struct TVCoreTests {
       response(watchlistJSON),
       response(updateJSON),
     ])
-    let client = TVAPIClient(connection: Self.connection, session: Self.session, transport: transport)
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
 
     let list = try await client.watchlist()
     #expect(list.items.count == 1)
@@ -456,7 +457,8 @@ struct TVCoreTests {
       {"name":"Jane Doe","subtitle":"Actor","profile":null,"items":[\(itemJSON)]}
       """
     let transport = TVCoreFakeTransport(responses: [response(personJSON)])
-    let client = TVAPIClient(connection: Self.connection, session: Self.session, transport: transport)
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
 
     let person = try await client.personDetail(name: "Jane Doe")
     #expect(person.name == "Jane Doe")
@@ -476,7 +478,8 @@ struct TVCoreTests {
         statusCode: 200, headers: ["Content-Type": "image/jpeg"],
         body: jpegBytes, fingerprint: Self.fingerprint)
     ])
-    let client = TVAPIClient(connection: Self.connection, session: Self.session, transport: transport)
+    let client = TVAPIClient(
+      connection: Self.connection, session: Self.session, transport: transport)
 
     let frame = try await client.scrubPreviewFrame(mediaID: Self.mediaID, seconds: 45)
     #expect(frame == jpegBytes)

@@ -363,7 +363,11 @@
         body = saved[id] ?? TVUITestFixtures.progress(id: id)
       } else if path == "/api/v1/watchlist" {
         let items = watchlist.map { id in
-          item(id == TVUITestFixtures.seriesID ? TVUITestFixtures.series() : TVUITestFixtures.movie())
+          let itemPayload =
+            id == TVUITestFixtures.seriesID
+            ? TVUITestFixtures.series()
+            : TVUITestFixtures.movie()
+          return item(itemPayload)
         }
         body = [
           "items": items,
