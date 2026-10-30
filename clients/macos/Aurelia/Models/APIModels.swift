@@ -659,29 +659,35 @@ struct LiveSubtitleTrack: Codable, Identifiable, Equatable, Sendable {
   }
 }
 
+/// One entry of the profile's own viewing history, as the server reports it.
 struct WatchHistoryItem: Codable, Identifiable, Equatable, Sendable {
   let id: UUID
   let mediaId: UUID
   let title: String
-  let kind: String
+  /// "Series · S1E2" for episodes, the year for movies.
+  let eyebrow: String?
   let year: Int?
-  let seasonNumber: Int?
-  let episodeNumber: Int?
-  let watchedAt: String
-  let durationSeconds: Double
-  let completedSeconds: Double
-  let completionPercentage: Double
+  let kind: String
   let poster: ArtworkSummary?
-  let backdrop: ArtworkSummary?
+  let watchedAt: String
+  let positionMilliseconds: Int64
+  let durationMilliseconds: Int64
+  let secondsWatched: Int64
+  let isCompleted: Bool
 
   var watchedDate: Date? { ServerDate.parse(watchedAt) }
+  var completionPercentage: Double {
+    if isCompleted { return 100 }
+    guard durationMilliseconds > 0 else { return 0 }
+    return min(100, Double(positionMilliseconds) / Double(durationMilliseconds) * 100)
+  }
 }
 
 struct WatchHistoryPage: Codable, Equatable, Sendable {
   let items: [WatchHistoryItem]
-  let totalCount: Int
   let offset: Int
   let limit: Int
+  let total: Int
 }
 
 struct PeriodHours: Codable, Equatable, Sendable {

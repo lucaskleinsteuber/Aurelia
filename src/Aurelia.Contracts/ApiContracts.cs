@@ -647,7 +647,7 @@ public sealed record WatchHistoryItem(
     int? Year,
     MediaKind Kind,
     ArtworkSummary? Poster,
-    DateTimeOffset Timestamp,
+    DateTimeOffset WatchedAt,
     long PositionMilliseconds,
     long DurationMilliseconds,
     long SecondsWatched,

@@ -92,5 +92,84 @@
       "token": "synthetic-contract-token-no-real-credential-0001",
       "expiresAt": "2027-01-13T12:00:00+00:00"
     }
-  }
+  },
+  "historyPage": {
+    "items": [
+      {
+        "id": "16600000-0000-0000-0000-000000000001",
+        "mediaId": "16600000-0000-0000-0000-000000000002",
+        "title": "Pilot",
+        "eyebrow": "Example Show · S1E1",
+        "year": 2020,
+        "kind": "episode",
+        "poster": {
+          "id": "10000000-0000-0000-0000-000000000099",
+          "kind": "poster",
+          "path": "/api/v1/artwork/10000000-0000-0000-0000-000000000099",
+          "contentType": "image/jpeg",
+          "contentLength": 1234,
+          "revision": 3,
+          "unknownFutureField": true
+        },
+        "watchedAt": "2026-10-30T19:30:00+00:00",
+        "positionMilliseconds": 1200000,
+        "durationMilliseconds": 2400000,
+        "secondsWatched": 1210,
+        "isCompleted": false
+      }
+    ],
+    "offset": 0,
+    "limit": 50,
+    "total": 1
+  },
+  "duplicateGroups": [
+    {
+      "key": "movie:tmdb:42",
+      "title": "Example Film",
+      "kind": "movie",
+      "year": 2019,
+      "items": [
+        {
+          "id": "16600000-0000-0000-0000-000000000003",
+          "title": "Example Film",
+          "kind": "movie",
+          "year": 2019,
+          "fileName": "Example Film (2019).mkv",
+          "fileSize": 1048576,
+          "availability": "available"
+        },
+        {
+          "id": "16600000-0000-0000-0000-000000000004",
+          "title": "Example Film",
+          "kind": "movie",
+          "year": 2019,
+          "fileName": "Example Film 4K.mkv",
+          "fileSize": null,
+          "availability": "missing"
+        }
+      ]
+    }
+  ],
+  "offlineTitles": [
+    {
+      "id": "16600000-0000-0000-0000-000000000004",
+      "title": "Example Film",
+      "kind": "movie",
+      "year": 2019,
+      "libraryName": "Movies",
+      "fileName": "Example Film 4K.mkv",
+      "lastSeenAt": "2026-09-01T12:00:00+00:00",
+      "daysOffline": 59
+    }
+  ],
+  "unmatchedTitles": [
+    {
+      "id": "16600000-0000-0000-0000-000000000005",
+      "title": "Unknown Clip",
+      "kind": "movie",
+      "year": null,
+      "fileName": "clip.mkv",
+      "issueReason": "No metadata found"
+    }
+  ]
 }

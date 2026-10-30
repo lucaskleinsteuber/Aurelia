@@ -1048,16 +1048,14 @@ async function historyScreen() {
     clearButton.hidden = false;
     for (const item of items) {
       const row = h("div", { class: "history-item-row" },
-        h("a", { class: "history-item-poster", href: `/title/${item.mediaItemId}`, "data-route": true },
+        h("a", { class: "history-item-poster", href: `/title/${item.mediaId}`, "data-route": true },
           artwork(item.poster, 160, "poster-art", "")),
         h("div", { class: "history-item-info" },
-          h("a", { class: "history-item-title", href: `/title/${item.mediaItemId}`, "data-route": true },
-            item.parentTitle ? `${item.parentTitle}: ${item.title}` : item.title),
+          h("a", { class: "history-item-title", href: `/title/${item.mediaId}`, "data-route": true }, item.title),
           h("div", { class: "history-item-meta muted small" },
-            item.seasonNumber ? `S${item.seasonNumber} · E${item.episodeNumber} · ` : "",
-            item.year ? `${item.year} · ` : "",
-            new Date(item.watchedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
-          progressBar(item.progressFraction)),
+            [item.eyebrow, new Date(item.watchedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })]
+              .filter(Boolean).join(" · ")),
+          progressBar(item)),
         h("button", {
           class: "icon-button danger",
           "aria-label": `Remove ${item.title} from history`,

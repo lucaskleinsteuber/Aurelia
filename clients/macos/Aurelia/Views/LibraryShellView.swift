@@ -1454,7 +1454,7 @@ private struct HistoryPage: View {
             ForEach(items) { item in
               HStack(spacing: 16) {
                 AuthenticatedArtwork(
-                  artwork: item.poster ?? item.backdrop,
+                  artwork: item.poster,
                   symbol: item.kind == "movie" ? "film" : "tv"
                 )
                 .frame(width: 80, height: 45)
@@ -1468,10 +1468,7 @@ private struct HistoryPage: View {
                     .font(.body.weight(.medium))
                     .lineLimit(1)
                   HStack(spacing: 8) {
-                    if let year = item.year { Text("\(year)") }
-                    if let s = item.seasonNumber, let e = item.episodeNumber {
-                      Text("S\(s) E\(e)")
-                    }
+                    if let eyebrow = item.eyebrow { Text(eyebrow) }
                     if let watched = item.watchedDate {
                       Text("·")
                       Text(watched.formatted(date: .abbreviated, time: .shortened))
@@ -1546,7 +1543,7 @@ private struct HistoryPage: View {
       } else {
         items.append(contentsOf: page.items)
       }
-      totalCount = page.totalCount
+      totalCount = page.total
       isLoading = false
     } catch {
       isLoading = false

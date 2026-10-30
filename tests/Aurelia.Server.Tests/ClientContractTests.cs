@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Aurelia.Contracts;
 using Xunit;
 
@@ -29,4 +30,38 @@ public sealed class ClientContractTests
         Assert.Equal(UserRole.Owner, approved.Authentication.User.Role);
         Assert.Equal("device_session_revoked", root.GetProperty("problem").Deserialize<ApiProblem>(ApiTestClient.JsonOptions)!.Code);
     }
+
+    /// <summary>
+    /// The clients decode these fixtures; the server must produce exactly their field names, or
+    /// a client screen silently stays empty.
+    /// </summary>
+    [Fact]
+    public void ServerResponsesUseTheFieldNamesTheClientFixturesDecode()
+    {
+        using var stream = typeof(ClientContractTests).Assembly.GetManifestResourceStream("client-contracts-v1.json");
+        var root = JsonNode.Parse(stream!)!;
+        var artwork = root["artwork"]!.Deserialize<ArtworkSummary>(ApiTestClient.JsonOptions)!;
+        var now = DateTimeOffset.UnixEpoch;
+
+        AssertSameShape(root["historyPage"]!, new WatchHistoryPage(
+            [new WatchHistoryItem(Guid.NewGuid(), Guid.NewGuid(), "Pilot", "Example Show · S1E1", 2020, MediaKind.Episode, artwork, now, 1, 2, 3, false)],
+            0, 50, 1));
+        AssertSameShape(root["duplicateGroups"]!, new[] { new DuplicateGroup("key", "Example Film", MediaKind.Movie, 2019,
+            [new DuplicateItemSummary(Guid.NewGuid(), "Example Film", MediaKind.Movie, 2019, "file.mkv", 1, MediaAvailability.Available)]) });
+        AssertSameShape(root["offlineTitles"]!, new[] { new OfflineTitleSummary(Guid.NewGuid(), "Example Film", MediaKind.Movie, 2019,
+            "Movies", "file.mkv", now, 1) });
+        AssertSameShape(root["unmatchedTitles"]!, new[] { new UnmatchedTitleSummary(Guid.NewGuid(), "Clip", MediaKind.Movie, null,
+            "clip.mkv", "No metadata found") });
+    }
+
+    private static void AssertSameShape(JsonNode fixture, object response) =>
+        Assert.Equal(Shape(fixture), Shape(JsonSerializer.SerializeToNode(response, ApiTestClient.JsonOptions)!));
+
+    private static string Shape(JsonNode? node) => node switch
+    {
+        JsonObject value => "{" + string.Join(",", value.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => pair.Key + (pair.Key == "poster" ? "" : ":" + Shape(pair.Value)))) + "}",
+        JsonArray value => "[" + (value.Count > 0 ? Shape(value[0]) : "") + "]",
+        _ => "",
+    };
 }

@@ -50,6 +50,22 @@ struct ClientContractTests {
     #expect(unknown == .unknown)
   }
 
+  @Test func historyAndLibraryHealthFixturesDecode() throws {
+    let history = try fixture("historyPage", as: WatchHistoryPage.self)
+    #expect(history.total == 1)
+    #expect(history.items.first?.eyebrow == "Example Show · S1E1")
+    #expect(history.items.first?.completionPercentage == 50)
+    #expect(history.items.first?.watchedDate != nil)
+
+    let groups = try fixture("duplicateGroups", as: [DuplicateGroup].self)
+    #expect(groups.first?.items.map(\.isAvailable) == [true, false])
+    let offline = try fixture("offlineTitles", as: [OfflineTitleSummary].self)
+    #expect(offline.first?.daysOffline == 59)
+    #expect(offline.first?.lastSeenDate != nil)
+    let unmatched = try fixture("unmatchedTitles", as: [UnmatchedTitleSummary].self)
+    #expect(unmatched.first?.issueReason == "No metadata found")
+  }
+
   @Test @MainActor func artworkRevisionChangesInvalidateSameID() async throws {
     var requests = 0
     let loader = ArtworkLoader { _, _ in
