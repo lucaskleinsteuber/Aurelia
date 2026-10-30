@@ -398,6 +398,11 @@ struct LibraryShellView: View {
 }
 
 private struct HomePage: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
   @EnvironmentObject private var model: AppModel
   let onSelect: (UUID) -> Void
   let onSelectCollection: (UUID) -> Void
@@ -503,7 +508,8 @@ private struct HomePage: View {
   }
 
   @ViewBuilder
-  private func posterRow(_ title: String, items: [CatalogItemSummary]) -> some View {
+  private func posterRow(_ title: String, items allItems: [CatalogItemSummary]) -> some View {
+    let items = LibraryDisplayPreferences.visible(allItems, keepWatched: false)
     if !items.isEmpty {
       VStack(alignment: .leading, spacing: 14) {
         AureliaSectionHeading(title: title, count: items.count)
@@ -644,6 +650,11 @@ private struct HomeHero: View {
 }
 
 private struct LibraryPage: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
   @EnvironmentObject private var model: AppModel
   let section: CatalogBrowseSection
   let findRequest: FindRequest?
@@ -1052,6 +1063,11 @@ private struct CollectionCard: View {
 }
 
 private struct CollectionDetailView: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
   @EnvironmentObject private var model: AppModel
   let collection: CollectionSummary
   let onBack: () -> Void
@@ -1155,12 +1171,13 @@ private struct CollectionDetailView: View {
 private func posterGrid(_ items: [CatalogItemSummary], onSelect: @escaping (UUID) -> Void)
   -> some View
 {
+  let width = LibraryDisplayPreferences.posterSize().width
   LazyVGrid(
-    columns: [GridItem(.adaptive(minimum: 154, maximum: 180), spacing: 22)],
+    columns: [GridItem(.adaptive(minimum: width - 26, maximum: width), spacing: 22)],
     alignment: .leading,
     spacing: 30
   ) {
-    ForEach(items) { item in
+    ForEach(LibraryDisplayPreferences.visible(items, keepWatched: true)) { item in
       Button {
         onSelect(item.id)
       } label: {
@@ -1176,6 +1193,11 @@ private func posterGrid(_ items: [CatalogItemSummary], onSelect: @escaping (UUID
 }
 
 private struct WatchlistPage: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
   @EnvironmentObject private var model: AppModel
   @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
   let onSelect: (UUID) -> Void
@@ -1209,6 +1231,11 @@ private struct WatchlistPage: View {
 }
 
 private struct PersonDetailView: View {
+  // Settings › General changes these pages while they are open.
+  @AppStorage(GeneralPreferenceKeys.posterSize) private var posterSizeSetting = "standard"
+  @AppStorage(GeneralPreferenceKeys.showWatchedInRows) private var showWatchedSetting = true
+  @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
+
   @EnvironmentObject private var model: AppModel
   let person: PersonSelection
   let onBack: () -> Void

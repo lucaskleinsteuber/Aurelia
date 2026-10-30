@@ -10,29 +10,70 @@ struct GeneralPreferencesTests {
       """
       {"automaticResume":true,"defaultPlaybackRate":1.0,"defaultVolume":1.0,
       "controlsAutoHideDelay":3,"seekInterval":15,"preventSleepDuringPlayback":true,
-      "automaticallyPlayNextEpisode":true,"nightMode":false}
+      "automaticallyPlayNextEpisode":true,"nightMode":false,
+      "markWatchedThresholdPercent":95,"subtitleSize":"large"}
       """.utf8)
     let value = try JSONDecoder().decode(PlaybackPreferences.self, from: saved)
-    #expect(value.upNextCountdownSeconds == 15)
-    #expect(value.resumeThresholdSeconds == 10)
-    #expect(value.markWatchedThresholdPercent == 90)
+    // The behavior before these options existed: Up Next 20 seconds before the end, no start-over.
+    #expect(value.upNextCountdownSeconds == 20)
+    #expect(value.resumeThresholdSeconds == 0)
     #expect(value.defaultAudioLanguage == "original")
     #expect(value.defaultSubtitleLanguage == "off")
-    #expect(value.subtitleSize == "medium")
-    #expect(value.subtitleBackground == "transparent")
 
     var modified = value
     modified.upNextCountdownSeconds = 25
-    modified.resumeThresholdSeconds = 15
-    modified.markWatchedThresholdPercent = 95
+    modified.resumeThresholdSeconds = 60
     modified.defaultAudioLanguage = "de"
     modified.defaultSubtitleLanguage = "en"
-    modified.subtitleSize = "large"
-    modified.subtitleBackground = "solid"
 
     let roundTrip = try JSONDecoder().decode(
       PlaybackPreferences.self, from: JSONEncoder().encode(modified))
     #expect(roundTrip == modified)
+
+    modified.defaultAudioLanguage = "klingon"
+    #expect(modified.normalized.defaultAudioLanguage == "original")
+  }
+
+  @Test func defaultLanguagesPickTheMatchingVLCTrack() {
+    let tracks = [
+      PlaybackTrack(id: 1, title: "Track 1 - [English]"),
+      PlaybackTrack(id: 2, title: "Commentary - [eng]"),
+      PlaybackTrack(id: 3, title: "Forced - [ger]"),
+      PlaybackTrack(id: 4, title: "Deutsch - [deu]"),
+    ]
+    #expect(PlaybackLanguage.track(in: tracks, for: "en")?.id == 2)
+    #expect(PlaybackLanguage.track(in: tracks, for: "de")?.id == 4)
+    #expect(PlaybackLanguage.track(in: tracks, for: "ja") == nil)
+    #expect(PlaybackLanguage.track(in: tracks, for: "original") == nil)
+    #expect(PlaybackLanguage.track(in: tracks, for: "off") == nil)
+  }
+
+  @Test func displaySettingsFilterRowsAndGrids() throws {
+    let suite = "aurelia.display-tests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    func item(_ availability: MediaAvailability, _ state: CatalogWatchState) -> CatalogItemSummary {
+      CatalogItemSummary(
+        id: UUID(), kind: .movie, title: "Title", originalTitle: nil, year: nil, overview: nil,
+        genres: [], poster: nil, backdrop: nil, availability: availability, isFavorite: false,
+        progress: nil, addedAt: "2026-10-30T12:00:00Z", watchState: state)
+    }
+    let watched = item(.available, .completed)
+    let offline = item(.missing, .unplayed)
+    let fresh = item(.available, .unplayed)
+    let all = [watched, offline, fresh]
+
+    #expect(LibraryDisplayPreferences.visible(all, keepWatched: false, defaults: defaults) == all)
+    defaults.set(false, forKey: GeneralPreferenceKeys.showWatchedInRows)
+    defaults.set(true, forKey: GeneralPreferenceKeys.hideOfflineTitles)
+    #expect(
+      LibraryDisplayPreferences.visible(all, keepWatched: false, defaults: defaults) == [fresh])
+    #expect(
+      LibraryDisplayPreferences.visible(all, keepWatched: true, defaults: defaults) == [
+        watched, fresh,
+      ])
+    defaults.set("large", forKey: GeneralPreferenceKeys.posterSize)
+    #expect(LibraryDisplayPreferences.posterSize(defaults) == .large)
   }
 
   @Test func upNextPolicyRespectsCustomLeadSeconds() {
@@ -76,9 +117,6 @@ struct GeneralPreferencesTests {
     #expect(StartScreenPreference(rawValue: "series") == .series)
     #expect(StartScreenPreference(rawValue: "recentlyAdded") == .recentlyAdded)
 
-    #expect(SubtitleSizePreference(rawValue: "medium") == .medium)
-    #expect(SubtitleBackgroundPreference(rawValue: "semiTransparent") == .semiTransparent)
-    #expect(LibraryRescanInterval(rawValue: "1h") == .oneHour)
   }
 
   @Test func sidebarPreferencesOrderAndVisibility() {

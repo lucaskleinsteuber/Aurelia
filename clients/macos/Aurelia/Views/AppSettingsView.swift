@@ -49,7 +49,6 @@ struct AppSettingsView: View {
   @AppStorage(GeneralPreferenceKeys.showCollectionsInSidebar) private var showCollectionsInSidebar =
     true
   @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineTitles = false
-  @AppStorage(GeneralPreferenceKeys.rescanInterval) private var rescanInterval = "manual"
 
   // Window & System
   @AppStorage(WindowClosePreference.quitsKey) private var quitsWhenWindowCloses = true
@@ -368,7 +367,6 @@ struct AppSettingsView: View {
       if model.canManageStorage
         && queryMatches(query, "rescan interval automated exclusions offline")
       {
-        scanningAndAutomationSection
         catalogVisibilitySection
         let _ = { foundAny = true }()
       }
@@ -488,13 +486,18 @@ struct AppSettingsView: View {
 
         Divider()
 
-        Toggle("Show Watched Titles in Rows", isOn: $showWatchedInRows)
-          .accessibilityIdentifier("interface-show-watched")
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle("Show Watched Titles in Rows", isOn: $showWatchedInRows)
+            .accessibilityIdentifier("interface-show-watched")
+          Text("Keeps finished titles in Favorites, genre rows and Recently Added on Home.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
 
         VStack(alignment: .leading, spacing: 2) {
-          Toggle("Reduce Motion for Hero Banners", isOn: $reduceHeroMotion)
+          Toggle("Reduce Motion", isOn: $reduceHeroMotion)
             .accessibilityIdentifier("interface-hero-motion")
-          Text("Minimizes slide and zoom transitions on the featured showcase.")
+          Text("Turns off sliding and zooming animations in Aurelia, as the system setting does.")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -621,7 +624,7 @@ struct AppSettingsView: View {
           Picker(
             "Up Next Countdown", selection: $playbackPreferences.preferences.upNextCountdownSeconds
           ) {
-            ForEach([5, 10, 15, 20], id: \.self) { sec in
+            ForEach([5, 10, 15, 20, 30], id: \.self) { sec in
               Text("\(sec) seconds").tag(sec)
             }
           }
@@ -630,31 +633,19 @@ struct AppSettingsView: View {
           .accessibilityIdentifier("playback-upnext-countdown")
         }
 
-        LabeledContent("Restart if Watched Under") {
+        LabeledContent("Start Over If Barely Started") {
           Picker(
-            "Restart Threshold", selection: $playbackPreferences.preferences.resumeThresholdSeconds
+            "Start Over Threshold",
+            selection: $playbackPreferences.preferences.resumeThresholdSeconds
           ) {
-            ForEach([5, 10, 30, 60], id: \.self) { sec in
-              Text("\(sec) seconds").tag(sec)
-            }
+            Text("Never").tag(0)
+            Text("Under 30 seconds").tag(30)
+            Text("Under 1 minute").tag(60)
+            Text("Under 2 minutes").tag(120)
           }
           .labelsHidden()
           .frame(width: 140)
           .accessibilityIdentifier("playback-resume-threshold")
-        }
-
-        LabeledContent("Mark as Watched Threshold") {
-          Picker(
-            "Watched Threshold",
-            selection: $playbackPreferences.preferences.markWatchedThresholdPercent
-          ) {
-            ForEach([80, 85, 90, 95], id: \.self) { pct in
-              Text("\(pct)% completed").tag(pct)
-            }
-          }
-          .labelsHidden()
-          .frame(width: 140)
-          .accessibilityIdentifier("playback-watched-threshold")
         }
 
         Divider()
@@ -743,7 +734,8 @@ struct AppSettingsView: View {
     AureliaSettingsSection(
       "Audio & Subtitles",
       symbol: "captions.bubble.fill",
-      description: "Default track selections, subtitle appearance, and remembered choices."
+      description:
+        "Default languages until you choose tracks for a series, and the remembered choices."
     ) {
       VStack(alignment: .leading, spacing: 14) {
         LabeledContent("Default Audio Language") {
@@ -756,6 +748,7 @@ struct AppSettingsView: View {
             Text("German").tag("de")
             Text("French").tag("fr")
             Text("Spanish").tag("es")
+            Text("Italian").tag("it")
             Text("Japanese").tag("ja")
           }
           .labelsHidden()
@@ -768,40 +761,17 @@ struct AppSettingsView: View {
             "Default Subtitle Language",
             selection: $playbackPreferences.preferences.defaultSubtitleLanguage
           ) {
-            Text("Off").tag("off")
+            Text("File Default").tag("off")
             Text("English").tag("en")
             Text("German").tag("de")
             Text("French").tag("fr")
             Text("Spanish").tag("es")
+            Text("Italian").tag("it")
             Text("Japanese").tag("ja")
           }
           .labelsHidden()
           .frame(width: 160)
           .accessibilityIdentifier("playback-sub-lang")
-        }
-
-        LabeledContent("Subtitle Size") {
-          Picker("Subtitle Size", selection: $playbackPreferences.preferences.subtitleSize) {
-            ForEach(SubtitleSizePreference.allCases) { size in
-              Text(size.label).tag(size.rawValue)
-            }
-          }
-          .labelsHidden()
-          .frame(width: 160)
-          .accessibilityIdentifier("playback-sub-size")
-        }
-
-        LabeledContent("Subtitle Background") {
-          Picker(
-            "Subtitle Background", selection: $playbackPreferences.preferences.subtitleBackground
-          ) {
-            ForEach(SubtitleBackgroundPreference.allCases) { bg in
-              Text(bg.label).tag(bg.rawValue)
-            }
-          }
-          .labelsHidden()
-          .frame(width: 160)
-          .accessibilityIdentifier("playback-sub-bg")
         }
 
         Divider()
@@ -841,7 +811,6 @@ struct AppSettingsView: View {
   private var librarySections: some View {
     storageLocationsSection
     libraryHealthSection
-    scanningAndAutomationSection
     catalogVisibilitySection
   }
 
@@ -922,32 +891,6 @@ struct AppSettingsView: View {
     }
   }
 
-  private var scanningAndAutomationSection: some View {
-    AureliaSettingsSection(
-      "Scanning & Automation",
-      symbol: "arrow.triangle.2.circlepath",
-      description: "Scheduled rescan intervals for connected media locations."
-    ) {
-      VStack(alignment: .leading, spacing: 14) {
-        LabeledContent("Automatic Rescan Interval") {
-          Picker("Rescan Interval", selection: $rescanInterval) {
-            ForEach(LibraryRescanInterval.allCases) { interval in
-              Text(interval.label).tag(interval.rawValue)
-            }
-          }
-          .labelsHidden()
-          .frame(width: 180)
-          .accessibilityIdentifier("library-rescan-interval")
-        }
-
-        Text("Aurelia monitors storage roots for file modifications when available.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-  }
-
   private var catalogVisibilitySection: some View {
     AureliaSettingsSection(
       "Catalog Visibility",
@@ -958,7 +901,7 @@ struct AppSettingsView: View {
         Toggle("Hide Offline Titles", isOn: $hideOfflineTitles)
           .accessibilityIdentifier("library-hide-offline")
         Text(
-          "Hides movies and episodes whose storage disk or network mount is temporarily disconnected."
+          "On this Mac, hides titles whose file or drive is unavailable. Their details and progress stay. Watch for Changes on a storage location rescans automatically."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

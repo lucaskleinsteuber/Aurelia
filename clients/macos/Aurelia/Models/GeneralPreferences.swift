@@ -118,66 +118,6 @@ enum SidebarPreferences {
   }
 }
 
-enum SubtitleSizePreference: String, CaseIterable, Identifiable, Sendable {
-  case small
-  case medium
-  case large
-
-  var id: String { rawValue }
-
-  var label: String {
-    switch self {
-    case .small: "Small"
-    case .medium: "Medium"
-    case .large: "Large"
-    }
-  }
-
-  var pointSize: CGFloat {
-    switch self {
-    case .small: 18
-    case .medium: 24
-    case .large: 32
-    }
-  }
-}
-
-enum SubtitleBackgroundPreference: String, CaseIterable, Identifiable, Sendable {
-  case transparent
-  case semiTransparent
-  case solid
-
-  var id: String { rawValue }
-
-  var label: String {
-    switch self {
-    case .transparent: "Transparent"
-    case .semiTransparent: "Semi-Transparent"
-    case .solid: "Solid Black"
-    }
-  }
-}
-
-enum LibraryRescanInterval: String, CaseIterable, Identifiable, Sendable {
-  case manual = "manual"
-  case fifteenMinutes = "15m"
-  case oneHour = "1h"
-  case sixHours = "6h"
-  case oneDay = "24h"
-
-  var id: String { rawValue }
-
-  var label: String {
-    switch self {
-    case .manual: "Manual Only"
-    case .fifteenMinutes: "Every 15 Minutes"
-    case .oneHour: "Every Hour"
-    case .sixHours: "Every 6 Hours"
-    case .oneDay: "Every 24 Hours"
-    }
-  }
-}
-
 enum GeneralPreferenceKeys {
   static let defaultStartScreen = "AureliaDefaultStartScreen"
   static let sidebarItemOrder = "AureliaSidebarItemOrder"
@@ -190,5 +130,30 @@ enum GeneralPreferenceKeys {
   static let showWatchlistInSidebar = "AureliaShowWatchlistInSidebar"
   static let showCollectionsInSidebar = "AureliaShowCollectionsInSidebar"
   static let hideOfflineTitles = "AureliaHideOfflineTitles"
-  static let rescanInterval = "AureliaRescanInterval"
+}
+
+/// What Settings › General changes in the library: rows, grids and poster size.
+enum LibraryDisplayPreferences {
+  static func posterSize(_ defaults: UserDefaults = .standard) -> PosterSizePreference {
+    defaults.string(forKey: GeneralPreferenceKeys.posterSize).flatMap(PosterSizePreference.init)
+      ?? .standard
+  }
+
+  /// The titles a Home row or library grid shows. Rows can leave out watched titles; both can
+  /// leave out titles whose file or drive is unavailable.
+  static func visible(
+    _ items: [CatalogItemSummary], keepWatched: Bool, defaults: UserDefaults = .standard
+  ) -> [CatalogItemSummary] {
+    let hideOffline = defaults.bool(forKey: GeneralPreferenceKeys.hideOfflineTitles)
+    let showWatched =
+      defaults.object(forKey: GeneralPreferenceKeys.showWatchedInRows) as? Bool ?? true
+    return items.filter { item in
+      !(hideOffline && item.kind != .series && item.availability != .available)
+        && (keepWatched || showWatched || item.watchState != .completed)
+    }
+  }
+
+  static func reducesMotion(_ defaults: UserDefaults = .standard) -> Bool {
+    defaults.bool(forKey: GeneralPreferenceKeys.reduceHeroMotion)
+  }
 }

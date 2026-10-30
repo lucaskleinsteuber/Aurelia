@@ -18,8 +18,10 @@ extension EnvironmentValues {
     accessibilityReduceTransparency || cinemaAccessibilityFixture
   }
 
+  /// The system setting, or Settings › General › Reduce Motion in Aurelia.
   var aureliaReduceMotion: Bool {
     accessibilityReduceMotion || cinemaAccessibilityFixture
+      || LibraryDisplayPreferences.reducesMotion()
   }
 
   var aureliaContrast: ColorSchemeContrast {

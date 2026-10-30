@@ -25,6 +25,33 @@ struct PlaybackTrack: Identifiable, Equatable, Sendable {
   }
 }
 
+/// The default languages of Settings › Playback, matched against VLC's "[eng]" track tags.
+enum PlaybackLanguage {
+  static let choices = ["en", "de", "fr", "es", "it", "ja"]
+  private static let aliases: [String: Set<String>] = [
+    "en": ["en", "eng"], "de": ["de", "deu", "ger"], "fr": ["fr", "fra", "fre"],
+    "es": ["es", "spa"], "it": ["it", "ita"], "ja": ["ja", "jpn"],
+  ]
+
+  static func isChoice(_ value: String, off: String) -> Bool {
+    value == off || choices.contains(value)
+  }
+
+  static func matches(_ code: String?, _ language: String) -> Bool {
+    guard let code = code?.split(whereSeparator: { $0 == "-" || $0 == "_" }).first else {
+      return false
+    }
+    return aliases[language, default: [language]].contains(code.lowercased())
+  }
+
+  /// The first track in that language, or nil for "original", "off" or no match.
+  static func track(in tracks: [PlaybackTrack], for language: String) -> PlaybackTrack? {
+    guard choices.contains(language) else { return nil }
+    let matching = tracks.filter { matches($0.preference.language, language) }
+    return matching.first { !$0.title.localizedCaseInsensitiveContains("forced") } ?? matching.first
+  }
+}
+
 struct PlaybackTrackPreference: Codable, Equatable, Sendable {
   let language: String?
   let title: String
@@ -50,13 +77,10 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     preventSleepDuringPlayback: true,
     automaticallyPlayNextEpisode: true,
     nightMode: false,
-    upNextCountdownSeconds: 15,
-    resumeThresholdSeconds: 10,
-    markWatchedThresholdPercent: 90,
+    upNextCountdownSeconds: 20,
+    resumeThresholdSeconds: 0,
     defaultAudioLanguage: "original",
-    defaultSubtitleLanguage: "off",
-    subtitleSize: "medium",
-    subtitleBackground: "transparent")
+    defaultSubtitleLanguage: "off")
 
   var automaticResume: Bool
   var defaultPlaybackRate: Double
@@ -67,13 +91,14 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var automaticallyPlayNextEpisode: Bool
   /// Softens loud scenes and lifts quiet dialogue.
   var nightMode: Bool
+  /// How long before the end the next episode is offered.
   var upNextCountdownSeconds: Int
+  /// Resume starts over when less than this was watched.
   var resumeThresholdSeconds: Int
-  var markWatchedThresholdPercent: Int
+  /// Used until a sound track is chosen for a series ("original" keeps the file's default).
   var defaultAudioLanguage: String
+  /// Used until subtitles are chosen for a series ("off" keeps the file's own default).
   var defaultSubtitleLanguage: String
-  var subtitleSize: String
-  var subtitleBackground: String
 
   init(
     automaticResume: Bool,
@@ -84,13 +109,10 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     preventSleepDuringPlayback: Bool,
     automaticallyPlayNextEpisode: Bool,
     nightMode: Bool,
-    upNextCountdownSeconds: Int = 15,
-    resumeThresholdSeconds: Int = 10,
-    markWatchedThresholdPercent: Int = 90,
+    upNextCountdownSeconds: Int = 20,
+    resumeThresholdSeconds: Int = 0,
     defaultAudioLanguage: String = "original",
-    defaultSubtitleLanguage: String = "off",
-    subtitleSize: String = "medium",
-    subtitleBackground: String = "transparent"
+    defaultSubtitleLanguage: String = "off"
   ) {
     self.automaticResume = automaticResume
     self.defaultPlaybackRate = defaultPlaybackRate
@@ -102,11 +124,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     self.nightMode = nightMode
     self.upNextCountdownSeconds = upNextCountdownSeconds
     self.resumeThresholdSeconds = resumeThresholdSeconds
-    self.markWatchedThresholdPercent = markWatchedThresholdPercent
     self.defaultAudioLanguage = defaultAudioLanguage
     self.defaultSubtitleLanguage = defaultSubtitleLanguage
-    self.subtitleSize = subtitleSize
-    self.subtitleBackground = subtitleBackground
   }
 
   var normalized: PlaybackPreferences {
@@ -119,7 +138,12 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     value.seekInterval = min(max(value.seekInterval, 5), 60)
     value.upNextCountdownSeconds = min(max(value.upNextCountdownSeconds, 5), 30)
     value.resumeThresholdSeconds = min(max(value.resumeThresholdSeconds, 0), 120)
-    value.markWatchedThresholdPercent = min(max(value.markWatchedThresholdPercent, 50), 99)
+    if !PlaybackLanguage.isChoice(value.defaultAudioLanguage, off: "original") {
+      value.defaultAudioLanguage = "original"
+    }
+    if !PlaybackLanguage.isChoice(value.defaultSubtitleLanguage, off: "off") {
+      value.defaultSubtitleLanguage = "off"
+    }
     return value
   }
 }
@@ -128,8 +152,8 @@ extension PlaybackPreferences {
   private enum CodingKeys: String, CodingKey {
     case automaticResume, defaultPlaybackRate, defaultVolume, controlsAutoHideDelay
     case seekInterval, preventSleepDuringPlayback, automaticallyPlayNextEpisode, nightMode
-    case upNextCountdownSeconds, resumeThresholdSeconds, markWatchedThresholdPercent
-    case defaultAudioLanguage, defaultSubtitleLanguage, subtitleSize, subtitleBackground
+    case upNextCountdownSeconds, resumeThresholdSeconds
+    case defaultAudioLanguage, defaultSubtitleLanguage
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -147,20 +171,13 @@ extension PlaybackPreferences {
         Bool.self, forKey: .automaticallyPlayNextEpisode),
       nightMode: try container.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false,
       upNextCountdownSeconds: try container.decodeIfPresent(
-        Int.self, forKey: .upNextCountdownSeconds)
-        ?? 15,
+        Int.self, forKey: .upNextCountdownSeconds) ?? 20,
       resumeThresholdSeconds: try container.decodeIfPresent(
-        Int.self, forKey: .resumeThresholdSeconds)
-        ?? 10,
-      markWatchedThresholdPercent: try container.decodeIfPresent(
-        Int.self, forKey: .markWatchedThresholdPercent) ?? 90,
+        Int.self, forKey: .resumeThresholdSeconds) ?? 0,
       defaultAudioLanguage: try container.decodeIfPresent(
         String.self, forKey: .defaultAudioLanguage) ?? "original",
       defaultSubtitleLanguage: try container.decodeIfPresent(
-        String.self, forKey: .defaultSubtitleLanguage) ?? "off",
-      subtitleSize: try container.decodeIfPresent(String.self, forKey: .subtitleSize) ?? "medium",
-      subtitleBackground: try container.decodeIfPresent(
-        String.self, forKey: .subtitleBackground) ?? "transparent")
+        String.self, forKey: .defaultSubtitleLanguage) ?? "off")
   }
 }
 
@@ -573,13 +590,26 @@ final class VLCPlaybackEngine: PlaybackEngine {
     appliedTrackPreferences = true
 
     let store = PlaybackTrackPreferenceStore.shared
-    if let preference = store.audio(scope: trackScope, profileId: profileScope),
-      let track = bestMatch(preference, tracks: audioTracks)
+    let defaults = PlaybackPreferencesStore.shared.preferences
+    if let preference = store.audio(scope: trackScope, profileId: profileScope) {
+      if let track = bestMatch(preference, tracks: audioTracks) {
+        player.currentAudioTrackIndex = track.id
+      }
+    } else if let track = PlaybackLanguage.track(
+      in: audioTracks, for: defaults.defaultAudioLanguage)
     {
       player.currentAudioTrackIndex = track.id
     }
     let subChoice = store.subtitleChoice(scope: trackScope, profileId: profileScope)
-    if subChoice.chosen {
+    if !subChoice.chosen {
+      // Without a choice for this series, Settings › Playback may pick a subtitle language;
+      // otherwise the file's own default (such as forced subtitles) stays.
+      if let track = PlaybackLanguage.track(
+        in: subtitleTracks, for: defaults.defaultSubtitleLanguage)
+      {
+        player.currentVideoSubTitleIndex = track.id
+      }
+    } else {
       if let preference = subChoice.preference {
         if let track = bestMatch(preference, tracks: subtitleTracks) {
           player.currentVideoSubTitleIndex = track.id
