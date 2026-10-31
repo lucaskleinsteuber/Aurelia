@@ -38,6 +38,62 @@ public sealed class CollectionsAndHistoryTests
     }
 
     [Fact]
+    public async Task SmartListsUnderstandTheRulesTheAppsSend()
+    {
+        var mediaRoot = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(mediaRoot);
+        await File.WriteAllBytesAsync(Path.Combine(mediaRoot, "Alpha.mkv"), [1]);
+        await File.WriteAllBytesAsync(Path.Combine(mediaRoot, "Beta 100%.mkv"), [2]);
+        try
+        {
+            using var factory = CreateFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await SendAsync<LibrarySummary>(client, owner.Token, HttpMethod.Post, "/api/v1/libraries",
+                new CreateLibraryRequest("Movies", mediaRoot, LibraryKind.Movies));
+            var scan = await SendAsync<LibraryScanSummary>(client, owner.Token, HttpMethod.Post, $"/api/v1/libraries/{library.Id}/scans");
+            await WaitForScanAsync(client, owner.Token, scan.Id);
+            var movies = (await SendAsync<PagedResponse<MovieSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/catalog/movies")).Items;
+            var alpha = movies.Single(movie => movie.Title.StartsWith("Alpha", StringComparison.Ordinal));
+            var beta = movies.Single(movie => movie.Title.StartsWith("Beta", StringComparison.Ordinal));
+            await SendAsync<object>(client, owner.Token, HttpMethod.Put, $"/api/v1/media/{alpha.Id}/favorite", new SetFavoriteRequest(true));
+
+            async Task<CollectionSummary> Smart(string name, string rules) =>
+                await SendAsync<CollectionSummary>(client, owner.Token, HttpMethod.Post, "/api/v1/collections",
+                    new SaveCollectionRequest(name, [], IsSmart: true, IsShared: false, RulesJson: rules));
+
+            // The Mac app's spelling: plural kind, "match".
+            var macList = await Smart("Mac", """{"kind":"movies","favoritesOnly":true,"match":"all"}""");
+            Assert.Equal(alpha.Id, Assert.Single(macList.Items).Id);
+            // The browser's spelling: "textContains", "matchAny"; % is a letter, not a wildcard.
+            var webList = await Smart("Web", """{"kind":"movie","textContains":"100%","matchAny":false}""");
+            Assert.Equal(beta.Id, Assert.Single(webList.Items).Id);
+            Assert.Empty((await Smart("Nothing", """{"textContains":"_"}""")).Items);
+            // "Match any rule": a favorite or a title with "Beta"; with all rules no title has both.
+            Assert.Equal(2, (await Smart("Either", """{"favoritesOnly":true,"search":"Beta","match":"any"}""")).Items.Count);
+            Assert.Empty((await Smart("Both", """{"favoritesOnly":true,"search":"Beta","match":"all"}""")).Items);
+            // Stored in one spelling every app reads back.
+            Assert.Contains("\"favoritesOnly\":true", macList.RulesJson, StringComparison.Ordinal);
+            Assert.Contains("\"kind\":\"movie\"", macList.RulesJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("match\"", macList.RulesJson, StringComparison.Ordinal);
+
+            using var invalid = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/collections", owner.Token,
+                new SaveCollectionRequest("Broken", [], IsSmart: true, IsShared: false, RulesJson: "not json"));
+            using var invalidResponse = await ApiTestClient.SendAsync(client, invalid);
+            Assert.Equal(HttpStatusCode.BadRequest, invalidResponse.StatusCode);
+
+            // Only provider franchises can be copied, not another collection by its id.
+            using var copy = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/collections/from-franchise/{macList.Id}", owner.Token);
+            using var copyResponse = await ApiTestClient.SendAsync(client, copy);
+            Assert.Equal(HttpStatusCode.NotFound, copyResponse.StatusCode);
+        }
+        finally
+        {
+            Directory.Delete(mediaRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ViewersCanCreateAndManageOwnCollectionsWhileSharedCollectionsAreProtected()
     {
         var mediaRoot = TestPaths.CreateDataDirectory();

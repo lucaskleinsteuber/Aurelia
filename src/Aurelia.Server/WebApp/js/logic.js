@@ -907,3 +907,46 @@ export function isTitleOffline(item, target) {
   if (item && item.kind !== "series" && item.availability !== "available") return true;
   return false;
 }
+
+/**
+ * A smart list's rules for the editor. They travel in the protocol's names (`kind: "movie"`,
+ * `watchedState`, `textContains`, `combination: "or"`); lists that earlier versions saved as
+ * `watchState`, `matchAny`, or the Mac app's `watched`, `search`, `match` and `"movies"` still open.
+ */
+export function readSmartRules(json) {
+  let rules = {};
+  try { rules = json ? JSON.parse(json) ?? {} : {}; } catch { rules = {}; }
+  const kind = rules.kind === "movies" ? "movie" : ["movie", "series"].includes(rules.kind) ? rules.kind : "";
+  const state = String(rules.watchedState ?? rules.watchState ?? rules.watched ?? "").toLowerCase();
+  const watchedState = state === "unwatched" || state === "unplayed" ? "unwatched"
+    : state === "inprogress" || state === "in_progress" ? "inProgress"
+      : state === "watched" || state === "completed" ? "watched" : "";
+  const combination = String(rules.combination ?? rules.match ?? "").toLowerCase();
+  return {
+    kind,
+    genres: Array.isArray(rules.genres) ? rules.genres.filter((genre) => typeof genre === "string") : [],
+    yearMin: Number.isFinite(rules.yearMin) ? rules.yearMin : null,
+    yearMax: Number.isFinite(rules.yearMax) ? rules.yearMax : null,
+    watchedState,
+    addedWithinDays: Number.isFinite(rules.addedWithinDays) ? rules.addedWithinDays : null,
+    favoritesOnly: rules.favoritesOnly === true,
+    textContains: rules.textContains ?? rules.search ?? "",
+    matchAny: rules.matchAny === true || combination === "or" || combination === "any",
+  };
+}
+
+/** The editor's choices as the rules the server stores. */
+export function smartRulesJson(form) {
+  const rules = {
+    kind: form.kind || null,
+    genres: form.genres?.length ? form.genres : null,
+    yearMin: form.yearMin ?? null,
+    yearMax: form.yearMax ?? null,
+    watchedState: form.watchedState || null,
+    addedWithinDays: form.addedWithinDays ?? null,
+    favoritesOnly: form.favoritesOnly ? true : null,
+    textContains: form.textContains || null,
+    combination: form.matchAny ? "or" : "and",
+  };
+  return JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== null)));
+}

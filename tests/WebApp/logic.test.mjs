@@ -293,3 +293,27 @@ test("ISO weeks start on their Monday", () => {
   assert.equal(logic.weekStart("2021-W01").getDate(), 4);
   assert.equal(logic.weekStart("October"), null);
 });
+
+test("smart list rules travel in the protocol's names and old lists still open", () => {
+  const json = logic.smartRulesJson({
+    kind: "movie", genres: ["Drama"], yearMin: null, yearMax: 2020, watchedState: "inProgress",
+    addedWithinDays: null, favoritesOnly: true, textContains: "", matchAny: true,
+  });
+  assert.deepEqual(JSON.parse(json), {
+    kind: "movie", genres: ["Drama"], yearMax: 2020, watchedState: "inProgress", favoritesOnly: true, combination: "or",
+  });
+  assert.deepEqual(logic.readSmartRules(json), {
+    kind: "movie", genres: ["Drama"], yearMin: null, yearMax: 2020, watchedState: "inProgress",
+    addedWithinDays: null, favoritesOnly: true, textContains: "", matchAny: true,
+  });
+  // Saved by the earlier browser app and by the Mac app.
+  const web = logic.readSmartRules('{"watchState":"completed","matchAny":true,"textContains":"x"}');
+  assert.equal(web.watchedState, "watched");
+  assert.equal(web.matchAny, true);
+  const mac = logic.readSmartRules('{"kind":"movies","watched":"unwatched","search":"Alien","match":"all"}');
+  assert.equal(mac.kind, "movie");
+  assert.equal(mac.watchedState, "unwatched");
+  assert.equal(mac.textContains, "Alien");
+  assert.equal(mac.matchAny, false);
+  assert.equal(logic.readSmartRules("not json").kind, "");
+});

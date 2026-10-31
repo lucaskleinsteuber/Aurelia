@@ -16,6 +16,24 @@ struct ClientContractTests {
     return try JSONDecoder().decode(type, from: data)
   }
 
+  @Test func smartListRulesTravelInTheProtocolsNames() throws {
+    let rules = SmartCollectionRules(
+      kind: "movies", watched: "unwatched", search: "Alien", match: "any")
+    let sent = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(rules)) as? [String: Any])
+    #expect(sent["kind"] as? String == "movie")
+    #expect(sent["watchedState"] as? String == "unwatched")
+    #expect(sent["textContains"] as? String == "Alien")
+    #expect(sent["combination"] as? String == "or")
+    #expect(sent["watched"] == nil && sent["search"] == nil && sent["match"] == nil)
+    // Read back from the server, and as earlier versions of the app saved it.
+    #expect(try JSONDecoder().decode(SmartCollectionRules.self, from: JSONEncoder().encode(rules)) == rules)
+    let legacy = try JSONDecoder().decode(
+      SmartCollectionRules.self,
+      from: Data(#"{"kind":"movies","watched":"watched","search":"x","match":"any"}"#.utf8))
+    #expect(legacy == SmartCollectionRules(kind: "movies", watched: "watched", search: "x", match: "any"))
+  }
+
   @Test func sharedArtworkFixturesRemainCompatible() throws {
     let old = try fixture("artworkLegacy", as: ArtworkSummary.self)
     let current = try fixture("artwork", as: ArtworkSummary.self)

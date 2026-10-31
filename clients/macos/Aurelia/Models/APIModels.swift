@@ -599,6 +599,9 @@ struct CollectionSummary: Codable, Identifiable, Equatable, Sendable {
   }
 }
 
+/// A smart list's rules in the editor's terms ("movies", "watched", "any"). They travel in the
+/// protocol's names (`kind: movie`, `watchedState`, `textContains`, `combination: or`); lists
+/// that earlier versions saved in the editor's names are still read.
 struct SmartCollectionRules: Codable, Equatable, Sendable {
   var kind: String? = nil
   var genres: [String]? = nil
@@ -611,6 +614,73 @@ struct SmartCollectionRules: Codable, Equatable, Sendable {
   var favoritesOnly: Bool? = nil
   var search: String? = nil
   var match: String? = nil
+
+  private enum CodingKeys: String, CodingKey {
+    case kind, genres, yearMin, yearMax, ratingMin, ratingMax, watchedState, addedWithinDays
+    case favoritesOnly, textContains, combination
+    case watched, search, match
+  }
+
+  init(
+    kind: String? = nil, genres: [String]? = nil, yearMin: Int? = nil, yearMax: Int? = nil,
+    ratingMin: Double? = nil, ratingMax: Double? = nil, watched: String? = nil,
+    addedWithinDays: Int? = nil, favoritesOnly: Bool? = nil, search: String? = nil,
+    match: String? = nil
+  ) {
+    self.kind = kind
+    self.genres = genres
+    self.yearMin = yearMin
+    self.yearMax = yearMax
+    self.ratingMin = ratingMin
+    self.ratingMax = ratingMax
+    self.watched = watched
+    self.addedWithinDays = addedWithinDays
+    self.favoritesOnly = favoritesOnly
+    self.search = search
+    self.match = match
+  }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    switch try values.decodeIfPresent(String.self, forKey: .kind) {
+    case "movie", "movies": kind = "movies"
+    case "series": kind = "series"
+    default: kind = nil
+    }
+    genres = try values.decodeIfPresent([String].self, forKey: .genres)
+    yearMin = try values.decodeIfPresent(Int.self, forKey: .yearMin)
+    yearMax = try values.decodeIfPresent(Int.self, forKey: .yearMax)
+    ratingMin = try values.decodeIfPresent(Double.self, forKey: .ratingMin)
+    ratingMax = try values.decodeIfPresent(Double.self, forKey: .ratingMax)
+    watched =
+      try values.decodeIfPresent(String.self, forKey: .watchedState)
+      ?? values.decodeIfPresent(String.self, forKey: .watched)
+    addedWithinDays = try values.decodeIfPresent(Int.self, forKey: .addedWithinDays)
+    favoritesOnly = try values.decodeIfPresent(Bool.self, forKey: .favoritesOnly)
+    search =
+      try values.decodeIfPresent(String.self, forKey: .textContains)
+      ?? values.decodeIfPresent(String.self, forKey: .search)
+    if let combination = try values.decodeIfPresent(String.self, forKey: .combination) {
+      match = combination == "or" ? "any" : "all"
+    } else {
+      match = try values.decodeIfPresent(String.self, forKey: .match)
+    }
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encodeIfPresent(kind.map { $0 == "movies" ? "movie" : $0 }, forKey: .kind)
+    try values.encodeIfPresent(genres, forKey: .genres)
+    try values.encodeIfPresent(yearMin, forKey: .yearMin)
+    try values.encodeIfPresent(yearMax, forKey: .yearMax)
+    try values.encodeIfPresent(ratingMin, forKey: .ratingMin)
+    try values.encodeIfPresent(ratingMax, forKey: .ratingMax)
+    try values.encodeIfPresent(watched, forKey: .watchedState)
+    try values.encodeIfPresent(addedWithinDays, forKey: .addedWithinDays)
+    try values.encodeIfPresent(favoritesOnly, forKey: .favoritesOnly)
+    try values.encodeIfPresent(search, forKey: .textContains)
+    try values.encode(match == "any" ? "or" : "and", forKey: .combination)
+  }
 }
 
 struct LiveSubtitleTrack: Codable, Identifiable, Equatable, Sendable {

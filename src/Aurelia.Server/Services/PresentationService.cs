@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +9,8 @@ namespace Aurelia.Server.Services;
 public sealed class PresentationService(
     AureliaDbContext database,
     TimeProvider timeProvider,
-    MediaSearchIndexService searchIndex)
+    MediaSearchIndexService searchIndex,
+    WatchlistService? watchlist = null)
 {
     public async Task<PagedResponse<CatalogItemSummary>> CatalogAsync(
         Guid userId,
@@ -315,11 +315,18 @@ public sealed class PresentationService(
             hour.AddHours(1));
     }
 
-    public async Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken) =>
+        CollectionsAsync(userId, offset, limit, null, cancellationToken);
+
+    private async Task<CollectionSummary> CollectionAsync(Guid userId, Guid id, CancellationToken cancellationToken) =>
+        (await CollectionsAsync(userId, 0, 1, id, cancellationToken)).Single();
+
+    private async Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, Guid? onlyId, CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
         var collections = await database.MediaCollections.AsNoTracking()
             .Where(collection => (collection.UserId == null || collection.UserId == userId)
+                && (onlyId == null || collection.Id == onlyId)
                 && (collection.IsManual || collection.IsSmart || collection.Members.Count >= 2))
             .OrderBy(collection => collection.Name).ThenBy(collection => collection.Id).Skip(offset).Take(limit)
             .Select(collection => new
@@ -342,13 +349,12 @@ public sealed class PresentationService(
         {
             if (collection.IsSmart)
             {
-                SmartCollectionRules? rules = null;
-                if (!string.IsNullOrWhiteSpace(collection.SmartRulesJson))
-                {
-                    try { rules = JsonSerializer.Deserialize<SmartCollectionRules>(collection.SmartRulesJson); } catch { }
-                }
-                rules ??= new SmartCollectionRules();
-                var (smartItems, totalCount) = await SmartListEvaluator.EvaluateAsync(database, userId, rules, 0, 50, cancellationToken);
+                // Unreadable rules choose nothing rather than the whole library.
+                var rules = SmartListEvaluator.Parse(collection.SmartRulesJson);
+                var listed = rules?.WatchlistOnly == true && watchlist is not null
+                    ? await watchlist.MediaIdsAsync(userId, cancellationToken) : null;
+                var (smartItems, totalCount) = rules is null ? ([], 0)
+                    : await SmartListEvaluator.EvaluateAsync(database, userId, rules, 0, 50, cancellationToken, listed);
                 var memberSummaries = smartItems.Select(item => ToCatalog(item, userId)).ToList();
                 var poster = memberSummaries.Select(item => item.Poster).FirstOrDefault(p => p is not null);
                 results.Add(new CollectionSummary(
@@ -403,14 +409,13 @@ public sealed class PresentationService(
             Id = Guid.NewGuid(),
             IsManual = true,
             IsSmart = request.IsSmart,
-            SmartRulesJson = request.IsSmart ? request.RulesJson : null,
             UserId = request.IsShared ? null : userId,
             CreatedAt = DateTimeOffset.UtcNow,
         };
         await ApplyCollectionAsync(collection, request, cancellationToken);
         database.MediaCollections.Add(collection);
         await database.SaveChangesAsync(cancellationToken);
-        return (await CollectionsAsync(userId, 0, 200, cancellationToken)).Single(value => value.Id == collection.Id);
+        return await CollectionAsync(userId, collection.Id, cancellationToken);
     }
 
     public async Task<CollectionSummary> UpdateCollectionAsync(Guid userId, Guid id, SaveCollectionRequest request, CancellationToken cancellationToken)
@@ -426,11 +431,11 @@ public sealed class PresentationService(
         // A private collection keeps its owner; un-sharing makes it the editor's own.
         collection.UserId = request.IsShared ? null : collection.UserId ?? userId;
         collection.IsSmart = request.IsSmart;
-        collection.SmartRulesJson = request.IsSmart ? request.RulesJson : null;
+        collection.SmartRulesJson = null;
 
         await ApplyCollectionAsync(collection, request, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
-        return (await CollectionsAsync(userId, 0, 200, cancellationToken)).Single(value => value.Id == collection.Id);
+        return await CollectionAsync(userId, collection.Id, cancellationToken);
     }
 
     public async Task DeleteCollectionAsync(Guid userId, Guid id, CancellationToken cancellationToken)
@@ -521,9 +526,10 @@ public sealed class PresentationService(
 
     public async Task<CollectionSummary> CreateCollectionFromFranchiseAsync(Guid userId, Guid franchiseId, CancellationToken cancellationToken)
     {
+        // Only a provider franchise can be copied, never another profile's own collection.
         var franchise = await database.MediaCollections.AsNoTracking()
             .Include(c => c.Members)
-            .SingleOrDefaultAsync(c => c.Id == franchiseId, cancellationToken)
+            .SingleOrDefaultAsync(c => c.Id == franchiseId && c.Provider == "tmdb", cancellationToken)
             ?? throw new MetadataException("franchise_not_found", "Franchise collection not found.", StatusCodes.Status404NotFound);
 
         var memberIds = franchise.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList();
@@ -560,8 +566,11 @@ public sealed class PresentationService(
 
         if (request.IsSmart)
         {
+            // Stored in one spelling, whichever app wrote the rules.
+            var rules = SmartListEvaluator.Parse(request.RulesJson ?? "{}")
+                ?? throw new MetadataException("invalid_smart_rules", "The smart list's rules could not be read.", StatusCodes.Status400BadRequest);
             collection.IsSmart = true;
-            collection.SmartRulesJson = request.RulesJson;
+            collection.SmartRulesJson = SmartListEvaluator.Canonical(rules);
             foreach (var member in collection.Members.ToList())
             {
                 collection.Members.Remove(member);

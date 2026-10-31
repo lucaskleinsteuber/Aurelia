@@ -1,7 +1,7 @@
 // Viewer library screens and actions. Each route owns its reads and dialogs; navigation closes
 // them before another profile can use the page. Lists request one bounded page per action.
 import { h, icon, clear } from "./dom.js";
-import { browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS } from "./logic.js";
+import { browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS, readSmartRules, smartRulesJson } from "./logic.js";
 
 const TITLES = { library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows" };
 const PAGE_SIZE = 100;
@@ -207,7 +207,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
   function openCollectionEditor(target = {}) {
     dialog?.close();
     const isEdit = Boolean(target.id);
-    const existingRules = target.rulesJson ? JSON.parse(target.rulesJson) : {};
+    const existingRules = readSmartRules(target.rulesJson);
 
     const nameInput = h("input", { class: "text-field", type: "text", value: target.name ?? "", placeholder: "Collection Name", required: true });
     let isSmart = Boolean(target.isSmart);
@@ -220,18 +220,18 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       h("option", { value: "" }, "All"),
       h("option", { value: "movie", selected: existingRules.kind === "movie" }, "Movies"),
       h("option", { value: "series", selected: existingRules.kind === "series" }, "TV Shows"));
-    const genreInput = h("input", { class: "text-field", type: "text", value: (existingRules.genres ?? []).join(", "), placeholder: "Action, Comedy…" });
+    const genreInput = h("input", { class: "text-field", type: "text", value: existingRules.genres.join(", "), placeholder: "Action, Comedy…" });
     const yearMinInput = h("input", { class: "text-field", type: "number", value: existingRules.yearMin != null ? String(existingRules.yearMin) : "", placeholder: "e.g. 1990" });
     const yearMaxInput = h("input", { class: "text-field", type: "number", value: existingRules.yearMax != null ? String(existingRules.yearMax) : "", placeholder: "e.g. 2025" });
     const watchStateSelect = h("select", { class: "select-input" },
       h("option", { value: "" }, "Any"),
-      h("option", { value: "unwatched", selected: existingRules.watchState === "unwatched" }, "Unwatched"),
-      h("option", { value: "inProgress", selected: existingRules.watchState === "inProgress" }, "In Progress"),
-      h("option", { value: "completed", selected: existingRules.watchState === "completed" }, "Watched"));
+      h("option", { value: "unwatched", selected: existingRules.watchedState === "unwatched" }, "Unwatched"),
+      h("option", { value: "inProgress", selected: existingRules.watchedState === "inProgress" }, "In Progress"),
+      h("option", { value: "watched", selected: existingRules.watchedState === "watched" }, "Watched"));
     const addedDaysInput = h("input", { class: "text-field", type: "number", value: existingRules.addedWithinDays != null ? String(existingRules.addedWithinDays) : "", placeholder: "e.g. 30" });
     const favoritesOnlyCheck = h("input", { type: "checkbox", checked: Boolean(existingRules.favoritesOnly) });
-    const searchInput = h("input", { class: "text-field", type: "text", value: existingRules.textContains ?? "", placeholder: "Title contains…" });
-    const matchAnyCheck = h("input", { type: "checkbox", checked: Boolean(existingRules.matchAny) });
+    const searchInput = h("input", { class: "text-field", type: "text", value: existingRules.textContains, placeholder: "Title contains…" });
+    const matchAnyCheck = h("input", { type: "checkbox", checked: existingRules.matchAny });
 
     const rulesSection = h("div", { class: "smart-rules-form", style: { display: isSmart ? "flex" : "none", flexDirection: "column", gap: "10px", marginTop: "12px" } },
       h("h3", {}, "Smart List Rules"),
@@ -268,18 +268,17 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       let rulesJson = null;
       if (isSmart) {
         const genres = genreInput.value.split(",").map((g) => g.trim()).filter(Boolean);
-        const rules = {
-          kind: kindSelect.value || null,
-          genres: genres.length ? genres : null,
+        rulesJson = smartRulesJson({
+          kind: kindSelect.value,
+          genres,
           yearMin: yearMinInput.value ? Number(yearMinInput.value) : null,
           yearMax: yearMaxInput.value ? Number(yearMaxInput.value) : null,
-          watchState: watchStateSelect.value || null,
+          watchedState: watchStateSelect.value,
           addedWithinDays: addedDaysInput.value ? Number(addedDaysInput.value) : null,
-          favoritesOnly: favoritesOnlyCheck.checked || null,
-          textContains: searchInput.value.trim() || null,
-          matchAny: matchAnyCheck.checked || false,
-        };
-        rulesJson = JSON.stringify(rules);
+          favoritesOnly: favoritesOnlyCheck.checked,
+          textContains: searchInput.value.trim(),
+          matchAny: matchAnyCheck.checked,
+        });
       }
 
       try {
