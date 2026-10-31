@@ -133,6 +133,13 @@ actor IOSArtworkPipeline {
     interest.removeAll()
     cache.removeAllObjects()
   }
+  /// The size of the artwork stored on this device.
+  func storedBytes() -> Int { diskCache?.byteCount() ?? 0 }
+  /// Forgets all artwork, in memory and on disk.
+  func removeStored() {
+    clear()
+    diskCache?.removeAll()
+  }
   private func acquire() async {
     if active < 6 {
       active += 1

@@ -391,6 +391,49 @@
           "profile": NSNull(),
           "items": [item(IOSUITestFixtures.movie())],
         ]
+      } else if path == "/api/v1/history", request.httpMethod != "DELETE" {
+        let now = Date()
+        let entries: [(UUID, String, String?, Int, Bool, Double)] = [
+          (IOSUITestFixtures.movieID, "Aurelia Test Movie", "2026", 2_700, false, 0),
+          (
+            IOSUITestFixtures.episodeID(season: 2, episode: 1), "The First Synthetic Episode",
+            "Aurelia Test Series · S2E1", 2_880, true, 1
+          ),
+        ]
+        body = [
+          "items": entries.map { id, title, eyebrow, seconds, completed, daysAgo in
+            [
+              "id": UUID().uuidString, "mediaId": id.uuidString, "title": title,
+              "eyebrow": eyebrow as Any, "year": 2026, "kind": completed ? "episode" : "movie",
+              "poster": NSNull(),
+              "watchedAt": ISO8601DateFormatter().string(
+                from: now.addingTimeInterval(-daysAgo * 86_400 - 3_600)),
+              "positionMilliseconds": seconds * 1_000, "durationMilliseconds": 5_400_000,
+              "secondsWatched": seconds, "isCompleted": completed,
+            ] as [String: Any]
+          },
+          "offset": 0, "limit": 50, "total": entries.count,
+        ]
+      } else if path == "/api/v1/statistics" {
+        body = [
+          "totalHoursWatched": 52.4, "hoursPast7Days": 3.25, "hoursPast30Days": 14.5,
+          "hoursByWeek": (0..<12).map { week in
+            ["period": "2026-W\(32 + week)", "hours": Double((week * 7) % 9) + 0.5]
+          },
+          "topTitles": [
+            ["name": "Aurelia Test Series", "count": 14, "hours": 11.2],
+            ["name": "Aurelia Test Movie", "count": 2, "hours": 3.1],
+          ],
+          "topGenres": [["name": "Drama", "count": 16, "hours": 14.3]],
+          "currentStreakDays": 3, "longestStreakDays": 9, "busiestWeekday": "Saturday",
+          "completionRate": 82.0, "yearsAvailable": [2025, 2026],
+        ]
+      } else if path.hasPrefix("/api/v1/statistics/year/") {
+        body = [
+          "year": Int(url.lastPathComponent) ?? 2026, "totalHoursWatched": 40.5,
+          "titlesWatched": 12, "moviesWatched": 4, "episodesWatched": 31,
+          "topGenre": "Drama", "topTitle": "Aurelia Test Series",
+        ]
       } else if path.contains("/scrub-previews/") {
         return IOSHTTPResponse(
           statusCode: 503, headers: [:], body: Data(), fingerprint: IOSUITestFixtures.fingerprint)

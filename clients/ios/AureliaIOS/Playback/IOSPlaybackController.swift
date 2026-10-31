@@ -5,7 +5,7 @@ import UIKit
 
 @MainActor
 final class IOSPlaybackController: ObservableObject {
-  enum TrackMenu: Equatable { case audio, subtitles, rate, sleep }
+  enum TrackMenu: Equatable { case audio, rate, sleep }
 
   let engine: any IOSPlaybackEngine
   private let runtime: IOSPlaybackRuntime

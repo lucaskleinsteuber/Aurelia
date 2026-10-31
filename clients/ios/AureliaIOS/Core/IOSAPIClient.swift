@@ -181,6 +181,46 @@ struct IOSAPIClient: Sendable {
   }
 
   func home() async throws -> IOSHome { try await get("/api/v1/home") }
+  func history(offset: Int = 0, limit: Int = 50) async throws -> IOSWatchHistoryPage {
+    try Self.decode(
+      IOSWatchHistoryPage.self,
+      data: await send(
+        "/api/v1/history",
+        query: [
+          URLQueryItem(name: "offset", value: String(offset)),
+          URLQueryItem(name: "limit", value: String(limit)),
+        ]))
+  }
+  func deleteHistoryItem(id: UUID) async throws {
+    _ = try await send("/api/v1/history/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+  func clearHistory() async throws { _ = try await send("/api/v1/history", method: "DELETE") }
+  func statistics() async throws -> IOSUserStatistics { try await get("/api/v1/statistics") }
+  func yearInReview(year: Int) async throws -> IOSYearInReview {
+    try await get("/api/v1/statistics/year/\(year)")
+  }
+  /// Sets a new PIN for the signed-in profile; the current one is needed when it has a PIN.
+  func changeProfilePIN(current: String?, new: String) async throws {
+    struct Payload: Encodable {
+      let pinProtectionEnabled: Bool
+      let currentPin: String?
+      let pin: String?
+    }
+    _ = try await send(
+      "/api/v1/profile/pin-protection", method: "PUT",
+      body: JSONEncoder().encode(
+        Payload(pinProtectionEnabled: true, currentPin: current, pin: new)))
+  }
+  /// Turns the PIN off; the server allows this only for profiles that are not Owner or Admin.
+  func removeProfilePIN(current: String) async throws {
+    struct Payload: Encodable {
+      let pinProtectionEnabled: Bool
+      let currentPin: String?
+    }
+    _ = try await send(
+      "/api/v1/profile/pin-protection", method: "PUT",
+      body: JSONEncoder().encode(Payload(pinProtectionEnabled: false, currentPin: current)))
+  }
   func collections(offset: Int = 0, limit: Int = 60) async throws -> [IOSCollection] {
     guard offset >= 0, (1...200).contains(limit) else { throw IOSCoreError.invalidResponse }
     let data = try await send(

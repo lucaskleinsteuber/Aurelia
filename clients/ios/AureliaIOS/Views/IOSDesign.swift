@@ -136,7 +136,7 @@ struct IOSButtonStyle: ButtonStyle {
       .lineLimit(1)
       .padding(.horizontal, kind == .icon || kind == .row ? 0 : 20)
       .frame(maxWidth: fullWidth ? .infinity : nil)
-      .frame(width: kind == .icon ? 44 : nil, height: kind == .icon ? 44 : nil)
+      .frame(width: kind == .icon ? 48 : nil, height: kind == .icon ? 48 : nil)
       .frame(minHeight: kind == .icon || kind == .row ? nil : 48)
       .foregroundStyle(kind == .primary ? Color.black : Color.white)
       .background {

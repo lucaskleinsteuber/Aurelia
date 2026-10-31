@@ -25,6 +25,13 @@ its screens are its own:
   Movies, TV Shows, Search and Settings, iOS text sizes and margins, the PIN entered on a keypad
   like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an
   iOS form. The player works by touch; a hardware keyboard adds the arrow keys, Space and Escape.
+  The app icon is the Mac app's Liquid Glass icon.
+- **Settings** hold everything that belongs to the profile on this device and nothing that
+  manages the server: Watch History (swipe to remove an entry, or clear it), Statistics with
+  watch time in minutes, hours and days, the last weeks as a chart, top titles and genres and a
+  year in review, Playback, the profile's own PIN (set, change, or turn off for ordinary
+  profiles), the size of the stored artwork with a button to clear it, and the server's name,
+  address and version.
 
 ## Building and testing
 
@@ -59,8 +66,9 @@ development profile expires after seven days; the signing refresh job in
 again to renew it.
 
 The player works by touch: tap the picture to show or hide the controls, and drag along the
-timeline (or tap a place on it) to jump there. A hardware keyboard adds the arrow keys, Space
-and Escape.
+timeline (or tap a place on it) to jump there. The buttons at the top choose the speed, the
+sound and subtitles (with Night Mode) and the sleep timer in a short sheet. A hardware keyboard
+adds the arrow keys, Space and Escape.
 
 ## Known limits
 

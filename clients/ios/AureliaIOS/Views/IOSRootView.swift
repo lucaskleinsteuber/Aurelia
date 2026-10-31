@@ -310,6 +310,8 @@ struct IOSPairingView: View {
 struct IOSConnectionMenu: View {
   @EnvironmentObject private var model: IOSAppModel
   @State private var confirmingDisconnect = false
+  @State private var artworkBytes: Int?
+  @State private var serverVersion: String?
 
   var body: some View {
     List {
@@ -330,12 +332,55 @@ struct IOSConnectionMenu: View {
           Label("Switch Profile", systemImage: "person.2")
         }
       }
-      Section {
+      Section("Activity") {
+        NavigationLink {
+          IOSWatchHistoryView()
+        } label: {
+          Label("Watch History", systemImage: "clock.arrow.circlepath")
+        }.accessibilityIdentifier("settings-history")
+        NavigationLink {
+          IOSStatisticsView()
+        } label: {
+          Label("Statistics", systemImage: "chart.bar")
+        }.accessibilityIdentifier("settings-statistics")
+      }
+      Section("Profile") {
         NavigationLink {
           IOSPlaybackSettingsView()
         } label: {
           Label("Playback", systemImage: "play.rectangle")
         }.accessibilityIdentifier("profile-playback-settings")
+        NavigationLink {
+          IOSProfilePINView()
+        } label: {
+          Label("Profile PIN", systemImage: "lock")
+        }.accessibilityIdentifier("settings-pin")
+      }
+      Section {
+        LabeledContent {
+          Text(artworkBytes.map { $0.formatted(.byteCount(style: .file)) } ?? "…")
+        } label: {
+          Label("Stored Artwork", systemImage: "photo.stack")
+        }
+        Button("Clear Stored Artwork") {
+          Task {
+            await model.artwork.removeStored()
+            artworkBytes = await model.artwork.storedBytes()
+          }
+        }
+        .disabled((artworkBytes ?? 0) == 0)
+        .accessibilityIdentifier("settings-clear-artwork")
+      } header: {
+        Text("Storage")
+      } footer: {
+        Text(
+          "Posters and backdrops are kept on this device so they appear at once. Videos are never stored."
+        )
+      }
+      Section("Server") {
+        LabeledContent("Name", value: model.connection?.name ?? "Aurelia Server")
+        LabeledContent("Address", value: model.connection?.baseURL.host() ?? "—")
+        LabeledContent("Version", value: serverVersion ?? "…")
       }
       Section {
         Button(role: .destructive) {
@@ -352,6 +397,10 @@ struct IOSConnectionMenu: View {
     .scrollContentBackground(.hidden)
     .background(IOSDesign.canvas.ignoresSafeArea())
     .navigationTitle("Settings")
+    .task {
+      artworkBytes = await model.artwork.storedBytes()
+      serverVersion = (try? await model.client?.serverInfo())?.version ?? "—"
+    }
     .confirmationDialog(
       "Disconnect from this server?", isPresented: $confirmingDisconnect,
       titleVisibility: .visible

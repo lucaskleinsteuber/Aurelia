@@ -52,6 +52,31 @@ struct IOSArtworkDiskCache: Sendable {
     try? FileManager.default.removeItem(at: fileURL(forKey: key))
   }
 
+  /// The bytes the cache occupies on this device.
+  func byteCount() -> Int {
+    let keys: Set<URLResourceKey> = [.fileSizeKey, .isRegularFileKey]
+    guard
+      let files = try? FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: Array(keys))
+    else { return 0 }
+    return files.reduce(0) { total, file in
+      guard let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true
+      else { return total }
+      return total + (values.fileSize ?? 0)
+    }
+  }
+
+  /// Deletes every stored image; they download again when they are next shown.
+  func removeAll() {
+    guard
+      let files = try? FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: nil)
+    else { return }
+    for file in files where file.pathExtension == "artwork" {
+      try? FileManager.default.removeItem(at: file)
+    }
+  }
+
   /// Removes the least recently used entries until the cache is below 80 % of its limit.
   func prune() {
     let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]

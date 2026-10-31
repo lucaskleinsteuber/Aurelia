@@ -103,61 +103,74 @@ struct IOSDetailView: View {
     }
   }
 
-  /// The artwork to the screen edges, then the title, facts, the Play button and the actions.
+  /// The artwork to the screen edges fading into the canvas, the title and facts below it on
+  /// the canvas (bright artwork never sits behind text), then Play with round actions beside it.
   private var header: some View {
-    VStack(spacing: 14) {
-      IOSHeroBackdrop(artwork: item.backdrop ?? item.poster)
-        .frame(height: IOSDesign.isPad ? 420 : 300)
+    VStack(spacing: 0) {
+      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 1280, symbol: nil)
+        .frame(maxWidth: .infinity).frame(height: IOSDesign.isPad ? 460 : 330)
         .clipped()
-        .overlay(alignment: .bottom) {
-          VStack(spacing: 6) {
-            Text(item.title).font(.system(.largeTitle, weight: .bold))
-              .multilineTextAlignment(.center).lineLimit(3).minimumScaleFactor(0.7)
-            if !facts.isEmpty {
-              Text(facts).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-            }
-          }.padding(.horizontal, IOSDesign.margin)
+        .overlay {
+          LinearGradient(
+            stops: [
+              .init(color: .black.opacity(0.4), location: 0),
+              .init(color: .clear, location: 0.24),
+              .init(color: .clear, location: 0.5),
+              .init(color: IOSDesign.canvas.opacity(0.85), location: 0.86),
+              .init(color: IOSDesign.canvas, location: 1),
+            ], startPoint: .top, endPoint: .bottom)
         }
-      VStack(alignment: .leading, spacing: 14) {
+        .accessibilityHidden(true)
+      VStack(spacing: 16) {
+        VStack(spacing: 6) {
+          Text(item.title).font(.title.weight(.bold))
+            .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.8)
+          if !facts.isEmpty {
+            Text(facts).font(.footnote).foregroundStyle(.secondary)
+              .multilineTextAlignment(.center)
+          }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
         if let target = plan?.target, let unavailable = target.availabilityMessage {
           Label(unavailable, systemImage: "exclamationmark.triangle.fill")
             .font(.footnote.weight(.semibold)).foregroundStyle(.orange)
         } else if !loading, plan?.target == nil {
           Text("No playable media available.").font(.footnote).foregroundStyle(.secondary)
         }
-        Button {
-          playTarget()
-        } label: {
-          HStack(spacing: 8) {
-            if launching || (loading && plan == nil) {
-              ProgressView().tint(.black)
-            } else {
-              Image(systemName: "play.fill")
+        HStack(spacing: 10) {
+          Button {
+            playTarget()
+          } label: {
+            HStack(spacing: 8) {
+              if launching || (loading && plan == nil) {
+                ProgressView().tint(.black)
+              } else {
+                Image(systemName: "play.fill")
+              }
+              Text(playLabel)
             }
-            Text(playLabel)
           }
-        }
-        .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
-        .disabled(launching)
-        .accessibilityIdentifier("detail-play")
-        if let fraction = plan?.target?.progressFraction {
-          IOSProgressBar(fraction: fraction).padding(.horizontal, 40)
-        }
-        HStack(spacing: 0) {
+          .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+          .disabled(launching)
+          .accessibilityIdentifier("detail-play")
           if item.kind == .movie || item.kind == .series {
-            actionButton(
-              item.isFavorite ? "Favorite" : "Favorite",
-              symbol: item.isFavorite ? "star.fill" : "star", id: "detail-favorite"
-            ) { Task { await actions.favorite(item, model: model) } }
+            Button {
+              Task { await actions.favorite(item, model: model) }
+            } label: {
+              Image(systemName: item.isFavorite ? "star.fill" : "star")
+            }
+            .buttonStyle(IOSButtonStyle(kind: .icon))
+            .accessibilityIdentifier("detail-favorite")
             .accessibilityLabel(item.isFavorite ? "Remove from Favorites" : "Add to Favorites")
           }
-          if plan?.action == .resume, plan?.target?.isPlayable == true {
-            actionButton("Start Over", symbol: "arrow.counterclockwise", id: "detail-start-over") {
-              playTarget(startOver: true)
-            }
-          }
           Menu {
+            if plan?.action == .resume, plan?.target?.isPlayable == true {
+              Button("Start Over", systemImage: "arrow.counterclockwise") {
+                playTarget(startOver: true)
+              }
+              .accessibilityIdentifier("detail-start-over")
+            }
             IOSMediaContextActions(item: item, actions: actions, includeFavorite: false)
             if item.kind == .series, let selectedSeason {
               let name = selectedSeason == 0 ? "Specials" : "Season \(selectedSeason)"
@@ -169,41 +182,52 @@ struct IOSDetailView: View {
               }
             }
           } label: {
-            actionLabel("More", symbol: "ellipsis")
+            Image(systemName: "ellipsis").font(.body.weight(.semibold))
+              .frame(width: 48, height: 48)
+              .background(IOSDesign.raised, in: Circle())
+              .contentShape(Circle())
           }
+          .tint(.white)
           .accessibilityIdentifier("detail-more").accessibilityLabel("More")
+        }
+        if let target = plan?.target, let fraction = target.progressFraction {
+          HStack(spacing: 10) {
+            IOSProgressBar(fraction: fraction).frame(width: 72)
+            if let left = remaining(target) {
+              Text(left).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            }
+            Spacer()
+          }
+          .accessibilityElement(children: .combine)
         }
         if let overview = detail?.metadata.overview ?? item.overview {
           Button {
             showingAbout = true
           } label: {
-            Text(overview).font(.subheadline).foregroundStyle(.white.opacity(0.85))
-              .lineLimit(4).multilineTextAlignment(.leading)
-              .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+              Text(overview).font(.subheadline).foregroundStyle(.white.opacity(0.85))
+                .lineLimit(3).multilineTextAlignment(.leading)
+              Text("More").font(.subheadline.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
           .buttonStyle(IOSContentButtonStyle()).disabled(detail == nil)
           .accessibilityHint("Shows the full description")
         }
       }
       .padding(.horizontal, IOSDesign.margin)
+      .padding(.top, -44)
     }
   }
 
-  private func actionButton(
-    _ title: String, symbol: String, id: String, action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) { actionLabel(title, symbol: symbol) }
-      .buttonStyle(IOSContentButtonStyle()).accessibilityIdentifier(id)
-  }
-
-  private func actionLabel(_ title: String, symbol: String) -> some View {
-    VStack(spacing: 6) {
-      Image(systemName: symbol).font(.title3).frame(height: 24)
-      Text(title).font(.caption2.weight(.medium))
-    }
-    .foregroundStyle(.white)
-    .frame(maxWidth: .infinity, minHeight: 52)
-    .contentShape(Rectangle())
+  /// "42 min left" for a title that has been started.
+  private func remaining(_ target: IOSCatalogItem) -> String? {
+    guard let progress = target.progress, progress.durationMilliseconds > 0 else { return nil }
+    let minutes = Int(
+      (Double(max(0, progress.durationMilliseconds - progress.positionMilliseconds)) / 60_000)
+        .rounded(.up))
+    guard minutes > 0 else { return nil }
+    return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min left" : "\(minutes) min left"
   }
 
   /// The season picker above the season's episodes as a list, like the Apple TV app on iPhone.
@@ -323,7 +347,10 @@ struct IOSDetailView: View {
     return VStack(alignment: .leading, spacing: 12) {
       IOSSectionHeader(title: "Information")
       LazyVGrid(
-        columns: [GridItem(.flexible(), alignment: .topLeading), GridItem(.flexible(), alignment: .topLeading)],
+        columns: [
+          GridItem(.flexible(), alignment: .topLeading),
+          GridItem(.flexible(), alignment: .topLeading),
+        ],
         alignment: .leading, spacing: 14
       ) {
         ForEach(fields, id: \.title) { field in
@@ -527,7 +554,9 @@ private struct IOSSupplementCard: View {
         Image(systemName: "play.fill").font(.callout.weight(.bold))
           .frame(width: 36, height: 36).background(.ultraThinMaterial, in: Circle())
       }
-      .frame(width: IOSDesign.landscapeWidth * 0.85, height: IOSDesign.landscapeWidth * 0.85 * 9 / 16)
+      .frame(
+        width: IOSDesign.landscapeWidth * 0.85, height: IOSDesign.landscapeWidth * 0.85 * 9 / 16
+      )
       .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(5) }
       .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
       Text(item.title).font(.footnote.weight(.semibold)).lineLimit(1)

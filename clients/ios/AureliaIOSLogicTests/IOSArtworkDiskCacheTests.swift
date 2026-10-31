@@ -51,6 +51,21 @@ struct IOSArtworkDiskCacheTests {
     #expect(cache.data(forKey: "entry-3") != nil)
   }
 
+  @Test func sizeAndClearingCoverOnlyStoredArtwork() throws {
+    let cache = temporaryCache()
+    defer { try? FileManager.default.removeItem(at: cache.directory) }
+    #expect(cache.byteCount() == 0)
+    cache.store(Data(repeating: 1, count: 300), forKey: "first")
+    cache.store(Data(repeating: 2, count: 200), forKey: "second")
+    let unrelated = cache.directory.appendingPathComponent("keep.txt")
+    try Data([9]).write(to: unrelated)
+    #expect(cache.byteCount() == 501)
+    cache.removeAll()
+    #expect(cache.data(forKey: "first") == nil)
+    #expect(cache.data(forKey: "second") == nil)
+    #expect(FileManager.default.fileExists(atPath: unrelated.path))
+  }
+
   private func poster(id: UUID = UUID(), revision: Int64?) -> IOSArtwork {
     IOSArtwork(
       id: id, kind: "poster", path: "/api/v1/artwork/\(id.uuidString.lowercased())",
