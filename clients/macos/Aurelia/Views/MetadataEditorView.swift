@@ -164,6 +164,8 @@ struct MetadataEditorSheet: View {
     )
     .background(AureliaDesign.canvas)
     .interactiveDismissDisabled(draft.dirty || draft.busy)
+    // A container, so the editor's own controls keep their identifiers.
+    .accessibilityElement(children: .contain)
     .accessibilityIdentifier("metadata-editor")
     .task { if draft.document == nil { await load() } }
     .alert("Discard unsaved changes?", isPresented: $discard) {

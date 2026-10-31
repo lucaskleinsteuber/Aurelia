@@ -36,7 +36,7 @@ struct PlayerView: View {
     _sceneNotes = StateObject(
       wrappedValue: SceneNotesController(profile: profile, mediaId: presentation.mediaId))
     #if DEBUG
-      if CinemaUITestFixture.enabled {
+      if CinemaUITestFixture.playsSimulatedTitles {
         _controller = StateObject(
           wrappedValue: CinemaUITestFixture.player(profile: profile, presentation: presentation))
         return
@@ -559,12 +559,11 @@ struct PlayerView: View {
               image: previews.imageBucket == previews.bucket(for: Int64(position))
                 ? previews.image : nil)
           },
+          valueDescription:
+            "\(formatTime(displayedPosition)) of \(formatTime(max(Double(controller.durationMilliseconds), 1)))",
           onEditingChanged: timelineEditingChanged
         )
         .focused($focusedControl, equals: "timeline")
-        .accessibilityValue(
-          "\(formatTime(displayedPosition)) of \(formatTime(max(Double(controller.durationMilliseconds), 1)))"
-        )
         Text(formatTime(Double(controller.durationMilliseconds)))
           .monospacedDigit().frame(minWidth: 44, alignment: .leading)
       }
@@ -1027,6 +1026,7 @@ private struct PlayerTimeline: View {
   @Binding var hoverPosition: Double?
   let previewClearance: CGFloat
   let preview: PlayerTimelinePreview?
+  let valueDescription: String
   let onEditingChanged: (Bool) -> Void
 
   var body: some View {
@@ -1043,6 +1043,7 @@ private struct PlayerTimeline: View {
         }
         Slider(value: $position, in: 0...duration, onEditingChanged: onEditingChanged)
           .tint(.white)
+          .accessibilityValue(valueDescription)
         ForEach(notes) { note in
           let start = min(max(Double(note.startMilliseconds) / duration, 0), 1) * proxy.size.width
           let end =

@@ -8,6 +8,10 @@
       ProcessInfo.processInfo.environment["AURELIA_CINEMA_UI_TESTS"] == "1"
         && ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == "library-admin"
     }
+    /// Every UI test plays through the simulated engine below; none opens VLC.
+    static var playsSimulatedTitles: Bool {
+      enabled || ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] != nil
+    }
     static let assetID = UUID(uuidString: "40000000-0000-0000-0000-000000000001")!
     private static var notesByMedia: [UUID: [SceneNote]] = [:]
     static func sceneNotes(path: String, method: String, body: Data?) throws -> Data {
@@ -277,6 +281,8 @@
   }
   @MainActor private final class FixturePlaybackEngine: PlaybackEngine {
     private var tickTask: Task<Void, Never>?
+    private var showedFirstFrame = false
+    private var showedResumeFrame = false
     var onUpdate: (() -> Void)?
     var onEnded: (() -> Void)?
     var onError: ((String) -> Void)?
@@ -302,10 +308,20 @@
       view.wantsLayer = true
       view.layer?.backgroundColor = NSColor.darkGray.cgColor
     }
-    func load(url: URL) {}  // No URL is opened, downloaded or decoded.
+    // No URL is opened, downloaded or decoded.
+    func load(url: URL) {
+      showedFirstFrame = false
+      showedResumeFrame = false
+    }
     func play() {
       isPlaying = true
       onUpdate?()
+      // Real playback moves its clock as the first frame shows, which is what lifts the
+      // player's start screen; the stepped fixture timeline moves once for that, then stays.
+      if !showedFirstFrame {
+        showedFirstFrame = true
+        showFrame()
+      }
       // Stress overlay/layout updates during these opt-in idle-pointer tests.
       // Other fixtures retain their deterministic, explicitly stepped timeline.
       guard ProcessInfo.processInfo.environment["AURELIA_AUTO_HIDE_UI_TESTS"] == "1",
@@ -334,6 +350,19 @@
     func seek(to milliseconds: Int64) {
       currentTimeMilliseconds = milliseconds
       onUpdate?()
+      // The seek to the resume position also has to show a frame before the start screen lifts.
+      if isPlaying, !showedResumeFrame {
+        showedResumeFrame = true
+        showFrame()
+      }
+    }
+    private func showFrame() {
+      Task { [weak self] in
+        try? await Task.sleep(for: .milliseconds(50))
+        guard let self, self.isPlaying else { return }
+        self.currentTimeMilliseconds += 300
+        self.onUpdate?()
+      }
     }
     func selectAudioTrack(id: Int32) {
       selectedAudioTrackID = id
