@@ -363,6 +363,21 @@ final class IOSPlaybackController: ObservableObject {
     userInteracted()
   }
 
+  /// Touch scrubbing: the finger's place on the timeline; lifting it jumps there.
+  func scrub(toFraction fraction: Double) {
+    guard canSeek, !closed, duration > 0 else { return }
+    isScrubbing = true
+    scrubPosition = Int64((min(max(fraction, 0), 1) * Double(duration)).rounded())
+    userInteracted()
+  }
+
+  /// A tap on the picture while the controls show hides them again, when nothing holds them.
+  func hideControls() {
+    guard !closed, mayHideControls else { return }
+    controlsTask?.cancel()
+    controlsVisible = false
+  }
+
   /// Jumps to the scrub position; false when nothing was being scrubbed.
   @discardableResult
   func commitScrub() -> Bool {

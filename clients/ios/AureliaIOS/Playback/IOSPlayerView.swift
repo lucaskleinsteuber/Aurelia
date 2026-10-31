@@ -141,6 +141,9 @@ struct IOSPlayerView: View {
         colors: [.black.opacity(0.60), .clear, .black.opacity(0.85)], startPoint: .top,
         endPoint: .bottom
       ).ignoresSafeArea()
+        // A tap on the picture hides the controls again.
+        .contentShape(Rectangle()).onTapGesture { controller.hideControls() }
+        .accessibilityHidden(true)
       VStack(spacing: IOSDesign.s(0)) {
         HStack(spacing: IOSDesign.s(18)) {
           icon("Close", symbol: "chevron.left", id: .close) { controller.close() }
@@ -309,6 +312,21 @@ struct IOSPlayerView: View {
           Text(IOSPlayerPolicy.timeLabel(milliseconds: controller.duration))
         }.font(.system(size: IOSDesign.s(22)).monospacedDigit()).foregroundStyle(.secondary)
       }.padding(.vertical, IOSDesign.s(16)).contentShape(Rectangle())
+        // Touch: drag along the bar (or tap a place) to choose a position; lifting jumps there.
+        .overlay {
+          GeometryReader { geometry in
+            Color.clear.contentShape(Rectangle())
+              .gesture(
+                DragGesture(minimumDistance: 0)
+                  .onChanged { value in
+                    controller.scrub(toFraction: value.location.x / max(geometry.size.width, 1))
+                  }
+                  .onEnded { _ in
+                    controller.commitScrub()
+                    controller.setScrubbing(false)
+                  })
+          }
+        }
     }.buttonStyle(IOSContentButtonStyle()).focusEffectDisabled().focused($focus, equals: .timeline)
       .disabled(!controller.canSeek)
       .iosMoveCommand { direction in

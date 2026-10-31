@@ -1,7 +1,7 @@
 # Aurelia for iPhone and iPad
 
-`clients/ios` holds the iPhone and iPad client. It is a preview: it builds and its logic is
-tested, but it has not been installed on a real device or played a real title yet.
+`clients/ios` holds the iPhone and iPad client. It is a preview: it builds, its logic is
+tested and it installs on a real iPhone, but its playback has not been checked on one yet.
 
 ## How it is built
 
@@ -44,13 +44,27 @@ argument `--aurelia-ui-testing` and the environment variable
 
 ## Installing on your own iPhone
 
-The app is signed for development like the Apple TV app. To install it, open
-`clients/ios/AureliaIOS.xcodeproj` in Xcode, choose your iPhone and press Run. A free
+```bash
+zsh scripts/build-ios.sh --device <identifier>
+```
+
+Builds the app signed for development and installs it on a paired iPhone or iPad, over the
+cable or over Wi-Fi; `xcrun devicectl list devices` shows the identifier. The device needs
+Developer Mode (Settings › Privacy & Security) and must have been paired with this Mac in Xcode
+once. Reinstalling replaces only the app, so its server connection and settings stay. A free
 development profile expires after seven days; the signing refresh job in
-`scripts/refresh-signing.sh` currently renews only the Mac and Apple TV apps.
+`scripts/refresh-signing.sh` currently renews only the Mac and Apple TV apps, so run the command
+again to renew it.
+
+The player works by touch: tap the picture to show or hide the controls, and drag along the
+timeline (or tap a place on it) to jump there. A hardware keyboard adds the arrow keys, Space
+and Escape.
 
 ## Known limits
 
-- Not yet tried on a physical iPhone or iPad, and no real title has played in it.
+- Installed on a real iPhone, but its playback and touch controls still need the owner's own
+  check; automated tests never play a real title.
+- Waking a sleeping server sends a broadcast, which iOS may block for apps without Apple's
+  multicast permission; the server then has to be woken another way.
 - No UI tests yet; the logic tests cover the shared core.
 - The app is not published on GitHub.
