@@ -394,8 +394,44 @@ public sealed class CollectionsAndHistoryTests
             Assert.Equal(HttpStatusCode.Conflict, refusedRemovalResponse.StatusCode);
             Assert.Empty(await SendAsync<List<OfflineTitleSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/library/health/offline?days=0"));
 
-            // Once its file is missing, the copy's favorite moves to the remaining copy.
+            // Once its file is missing, every profile's favorite, progress and history moves to
+            // the remaining copy, not only those of the administrator who merges.
             await SendAsync<object>(client, owner.Token, HttpMethod.Put, $"/api/v1/media/{item2.Id}/favorite", new SetFavoriteRequest(true));
+            var viewer = new ServerUser
+            {
+                Id = Guid.NewGuid(),
+                Username = "viewer",
+                NormalizedUsername = "VIEWER",
+                PasswordHash = "synthetic-only",
+                Role = UserRole.User,
+                IsEnabled = true,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            db.Users.Add(viewer);
+            db.UserFavorites.Add(new UserFavorite { Id = Guid.NewGuid(), UserId = viewer.Id, MediaItemId = item2.Id, CreatedAt = DateTimeOffset.UtcNow });
+            db.PlaybackProgress.Add(new PlaybackProgress
+            {
+                Id = Guid.NewGuid(),
+                UserId = viewer.Id,
+                User = null!,
+                MediaItemId = item2.Id,
+                MediaItem = null!,
+                PositionMilliseconds = 60_000,
+                DurationMilliseconds = 120_000,
+                LastPlayedAt = DateTimeOffset.UtcNow,
+                Revision = 1,
+            });
+            db.WatchEvents.Add(new WatchEvent
+            {
+                Id = Guid.NewGuid(),
+                UserId = viewer.Id,
+                MediaItemId = item2.Id,
+                Timestamp = DateTimeOffset.UtcNow,
+                PositionMilliseconds = 60_000,
+                DurationMilliseconds = 120_000,
+                SecondsWatched = 60,
+            });
+            await db.SaveChangesAsync();
             await db.MediaItems.Where(item => item.Id == item2.Id)
                 .ExecuteUpdateAsync(update => update.SetProperty(item => item.Availability, MediaAvailability.Missing));
             var offline = await SendAsync<List<OfflineTitleSummary>>(client, owner.Token, HttpMethod.Get, "/api/v1/library/health/offline?days=0");
@@ -412,7 +448,10 @@ public sealed class CollectionsAndHistoryTests
             using var verify = factory.Services.CreateScope();
             var verifyDb = verify.ServiceProvider.GetRequiredService<AureliaDbContext>();
             Assert.False(await verifyDb.MediaItems.AnyAsync(item => item.Id == item2.Id));
-            Assert.True(await verifyDb.UserFavorites.AnyAsync(favorite => favorite.MediaItemId == item1.Id));
+            Assert.True(await verifyDb.UserFavorites.AnyAsync(favorite => favorite.MediaItemId == item1.Id && favorite.UserId == owner.User.Id));
+            Assert.True(await verifyDb.UserFavorites.AnyAsync(favorite => favorite.MediaItemId == item1.Id && favorite.UserId == viewer.Id));
+            Assert.Equal(60_000, (await verifyDb.PlaybackProgress.SingleAsync(progress => progress.UserId == viewer.Id)).PositionMilliseconds);
+            Assert.Equal(item1.Id, (await verifyDb.WatchEvents.SingleAsync(watch => watch.UserId == viewer.Id)).MediaItemId);
             Assert.True(await verifyDb.MediaExclusions.AnyAsync(), "The removed copy stays out of future scans.");
 
             // INVARIANT CHECK: Media files on disk MUST NOT be deleted, renamed, or modified!

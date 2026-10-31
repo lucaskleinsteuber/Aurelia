@@ -292,6 +292,10 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasOne(note => note.User).WithMany().HasForeignKey(note => note.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(note => note.MediaItem).WithMany().HasForeignKey(note => note.MediaItemId).OnDelete(DeleteBehavior.Cascade);
         });
+        // History belongs to its profile and, like progress, only shows titles the profile may see,
+        // so a page's total matches the entries it can list.
+        modelBuilder.Entity<WatchEvent>().HasQueryFilter(watch => AccessUserId == null
+            || (watch.UserId == AccessUserId && MediaItems.Any(media => media.Id == watch.MediaItemId)));
         modelBuilder.Entity<UserFavorite>().HasQueryFilter(favorite => AccessUserId == null
             || (favorite.UserId == AccessUserId && MediaItems.Any(media => media.Id == favorite.MediaItemId)));
         modelBuilder.Entity<SyncChange>().HasQueryFilter(change => AccessUserId == null || AccessWholeCatalog

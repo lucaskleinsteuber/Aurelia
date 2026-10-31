@@ -92,7 +92,8 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         Guid userId,
         CancellationToken cancellationToken)
     {
-        var items = await database.WatchEvents
+        // Clearing removes the profile's whole history, also for titles it cannot see right now.
+        var items = await database.WatchEvents.IgnoreQueryFilters()
             .Where(e => e.UserId == userId)
             .ToListAsync(cancellationToken);
         if (items.Count > 0)

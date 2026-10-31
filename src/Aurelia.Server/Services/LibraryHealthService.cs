@@ -126,17 +126,23 @@ public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutat
             throw new MetadataException("invalid_merge", "Choose two different copies.", StatusCodes.Status400BadRequest);
 
         var source = await database.MediaItems
-            .Include(item => item.Favorites)
-            .Include(item => item.PlaybackProgress)
             .Include(item => item.CollectionMemberships)
             .SingleOrDefaultAsync(item => item.Id == sourceId, cancellationToken)
             ?? throw new MetadataException("source_not_found", "The copy to merge was not found.", StatusCodes.Status404NotFound);
         var target = await database.MediaItems
-            .Include(item => item.Favorites)
-            .Include(item => item.PlaybackProgress)
             .Include(item => item.CollectionMemberships)
             .SingleOrDefaultAsync(item => item.Id == targetId, cancellationToken)
             ?? throw new MetadataException("target_not_found", "The copy to keep was not found.", StatusCodes.Status404NotFound);
+        // Favorites, progress and history belong to profiles. The request's own profile filter
+        // would show only the administrator's, and the others would be deleted with the copy.
+        var sourceFavorites = await database.UserFavorites.IgnoreQueryFilters()
+            .Where(favorite => favorite.MediaItemId == sourceId).ToListAsync(cancellationToken);
+        var targetFavorites = await database.UserFavorites.IgnoreQueryFilters()
+            .Where(favorite => favorite.MediaItemId == targetId).ToListAsync(cancellationToken);
+        var sourceProgress = await database.PlaybackProgress.IgnoreQueryFilters()
+            .Where(progress => progress.MediaItemId == sourceId).ToListAsync(cancellationToken);
+        var targetProgress = await database.PlaybackProgress.IgnoreQueryFilters()
+            .Where(progress => progress.MediaItemId == targetId).ToListAsync(cancellationToken);
 
         if (source.Kind != target.Kind || source.Kind is not (MediaKind.Movie or MediaKind.Episode))
             throw new MetadataException("invalid_merge", "Only two copies of the same movie or episode can be merged.", StatusCodes.Status400BadRequest);
@@ -146,12 +152,12 @@ public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutat
                 StatusCodes.Status409Conflict);
 
         var now = clock.GetUtcNow();
-        foreach (var favorite in source.Favorites.Where(favorite => target.Favorites.All(existing => existing.UserId != favorite.UserId)))
+        foreach (var favorite in sourceFavorites.Where(favorite => targetFavorites.All(existing => existing.UserId != favorite.UserId)))
             database.UserFavorites.Add(new UserFavorite { Id = Guid.NewGuid(), UserId = favorite.UserId, MediaItemId = target.Id, CreatedAt = favorite.CreatedAt });
 
-        foreach (var progress in source.PlaybackProgress)
+        foreach (var progress in sourceProgress)
         {
-            var existing = target.PlaybackProgress.FirstOrDefault(value => value.UserId == progress.UserId);
+            var existing = targetProgress.FirstOrDefault(value => value.UserId == progress.UserId);
             if (existing is null)
             {
                 database.PlaybackProgress.Add(new PlaybackProgress
@@ -181,7 +187,7 @@ public sealed class LibraryHealthService(AureliaDbContext database, LibraryMutat
         foreach (var member in source.CollectionMemberships.Where(member => target.CollectionMemberships.All(existing => existing.CollectionId != member.CollectionId)))
             database.MediaCollectionMembers.Add(new MediaCollectionMember { CollectionId = member.CollectionId, MediaItemId = target.Id, SortOrder = member.SortOrder });
 
-        await database.WatchEvents.Where(watch => watch.MediaItemId == sourceId)
+        await database.WatchEvents.IgnoreQueryFilters().Where(watch => watch.MediaItemId == sourceId)
             .ExecuteUpdateAsync(update => update.SetProperty(watch => watch.MediaItemId, targetId), cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
         await mutations.RemoveAsync(userId, sourceId, cancellationToken);

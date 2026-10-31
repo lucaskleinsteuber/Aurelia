@@ -467,6 +467,55 @@ public sealed class LibraryStateTests
     }
 
     [Fact]
+    public async Task HistoryOfARestrictedProfileCountsOnlyTitlesItMaySeeAndClearsAll()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var viewerId = Guid.NewGuid();
+        await using (var seedScope = fixture.Factory.Services.CreateAsyncScope())
+        {
+            var database = seedScope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var viewer = new ServerUser
+            {
+                Id = viewerId,
+                Username = "synthetic viewer",
+                NormalizedUsername = "SYNTHETIC VIEWER",
+                Role = UserRole.User,
+                PasswordHash = "synthetic",
+                AccessMode = ProfileAccessMode.SelectedTitles,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            database.Users.Add(viewer);
+            database.UserTitleGrants.Add(new UserTitleGrant { User = viewer, UserId = viewerId, MediaItemId = fixture.Movie.Id, MediaItem = null! });
+            foreach (var mediaId in new[] { fixture.Movie.Id, fixture.Episodes[0].Id })
+            {
+                database.WatchEvents.Add(new WatchEvent
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = viewerId,
+                    MediaItemId = mediaId,
+                    Timestamp = DateTimeOffset.UtcNow,
+                    PositionMilliseconds = 30_000,
+                    DurationMilliseconds = 60_000,
+                    SecondsWatched = 30,
+                });
+            }
+            await database.SaveChangesAsync();
+        }
+        await using var scope = fixture.Factory.Services.CreateAsyncScope();
+        var scoped = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        scoped.AccessUserId = viewerId; scoped.AccessMode = ProfileAccessMode.SelectedTitles;
+        var history = scope.ServiceProvider.GetRequiredService<WatchHistoryService>();
+        var page = await history.GetHistoryAsync(viewerId, 0, 50, default);
+        Assert.Equal(fixture.Movie.Id, Assert.Single(page.Items).MediaId);
+        Assert.Equal(1, page.Total);
+
+        await history.ClearHistoryAsync(viewerId, default);
+        await using var verify = fixture.Factory.Services.CreateAsyncScope();
+        Assert.False(await verify.ServiceProvider.GetRequiredService<AureliaDbContext>().WatchEvents
+            .AnyAsync(watch => watch.UserId == viewerId));
+    }
+
+    [Fact]
     public async Task HiddenChildInAnotherRootCannotAffectSeriesWatchFiltersOrLastPlayedOrder()
     {
         using var fixture = await Fixture.CreateAsync();
