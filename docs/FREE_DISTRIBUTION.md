@@ -117,15 +117,16 @@ longer launches. `zsh scripts/refresh-signing.sh --install` sets up a per-user
 LaunchAgent that runs at login and twice a day. When a profile has less than three
 days left, it asks Apple for a fresh profile (Xcode's signing step on a small checkout,
 stopped once the profile arrives), embeds it, and re-signs only the outer bundle of the
-installed Mac app and the adopted Apple TV build with the same certificate. Nested
+installed Mac app and the adopted Apple TV and iPhone builds with the same certificate. Nested
 code, identifier, entitlements and hardened runtime are preserved, and the version
 does not change. The Mac app is skipped while it is open. A notification reports each
 refresh or failure; the log is `~/Library/Logs/Aurelia Signing Refresh.log`.
 
 Background jobs may not read `~/Documents`, so the job keeps its own copy of the
-script, the checkout and the Apple TV app in
+script, the checkout and the Apple TV and iPhone apps in
 `~/Library/Application Support/Aurelia Signing Refresh`. Run
-`--adopt-tv` after installing an Apple TV build, `--force` to refresh now, and
+`--adopt-tv` after installing an Apple TV build, `--adopt-iphone` after installing an
+iPhone build, `--force` to refresh now (`--force iphone` for one app only), and
 `--uninstall` to remove the job. A paid Apple Developer Program membership makes this
 unnecessary with one-year profiles.
 

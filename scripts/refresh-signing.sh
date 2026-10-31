@@ -3,19 +3,21 @@
 #
 # A free Apple account issues development profiles that expire after 7 days; an app whose
 # profile expired no longer launches. This script asks Apple for fresh profiles and re-signs the
-# installed Mac app and the Apple TV app with them. The app versions stay the same: the existing
+# installed Mac app, the Apple TV app and the iPhone app with them. The app versions stay the same: the existing
 # bundles are re-signed, nothing is rebuilt from newer source.
 #
 #   zsh scripts/refresh-signing.sh --install      set up the state folder and the daily job
 #   zsh scripts/refresh-signing.sh --adopt-tv     hand the Apple TV build just installed to the job
 #                                                 (its build folder is deleted afterwards)
+#   zsh scripts/refresh-signing.sh --adopt-iphone the same for the iPhone build just installed
 #   zsh scripts/refresh-signing.sh [--force]      refresh what expires within 3 days (or all)
+#   zsh scripts/refresh-signing.sh --force iphone refresh one app now: mac, tv or iphone
 #   zsh scripts/refresh-signing.sh --uninstall    remove the job (keeps the state folder)
 #
 # Background jobs may not read ~/Documents, so the job works from its own state folder in
 # ~/Library/Application Support with a copy of this script, a small checkout used only to
-# request profiles, and a copy of the installed Apple TV app. Run --install and --adopt-tv
-# interactively from the repository.
+# request profiles, and copies of the installed Apple TV and iPhone apps. Run --install and the
+# --adopt options interactively from the repository.
 set -euo pipefail
 
 script_path=${0:A}
@@ -27,6 +29,7 @@ profiles="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 mac_app=/Applications/Aurelia.app
 mac_bundle=com.lucas.aurelia.media
 tv_bundle=com.lucas.aurelia.tvos
+iphone_bundle=com.lucas.aurelia.ios
 threshold_seconds=$((3 * 24 * 60 * 60))
 export DEVELOPER_DIR=${DEVELOPER_DIR:-$(xcode-select -p)}
 
@@ -48,7 +51,7 @@ profile_name() {
   security cms -D -i "$1" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null
 }
 
-# The cached profiles Xcode made for one bundle and platform ("Mac" or "tvOS").
+# The cached profiles Xcode made for one bundle and platform ("Mac", "tvOS" or "iOS").
 cached_profiles() {
   local platform=$1 bundle=$2 file
   [[ -d "$profiles" ]] || return 0
@@ -190,42 +193,64 @@ refresh_mac() {
   notify "Mac app re-signed, valid until $(date -r $expiry '+%d.%m.')."
 }
 
-tv_installed_version() {
+# A paired device app: "tv" for the Apple TV, "iphone" for the iPhone. Sets the globals the
+# functions below use.
+device_kind() {
+  case $1 in
+    tv)
+      name="Apple TV" folder=tvOS bundle=$tv_bundle platform=tvOS
+      project=clients/tvos/AureliaTV.xcodeproj scheme=AureliaTV products=Release-appletvos
+      device_match="Apple TV" device_variable=AURELIA_TV_DEVICE adopt_option=--adopt-tv
+      ;;
+    iphone)
+      name=iPhone folder=iOS bundle=$iphone_bundle platform=iOS
+      project=clients/ios/AureliaIOS.xcodeproj scheme=AureliaIOS products=Release-iphoneos
+      device_match=iPhone device_variable=AURELIA_IPHONE_DEVICE adopt_option=--adopt-iphone
+      ;;
+  esac
+}
+
+device_installed_version() {
   local device=$1 out attempt
   for attempt in 1 2 3; do
-    out=$(xcrun devicectl device info apps --device "$device" --bundle-id "$tv_bundle" 2>&1) || true
-    if print -r -- "$out" | grep -q "$tv_bundle"; then
-      print -r -- "$out" | awk -v id="$tv_bundle" '$2 == id { print $3 " (" $4 ")" }'
+    out=$(xcrun devicectl device info apps --device "$device" --bundle-id "$bundle" 2>&1) || true
+    if print -r -- "$out" | grep -q "$bundle"; then
+      print -r -- "$out" | awk -v id="$bundle" '$2 == id { print $3 " (" $4 ")" }'
       return 0
     fi
   done
   return 1
 }
 
-refresh_tv() {
-  local app="$state/tvOS/Aurelia.app" device expiry installed adopted profile stage attempt
-  [[ -d "$app" && -r "$state/tvOS/device" ]] || {
-    log "Apple TV: no build adopted yet (run --adopt-tv)."
+refresh_device() {
+  local name folder bundle platform project scheme products device_match device_variable
+  local adopt_option
+  device_kind "$1"
+  local app="$state/$folder/Aurelia.app" device expiry installed adopted profile stage attempt
+  [[ -d "$app" && -r "$state/$folder/device" ]] || {
+    log "$name: no build adopted yet (run $adopt_option)."
     return 0
   }
-  device=$(<"$state/tvOS/device")
+  device=$(<"$state/$folder/device")
   expiry=$(profile_expiry "$app/embedded.mobileprovision")
   needs_refresh "$expiry" || {
-    log "Apple TV: valid until $(date -r $expiry '+%d.%m. %H:%M')."
+    log "$name: valid until $(date -r $expiry '+%d.%m. %H:%M')."
     return 0
   }
-  installed=$(tv_installed_version "$device") || {
-    log "Apple TV: not reachable; trying again later."
+  installed=$(device_installed_version "$device") || {
+    log "$name: not reachable; trying again later."
+    if (( expiry - $(date +%s) < 24 * 60 * 60 )); then
+      notify "Unlock the $name on this network so Aurelia can be re-signed; it stops opening on $(date -r $expiry '+%d.%m. at %H:%M')."
+    fi
     return 0
   }
   adopted=$(bundle_version "$app" Info.plist)
   if [[ "$installed" != "$adopted" ]]; then
-    log "Apple TV: $installed is installed but $adopted was adopted; run --adopt-tv."
-    notify "Apple TV app: run refresh-signing.sh --adopt-tv once."
+    log "$name: $installed is installed but $adopted was adopted; run $adopt_option."
+    notify "$name app: run refresh-signing.sh $adopt_option once."
     return 1
   fi
-  profile=$(request_profile tvOS "$tv_bundle" clients/tvos/AureliaTV.xcodeproj AureliaTV \
-    "id=$device") || return 1
+  profile=$(request_profile "$platform" "$bundle" "$project" "$scheme" "id=$device") || return 1
   stage="$state/Stage/Aurelia.app"
   rm -rf "$state/Stage" && mkdir -p "$state/Stage" && ditto "$app" "$stage" || return 1
   resign "$stage" "$profile" embedded.mobileprovision || return 1
@@ -233,15 +258,15 @@ refresh_tv() {
     if xcrun devicectl device install app --device "$device" "$stage" >>"$log_file" 2>&1; then
       break
     fi
-    (( attempt == 3 )) && { log "Apple TV: installing failed."; return 1; }
+    (( attempt == 3 )) && { log "$name: installing failed."; return 1; }
     sleep 5
   done
-  installed=$(tv_installed_version "$device") || installed=unknown
-  [[ "$installed" == "$adopted" ]] || { log "Apple TV: now reports $installed."; return 1; }
+  installed=$(device_installed_version "$device") || installed=unknown
+  [[ "$installed" == "$adopted" ]] || { log "$name: now reports $installed."; return 1; }
   rm -rf "$app" && mv "$stage" "$app" && rm -rf "$state/Stage"
   expiry=$(profile_expiry "$app/embedded.mobileprovision")
-  log "Apple TV: $installed re-signed, valid until $(date -r $expiry '+%d.%m. %H:%M')."
-  notify "Apple TV app re-signed, valid until $(date -r $expiry '+%d.%m.')."
+  log "$name: $installed re-signed, valid until $(date -r $expiry '+%d.%m. %H:%M')."
+  notify "$name app re-signed, valid until $(date -r $expiry '+%d.%m.')."
 }
 
 repository() {
@@ -264,34 +289,41 @@ update_checkout() {
   cp "$root/scripts/refresh-signing.sh" "$state/refresh-signing.sh"
 }
 
-# Copies the Apple TV build that is installed now, found by its version in the build folder.
-adopt_tv() {
-  local root=$1 device=${AURELIA_TV_DEVICE:-} installed version build candidate
+# Copies the device build that is installed now, found by its version in the build folder.
+adopt_device() {
+  local name folder bundle platform project scheme products device_match device_variable
+  local adopt_option
+  device_kind "$2"
+  local root=$1 device=${(P)device_variable:-} installed version build candidate
   local repository_root=$root
   source "$root/scripts/workspace-paths.sh"
-  if [[ -z "$device" && -r "$state/tvOS/device" ]]; then device=$(<"$state/tvOS/device"); fi
+  if [[ -z "$device" && -r "$state/$folder/device" ]]; then device=$(<"$state/$folder/device"); fi
   if [[ -z "$device" ]]; then
     # "Apple TV 4K (27.2) (00008110-…)": the identifier is the last parenthesized part.
     device=$(xcrun xctrace list devices 2>/dev/null | sed -n '/^== Devices ==/,/^== /p' \
-      | grep 'Apple TV' | grep -v Simulator | head -1 | sed -E 's/.*\(([^()]*)\)[[:space:]]*$/\1/')
+      | grep "$device_match" | grep -v Simulator | head -1 \
+      | sed -E 's/.*\(([^()]*)\)[[:space:]]*$/\1/')
   fi
-  [[ -n "$device" ]] || { print -u2 "No Apple TV found; set AURELIA_TV_DEVICE."; exit 1; }
-  installed=$(tv_installed_version "$device") || { print -u2 "The Apple TV is not reachable."; exit 1; }
+  [[ -n "$device" ]] || { print -u2 "No $name found; set $device_variable."; return 1; }
+  installed=$(device_installed_version "$device") || {
+    print -u2 "The $name is not reachable."
+    return 1
+  }
   version=${installed%% *}
   build=${${installed##*\(}%\)}
-  candidate="$other_root/Build/tvOS/$version-$build/DerivedData/Build/Products/Release-appletvos/Aurelia.app"
-  [[ -d "$candidate" ]] || { print -u2 "No build for $installed at $candidate."; exit 1; }
+  candidate="$other_root/Build/$folder/$version-$build/DerivedData/Build/Products/$products/Aurelia.app"
+  [[ -d "$candidate" ]] || { print -u2 "No build for $installed at $candidate."; return 1; }
   [[ "$(bundle_version "$candidate" Info.plist)" == "$installed" ]] || {
     print -u2 "The build folder for $installed holds a different version."
-    exit 1
+    return 1
   }
-  mkdir -p "$state/tvOS"
-  rm -rf "$state/tvOS/Aurelia.app"
-  ditto "$candidate" "$state/tvOS/Aurelia.app"
-  print -r -- "$device" >"$state/tvOS/device"
+  mkdir -p "$state/$folder"
+  rm -rf "$state/$folder/Aurelia.app"
+  ditto "$candidate" "$state/$folder/Aurelia.app"
+  print -r -- "$device" >"$state/$folder/device"
   # The job's copy is the one that is kept; the build folder is not needed any more.
-  rm -rf -- "$other_root/Build/tvOS/$version-$build"
-  log "Apple TV: adopted $installed."
+  rm -rf -- "$other_root/Build/$folder/$version-$build"
+  log "$name: adopted $installed."
 }
 
 install_agent() {
@@ -324,14 +356,20 @@ case "${1:-}" in
   --install)
     root=$(repository)
     update_checkout "$root"
-    adopt_tv "$root" || true
+    adopt_device "$root" tv || true
+    adopt_device "$root" iphone || true
     install_agent
     log "Installed: runs daily at 4:30 and 14:30, and at login."
     ;;
   --adopt-tv)
     root=$(repository)
     update_checkout "$root"
-    adopt_tv "$root"
+    adopt_device "$root" tv
+    ;;
+  --adopt-iphone)
+    root=$(repository)
+    update_checkout "$root"
+    adopt_device "$root" iphone
     ;;
   --uninstall)
     launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
@@ -343,16 +381,19 @@ case "${1:-}" in
     mkdir "$state/.lock" 2>/dev/null || { log "Another refresh is running."; exit 0; }
     trap 'rmdir "$state/.lock" 2>/dev/null || true' EXIT
     [[ -d "$state/Checkout" ]] || { log "Not set up; run --install."; exit 1; }
+    only=${2:-}
+    [[ -z "$only" || "$only" == (mac|tv|iphone) ]] || { print -u2 "Unknown app: $only"; exit 2; }
     failed=0
-    refresh_mac || failed=1
-    refresh_tv || failed=1
+    [[ -z "$only" || "$only" == mac ]] && { refresh_mac || failed=1; }
+    [[ -z "$only" || "$only" == tv ]] && { refresh_device tv || failed=1; }
+    [[ -z "$only" || "$only" == iphone ]] && { refresh_device iphone || failed=1; }
     if (( failed )); then
       notify "Re-signing failed. See ~/Library/Logs/Aurelia Signing Refresh.log."
       exit 1
     fi
     ;;
   *)
-    print -u2 "Usage: refresh-signing.sh [--install | --adopt-tv | --uninstall | --force]"
+    print -u2 "Usage: refresh-signing.sh [--install | --adopt-tv | --adopt-iphone | --uninstall | --force [mac|tv|iphone]]"
     exit 2
     ;;
 esac
