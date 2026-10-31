@@ -107,6 +107,11 @@ DEVELOPER_DIR="$developer_dir" xcodebuild \
 stop_test_hosts
 
 if [[ "${AURELIA_SKIP_UI_TESTS:-0}" != "1" && "${AURELIA_LOGIC_ONLY:-0}" != "1" ]]; then
+  # AURELIA_UI_TEST_FILTER takes one or more comma-separated test identifiers.
+  ui_test_filters=()
+  for filter in "${(@s:,:)${AURELIA_UI_TEST_FILTER:-AureliaUITests}}"; do
+    ui_test_filters+=("-only-testing:$filter")
+  done
   DEVELOPER_DIR="$developer_dir" xcodebuild \
     -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
     -scheme Aurelia \
@@ -115,6 +120,6 @@ if [[ "${AURELIA_SKIP_UI_TESTS:-0}" != "1" && "${AURELIA_LOGIC_ONLY:-0}" != "1" 
     -resultBundlePath "$temporary_ui_result" \
     -enableCodeCoverage NO \
     -parallel-testing-enabled NO \
-    -only-testing:"${AURELIA_UI_TEST_FILTER:-AureliaUITests}" \
+    "${ui_test_filters[@]}" \
     test-without-building 2>&1 | tee -a "$temporary_log"
 fi

@@ -94,7 +94,7 @@ final class CinemaUITests: XCTestCase {
     let app = launch()
     defer { app.terminate() }
     app.descendants(matching: .any)["media-actions"].click()
-    app.menuItems["Find Metadata Match"].click()
+    app.menuItems["Find Metadata Match…"].click()
     let query = app.textFields["metadata-match-query"]
     XCTAssertTrue(query.waitForExistence(timeout: 5), app.debugDescription)
     XCTAssertTrue(app.staticTexts["Match: Breaking Bad"].waitForExistence(timeout: 5))
@@ -353,8 +353,22 @@ final class CinemaUITests: XCTestCase {
       CGVector(dx: frame.midX - window.frame.minX, dy: frame.midY - window.frame.minY))
   }
 
+  /// Opens the first person's photo crop; the photo menu may sit below the editor's visible
+  /// area, where isHittable is still true, so it is scrolled into view by its frame.
+  @MainActor private func openFirstPersonCrop(in app: XCUIApplication) {
+    let photo = app.menuButtons["Photo"].firstMatch
+    let editorScroll = app.descendants(matching: .any)["metadata-editor-scroll"]
+    XCTAssertTrue(photo.waitForExistence(timeout: 5))
+    for _ in 0..<12 where photo.frame.maxY > editorScroll.frame.maxY - 12 {
+      editorScroll.scroll(byDeltaX: 0, deltaY: -150)
+    }
+    photo.click()
+    XCTAssertTrue(app.menuItems["Crop…"].waitForExistence(timeout: 5))
+    app.menuItems["Crop…"].click()
+  }
+
   @MainActor private func selectEditorSection(_ name: String, in app: XCUIApplication) {
-    let scroll = app.scrollViews["metadata-editor-scroll"]
+    let scroll = app.descendants(matching: .any)["metadata-editor-scroll"]
     scroll.scroll(byDeltaX: 0, deltaY: 10_000)
     let heading = app.staticTexts[name].firstMatch
     for _ in 0..<24 {
@@ -395,7 +409,7 @@ final class CinemaUITests: XCTestCase {
     for name in ["Trailers", "Extras", "Cast & Crew"] {
       let visibleCard =
         name == "Cast & Crew"
-        ? app.staticTexts["Person 2"]
+        ? app.buttons["person-tmdb:person:2"]
         : app.buttons[
           name == "Trailers"
             ? "supplement-50000000-0000-0000-0000-000000000011"
@@ -426,7 +440,8 @@ final class CinemaUITests: XCTestCase {
       pointer(arrow, in: app).click()
       shot(app, "Cinema - \(name) - Arrow Page")
     }
-    XCTAssertEqual(app.staticTexts.matching(identifier: "Bryan Cranston").count, 1)
+    XCTAssertEqual(
+      app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Bryan Cranston,")).count, 1)
     XCTAssertFalse(app.staticTexts["Acting"].exists)
     let sidebar = app.descendants(matching: .any)["sidebar-library"]
     sidebar.click()
@@ -458,7 +473,7 @@ final class CinemaUITests: XCTestCase {
     XCTAssertTrue(crop.waitForExistence(timeout: 5))
     XCTAssertTrue(crop.isEnabled)
     if !crop.isHittable {
-      app.scrollViews["metadata-editor-scroll"].scroll(byDeltaX: 0, deltaY: -300)
+      app.descendants(matching: .any)["metadata-editor-scroll"].scroll(byDeltaX: 0, deltaY: -300)
     }
     XCTAssertTrue(crop.isHittable)
     crop.click()
@@ -510,8 +525,7 @@ final class CinemaUITests: XCTestCase {
     app.buttons["crop-cancel"].click()
     selectEditorSection("Cast and Crew", in: app)
     XCTAssertTrue(app.buttons["Add Person"].waitForExistence(timeout: 5))
-    app.menuButtons["Photo"].firstMatch.click()
-    app.menuItems["Crop…"].click()
+    openFirstPersonCrop(in: app)
     XCTAssertTrue(app.buttons["crop-use"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.staticTexts["1:1"].exists)
     let personFrame = app.descendants(matching: .any)["crop-frame"].frame
@@ -537,8 +551,7 @@ final class CinemaUITests: XCTestCase {
     app.buttons["crop-redo"].click()
     app.buttons["crop-cancel"].click()
     // Cancelling a crop must leave the person's original selection untouched.
-    app.menuButtons["Photo"].firstMatch.click()
-    app.menuItems["Crop…"].click()
+    openFirstPersonCrop(in: app)
     XCTAssertTrue(app.buttons["crop-use"].waitForExistence(timeout: 5))
     XCTAssertEqual(
       app.descendants(matching: .any)["crop-frame"].frame.width, personFrame.width, accuracy: 1)
@@ -550,8 +563,7 @@ final class CinemaUITests: XCTestCase {
     app.menuItems["Edit Metadata…"].click()
     XCTAssertTrue(app.textFields["metadata-title"].waitForExistence(timeout: 5))
     selectEditorSection("Cast and Crew", in: app)
-    app.menuButtons["Photo"].firstMatch.click()
-    app.menuItems["Crop…"].click()
+    openFirstPersonCrop(in: app)
     XCTAssertTrue(app.buttons["crop-use"].waitForExistence(timeout: 5))
     XCTAssertLessThan(selection.frame.width, personFrame.width * 0.7)
     shot(app, "Cinema - Person Crop - Zoom Persisted After Editor Save")

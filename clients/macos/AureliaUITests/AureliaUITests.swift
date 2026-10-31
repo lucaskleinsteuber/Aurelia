@@ -168,9 +168,9 @@ final class AureliaUITests: XCTestCase {
     app.activate()
     defer { app.terminate() }
     app.typeKey(",", modifierFlags: .command)
-    // The connection to the server is part of this Mac's own settings.
-    XCTAssertTrue(app.buttons["App"].waitForExistence(timeout: 8))
-    app.buttons["App"].click()
+    // The connection to the server is under Settings › Advanced.
+    XCTAssertTrue(app.buttons["Advanced"].waitForExistence(timeout: 8))
+    app.buttons["Advanced"].click()
     let restore = app.buttons["restore-local-host"]
     XCTAssertTrue(restore.waitForExistence(timeout: 8))
     for _ in 0..<8 where !restore.isHittable { app.scrollViews.firstMatch.swipeUp() }
@@ -178,9 +178,11 @@ final class AureliaUITests: XCTestCase {
     recordImportScreenshot(app, named: "Server settings - restore hosting without signing out")
     restore.click()
     XCTAssertTrue(restore.waitForNonExistence(timeout: 5))
-    XCTAssertTrue(app.buttons["Restart Server"].exists)
     XCTAssertTrue(app.staticTexts["owner · Owner"].exists)
     XCTAssertFalse(app.buttons["Disconnect This Mac"].exists)
+    // The restored server is managed under Settings › Server again.
+    app.buttons["Server"].click()
+    XCTAssertTrue(app.buttons["Restart Server"].waitForExistence(timeout: 8))
     assertNoUnexpectedDialog(in: app)
   }
 
@@ -312,7 +314,7 @@ final class AureliaUITests: XCTestCase {
     defer { app.terminate() }
 
     app.typeKey(",", modifierFlags: .command)
-    let metadataTab = app.buttons["Movie Info"]
+    let metadataTab = app.buttons["Metadata"]
     XCTAssertTrue(metadataTab.waitForExistence(timeout: 8))
     metadataTab.click()
     XCTAssertTrue(app.staticTexts["Movie & TV Information"].waitForExistence(timeout: 8))
@@ -336,8 +338,8 @@ final class AureliaUITests: XCTestCase {
     let playbackTab = app.buttons["Playback"]
     XCTAssertTrue(playbackTab.waitForExistence(timeout: 8))
     playbackTab.click()
-    XCTAssertTrue(app.staticTexts["Playback"].waitForExistence(timeout: 8))
-    XCTAssertTrue(app.descendants(matching: .any)["playback-automatic-resume"].exists)
+    XCTAssertTrue(
+      app.descendants(matching: .any)["playback-automatic-resume"].waitForExistence(timeout: 8))
     XCTAssertTrue(app.descendants(matching: .any)["playback-auto-next"].exists)
     XCTAssertTrue(app.descendants(matching: .any)["playback-prevent-sleep"].exists)
     XCTAssertTrue(app.descendants(matching: .any)["playback-default-rate"].exists)
@@ -363,11 +365,14 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(serverTab.waitForExistence(timeout: 8))
     serverTab.click()
     XCTAssertTrue(app.staticTexts["Your Server"].waitForExistence(timeout: 8))
-    for section in ["When the Server Runs", "Devices & Backups", "Profiles"] {
-      XCTAssertTrue(app.staticTexts[section].exists, "Missing everyday section: \(section)")
-    }
+    // The essentials appear once the server's capabilities have loaded. This synthetic server
+    // runs elsewhere, so it has no hosting section, and profiles live under Profiles and Devices.
+    XCTAssertTrue(
+      app.staticTexts["Devices & Backups"].waitForExistence(timeout: 8),
+      "Missing everyday section: Devices & Backups")
     XCTAssertTrue(app.buttons["server-advanced-settings"].exists)
-    XCTAssertTrue(app.descendants(matching: .any)["server-hosting-mode"].exists)
+    XCTAssertFalse(app.descendants(matching: .any)["server-hosting-mode"].exists)
+    XCTAssertFalse(app.buttons["create-profile"].exists)
     XCTAssertTrue(app.descendants(matching: .any)["server-pairing-enabled"].exists)
     XCTAssertTrue(app.descendants(matching: .any)["server-automatic-backups"].exists)
     let advanced = [
@@ -420,7 +425,7 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["1 skipped"].exists)
     XCTAssertTrue(app.buttons["Cancel"].exists)
     XCTAssertFalse(app.staticTexts["The server returned an invalid response."].exists)
-    let settingsWindow = app.windows["Server"]
+    let settingsWindow = app.windows["com_apple_SwiftUI_Settings_window"]
     for _ in 0..<12 {
       if status.isHittable { break }
       settingsWindow.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.7))
@@ -440,6 +445,9 @@ final class AureliaUITests: XCTestCase {
     let app = XCUIApplication()
     configureTestLaunch(app)
     app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "welcome"
+    // Closing the last window quits Aurelia by default; this test covers the setting that keeps
+    // it running so Launch Services reopens the same process.
+    app.launchArguments += ["-AureliaQuitsWhenWindowCloses", "NO"]
     app.launch()
     app.activate()
     defer { app.terminate() }
@@ -659,7 +667,7 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(keepEditing.waitForExistence(timeout: 5))
     keepEditing.click()
     XCTAssertEqual(title.value as? String, "Corrected Test Title")
-    let editorScroll = app.scrollViews["metadata-editor-scroll"]
+    let editorScroll = app.descendants(matching: .any)["metadata-editor-scroll"]
     for section in ["Production and Release", "Cast and Crew", "Artwork", "Source"] {
       let heading = app.staticTexts[section].firstMatch
       for _ in 0..<24 {

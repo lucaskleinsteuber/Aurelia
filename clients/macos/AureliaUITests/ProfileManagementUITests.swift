@@ -23,7 +23,6 @@ final class ProfileManagementUITests: XCTestCase {
   func testCreationUsesOneSaveAndNoSecondServerPassword() {
     let app = launchManagement()
     defer { app.terminate() }
-    unlock(app)
     let create = app.buttons["create-profile"]
     reveal(create, in: app)
     create.click()
@@ -48,7 +47,6 @@ final class ProfileManagementUITests: XCTestCase {
   func testAdministratorRequiresPINAndCanSelectSearchedTitles() {
     let app = launchManagement()
     defer { app.terminate() }
-    unlock(app)
     let create = app.buttons["create-profile"]
     reveal(create, in: app)
     create.click()
@@ -64,8 +62,10 @@ final class ProfileManagementUITests: XCTestCase {
     XCTAssertFalse(protection.isEnabled)
     XCTAssertTrue(app.secureTextFields["profile-editor-pin"].exists)
     XCTAssertFalse(app.buttons["profile-editor-save"].isEnabled)
-    let rule = app.descendants(matching: .any)["pin-requirement"]
-    let problem = app.descendants(matching: .any)["pin-requirement-error"]
+    // Settings shows the signed-in profile's own PIN rule too; check the editor's.
+    let editor = app.sheets.firstMatch
+    let rule = editor.descendants(matching: .any)["pin-requirement"]
+    let problem = editor.descendants(matching: .any)["pin-requirement-error"]
     XCTAssertTrue(rule.exists, "The PIN rule is shown before typing.")
     app.secureTextFields["profile-editor-pin"].click()
     app.secureTextFields["profile-editor-pin"].typeText("12ab")
@@ -94,44 +94,9 @@ final class ProfileManagementUITests: XCTestCase {
   }
 
   @MainActor
-  func testLockKeepsProfileDraftButClearsPINAndAllowsUnlockInsideEditor() {
-    let app = launchManagement()
-    defer { app.terminate() }
-    unlock(app)
-    let create = app.buttons["create-profile"]
-    reveal(create, in: app)
-    create.click()
-    let name = app.textFields["profile-editor-name"]
-    XCTAssertTrue(name.waitForExistence(timeout: 8))
-    name.click()
-    name.typeText("Kept Draft")
-    let protection = app.checkBoxes["profile-editor-pin-protection"]
-    protection.click()
-    let pin = app.secureTextFields["profile-editor-pin"]
-    XCTAssertTrue(pin.waitForExistence(timeout: 5))
-    pin.click()
-    pin.typeText("1234")
-    app.secureTextFields["profile-editor-pin-confirmation"].click()
-    app.secureTextFields["profile-editor-pin-confirmation"].typeText("1234")
-    last(app.buttons.matching(identifier: "management-lock")).click()
-    XCTAssertTrue(app.secureTextFields["management-password"].waitForExistence(timeout: 8))
-    XCTAssertEqual(name.value as? String, "Kept Draft")
-    XCTAssertEqual(pin.value as? String, "")
-    XCTAssertFalse(app.buttons["profile-editor-save"].isEnabled)
-    shot(app, "Profile Draft - Management Locked, PIN Cleared")
-    unlock(app)
-    XCTAssertEqual(name.value as? String, "Kept Draft")
-    XCTAssertEqual(pin.value as? String, "")
-    XCTAssertFalse(app.buttons["profile-editor-save"].isEnabled)
-    app.buttons["profile-editor-cancel"].click()
-    XCTAssertTrue(name.waitForNonExistence(timeout: 8))
-  }
-
-  @MainActor
   func testEditorPreservesLegacyAccessAndSaveFailureKeepsDraft() {
     let app = launchManagement()
     defer { app.terminate() }
-    unlock(app)
     let edit = app.buttons["edit-profile-71000000-0000-0000-0000-000000000002"]
     reveal(edit, in: app)
     edit.click()
@@ -157,58 +122,22 @@ final class ProfileManagementUITests: XCTestCase {
     app.buttons["profile-editor-cancel"].click()
   }
 
-  @MainActor
-  func testManagementExpirationKeepsDraftAndClearsPINWithoutGlobalError() {
-    let app = launchManagement(expirySeconds: "30")
-    defer { app.terminate() }
-    unlock(app)
-    let create = app.buttons["create-profile"]
-    reveal(create, in: app)
-    create.click()
-    let name = app.textFields["profile-editor-name"]
-    XCTAssertTrue(name.waitForExistence(timeout: 8))
-    name.click()
-    name.typeText("Expiry Draft")
-    app.checkBoxes["profile-editor-pin-protection"].click()
-    let pin = app.secureTextFields["profile-editor-pin"]
-    pin.click()
-    pin.typeText("1234")
-    XCTAssertTrue(app.secureTextFields["management-password"].waitForExistence(timeout: 40))
-    XCTAssertEqual(name.value as? String, "Expiry Draft")
-    XCTAssertEqual(pin.value as? String, "")
-    XCTAssertFalse(app.buttons["profile-editor-save"].isEnabled)
-    XCTAssertFalse(app.staticTexts["The server returned an invalid response."].exists)
-    shot(app, "Profile Draft - Timed Management Expiry")
-    unlock(app)
-    XCTAssertEqual(name.value as? String, "Expiry Draft")
-    app.buttons["profile-editor-cancel"].click()
-  }
-
-  @MainActor private func launchManagement(expirySeconds: String? = nil) -> XCUIApplication {
+  /// Profiles are managed from Settings › Profiles and Devices; an owner signed in with the
+  /// profile PIN needs no server password for that.
+  @MainActor private func launchManagement() -> XCUIApplication {
     continueAfterFailure = false
     let app = XCUIApplication()
     app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
     app.launchEnvironment["AURELIA_UI_TEST_MODE"] = "profile-management"
-    if let expirySeconds {
-      app.launchEnvironment["AURELIA_UI_TEST_MANAGEMENT_SECONDS"] = expirySeconds
-    }
     app.launch()
     app.activate()
     app.typeKey(",", modifierFlags: .command)
-    let server = app.buttons["Server"]
-    XCTAssertTrue(server.waitForExistence(timeout: 8))
-    server.click()
-    XCTAssertTrue(app.secureTextFields["management-password"].waitForExistence(timeout: 8))
+    let profiles = app.buttons["Profiles and Devices"]
+    XCTAssertTrue(profiles.waitForExistence(timeout: 8))
+    profiles.click()
+    XCTAssertTrue(app.buttons["create-profile"].waitForExistence(timeout: 8))
+    XCTAssertFalse(app.secureTextFields["management-password"].exists)
     return app
-  }
-
-  @MainActor private func unlock(_ app: XCUIApplication) {
-    let password = last(app.secureTextFields.matching(identifier: "management-password"))
-    XCTAssertTrue(password.waitForExistence(timeout: 8))
-    password.click()
-    password.typeText("synthetic-server-password")
-    last(app.buttons.matching(identifier: "management-unlock")).click()
-    XCTAssertTrue(password.waitForNonExistence(timeout: 8))
   }
 
   @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) {

@@ -109,9 +109,8 @@ final class LibraryBrowseUITests: XCTestCase {
     app.terminate()
     app.launch()
     app.activate()
-    XCTAssertTrue(app.descendants(matching: .any)["home-page"].waitForExistence(timeout: 8))
-    app.descendants(matching: .any)["sidebar-library"].click()
-    XCTAssertTrue(search.waitForExistence(timeout: 5))
+    // Aurelia reopens on the page it was left on, here the Library.
+    XCTAssertTrue(search.waitForExistence(timeout: 8))
     XCTAssertEqual(search.value as? String, "")
     XCTAssertTrue(movie.waitForExistence(timeout: 5))
     XCTAssertTrue(series.waitForNonExistence(timeout: 5))

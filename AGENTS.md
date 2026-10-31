@@ -114,7 +114,8 @@ These rules apply to every task in this repository.
   repository in `Local/Aurelia Desktop (archived)`. Do not
   restore, build or test it unless the user asks for it.
 - For tvOS, run warning-free device/simulator builds, host-executable logic tests
-  and XCUITest on the dedicated tvOS 26 simulator. UI tests must use synthetic
+  and, after asking the user (see below), XCUITest on the dedicated tvOS 26
+  simulator. UI tests must use synthetic
   data and a simulated engine through the production views/control logic, with
   no real video engine, stream relay, personal credentials or server access.
   Actual playback remains the user's physical Apple TV check. Install the
@@ -138,6 +139,13 @@ These rules apply to every task in this repository.
   playback soak gates for builds, releases, or installation. Run playback
   verification only when the user explicitly requests those tests. A user's
   confirmation that playback works does not request an automated playback run.
+- Mac and tvOS UI tests (XCUITest) take over the user's screen. Before every
+  UI test run, even a single test and even within a request to "test
+  everything", ask the user whether to run UI tests (yes or no) and wait for
+  the answer; never start one automatically. Find failures from diagnostics and
+  code first, then batch the fixes into one run. Without UI tests, verify with
+  builds, unit and logic tests and headless smoke tests, and say that UI tests
+  were not run.
 - Treat warnings as errors. Do not publish or install a failing candidate.
 - Verify arm64 and x86_64 server payloads and the universal macOS bundle. State
   clearly when an architecture could only be built, not executed locally.

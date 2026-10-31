@@ -43,7 +43,9 @@ final class ServerFoundationUITests: XCTestCase {
   @MainActor func testServerOverviewExplainsReadiness() throws {
     let app = launch()
     defer { app.terminate() }
-    app.buttons["Server"].click()
+    let server = app.buttons["Server"]
+    XCTAssertTrue(server.waitForExistence(timeout: 8))
+    server.click()
     XCTAssertTrue(app.staticTexts["Your Server"].waitForExistence(timeout: 8))
     XCTAssertTrue(app.staticTexts["Degraded"].exists)
     XCTAssertTrue(app.staticTexts["Media drive disconnected"].exists)
@@ -59,9 +61,10 @@ final class ServerFoundationUITests: XCTestCase {
     app.launch()
     app.activate()
     app.typeKey(",", modifierFlags: .command)
-    // Devices are part of the server's settings.
-    XCTAssertTrue(app.buttons["Server"].waitForExistence(timeout: 8))
-    app.buttons["Server"].click()
+    // Device approval is part of Settings › Profiles and Devices.
+    let devices = app.buttons["Profiles and Devices"]
+    XCTAssertTrue(devices.waitForExistence(timeout: 8))
+    devices.click()
     return app
   }
 
