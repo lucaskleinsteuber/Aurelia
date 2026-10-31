@@ -1,7 +1,7 @@
 #!/bin/bash
 # Publishes the current version as a GitHub Release of `origin`, tagged <version>-<build> at the
 # pushed HEAD: the Linux server downloads that scripts/build-linux-server.sh made, which
-# `sudo aurelia update` installs, and the universal Mac app that scripts/build-macos-release.sh
+# `sudo aurelia update` installs, and the Apple silicon Mac app that scripts/build-macos-release.sh
 # made, as a disk image. GitHub adds the source code of the tag by itself. A release is visible to
 # everyone who can see the repository; the owner wants every Mac/server version published this way.
 # An existing release of the same tag gets the downloads added or replaced. A new release stays a
@@ -24,15 +24,14 @@ for file in "${linux[@]}" "$output/SHA256SUMS"; do
 done
 (cd "$output" && shasum -a 256 -c SHA256SUMS >/dev/null) || { echo "The downloads do not match SHA256SUMS." >&2; exit 1; }
 
-# The Mac app of exactly this version, signed and with both architectures.
+# The Mac app of exactly this version, signed and for Apple silicon only.
 app="$other_root/Build/Build $build/Aurelia.app"
 [ -d "$app" ] || { echo "Missing $app; run scripts/build-macos-release.sh first." >&2; exit 1; }
 [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$version" ] \
   && [ "$(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")" = "$build" ] \
   || { echo "$app is not Aurelia $version ($build)." >&2; exit 1; }
 archs=$(lipo -archs "$app/Contents/MacOS/Aurelia")
-[[ " $archs " == *" x86_64 "* && " $archs " == *" arm64 "* ]] \
-  || { echo "The Mac app is not universal ($archs)." >&2; exit 1; }
+[ "$archs" = arm64 ] || { echo "The Mac app is not built for Apple silicon only ($archs)." >&2; exit 1; }
 codesign --verify --deep --strict "$app" || { echo "The Mac app's signature is not valid." >&2; exit 1; }
 
 head=$(git -C "$repository_root" rev-parse HEAD)
@@ -41,7 +40,9 @@ git -C "$repository_root" merge-base --is-ancestor "$head" origin/main \
   || { echo "Push HEAD to origin/main before publishing it." >&2; exit 1; }
 
 # A disk image with the app and a shortcut to Applications to drag it onto.
-dmg="$output/Aurelia-$tag-macOS-universal.dmg"
+# Releases up to 1.25.1 were universal; Intel Macs keep 1.25.1, whose updater looks only for
+# the universal name and so never fetches an app it cannot run.
+dmg="$output/Aurelia-$tag-macOS-arm64.dmg"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 ditto "$app" "$stage/Aurelia.app"
@@ -52,7 +53,7 @@ hdiutil verify -quiet "$dmg"
 (cd "$output" && shasum -a 256 "./$(basename "${linux[0]}")" "./$(basename "${linux[1]}")" "./$(basename "$dmg")" > SHA256SUMS)
 files=("${linux[@]}" "$dmg" "$output/SHA256SUMS")
 
-downloads="- **Mac:** Aurelia-$tag-macOS-universal.dmg, for Apple silicon and Intel. Open it and drag Aurelia to Applications. It is signed for development and not notarized, so it runs on the Macs registered for this developer account.
+downloads="- **Mac:** Aurelia-$tag-macOS-arm64.dmg, for Macs with Apple silicon (Intel Macs stay on 1.25.1). Open it and drag Aurelia to Applications. It is signed for development and not notarized, so it runs on the Macs registered for this developer account.
 - **Linux server:** the package for x64 or arm64; see docs/LINUX_SERVER.md. Installed servers update with \`sudo aurelia update\` or in Aurelia on a Mac under Settings › Server › Updates.
 - **Source code:** attached by GitHub below."
 

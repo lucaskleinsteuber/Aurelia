@@ -82,7 +82,7 @@ enum AppUpdateLogic {
   }
 
   /// The disk image publish-release.sh attaches for a tag.
-  static func diskImageName(tag: String) -> String { "Aurelia-\(tag)-macOS-universal.dmg" }
+  static func diskImageName(tag: String) -> String { "Aurelia-\(tag)-macOS-arm64.dmg" }
 
   /// A release is newer when its build number is higher; build numbers only ever rise.
   static func isNewer(build: Int, than currentBuild: Int) -> Bool { build > currentBuild }

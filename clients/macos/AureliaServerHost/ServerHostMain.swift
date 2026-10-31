@@ -1157,11 +1157,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
     if let override = ProcessInfo.processInfo.environment["AURELIA_SERVER_EXECUTABLE"] {
       return URL(fileURLWithPath: override)
     }
-    #if arch(arm64)
-      let runtime = "osx-arm64"
-    #else
-      let runtime = "osx-x64"
-    #endif
+    // The Mac app is built for Apple silicon only.
+    let runtime = "osx-arm64"
     let mainContents = Bundle.main.bundleURL
       .deletingLastPathComponent()
       .deletingLastPathComponent()

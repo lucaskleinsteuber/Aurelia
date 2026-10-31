@@ -50,7 +50,6 @@ fi
 [[ "$configuration" == Release || "$configuration" == Debug ]] \
   || { print -u2 'Full chain configuration must be Release or Debug.'; exit 2; }
 runtime='osx-arm64'
-[[ "$(uname -m)" == x86_64 ]] && runtime='osx-x64'
 server="$candidate/Contents/Resources/Server/$runtime/Aurelia.Server"
 [[ -x "$server" ]] || { print -u2 'The staged app has no packaged server for this architecture.'; exit 2; }
 runtime_parent="$HOME/Library/Caches/Aurelia/TestRuns"

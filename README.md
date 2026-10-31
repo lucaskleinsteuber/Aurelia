@@ -76,7 +76,7 @@ statistics, which stay private to your profile.
 
 | | Runs on | What it does |
 | --- | --- | --- |
-| **Aurelia for Mac** | macOS 26 or later, Apple silicon and Intel | Watch, manage the library, host the server or connect to one |
+| **Aurelia for Mac** | macOS 26 or later, Apple silicon (Intel Macs: up to 1.25.1) | Watch, manage the library, host the server or connect to one |
 | **Aurelia for Apple TV** | tvOS 26 or later | Watch on the big screen; pairs with your server by code |
 | **Aurelia for iPhone & iPad** (preview) | iOS/iPadOS 26 or later | The Apple TV app for touch screens; not yet tested on a device, see [iPhone and iPad](docs/IOS_APP.md) |
 | **Aurelia Server for Linux** | x64 and arm64, with systemd | Runs the library on its own; updates from GitHub |

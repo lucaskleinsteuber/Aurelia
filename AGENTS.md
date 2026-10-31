@@ -147,8 +147,10 @@ These rules apply to every task in this repository.
   builds, unit and logic tests and headless smoke tests, and say that UI tests
   were not run.
 - Treat warnings as errors. Do not publish or install a failing candidate.
-- Verify arm64 and x86_64 server payloads and the universal macOS bundle. State
-  clearly when an architecture could only be built, not executed locally.
+- The Mac app and its bundled server are built for Apple silicon (arm64) only;
+  1.25.1 was the last universal release for Intel Macs. Do not add Intel slices
+  back. The Linux server keeps both x64 and arm64 packages; verify both, and
+  state clearly when an architecture could only be built, not executed locally.
 - A successful build, signature check, or API call is evidence only for the
   path actually exercised; never claim broader UI, codec, device, or library
   coverage.
@@ -221,7 +223,7 @@ These rules apply to every task in this repository.
 - Never change repository visibility or rewrite historical author information
   without explicit user authorization.
 - The owner wants every Mac/server version that is installed for them published
-  as a GitHub Release with `scripts/publish-release.sh`: the universal Mac DMG,
+  as a GitHub Release with `scripts/publish-release.sh`: the Apple silicon Mac DMG,
   the Linux server packages and GitHub's source archives. Push first, build the
   Linux packages of the same version, publish, and verify the downloads. Then
   update the owner's Linux server to that release with `sudo aurelia update

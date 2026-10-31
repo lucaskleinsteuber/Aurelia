@@ -26,9 +26,8 @@ sh scripts/verify-product-names.sh
 scripts/test-macos.sh
 ```
 
-Native-host, Intel execution, autostart and disk-full recovery checks use
-`test-native-host.sh`, `test-server-x64.sh`, `test-release-app-autostart.sh`
-and `test-recovery-disk-full.sh` in `scripts/`. Use isolated synthetic data;
+Native-host, autostart and disk-full recovery checks use `test-native-host.sh`,
+`test-release-app-autostart.sh` and `test-recovery-disk-full.sh` in `scripts/`. Use isolated synthetic data;
 UI tests need an unlocked GUI session. A cross-build is not an execution pass.
 Follow `AGENTS.md` for versioning, installation and data preservation, and
 [free distribution](FREE_DISTRIBUTION.md) for signing and public-download limits.
@@ -148,7 +147,7 @@ production entitlement files are never changed. This test therefore checks
 Release-compiled playback code, not the untouched candidate's distribution
 entitlement runtime; signature and candidate launch remain separate gates.
 The test host is compiled for the local architecture; the release build separately
-verifies the universal client and both server payloads.
+verifies that the client and its server payload are arm64 only.
 Test accounts, database, certificates and progress are isolated. Short tickets are enabled only
 in the server's `Testing` environment; ordinary tickets retain their lifetime.
 The private runtime is removed after copying redacted evidence and the XCTest

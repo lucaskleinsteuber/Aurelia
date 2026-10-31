@@ -25,9 +25,7 @@ configuration=${AURELIA_SOURCE_EVIDENCE_CONFIGURATION:-Release}
   || { evidence_fail invalid_source_evidence_configuration; exit 2; }
 architecture=$(uname -m)
 runtime='osx-arm64'
-[[ "$architecture" == x86_64 ]] && runtime='osx-x64'
-[[ "$architecture" == arm64 || "$architecture" == x86_64 ]] \
-  || { evidence_fail unsupported_local_architecture; exit 2; }
+[[ "$architecture" == arm64 ]] || { evidence_fail unsupported_local_architecture; exit 2; }
 server="$candidate/Contents/Resources/Server/$runtime/Aurelia.Server"
 [[ -x "$server" && -x "$DOTNET_BIN" ]] \
   || { evidence_fail packaged_server_or_pinned_dotnet_unavailable; exit 2; }
