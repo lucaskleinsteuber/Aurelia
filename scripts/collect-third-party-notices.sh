@@ -30,8 +30,8 @@ while IFS= read -r dependency; do
     esac
   done
   case "$package/$version" in
-    Haukcode.Mdns/1.0.18) cp "$repository_root/docs/licenses/Haukcode.Mdns-LICENSE.txt" "$target/" ;;
-    SQLitePCLRaw.*/2.1.12) cp "$repository_root/docs/licenses/SQLitePCLRaw-"*.txt "$target/" ;;
+    Haukcode.Mdns/1.0.22) cp "$repository_root/docs/licenses/Haukcode.Mdns-LICENSE.txt" "$target/" ;;
+    SQLitePCLRaw.*/2.1.13) cp "$repository_root/docs/licenses/SQLitePCLRaw-"*.txt "$target/" ;;
     Haukcode.Mdns/*|SQLitePCLRaw.*/*)
       echo "Review upstream notices for the changed dependency: $dependency" >&2; exit 1 ;;
   esac
