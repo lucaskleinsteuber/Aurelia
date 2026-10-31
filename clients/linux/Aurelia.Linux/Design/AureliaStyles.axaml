@@ -101,4 +101,73 @@
     <Setter Property="Background" Value="{StaticResource AureliaSurfaceBrush}" />
     <Setter Property="ClipToBounds" Value="True" />
   </Style>
+
+  <!-- Window buttons: small neutral circles that stay visible over artwork. -->
+  <Style Selector="Button.windowButton">
+    <Setter Property="Width" Value="26" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="13" />
+    <Setter Property="Background" Value="#3D2A2E33" />
+    <Setter Property="Foreground" Value="#E6F5F5F7" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.windowButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#66474C53" />
+    <Setter Property="Foreground" Value="#FFFFFFFF" />
+  </Style>
+  <Style Selector="Button.windowButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#80565C64" />
+  </Style>
+
+  <!-- A choice card, as on the Mac's welcome screen. -->
+  <Style Selector="Button.choice">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Padding" Value="18" />
+    <Setter Property="MinHeight" Value="82" />
+    <Setter Property="CornerRadius" Value="{StaticResource AureliaCardRadius}" />
+    <Setter Property="Background" Value="{StaticResource AureliaSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaHairlineBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Button.choice.recommended">
+    <Setter Property="Background" Value="{StaticResource AureliaRaisedSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="#2EFFFFFF" />
+  </Style>
+  <Style Selector="Button.choice:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#33373C" />
+    <Setter Property="BorderBrush" Value="#3DFFFFFF" />
+  </Style>
+  <Style Selector="Button.choice.recommended:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#454A4F" />
+  </Style>
+  <Style Selector="Button.choice:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="Border.choiceSymbol">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Background" Value="{StaticResource AureliaRaisedSurfaceBrush}" />
+  </Style>
+  <Style Selector="Button.choice.recommended Border.choiceSymbol">
+    <Setter Property="Background" Value="#F0FFFFFF" />
+  </Style>
+  <Style Selector="Button.choice.recommended Border.choiceSymbol PathIcon">
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+
+  <!-- A quiet text button, for links like "Back". -->
+  <Style Selector="Button.link">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaAccentBrush}" />
+    <Setter Property="Padding" Value="6,4" />
+  </Style>
+  <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#4DA3FF" />
+  </Style>
 </Styles>

@@ -13,8 +13,8 @@ Linux x64. Platform specifics stay behind small adapters so the code stays porta
 
 | Project | Contents |
 | --- | --- |
-| `Aurelia.Linux.Core` | App logic without any interface toolkit, such as the sidebar pages and their order |
-| `Aurelia.Linux` | The app: design tokens and styles (`Design/`), the sidebar shell and pages (`Views/`) |
+| `Aurelia.Linux.Core` | App logic without any interface toolkit: screen order, settings, the desktop's window button layout, the sidebar pages |
+| `Aurelia.Linux` | The app: design tokens and styles (`Design/`), window buttons and behavior (`Controls/`), screens (`Views/`) |
 | `Aurelia.Linux.Tests` | Logic tests and headless interface tests that draw the real views without a screen |
 
 The version and build number live in `clients/linux/Directory.Build.props`
@@ -30,9 +30,28 @@ nothing is loaded or licensed from elsewhere.
 
 Pages run full height beneath the sidebar. The sidebar (`Controls/SidebarBackground.cs`) blurs
 what passes beneath it and tints it with the canvas color at 66 %, like the Mac app;
-`ReduceTransparency` makes it the opaque canvas. The window keeps the desktop's own title bar and
-buttons. Avalonia runs natively on Wayland and falls back to X11; `AURELIA_DISPLAY_BACKEND=x11`
-forces X11.
+`ReduceTransparency` makes it the opaque canvas. Avalonia runs natively on Wayland and falls back to
+X11; `AURELIA_DISPLAY_BACKEND=x11` forces X11.
+
+## Window
+
+Like the Mac app, the window has no title bar: the content reaches the top edge. On Wayland the app
+extends into the window and Avalonia draws only the resize border; on X11 the window manager keeps a
+thin border and drops its title bar (`WindowDecorations.BorderOnly`). Aurelia draws its own window
+buttons (`Controls/WindowChrome.cs`): plain round close, minimize and maximize buttons, never imitations
+of the Mac's colored ones, placed where the desktop puts them. KDE Plasma's `ButtonsOnLeft` and
+`ButtonsOnRight` in kwinrc are read first, then GNOME's `button-layout` (also used by Cinnamon, Budgie
+and MATE), otherwise they sit on the right. Pressing on empty space in the top 52 pixels moves the
+window and a double click maximizes it (`Controls/AppWindowBehavior.cs`); F11 switches full screen,
+F9 the sidebar, Ctrl+Q quits. The sidebar can be dragged between 210 and 300 pixels wide.
+
+## Screens and settings
+
+`Flow/AppFlow.cs` chooses the full-window screen in the Mac app's order: the start screen, the welcome
+choice ("Set Up This PC" or "Connect to an Existing Server"), host setup or the connection screen, the
+profile picker, the first storage locations and the library. The chosen mode is remembered.
+Preferences are kept in `$XDG_CONFIG_HOME/aurelia-desktop/settings.json`, readable only by the user
+and written through a temporary file; caches go to `$XDG_CACHE_HOME/aurelia-desktop`.
 
 ## Video
 

@@ -2,6 +2,8 @@ using Aurelia.Linux.Core;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Chrome;
+using Avalonia.Input;
 using Avalonia.Media;
 
 namespace Aurelia.Linux.Views;
@@ -15,8 +17,14 @@ public sealed record SidebarItem(LibraryDestination Destination, string Title, G
 /// </summary>
 public sealed partial class LibraryShell : UserControl
 {
-    private readonly double sidebarWidth;
+    public const double MinimumSidebarWidth = 210;
+    public const double MaximumSidebarWidth = 300;
+
+    private double sidebarWidth;
+    private double? resizeStartWidth;
+    private double resizeStartX;
     private bool sidebarVisible = true;
+    private double leadingInset;
 
     public LibraryShell()
     {
@@ -29,6 +37,23 @@ public sealed partial class LibraryShell : UserControl
             .ToList();
         SidebarList.SelectionChanged += (_, _) => ShowSelectedPage();
         SidebarToggle.Click += (_, _) => SidebarVisible = !SidebarVisible;
+        WindowDecorationProperties.SetElementRole(SidebarToggle, WindowDecorationsElementRole.User);
+        SidebarResizeHandle.PointerPressed += (_, e) =>
+        {
+            resizeStartWidth = sidebarWidth;
+            resizeStartX = e.GetPosition(this).X;
+            e.Pointer.Capture(SidebarResizeHandle);
+            e.Handled = true;
+        };
+        SidebarResizeHandle.PointerMoved += (_, e) =>
+        {
+            if (resizeStartWidth is { } start) SidebarWidth = start + e.GetPosition(this).X - resizeStartX;
+        };
+        SidebarResizeHandle.PointerReleased += (_, e) =>
+        {
+            resizeStartWidth = null;
+            e.Pointer.Capture(null);
+        };
         SidebarList.SelectedIndex = 0;
         ShowSelectedPage();
         UpdateSidebarLayout();
@@ -42,6 +67,17 @@ public sealed partial class LibraryShell : UserControl
         set => SidebarList.SelectedItem = SidebarItems.FirstOrDefault(item => item.Destination == value);
     }
 
+    public double SidebarWidth
+    {
+        get => sidebarWidth;
+        set
+        {
+            sidebarWidth = Math.Clamp(value, MinimumSidebarWidth, MaximumSidebarWidth);
+            Sidebar.Width = sidebarWidth;
+            UpdateSidebarLayout();
+        }
+    }
+
     public bool SidebarVisible
     {
         get => sidebarVisible;
@@ -49,6 +85,17 @@ public sealed partial class LibraryShell : UserControl
         {
             if (sidebarVisible == value) return;
             sidebarVisible = value;
+            UpdateSidebarLayout();
+        }
+    }
+
+    /// <summary>Room taken by window buttons at the left edge; the sidebar toggle sits beside them while the sidebar is hidden.</summary>
+    public double LeadingInset
+    {
+        get => leadingInset;
+        set
+        {
+            leadingInset = value;
             UpdateSidebarLayout();
         }
     }
@@ -65,7 +112,7 @@ public sealed partial class LibraryShell : UserControl
     {
         Sidebar.IsVisible = sidebarVisible;
         // The toggle sits at the sidebar's top right, or at the window's edge while it is hidden.
-        SidebarToggle.Margin = new Thickness(sidebarVisible ? sidebarWidth - 46 : 12, 12, 0, 0);
+        SidebarToggle.Margin = new Thickness(sidebarVisible ? sidebarWidth - 46 : Math.Max(12, leadingInset + 4), 10, 0, 0);
         var label = sidebarVisible ? "Hide Sidebar" : "Show Sidebar";
         AutomationProperties.SetName(SidebarToggle, label);
         ToolTip.SetTip(SidebarToggle, $"{label} (F9)");

@@ -64,7 +64,7 @@ elif [ -n "${AURELIA_LINUX_PACKAGE_HOST:-}" ]; then
   ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" \
     "cd '$remote_dir' && bash package-linux-app.sh '${archive##*/}' out '$version' '$build'"
   scp -q "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/out/*" "$output/"
-  ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir'"
+  ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && rmdir .cache/aurelia-package 2>/dev/null; true"
 else
   echo "warning: no Linux computer for the packages; set AURELIA_LINUX_PACKAGE_HOST. Only the archive was made." >&2
 fi

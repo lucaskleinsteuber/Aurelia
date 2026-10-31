@@ -13,6 +13,9 @@
           AutomationProperties.Name="Sidebar">
       <controls:SidebarBackground x:Name="SidebarBackdrop" />
       <Border Width="1" HorizontalAlignment="Right" Background="{StaticResource AureliaHairlineBrush}" />
+      <!-- Dragging the edge resizes the sidebar between 210 and 300, like the Mac app. -->
+      <Border x:Name="SidebarResizeHandle" Width="8" HorizontalAlignment="Right" Margin="0,0,-4,0"
+              Background="Transparent" Cursor="SizeWestEast" ZIndex="1" />
       <DockPanel>
         <!-- Room for the sidebar toggle above the first row. -->
         <Panel DockPanel.Dock="Top" Height="58" />
