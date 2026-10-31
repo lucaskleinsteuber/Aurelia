@@ -16,6 +16,20 @@ struct WatchTimeTests {
     #expect(WatchTime.text(seconds: 76 * 3_600) == "3 days 4 h")
   }
 
+  @Test func theLastTwelveWeeksIncludeWeeksWithoutWatching() throws {
+    var calendar = Calendar(identifier: .iso8601)
+    calendar.timeZone = try #require(TimeZone(identifier: "Europe/Berlin"))
+    let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 31, hour: 19)))
+    let weeks = WatchTime.lastWeeks(
+      [PeriodHours(period: "2026-W43", hours: 1.5), PeriodHours(period: "2026-W30", hours: 9)],
+      now: now, calendar: calendar)
+    #expect(weeks.count == 12)
+    #expect(weeks.first?.period == "2026-W33")
+    #expect(weeks.last?.period == "2026-W44")
+    #expect(weeks.first { $0.period == "2026-W43" }?.hours == 1.5)
+    #expect(weeks.filter { $0.hours > 0 }.count == 1, "Older weeks are left out.")
+  }
+
   @Test func hoursFromTheServerBecomeWholeMinutes() {
     #expect(WatchTime.text(hours: 0.5) == "30 min")
     #expect(WatchTime.text(hours: 1.25) == "1 h 15 min")

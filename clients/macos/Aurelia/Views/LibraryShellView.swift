@@ -1200,14 +1200,12 @@ private struct WatchlistPage: View {
   @AppStorage(GeneralPreferenceKeys.hideOfflineTitles) private var hideOfflineSetting = false
 
   @EnvironmentObject private var model: AppModel
-  @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
   let onSelect: (UUID) -> Void
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 26) {
         AureliaSectionHeading(title: "Watchlist", count: model.watchlistItems.count)
-          .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding + 24))
         if model.watchlistItems.isEmpty {
           ContentUnavailableView(
             "Your Watchlist Is Empty",
@@ -1320,7 +1318,6 @@ private struct PersonDetailView: View {
 
 private struct CollectionsPage: View {
   @EnvironmentObject private var model: AppModel
-  @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
   let onSelectCollection: (UUID) -> Void
   @State private var showingCreate = false
   @State private var franchises: [CollectionSummary] = []
@@ -1340,7 +1337,6 @@ private struct CollectionsPage: View {
           .buttonStyle(.bordered)
           .accessibilityIdentifier("new-collection-button")
         }
-        .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding + 24))
 
         if model.collections.isEmpty {
           ContentUnavailableView(
@@ -1440,11 +1436,10 @@ private struct CollectionsPage: View {
 }
 
 private struct HistoryPage: View {
-  @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
   let onSelect: (UUID) -> Void
 
   var body: some View {
-    ActivityPageScroll(title: "Watch History", sidebarOverlap: sidebarOverlap) {
+    ActivityPageScroll(title: "Watch History") {
       ActivityHistoryView(onSelect: onSelect)
     }
     .accessibilityIdentifier("history-page")
@@ -1452,30 +1447,25 @@ private struct HistoryPage: View {
 }
 
 private struct StatisticsPage: View {
-  @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
-
   var body: some View {
-    ActivityPageScroll(title: "Statistics", sidebarOverlap: sidebarOverlap) {
+    ActivityPageScroll(title: "Statistics") {
       ActivityStatisticsView()
     }
     .accessibilityIdentifier("statistics-page")
   }
 }
 
-/// The library's History and Statistics pages show the same views as Settings › Activity.
+/// The library's History and Statistics pages show the same views as Settings › Activity. The
+/// shell already insets its pages beside the sidebar, so they need only the page margin.
 private struct ActivityPageScroll<Content: View>: View {
   let title: String
-  let sidebarOverlap: CGFloat
   @ViewBuilder let content: Content
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 26) {
         AureliaSectionHeading(title: title)
-          .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding + 24))
-        content
-          .frame(maxWidth: 980, alignment: .leading)
-          .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding))
+        content.frame(maxWidth: 980, alignment: .leading)
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.top, 22)

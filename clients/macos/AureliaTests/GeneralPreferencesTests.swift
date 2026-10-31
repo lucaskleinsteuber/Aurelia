@@ -142,4 +142,15 @@ struct GeneralPreferencesTests {
     #expect(resetOrder.first == .home)
     #expect(SidebarPreferences.isVisible(.home) == true)
   }
+
+  @Test func activityPagesJoinTheSidebarOnlyWhenTurnedOn() {
+    SidebarPreferences.resetToDefaults()
+    defer { SidebarPreferences.resetToDefaults() }
+    #expect(!SidebarPreferences.isVisible(.history))
+    #expect(!SidebarPreferences.isVisible(.statistics))
+    #expect(SidebarPreferences.loadOrder().contains(.history), "They stay in the customizer's list.")
+    SidebarPreferences.setVisible(.statistics, isVisible: true)
+    #expect(SidebarPreferences.isVisible(.statistics))
+    #expect(!SidebarPreferences.isVisible(.history))
+  }
 }

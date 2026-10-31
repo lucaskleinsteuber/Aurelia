@@ -65,7 +65,7 @@ struct ActivityStatisticsView: View {
         } else {
           summary(stats)
           highlights(stats)
-          if !stats.weeklyHours.isEmpty { weeks(stats.weeklyHours) }
+          if !stats.weeklyHours.isEmpty { weeks(WatchTime.lastWeeks(stats.weeklyHours)) }
           if let titles = stats.topTitles, !titles.isEmpty {
             ranking(
               "Most Watched", symbol: "star.fill",

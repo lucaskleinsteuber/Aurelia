@@ -33,6 +33,26 @@ enum WatchTime {
       from: DateComponents(weekday: 2, weekOfYear: week, yearForWeekOfYear: year))
   }
 
+  /// The last `count` ISO weeks up to the current one, oldest first. Weeks without watching
+  /// are zero, so a chart keeps its shape however little was watched.
+  static func lastWeeks(
+    _ periods: [PeriodHours], count: Int = 12, now: Date = Date(),
+    calendar base: Calendar = .current
+  ) -> [PeriodHours] {
+    var calendar = Calendar(identifier: .iso8601)
+    calendar.timeZone = base.timeZone
+    let hours = Dictionary(periods.map { ($0.period, $0.hours) }, uniquingKeysWith: +)
+    return (0..<count).reversed().compactMap { back in
+      guard let day = calendar.date(byAdding: .weekOfYear, value: -back, to: now) else {
+        return nil
+      }
+      let parts = calendar.dateComponents([.weekOfYear, .yearForWeekOfYear], from: day)
+      guard let week = parts.weekOfYear, let year = parts.yearForWeekOfYear else { return nil }
+      let period = String(format: "%04d-W%02d", year, week)
+      return PeriodHours(period: period, hours: hours[period] ?? 0)
+    }
+  }
+
   /// "Today", "Yesterday" or the weekday and date, for grouping the watch history.
   static func dayTitle(for date: Date, now: Date = Date(), calendar: Calendar = .current)
     -> String

@@ -93,10 +93,14 @@ enum SidebarPreferences {
     bumpRevision()
   }
 
+  /// History and Statistics live in Settings › Activity; they join the sidebar only when
+  /// someone turns them on in the sidebar settings.
+  static let hiddenByDefault: Set<LibraryDestination> = [.history, .statistics]
+
   static func isVisible(_ destination: LibraryDestination) -> Bool {
     let key = "AureliaSidebarShow_\(destination.rawValue)"
     if UserDefaults.standard.object(forKey: key) == nil {
-      return true
+      return !hiddenByDefault.contains(destination)
     }
     return UserDefaults.standard.bool(forKey: key)
   }
