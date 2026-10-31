@@ -79,7 +79,8 @@ enum WindowClosePreference {
   static let quitsKey = "AureliaQuitsWhenWindowCloses"
 
   static func quits(defaults: UserDefaults = .standard) -> Bool {
-    defaults.object(forKey: quitsKey) as? Bool ?? true
+    // bool(forKey:) also reads "NO" and "YES" given as launch arguments.
+    defaults.object(forKey: quitsKey) == nil ? true : defaults.bool(forKey: quitsKey)
   }
 }
 
