@@ -65,15 +65,16 @@ struct IOSArtworkView: View {
   @State private var image: UIImage?
 
   var body: some View {
-    ZStack {
-      IOSDesign.surface
-      if let image {
-        Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
-      } else if let symbol {
-        Image(systemName: symbol).font(.title2).foregroundStyle(.tertiary)
+    // The picture is an overlay: filling its frame must never widen the layout around it.
+    IOSDesign.surface
+      .overlay {
+        if let image {
+          Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
+        } else if let symbol {
+          Image(systemName: symbol).font(.title2).foregroundStyle(.tertiary)
+        }
       }
-    }
-    .clipped()
+      .clipped()
     .animation(.easeOut(duration: 0.2), value: image != nil)
     .task(id: key) {
       image = nil

@@ -68,6 +68,13 @@ struct IOSHomeView: View {
     .task(id: model.libraryRefresh) {
       await model.loadHome()
       await model.preloadLibrary()
+      #if DEBUG
+        if IOSShowcasePage.current == "detail", detailItem == nil, let home = model.home,
+          let featured = hero(home)
+        {
+          detailItem = IOSHomeDetail(item: featured)
+        }
+      #endif
     }
     .modifier(IOSLibraryActionPresentation(actions: actions))
     .navigationDestination(item: $detailItem) { value in
@@ -353,7 +360,10 @@ struct IOSCollectionCard: View {
   let collection: IOSCollection
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      IOSArtworkView(artwork: collection.poster, width: 320, symbol: "rectangle.stack")
+      // Without its own poster a collection shows its first title's, as on the Mac.
+      IOSArtworkView(
+        artwork: collection.poster ?? collection.items.lazy.compactMap(\.poster).first, width: 320,
+        symbol: "rectangle.stack")
         .aspectRatio(2 / 3, contentMode: .fit)
         .overlay(alignment: .topLeading) {
           if collection.isSmart {

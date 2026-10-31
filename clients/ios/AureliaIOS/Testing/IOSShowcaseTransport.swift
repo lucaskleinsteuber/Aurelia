@@ -92,4 +92,13 @@
         fingerprint: IOSUITestFixtures.fingerprint)
     }
   }
+
+  /// Which page a README screenshot shows: "movies", "shows" or "detail" (the featured title).
+  /// Read only in the showcase scenario, so tests and normal use never see it.
+  enum IOSShowcasePage {
+    static var current: String? {
+      guard IOSUITestScenario.current == .showcase else { return nil }
+      return ProcessInfo.processInfo.environment["AURELIA_IOS_SHOWCASE_PAGE"]
+    }
+  }
 #endif

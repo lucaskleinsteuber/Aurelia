@@ -30,6 +30,15 @@ struct IOSRootView: View {
             .tag(IOSLibraryTab.profile)
         }
         .tint(.white)
+        #if DEBUG
+          .onAppear {
+            switch IOSShowcasePage.current {
+            case "movies": tab = .movies
+            case "shows": tab = .shows
+            default: break
+            }
+          }
+        #endif
       }
     }
     .background(IOSDesign.canvas.ignoresSafeArea())

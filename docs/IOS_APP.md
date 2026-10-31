@@ -51,6 +51,13 @@ To look at the app without a server, build the Debug configuration and launch it
 argument `--aurelia-ui-testing` and the environment variable
 `AURELIA_IOS_UI_SCENARIO=library`: it shows an invented library and a simulated player.
 
+```bash
+zsh scripts/capture-showcase.sh --ios-only
+```
+
+Makes the README screenshots of iPhone and iPad from the invented showcase library in
+simulators; `AURELIA_IOS_SHOWCASE_PAGE` (`movies`, `shows` or `detail`) chooses the page.
+
 ## Installing on your own iPhone
 
 ```bash

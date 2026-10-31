@@ -5,13 +5,17 @@
 #
 # The Mac UI test takes over the screen for about a minute; the Apple TV test runs in a
 # temporary tvOS simulator. `--web-only` instead captures the browser in an isolated headless
-# context with simulated metadata; it never enters the native test path.
+# context with simulated metadata; it never enters the native test path. `--ios-only` captures
+# the iPhone and iPad app in simulators (scripts/capture-ios-showcase.sh).
 set -euo pipefail
 
 repository_root=${0:A:h:h}
 if [[ "${1:-}" == "--web-only" ]]; then
   shift
   exec sh "$repository_root/scripts/capture-web-showcase.sh" "$@"
+fi
+if [[ "${1:-}" == "--ios-only" ]]; then
+  exec zsh "$repository_root/scripts/capture-ios-showcase.sh"
 fi
 source "$repository_root/scripts/workspace-paths.sh"
 showcase="$other_root/Showcase"
