@@ -243,7 +243,9 @@ time counts only while the position advances, so a pause adds nothing).
   `isCompleted`.
 - `DELETE /api/v1/history/{id}` removes one entry; `DELETE /api/v1/history` clears them all.
 - `GET /api/v1/statistics` and `GET /api/v1/statistics/year/{year}` summarize the profile's
-  viewing. Days, weekdays and hours are counted in the server's time zone.
+  viewing. Days, weekdays and hours are counted in the server's time zone. Watch times are
+  hours to the second (`totalHoursWatched`, `hoursPast7Days`, `hoursByWeek` with ISO weeks such
+  as `2026-W43`, and `hours` beside each top genre and title), so clients can show minutes.
 
 History and statistics belong to the profile alone; no other profile, administrators
 included, can read them. Entries older than three years are pruned.

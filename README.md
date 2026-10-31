@@ -52,7 +52,7 @@ browser, without the server password except for the few changes that cannot be u
 
 **Collections and history.** Make your own collections and smart lists that fill themselves,
 see all films of a franchise together, and look back at your own viewing history and
-statistics, which stay private to your profile.
+statistics, also under Settings › Activity on the Mac, which stay private to your profile.
 
 ## Screenshots
 

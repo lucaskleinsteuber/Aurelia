@@ -1440,397 +1440,48 @@ private struct CollectionsPage: View {
 }
 
 private struct HistoryPage: View {
-  @EnvironmentObject private var model: AppModel
   @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
   let onSelect: (UUID) -> Void
-  @State private var items: [WatchHistoryItem] = []
-  @State private var totalCount: Int = 0
-  @State private var isLoading = false
-  @State private var showingClearConfirmation = false
-  @State private var errorMessage: String?
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 26) {
-        HStack {
-          AureliaSectionHeading(title: "Watch History", count: totalCount)
-          Spacer()
-          if !items.isEmpty {
-            Button(role: .destructive) {
-              showingClearConfirmation = true
-            } label: {
-              Label("Clear History", systemImage: "trash")
-            }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier("clear-history-button")
-          }
-        }
-        .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding + 24))
-
-        if isLoading && items.isEmpty {
-          ProgressView("Loading history…")
-            .frame(maxWidth: .infinity, minHeight: 280)
-        } else if items.isEmpty {
-          ContentUnavailableView(
-            "No Watch History",
-            systemImage: "clock.arrow.circlepath",
-            description: Text("Movies and episodes you watch will appear here.")
-          )
-          .frame(maxWidth: .infinity, minHeight: 280)
-        } else {
-          LazyVStack(alignment: .leading, spacing: 14) {
-            ForEach(items) { item in
-              HStack(spacing: 16) {
-                AuthenticatedArtwork(
-                  artwork: item.poster,
-                  symbol: item.kind == "movie" ? "film" : "tv"
-                )
-                .frame(width: 80, height: 45)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay {
-                  RoundedRectangle(cornerRadius: 6).stroke(AureliaDesign.hairline, lineWidth: 1)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                  Text(item.title)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                  HStack(spacing: 8) {
-                    if let eyebrow = item.eyebrow { Text(eyebrow) }
-                    if let watched = item.watchedDate {
-                      Text("·")
-                      Text(watched.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    Text("·")
-                    Text("\(Int(item.completionPercentage))% completed")
-                  }
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                  onSelect(item.mediaId)
-                } label: {
-                  Image(systemName: "play.circle.fill")
-                    .font(.title2)
-                }
-                .buttonStyle(.plain)
-
-                Button(role: .destructive) {
-                  Task { await deleteItem(item) }
-                } label: {
-                  Image(systemName: "xmark")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-              }
-              .padding(.vertical, 4)
-              Divider()
-            }
-
-            if items.count < totalCount {
-              Button("Load More") {
-                Task { await load(offset: items.count) }
-              }
-              .frame(maxWidth: .infinity)
-              .padding(.top, 12)
-            }
-          }
-        }
-      }
-      .padding(AureliaDesign.pagePadding)
-      .padding(.top, 22)
-    }
-    .scrollClipDisabled()
-    .aureliaOverlayScrollbars()
-    .task { await load(offset: 0) }
-    .confirmationDialog(
-      "Clear Watch History?", isPresented: $showingClearConfirmation, titleVisibility: .visible
-    ) {
-      Button("Clear History", role: .destructive) {
-        Task { await clearAll() }
-      }
-    } message: {
-      Text(
-        "All playback history for your profile will be removed. Media files and library items are untouched."
-      )
+    ActivityPageScroll(title: "Watch History", sidebarOverlap: sidebarOverlap) {
+      ActivityHistoryView(onSelect: onSelect)
     }
     .accessibilityIdentifier("history-page")
-  }
-
-  private func load(offset: Int) async {
-    guard let profile = model.profile else { return }
-    isLoading = true
-    do {
-      let page = try await APIClient(profile: profile).history(offset: offset, limit: 50)
-      if offset == 0 {
-        items = page.items
-      } else {
-        items.append(contentsOf: page.items)
-      }
-      totalCount = page.total
-      isLoading = false
-    } catch {
-      isLoading = false
-      errorMessage = error.localizedDescription
-    }
-  }
-
-  private func deleteItem(_ item: WatchHistoryItem) async {
-    guard let profile = model.profile else { return }
-    do {
-      try await APIClient(profile: profile).deleteHistoryItem(id: item.id)
-      items.removeAll(where: { $0.id == item.id })
-      totalCount = max(0, totalCount - 1)
-    } catch {}
-  }
-
-  private func clearAll() async {
-    guard let profile = model.profile else { return }
-    do {
-      try await APIClient(profile: profile).clearHistory()
-      items.removeAll()
-      totalCount = 0
-    } catch {}
   }
 }
 
 private struct StatisticsPage: View {
-  @EnvironmentObject private var model: AppModel
   @Environment(\.aureliaSidebarOverlap) private var sidebarOverlap
-  @State private var stats: UserStatistics?
-  @State private var isLoading = false
-  @State private var selectedYear: Int?
-  @State private var yearReview: YearInReview?
-  @State private var errorMessage: String?
+
+  var body: some View {
+    ActivityPageScroll(title: "Statistics", sidebarOverlap: sidebarOverlap) {
+      ActivityStatisticsView()
+    }
+    .accessibilityIdentifier("statistics-page")
+  }
+}
+
+/// The library's History and Statistics pages show the same views as Settings › Activity.
+private struct ActivityPageScroll<Content: View>: View {
+  let title: String
+  let sidebarOverlap: CGFloat
+  @ViewBuilder let content: Content
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 32) {
-        AureliaSectionHeading(title: "Statistics", count: nil)
+      VStack(alignment: .leading, spacing: 26) {
+        AureliaSectionHeading(title: title)
           .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding + 24))
-
-        if isLoading && stats == nil {
-          ProgressView("Loading statistics…")
-            .frame(maxWidth: .infinity, minHeight: 280)
-        } else if let error = errorMessage, stats == nil {
-          VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-              .font(.system(size: 38))
-              .foregroundStyle(.orange)
-            Text("Could Not Load Statistics")
-              .font(.headline)
-            Text(error)
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-              .multilineTextAlignment(.center)
-              .frame(maxWidth: 400)
-            Button("Try Again") {
-              Task { await load() }
-            }
-            .buttonStyle(.borderedProminent)
-            .padding(.top, 4)
-          }
-          .frame(maxWidth: .infinity, minHeight: 280)
-        } else if let stats {
-          if stats.totalHoursWatched == 0 && (stats.topGenres ?? []).isEmpty {
-            VStack(spacing: 16) {
-              Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-              Text("No Viewing Activity Yet")
-                .font(.title3.weight(.semibold))
-              Text(
-                "Start watching movies or series in Aurelia to see your total watch time, streaks, and favorite genres here."
-              )
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-              .multilineTextAlignment(.center)
-              .frame(maxWidth: 380)
-            }
-            .frame(maxWidth: .infinity, minHeight: 280)
-          } else {
-            // Stat cards row
-            LazyVGrid(
-              columns: [GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 16)], spacing: 16
-            ) {
-              statCard(
-                "Total Hours", value: String(format: "%.1f h", stats.totalHoursWatched),
-                icon: "clock.fill")
-              statCard(
-                "Past 7 Days",
-                value: String(format: "%.1f h", stats.hoursPast7Days ?? 0),
-                icon: "calendar")
-              statCard(
-                "Past 30 Days",
-                value: String(format: "%.1f h", stats.hoursPast30Days ?? 0),
-                icon: "calendar.badge.clock")
-              statCard(
-                "Current Streak",
-                value:
-                  "\(stats.currentStreakDays ?? 0) \((stats.currentStreakDays ?? 0) == 1 ? "day" : "days")",
-                icon: "flame.fill")
-              statCard(
-                "Longest Streak",
-                value:
-                  "\(stats.longestStreakDays ?? 0) \((stats.longestStreakDays ?? 0) == 1 ? "day" : "days")",
-                icon: "trophy.fill")
-              statCard(
-                "Completion Rate",
-                value: String(format: "%.0f%%", stats.completionRatePercent),
-                icon: "checkmark.seal.fill")
-            }
-
-            // Busiest watching times
-            HStack(spacing: 20) {
-              statCard("Busiest Day", value: stats.busiestDayOfWeek, icon: "calendar")
-              statCard(
-                "Most Active Time", value: stats.busiestTimeOfDay ?? "—",
-                icon: "clock")
-            }
-
-            // Top Genres
-            if let genres = stats.topGenres, !genres.isEmpty {
-              VStack(alignment: .leading, spacing: 14) {
-                Text("Top Genres").font(AureliaDesign.sectionTitle)
-                HStack(spacing: 10) {
-                  ForEach(genres.prefix(6), id: \.name) { genre in
-                    HStack(spacing: 6) {
-                      Text(genre.name).font(.body.weight(.medium))
-                      Text("\(genre.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.white.opacity(0.1), in: Capsule())
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 10))
-                  }
-                }
-              }
-            }
-
-            // Weekly Hours Visual Bar
-            if !stats.weeklyHours.isEmpty {
-              VStack(alignment: .leading, spacing: 14) {
-                Text("Hours by Week").font(AureliaDesign.sectionTitle)
-                HStack(alignment: .bottom, spacing: 12) {
-                  let maxHours = max(1.0, stats.weeklyHours.map(\.hours).max() ?? 1.0)
-                  ForEach(stats.weeklyHours, id: \.period) { item in
-                    VStack(spacing: 6) {
-                      Text(String(format: "%.1f", item.hours))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                      RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.accentColor)
-                        .frame(width: 32, height: max(6, CGFloat(item.hours / maxHours) * 120))
-                      Text(item.period.components(separatedBy: "-W").last ?? item.period)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
-                  }
-                }
-                .frame(height: 160)
-              }
-            }
-
-            // Year in Review
-            if let years = stats.yearsAvailable, !years.isEmpty {
-              VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                  Text("Year in Review").font(AureliaDesign.sectionTitle)
-                  Spacer()
-                  Picker(
-                    "Year",
-                    selection: Binding(
-                      get: {
-                        selectedYear ?? years.first
-                          ?? Calendar.current.component(.year, from: Date())
-                      },
-                      set: { year in
-                        selectedYear = year
-                        Task { await loadYear(year) }
-                      }
-                    )
-                  ) {
-                    ForEach(years, id: \.self) { y in
-                      Text("\(y)").tag(y)
-                    }
-                  }
-                  .frame(width: 120)
-                }
-
-                if let review = yearReview {
-                  HStack(spacing: 16) {
-                    statCard(
-                      "Total Hours", value: String(format: "%.1f h", review.totalHours),
-                      icon: "clock"
-                    )
-                    statCard("Total Titles", value: "\(review.totalTitles)", icon: "film.stack")
-                    statCard("Movies", value: "\(review.movieCount)", icon: "film")
-                    statCard("Episodes", value: "\(review.episodeCount)", icon: "tv")
-                  }
-                }
-              }
-            }
-          }
-        }
+        content
+          .frame(maxWidth: 980, alignment: .leading)
+          .padding(.leading, max(0, sidebarOverlap - AureliaDesign.pagePadding))
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.top, 22)
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
-    .task { await load() }
-    .accessibilityIdentifier("statistics-page")
-  }
-
-  private func statCard(_ title: String, value: String, icon: String) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Text(title).font(.caption).foregroundStyle(.secondary)
-        Spacer()
-        Image(systemName: icon).foregroundStyle(.tint).font(.caption)
-      }
-      Text(value).font(.title2.weight(.bold))
-    }
-    .padding(16)
-    .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius))
-    .overlay {
-      RoundedRectangle(cornerRadius: AureliaDesign.cardRadius).stroke(
-        AureliaDesign.hairline, lineWidth: 1)
-    }
-  }
-
-  private func load() async {
-    guard let profile = model.profile else {
-      errorMessage = "No active profile session."
-      return
-    }
-    isLoading = true
-    errorMessage = nil
-    do {
-      let loaded = try await APIClient(profile: profile).statistics()
-      stats = loaded
-      if let years = loaded.yearsAvailable, let firstYear = years.first {
-        selectedYear = firstYear
-        await loadYear(firstYear)
-      }
-      isLoading = false
-    } catch {
-      isLoading = false
-      errorMessage = error.localizedDescription
-    }
-  }
-
-  private func loadYear(_ year: Int) async {
-    guard let profile = model.profile else { return }
-    yearReview = try? await APIClient(profile: profile).yearInReview(year: year)
   }
 }
 

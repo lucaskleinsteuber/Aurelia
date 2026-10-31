@@ -259,6 +259,32 @@ public sealed class CollectionsAndHistoryTests
             var stats = await SendAsync<UserStatistics>(client, viewerAuth.Token, HttpMethod.Get, "/api/v1/statistics");
             Assert.True(stats.TotalHoursWatched >= 0);
 
+            // Statistics keep exact minutes: ten minutes are not rounded to a tenth of an hour.
+            var tenMinutes = Guid.NewGuid();
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                db.WatchEvents.Add(new WatchEvent
+                {
+                    Id = tenMinutes,
+                    UserId = user.Id,
+                    MediaItemId = mediaId,
+                    Timestamp = DateTimeOffset.UtcNow,
+                    PositionMilliseconds = 720_000,
+                    DurationMilliseconds = 6_000_000,
+                    SecondsWatched = 600,
+                });
+                await db.SaveChangesAsync();
+            }
+            var exact = await SendAsync<UserStatistics>(client, viewerAuth.Token, HttpMethod.Get, "/api/v1/statistics");
+            Assert.InRange(exact.TotalHoursWatched - stats.TotalHoursWatched, 599 / 3600.0, 601 / 3600.0);
+            Assert.InRange(exact.HoursPast7Days - stats.HoursPast7Days, 599 / 3600.0, 601 / 3600.0);
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                await db.WatchEvents.Where(e => e.Id == tenMinutes).ExecuteDeleteAsync();
+            }
+
             // Viewer deletes single event
             using var deleteEvent = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/history/{item.Id}", viewerAuth.Token);
             using var deleteEventResp = await ApiTestClient.SendAsync(client, deleteEvent);

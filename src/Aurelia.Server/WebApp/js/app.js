@@ -1065,7 +1065,8 @@ async function historyScreen() {
         h("div", { class: "history-item-info" },
           h("a", { class: "history-item-title", href: `/title/${item.mediaId}`, "data-route": true }, item.title),
           h("div", { class: "history-item-meta muted small" },
-            [item.eyebrow, new Date(item.watchedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })]
+            [item.eyebrow, new Date(item.watchedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+              `Watched ${logic.watchTime(item.secondsWatched)}`]
               .filter(Boolean).join(" · ")),
           progressBar(item)),
         h("button", {
@@ -1120,84 +1121,106 @@ async function historyScreen() {
 
 async function statisticsScreen() {
   const container = h("div", { class: "statistics-page library page-enter" });
+  container.append(h("div", { class: "page-header" }, h("h1", {}, "Statistics")));
   let stats;
   try {
     stats = await api.statistics();
   } catch (e) {
     return emptyState("warning", "Couldn’t Load Statistics", e.message);
   }
+  if (!(stats.totalHoursWatched > 0)) {
+    return emptyState("star", "No Viewing Activity Yet",
+      "Watch a movie or an episode, and your watch time, streaks and favorites appear here.");
+  }
 
-  const statCard = (title, value, subtitle) => h("div", { class: "stat-card" },
+  const statCard = (title, value, detail) => h("div", { class: "stat-card" },
     h("div", { class: "stat-card-title muted small" }, title),
     h("div", { class: "stat-card-value" }, value),
-    subtitle ? h("div", { class: "stat-card-subtitle muted small" }, subtitle) : null);
+    detail ? h("div", { class: "stat-card-subtitle muted small" }, detail) : null);
+  const days = (count) => (count === 1 ? "1 day" : `${count ?? 0} days`);
+  const timeOfDay = (text) => {
+    const word = String(text ?? "").split(" ")[0].toLowerCase();
+    return word ? (word === "night" ? "at night" : `in the ${word}`) : "";
+  };
 
-  const totalHours = Math.round(stats.totalHoursWatched);
-  const weekHours = Math.round(stats.hoursPast7Days * 10) / 10;
-  const monthHours = Math.round(stats.hoursPast30Days * 10) / 10;
-  const completionPercent = Math.round(stats.completionRate * 100);
+  const summary = h("div", { class: "stat-summary" },
+    h("div", {},
+      h("div", { class: "muted small" }, "Total Watch Time"),
+      h("div", { class: "stat-total" }, logic.watchHours(stats.totalHoursWatched))),
+    h("div", { class: "stat-recent" },
+      h("div", {}, h("div", { class: "muted small" }, "Past 7 Days"), h("strong", {}, logic.watchHours(stats.hoursPast7Days))),
+      h("div", {}, h("div", { class: "muted small" }, "Past 30 Days"), h("strong", {}, logic.watchHours(stats.hoursPast30Days)))));
 
-  const cardsGrid = h("div", { class: "stat-cards-grid" },
-    statCard("Total Watch Time", `${totalHours} hrs`, "All-time viewed"),
-    statCard("Past 7 Days", `${weekHours} hrs`, "Recent activity"),
-    statCard("Past 30 Days", `${monthHours} hrs`, "Monthly volume"),
-    statCard("Watch Streak", `${stats.dayStreak} ${stats.dayStreak === 1 ? "day" : "days"}`, `Best: ${stats.bestDayStreak} days`),
-    statCard("Completion Rate", `${completionPercent}%`, "Titles finished"),
-    statCard("Most Active Time", stats.busiestDayOfWeek ?? "—", stats.busiestHourOfDay != null ? `Around ${stats.busiestHourOfDay}:00` : ""));
+  const highlights = h("div", { class: "stat-cards-grid" },
+    statCard("Current Streak", days(stats.currentStreakDays)),
+    statCard("Longest Streak", days(stats.longestStreakDays)),
+    statCard("Finished", `${Math.round(stats.completionRate ?? 0)} %`),
+    statCard("Watches Most", stats.busiestWeekday ?? "—", timeOfDay(stats.busiestTimeOfDay)));
 
-  const weeklyBars = (stats.hoursByWeek ?? []).map((week) => {
-    const maxWeek = Math.max(1, ...(stats.hoursByWeek ?? []).map((w) => w.hours));
-    const pct = Math.min(100, Math.round((week.hours / maxWeek) * 100));
-    return h("div", { class: "chart-bar-col", title: `${week.periodLabel}: ${week.hours} hrs` },
-      h("div", { class: "chart-bar", style: { height: `${Math.max(4, pct)}%` } }),
-      h("div", { class: "chart-label muted small" }, week.periodLabel.slice(5)));
-  });
-  const weeklySection = h("div", { class: "stat-section" },
-    h("h2", {}, "Activity Over the Past 12 Weeks"),
-    h("div", { class: "weekly-chart" }, weeklyBars));
+  const weekTitle = (period) => logic.weekStart(period)?.toLocaleDateString(undefined, { day: "numeric", month: "short" }) ?? period;
+  const weeks = stats.hoursByWeek ?? [];
+  const longestWeek = Math.max(0.0001, ...weeks.map((week) => week.hours));
+  const weeklySection = weeks.length ? h("section", { class: "stat-section" },
+    h("h2", {}, "Last 12 Weeks"),
+    h("div", { class: "weekly-chart" }, weeks.map((week) => {
+      const label = `Week of ${weekTitle(week.period)}: ${logic.watchHours(week.hours)}`;
+      return h("div", { class: "chart-bar-col", title: label, "aria-label": label, role: "img" },
+        h("div", { class: "chart-bar", style: { height: `${Math.max(3, Math.round((week.hours / longestWeek) * 100))}%` } }),
+        h("div", { class: "chart-label muted small" }, weekTitle(week.period)));
+    }))) : null;
 
-  const genrePills = (stats.topGenres ?? []).map((g) =>
-    h("span", { class: "genre-pill" }, `${g.name} `, h("span", { class: "genre-count" }, String(g.count))));
-  const genresSection = h("div", { class: "stat-section" },
-    h("h2", {}, "Top Genres"),
-    h("div", { class: "genre-pills" }, genrePills.length ? genrePills : h("p", { class: "muted" }, "No genre data yet.")));
+  const ranking = (title, note, items) => {
+    const shown = (items ?? []).slice(0, 5);
+    if (!shown.length) return null;
+    const longest = Math.max(0.0001, ...shown.map((item) => item.hours ?? 0));
+    return h("section", { class: "stat-section" },
+      h("h2", {}, title),
+      h("p", { class: "muted small" }, note),
+      h("ol", { class: "stat-ranking" }, shown.map((item) => h("li", {},
+        h("div", { class: "stat-ranking-line" },
+          h("span", {}, item.name),
+          h("span", { class: "muted" }, item.hours != null ? logic.watchHours(item.hours) : `${item.count}×`)),
+        h("div", { class: "stat-ranking-bar", style: { width: `${Math.max(1, Math.round(((item.hours ?? 0) / longest) * 100))}%` } })))));
+  };
 
-  const currentYear = new Date().getFullYear();
-  const yearSelect = h("select", { class: "select-input", "aria-label": "Year in Review" },
-    [currentYear, currentYear - 1, currentYear - 2].map((y) => h("option", { value: String(y) }, String(y))));
+  const years = stats.yearsAvailable ?? [];
   const yearContainer = h("div", { class: "year-in-review-content" });
-
+  const yearSelect = h("select", { class: "select-input", "aria-label": "Year in Review" },
+    years.map((year) => h("option", { value: String(year) }, String(year))));
   async function loadYear(year) {
     clear(yearContainer);
-    yearContainer.append(h("div", { class: "spinner visible" }));
     try {
-      const yData = await api.yearInReview(year);
-      clear(yearContainer);
-      yearContainer.append(h("div", { class: "stat-cards-grid" },
-        statCard("Hours Watched", `${Math.round(yData.totalHoursWatched)} hrs`),
-        statCard("Titles Completed", String(yData.totalTitlesWatched), `${yData.totalMoviesWatched} movies, ${yData.totalEpisodesWatched} episodes`),
-        statCard("Longest Streak", `${yData.longestDayStreak} days`),
-        yData.mostWatchedTitle ? statCard("Most Watched", yData.mostWatchedTitle) : null));
-    } catch (e) {
-      clear(yearContainer);
+      const review = await api.yearInReview(year);
+      const busiest = review.busiestDay
+        ? new Date(`${review.busiestDay}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
+        : null;
+      yearContainer.append(
+        h("div", { class: "stat-cards-grid" },
+          statCard("Watch Time", logic.watchHours(review.totalHoursWatched)),
+          statCard("Titles", String(review.titlesWatched ?? 0)),
+          statCard("Movies", String(review.moviesWatched ?? 0)),
+          statCard("Episodes", String(review.episodesWatched ?? 0))),
+        h("dl", { class: "stat-facts" },
+          review.topGenre ? [h("dt", {}, "Favorite Genre"), h("dd", {}, review.topGenre)] : null,
+          review.topTitle ? [h("dt", {}, "Most Watched"), h("dd", {}, review.topTitle)] : null,
+          busiest ? [h("dt", {}, "Busiest Day"), h("dd", {}, [busiest, review.busiestDayHours != null ? logic.watchHours(review.busiestDayHours) : null].filter(Boolean).join(" · "))] : null));
+    } catch {
       yearContainer.append(h("p", { class: "muted" }, "No activity recorded for this year."));
     }
   }
-
   yearSelect.addEventListener("change", () => loadYear(Number(yearSelect.value)));
-  loadYear(currentYear);
-
-  const yearSection = h("div", { class: "stat-section" },
+  const yearSection = years.length ? h("section", { class: "stat-section" },
     h("div", { class: "section-header" }, h("h2", {}, "Year in Review"), yearSelect),
-    yearContainer);
+    yearContainer) : null;
+  if (years.length) loadYear(years[0]);
 
   container.append(
-    h("div", { class: "page-header" }, h("h1", {}, "Watching Statistics")),
-    cardsGrid,
-    weeklySection,
-    genresSection,
-    yearSection);
-
+    summary,
+    highlights,
+    weeklySection ?? "",
+    ranking("Most Watched", "Series count with all their episodes.", stats.topTitles) ?? "",
+    ranking("Favorite Genres", "By the time you spent with them.", stats.topGenres) ?? "",
+    yearSection ?? "");
   return container;
 }
 

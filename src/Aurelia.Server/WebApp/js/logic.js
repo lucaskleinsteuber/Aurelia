@@ -196,6 +196,38 @@ export function runtime(minutes) {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
+/** Watch time as people say it, like the Mac app: "45 min", "2 h 5 min", "3 days 4 h". */
+export function watchTime(seconds) {
+  const total = Number.isFinite(seconds) ? Math.max(0, Math.round(seconds)) : 0;
+  if (total === 0) return "0 min";
+  if (total < 30) return "Under 1 min";
+  const minutes = Math.floor((total + 30) / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) return restMinutes === 0 ? `${hours} h` : `${hours} h ${restMinutes} min`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  const dayText = days === 1 ? "1 day" : `${days} days`;
+  return restHours === 0 ? dayText : `${dayText} ${restHours} h`;
+}
+
+/** watchTime for the hours the statistics report. */
+export function watchHours(hours) {
+  return watchTime(Number.isFinite(hours) ? hours * 3600 : 0);
+}
+
+/** The Monday that starts an ISO week such as "2026-W43", in local time. */
+export function weekStart(period) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(period ?? "");
+  if (!match) return null;
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  const january4 = new Date(year, 0, 4);
+  const weekday = (january4.getDay() + 6) % 7;
+  return new Date(year, 0, 4 - weekday + (week - 1) * 7);
+}
+
 /** Time left of a started title, such as "38 min left". */
 export function remaining(progress) {
   if (!progress || progress.isCompleted || !progress.durationMilliseconds) return "";

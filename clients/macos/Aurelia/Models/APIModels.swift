@@ -698,6 +698,8 @@ struct PeriodHours: Codable, Equatable, Sendable {
 struct NamedCount: Codable, Equatable, Sendable {
   let name: String
   let count: Int
+  /// Watch time in hours; older servers send only the count.
+  let hours: Double?
 }
 
 struct YearInReview: Codable, Equatable, Sendable {

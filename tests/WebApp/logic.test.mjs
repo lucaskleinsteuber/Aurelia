@@ -274,3 +274,22 @@ test("library browsing builds the server's query like the Mac's filters", () => 
   assert.deepEqual(logic.browseFacets([{ genres: ["Drama", "Crime"], year: 2008 }, { genres: ["Comedy", "Drama"], year: 2015 }]),
     { genres: ["Comedy", "Crime", "Drama"], years: [2015, 2008] });
 });
+
+test("watch time reads in minutes, hours and days like the Mac app", () => {
+  assert.equal(logic.watchTime(0), "0 min");
+  assert.equal(logic.watchTime(20), "Under 1 min");
+  assert.equal(logic.watchTime(45 * 60), "45 min");
+  assert.equal(logic.watchTime(125 * 60), "2 h 5 min");
+  assert.equal(logic.watchTime(24 * 3600), "1 day");
+  assert.equal(logic.watchTime(76 * 3600), "3 days 4 h");
+  assert.equal(logic.watchHours(0.5), "30 min");
+  assert.equal(logic.watchHours(10 / 60), "10 min");
+  assert.equal(logic.watchHours(undefined), "0 min");
+});
+
+test("ISO weeks start on their Monday", () => {
+  const start = logic.weekStart("2026-W43");
+  assert.deepEqual([start.getFullYear(), start.getMonth(), start.getDate(), start.getDay()], [2026, 9, 19, 1]);
+  assert.equal(logic.weekStart("2021-W01").getDate(), 4);
+  assert.equal(logic.weekStart("October"), null);
+});

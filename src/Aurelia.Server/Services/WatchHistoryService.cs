@@ -135,7 +135,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         }
 
         var totalSeconds = events.Sum(e => e.SecondsWatched);
-        var totalHours = Math.Round(totalSeconds / 3600.0, 1);
+        var totalHours = Hours(totalSeconds);
 
         var now = clock.GetUtcNow();
         var sevenDaysAgo = now.AddDays(-7);
@@ -144,8 +144,8 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         var past7Seconds = events.Where(e => e.Timestamp >= sevenDaysAgo).Sum(e => e.SecondsWatched);
         var past30Seconds = events.Where(e => e.Timestamp >= thirtyDaysAgo).Sum(e => e.SecondsWatched);
 
-        var hoursPast7Days = Math.Round(past7Seconds / 3600.0, 1);
-        var hoursPast30Days = Math.Round(past30Seconds / 3600.0, 1);
+        var hoursPast7Days = Hours(past7Seconds);
+        var hoursPast30Days = Hours(past30Seconds);
 
         var yearsAvailable = events
             .Select(e => Local(e.Timestamp).Year)
@@ -163,7 +163,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
                 return $"{year}-W{week:D2}";
             })
             .OrderBy(g => g.Key)
-            .Select(g => new PeriodHours(g.Key, Math.Round(g.Sum(e => e.SecondsWatched) / 3600.0, 1)))
+            .Select(g => new PeriodHours(g.Key, Hours(g.Sum(e => e.SecondsWatched))))
             .TakeLast(12)
             .ToList();
 
@@ -171,7 +171,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         var hoursByMonth = events
             .GroupBy(e => Local(e.Timestamp).ToString("yyyy-MM", CultureInfo.InvariantCulture))
             .OrderBy(g => g.Key)
-            .Select(g => new PeriodHours(g.Key, Math.Round(g.Sum(e => e.SecondsWatched) / 3600.0, 1)))
+            .Select(g => new PeriodHours(g.Key, Hours(g.Sum(e => e.SecondsWatched))))
             .TakeLast(12)
             .ToList();
 
@@ -191,7 +191,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         var topGenres = genreCounts
             .OrderByDescending(kv => kv.Value.Seconds)
             .Take(10)
-            .Select(kv => new NamedCount(kv.Key, kv.Value.Count, Math.Round(kv.Value.Seconds / 3600.0, 1)))
+            .Select(kv => new NamedCount(kv.Key, kv.Value.Count, Hours(kv.Value.Seconds)))
             .ToList();
 
         // Top titles
@@ -199,7 +199,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
             .GroupBy(e => DisplayTitle(e.MediaItem))
             .OrderByDescending(g => g.Sum(e => e.SecondsWatched))
             .Take(10)
-            .Select(g => new NamedCount(g.Key, g.Count(), Math.Round(g.Sum(e => e.SecondsWatched) / 3600.0, 1)))
+            .Select(g => new NamedCount(g.Key, g.Count(), Hours(g.Sum(e => e.SecondsWatched))))
             .ToList();
 
         // Streaks
@@ -279,7 +279,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
             return new YearInReview(year, 0, 0, 0, 0, null, null, null, null);
         }
 
-        var totalHours = Math.Round(events.Sum(e => e.SecondsWatched) / 3600.0, 1);
+        var totalHours = Hours(events.Sum(e => e.SecondsWatched));
         var distinctTitles = events.Select(e => e.MediaItemId).Distinct().Count();
         var moviesWatched = events.Where(e => e.MediaItem.Kind == MediaKind.Movie).Select(e => e.MediaItemId).Distinct().Count();
         var episodesWatched = events.Where(e => e.MediaItem.Kind == MediaKind.Episode).Count();
@@ -312,7 +312,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
 
         var busiestDay = busiestDayGroup?.Key;
         var busiestDayHours = busiestDayGroup is not null
-            ? Math.Round(busiestDayGroup.Sum(e => e.SecondsWatched) / 3600.0, 1)
+            ? Hours(busiestDayGroup.Sum(e => e.SecondsWatched))
             : (double?)null;
 
         return new YearInReview(
@@ -326,6 +326,9 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
             busiestDay,
             busiestDayHours);
     }
+
+    /// <summary>Hours to the second, so clients can show exact minutes; tenths of an hour hid them.</summary>
+    private static double Hours(long seconds) => Math.Round(seconds / 3600.0, 4);
 
     /// <summary>Episodes count for their series, so a binge shows up as the show, not one episode.</summary>
     private static string DisplayTitle(MediaItem item) =>
