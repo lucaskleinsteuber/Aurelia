@@ -31,6 +31,10 @@ public static partial class SidecarSubtitles
     };
 
     private static readonly ConcurrentDictionary<string, CachedSubtitle> MemoryCache = new();
+    // Converted subtitles are small; the cap keeps a few large files from filling a small server's memory.
+    private const long MaximumCachedBytes = 32 * 1024 * 1024;
+    private const int MaximumCachedFileBytes = 2 * 1024 * 1024;
+    private static long cachedBytes;
 
     private sealed record CachedSubtitle(long LastModifiedTicks, long FileLength, byte[] Content);
 
@@ -313,8 +317,18 @@ public static partial class SidecarSubtitles
         }
 
         var resultBytes = Encoding.UTF8.GetBytes(vtt);
-        if (MemoryCache.Count > 100) MemoryCache.Clear();
-        MemoryCache[filePath] = new CachedSubtitle(ticks, length, resultBytes);
+        if (resultBytes.Length <= MaximumCachedFileBytes)
+        {
+            if (MemoryCache.Count >= 100 || Interlocked.Read(ref cachedBytes) + resultBytes.Length > MaximumCachedBytes)
+            {
+                MemoryCache.Clear();
+                Interlocked.Exchange(ref cachedBytes, 0);
+            }
+            if (MemoryCache.TryAdd(filePath, new CachedSubtitle(ticks, length, resultBytes)))
+                Interlocked.Add(ref cachedBytes, resultBytes.Length);
+            else
+                MemoryCache[filePath] = new CachedSubtitle(ticks, length, resultBytes);
+        }
         return resultBytes;
     }
 
@@ -361,13 +375,17 @@ public static partial class SidecarSubtitles
         return normalized;
     }
 
-    [GeneratedRegex(@"^(\d{2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}),(\d{3})", RegexOptions.Multiline)]
+    // Some tools write one-digit hours ("0:00:01,000") or a dot before the milliseconds.
+    [GeneratedRegex(@"^(\d{1,3}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,3}):(\d{2}):(\d{2})[,.](\d{3})", RegexOptions.Multiline)]
     private static partial Regex SrtTimestampRegex();
 
     public static string ConvertSrtToWebVtt(string srt)
     {
         var normalized = srt.Replace("\r\n", "\n").Replace('\r', '\n');
-        var convertedTimestamps = SrtTimestampRegex().Replace(normalized, "$1.$2 --> $3.$4");
+        // WebVTT needs at least two hour digits and a dot before the milliseconds.
+        var convertedTimestamps = SrtTimestampRegex().Replace(normalized, match =>
+            $"{match.Groups[1].Value.PadLeft(2, '0')}:{match.Groups[2].Value}:{match.Groups[3].Value}.{match.Groups[4].Value} --> "
+            + $"{match.Groups[5].Value.PadLeft(2, '0')}:{match.Groups[6].Value}:{match.Groups[7].Value}.{match.Groups[8].Value}");
 
         var sb = new StringBuilder();
         sb.AppendLine("WEBVTT");

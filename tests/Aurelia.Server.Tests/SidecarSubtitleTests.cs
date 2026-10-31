@@ -184,6 +184,13 @@ public sealed class SidecarSubtitleTests : IDisposable
     }
 
     [Fact]
+    public void SrtTimesWithOneHourDigitOrADotBecomeValidWebVtt()
+    {
+        var vtt = SidecarSubtitles.ConvertSrtToWebVtt("1\n0:00:01,000 --> 0:00:02.500\nHello\n");
+        Assert.Contains("00:00:01.000 --> 00:00:02.500", vtt);
+    }
+
+    [Fact]
     public void ConvertsAssToWebVttWithDialogueAndFormatting()
     {
         var ass = """
