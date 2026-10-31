@@ -1,7 +1,12 @@
 import SwiftUI
 
 struct ServerManagementView: View {
+  /// Settings shows the server under Server and the people who use it under Profiles and
+  /// Devices; both pages share this view's loading, approval and deletion handling.
+  enum Part { case server, people }
+
   @EnvironmentObject private var model: AppModel
+  private let part: Part
   @State private var configuration: ServerConfigurationResponse?
   @State private var status: ServerStatusSummary?
   @State private var health: ServerHealthResponse?
@@ -17,7 +22,8 @@ struct ServerManagementView: View {
   @State private var deletionRun = UUID()
   @State private var showsAdvanced: Bool
 
-  init(showsAdvanced: Bool = false) {
+  init(_ part: Part = .server, showsAdvanced: Bool = false) {
+    self.part = part
     _showsAdvanced = State(initialValue: showsAdvanced)
   }
 
@@ -29,67 +35,11 @@ struct ServerManagementView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
       if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-      if loading && status == nil { ProgressView("Loading server settings…") }
-      if let status {
-        ServerSummaryCard(
-          status: status, configuration: configuration, client: client,
-          nativeHostAvailable: capabilities?.nativeHostOperations == true,
-          hosting: hosting,
-          refreshing: loading || deletingProfile != nil
-        ) { Task { await reload() } }
-      }
-      if let health {
-        ServerHealthCard(health: health)
-      }
-      // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
-      // power saving and updates of the Linux package.
-      if let client, capabilities != nil || model.isLocalHost {
-        if hosting.hostsOnMac {
-          ServerHostingEditor(
-            client: client, available: capabilities?.nativeHostOperations == true)
-        } else if hosting == .linuxPackage {
-          ServerUpdatesEditor(client: client)
-          ServerPowerEditor(client: client)
-        }
-      }
-      if let configuration, let client {
-        ServerEssentialsEditor(configuration: configuration, client: client) {
-          self.configuration = $0
-        }
-        .id("essentials-\(configuration.stored.revision)")
-        ServerScrubPreviewsEditor(client: client)
-      }
-      profiles
-      ServerDevicesSection()
-      ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
-        if let status { ServerDetailsBox(status: status) }
-        if let configuration, let client {
-          if hosting == .linuxPackage {
-            ServerLinuxNetworkBox(configuration: configuration)
-          } else {
-            ServerNetworkEditor(
-              configuration: configuration, client: client,
-              nativeHostAvailable: capabilities?.nativeHostOperations == true
-            ) { Task { await reload() } }
-            .id("network-\(configuration.stored.revision)")
-          }
-          ServerSecurityEditor(configuration: configuration, client: client) { configuration in
-            self.configuration = configuration
-          }.id(configuration.stored.revision)
-          ServerLibraryJobsEditor(configuration: configuration, client: client) {
-            self.configuration = $0
-          }
-          .id("jobs-\(configuration.stored.revision)")
-          ServerBackupsEditor(
-            configuration: configuration, client: client,
-            nativeHostAvailable: capabilities?.nativeHostOperations == true
-          ) { self.configuration = $0 }
-          .id("backups-\(configuration.stored.revision)")
-          ServerDiagnosticsEditor(configuration: configuration, client: client) {
-            self.configuration = $0
-          }
-          .id("diagnostics-\(configuration.stored.revision)")
-        }
+      if part == .people {
+        profiles
+        ServerDevicesSection()
+      } else {
+        serverParts
       }
     }
     .task(id: model.administrationGeneration) {
@@ -134,6 +84,69 @@ struct ServerManagementView: View {
     }
     .sheet(isPresented: $creatingUser) {
       if let client { ServerProfileEditor(client: client) { Task { await reload() } } }
+    }
+  }
+
+  @ViewBuilder private var serverParts: some View {
+    if loading && status == nil { ProgressView("Loading server settings…") }
+    if let status {
+      ServerSummaryCard(
+        status: status, configuration: configuration, client: client,
+        nativeHostAvailable: capabilities?.nativeHostOperations == true,
+        hosting: hosting,
+        refreshing: loading || deletingProfile != nil
+      ) { Task { await reload() } }
+    }
+    if let health {
+      ServerHealthCard(health: health)
+    }
+    // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
+    // power saving and updates of the Linux package.
+    if let client, capabilities != nil || model.isLocalHost {
+      if hosting.hostsOnMac {
+        ServerHostingEditor(
+          client: client, available: capabilities?.nativeHostOperations == true)
+      } else if hosting == .linuxPackage {
+        ServerUpdatesEditor(client: client)
+        ServerPowerEditor(client: client)
+      }
+    }
+    if let configuration, let client {
+      ServerEssentialsEditor(configuration: configuration, client: client) {
+        self.configuration = $0
+      }
+      .id("essentials-\(configuration.stored.revision)")
+      ServerScrubPreviewsEditor(client: client)
+    }
+    ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
+      if let status { ServerDetailsBox(status: status) }
+      if let configuration, let client {
+        if hosting == .linuxPackage {
+          ServerLinuxNetworkBox(configuration: configuration)
+        } else {
+          ServerNetworkEditor(
+            configuration: configuration, client: client,
+            nativeHostAvailable: capabilities?.nativeHostOperations == true
+          ) { Task { await reload() } }
+          .id("network-\(configuration.stored.revision)")
+        }
+        ServerSecurityEditor(configuration: configuration, client: client) { configuration in
+          self.configuration = configuration
+        }.id(configuration.stored.revision)
+        ServerLibraryJobsEditor(configuration: configuration, client: client) {
+          self.configuration = $0
+        }
+        .id("jobs-\(configuration.stored.revision)")
+        ServerBackupsEditor(
+          configuration: configuration, client: client,
+          nativeHostAvailable: capabilities?.nativeHostOperations == true
+        ) { self.configuration = $0 }
+        .id("backups-\(configuration.stored.revision)")
+        ServerDiagnosticsEditor(configuration: configuration, client: client) {
+          self.configuration = $0
+        }
+        .id("diagnostics-\(configuration.stored.revision)")
+      }
     }
   }
 
@@ -264,6 +277,13 @@ struct ServerManagementView: View {
     loading = true
     defer { loading = false }
     do {
+      if part == .people {
+        let accounts = try await model.currentAdministration { try await client.serverUsers() }
+        guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+        users = accounts
+        error = nil
+        return
+      }
       let loaded = try await model.currentAdministration {
         guard model.isCurrentAdministration(generation) else { throw CancellationError() }
         async let config = client.serverSettings()

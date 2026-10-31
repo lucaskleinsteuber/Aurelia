@@ -366,7 +366,7 @@ struct AppSettingsView: View {
         let _ = { foundAny = true }()
       }
       if model.canManageStorage
-        && queryMatches(query, "rescan interval automated exclusions offline")
+        && queryMatches(query, "offline hidden titles health duplicates")
       {
         catalogVisibilitySection
         let _ = { foundAny = true }()
@@ -381,43 +381,22 @@ struct AppSettingsView: View {
         currentProfileSection
         let _ = { foundAny = true }()
       }
-      if model.canManageMedia && queryMatches(query, "user accounts profiles create edit delete") {
+      if model.canManageMedia
+        && queryMatches(
+          query,
+          "user accounts profiles create edit delete devices streaming pairing authorized sessions revoke"
+        )
+      {
         userAccountsSection
         let _ = { foundAny = true }()
       }
       if model.canManageMedia
-        && queryMatches(query, "devices streaming pairing authorized sessions revoke")
+        && queryMatches(
+          query,
+          "server status uptime health hosting background scrub previews thumbnails backup restore power sleep network port diagnostics jobs limits"
+        )
       {
-        streamingDevicesSection
-        let _ = { foundAny = true }()
-      }
-      if model.canManageMedia
-        && queryMatches(query, "server status uptime streams health cpu ram memory")
-      {
-        yourServerSection
-        serverHealthSection
-        let _ = { foundAny = true }()
-      }
-      if model.canManageMedia && queryMatches(query, "scrub previews thumbnails strip timeline cap")
-      {
-        scrubPreviewsSection
-        let _ = { foundAny = true }()
-      }
-      if model.canManageMedia
-        && queryMatches(query, "live conversion transcoding remuxing stream limit")
-      {
-        liveConversionSection
-        let _ = { foundAny = true }()
-      }
-      if model.canManageMedia && queryMatches(query, "backup automatic database restore") {
-        automaticBackupsSection
-        let _ = { foundAny = true }()
-      }
-      if model.canManageMedia
-        && queryMatches(query, "power sleep idle awake hours lan network port")
-      {
-        serverPowerSection
-        serverNetworkSection
+        ServerManagementView()
         let _ = { foundAny = true }()
       }
       if queryMatches(
@@ -986,7 +965,6 @@ struct AppSettingsView: View {
     currentProfileSection
     if model.canManageMedia {
       userAccountsSection
-      streamingDevicesSection
     }
   }
 
@@ -1021,98 +999,18 @@ struct AppSettingsView: View {
     }
   }
 
+  /// Profiles and paired devices, with the same approval and deletion handling as before.
   private var userAccountsSection: some View {
-    AureliaSettingsSection(
-      "User Accounts",
-      symbol: "person.2.fill",
-      description: "Manage household user profiles and library access modes."
-    ) {
-      ServerProfileManagementList()
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-  }
-
-  private var streamingDevicesSection: some View {
-    AureliaSettingsSection(
-      "Streaming Devices",
-      symbol: "tv.and.mediabox",
-      description: "Authorize new client pairings and review active device sessions."
-    ) {
-      VStack(alignment: .leading, spacing: 16) {
-        DeviceApprovalView()
-        ServerDevicesSection()
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    ServerManagementView(.people)
   }
 
   // MARK: - 6. Server
 
   @ViewBuilder
+  /// Hosting, pairing, health, scrub previews, backups, network, jobs and diagnostics, shaped by
+  /// where the server runs (in Aurelia on this Mac, another Mac or the Linux package).
   private var serverSections: some View {
-    yourServerSection
-    serverHealthSection
-    scrubPreviewsSection
-    liveConversionSection
-    automaticBackupsSection
-    serverPowerSection
-    serverNetworkSection
-  }
-
-  private var yourServerSection: some View {
-    AureliaSettingsSection(
-      "Your Server",
-      symbol: "server.rack",
-      description: "Backend server state and active client streams."
-    ) {
-      VStack(alignment: .leading, spacing: 10) {
-        LabeledContent("Name", value: model.profile?.name ?? "Aurelia")
-        LabeledContent("Status", value: model.hostSnapshot.state.rawValue.capitalized)
-        if let user = model.profile?.user {
-          LabeledContent("Access Level", value: user.role.rawValue.capitalized)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-  }
-
-  private var serverHealthSection: some View {
-    ServerHealthCardWrapper()
-  }
-
-  private var scrubPreviewsSection: some View {
-    ServerScrubPreviewsWrapper()
-  }
-
-  private var liveConversionSection: some View {
-    AureliaSettingsSection(
-      "Live Conversion",
-      symbol: "play.display",
-      description:
-        "On-the-fly stream transcoding and live remuxing for browsers and remote clients."
-    ) {
-      VStack(alignment: .leading, spacing: 8) {
-        Text(
-          "Hardware video decoding and live stream conversion are performed without saving temporary files to disk."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        LabeledContent("Temporary Transcode Cache", value: "None (Memory Only)")
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
-  }
-
-  private var automaticBackupsSection: some View {
-    ServerBackupsWrapper()
-  }
-
-  private var serverPowerSection: some View {
-    ServerPowerWrapper()
-  }
-
-  private var serverNetworkSection: some View {
-    ServerNetworkWrapper()
+    ServerManagementView()
   }
 
   // MARK: - 7. Updates
@@ -1277,193 +1175,12 @@ struct AppSettingsView: View {
 
 // MARK: - Server Component Wrappers
 
-private struct ServerHealthCardWrapper: View {
-  @EnvironmentObject private var model: AppModel
-  @State private var health: ServerHealthResponse?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if let health {
-        ServerHealthCard(health: health)
-      } else {
-        AureliaSettingsSection(
-          "Server Health",
-          symbol: "waveform.path.ecg",
-          description: "System resource consumption and background task workers."
-        ) {
-          ProgressView("Loading server health…")
-        }
-      }
-    }
-    .task {
-      guard let profile = model.profile else { return }
-      let client = APIClient(profile: profile)
-      health = try? await client.serverHealth()
-    }
-  }
-}
-
-private struct ServerScrubPreviewsWrapper: View {
-  @EnvironmentObject private var model: AppModel
-
-  var body: some View {
-    if let profile = model.profile {
-      ServerScrubPreviewsEditor(client: APIClient(profile: profile))
-    }
-  }
-}
-
-private struct ServerBackupsWrapper: View {
-  @EnvironmentObject private var model: AppModel
-  @State private var configuration: ServerConfigurationResponse?
-
-  var body: some View {
-    if let profile = model.profile {
-      let client = APIClient(profile: profile)
-      if let configuration {
-        ServerBackupsEditor(
-          configuration: configuration, client: client,
-          nativeHostAvailable: model.isLocalHost
-        ) { self.configuration = $0 }
-      } else {
-        ProgressView("Loading backup configuration…")
-          .task {
-            configuration = try? await client.serverSettings()
-          }
-      }
-    }
-  }
-}
-
-private struct ServerPowerWrapper: View {
-  @EnvironmentObject private var model: AppModel
-
-  var body: some View {
-    if let profile = model.profile {
-      ServerPowerEditor(client: APIClient(profile: profile))
-    }
-  }
-}
-
-private struct ServerNetworkWrapper: View {
-  @EnvironmentObject private var model: AppModel
-  @State private var configuration: ServerConfigurationResponse?
-
-  var body: some View {
-    if let profile = model.profile {
-      let client = APIClient(profile: profile)
-      if let configuration {
-        ServerNetworkEditor(
-          configuration: configuration, client: client,
-          nativeHostAvailable: model.isLocalHost
-        ) {
-          Task {
-            self.configuration = try? await client.serverSettings()
-          }
-        }
-      } else {
-        ProgressView("Loading network settings…")
-          .task {
-            configuration = try? await client.serverSettings()
-          }
-      }
-    }
-  }
-}
-
 private struct ServerUpdatesWrapper: View {
   @EnvironmentObject private var model: AppModel
 
   var body: some View {
     if let profile = model.profile {
       ServerUpdatesEditor(client: APIClient(profile: profile))
-    }
-  }
-}
-
-private struct ServerProfileManagementList: View {
-  @EnvironmentObject private var model: AppModel
-  @State private var users: [UserAccessSummary] = []
-  @State private var editingUser: UserAccessSummary?
-  @State private var creatingUser = false
-  @State private var profileToDelete: UserAccessSummary?
-  @State private var error: String?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      if let error { Text(error).foregroundStyle(.red) }
-
-      ForEach(users) { user in
-        HStack {
-          AureliaProfileAvatar(id: user.id, name: user.user.username, size: 28)
-          VStack(alignment: .leading, spacing: 1) {
-            Text(user.user.username).font(.headline)
-            Text(user.user.role.rawValue.capitalized)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          Spacer()
-          Button("Edit…") { editingUser = user }
-          if user.id != model.profile?.user?.id {
-            Button(role: .destructive) {
-              profileToDelete = user
-            } label: {
-              Image(systemName: "trash")
-            }
-          }
-        }
-        if user.id != users.last?.id { Divider() }
-      }
-
-      Button("Add User Profile…") { creatingUser = true }
-    }
-    .task {
-      await reloadUsers()
-    }
-    .sheet(item: $editingUser) { user in
-      if let profile = model.profile {
-        ServerProfileEditor(existing: user, client: APIClient(profile: profile)) {
-          Task { await reloadUsers() }
-        }
-      }
-    }
-    .sheet(isPresented: $creatingUser) {
-      if let profile = model.profile {
-        ServerProfileEditor(client: APIClient(profile: profile)) {
-          Task { await reloadUsers() }
-        }
-      }
-    }
-    .confirmationDialog(
-      "Delete Profile \(profileToDelete?.user.username ?? "")?",
-      isPresented: Binding(
-        get: { profileToDelete != nil }, set: { if !$0 { profileToDelete = nil } }),
-      titleVisibility: .visible
-    ) {
-      if let user = profileToDelete {
-        Button("Delete Profile", role: .destructive) {
-          Task {
-            guard let profile = model.profile else { return }
-            let client = APIClient(profile: profile)
-            do {
-              try await client.deleteProfile(id: user.id)
-              await reloadUsers()
-            } catch {
-              self.error = error.localizedDescription
-            }
-          }
-        }
-      }
-    } message: {
-      Text("All progress, scene notes and preferences for this profile will be deleted.")
-    }
-  }
-
-  private func reloadUsers() async {
-    guard let profile = model.profile else { return }
-    let client = APIClient(profile: profile)
-    if let fetched = try? await client.serverUsers() {
-      users = fetched
     }
   }
 }

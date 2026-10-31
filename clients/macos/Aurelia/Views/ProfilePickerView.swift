@@ -461,63 +461,6 @@ struct CenteredProfileLayout: Layout {
   }
 }
 
-struct ManagementUnlockView: View {
-  @EnvironmentObject private var model: AppModel
-  @State private var password = ""
-  @State private var working = false
-  var body: some View {
-    GroupBox("Server Management Locked") {
-      VStack(alignment: .leading, spacing: 14) {
-        Text(
-          "Enter the Server Password to manage the areas allowed by your role for ten minutes. Your Profile PIN only opens your profile."
-        )
-        .foregroundStyle(.secondary)
-        SecureField("Server Password", text: $password).textFieldStyle(.roundedBorder)
-          .accessibilityIdentifier("management-password")
-          .onSubmit { unlockManagement() }
-        Button("Unlock Management") { unlockManagement() }
-          .disabled(password.isEmpty || working).accessibilityIdentifier("management-unlock")
-        if let error = model.administrationErrorMessage { Text(error).foregroundStyle(.orange) }
-      }.padding(12)
-    }
-    .onDisappear { password = "" }
-    .onChange(of: model.administrationGeneration) { _, _ in password = "" }
-  }
-
-  private func unlockManagement() {
-    guard !working, !password.isEmpty else { return }
-    let submittedPassword = password
-    password = ""
-    working = true
-    Task {
-      defer { working = false }
-      _ = await model.unlockManagement(password: submittedPassword)
-    }
-  }
-}
-
-struct ManagementStatusView: View {
-  @EnvironmentObject private var model: AppModel
-
-  var body: some View {
-    TimelineView(.periodic(from: .now, by: 1)) { context in
-      if model.managementUnlocked {
-        HStack(spacing: 12) {
-          Label("Management Unlocked", systemImage: "lock.open")
-          if let expiry = model.managementExpiresAt {
-            let remaining = max(0, Int(ceil(expiry.timeIntervalSince(context.date))))
-            Text(String(format: "%d:%02d remaining", remaining / 60, remaining % 60))
-              .monospacedDigit().foregroundStyle(.secondary)
-          }
-          Spacer()
-          Button("Lock Management") { Task { await model.lockManagement() } }
-            .accessibilityIdentifier("management-lock")
-        }.font(.callout)
-      }
-    }
-  }
-}
-
 struct ChangeProfilePINView: View {
   @EnvironmentObject private var model: AppModel
   @State private var current = ""
