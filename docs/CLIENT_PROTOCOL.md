@@ -225,12 +225,18 @@ The server reports capability `collections-v2`.
   or rules; `DELETE` removes the collection, never a title.
 - `POST` and `DELETE /api/v1/collections/{id}/items/{mediaId}` add or remove one movie or
   series. A smart list answers `409 smart_collection`: its rules choose its titles.
-- A smart list's `rulesJson` is a `SmartCollectionRules` object: `kind`, `genres`, `yearMin`,
-  `yearMax`, `decade`, `ratingMin`, `ratingMax`, `watchedState`, `addedWithinDays`,
-  `favoritesOnly`, `watchlistOnly`, `textContains` and `combination` (`and`/`or`). Results are
-  evaluated per profile and kept for 60 seconds.
+- A smart list's `rulesJson` is a `SmartCollectionRules` object: `kind` (`movie`, `series` or
+  `episode`), `genres`, `yearMin`, `yearMax`, `decade`, `ratingMin`, `ratingMax`,
+  `watchedState` (`unwatched`, `inProgress`, `watched`), `addedWithinDays`, `favoritesOnly`,
+  `watchlistOnly`, `textContains` and `combination`. With `and` a title must meet every rule
+  (and every genre); with `or` one rule is enough. Text and genres match literally. The server
+  stores the rules in exactly these names and answers `400 invalid_smart_rules` when
+  `rulesJson` is not a JSON object; for lists saved by earlier apps it also reads `watched`,
+  `watchState`, `search`, `match` (`any`/`all`), `matchAny` and the kind `movies`. Results are
+  evaluated per profile and kept for 60 seconds, except watchlist-only lists.
 - `GET /api/v1/catalog/franchises` lists franchises from TMDB (`belongs_to_collection`);
-  `POST /api/v1/collections/from-franchise/{id}` turns one into a personal collection.
+  `POST /api/v1/collections/from-franchise/{id}` turns one into a personal collection. Any
+  other collection id answers `404 franchise_not_found`.
 
 ## Watch history and statistics
 
