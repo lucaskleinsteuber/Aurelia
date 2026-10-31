@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Aurelia
+GenericName=Media Player
+Comment=Watch the movies and TV shows on your Aurelia server
+Exec=aurelia-desktop %U
+Icon=io.github.lucasfd3.Aurelia
+Terminal=false
+Categories=AudioVideo;Video;Player;TV;
+Keywords=movies;series;tv;media;library;server;
+StartupNotify=true
+StartupWMClass=aurelia-desktop

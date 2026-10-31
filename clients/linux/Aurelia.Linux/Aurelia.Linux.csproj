@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- The executable is installed as /usr/bin/aurelia-desktop; `aurelia` belongs to the server package. -->
+    <AssemblyName>aurelia-desktop</AssemblyName>
+    <RootNamespace>Aurelia.Linux</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Wayland" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Aurelia.Linux.Core/Aurelia.Linux.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aurelia.Linux.Tests" />
+  </ItemGroup>
+</Project>

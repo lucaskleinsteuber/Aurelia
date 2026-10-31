@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.lucasfd3.Aurelia</id>
+  <name>Aurelia</name>
+  <summary>Watch the movies and TV shows on your Aurelia server</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <developer id="io.github.lucasfd3">
+    <name>Aurelia</name>
+  </developer>
+  <description>
+    <p>
+      Aurelia is a self-hosted media server with native apps. Aurelia for Linux browses your library,
+      plays your movies and TV shows, and can host the Aurelia server on this computer.
+    </p>
+    <p>This is a preview build.</p>
+  </description>
+  <launchable type="desktop-id">io.github.lucasfd3.Aurelia.desktop</launchable>
+  <url type="homepage">https://github.com/lucasfd3/Aurelia</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="@VERSION@" date="@DATE@" />
+  </releases>
+</component>

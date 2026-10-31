@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/shared/">
+    <Project Path="../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />
+  </Folder>
+  <Project Path="Aurelia.Linux.Core/Aurelia.Linux.Core.csproj" />
+  <Project Path="Aurelia.Linux/Aurelia.Linux.csproj" />
+  <Project Path="Aurelia.Linux.Tests/Aurelia.Linux.Tests.csproj" />
+</Solution>

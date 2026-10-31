@@ -30,7 +30,7 @@ exists() { [ -e "$1" ] || { echo "Missing protected fixture: $1" >&2; exit 1; };
 absent() { [ ! -e "$1" ] || { echo "Stale fixture retained: $1" >&2; exit 1; }; }
 
 for build in 1 2 3; do mkdir -p "$workspace/Build/Build $build"; done
-for platform in tvOS Linux; do
+for platform in tvOS Linux LinuxApp; do
   mkdir -p "$workspace/Build/$platform/old" "$workspace/Build/$platform/new"
   old_tree "$workspace/Build/$platform/old"
 done
@@ -72,7 +72,7 @@ PRUNE_TEST_PROCESS=installed prune
 absent "$workspace/Build/Build 1"
 absent "$workspace/Build/Build 2"
 exists "$workspace/Build/Build 3"
-for platform in tvOS Linux; do
+for platform in tvOS Linux LinuxApp; do
   absent "$workspace/Build/$platform/old"
   exists "$workspace/Build/$platform/new"
 done

@@ -1,0 +1,104 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="{StaticResource AureliaFontFamily}" />
+    <Setter Property="FontSize" Value="{StaticResource AureliaBodyFontSize}" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaPrimaryTextBrush}" />
+  </Style>
+
+  <!-- Typography -->
+  <Style Selector="TextBlock.pageTitle">
+    <Setter Property="FontSize" Value="{StaticResource AureliaPageTitleFontSize}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="TextBlock.heroTitle">
+    <Setter Property="FontSize" Value="{StaticResource AureliaHeroTitleFontSize}" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="TextBlock.sectionTitle">
+    <Setter Property="FontSize" Value="{StaticResource AureliaSectionTitleFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.eyebrow">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="1.4" />
+  </Style>
+  <Style Selector="TextBlock.subdued">
+    <Setter Property="Foreground" Value="{StaticResource AureliaSubduedTextBrush}" />
+  </Style>
+
+  <!-- Sidebar rows: tinted symbols, as in the Apple TV app's sidebar; on the selection they turn
+       white so they stay visible on the highlight. -->
+  <Style Selector="ListBox.sidebar">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="12,0" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem">
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="MinHeight" Value="38" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaPrimaryTextBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem PathIcon">
+    <Setter Property="Foreground" Value="{StaticResource AureliaAccentBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaHoverBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaSelectionBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaSelectionBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected TextBlock">
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:selected PathIcon">
+    <Setter Property="Foreground" Value="{StaticResource AureliaPrimaryTextBrush}" />
+  </Style>
+  <Style Selector="ListBox.sidebar ListBoxItem:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- A round, translucent button over content, like the Mac app's sidebar toggle. -->
+  <Style Selector="Button.chrome">
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="17" />
+    <Setter Property="Background" Value="#66282C2F" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaPrimaryTextBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.chrome:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#99383C40" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaPrimaryTextBrush}" />
+  </Style>
+
+  <!-- The white capsule for a page's main action ("Open", "Play"). -->
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="#F5F5F7" />
+    <Setter Property="Foreground" Value="#111316" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Padding" Value="22,0" />
+    <Setter Property="MinHeight" Value="{StaticResource AureliaMinimumControlSize}" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+
+  <!-- Cards on shelves. -->
+  <Style Selector="Border.card">
+    <Setter Property="CornerRadius" Value="{StaticResource AureliaCardRadius}" />
+    <Setter Property="Background" Value="{StaticResource AureliaSurfaceBrush}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+</Styles>

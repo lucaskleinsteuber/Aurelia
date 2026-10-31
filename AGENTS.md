@@ -110,6 +110,18 @@ These rules apply to every task in this repository.
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published.
+- Aurelia for Linux (`clients/linux`, preview, 0.1.0 (2)) is the native Linux desktop
+  app and is meant to become the full Mac app on Linux. It is a separate product with
+  its own version counter (`Version` and `AureliaLinuxBuildNumber` in
+  `clients/linux/Directory.Build.props`), written in C# with Avalonia, Linux x64 only,
+  with platform specifics behind small adapters. It shares only `src/Aurelia.Contracts`
+  with the server and copies no Mac code. Verify it with `scripts/test-linux-app.sh`
+  (formatting, warning-free build, headless Avalonia tests, which need no screen and no
+  question first), build it with `scripts/build-linux-app.sh` (packages made on Linux by
+  `scripts/package-linux-app.sh`) and install each verified test build on the owner's
+  CachyOS laptop (`Local/LinuxLaptop/ssh_config`) with `scripts/install-linux-app.sh`
+  without asking; installing replaces only the package. Synthetic data only, no real
+  playback in tests. It is not published yet. See `docs/LINUX_APP.md`.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
   repository in `Local/Aurelia Desktop (archived)`. Do not
   restore, build or test it unless the user asks for it.

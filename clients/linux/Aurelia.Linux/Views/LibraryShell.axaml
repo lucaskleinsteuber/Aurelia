@@ -1,0 +1,45 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Aurelia.Linux.Controls"
+             xmlns:views="clr-namespace:Aurelia.Linux.Views"
+             x:Class="Aurelia.Linux.Views.LibraryShell">
+  <Grid>
+    <!-- Pages run full height beneath the sidebar; each insets its content beside it. -->
+    <Panel x:Name="PageLayer" Background="{StaticResource AureliaBackdropBrush}">
+      <ContentControl x:Name="PageHost" />
+    </Panel>
+
+    <Grid x:Name="Sidebar" Width="{StaticResource AureliaSidebarWidth}" HorizontalAlignment="Left"
+          AutomationProperties.Name="Sidebar">
+      <controls:SidebarBackground x:Name="SidebarBackdrop" />
+      <Border Width="1" HorizontalAlignment="Right" Background="{StaticResource AureliaHairlineBrush}" />
+      <DockPanel>
+        <!-- Room for the sidebar toggle above the first row. -->
+        <Panel DockPanel.Dock="Top" Height="58" />
+        <Border DockPanel.Dock="Bottom" Padding="22,12,16,18">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <PathIcon Data="{StaticResource IconServer}" Width="16" Height="16"
+                      Foreground="{StaticResource AureliaSubduedTextBrush}" />
+            <TextBlock x:Name="ConnectionLabel" Text="Not Connected" Classes="subdued" VerticalAlignment="Center" />
+          </StackPanel>
+        </Border>
+        <ListBox x:Name="SidebarList" Classes="sidebar" SelectionMode="Single,AlwaysSelected"
+                 AutomationProperties.Name="Library pages">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="views:SidebarItem">
+              <StackPanel Orientation="Horizontal" Spacing="12" AutomationProperties.Name="{Binding Title}">
+                <PathIcon Data="{Binding Icon}" Width="18" Height="18" />
+                <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Grid>
+
+    <Button x:Name="SidebarToggle" Classes="chrome" HorizontalAlignment="Left" VerticalAlignment="Top"
+            HotKey="F9" ToolTip.Tip="Hide Sidebar (F9)" AutomationProperties.Name="Hide Sidebar">
+      <PathIcon Data="{StaticResource IconSidebar}" Width="17" Height="17" />
+    </Button>
+  </Grid>
+</UserControl>

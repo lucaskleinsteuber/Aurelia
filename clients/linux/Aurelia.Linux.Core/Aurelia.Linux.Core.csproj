@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- App logic without any UI toolkit, so it can be tested on its own. -->
+  <PropertyGroup>
+    <RootNamespace>Aurelia.Linux.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />
+  </ItemGroup>
+</Project>
