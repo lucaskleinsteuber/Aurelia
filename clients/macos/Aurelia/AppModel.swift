@@ -147,7 +147,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var isLeavingRest = false
   /// Whether a title plays now; the player reports it.
   private(set) var playerIsPlaying = false
-  var secondsWithoutInput: @MainActor () -> TimeInterval = { AureliaRest.secondsWithoutInput }
+  var secondsWithoutUse: @MainActor () -> TimeInterval = { AureliaUseClock.shared.secondsWithoutUse }
   private var restWatchTask: Task<Void, Never>?
   private var serverWakeTask: Task<Bool, Never>?
   @Published private(set) var isWorking = false
@@ -652,6 +652,8 @@ final class AppModel: ObservableObject {
 
   /// Checks twice a minute whether Aurelia should let go of its server.
   private func watchForRest() {
+    // Starts counting from now when Aurelia has not been in front yet, as after login.
+    _ = AureliaUseClock.shared
     restWatchTask?.cancel()
     restWatchTask = Task { [weak self] in
       while !Task.isCancelled {
@@ -666,7 +668,7 @@ final class AppModel: ObservableObject {
     !isResting && !isLeavingRest && !isStarting
       && AureliaRest.shouldRest(
         enabled: AureliaRest.isEnabled(), minutes: AureliaRest.minutes(),
-        secondsWithoutInput: secondsWithoutInput(), playing: playerIsPlaying,
+        secondsWithoutInput: secondsWithoutUse(), playing: playerIsPlaying,
         connectedElsewhere: operatingMode != .host && profile != nil)
   }
 

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 
@@ -58,6 +59,40 @@ struct ConnectionReliabilityTests {
     #expect(!rests(playing: true), "A title playing through the night is still watched.")
     #expect(!rests(enabled: false))
     #expect(!rests(elsewhere: false), "A server on this Mac is not left alone.")
+  }
+
+  @Test func onlyUsingAureliaItselfCountsAsUse() {
+    let now = Date()
+    let left = now.addingTimeInterval(-20 * 60)
+    #expect(
+      AureliaRest.secondsWithoutUse(
+        isActive: true, secondsWithoutInput: 40, lastActive: left, now: now) == 40,
+      "In front, the last input went to Aurelia.")
+    #expect(
+      AureliaRest.secondsWithoutUse(
+        isActive: false, secondsWithoutInput: 2, lastActive: left, now: now) == 20 * 60,
+      "Typing in another app does not keep the server awake.")
+    #expect(
+      AureliaRest.secondsWithoutUse(
+        isActive: false, secondsWithoutInput: 2, lastActive: now.addingTimeInterval(5), now: now)
+        == 0)
+  }
+
+  @Test @MainActor func leavingAureliaIsNotedFromAnyThread() async throws {
+    let clock = AureliaUseClock.shared
+    let before = clock.lastActive
+    try await Task.sleep(for: .milliseconds(20))
+    await withCheckedContinuation { continuation in
+      DispatchQueue.global().async {
+        NotificationCenter.default.post(
+          name: NSApplication.didResignActiveNotification, object: nil)
+        continuation.resume()
+      }
+    }
+    for _ in 0..<100 where clock.lastActive == before {
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    #expect(clock.lastActive > before)
   }
 
   @Test func restingClosesThePlayerAndStaysQuiet() async {

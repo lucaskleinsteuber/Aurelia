@@ -556,7 +556,7 @@ struct AppSettingsView: View {
             .disabled(!restsWhenUnused)
           }
           Text(
-            "With no activity for this duration, Aurelia disconnects so a server that saves power can sleep."
+            "When Aurelia is not used for this long, it disconnects so a server that saves power can sleep. Working in other apps does not count as using Aurelia."
           )
           .font(.caption)
           .foregroundStyle(.secondary)
