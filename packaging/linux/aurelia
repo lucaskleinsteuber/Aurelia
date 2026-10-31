@@ -56,16 +56,16 @@ github_fetch() {
 report_update=false
 status_newest_version="" status_newest_build="" status_target="" status_checked_at=""
 write_update_status() {
-  local state=$1 message=${2:-} temporary
+  local state=$1 message=${2:-}
   $report_update || return 0
   message=$(printf '%s' "$message" | tr -cd '[:print:]' | cut -c1-200)
-  temporary=$(mktemp "$data_dir/update-status.XXXXXX") || return 0
+  # Written as the server's user: root changing owners in that user's folder could be led along
+  # a link onto any file of the computer.
   printf 'STATE=%s\nCHANGED_AT=%s\nCHECKED_AT=%s\nNEWEST_VERSION=%s\nNEWEST_BUILD=%s\nTARGET_BUILD=%s\nMESSAGE=%s\n' \
     "$state" "$(date +%s)" "$status_checked_at" "$status_newest_version" "$status_newest_build" "$status_target" \
-    "$message" > "$temporary"
-  chown aurelia:aurelia "$temporary"
-  chmod 0600 "$temporary"
-  mv -f "$temporary" "$data_dir/update-status"
+    "$message" \
+    | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$data_dir/update-status" \
+    || true
 }
 
 github_failure() {

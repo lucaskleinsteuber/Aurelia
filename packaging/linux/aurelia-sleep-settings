@@ -27,13 +27,11 @@ read_sleep_settings() {
   return 0
 }
 
-# Writes the current values for the server's user, which must be able to change them later.
+# Writes the current values as the server's user, which must be able to change them later. Root
+# never creates, changes the owner of or moves a file in that user's folder: chown and chmod
+# would follow a link the user placed there in the meantime, onto any file of the computer.
 write_sleep_settings() {
-  local file=$1 temporary
-  temporary=$(mktemp "$file.XXXXXX")
   printf '# What Aurelia Server does when unused, changed in the app or with `sudo aurelia sleep`.\nMODE=%s\nIDLE_MINUTES=%s\nAWAKE_FROM=%s\nAWAKE_UNTIL=%s\n' \
-    "$MODE" "$IDLE_MINUTES" "$AWAKE_FROM" "$AWAKE_UNTIL" > "$temporary"
-  chown aurelia:aurelia "$temporary"
-  chmod 0600 "$temporary"
-  mv -f "$temporary" "$file"
+    "$MODE" "$IDLE_MINUTES" "$AWAKE_FROM" "$AWAKE_UNTIL" \
+    | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$1"
 }
