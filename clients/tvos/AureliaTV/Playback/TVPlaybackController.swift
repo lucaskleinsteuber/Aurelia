@@ -523,7 +523,7 @@ final class TVPlaybackController: ObservableObject {
           guard let self, !self.closed, self.generation == operation,
             self.relayGeneration == relayOperation
           else { return }
-          for track in tracks {
+          for track in TVLiveSubtitleTrack.sidecarFiles(tracks) {
             if let subURL = secureRelay.subtitleURL(index: track.index) {
               self.engine.addSubtitleSlave(url: subURL)
             }

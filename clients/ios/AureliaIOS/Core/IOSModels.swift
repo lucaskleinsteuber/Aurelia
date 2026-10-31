@@ -495,14 +495,23 @@ struct IOSCatalogDetail: Codable, Equatable, Sendable {
   }
 }
 
+/// A subtitle track the server lists for a stream. Untitled tracks arrive without a title.
 struct IOSLiveSubtitleTrack: Codable, Equatable, Sendable {
   let index: Int
-  let title: String
+  let title: String?
   let language: String?
   let isDefault: Bool
   let isForced: Bool
   let isSdh: Bool
   let isSidecar: Bool
+  /// False for bitmap files (VobSub), which the server cannot turn into text.
+  let supported: Bool?
+
+  /// The subtitle files next to the video that the player adds itself. Embedded tracks are
+  /// already in the stream, and loading them again would make the server extract each one.
+  static func sidecarFiles(_ tracks: [IOSLiveSubtitleTrack]) -> [IOSLiveSubtitleTrack] {
+    tracks.filter { $0.isSidecar && $0.supported != false }
+  }
 }
 
 enum IOSPlaybackAction: String, Codable, Sendable { case play, resume, playAgain }

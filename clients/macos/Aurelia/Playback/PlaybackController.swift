@@ -895,7 +895,7 @@ final class PlaybackController: ObservableObject {
     Task { [weak self] in
       guard let self, let relay = self.relay else { return }
       if let tracks = try? await self.client.streamSubtitles(ticket: source.id) {
-        for track in tracks where track.isSidecar {
+        for track in tracks where track.isSidecar && track.supported {
           if let subURL = relay.subtitleURL(index: track.index) {
             self.engine.addSubtitleSlave(url: subURL)
           }

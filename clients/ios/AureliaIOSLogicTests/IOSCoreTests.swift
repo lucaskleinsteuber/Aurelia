@@ -3,6 +3,17 @@ import Testing
 
 @Suite("iOS client contracts and transport")
 struct IOSCoreTests {
+  @Test func untitledTracksDecodeAndOnlyTextSidecarFilesAreAdded() throws {
+    let json = #"""
+      [{"index":2,"format":"subrip","language":null,"title":null,"isDefault":false,"isForced":false,"supported":true,"isSidecar":false,"isSdh":false},
+       {"index":1000,"format":"subrip","language":null,"title":null,"isDefault":false,"isForced":false,"supported":true,"isSidecar":true,"isSdh":false},
+       {"index":1001,"format":"vobsub","language":"en","title":"English","isDefault":false,"isForced":false,"supported":false,"isSidecar":true,"isSdh":false}]
+      """#
+    let tracks = try JSONDecoder().decode([IOSLiveSubtitleTrack].self, from: Data(json.utf8))
+    #expect(tracks.count == 3)
+    #expect(IOSLiveSubtitleTrack.sidecarFiles(tracks).map(\.index) == [1000])
+  }
+
   @Test func pinnedSessionsAreReusedPerIdentityAndBounded() {
     let pool = IOSPinnedSessionPool()
     let first = pool.lease(host: "tv.local", fingerprint: "aa")
