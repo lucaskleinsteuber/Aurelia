@@ -14,13 +14,13 @@ struct IOSHomeView: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: IOSDesign.s(54)) {
+      VStack(alignment: .leading, spacing: 28) {
         if let home = model.home {
           if let hero = hero(home) {
             IOSHomeHero(item: model.overlay(hero), launching: launching) { play($0) }
           } else {
-            Text("Home").font(.system(size: IOSDesign.s(52), weight: .bold))
-              .padding(.horizontal, IOSDesign.pagePadding).padding(.top, IOSDesign.s(170))
+            Text("Home").font(.largeTitle.bold())
+              .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
           }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
@@ -34,22 +34,36 @@ struct IOSHomeView: View {
           if home.continueWatching.isEmpty && model.watchlistItems.isEmpty && home.favorites.isEmpty
             && home.recentlyAdded.isEmpty
           {
-            ContentUnavailableView("Your Library Is Empty", systemImage: "film")
+            ContentUnavailableView(
+              "Your Library Is Empty", systemImage: "film",
+              description: Text("Add a storage location in Aurelia on your Mac."))
           }
         }
         if model.homeLoading && model.home == nil {
-          ProgressView().frame(maxWidth: .infinity).padding(.top, IOSDesign.s(200))
+          ProgressView().frame(maxWidth: .infinity).padding(.top, 160)
         }
         if let error = model.homeError {
-          VStack(alignment: .leading, spacing: IOSDesign.s(20)) {
+          VStack(spacing: 12) {
             IOSErrorText(message: error)
             Button("Try Again") { Task { await model.loadHome() } }.buttonStyle(IOSButtonStyle())
-          }.padding(.horizontal, IOSDesign.pagePadding)
+          }
+          .frame(maxWidth: .infinity)
+          .padding(.horizontal, IOSDesign.margin).padding(.top, model.home == nil ? 120 : 0)
         }
-      }.padding(.bottom, IOSDesign.s(80))
+      }.padding(.bottom, 32)
     }
-    // The hero artwork reaches the top edge beneath the native tab bar.
+    // The hero artwork reaches the top edge, under the status bar.
     .ignoresSafeArea(edges: .top)
+    .toolbar(.hidden, for: .navigationBar)
+    .overlay(alignment: .top) {
+      // Keeps the clock and battery readable over shelves scrolling beneath them.
+      LinearGradient(
+        colors: [IOSDesign.canvas, IOSDesign.canvas.opacity(0)], startPoint: .top, endPoint: .bottom
+      )
+      .frame(height: 0).padding(.bottom, 16)
+      .background(IOSDesign.canvas.opacity(0.85).ignoresSafeArea(edges: .top))
+      .allowsHitTesting(false)
+    }
     .background(IOSDesign.canvas.ignoresSafeArea())
     .task(id: model.libraryRefresh) {
       await model.loadHome()
@@ -154,122 +168,104 @@ struct IOSHomeView: View {
     -> some View
   {
     if !items.isEmpty {
-      VStack(alignment: .leading, spacing: IOSDesign.s(26)) {
-        IOSSectionHeader(title: title, count: items.count).padding(
-          .horizontal, IOSDesign.pagePadding)
-        ScrollView(.horizontal) {
-          LazyHStack(alignment: .top, spacing: IOSDesign.s(48)) {
-            ForEach(items) { original in
-              let item = model.overlay(original)
-              Group {
-                if section == .continueWatching {
-                  Button {
-                    play(item)
-                  } label: {
-                    IOSContinueCard(item: item)
-                  }
-                } else {
-                  NavigationLink {
-                    IOSDetailView(id: item.detailID, initial: item)
-                  } label: {
-                    IOSPosterLabel(item: item).frame(width: IOSDesign.posterWidth)
-                  }
+      VStack(alignment: .leading, spacing: 10) {
+        if section != .continueWatching, items.count >= Self.shelfLimit {
+          IOSSectionHeader(
+            title: title, count: nil, destination: IOSBrowseDestination(section: section))
+        } else {
+          IOSSectionHeader(title: title)
+        }
+        IOSShelf {
+          ForEach(items) { original in
+            let item = model.overlay(original)
+            Group {
+              if section == .continueWatching {
+                Button {
+                  play(item)
+                } label: {
+                  IOSContinueCard(item: item)
+                }
+              } else {
+                NavigationLink {
+                  IOSDetailView(id: item.detailID, initial: item)
+                } label: {
+                  IOSPosterLabel(item: item).frame(width: IOSDesign.posterWidth)
                 }
               }
-              .buttonStyle(.borderless)
-              .accessibilityIdentifier("home-\(section.rawValue)-\(item.id)")
-              .contextMenu {
-                if section == .continueWatching {
-                  Button("Show Details") { detailItem = IOSHomeDetail(item: item) }
+            }
+            .buttonStyle(IOSContentButtonStyle())
+            .accessibilityIdentifier("home-\(section.rawValue)-\(item.id)")
+            .contextMenu {
+              if section == .continueWatching {
+                Button("Show Details", systemImage: "info.circle") {
+                  detailItem = IOSHomeDetail(item: item)
                 }
-                IOSMediaContextActions(
-                  item: item, actions: actions, continuation: section == .continueWatching)
               }
+              IOSMediaContextActions(
+                item: item, actions: actions, continuation: section == .continueWatching)
             }
-            if section != .continueWatching, items.count >= Self.shelfLimit {
-              NavigationLink {
-                IOSBrowseDestination(section: section)
-              } label: {
-                IOSShowAllTile()
-              }.buttonStyle(.borderless).accessibilityIdentifier("home-all-\(section.rawValue)")
-            }
-          }.padding(.horizontal, IOSDesign.pagePadding).padding(.vertical, IOSDesign.s(16))
-        }.scrollIndicators(.hidden).scrollClipDisabled()
+          }
+        }
       }
     }
   }
 
   private func genreShelf(_ row: IOSHomeGenreRow) -> some View {
-    VStack(alignment: .leading, spacing: IOSDesign.s(26)) {
-      IOSSectionHeader(title: row.genre, count: row.items.count).padding(
-        .horizontal, IOSDesign.pagePadding)
-      ScrollView(.horizontal) {
-        LazyHStack(alignment: .top, spacing: IOSDesign.s(48)) {
-          ForEach(row.items) { original in
-            let item = model.overlay(original)
-            NavigationLink {
-              IOSDetailView(id: item.detailID, initial: item)
-            } label: {
-              IOSPosterLabel(item: item).frame(width: IOSDesign.posterWidth)
-            }.buttonStyle(.borderless)
-              .accessibilityIdentifier("home-genre-\(row.genre)-\(item.id)")
-              .contextMenu { IOSMediaContextActions(item: item, actions: actions) }
-          }
-        }.padding(.horizontal, IOSDesign.pagePadding).padding(.vertical, IOSDesign.s(16))
-      }.scrollIndicators(.hidden).scrollClipDisabled()
+    VStack(alignment: .leading, spacing: 10) {
+      IOSSectionHeader(title: row.genre)
+      IOSShelf {
+        ForEach(row.items) { original in
+          let item = model.overlay(original)
+          NavigationLink {
+            IOSDetailView(id: item.detailID, initial: item)
+          } label: {
+            IOSPosterLabel(item: item).frame(width: IOSDesign.posterWidth)
+          }.buttonStyle(IOSContentButtonStyle())
+            .accessibilityIdentifier("home-genre-\(row.genre)-\(item.id)")
+            .contextMenu { IOSMediaContextActions(item: item, actions: actions) }
+        }
+      }
     }
   }
 
   private func collections(_ values: [IOSCollection]) -> some View {
-    VStack(alignment: .leading, spacing: IOSDesign.s(26)) {
-      IOSSectionHeader(title: "Collections", count: values.count).padding(
-        .horizontal, IOSDesign.pagePadding)
-      ScrollView(.horizontal) {
-        LazyHStack(alignment: .top, spacing: IOSDesign.s(48)) {
-          ForEach(values) { collection in
-            NavigationLink {
-              IOSCollectionView(collection: collection)
-            } label: {
-              IOSCollectionCard(collection: collection).frame(width: IOSDesign.posterWidth)
-            }.buttonStyle(.borderless).accessibilityIdentifier("collection-\(collection.id)")
-          }
-          if values.count >= Self.shelfLimit {
-            NavigationLink {
-              IOSCollectionsView()
-            } label: {
-              IOSShowAllTile()
-            }.buttonStyle(.borderless).accessibilityIdentifier("home-all-collections")
-          }
-        }.padding(.horizontal, IOSDesign.pagePadding).padding(.vertical, IOSDesign.s(16))
-      }.scrollIndicators(.hidden).scrollClipDisabled()
+    VStack(alignment: .leading, spacing: 10) {
+      if values.count >= Self.shelfLimit {
+        IOSSectionHeader(title: "Collections", count: nil, destination: IOSCollectionsView())
+      } else {
+        IOSSectionHeader(title: "Collections")
+      }
+      IOSShelf {
+        ForEach(values) { collection in
+          NavigationLink {
+            IOSCollectionView(collection: collection)
+          } label: {
+            IOSCollectionCard(collection: collection).frame(width: IOSDesign.posterWidth)
+          }.buttonStyle(IOSContentButtonStyle()).accessibilityIdentifier(
+            "collection-\(collection.id)")
+        }
+      }
     }
   }
 }
 
-/// Full-bleed artwork with the Mac hero gradients and one primary action.
+/// The featured title across the top: its artwork to the screen edges, fading into the page,
+/// with the title and one main action, like the Apple TV app on iPhone.
 private struct IOSHomeHero: View {
   let item: IOSCatalogItem
   let launching: Bool
   let play: (IOSCatalogItem) -> Void
+
   var body: some View {
-    ZStack(alignment: .bottomLeading) {
+    ZStack(alignment: .bottom) {
       IOSHeroBackdrop(artwork: item.backdrop ?? item.poster)
-      VStack(alignment: .leading, spacing: IOSDesign.s(18)) {
-        IOSEyebrow(
-          text: (item.kind == .episode
-            ? ["TV Show", item.episodeLabel] : [item.kindLabel, item.year.map(String.init)])
-            .compactMap { $0 }.joined(separator: " · "))
-        Text(item.parentTitle ?? item.title).font(.system(size: IOSDesign.s(72), weight: .bold))
-          .tracking(-0.8).lineLimit(2)
+      VStack(spacing: 10) {
+        IOSEyebrow(text: eyebrow)
+        Text(item.parentTitle ?? item.title).font(.system(.largeTitle, weight: .bold))
+          .multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.8)
         if !item.genres.isEmpty {
-          Text(item.genres.prefix(3).joined(separator: " · ")).font(
-            .system(size: IOSDesign.s(24), weight: .semibold))
-        }
-        if let overview = item.overview {
-          Text(overview).font(.system(size: IOSDesign.s(26))).lineLimit(3).frame(
-            maxWidth: IOSDesign.s(1000), alignment: .leading
-          )
-          .foregroundStyle(.white.opacity(0.88))
+          Text(item.genres.prefix(3).joined(separator: " · ")).font(.subheadline)
+            .foregroundStyle(.white.opacity(0.75))
         }
         Group {
           if item.progressFraction != nil {
@@ -282,67 +278,69 @@ private struct IOSHomeHero: View {
             NavigationLink {
               IOSDetailView(id: item.detailID, initial: item)
             } label: {
-              Label("Open", systemImage: "arrow.right")
+              Label("Details", systemImage: "info.circle")
             }
           }
-        }.buttonStyle(IOSButtonStyle(kind: .primary)).padding(.top, IOSDesign.s(10))
-          .accessibilityIdentifier("home-hero")
-      }.padding(.horizontal, IOSDesign.pagePadding).padding(.bottom, IOSDesign.s(60))
-    }.frame(maxWidth: .infinity, minHeight: IOSDesign.s(760), alignment: .bottomLeading)
+        }
+        .buttonStyle(IOSButtonStyle(kind: .primary)).frame(minWidth: 180).padding(.top, 6)
+        .accessibilityIdentifier("home-hero")
+      }
+      .padding(.horizontal, IOSDesign.margin).padding(.bottom, 8)
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private var eyebrow: String {
+    (item.kind == .episode
+      ? ["TV Show", item.episodeLabel] : [item.kindLabel, item.year.map(String.init)])
+      .compactMap { $0 }.joined(separator: " · ")
   }
 }
 
-/// Backdrop with the Mac's left-to-right and bottom fades into the canvas.
+/// Wide artwork that fills the top of a page and fades into the canvas below.
 struct IOSHeroBackdrop: View {
   let artwork: IOSArtwork?
   var body: some View {
-    IOSArtworkView(artwork: artwork, width: 1920, symbol: nil)
-      .overlay {
-        LinearGradient(
-          stops: [
-            .init(color: .black.opacity(0.82), location: 0),
-            .init(color: .black.opacity(0.5), location: 0.36),
-            .init(color: .clear, location: 0.74),
-          ], startPoint: .leading, endPoint: .trailing)
-      }
-      .overlay {
-        LinearGradient(
-          stops: [
-            .init(color: .clear, location: 0.45),
-            .init(color: IOSDesign.canvas.opacity(0.4), location: 0.74),
-            .init(color: IOSDesign.canvas, location: 1),
-          ], startPoint: .top, endPoint: .bottom)
-      }
-      .ignoresSafeArea()
-      .accessibilityHidden(true)
+    GeometryReader { geometry in
+      IOSArtworkView(artwork: artwork, width: 1280, symbol: nil)
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        .overlay {
+          LinearGradient(
+            stops: [
+              .init(color: .black.opacity(0.35), location: 0),
+              .init(color: .clear, location: 0.25),
+              .init(color: .clear, location: 0.45),
+              .init(color: IOSDesign.canvas.opacity(0.75), location: 0.78),
+              .init(color: IOSDesign.canvas, location: 1),
+            ], startPoint: .top, endPoint: .bottom)
+        }
+    }
+    .frame(height: IOSDesign.isPad ? 560 : 470)
+    .accessibilityHidden(true)
   }
 }
 
-/// Landscape Continue Watching card with its text and progress inside the image.
+/// A wide Continue Watching card: artwork with progress, the title and what comes next below.
 struct IOSContinueCard: View {
   let item: IOSCatalogItem
   var body: some View {
-    ZStack(alignment: .bottomLeading) {
-      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 1280, symbol: nil)
-      LinearGradient(
-        stops: [
-          .init(color: .clear, location: 0.35), .init(color: .black.opacity(0.25), location: 0.55),
-          .init(color: .black.opacity(0.9), location: 1),
-        ], startPoint: .top, endPoint: .bottom)
-      VStack(alignment: .leading, spacing: IOSDesign.s(6)) {
-        IOSEyebrow(text: "Continue Watching", size: 16)
-        Text(item.parentTitle ?? item.title).font(.system(size: IOSDesign.s(26), weight: .bold))
-          .lineLimit(1)
-        Text(detail).font(.system(size: IOSDesign.s(20))).foregroundStyle(.white.opacity(0.75))
-          .lineLimit(1)
-        if let fraction = item.progressFraction {
-          IOSProgressBar(fraction: fraction).padding(.top, IOSDesign.s(8))
+    VStack(alignment: .leading, spacing: 6) {
+      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 640, symbol: "play.rectangle")
+        .frame(width: IOSDesign.landscapeWidth, height: IOSDesign.landscapeWidth * 9 / 16)
+        .overlay(alignment: .bottomLeading) {
+          if let fraction = item.progressFraction {
+            IOSProgressBar(fraction: fraction).padding(.horizontal, 10).padding(.bottom, 10)
+          }
         }
-      }.padding(IOSDesign.s(20))
+        .overlay(alignment: .center) {
+          Image(systemName: "play.fill").font(.title3).foregroundStyle(.white)
+            .frame(width: 44, height: 44).background(.ultraThinMaterial, in: Circle())
+        }
+        .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
+      Text(item.parentTitle ?? item.title).font(.footnote.weight(.semibold)).lineLimit(1)
+      Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
     }
-    .frame(width: IOSDesign.landscapeWidth, height: IOSDesign.landscapeWidth * 9 / 16)
-    .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
-    .hoverEffect(.highlight)
+    .frame(width: IOSDesign.landscapeWidth, alignment: .leading)
   }
   private var detail: String {
     if let message = item.availabilityMessage { return message }
@@ -354,41 +352,23 @@ struct IOSContinueCard: View {
 struct IOSCollectionCard: View {
   let collection: IOSCollection
   var body: some View {
-    VStack(alignment: .leading, spacing: IOSDesign.s(18)) {
-      ZStack(alignment: .topLeading) {
-        IOSArtworkView(artwork: collection.poster, width: 640, symbol: "rectangle.stack")
-          .aspectRatio(2 / 3, contentMode: .fit)
-          .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
-          .hoverEffect(.highlight)
-        if collection.isSmart {
-          Text("Smart")
-            .font(.system(size: IOSDesign.s(16), weight: .bold))
-            .padding(.horizontal, IOSDesign.s(10))
-            .padding(.vertical, IOSDesign.s(4))
-            .background(.ultraThinMaterial, in: Capsule())
-            .padding(IOSDesign.s(12))
+    VStack(alignment: .leading, spacing: 6) {
+      IOSArtworkView(artwork: collection.poster, width: 320, symbol: "rectangle.stack")
+        .aspectRatio(2 / 3, contentMode: .fit)
+        .overlay(alignment: .topLeading) {
+          if collection.isSmart {
+            Text("Smart").font(.caption2.weight(.bold))
+              .padding(.horizontal, 6).padding(.vertical, 3)
+              .background(.ultraThinMaterial, in: Capsule()).padding(6)
+          }
         }
-      }
-      VStack(alignment: .leading, spacing: IOSDesign.s(6)) {
-        Text(collection.name).font(.system(size: IOSDesign.s(24), weight: .semibold)).lineLimit(1)
+        .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
+      VStack(alignment: .leading, spacing: 1) {
+        Text(collection.name).font(.footnote.weight(.semibold)).lineLimit(1)
         let count = collection.totalCount > 0 ? collection.totalCount : collection.items.count
-        Text(count == 1 ? "1 title" : "\(count) titles")
-          .font(.system(size: IOSDesign.s(20))).foregroundStyle(.secondary)
+        Text(count == 1 ? "1 title" : "\(count) titles").font(.caption).foregroundStyle(.secondary)
       }
     }
-  }
-}
-
-/// A single end-of-shelf tile instead of header buttons on every row.
-struct IOSShowAllTile: View {
-  var body: some View {
-    VStack(spacing: IOSDesign.s(18)) {
-      Image(systemName: "chevron.right").font(.system(size: IOSDesign.s(34), weight: .semibold))
-      Text("Show All").font(.system(size: IOSDesign.s(24), weight: .semibold))
-    }
-    .frame(width: IOSDesign.posterWidth, height: IOSDesign.posterWidth * 3 / 2)
-    .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: IOSDesign.cardRadius))
-    .hoverEffect(.highlight)
   }
 }
 
@@ -399,25 +379,20 @@ struct IOSCollectionsView: View {
   @State private var complete = false
   @State private var error: String?
   @State private var generation = UUID()
-  @FocusState private var focused: UUID?
   var body: some View {
     ScrollView {
-      LazyVStack(alignment: .leading, spacing: IOSDesign.s(24)) {
-        IOSSectionHeader(title: "Collections", count: collections.isEmpty ? nil : collections.count)
-        LazyVGrid(
-          columns: Array(repeating: GridItem(.flexible(), spacing: IOSDesign.s(48)), count: 6),
-          spacing: IOSDesign.s(56)
-        ) {
+      LazyVStack(alignment: .leading, spacing: 20) {
+        LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
           ForEach(collections) { collection in
             NavigationLink {
               IOSCollectionView(collection: collection)
             } label: {
               IOSCollectionCard(collection: collection)
-            }.buttonStyle(.borderless).focused($focused, equals: collection.id).onAppear {
+            }.buttonStyle(IOSContentButtonStyle()).onAppear {
               if collection.id == collections.last?.id { Task { await next() } }
             }
           }
-        }.defaultFocus($focused, collections.first?.id, priority: .userInitiated)
+        }
         if loading { ProgressView() }
         if let error {
           IOSErrorText(message: error)
@@ -426,8 +401,9 @@ struct IOSCollectionsView: View {
         if complete && collections.isEmpty {
           Text("No collections available.").foregroundStyle(.secondary)
         }
-      }.padding(.horizontal, IOSDesign.pagePadding).padding(.vertical, IOSDesign.s(40))
+      }.padding(.horizontal, IOSDesign.margin).padding(.vertical, 12)
     }.background(IOSDesign.canvas.ignoresSafeArea())
+      .navigationTitle("Collections")
       .task(id: model.libraryRefresh) {
         generation = UUID()
         complete = false
@@ -472,17 +448,12 @@ struct IOSCollectionView: View {
   @State private var unavailable = false
   @State private var error: String?
   @State private var requestID = UUID()
-  @FocusState private var focused: UUID?
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: IOSDesign.s(32)) {
-        IOSSectionHeader(title: current?.name ?? "Collection", count: current?.items.count)
+      VStack(alignment: .leading, spacing: 20) {
         if let current {
-          LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: IOSDesign.s(48)), count: 6),
-            spacing: IOSDesign.s(56)
-          ) {
+          LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
             ForEach(current.items) { original in
               let item = model.overlay(original)
               NavigationLink {
@@ -490,11 +461,11 @@ struct IOSCollectionView: View {
               } label: {
                 IOSPosterLabel(item: item)
               }
-              .buttonStyle(.borderless).focused($focused, equals: item.id)
+              .buttonStyle(IOSContentButtonStyle())
               .accessibilityIdentifier("collection-item-\(item.id)")
               .contextMenu { IOSMediaContextActions(item: item, actions: actions) }
             }
-          }.defaultFocus($focused, current.items.first?.id, priority: .userInitiated)
+          }
 
           if current.items.isEmpty {
             ContentUnavailableView("No Titles Available", systemImage: "rectangle.stack")
@@ -509,8 +480,9 @@ struct IOSCollectionView: View {
           IOSErrorText(message: error)
           Button("Try Again") { Task { await reload() } }.buttonStyle(IOSButtonStyle())
         }
-      }.padding(.horizontal, IOSDesign.pagePadding).padding(.vertical, IOSDesign.s(40))
+      }.padding(.horizontal, IOSDesign.margin).padding(.vertical, 12)
     }.background(IOSDesign.canvas.ignoresSafeArea())
+      .navigationTitle(current?.name ?? collection.name)
       .task(id: model.libraryRefresh) { await reload() }
       .modifier(IOSLibraryActionPresentation(actions: actions))
   }

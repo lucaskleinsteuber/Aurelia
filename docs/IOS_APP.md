@@ -6,7 +6,8 @@ tested and it installs on a real iPhone, but its playback has not been checked o
 ## How it is built
 
 The app shares its behavior with the Apple TV app, which plays on a real TV every day. Its
-code is a copy of the Apple TV app's, adapted for touch and smaller screens, not a link to it:
+connection, playback and library code is a copy of the Apple TV app's, not a link to it, and
+its screens are its own:
 `clients/ios` has its own Xcode project with no references into `clients/tvos` or
 `clients/macos`, as `AGENTS.md` requires.
 
@@ -20,9 +21,10 @@ code is a copy of the Apple TV app's, adapted for touch and smaller screens, not
   sign-in to each request and streams the bytes through; nothing is stored. Progress, sound
   tracks, subtitles (including subtitle files next to the video), scrub previews, Up Next and
   the sleep timer behave as on the Apple TV.
-- **Sizes**: the screens are the Apple TV's, scaled to half size on iPhone and three quarters
-  on iPad (`IOSDesign.scale`). Touch controls the player; a hardware keyboard adds the
-  arrow keys, Space and Escape.
+- **Screens** are built for iPhone and iPad rather than taken from the TV: a tab bar with Home,
+  Movies, TV Shows, Search and Settings, iOS text sizes and margins, the PIN entered on a keypad
+  like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an
+  iOS form. The player works by touch; a hardware keyboard adds the arrow keys, Space and Escape.
 
 ## Building and testing
 

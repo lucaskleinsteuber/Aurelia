@@ -9,73 +9,54 @@ struct IOSPersonDetailView: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: IOSDesign.s(36)) {
+      VStack(spacing: 24) {
         if let person {
-          HStack(spacing: IOSDesign.s(36)) {
-            if let profile = person.profile {
-              IOSArtworkView(artwork: profile, width: 240, symbol: "person.fill")
-                .frame(width: IOSDesign.s(240), height: IOSDesign.s(240))
-                .clipShape(Circle())
-            }
-            VStack(alignment: .leading, spacing: IOSDesign.s(10)) {
-              Text(person.name)
-                .font(.system(size: IOSDesign.s(56), weight: .bold))
-              if let subtitle = person.subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                  .font(.system(size: IOSDesign.s(26), weight: .medium))
-                  .foregroundStyle(.secondary)
-              }
+          VStack(spacing: 10) {
+            IOSArtworkView(artwork: person.profile, width: 320, symbol: "person.fill")
+              .frame(width: 120, height: 120).clipShape(Circle())
+              .overlay(Circle().stroke(.white.opacity(0.08), lineWidth: 0.5))
+            Text(person.name).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+            if let subtitle = person.subtitle, !subtitle.isEmpty {
+              Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             }
           }
-          .padding(.horizontal, IOSDesign.pagePadding)
-          .padding(.top, IOSDesign.s(40))
+          .padding(.horizontal, IOSDesign.margin).padding(.top, 12)
 
           if !person.items.isEmpty {
-            VStack(alignment: .leading, spacing: IOSDesign.s(24)) {
+            VStack(alignment: .leading, spacing: 10) {
               IOSSectionHeader(title: "Appears In", count: person.items.count)
-                .padding(.horizontal, IOSDesign.pagePadding)
-              ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: IOSDesign.s(48)) {
-                  ForEach(person.items) { item in
-                    NavigationLink {
-                      IOSDetailView(id: item.detailID, initial: item)
-                    } label: {
-                      IOSPosterLabel(item: item).frame(width: IOSDesign.posterWidth)
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityIdentifier("person-work-\(item.id)")
+              LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
+                ForEach(person.items) { item in
+                  NavigationLink {
+                    IOSDetailView(id: item.detailID, initial: item)
+                  } label: {
+                    IOSPosterLabel(item: model.overlay(item))
                   }
+                  .buttonStyle(IOSContentButtonStyle())
+                  .accessibilityIdentifier("person-work-\(item.id)")
                 }
-                .padding(.horizontal, IOSDesign.pagePadding)
-                .padding(.vertical, IOSDesign.s(16))
               }
-              .scrollIndicators(.hidden)
-              .scrollClipDisabled()
-
+              .padding(.horizontal, IOSDesign.margin)
             }
           } else {
-            ContentUnavailableView("No Titles Found", systemImage: "film")
-              .padding(.top, IOSDesign.s(60))
+            ContentUnavailableView("No Titles Found", systemImage: "film").padding(.top, 40)
           }
         } else if loading {
-          ProgressView()
-            .frame(maxWidth: .infinity)
-            .padding(.top, IOSDesign.s(120))
+          ProgressView().frame(maxWidth: .infinity).padding(.top, 120)
         } else if let error {
-          VStack(alignment: .leading, spacing: IOSDesign.s(20)) {
+          VStack(spacing: 12) {
             IOSErrorText(message: error)
-            Button("Try Again") {
-              Task { await load() }
-            }
-            .buttonStyle(IOSButtonStyle())
+            Button("Try Again") { Task { await load() } }.buttonStyle(IOSButtonStyle())
           }
-          .padding(.horizontal, IOSDesign.pagePadding)
-          .padding(.top, IOSDesign.s(60))
+          .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
         }
       }
-      .padding(.bottom, IOSDesign.s(60))
+      .padding(.bottom, 32)
     }
     .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle(person?.name ?? name)
+    .navigationBarTitleDisplayMode(.inline)
     .task { await load() }
   }
 

@@ -26,11 +26,10 @@ struct IOSRootView: View {
             Label("Search", systemImage: "magnifyingglass")
           }.tag(IOSLibraryTab.search)
           NavigationStack { IOSConnectionMenu() }
-            .tabItem {
-              Label(model.session?.user.username ?? "Profile", systemImage: "person.crop.circle")
-            }
+            .tabItem { Label("Settings", systemImage: "gearshape") }
             .tag(IOSLibraryTab.profile)
         }
+        .tint(.white)
       }
     }
     .background(IOSDesign.canvas.ignoresSafeArea())
@@ -82,40 +81,77 @@ struct IOSConnectionView: View {
   }
 
   private var connectionForm: some View {
-    ScrollView {
-      VStack(spacing: IOSDesign.s(30)) {
-        Image(systemName: "play.rectangle.fill").font(.system(size: IOSDesign.s(64)))
-          .foregroundStyle(
-            .secondary)
-        Text("Aurelia").font(.system(size: IOSDesign.s(54), weight: .bold))
-        Text("Connect to your server").font(.title2)
-        if let error = model.error { IOSErrorText(message: error) }
+    NavigationStack {
+      List {
+        Section {
+          VStack(spacing: 10) {
+            Image(systemName: "play.rectangle.fill").font(.system(size: 48))
+              .foregroundStyle(.white.opacity(0.85))
+            Text("Aurelia").font(.largeTitle.bold())
+            Text("Connect to the Aurelia server on your home network.")
+              .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+          }
+          .frame(maxWidth: .infinity).padding(.vertical, 12)
+          .listRowBackground(Color.clear)
+        }
+        if let error = model.error {
+          Section { IOSErrorText(message: error).frame(maxWidth: .infinity) }
+            .listRowBackground(Color.clear)
+        }
         if let saved = model.connection {
-          Button("Reconnect to \(saved.name)") {
-            choosingOtherServer = false
-            Task { await model.reconnect(userInitiated: true) }
-          }.disabled(model.isBusy)
+          Section {
+            Button {
+              choosingOtherServer = false
+              Task { await model.reconnect(userInitiated: true) }
+            } label: {
+              Label("Reconnect to \(saved.name)", systemImage: "arrow.clockwise")
+            }.disabled(model.isBusy)
+          }
         }
-        ForEach(browser.servers) { server in
-          Button {
-            model.inspect(address: server.baseURL.absoluteString)
-          } label: {
-            Label(server.name, systemImage: "desktopcomputer").frame(minWidth: IOSDesign.s(460))
-          }.disabled(model.isBusy)
+        Section {
+          ForEach(browser.servers) { server in
+            Button {
+              model.inspect(address: server.baseURL.absoluteString)
+            } label: {
+              HStack {
+                Label(server.name, systemImage: "server.rack").foregroundStyle(.white)
+                Spacer()
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                  .foregroundStyle(.tertiary)
+              }
+            }.disabled(model.isBusy)
+          }
+          if browser.servers.isEmpty {
+            HStack(spacing: 10) {
+              if browser.errorMessage == nil { ProgressView() }
+              Text(browser.errorMessage ?? "Looking for servers…").foregroundStyle(.secondary)
+            }
+          }
+        } header: {
+          Text("On This Network")
         }
-        if browser.servers.isEmpty {
-          Text(browser.errorMessage ?? "Looking for Aurelia servers…").foregroundStyle(.secondary)
-        }
-        VStack(spacing: IOSDesign.s(18)) {
-          TextField("HTTPS server address", text: $address)
+        Section {
+          TextField("https://192.168.1.20:8443", text: $address)
             .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never)
             .autocorrectionDisabled().submitLabel(.go)
             .onSubmit { model.inspect(address: address) }
           Button("Connect") { model.inspect(address: address) }
             .disabled(model.isBusy || address.trimmingCharacters(in: .whitespaces).isEmpty)
-        }.frame(width: IOSDesign.s(700)).padding(.top, IOSDesign.s(18))
-        if model.isBusy { ProgressView("Connecting…") }
-      }.padding(IOSDesign.s(70)).frame(maxWidth: .infinity)
+        } header: {
+          Text("Server Address")
+        } footer: {
+          if model.isBusy {
+            HStack(spacing: 8) {
+              ProgressView()
+              Text("Connecting…")
+            }
+          } else {
+            Text("The address Aurelia on your Mac shows under Settings › Server.")
+          }
+        }
+      }
+      .scrollContentBackground(.hidden)
+      .background(IOSDesign.canvas.ignoresSafeArea())
     }
   }
 }
@@ -128,37 +164,42 @@ struct IOSSavedServerView: View {
   let chooseOtherServer: () -> Void
 
   var body: some View {
-    VStack(spacing: IOSDesign.s(34)) {
+    VStack(spacing: 20) {
+      Spacer()
       if model.savedServerUnreachable {
-        Image(systemName: "power").font(.system(size: IOSDesign.s(72), weight: .medium))
+        Image(systemName: "power").font(.system(size: 44, weight: .medium))
           .foregroundStyle(.secondary)
-        VStack(spacing: IOSDesign.s(18)) {
-          Text("The Server Is Off").font(.system(size: IOSDesign.s(56), weight: .bold))
+        VStack(spacing: 10) {
+          Text("The Server Is Off").font(.title.bold())
           Text(
             "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
           )
-          .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
-          .frame(maxWidth: IOSDesign.s(1100))
-          Text("This Apple TV connects by itself as soon as the server is on.")
-            .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+          .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+          Text("Aurelia connects by itself as soon as the server is on.")
+            .font(.footnote).foregroundStyle(.tertiary).multilineTextAlignment(.center)
         }
+        .frame(maxWidth: 420)
         ZStack {
           if model.isBusy {
             ProgressView("Waiting for the server…")
           } else {
             Button("Try Again") { Task { await model.reconnect(userInitiated: true) } }
+              .buttonStyle(IOSButtonStyle(kind: .primary))
               .accessibilityIdentifier("tv-server-retry")
           }
-        }.frame(minHeight: IOSDesign.s(110))
+        }.frame(minHeight: 56)
       } else {
-        ProgressView().scaleEffect(1.6).frame(height: IOSDesign.s(90))
-        Text("Connecting to \(name)…").font(.system(size: IOSDesign.s(40), weight: .semibold))
+        ProgressView().controlSize(.large)
+        Text("Connecting to \(name)…").font(.title3.weight(.semibold))
+          .multilineTextAlignment(.center)
       }
+      Spacer()
       Button("Connect to Another Server", action: chooseOtherServer)
-        .font(.system(size: IOSDesign.s(24))).padding(.top, IOSDesign.s(20))
+        .font(.subheadline.weight(.semibold)).tint(.white.opacity(0.75))
         .accessibilityIdentifier("tv-other-server")
     }
-    .padding(IOSDesign.s(80)).frame(maxWidth: .infinity, maxHeight: .infinity)
+    .padding(IOSDesign.margin).padding(.bottom, 12)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("tv-server-asleep")
     .task(id: model.savedServerUnreachable) {
       // Tries again every 20 seconds while the hint is shown.
@@ -175,21 +216,34 @@ struct IOSServerTrustView: View {
   @EnvironmentObject private var model: IOSAppModel
 
   var body: some View {
-    VStack(spacing: IOSDesign.s(30)) {
-      Text(model.inspected?.info.name ?? "Aurelia Server").font(.largeTitle.bold())
-      Text("Confirm this fingerprint on your Mac.").font(.title3)
-      Text(IOSServerIdentity.display(model.inspected?.fingerprint ?? ""))
-        .font(.system(size: IOSDesign.s(23), weight: .medium, design: .monospaced))
-        .multilineTextAlignment(.center).frame(maxWidth: IOSDesign.s(980))
-      Text(model.inspected?.baseURL.host ?? "").foregroundStyle(.secondary)
+    VStack(spacing: 22) {
+      Spacer()
+      Image(systemName: "lock.shield").font(.system(size: 44)).foregroundStyle(.secondary)
+      VStack(spacing: 6) {
+        Text(model.inspected?.info.name ?? "Aurelia Server").font(.title.bold())
+          .multilineTextAlignment(.center)
+        Text(model.inspected?.baseURL.host ?? "").font(.subheadline).foregroundStyle(.secondary)
+      }
+      VStack(spacing: 10) {
+        Text("Check that Aurelia on your Mac shows the same fingerprint.")
+          .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        Text(IOSServerIdentity.display(model.inspected?.fingerprint ?? ""))
+          .font(.system(.footnote, design: .monospaced, weight: .medium))
+          .multilineTextAlignment(.center).textSelection(.enabled)
+          .padding(14).frame(maxWidth: .infinity)
+          .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      }
       if let error = model.error { IOSErrorText(message: error) }
-      HStack(spacing: IOSDesign.s(32)) {
+      Spacer()
+      VStack(spacing: 10) {
+        Button("Trust and Continue") { model.beginPairing() }
+          .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
         Button("Back") { model.cancelPairing() }
-        Button("Trust and Continue") { model.beginPairing() }.buttonStyle(
-          IOSButtonStyle(kind: .primary))
+          .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
       }.disabled(model.isBusy)
-    }.padding(IOSDesign.s(80)).frame(maxWidth: .infinity, maxHeight: .infinity)
-      .iosBackCommand { model.cancelPairing() }
+    }
+    .padding(IOSDesign.margin).frame(maxWidth: 520).frame(maxWidth: .infinity)
+    .iosBackCommand { model.cancelPairing() }
   }
 }
 
@@ -197,14 +251,22 @@ struct IOSPairingView: View {
   @EnvironmentObject private var model: IOSAppModel
 
   var body: some View {
-    VStack(spacing: IOSDesign.s(28)) {
-      Text("Approve this device").font(.largeTitle.bold())
-      Text("Enter this code in Aurelia on your Mac.").font(.title3)
+    VStack(spacing: 22) {
+      Spacer()
+      Image(systemName: "iphone.badge.checkmark").font(.system(size: 44))
+        .foregroundStyle(.secondary)
+      VStack(spacing: 6) {
+        Text("Approve This iPhone").font(.title.bold()).multilineTextAlignment(.center)
+        Text("On your Mac, choose Enter Code from Apple TV or Browser… and type this code.")
+          .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+      }
       if let pairing = model.pairing {
-        Text(pairing.code).font(
-          .system(size: IOSDesign.s(76), weight: .semibold, design: .monospaced)
-        )
-        .tracking(10).accessibilityLabel(pairing.code.map(String.init).joined(separator: " "))
+        Text(pairing.code)
+          .font(.system(size: 44, weight: .semibold, design: .monospaced)).tracking(6)
+          .padding(.vertical, 14).frame(maxWidth: .infinity)
+          .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+          .textSelection(.enabled)
+          .accessibilityLabel(pairing.code.map(String.init).joined(separator: " "))
         TimelineView(.periodic(from: .now, by: 1)) { context in
           let remaining = max(
             0,
@@ -216,76 +278,94 @@ struct IOSPairingView: View {
               ? "Expires in \(remaining / 60):\(String(format: "%02d", remaining % 60))"
               : "Code expired"
           )
-          .foregroundStyle(.secondary)
+          .font(.footnote).monospacedDigit().foregroundStyle(.secondary)
         }
       }
       if let error = model.error {
         IOSErrorText(message: error)
         if model.connection?.pendingAcknowledgement != nil {
-          Button("Finish Pairing") { Task { await model.reconnect() } }.disabled(model.isBusy)
+          Button("Finish Pairing") { Task { await model.reconnect() } }
+            .buttonStyle(IOSButtonStyle(kind: .primary)).disabled(model.isBusy)
         } else {
-          Button("New Code") { model.beginPairing() }.disabled(model.isBusy)
+          Button("New Code") { model.beginPairing() }
+            .buttonStyle(IOSButtonStyle(kind: .primary)).disabled(model.isBusy)
         }
       } else {
-        ProgressView("Waiting for approval…")
+        HStack(spacing: 8) {
+          ProgressView()
+          Text("Waiting for approval…").foregroundStyle(.secondary)
+        }.font(.subheadline)
       }
+      Spacer()
       Button("Cancel") { model.cancelPairing() }
-    }.padding(IOSDesign.s(80)).frame(maxWidth: .infinity, maxHeight: .infinity)
-      .iosBackCommand { model.cancelPairing() }
+        .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+    }
+    .padding(IOSDesign.margin).frame(maxWidth: 520).frame(maxWidth: .infinity)
+    .iosBackCommand { model.cancelPairing() }
   }
 }
 
+/// The Settings tab: who is watching on which server, playback settings, switching profile and
+/// disconnecting this device.
 struct IOSConnectionMenu: View {
   @EnvironmentObject private var model: IOSAppModel
   @State private var confirmingDisconnect = false
 
   var body: some View {
-    VStack(spacing: IOSDesign.s(44)) {
-      VStack(spacing: IOSDesign.s(18)) {
-        IOSProfilePicture(
-          id: model.session?.user.id, name: model.session?.user.username ?? "Profile", size: 150)
-        Text(model.session?.user.username ?? "Profile").font(
-          .system(size: IOSDesign.s(48), weight: .bold))
-        Text(model.connection?.name ?? "Aurelia Server").font(.system(size: IOSDesign.s(24)))
-          .foregroundStyle(.secondary)
-      }
-      VStack(spacing: IOSDesign.s(22)) {
-        NavigationLink {
-          IOSPlaybackSettingsView()
-        } label: {
-          Label("Playback Settings", systemImage: "play.rectangle").frame(width: IOSDesign.s(560))
-        }.accessibilityIdentifier("profile-playback-settings")
+    List {
+      Section {
+        HStack(spacing: 14) {
+          IOSProfilePicture(
+            id: model.session?.user.id, name: model.session?.user.username ?? "Profile", size: 56)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(model.session?.user.username ?? "Profile").font(.headline)
+            Text(model.connection?.name ?? "Aurelia Server").font(.subheadline)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .padding(.vertical, 4)
         Button {
           Task { await model.switchProfile() }
         } label: {
-          Label("Switch Profile", systemImage: "person.2").frame(width: IOSDesign.s(560))
+          Label("Switch Profile", systemImage: "person.2")
         }
+      }
+      Section {
+        NavigationLink {
+          IOSPlaybackSettingsView()
+        } label: {
+          Label("Playback", systemImage: "play.rectangle")
+        }.accessibilityIdentifier("profile-playback-settings")
+      }
+      Section {
         Button(role: .destructive) {
           confirmingDisconnect = true
         } label: {
-          Label("Disconnect This Device", systemImage: "xmark.circle").frame(
-            width: IOSDesign.s(560))
+          Label("Disconnect This iPhone", systemImage: "xmark.circle")
         }
-      }.buttonStyle(IOSButtonStyle())
-      Text(
-        "Aurelia \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))"
-      ).font(.system(size: IOSDesign.s(20))).foregroundStyle(.tertiary)
-    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(IOSDesign.canvas.ignoresSafeArea())
-      .confirmationDialog(
-        "Disconnect from this server?", isPresented: $confirmingDisconnect,
-        titleVisibility: .visible
-      ) {
-        Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }
-        Button("Cancel", role: .cancel) {}
+      } footer: {
+        Text(
+          "Aurelia \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))"
+        )
       }
+    }
+    .scrollContentBackground(.hidden)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle("Settings")
+    .confirmationDialog(
+      "Disconnect from this server?", isPresented: $confirmingDisconnect,
+      titleVisibility: .visible
+    ) {
+      Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }
+      Button("Cancel", role: .cancel) {}
+    }
   }
 }
 
 struct IOSErrorText: View {
   let message: String
   var body: some View {
-    Text(message).font(.callout).foregroundStyle(.orange).multilineTextAlignment(.center)
-      .frame(maxWidth: IOSDesign.s(1000)).accessibilityAddTraits(.updatesFrequently)
+    Text(message).font(.footnote).foregroundStyle(.orange).multilineTextAlignment(.center)
+      .accessibilityAddTraits(.updatesFrequently)
   }
 }

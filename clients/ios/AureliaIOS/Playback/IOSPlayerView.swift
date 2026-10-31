@@ -144,8 +144,8 @@ struct IOSPlayerView: View {
         // A tap on the picture hides the controls again.
         .contentShape(Rectangle()).onTapGesture { controller.hideControls() }
         .accessibilityHidden(true)
-      VStack(spacing: IOSDesign.s(0)) {
-        HStack(spacing: IOSDesign.s(18)) {
+      VStack(spacing: 0) {
+        HStack(spacing: 12) {
           icon("Close", symbol: "chevron.left", id: .close) { controller.close() }
           Spacer()
           Button {
@@ -168,9 +168,10 @@ struct IOSPlayerView: View {
           ) { controller.trackMenu = .sleep }
         }.iosMoveCommand { if $0 == .down { focus = .play } }
         Spacer()
-        HStack(spacing: IOSDesign.s(22)) {
+        HStack(spacing: 13) {
           icon(
-            "Back \(controller.seekInterval / 1_000) Seconds", symbol: "gobackward", id: .backward
+            "Back \(controller.seekInterval / 1_000) Seconds", symbol: skipSymbol("gobackward"),
+            id: .backward
           ) { controller.seek(by: -controller.seekInterval) }.disabled(!controller.canSeek)
           Button {
             controller.togglePlayPause()
@@ -180,30 +181,30 @@ struct IOSPlayerView: View {
                 ProgressView().tint(.black).accessibilityIdentifier("player-loading")
               } else {
                 Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(
-                  .system(size: IOSDesign.s(30), weight: .bold))
+                  .system(size: 30, weight: .bold))
               }
-            }.frame(width: IOSDesign.s(78), height: IOSDesign.s(78))
+            }.frame(width: 72, height: 72)
           }.buttonStyle(IOSPlayerPrimaryStyle()).focusEffectDisabled().focused(
             $focus, equals: .play
           )
           .disabled(controller.isLoading).accessibilityIdentifier("player-play")
           .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
           icon(
-            "Forward \(controller.seekInterval / 1_000) Seconds", symbol: "goforward", id: .forward
+            "Forward \(controller.seekInterval / 1_000) Seconds", symbol: skipSymbol("goforward"),
+            id: .forward
           ) { controller.seek(by: controller.seekInterval) }.disabled(!controller.canSeek)
-        }.padding(.horizontal, IOSDesign.s(24)).padding(.vertical, IOSDesign.s(16))
+        }.padding(.horizontal, 16).padding(.vertical, 8)
           .background(.ultraThinMaterial, in: Capsule())
           .iosMoveCommand { direction in
             if direction == .up { focus = .rate }
             if direction == .down { focus = .timeline }
           }
         Spacer()
-        VStack(alignment: .leading, spacing: IOSDesign.s(18)) {
-          Text(controller.title).font(.system(size: IOSDesign.s(30), weight: .semibold)).lineLimit(
-            2)
+        VStack(alignment: .leading, spacing: 12) {
+          Text(controller.title).font(.headline).lineLimit(1)
           if let error = controller.errorMessage {
-            Text(error).font(.system(size: IOSDesign.s(24))).foregroundStyle(.secondary)
-            HStack(spacing: IOSDesign.s(20)) {
+            Text(error).font(.system(size: 16)).foregroundStyle(.secondary)
+            HStack(spacing: 13) {
               if controller.canRetry {
                 Button("Try Again") { controller.retry() }.focused($focus, equals: .retry)
               }
@@ -216,16 +217,16 @@ struct IOSPlayerView: View {
             Label(
               controller.audioSelectionPending ? "Switching audio…" : "Switching subtitles…",
               systemImage: "arrow.triangle.2.circlepath"
-            ).font(.system(size: IOSDesign.s(20))).foregroundStyle(.secondary)
+            ).font(.system(size: 13)).foregroundStyle(.secondary)
               .accessibilityIdentifier(
                 "player-track-pending")
           }
           if let message = controller.progressMessage {
-            Text(message).font(.system(size: IOSDesign.s(20))).foregroundStyle(.secondary)
+            Text(message).font(.system(size: 13)).foregroundStyle(.secondary)
               .accessibilityIdentifier("player-progress-status")
           }
         }
-      }.padding(.horizontal, IOSDesign.s(80)).padding(.vertical, IOSDesign.s(54))
+      }.padding(.horizontal, 20).padding(.vertical, 12)
     }.defaultFocus($focus, .play, priority: .userInitiated).disabled(
       controller.trackMenu != nil || controller.isClosing)
   }
@@ -243,28 +244,28 @@ struct IOSPlayerView: View {
   }
 
   private func skipIndicator(_ indicator: IOSSkipIndicator) -> some View {
-    VStack(alignment: .leading, spacing: IOSDesign.s(12)) {
+    VStack(alignment: .leading, spacing: 8) {
       Label(
         "\(indicator.offset > 0 ? "+" : "−")\(abs(indicator.offset) / 1_000) s",
         systemImage: indicator.offset > 0 ? "goforward" : "gobackward"
-      ).font(.system(size: IOSDesign.s(26), weight: .semibold))
+      ).font(.system(size: 16, weight: .semibold))
       GeometryReader { geometry in
         ZStack(alignment: .leading) {
           Capsule().fill(.white.opacity(0.25))
           Capsule().fill(.white).frame(width: geometry.size.width * fraction)
         }
-      }.frame(height: IOSDesign.s(6))
+      }.frame(height: 4)
       HStack {
         Text(IOSPlayerPolicy.timeLabel(milliseconds: controller.position))
         Spacer()
         Text(IOSPlayerPolicy.timeLabel(milliseconds: controller.duration))
-      }.font(.system(size: IOSDesign.s(22)).monospacedDigit()).foregroundStyle(.secondary)
+      }.font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
     }
-    .padding(.horizontal, IOSDesign.s(30)).padding(.vertical, IOSDesign.s(22))
+    .padding(.horizontal, 16).padding(.vertical, 13)
     .background(
-      .ultraThinMaterial, in: RoundedRectangle(cornerRadius: IOSDesign.s(24), style: .continuous)
+      .ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous)
     )
-    .padding(.horizontal, IOSDesign.s(80)).padding(.bottom, IOSDesign.s(60))
+    .padding(.horizontal, 20).padding(.bottom, 20)
     .frame(maxHeight: .infinity, alignment: .bottom)
     .accessibilityElement(children: .ignore).accessibilityIdentifier("player-skip")
     .accessibilityValue(
@@ -278,7 +279,7 @@ struct IOSPlayerView: View {
       // Select jumps to a scrubbed position; otherwise it plays or pauses.
       if !controller.commitScrub() { controller.togglePlayPause() }
     } label: {
-      VStack(spacing: IOSDesign.s(12)) {
+      VStack(spacing: 8) {
         GeometryReader { geometry in
           ZStack(alignment: .leading) {
             Capsule().fill(.white.opacity(0.25))
@@ -287,7 +288,7 @@ struct IOSPlayerView: View {
             if controller.scrubPosition != nil {
               // Where playback is now, while the bar shows where Select would jump.
               Capsule().fill(.white.opacity(0.45))
-                .frame(width: IOSDesign.s(4), height: IOSDesign.s(18))
+                .frame(width: 3, height: 12)
                 .offset(x: geometry.size.width * playedFraction - 2)
             }
           }
@@ -310,8 +311,8 @@ struct IOSPlayerView: View {
             Spacer()
           }
           Text(IOSPlayerPolicy.timeLabel(milliseconds: controller.duration))
-        }.font(.system(size: IOSDesign.s(22)).monospacedDigit()).foregroundStyle(.secondary)
-      }.padding(.vertical, IOSDesign.s(16)).contentShape(Rectangle())
+        }.font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+      }.padding(.vertical, 12).contentShape(Rectangle())
         // Touch: drag along the bar (or tap a place) to choose a position; lifting jumps there.
         .overlay {
           GeometryReader { geometry in
@@ -380,11 +381,11 @@ struct IOSPlayerView: View {
 
   /// The frame at the scrub position above the timeline; it never leaves memory.
   private func scrubPreview(at position: Int64, width: CGFloat) -> some View {
-    let size = CGSize(width: IOSDesign.s(384), height: IOSDesign.s(216))
+    let size = CGSize(width: 192, height: 108)
     let center =
       controller.duration > 0 ? width * Double(position) / Double(controller.duration) : 0
     let x = min(max(center - size.width / 2, 0), max(width - size.width, 0))
-    return VStack(spacing: IOSDesign.s(10)) {
+    return VStack(spacing: 6) {
       ZStack {
         Color.black
         if previews.imageBucket == previews.bucket(for: position), let image = previews.image {
@@ -394,16 +395,16 @@ struct IOSPlayerView: View {
         }
       }
       .frame(width: size.width, height: size.height)
-      .clipShape(RoundedRectangle(cornerRadius: IOSDesign.s(14), style: .continuous))
+      .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
       .overlay {
-        RoundedRectangle(cornerRadius: IOSDesign.s(14), style: .continuous).stroke(
+        RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(
           .white.opacity(0.35), lineWidth: 2)
       }
       .shadow(color: .black.opacity(0.5), radius: 16, y: 6)
       Text(IOSPlayerPolicy.timeLabel(milliseconds: position))
-        .font(.system(size: IOSDesign.s(24), weight: .semibold).monospacedDigit())
+        .font(.system(size: 16, weight: .semibold).monospacedDigit())
     }
-    .offset(x: x, y: -40)
+    .offset(x: x, y: -18)
     .allowsHitTesting(false)
     .accessibilityElement(children: .ignore)
     .accessibilityIdentifier("player-scrub-preview")
@@ -414,10 +415,10 @@ struct IOSPlayerView: View {
   private var startScreen: some View {
     ZStack {
       Color.black.ignoresSafeArea()
-      VStack(spacing: IOSDesign.s(28)) {
-        IOSStartRing().frame(width: IOSDesign.s(72), height: IOSDesign.s(72))
+      VStack(spacing: 17) {
+        IOSStartRing().frame(width: 44, height: 44)
         if let message = controller.progressMessage {
-          Text(message).font(.system(size: IOSDesign.s(24))).foregroundStyle(.secondary)
+          Text(message).font(.system(size: 16)).foregroundStyle(.secondary)
         }
       }
     }
@@ -427,11 +428,11 @@ struct IOSPlayerView: View {
   }
 
   private func upNextCard(_ upNext: IOSUpNext) -> some View {
-    VStack(alignment: .leading, spacing: IOSDesign.s(18)) {
-      Text("UP NEXT").font(.system(size: IOSDesign.s(20), weight: .bold)).tracking(1.2)
+    VStack(alignment: .leading, spacing: 12) {
+      Text("UP NEXT").font(.system(size: 13, weight: .bold)).tracking(1.2)
         .foregroundStyle(.secondary)
-      Text(upNext.title).font(.system(size: IOSDesign.s(28), weight: .semibold)).lineLimit(2)
-      HStack(spacing: IOSDesign.s(18)) {
+      Text(upNext.title).font(.system(size: 17, weight: .semibold)).lineLimit(2)
+      HStack(spacing: 12) {
         Button {
           controller.playNextNow()
         } label: {
@@ -446,12 +447,12 @@ struct IOSPlayerView: View {
           .accessibilityIdentifier("player-up-next-cancel")
       }
     }
-    .padding(IOSDesign.s(30))
-    .frame(width: IOSDesign.s(620), alignment: .leading)
+    .padding(16)
+    .frame(width: 300, alignment: .leading)
     .background(
-      .ultraThinMaterial, in: RoundedRectangle(cornerRadius: IOSDesign.s(28), style: .continuous)
+      .ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17, style: .continuous)
     )
-    .padding(.trailing, IOSDesign.s(80)).padding(.bottom, IOSDesign.s(70))
+    .padding(.trailing, 20).padding(.bottom, 20)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
 
     .accessibilityIdentifier("player-up-next")
@@ -464,6 +465,11 @@ struct IOSPlayerView: View {
     }
   }
   private func rateTitle(_ rate: Double) -> String { String(format: "%gx", rate) }
+  /// The skip arrows show their seconds where SF Symbols has that number.
+  private func skipSymbol(_ base: String) -> String {
+    let seconds = controller.seekInterval / 1_000
+    return [5, 10, 15, 30, 45, 60, 75, 90].contains(seconds) ? "\(base).\(seconds)" : base
+  }
 
   private func icon(_ title: String, symbol: String, id: Control, action: @escaping () -> Void)
     -> some View
@@ -472,7 +478,7 @@ struct IOSPlayerView: View {
       controller.userInteracted()
       action()
     } label: {
-      Image(systemName: symbol).font(.system(size: IOSDesign.s(24), weight: .semibold))
+      Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
     }
     .buttonStyle(IOSButtonStyle(kind: .icon)).focusEffectDisabled().focused($focus, equals: id)
     .accessibilityLabel(title).accessibilityIdentifier("player-\(id)")
@@ -481,11 +487,11 @@ struct IOSPlayerView: View {
   private func menuView(_ menu: IOSPlaybackController.TrackMenu) -> some View {
     ZStack {
       Color.black.opacity(0.55).ignoresSafeArea()
-      VStack(alignment: .leading, spacing: IOSDesign.s(22)) {
+      VStack(alignment: .leading, spacing: 13) {
         Text(menuTitle(menu)).font(.title2.weight(.semibold))
         ScrollViewReader { proxy in
           ScrollView {
-            VStack(spacing: IOSDesign.s(14)) {
+            VStack(spacing: 10) {
               switch menu {
               case .audio:
                 ForEach(controller.audioTracks) { track in
@@ -523,8 +529,8 @@ struct IOSPlayerView: View {
                   ) { controller.setSleepTimer(timer) }.id(value)
                 }
               }
-            }.padding(IOSDesign.s(10))
-          }.frame(maxHeight: IOSDesign.s(460))
+            }.padding(6)
+          }.frame(maxHeight: 300)
             .task {
               switch menu {
               case .audio: proxy.scrollTo(controller.selectedAudio, anchor: .center)
@@ -537,8 +543,8 @@ struct IOSPlayerView: View {
         Button("Done") { controller.trackMenu = nil }.buttonStyle(IOSButtonStyle()).focused(
           $focus, equals: .closeMenu
         ).accessibilityIdentifier("player-tracks-done")
-      }.padding(IOSDesign.s(36)).frame(width: IOSDesign.s(740)).background(
-        .regularMaterial, in: RoundedRectangle(cornerRadius: IOSDesign.s(30), style: .continuous)
+      }.padding(20).frame(maxWidth: 380).padding(.horizontal, 20).background(
+        .regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous)
       )
     }.accessibilityIdentifier("player-tracks")
   }
@@ -554,14 +560,14 @@ struct IOSPlayerView: View {
     -> some View
   {
     Button(action: action) {
-      HStack(spacing: IOSDesign.s(16)) {
-        Text(title).font(.system(size: IOSDesign.s(24))).lineLimit(2)
+      HStack(spacing: 12) {
+        Text(title).font(.system(size: 16)).lineLimit(2)
         Spacer()
         if selected { Image(systemName: "checkmark") }
-      }.frame(maxWidth: .infinity, minHeight: IOSDesign.s(56), alignment: .leading).padding(
-        .horizontal, IOSDesign.s(22)
+      }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(
+        .horizontal, 13
       )
-      .padding(.vertical, IOSDesign.s(8))
+      .padding(.vertical, 6)
     }.buttonStyle(IOSButtonStyle(kind: .row)).focusEffectDisabled().focused($focus, equals: id)
       .accessibilityIdentifier("player-\(id)").accessibilityAddTraits(selected ? .isSelected : [])
   }

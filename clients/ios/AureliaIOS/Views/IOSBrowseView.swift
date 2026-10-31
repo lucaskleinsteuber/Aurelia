@@ -26,7 +26,6 @@ struct IOSLibraryGrid: View {
   @State private var lastKey: IOSBrowseLoadKey?
   @State private var scrollAnchor: UUID?
   @StateObject private var actions = IOSLibraryActions()
-  @FocusState private var focusedItem: UUID?
   private var querySummary: String {
     var labels = [query.summary]
     if listing.section.fixedKind == nil, let kind = query.kind {
@@ -45,44 +44,24 @@ struct IOSLibraryGrid: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: IOSDesign.s(30)) {
-        HStack(spacing: IOSDesign.s(24)) {
-          HStack(alignment: .firstTextBaseline, spacing: IOSDesign.s(14)) {
-            Text(title).font(.system(size: IOSDesign.s(56), weight: .bold))
-            if !listing.items.isEmpty {
-              Text("\(listing.total)").font(.system(size: IOSDesign.s(22), weight: .semibold))
-                .foregroundStyle(.tertiary)
-            }
-          }
-          Spacer()
-          Button {
-            filters = true
-          } label: {
-            Label("Filter & Sort", systemImage: "line.3.horizontal.decrease")
-          }
-          .buttonStyle(IOSButtonStyle()).accessibilityIdentifier("browse-filters")
-        }
-        if listing.section == .search {
-          TextField("Search Library", text: $search).submitLabel(.search)
-            .textInputAutocapitalization(.never).autocorrectionDisabled().accessibilityIdentifier(
-              "library-search")
-        }
+      VStack(alignment: .leading, spacing: 14) {
         if !querySummary.isEmpty {
-          HStack {
-            Text(querySummary).font(.system(size: IOSDesign.s(22))).foregroundStyle(.secondary)
-            Button("Clear Filters") { query = listing.section.defaultQuery }.buttonStyle(
-              IOSButtonStyle()
-            ).accessibilityIdentifier("browse-clear")
+          HStack(spacing: 10) {
+            Text(querySummary).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+            Spacer(minLength: 8)
+            Button("Clear") { query = listing.section.defaultQuery }
+              .font(.footnote.weight(.semibold)).accessibilityIdentifier("browse-clear")
           }
         }
         if listing.items.isEmpty && !listing.loading && listing.error == nil {
-          Text(search.isEmpty ? "No titles match this view." : "No matching titles.")
-            .foregroundStyle(.secondary)
+          ContentUnavailableView(
+            search.isEmpty ? "No Titles" : "No Results",
+            systemImage: search.isEmpty ? "film" : "magnifyingglass",
+            description: Text(
+              search.isEmpty ? "No titles match this view." : "No titles match “\(search)”.")
+          ).padding(.top, 40)
         }
-        LazyVGrid(
-          columns: Array(repeating: GridItem(.flexible(), spacing: IOSDesign.s(48)), count: 6),
-          spacing: IOSDesign.s(56)
-        ) {
+        LazyVGrid(columns: IOSDesign.gridColumns, spacing: 20) {
           ForEach(listing.items) { original in
             let item = model.overlay(original)
             NavigationLink {
@@ -93,9 +72,8 @@ struct IOSLibraryGrid: View {
             } label: {
               IOSPosterLabel(item: item)
             }
-            .buttonStyle(.borderless).focused(
-              $focusedItem, equals: item.id
-            ).id(item.id).accessibilityIdentifier("catalog-\(item.id)")
+            .buttonStyle(IOSContentButtonStyle())
+            .id(item.id).accessibilityIdentifier("catalog-\(item.id)")
             .contextMenu {
               IOSMediaContextActions(
                 item: item, actions: actions, continuation: listing.section == .continueWatching)
@@ -103,18 +81,33 @@ struct IOSLibraryGrid: View {
             .onAppear { if original.id == listing.items.last?.id { loadNext() } }
           }
         }.scrollTargetLayout()
-          // Coming from the tab bar or the header always starts at the first title.
-          .defaultFocus($focusedItem, listing.items.first?.id, priority: .userInitiated)
 
         if listing.loading {
-          ProgressView().frame(maxWidth: .infinity).accessibilityIdentifier("browse-loading")
+          ProgressView().frame(maxWidth: .infinity).padding(.vertical, 20)
+            .accessibilityIdentifier("browse-loading")
         }
         if let error = listing.error {
           IOSErrorText(message: error)
           Button("Try Again") { loadNext() }.buttonStyle(IOSButtonStyle())
         }
-      }.padding(.horizontal, IOSDesign.pagePadding).padding(.vertical, IOSDesign.s(40))
-    }.scrollPosition(id: $scrollAnchor, anchor: .top).background(IOSDesign.canvas.ignoresSafeArea())
+      }.padding(.horizontal, IOSDesign.margin).padding(.vertical, 8)
+    }
+    .scrollPosition(id: $scrollAnchor, anchor: .top)
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .navigationTitle(title)
+    .modifier(IOSSearchField(enabled: listing.section == .search, text: $search))
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        Button {
+          filters = true
+        } label: {
+          Image(
+            systemName: query == listing.section.defaultQuery
+              ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+        }
+        .accessibilityLabel("Filter & Sort").accessibilityIdentifier("browse-filters")
+      }
+    }
       .onAppear { restore() }
       .task(id: key) {
         let request = key
@@ -197,13 +190,22 @@ private struct IOSBrowseFilters: View {
           }
         }
         Toggle("Descending", isOn: $query.descending).disabled(query.sort == nil)
-        Button("Reset Filters & Sort") { query = section.defaultQuery }
-        Button("Done") {
-          query = section.constrain(query)
-          dismiss()
-        }.accessibilityIdentifier("filters-done")
-      }.navigationTitle("Filter & Sort").background(IOSDesign.canvas)
+        Section {
+          Button("Reset Filters & Sort", role: .destructive) { query = section.defaultQuery }
+        }
+      }
+      .navigationTitle("Filter & Sort")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") {
+            query = section.constrain(query)
+            dismiss()
+          }.accessibilityIdentifier("filters-done")
+        }
+      }
     }
+    .presentationDetents([.medium, .large])
   }
   private func year(_ path: WritableKeyPath<IOSBrowseQuery, Int?>) -> Binding<String> {
     Binding(
@@ -211,5 +213,22 @@ private struct IOSBrowseFilters: View {
       set: {
         query[keyPath: path] = $0.isEmpty ? nil : Int(String($0.filter(\.isNumber).prefix(4)))
       })
+  }
+}
+
+/// The Search tab's field in the navigation bar; other lists have none.
+private struct IOSSearchField: ViewModifier {
+  let enabled: Bool
+  @Binding var text: String
+  func body(content: Content) -> some View {
+    if enabled {
+      content.searchable(
+        text: $text, placement: .navigationBarDrawer(displayMode: .always),
+        prompt: "Movies and TV Shows"
+      )
+      .textInputAutocapitalization(.never).autocorrectionDisabled()
+    } else {
+      content
+    }
   }
 }
