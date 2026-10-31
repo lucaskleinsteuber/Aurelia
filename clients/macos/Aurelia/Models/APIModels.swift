@@ -1260,9 +1260,10 @@ struct PlayerHeartbeatRequest: Codable, Sendable {
   let isPaused: Bool
 }
 
+// Times arrive as ISO 8601 text, like every other server time; ServerDate reads them.
 struct PlayerHeartbeatResponse: Codable, Sendable {
   let success: Bool
-  let timestamp: Date
+  let timestamp: String
 }
 
 struct RemotePlayerDevice: Codable, Identifiable, Equatable, Sendable {
@@ -1276,7 +1277,7 @@ struct RemotePlayerDevice: Codable, Identifiable, Equatable, Sendable {
   let positionSeconds: Double?
   let durationSeconds: Double?
   let isPaused: Bool
-  let lastSeen: Date
+  let lastSeen: String
 }
 
 struct RemotePlaybackCommandRequest: Codable, Sendable {
@@ -1298,5 +1299,5 @@ struct RemotePlaybackCommand: Codable, Identifiable, Sendable {
   let mediaId: UUID?
   let positionSeconds: Double?
   let skipSeconds: Double?
-  let createdAt: Date
+  let createdAt: String
 }

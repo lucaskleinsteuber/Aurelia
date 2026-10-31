@@ -16,6 +16,22 @@ struct ClientContractTests {
     return try JSONDecoder().decode(type, from: data)
   }
 
+  @Test func remotePlayersAndCommandsDecodeAsTheServerWritesThem() throws {
+    let time = "2026-10-31T16:50:00.1234567+00:00"
+    let players = Data(
+      #"[{"deviceId":"tv","deviceName":"Living Room","clientType":"tvos","isPlaying":true,"mediaId":null,"title":"Synthetic","positionSeconds":12.5,"durationSeconds":60,"isPaused":false,"lastSeen":"\#(time)"}]"#
+        .utf8)
+    #expect(try JSONDecoder().decode([RemotePlayerDevice].self, from: players).first?.deviceName == "Living Room")
+    let commands = Data(
+      #"[{"commandId":"5f0c2f1e-4c7b-4a39-9a3e-0d6c1c2b8a11","action":"pause","mediaId":null,"positionSeconds":null,"skipSeconds":null,"createdAt":"\#(time)"}]"#
+        .utf8)
+    #expect(try JSONDecoder().decode([RemotePlaybackCommand].self, from: commands).first?.action == "pause")
+    #expect(
+      try JSONDecoder().decode(
+        PlayerHeartbeatResponse.self, from: Data(#"{"success":true,"timestamp":"\#(time)"}"#.utf8)
+      ).success)
+  }
+
   @Test func smartListRulesTravelInTheProtocolsNames() throws {
     let rules = SmartCollectionRules(
       kind: "movies", watched: "unwatched", search: "Alien", match: "any")

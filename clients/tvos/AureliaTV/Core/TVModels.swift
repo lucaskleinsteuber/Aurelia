@@ -550,5 +550,6 @@ public struct TVRemotePlaybackCommand: Decodable, Sendable {
   public let mediaId: UUID?
   public let positionSeconds: Double?
   public let skipSeconds: Double?
-  public let createdAt: Date
+  /// ISO 8601 text, as the server writes every time.
+  public let createdAt: String
 }

@@ -3,6 +3,14 @@ import Testing
 
 @Suite("iOS client contracts and transport")
 struct IOSCoreTests {
+  @Test func remoteCommandsDecodeAsTheServerWritesThem() throws {
+    let json = #"""
+      [{"commandId":"5f0c2f1e-4c7b-4a39-9a3e-0d6c1c2b8a11","action":"play","mediaId":"0b6f6a8e-2d9c-4b43-8d55-3f1a4c5e6d70","positionSeconds":null,"skipSeconds":null,"createdAt":"2026-10-31T16:50:00.1234567+00:00"}]
+      """#
+    let commands = try JSONDecoder().decode([IOSRemotePlaybackCommand].self, from: Data(json.utf8))
+    #expect(commands.first?.action == "play")
+  }
+
   @Test func untitledTracksDecodeAndOnlyTextSidecarFilesAreAdded() throws {
     let json = #"""
       [{"index":2,"format":"subrip","language":null,"title":null,"isDefault":false,"isForced":false,"supported":true,"isSidecar":false,"isSdh":false},
