@@ -224,12 +224,15 @@ done
 ffmpeg_root=$("$repository_root/scripts/build-ffmpeg-macos.sh" | tail -n 1)
 [[ -x "$ffmpeg_root/ffmpeg" && -x "$ffmpeg_root/ffprobe" ]] || { echo "The Mac ffmpeg build failed." >&2; exit 1; }
 /usr/bin/ditto "$ffmpeg_root" "$candidate/Contents/Resources/Server/ffmpeg"
-# The Mac app is for Apple silicon only; VLCKit ships as a universal framework, so drop its Intel
-# slice before it is signed again below.
-vlckit_binary="$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit"
-if /usr/bin/lipo "$vlckit_binary" -verify_arch x86_64 2>/dev/null; then
-  /usr/bin/lipo "$vlckit_binary" -remove x86_64 -output "$vlckit_binary"
-fi
+# The Mac app is for Apple silicon only. VLCKit and some NuGet native libraries (SkiaSharp) ship
+# universal, so drop their Intel slices before everything is signed again below.
+while IFS= read -r -d '' binary; do
+  if file "$binary" | grep -q 'Mach-O universal' \
+    && [[ " $(/usr/bin/lipo -archs "$binary") " == *" x86_64 "* ]] \
+    && [[ " $(/usr/bin/lipo -archs "$binary") " == *" arm64 "* ]]; then
+    /usr/bin/lipo "$binary" -remove x86_64 -output "$binary"
+  fi
+done < <(find "$candidate" -type f -print0)
 
 while IFS= read -r -d '' binary; do
   if file "$binary" | grep -q 'Mach-O'; then
