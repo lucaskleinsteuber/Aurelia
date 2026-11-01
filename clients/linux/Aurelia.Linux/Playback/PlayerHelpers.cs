@@ -46,7 +46,9 @@ internal sealed class ScrubPreviews(PlaybackController controller) : IDisposable
         {
             await Task.Delay(90, current.Token);
             var at = ScrubPreviewPlan.SnapshotPosition(bucket, interval, controller.Duration);
-            var bytes = await controller.Client.ScrubPreviewAsync(item.Id, (int)(at / 1000), current.Token);
+            byte[]? bytes;
+            try { bytes = await controller.Client.ScrubPreviewAsync(item.Id, (int)(at / 1000), current.Token); }
+            catch (AureliaApiException) { bytes = null; }
             current.Token.ThrowIfCancellationRequested();
             Bitmap? picture = Decode(bytes);
             if (picture is null && controller.PreviewDecoders is { } factory && controller.CreatePreviewRelay() is { } relay)
@@ -109,7 +111,8 @@ internal sealed class ScrubPreviews(PlaybackController controller) : IDisposable
             using var stream = new MemoryStream(bytes);
             return Bitmap.DecodeToWidth(stream, 320);
         }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException or NotSupportedException)
+        // Avalonia's codec wrapper can dereference an absent codec for corrupt image bytes.
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException or NotSupportedException or NullReferenceException)
         {
             return null;
         }

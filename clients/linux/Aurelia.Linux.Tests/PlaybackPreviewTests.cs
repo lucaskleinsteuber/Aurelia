@@ -1,4 +1,5 @@
 using System.Text;
+using System.Net;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using Aurelia.Contracts;
@@ -94,6 +95,21 @@ public sealed class PlaybackPreviewTests
         previews.Dispose();
         Assert.Equal(0, previews.CachedPictures);
         Assert.Null(await previews.GetAsync(41_000));
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BrokenServerPicturesFallBackWithoutEscapingIntoThePlayer(bool serverFailure)
+    {
+        await using var rig = new Rig();
+        await rig.StartAsync(FakeLibrary.MovieA);
+        var path = $"/api/v1/media/{FakeLibrary.MovieA}/scrub-previews/45";
+        if (serverFailure) rig.Server.Replace("GET", path, "{\"code\":\"preview_failed\",\"message\":\"Synthetic failure\"}", HttpStatusCode.InternalServerError);
+        else rig.Server.Image(path, "This is not an image."u8.ToArray());
+        using var previews = new ScrubPreviews(rig.Player);
+        Assert.NotNull(await previews.GetAsync(41_000));
+        Assert.Single(rig.Engines.Previews);
     }
 
     [AvaloniaFact]

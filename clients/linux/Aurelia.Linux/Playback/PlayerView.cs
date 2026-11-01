@@ -403,6 +403,8 @@ public sealed class PlayerView : UserControl, IDisposable
         previewTime.Text = PlayerPolicy.TimeLabel(at);
         previewBubble.Margin = new Thickness(Math.Clamp(x - 128, 0, Math.Max(0, timeline.Bounds.Width - 256)), 0, 0, 36);
         previewBubble.IsVisible = true;
+        // The cache may evict or reset its old bitmap while the next frame is awaited.
+        previewImage.Source = null;
         var picture = await previews.GetAsync(at);
         if (previewTime.Text == PlayerPolicy.TimeLabel(at)) previewImage.Source = picture;
         previewImage.IsVisible = previewImage.Source is not null;
