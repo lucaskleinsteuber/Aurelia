@@ -1,13 +1,14 @@
 name: Verify Linux app
 
-# Aurelia for Linux on Linux: formatting, a warning-free build and the headless interface tests.
+# Aurelia for Linux on Linux: formatting, a warning-free build, the headless interface tests and
+# the connection tests against the real server.
 # Linux minutes are the cheapest, so this runs whenever the app or what it shares changes.
 on:
   push:
     branches: [main]
     paths:
       - "clients/linux/**"
-      - "src/Aurelia.Contracts/**"
+      - "src/**"
       - "scripts/test-linux-app.sh"
       - ".github/workflows/linux-app.yml"
       - "Directory.Build.props"

@@ -4,6 +4,13 @@
     <RootNamespace>Aurelia.Linux.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Haukcode.Mdns" />
+    <PackageReference Include="Tmds.DBus.Protocol" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aurelia.Linux.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />
   </ItemGroup>
 </Project>

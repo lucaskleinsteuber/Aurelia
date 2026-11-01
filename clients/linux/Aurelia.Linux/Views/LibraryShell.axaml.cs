@@ -1,4 +1,6 @@
+using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core;
+using Aurelia.Linux.Core.Flow;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -25,6 +27,7 @@ public sealed partial class LibraryShell : UserControl
     private double resizeStartX;
     private bool sidebarVisible = true;
     private double leadingInset;
+    private AppSession? session;
 
     public LibraryShell()
     {
@@ -37,6 +40,10 @@ public sealed partial class LibraryShell : UserControl
             .ToList();
         SidebarList.SelectionChanged += (_, _) => ShowSelectedPage();
         SidebarToggle.Click += (_, _) => SidebarVisible = !SidebarVisible;
+        ProfileButton.Click += async (_, _) =>
+        {
+            if (session is not null) await session.SwitchProfileAsync();
+        };
         WindowDecorationProperties.SetElementRole(SidebarToggle, WindowDecorationsElementRole.User);
         SidebarResizeHandle.PointerPressed += (_, e) =>
         {
@@ -97,6 +104,27 @@ public sealed partial class LibraryShell : UserControl
         {
             leadingInset = value;
             UpdateSidebarLayout();
+        }
+    }
+
+    /// <summary>The connection whose profile shows at the foot of the sidebar; clicking it switches profiles.</summary>
+    public AppSession? Session
+    {
+        get => session;
+        set
+        {
+            session = value;
+            ProfileFooter.Children.Clear();
+            if (value?.Profile is { } profile)
+            {
+                ProfileFooter.Children.Add(new ProfileAvatar(profile.User.Id, profile.User.Username, 30));
+                ProfileFooter.Children.Add(new TextBlock { Text = profile.User.Username, FontWeight = FontWeight.SemiBold, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+                AutomationProperties.SetName(ProfileButton, $"Switch Profile, {profile.User.Username}");
+            }
+            else
+            {
+                ProfileFooter.Children.Add(ConnectionLabel);
+            }
         }
     }
 

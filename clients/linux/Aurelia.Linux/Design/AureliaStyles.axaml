@@ -170,4 +170,50 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#4DA3FF" />
   </Style>
+
+  <!-- A profile in "Who's watching?". -->
+  <Style Selector="Button.profile">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="14" />
+    <Setter Property="CornerRadius" Value="{StaticResource AureliaCardRadius}" />
+    <Setter Property="Width" Value="150" />
+  </Style>
+  <Style Selector="Button.profile:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaHoverBrush}" />
+  </Style>
+  <Style Selector="Button.profile:disabled">
+    <Setter Property="Opacity" Value="0.45" />
+  </Style>
+  <Style Selector="Button.profile:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style Selector="Button.sidebarFooter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="MinHeight" Value="46" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="Button.sidebarFooter:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaHoverBrush}" />
+  </Style>
+
+  <!-- Text fields on the Aurelia surface, also while focused. -->
+  <Style Selector="TextBox">
+    <Setter Property="Background" Value="{StaticResource AureliaSurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+  <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#2E3236" />
+    <Setter Property="BorderBrush" Value="#4DFFFFFF" />
+  </Style>
+  <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="#2E3236" />
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaAccentBrush}" />
+  </Style>
 </Styles>

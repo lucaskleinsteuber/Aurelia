@@ -36,9 +36,9 @@ public sealed class WindowTests
         var window = TestWindows.Show();
         Click(window.CurrentScreen!.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Connect to an Existing Server"));
         Assert.Equal(AppScreen.Connection, window.Flow.Screen);
-        Assert.IsType<PreviewNoticeView>(window.CurrentScreen);
+        Assert.IsType<ConnectionView>(window.CurrentScreen);
 
-        Click(window.CurrentScreen!.GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == "Back"));
+        Click(window.CurrentScreen!.GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == "Back" && b.IsEffectivelyVisible));
         Assert.Equal(AppScreen.Welcome, window.Flow.Screen);
     }
 

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The Linux app's logic against the real Aurelia server, in a project of its own: the server's
+       SkiaSharp 4 and Avalonia's SkiaSharp 3 cannot load into the same test process. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Aurelia.Linux.Core/Aurelia.Linux.Core.csproj" />
+    <ProjectReference Include="../../../src/Aurelia.Server/Aurelia.Server.csproj" />
+  </ItemGroup>
+</Project>

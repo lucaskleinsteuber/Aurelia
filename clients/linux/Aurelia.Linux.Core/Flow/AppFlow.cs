@@ -16,6 +16,7 @@ public enum AppScreen
     Welcome,
     HostSetup,
     Connection,
+    ServerUnreachable,
     ProfilePicker,
     InitialLibrarySetup,
     Library,

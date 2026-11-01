@@ -9,9 +9,11 @@ namespace Aurelia.Linux.Tests;
 /// <summary>Opens the real main window with in-memory settings, so tests never touch the person's files.</summary>
 internal static class TestWindows
 {
-    public static MainWindow Show(WindowButtonLayout? layout = null, ISettingsStore? settings = null)
+    public static MainWindow Show(WindowButtonLayout? layout = null, ISettingsStore? settings = null) => Show(AppServices.ForTests(settings, layout));
+
+    public static MainWindow Show(AppServices services)
     {
-        var window = new MainWindow(new AppServices(settings ?? new MemorySettingsStore(), layout ?? WindowButtonLayout.Default))
+        var window = new MainWindow(services)
         {
             Width = 1280,
             Height = 800,

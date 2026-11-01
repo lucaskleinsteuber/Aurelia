@@ -13,9 +13,10 @@ Linux x64. Platform specifics stay behind small adapters so the code stays porta
 
 | Project | Contents |
 | --- | --- |
-| `Aurelia.Linux.Core` | App logic without any interface toolkit: screen order, settings, the desktop's window button layout, the sidebar pages |
+| `Aurelia.Linux.Core` | App logic without any interface toolkit: API client, connection and profiles, keyring, discovery, Wake-on-LAN, screen order, settings |
 | `Aurelia.Linux` | The app: design tokens and styles (`Design/`), window buttons and behavior (`Controls/`), screens (`Views/`) |
 | `Aurelia.Linux.Tests` | Logic tests and headless interface tests that draw the real views without a screen |
+| `Aurelia.Linux.IntegrationTests` | The connection logic against the real server, in process |
 
 The version and build number live in `clients/linux/Directory.Build.props`
 (`Version`, `AureliaLinuxBuildNumber`), independent of the Mac/server and Apple TV versions.
@@ -53,6 +54,25 @@ profile picker, the first storage locations and the library. The chosen mode is 
 Preferences are kept in `$XDG_CONFIG_HOME/aurelia-desktop/settings.json`, readable only by the user
 and written through a temporary file; caches go to `$XDG_CACHE_HOME/aurelia-desktop`.
 
+## Connecting
+
+`Flow/AppSession.cs` keeps the connection the way the Mac app's AppModel does. At start it reads
+the saved pairing from the desktop keyring (`Platform/SecretServiceCredentialStore.cs`, the
+freedesktop Secret Service of GNOME Keyring and KDE Wallet; there is no plain-file fallback) and
+reaches the server (`Connection/ServerWakeUp.cs`): a quick check, then Wake-on-LAN every 10 seconds
+for up to two minutes when the server reported its hardware addresses, otherwise up to 20 seconds.
+A server announced nearby with the same id and key at another address is accepted and remembered.
+
+The connection screen lists servers announced on the network (`_aurelia._tcp` and the older
+`_aurelia-home._tcp`, TLS only) or takes a typed address (HTTPS, port 43111 by default). On first
+contact the client reads the server's P-256 key fingerprint from the TLS handshake and checks it
+against the one the server reports; the person compares it with the fingerprint shown on the
+server, enters the eight-digit pairing code (`POST /api/v1/auth/pair`) and every later connection
+accepts only that key (`Api/ServerTransport.cs`). "Who's watching?" follows: profiles without a PIN
+open at once, others take a four- to eight-digit PIN, and a server whose profiles were never set up
+asks for its password and the owner's new PIN. A profile closes after its server-given expiry, at
+most twelve hours, and the sidebar's profile button switches profiles.
+
 ## Video
 
 The player arrives in a later version. A test on KDE Plasma (Wayland) with the distribution's
@@ -80,9 +100,16 @@ frame callbacks (`libvlc_video_set_callbacks`). Notes for the player:
 scripts/test-linux-app.sh
 ```
 
-restores, checks formatting, builds Release with warnings as errors and runs all tests. The
-headless interface tests draw the real views with Skia and save the frames to
-`Local/Test Results/LinuxApp-<run>/snapshots`. They need no screen and do not take over one.
+restores, checks formatting, builds Release with warnings as errors and runs all tests:
+
+- `Aurelia.Linux.Tests`: logic, and headless interface tests that draw the real views with Skia
+  (frames are saved to `Local/Test Results/LinuxApp-<run>/snapshots`). They need no screen and do
+  not take over one. Screens that talk to a server use a scripted fake server.
+- `Aurelia.Linux.IntegrationTests`: the app's connection logic against the real Aurelia server in
+  the same process, with a temporary data folder and synthetic accounts. It is a separate project
+  because the server's SkiaSharp 4 and Avalonia's SkiaSharp 3 cannot load together.
+- The real desktop keyring is tested only on a Linux desktop with `AURELIA_TEST_KEYRING=1`, using
+  its own entry that the test removes again.
 
 ```bash
 scripts/build-linux-app.sh

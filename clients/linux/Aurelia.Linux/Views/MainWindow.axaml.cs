@@ -1,8 +1,11 @@
 using System.ComponentModel;
 using Aurelia.Linux.Controls;
+using Aurelia.Linux.Core.Api;
+using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Flow;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Threading;
 
 namespace Aurelia.Linux.Views;
 
@@ -15,7 +18,7 @@ public sealed partial class MainWindow : Window
     {
     }
 
-    public MainWindow(AppServices services)
+    public MainWindow(AppServices services, bool startSession = true)
     {
         this.services = services;
         InitializeComponent();
@@ -29,13 +32,24 @@ public sealed partial class MainWindow : Window
         Chrome.Attach(this, services.ButtonLayout);
         AppWindowBehavior.Attach(this);
         Flow = new AppFlow(services.Settings);
+        var discovery = new DiscoveryCache(services.CreateDiscovery());
+        var api = new AureliaApi(services.Transport);
+        Session = new AppSession(Flow, api, services.Credentials,
+            new ServerWakeUp(api, services.WakeOnLan, () => discovery.Latest, services.Time), services.DeviceName, services.Time);
         Flow.PropertyChanged += OnFlowChanged;
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Close) });
         ShowScreen();
-        Opened += (_, _) => Flow.FinishStarting();
+        if (startSession) Opened += async (_, _) => await Session.StartAsync();
+        Closed += (_, _) =>
+        {
+            discovery.Dispose();
+            api.Dispose();
+        };
     }
 
     public AppFlow Flow { get; }
+
+    public AppSession Session { get; }
 
     internal LibraryShell? Shell => shell;
 
@@ -48,16 +62,26 @@ public sealed partial class MainWindow : Window
 
     private void ShowScreen()
     {
+        if (Flow.Screen != AppScreen.Library) shell = null;
         Control screen = Flow.Screen switch
         {
-            AppScreen.Starting => new StartingView(),
+            AppScreen.Starting => new StartingView(Session),
             AppScreen.Welcome => new WelcomeView(Flow),
             AppScreen.HostSetup => new PreviewNoticeView(Flow, "Set Up This PC",
                 "Hosting your library on this computer arrives in a later test build. Until then, connect to a server that runs elsewhere."),
-            AppScreen.Connection => new PreviewNoticeView(Flow, "Connect to a Server",
-                "Finding and pairing with your server arrives in the next test build."),
-            _ => shell ??= new LibraryShell { LeadingInset = Chrome.LeadingWidth },
+            AppScreen.Connection => new ConnectionView(new ConnectionModel(Session, services.CreateDiscovery(), action => Dispatcher.UIThread.Post(action)), Flow),
+            AppScreen.ServerUnreachable => new ServerUnreachableView(Session),
+            AppScreen.ProfilePicker => ProfilePicker(),
+            _ => shell ??= new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session },
         };
         ScreenHost.Content = screen;
+    }
+
+    private ProfilePickerView ProfilePicker()
+    {
+        var model = new ProfilePickerModel(Session);
+        var view = new ProfilePickerView(model, Session);
+        _ = model.LoadAsync();
+        return view;
     }
 }

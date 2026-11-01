@@ -19,13 +19,13 @@
       <DockPanel>
         <!-- Room for the sidebar toggle above the first row. -->
         <Panel DockPanel.Dock="Top" Height="58" />
-        <Border DockPanel.Dock="Bottom" Padding="22,12,16,18">
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <PathIcon Data="{StaticResource IconServer}" Width="16" Height="16"
-                      Foreground="{StaticResource AureliaSubduedTextBrush}" />
+        <!-- The profile sits at the foot of the sidebar, like the account in the Apple TV app. -->
+        <Button x:Name="ProfileButton" DockPanel.Dock="Bottom" Classes="sidebarFooter" Margin="12,0,12,16"
+                ToolTip.Tip="Switch Profile" AutomationProperties.Name="Switch Profile">
+          <StackPanel x:Name="ProfileFooter" Orientation="Horizontal" Spacing="10">
             <TextBlock x:Name="ConnectionLabel" Text="Not Connected" Classes="subdued" VerticalAlignment="Center" />
           </StackPanel>
-        </Border>
+        </Button>
         <ListBox x:Name="SidebarList" Classes="sidebar" SelectionMode="Single,AlwaysSelected"
                  AutomationProperties.Name="Library pages">
           <ListBox.ItemTemplate>
