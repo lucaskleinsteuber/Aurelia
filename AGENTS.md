@@ -111,7 +111,7 @@ These rules apply to every task in this repository.
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published.
-- Aurelia for Linux (`clients/linux`, preview, 0.3.0 (4)) is the native Linux desktop
+- Aurelia for Linux (`clients/linux`, 1.0.0 (5)) is the native Linux desktop
   app, with library browsing, playback, settings, server administration and optional hosting
   on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
   its own version counter (`Version` and `AureliaLinuxBuildNumber` in
@@ -125,7 +125,10 @@ These rules apply to every task in this repository.
   without asking; installing replaces only the package. Synthetic data only, no real
   playback in tests. Hosting and network-trial tests use isolated server processes and temporary
   state; never start a second host over the installed server or use personal libraries for them.
-  It is not published yet. See `docs/LINUX_APP.md`.
+  Publish its deb, rpm, Arch and Flatpak packages with `scripts/publish-release.sh --linux-app`
+  under its independent `linux-app-<version>-<build>` tag, never as the Mac/server latest release.
+  Verify native package lifecycle tests in Ubuntu, Fedora and Arch, the actual Flatpak bundle,
+  and native Wayland/X11 startup separately from headless app tests. See `docs/LINUX_APP.md`.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
   repository in `Local/Aurelia Desktop (archived)`. Do not
   restore, build or test it unless the user asks for it.

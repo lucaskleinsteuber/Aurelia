@@ -14,17 +14,18 @@ Linux x64. Platform specifics stay behind small adapters so the code stays porta
 
 Download a package from an **Aurelia for Linux** release on [GitHub](https://github.com/lucasfd3/Aurelia/releases).
 These releases use `linux-app-<version>-<build>` tags and have an independent version from the
-Mac app and standalone Linux server. Choose the package for your distribution:
+Mac app and standalone Linux server. For example, install version 1.0.0 (5) with the command for
+your distribution:
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./Aurelia-Desktop-<version>-<build>-amd64.deb
+sudo apt install ./Aurelia-Desktop-1.0.0-5-amd64.deb
 # Fedora
-sudo dnf install ./Aurelia-Desktop-<version>-<build>-x86_64.rpm
+sudo dnf install ./Aurelia-Desktop-1.0.0-5-x86_64.rpm
 # Arch / CachyOS
-sudo pacman -U ./Aurelia-Desktop-<version>-<build>-x86_64.pkg.tar.zst
+sudo pacman -U ./Aurelia-Desktop-1.0.0-5-x86_64.pkg.tar.zst
 # Flatpak, per-user installation
-flatpak install --user ./Aurelia-Desktop-<version>-<build>-x86_64.flatpak
+flatpak install --user ./Aurelia-Desktop-1.0.0-5-x86_64.flatpak
 flatpak run io.github.lucasfd3.Aurelia
 ```
 
@@ -105,7 +106,9 @@ for up to two minutes when the server reported its hardware addresses, otherwise
 A server announced nearby with the same id and key at another address is accepted and remembered.
 
 The connection screen lists servers announced on the network (`_aurelia._tcp` and the older
-`_aurelia-home._tcp`, TLS only) or takes a typed address (HTTPS, port 43111 by default). On first
+`_aurelia-home._tcp`, TLS only) or takes a typed address (HTTPS, port 43111 by default). Starting
+offline leaves discovery empty and keeps manual entry available; network address changes retry
+unavailable discovery browsers. On first
 contact the client reads the server's P-256 key fingerprint from the TLS handshake and checks it
 against the one the server reports; the person compares it with the fingerprint shown on the
 server, enters the eight-digit pairing code (`POST /api/v1/auth/pair`) and every later connection

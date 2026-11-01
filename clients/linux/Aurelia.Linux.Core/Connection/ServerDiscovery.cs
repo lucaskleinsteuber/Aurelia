@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Aurelia.Linux.Core.Api;
 using Haukcode.Mdns;
@@ -49,52 +50,81 @@ public sealed class MdnsServerDiscovery : IServerDiscovery
 
     private readonly Lock gate = new();
     private readonly Dictionary<string, DiscoveredServer> found = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<MdnsBrowser> browsers = [];
+    private readonly Dictionary<string, IMdnsDiscoveryBrowser> browsers = [];
+    private readonly Func<string, IMdnsDiscoveryBrowser> createBrowser;
+    private bool running;
+
+    public MdnsServerDiscovery() : this(type => new MdnsDiscoveryBrowser(type))
+    {
+    }
+
+    internal MdnsServerDiscovery(Func<string, IMdnsDiscoveryBrowser> createBrowser) => this.createBrowser = createBrowser;
 
     public event Action<IReadOnlyList<DiscoveredServer>>? Changed;
 
-    public void Start()
+    public void Start() => StartBrowsers(initial: true);
+
+    internal void OnNetworkAddressChanged(object? sender, EventArgs args) => StartBrowsers(initial: false);
+
+    private void StartBrowsers(bool initial)
     {
+        List<IMdnsDiscoveryBrowser> failed = [];
         lock (gate)
         {
-            if (browsers.Count > 0) return;
+            if (!running)
+            {
+                if (!initial) return;
+                running = true;
+                NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
+            }
             foreach (var type in ServiceTypes)
             {
+                if (browsers.ContainsKey(type)) continue;
+                IMdnsDiscoveryBrowser? browser = null;
                 try
                 {
-                    var browser = new MdnsBrowser(type);
-                    browser.ServiceFound += service => Update(service, add: true);
-                    browser.ServiceLost += service => Update(service, add: false);
+                    browser = createBrowser(type);
+                    browser.ServiceFound += service => Update(browser, service, add: true);
+                    browser.ServiceLost += service => Update(browser, service, add: false);
+                    browsers.Add(type, browser);
                     browser.Start();
-                    browsers.Add(browser);
                 }
-                catch (SocketException)
+                catch (Exception failure) when (failure is SocketException or InvalidOperationException)
                 {
-                    // Without multicast the address can still be typed in.
+                    // No multicast-capable interface is a normal offline state. The manual
+                    // address still works; retry when an interface later gains an address.
+                    browsers.Remove(type);
+                    if (browser is not null) failed.Add(browser);
                 }
             }
         }
+        // A browser may wait for its receive callbacks while disposing. Do not hold their lock.
+        foreach (var browser in failed) browser.Dispose();
     }
 
     public void Halt()
     {
+        IMdnsDiscoveryBrowser[] stopped;
         lock (gate)
         {
-            foreach (var browser in browsers) browser.Dispose();
+            if (running) NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
+            running = false;
+            stopped = [.. browsers.Values];
             browsers.Clear();
             found.Clear();
         }
+        foreach (var browser in stopped) browser.Dispose();
         Changed?.Invoke([]);
     }
 
     public void Dispose() => Halt();
 
-    private void Update(ServiceProfile service, bool add)
+    private void Update(IMdnsDiscoveryBrowser browser, ServiceProfile service, bool add)
     {
         IReadOnlyList<DiscoveredServer> snapshot;
         lock (gate)
         {
-            if (browsers.Count == 0) return;
+            if (!running || !browsers.ContainsValue(browser)) return;
             var key = service.FullInstanceName;
             if (add && Convert(service) is { } server) found[key] = server;
             else found.Remove(key);
@@ -124,4 +154,31 @@ public sealed class MdnsServerDiscovery : IServerDiscovery
         Guid? id = properties.TryGetValue("id", out var text) && Guid.TryParse(text, out var parsed) ? parsed : null;
         return new DiscoveredServer(id, name, uri);
     }
+}
+
+internal interface IMdnsDiscoveryBrowser : IDisposable
+{
+    event Action<ServiceProfile>? ServiceFound;
+    event Action<ServiceProfile>? ServiceLost;
+    void Start();
+}
+
+internal sealed class MdnsDiscoveryBrowser(string type) : IMdnsDiscoveryBrowser
+{
+    private readonly MdnsBrowser browser = new(type);
+
+    public event Action<ServiceProfile>? ServiceFound
+    {
+        add => browser.ServiceFound += value;
+        remove => browser.ServiceFound -= value;
+    }
+
+    public event Action<ServiceProfile>? ServiceLost
+    {
+        add => browser.ServiceLost += value;
+        remove => browser.ServiceLost -= value;
+    }
+
+    public void Start() => browser.Start();
+    public void Dispose() => browser.Dispose();
 }

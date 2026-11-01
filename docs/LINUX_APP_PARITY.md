@@ -37,7 +37,7 @@ source and coverage map; the build summary records which tests actually ran for 
 | Mac capability | Linux counterpart | Coverage and limits |
 | --- | --- | --- |
 | Remember host/client mode and show the welcome choice | `Flow/AppFlow`, `Views/WelcomeView` | `AppFlowTests.StartsThenAsksWhereTheServerRuns`, `RemembersTheChosenMode`; `WindowTests.ChoosingAModeOpensItsScreenAndBackReturns`. |
-| Discover nearby servers, including legacy service advertisements | `Connection/ServerDiscovery`, `DiscoveryCache` | `DiscoveryMergeTests.ListsEachServerOnceSortedByName`; real multicast discovery is a desktop/network check. |
+| Discover nearby servers, including legacy service advertisements | `Connection/ServerDiscovery`, `DiscoveryCache` | `DiscoveryMergeTests.ListsEachServerOnceSortedByName`; `DiscoveryLifecycleTests` covers offline startup, cleanup, background retry and manual entry. Real multicast discovery is a desktop/network check. |
 | Typed HTTPS address and default port | `Api/ServerAddress`, `Views/ConnectionView` | `ServerAddressTests.NormalizesTypedAddresses`, `RejectsUnsafeOrUnclearAddresses`. |
 | Compare fingerprint and pair using an eight-digit code | `Flow/ConnectionModel`, `Api/AureliaApi` | `SetupScreenTests.PairsChoosesAProfileAndOpensTheLibrary`; `ConnectionFlowTests.PairsOpensTheOwnerProfileAndDisconnects`. |
 | Pin the trusted key on later requests | `Api/PinnedServerTransport`, `ServerIdentity` | `ConnectionFlowTests.RefusesAServerWithAnotherIdentity`; `ServerIdentityTests.FingerprintIsTheHashOfTheP256PublicKey`. |
