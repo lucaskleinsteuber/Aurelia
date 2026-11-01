@@ -1,0 +1,322 @@
+From: Aurelia contributors
+Subject: Fix VLC core buffer sizes, FIFO access and current toolchain diagnostics
+
+Keep borrowed input pointers const, allocate terminators for C-string lookup tables,
+use the locked FIFO byte-count API, and use the integer type for plugin-cache alignment.
+Retry interruption channel I/O on EINTR, accept an already pending nonblocking wake,
+and handle unexpected channel failures rather than dropping the result. Preserve the
+VLC 3 display callback ABI in an anonymous union while keeping its public deprecated
+name annotated; core dispatch uses the explicitly named legacy compatibility slot.
+
+--- a/include/vlc_vout_display.h
++++ b/include/vlc_vout_display.h
+@@ -330,7 +330,12 @@
+     int        (*control)(vout_display_t *, int, va_list);
+ 
+     /* Manage pending event (optional) */
+-    void       (*manage)(vout_display_t *) VLC_DEPRECATED;
++    union {
++        void   (*manage)(vout_display_t *) VLC_DEPRECATED;
++        /* Same ABI slot: core must still dispatch callbacks from VLC 3 modules,
++         * while new modules remain warned against the deprecated public name. */
++        void   (*manage_legacy)(vout_display_t *);
++    };
+ 
+     /* Private place holder for the vout_display_t module (optional)
+      *
+--- a/src/config/getopt.c
++++ b/src/config/getopt.c
+@@ -335,7 +335,7 @@
+ 
+     {
+         char c = *(state->nextchar)++;
+-        char *temp = strchr(optstring, c);
++        const char *temp = strchr(optstring, c);
+ 
+         /* Increment `optind' when we start to process its last character.  */
+         if (*state->nextchar == '\0')
+--- a/src/input/decoder.c
++++ b/src/input/decoder.c
+@@ -2376,7 +2376,10 @@
+ {
+     decoder_owner_sys_t *p_owner = p_dec->p_owner;
+ 
+-    return block_FifoSize( p_owner->p_fifo );
++    vlc_fifo_Lock( p_owner->p_fifo );
++    size_t size = vlc_fifo_GetBytes( p_owner->p_fifo );
++    vlc_fifo_Unlock( p_owner->p_fifo );
++    return size;
+ }
+ 
+ void input_DecoderGetObjects( decoder_t *p_dec,
+--- a/src/input/demux.c
++++ b/src/input/demux.c
+@@ -39,7 +39,7 @@
+ typedef const struct
+ {
+     char const key[20];
+-    char const name[8];
++    char const name[9]; /* Includes the terminator of "avformat". */
+ 
+ } demux_mapping;
+ 
+--- a/src/input/input.c
++++ b/src/input/input.c
+@@ -1991,7 +1991,6 @@
+         input_priv(p_input)->p_sout = NULL;
+     }
+ }
+-#endif
+ 
+ static void ControlInsertDemuxFilter( input_thread_t* p_input, const char* psz_demux_chain )
+ {
+@@ -2002,6 +2001,7 @@
+     else if ( psz_demux_chain != NULL )
+         msg_Dbg(p_input, "Failed to create demux filter %s", psz_demux_chain);
+ }
++#endif /* ENABLE_SOUT */
+ 
+ static bool Control( input_thread_t *p_input,
+                      int i_type, vlc_value_t val )
+@@ -3490,7 +3490,7 @@
+     /* if we are provided a subtitle.sub file,
+      * see if we don't have a subtitle.idx and use it instead */
+     char *psz_idxpath = NULL;
+-    char *psz_extension = strrchr( psz_subtitle, '.');
++    const char *psz_extension = strrchr( psz_subtitle, '.');
+     if( psz_extension && strcmp( psz_extension, ".sub" ) == 0 )
+     {
+         psz_idxpath = strdup( psz_subtitle );
+@@ -3498,8 +3498,8 @@
+         {
+             struct stat st;
+ 
+-            psz_extension = psz_extension - psz_subtitle + psz_idxpath;
+-            strcpy( psz_extension, ".idx" );
++            char *replacement = psz_idxpath + (psz_extension - psz_subtitle);
++            strcpy( replacement, ".idx" );
+ 
+             if( !vlc_stat( psz_idxpath, &st ) && S_ISREG( st.st_mode ) )
+             {
+--- a/src/input/stream.c
++++ b/src/input/stream.c
+@@ -181,7 +181,7 @@
+ 
+     for( ;; )
+     {
+-        char *psz_eol;
++        const char *psz_eol;
+         const uint8_t *p_data;
+         int i_data;
+         int64_t i_pos;
+@@ -261,7 +261,7 @@
+             {
+                 if( U16_AT( p ) == eol )
+                 {
+-                     psz_eol = (char *)p + 1;
++                     psz_eol = (const char *)p + 1;
+                      break;
+                 }
+             }
+@@ -273,7 +273,7 @@
+                 {
+                     if( U16_AT( p ) == eol )
+                     {
+-                        psz_eol = (char *)p + 1;
++                        psz_eol = (const char *)p + 1;
+                         break;
+                     }
+                 }
+@@ -282,7 +282,7 @@
+ 
+         if( psz_eol )
+         {
+-            i_data = (psz_eol - (char *)p_data) + 1;
++            i_data = (psz_eol - (const char *)p_data) + 1;
+             p_line = realloc_or_free( p_line,
+                         i_line + i_data + priv->text.char_width ); /* add \0 */
+             if( !p_line )
+--- a/src/misc/actions.c
++++ b/src/misc/actions.c
+@@ -197,7 +197,7 @@
+         name += len + 1;
+     }
+ 
+-    struct key_descriptor *d = bsearch (name, s_keys, KEYS_COUNT,
++    const struct key_descriptor *d = bsearch (name, s_keys, KEYS_COUNT,
+                                         sizeof (s_keys[0]), keystrcmp);
+     if (d != NULL)
+         code = d->i_code;
+@@ -259,7 +259,7 @@
+ #define MAXACTION 26
+ static const struct name2action
+ {
+-    char psz[MAXACTION];
++    char psz[MAXACTION + 1]; /* MAXACTION counts characters, not the terminator. */
+     vlc_action_id_t id;
+ } s_names2actions[] =
+ {
+--- a/src/misc/interrupt.c
++++ b/src/misc/interrupt.c
+@@ -291,7 +291,15 @@
+     int canc;
+ 
+     canc = vlc_savecancel();
+-    write(fd[1], &value, sizeof (value));
++    ssize_t written;
++    do
++        written = write(fd[1], &value, sizeof (value));
++    while (written < 0 && errno == EINTR);
++    /* A full nonblocking pipe already holds a wakeup. All other failures mean
++     * the interruption channel itself is broken: do not silently lose a wake. */
++    if (written != (ssize_t)sizeof (value)
++     && !(written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)))
++        abort();
+     vlc_restorecancel(canc);
+ }
+ 
+@@ -350,8 +358,19 @@
+     {
+         uint64_t dummy;
+ 
+-        read(fd[0], &dummy, sizeof (dummy));
+-        ret--;
++        ssize_t drained;
++        do
++            drained = read(fd[0], &dummy, sizeof (dummy));
++        while (drained < 0 && errno == EINTR);
++        if (drained == (ssize_t)sizeof (dummy)
++         || (drained < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)))
++            ret--;
++        else
++        {
++            if (drained >= 0)
++                errno = EIO;
++            ret = -1;
++        }
+     }
+     vlc_cleanup_pop();
+ 
+--- a/src/misc/keystore.c
++++ b/src/misc/keystore.c
+@@ -266,7 +266,7 @@
+ static void
+ smb_split_domain(vlc_credential *p_credential)
+ {
+-    char *psz_delim = strchr(p_credential->psz_username, ';');
++    const char *psz_delim = strchr(p_credential->psz_username, ';');
+     if (psz_delim)
+     {
+         size_t i_len = psz_delim - p_credential->psz_username;
+--- a/src/misc/messages.c
++++ b/src/misc/messages.c
+@@ -94,7 +94,7 @@
+         return;
+ 
+     /* Get basename from the module filename */
+-    char *p = strrchr(module, '/');
++    const char *p = strrchr(module, '/');
+     if (p != NULL)
+         module = p + 1;
+     p = strchr(module, '.');
+--- a/src/misc/mime.c
++++ b/src/misc/mime.c
+@@ -89,7 +89,7 @@
+ const char *vlc_mime_Ext2Mime( const char *psz_url )
+ {
+ 
+-    char *psz_ext;
++    const char *psz_ext;
+ 
+     psz_ext = strrchr( psz_url, '.' );
+     if( psz_ext )
+--- a/src/modules/cache.c
++++ b/src/modules/cache.c
+@@ -222,7 +222,7 @@
+ 
+         if (cfg->list_count)
+         {
+-            LOAD_ALIGNOF(*cfg->list.i);
++            LOAD_ALIGNOF(int);
+         }
+         else
+             LOAD_STRING(cfg->list_cb_name);
+@@ -544,7 +544,7 @@
+ 
+         if (cfg->list_count > 0)
+         {
+-            SAVE_ALIGNOF(*cfg->list.i);
++            SAVE_ALIGNOF(int);
+         }
+         else
+             SAVE_STRING(cfg->list_cb_name);
+--- a/src/text/url.c
++++ b/src/text/url.c
+@@ -241,19 +241,17 @@
+ char *vlc_uri2path (const char *url)
+ {
+     char *ret = NULL;
+-    char *end;
+-
+-    char *path = strstr (url, "://");
+-    if (path == NULL)
++
++    const char *start = strstr (url, "://");
++    if (start == NULL)
+         return NULL; /* unsupported scheme or invalid syntax */
+ 
+-    end = memchr (url, '/', path - url);
+-    size_t schemelen = ((end != NULL) ? end : path) - url;
+-    path += 3; /* skip "://" */
+-
+-    /* Remove request parameters and/or HTML anchor if present */
+-    end = path + strcspn (path, "?#");
+-    path = strndup (path, end - path);
++    const char *scheme_end = memchr (url, '/', start - url);
++    size_t schemelen = ((scheme_end != NULL) ? scheme_end : start) - url;
++    start += 3; /* skip "://" */
++
++    /* Borrow the input read-only, then own a writable decoded path. */
++    char *path = strndup (start, strcspn (start, "?#"));
+     if (unlikely(path == NULL))
+         return NULL; /* boom! */
+ 
+@@ -291,6 +289,7 @@
+     else
+     if (schemelen == 2 && !strncasecmp (url, "fd", 2))
+     {
++        char *end;
+         int fd = strtol (path, &end, 0);
+ 
+         if (*end)
+--- a/src/video_output/display.c
++++ b/src/video_output/display.c
+@@ -100,7 +100,7 @@
+     vd->prepare = NULL;
+     vd->display = NULL;
+     vd->control = NULL;
+-    vd->manage = NULL;
++    vd->manage_legacy = NULL;
+     vd->sys = NULL;
+ 
+     vd->owner = *owner;
+@@ -148,8 +148,8 @@
+ 
+ static void vout_display_Manage(vout_display_t *vd)
+ {
+-    if (vd->manage)
+-        vd->manage(vd);
++    if (vd->manage_legacy)
++        vd->manage_legacy(vd);
+ }
+ 
+ /* */
+@@ -1461,7 +1461,7 @@
+     wrapper->prepare = SplitterPrepare;
+     wrapper->display = SplitterDisplay;
+     wrapper->control = SplitterControl;
+-    wrapper->manage  = SplitterManage;
++    wrapper->manage_legacy = SplitterManage;
+     wrapper->sys     = sys;
+ 
+     /* */

@@ -6,13 +6,14 @@
 
 **Your own movie and TV library, at home.**
 
-A self-hosted media server for Mac or Linux, with native apps for Mac, Apple TV, iPhone and iPad,
+A self-hosted media server for Mac or Linux, with native apps for Mac, Linux, Apple TV, iPhone and iPad,
 and a player in any web browser.
 
 ![macOS 26](https://img.shields.io/badge/macOS-26-1F2328?logo=apple&logoColor=white)
 ![tvOS 26](https://img.shields.io/badge/tvOS-26-1F2328?logo=apple&logoColor=white)
 ![iOS 26](https://img.shields.io/badge/iOS%20%7C%20iPadOS-26-1F2328?logo=apple&logoColor=white)
 ![Linux server](https://img.shields.io/badge/server-Linux%20x64%20%7C%20arm64-1F2328?logo=linux&logoColor=white)
+![Linux app](https://img.shields.io/badge/desktop-Linux%20x64-1F2328?logo=linux&logoColor=white)
 ![SwiftUI](https://img.shields.io/badge/SwiftUI-native-5B4FE0?logo=swift&logoColor=white)
 ![.NET 10](https://img.shields.io/badge/.NET-10-5B4FE0?logo=dotnet&logoColor=white)
 
@@ -31,7 +32,7 @@ your home network unless you want it to.
 | --- | --- |
 | **What it is** | A media server plus apps, like a private streaming service for your own files |
 | **Server** | Inside the Mac app, or on its own on a Linux PC (x64 or arm64) |
-| **Watch on** | Mac, Apple TV, iPhone, iPad and any browser on your home network |
+| **Watch on** | Mac, Linux, Apple TV, iPhone, iPad and any browser on your home network |
 | **Plays** | The original files, with all their audio and subtitle tracks; browsers get MKV and other formats converted live |
 | **Profiles** | One per person, with their own progress, favorites, Watchlist and history; PIN protection |
 | **Your data** | Stays on your hardware. No account, no cloud, no tracking. Online details are optional |
@@ -87,6 +88,7 @@ install from the app.
 | | Runs on | What it does |
 | --- | --- | --- |
 | **Aurelia for Mac** | macOS 26 or later, Apple silicon (Intel Macs: up to 1.25.1) | Watch, manage the library, host the server or connect to one |
+| **Aurelia for Linux** | Linux x64, Wayland or X11 | Watch, manage the library, host the server or connect to one; deb, rpm, Arch and Flatpak downloads |
 | **Aurelia for Apple TV** | tvOS 26 or later | Watch on the big screen; pairs with your server by code |
 | **Aurelia for iPhone & iPad** (preview) | iOS and iPadOS 26 or later | Touch-first app with activity, PIN and playback settings; installed from source, see [iPhone and iPad](docs/IOS_APP.md) |
 | **Aurelia Server for Linux** | x64 and arm64 with systemd, e.g. Ubuntu | Runs the library on its own, sleeps when unused, updates from GitHub |
@@ -95,6 +97,7 @@ install from the app.
 ```mermaid
 flowchart LR
     mac["Mac"] -- "home network, HTTPS" --> server
+    linux["Linux app"] -- "home network, HTTPS" --> server
     tv["Apple TV"] -- "home network, HTTPS" --> server
     ios["iPhone / iPad"] -- "home network, HTTPS" --> server
     web["Browser"] -- "home network, HTTPS" --> server
@@ -104,16 +107,18 @@ flowchart LR
 
 ## Getting started
 
-1. **Set up the server.** Open Aurelia on a Mac and choose whether this Mac hosts your library or
+1. **Set up the server.** Open Aurelia on a Mac or Linux PC and choose whether this computer hosts your library or
    connects to an existing server. On a new host, create the owner profile, add your media
-   folders and confirm the import preview. For a Linux computer, follow
+   folders and confirm the import preview. For a Linux server without a desktop, follow
    [Aurelia Server on Linux](docs/LINUX_SERVER.md): unpack the download and run its installer.
 2. **Connect your devices.** Apple TV, iPhone, iPad and browsers find the server on your network
    and show an 8-digit code. Approve it on the Mac with *Enter Code from Apple TV or Browser…*.
-   Another Mac connects with a pairing code from *Settings › Server › Devices*.
+   Another Mac or Linux PC connects with a pairing code from the host's device settings.
 3. **Choose your profile and watch.**
 
-Each [release](../../releases) carries a disk image of the Mac app and the Linux server packages.
+Mac/server [releases](../../releases) carry a disk image of the Mac app and the Linux server packages.
+The Linux desktop app has its own releases, named **Aurelia for Linux**, with deb, rpm, Arch and
+Flatpak packages; see [installing Aurelia for Linux](docs/LINUX_APP.md#installation).
 The Mac app updates itself with *Aurelia › Check for Updates…* and keeps your library and
 settings; see [Updating the Mac app](docs/FREE_DISTRIBUTION.md#updating-the-mac-app). It is
 currently signed for development, so it runs on Macs registered for the developer account; a
@@ -146,6 +151,7 @@ is ever stored. More in [Aurelia in a web browser](docs/WEB_APP.md).
 | Guide | Covers |
 | --- | --- |
 | [Aurelia Server on Linux](docs/LINUX_SERVER.md) | Installing, updating, power saving and media drives |
+| [Aurelia for Linux](docs/LINUX_APP.md) | Installing the desktop app, hosting on a PC, updates and verification |
 | [iPhone and iPad](docs/IOS_APP.md) | What the preview does and how to install it on your own device |
 | [Aurelia in a web browser](docs/WEB_APP.md) | Signing in, what plays in a browser, and its limits |
 | [Security model](docs/SECURITY_MODEL.md) | Profiles, roles, pairing and what administrators can do |

@@ -1,0 +1,19 @@
+{
+  "name": "libebml",
+  "buildsystem": "cmake-ninja",
+  "config-opts": [
+    "-DBUILD_SHARED_LIBS=ON",
+    "-DCMAKE_POLICY_VERSION_MINIMUM=3.10",
+    "-DCMAKE_COMPILE_WARNING_AS_ERROR=ON"
+  ],
+  "post-install": [
+    "install -Dm644 LICENSE.LGPL /app/share/doc/aurelia-desktop/notices/libebml/LICENSE.LGPL"
+  ],
+  "sources": [
+    {
+      "type": "archive",
+      "url": "https://dl.matroska.org/downloads/libebml/libebml-1.4.5.tar.xz",
+      "sha256": "4971640b0592da29c2d426f303e137a9b0b3d07e1b81d069c1e56a2f49ab221b"
+    }
+  ]
+}

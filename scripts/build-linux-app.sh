@@ -12,16 +12,33 @@ export DOTNET_ROOT="${DOTNET_ROOT:-$(dirname -- "$DOTNET_BIN")}" DOTNET_NOLOGO=1
 project="$repository_root/clients/linux/Aurelia.Linux/Aurelia.Linux.csproj"
 packaging="$repository_root/clients/linux/packaging"
 app_id=io.github.lucasfd3.Aurelia
+package_formats="${AURELIA_LINUX_PACKAGE_FORMATS:-deb rpm arch flatpak}"
+normalized_formats=''
+for package_format in $package_formats; do
+  case "$package_format" in deb|rpm|arch|flatpak) ;; *) echo "Unknown package format: $package_format" >&2; exit 1 ;; esac
+  normalized_formats="$normalized_formats $package_format"
+done
+package_formats=${normalized_formats# }
+
 # The tests also prune old builds and results first.
 "$repository_root/scripts/test-linux-app.sh"
 
 version=$("$DOTNET_BIN" msbuild "$project" -getProperty:Version)
 build=$("$DOTNET_BIN" msbuild "$project" -getProperty:AureliaLinuxBuildNumber)
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$build" =~ ^[0-9]+$ ]] \
+  || { echo "The Linux app must have a MAJOR.MINOR.PATCH version and numeric build." >&2; exit 1; }
 output="$other_root/Build/LinuxApp/$version-$build"
 tree="$output/tree"
 rm -rf "$output"
 mkdir -p "$tree/usr/bin" "$tree/usr/share/applications" "$tree/usr/share/metainfo" \
   "$tree/usr/share/icons/hicolor/scalable/apps" "$tree/usr/share/doc/aurelia-desktop"
+git -C "$repository_root" rev-parse HEAD > "$output/SOURCE_COMMIT"
+if [ -z "$(git -C "$repository_root" status --porcelain --untracked-files=normal)" ]; then
+  echo true > "$output/SOURCE_CLEAN"
+else
+  echo false > "$output/SOURCE_CLEAN"
+fi
+
 "$DOTNET_BIN" restore "$project" --runtime linux-x64
 "$DOTNET_BIN" publish "$project" --configuration Release --runtime linux-x64 --self-contained true \
   --no-restore -p:DebugType=none --output "$tree/usr/lib/aurelia-desktop"
@@ -47,6 +64,7 @@ zsh "$repository_root/scripts/collect-third-party-notices.sh" \
   "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server.deps.json" "$server_assets" "$notices/server"
 cp "$repository_root/docs/licenses/Inter-OFL-1.1.txt" "$notices/"
 printf '%s (%s)\n' "$version" "$build" > "$tree/usr/lib/aurelia-desktop/VERSION"
+cp "$output/SOURCE_COMMIT" "$tree/usr/lib/aurelia-desktop/SOURCE_COMMIT"
 
 # The installed layout as one archive, owned by root, without macOS metadata; the packages are made from it.
 archive="$output/Aurelia-Desktop-$version-$build-linux-x64-tree.tar.gz"
@@ -64,12 +82,13 @@ elif [ -n "${AURELIA_LINUX_PACKAGE_HOST:-}" ]; then
   ssh_options=(-o BatchMode=yes)
   [ -z "${AURELIA_LINUX_PACKAGE_SSH_CONFIG:-}" ] || ssh_options+=(-F "$AURELIA_LINUX_PACKAGE_SSH_CONFIG")
   remote_dir=".cache/aurelia-package/$version-$build"
-  ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && mkdir -p '$remote_dir'"
+  ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && mkdir -p '$remote_dir/packaging'"
   scp -q "${ssh_options[@]}" "$archive" "$repository_root/scripts/package-linux-app.sh" \
     "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/"
+  scp -qr "${ssh_options[@]}" "$packaging/flatpak" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/packaging/"
   # The login shell may not be bash (fish, zsh), so the script runs under an explicit bash.
   ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" \
-    "cd '$remote_dir' && bash package-linux-app.sh '${archive##*/}' out '$version' '$build'"
+    "cd '$remote_dir' && AURELIA_LINUX_PACKAGE_FORMATS='$package_formats' bash package-linux-app.sh '${archive##*/}' out '$version' '$build'"
   scp -q "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/out/*" "$output/"
   ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && rmdir .cache/aurelia-package 2>/dev/null; true"
 else

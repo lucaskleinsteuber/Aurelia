@@ -1,13 +1,53 @@
 # Aurelia for Linux
 
-Aurelia for Linux (`clients/linux`) is the native desktop app for Linux. It is meant to become the
-full Mac app on Linux: the library, the player, the app settings, every server and administration
-screen, and hosting the server on the same computer. It is a preview and is not published yet.
+Aurelia for Linux (`clients/linux`) is the native desktop app for Linux: the library, the player,
+app settings, server administration and hosting the server on the same computer. It follows the
+Mac app's capabilities; [the feature inventory](LINUX_APP_PARITY.md) records each implementation,
+its tests and the remaining platform differences.
 
 It is written in C# (.NET 10) with the Avalonia interface toolkit, the way the Mac app is written
 in Swift with SwiftUI. Its interface code is its own; it shares only `src/Aurelia.Contracts` with
 the server, so requests and responses always use the same field names and formats. It runs on
 Linux x64. Platform specifics stay behind small adapters so the code stays portable.
+
+## Installation
+
+Download a package from an **Aurelia for Linux** release on [GitHub](https://github.com/lucasfd3/Aurelia/releases).
+These releases use `linux-app-<version>-<build>` tags and have an independent version from the
+Mac app and standalone Linux server. Choose the package for your distribution:
+
+```bash
+# Ubuntu / Debian
+sudo apt install ./Aurelia-Desktop-<version>-<build>-amd64.deb
+# Fedora
+sudo dnf install ./Aurelia-Desktop-<version>-<build>-x86_64.rpm
+# Arch / CachyOS
+sudo pacman -U ./Aurelia-Desktop-<version>-<build>-x86_64.pkg.tar.zst
+# Flatpak, per-user installation
+flatpak install --user ./Aurelia-Desktop-<version>-<build>-x86_64.flatpak
+flatpak run io.github.lucasfd3.Aurelia
+```
+
+Open **Aurelia** from the application launcher. Choose **Set Up This PC** to host a library here,
+or **Connect to an Existing Server** and enter a pairing code from your host's device settings.
+Native packages use the distribution's VLC libraries; installing `ffmpeg` is recommended when
+hosting here, for browser conversion and server-generated scrub previews.
+
+The Flatpak includes its own libVLC and decoder libraries. Flatpak installs the Freedesktop 26.08
+runtime separately from Flathub when needed; the runtime supplies the `ffmpeg` program used by the
+hosted server. That server process explicitly prefers the runtime's matching codec libraries,
+ahead of the app libraries in Flatpak's linker cache, so its encoders remain available.
+The app has read-only access to host files for media
+and artwork selection, while its own settings and server data remain in Flatpak's app directory.
+It uses the desktop keyring and portals for credentials, file selection and background startup.
+The desktop may ask for permission to start the app at login or keep it in the background.
+
+Updates replace app files and preserve settings, keyring entries and the hosted library database.
+The native app and Flatpak keep separate filesystem app data directories; changing package format
+does not migrate settings or a hosted database automatically. They use the same desktop-keyring
+identity for the paired-server credential and GitHub update token, so changing or disconnecting a
+connection in one format can affect the other. Choose one installation for everyday use, and avoid
+running both as hosts on the same port.
 
 ## Projects
 
@@ -315,8 +355,9 @@ third-party notices. `scripts/package-linux-app.sh` then makes the packages on L
 | `.pkg.tar.zst` | Arch Linux, CachyOS, Manjaro, EndeavourOS |
 | `.flatpak` | any distribution with Flatpak (Freedesktop runtime 26.08 from Flathub) |
 
-On the Mac, set `AURELIA_LINUX_PACKAGE_HOST` to an ssh host with `dpkg-deb`, `rpmbuild`,
-`makepkg`, `flatpak-builder` and the Freedesktop 26.08 Platform and Sdk, and optionally
+On the Mac, set `AURELIA_LINUX_PACKAGE_HOST` to an Arch-family ssh host with `dpkg-deb`, `rpmbuild`,
+`makepkg`, `flatpak-builder`, the Freedesktop 26.08 Platform and SDK, and the LLVM 22 SDK extension.
+The full four-format build uses Arch's dependency-checked `makepkg`. Set
 `AURELIA_LINUX_PACKAGE_SSH_CONFIG` to its ssh configuration. Everything lands in
 `Local/Build/LinuxApp/<version>-<build>/`.
 
@@ -326,6 +367,28 @@ scripts/install-linux-app.sh <ssh host>
 
 installs the newest build on a Linux computer with its own package manager. It replaces only the
 package; settings in the home folder stay.
+
+Additional package checks run on Linux with invented state and no media:
+
+```bash
+scripts/test-linux-app-install.sh <package-directory>
+scripts/test-linux-app-flatpak.sh <bundle.flatpak> '<version> (<build>)'
+scripts/test-linux-app-startup.sh --expected-version '<version> (<build>)' --verify-instance
+```
+
+The first installs, launches, reinstalls and removes the native packages in rootless Podman
+containers for Ubuntu, Fedora and Arch, checking preserved synthetic settings and the packaged
+server. The second uses a disposable Flatpak installation, a private D-Bus and hidden home
+contents, and verifies the actual bundle, runtime encoders, packaged server and window mapping
+under headless X11 and Wayland. The third checks the installed native app under the laptop's
+Wayland and X11 session, with isolated XDG directories and a private D-Bus; it also checks that a
+second background launch hands off to the existing instance. These checks do not open a video.
+
+Publish verified packages with `scripts/publish-release.sh --linux-app`. It requires clean,
+committed source matching `origin/main`, all four packages built from that commit and release
+notes in `Local/Release Notes/linux-app-<version>-<build>.md`. Downloads stay in a draft until
+their uploaded sizes and downloaded SHA-256 values match. The release does not replace the
+Mac/server channel's latest release.
 
 ## Feature inventory
 

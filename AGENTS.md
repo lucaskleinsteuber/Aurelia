@@ -162,7 +162,9 @@ These rules apply to every task in this repository.
   code first, then batch the fixes into one run. Without UI tests, verify with
   builds, unit and logic tests and headless smoke tests, and say that UI tests
   were not run.
-- Treat warnings as errors. Do not publish or install a failing candidate.
+- Treat warnings as errors, including third-party dependencies built for a package. Fix their
+  sources or build configuration; do not suppress diagnostics or waive warnings for foreign code.
+  Do not publish or install a failing candidate.
 - The Mac app and its bundled server are built for Apple silicon (arm64) only;
   1.25.1 was the last universal release for Intel Macs. Do not add Intel slices
   back. The Linux server keeps both x64 and arm64 packages; verify both, and

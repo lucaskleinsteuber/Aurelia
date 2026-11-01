@@ -8,4 +8,8 @@ packages (MIT License). Its interface is drawn with Avalonia (MIT License) and S
 The folders beside this file hold the license and notice files of every .NET package in the
 app, collected from its published dependency list.
 
+The native deb, rpm and Arch packages use the distribution's libVLC and plugins, which the
+package manager installs. The Flatpak includes its own pinned libVLC and codec libraries;
+their versions, source links and complete licenses are in `Flatpak.md` and the folders beside it.
+
 These notices do not choose a license for Aurelia's own source.

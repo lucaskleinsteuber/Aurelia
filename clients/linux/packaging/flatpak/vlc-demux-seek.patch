@@ -1,0 +1,300 @@
+From: Aurelia contributors
+Subject: Check demux seek failures and preserve valid stream positions
+
+Propagate failed AVI navigation instead of parsing from the wrong position; retain
+error results while reporting failed best-effort restores. Do not accept WebP/Targa
+when their required seek fails. Reject an Ogg blind seek when no keyframe was found,
+and keep the existing zero/error contract for short page reads while checking restore
+failures. Validate signed NUV positions before unsigned comparisons, and calculate
+AVI percentage positions without signedness mismatches or multiplication overflow.
+Use typed byte arithmetic and bounded Annodex payload reads; remove unused skeleton
+scan accumulators while keeping entry-count validation. Match MP4 unsigned sample
+counts and reject a negative previous edit-list index before indexing its table.
+
+--- a/modules/demux/avi/avi.c
++++ b/modules/demux/avi/avi.c
+@@ -1338,7 +1338,8 @@
+              * in case we fail we will disable all finished stream */
+             if( p_sys->b_seekable && p_sys->i_movi_lastchunk_pos >= p_sys->i_movi_begin + 12 )
+             {
+-                vlc_stream_Seek( p_demux->s, p_sys->i_movi_lastchunk_pos );
++                if( vlc_stream_Seek( p_demux->s, p_sys->i_movi_lastchunk_pos ) != VLC_SUCCESS )
++                    return VLC_DEMUXER_EGENERIC;
+                 if( AVI_PacketNext( p_demux ) )
+                 {
+                     return( AVI_TrackStopFinishedStreams( p_demux ) ? 0 : 1 );
+@@ -1346,7 +1347,8 @@
+             }
+             else
+             {
+-                vlc_stream_Seek( p_demux->s, p_sys->i_movi_begin + 12 );
++                if( vlc_stream_Seek( p_demux->s, p_sys->i_movi_begin + 12 ) != VLC_SUCCESS )
++                    return VLC_DEMUXER_EGENERIC;
+             }
+ 
+             for( ;; )
+@@ -1419,7 +1421,8 @@
+         }
+         else
+         {
+-            vlc_stream_Seek( p_demux->s, i_pos );
++            if( vlc_stream_Seek( p_demux->s, i_pos ) != VLC_SUCCESS )
++                return VLC_DEMUXER_EGENERIC;
+         }
+ 
+         /* Set the track to use */
+@@ -1690,8 +1693,9 @@
+             if ( i_ret )
+             {
+                 /* Go back to position before index failure */
+-                if ( vlc_stream_Tell( p_demux->s ) - i_pos_backup )
+-                    vlc_stream_Seek( p_demux->s, i_pos_backup );
++                if ( vlc_stream_Tell( p_demux->s ) != i_pos_backup &&
++                     vlc_stream_Seek( p_demux->s, i_pos_backup ) != VLC_SUCCESS )
++                    return VLC_EGENERIC;
+ 
+                 if ( p_sys->i_avih_flags & AVIF_MUSTUSEINDEX )
+                     return VLC_EGENERIC;
+@@ -1722,7 +1726,13 @@
+             i_percent = __MAX( i_percent, 0 );
+ 
+             /* try to find chunk that is at i_percent or the file */
+-            i_pos = __MAX( i_percent * stream_Size( p_demux->s ) / 100,
++            const int64_t i_size = stream_Size( p_demux->s );
++            if( i_size <= 0 )
++                goto failandresetpos;
++            const uint64_t i_size_unsigned = (uint64_t)i_size;
++            /* Divide first to avoid overflowing on large streams. i_percent is 0..99. */
++            i_pos = __MAX( (i_size_unsigned / 100) * i_percent +
++                           (i_size_unsigned % 100) * i_percent / 100,
+                            p_sys->i_movi_begin );
+             /* search first selected stream (and prefer non-EOF ones) */
+             for( unsigned i = 0; i < p_sys->i_track; i++ )
+@@ -1805,8 +1815,9 @@
+ 
+ failandresetpos:
+         /* Go back to position before index failure */
+-        if ( vlc_stream_Tell( p_demux->s ) - i_pos_backup )
+-            vlc_stream_Seek( p_demux->s, i_pos_backup );
++        if ( vlc_stream_Tell( p_demux->s ) != i_pos_backup &&
++             vlc_stream_Seek( p_demux->s, i_pos_backup ) != VLC_SUCCESS )
++            msg_Err( p_demux, "Failed to restore position after an unsuccessful seek" );
+ 
+         return VLC_EGENERIC;
+     }
+@@ -2067,7 +2078,8 @@
+ 
+     if( p_sys->i_movi_lastchunk_pos >= p_sys->i_movi_begin + 12 )
+     {
+-        vlc_stream_Seek( p_demux->s, p_sys->i_movi_lastchunk_pos );
++        if( vlc_stream_Seek( p_demux->s, p_sys->i_movi_lastchunk_pos ) != VLC_SUCCESS )
++            return VLC_EGENERIC;
+         if( AVI_PacketNext( p_demux ) )
+         {
+             return VLC_EGENERIC;
+@@ -2075,7 +2087,8 @@
+     }
+     else
+     {
+-        vlc_stream_Seek( p_demux->s, p_sys->i_movi_begin + 12 );
++        if( vlc_stream_Seek( p_demux->s, p_sys->i_movi_begin + 12 ) != VLC_SUCCESS )
++            return VLC_EGENERIC;
+     }
+ 
+     for( ;; )
+@@ -2876,7 +2889,11 @@
+     i_movi_end = __MIN( (uint32_t)(p_movi->i_chunk_pos + p_movi->i_chunk_size),
+                         stream_Size( p_demux->s ) );
+ 
+-    vlc_stream_Seek( p_demux->s, p_movi->i_chunk_pos + 12 );
++    if( vlc_stream_Seek( p_demux->s, p_movi->i_chunk_pos + 12 ) != VLC_SUCCESS )
++    {
++        msg_Err( p_demux, "Failed to seek to movie data while creating the index" );
++        return;
++    }
+     msg_Warn( p_demux, "creating index from LIST-movi, will take time !" );
+ 
+ 
+--- a/modules/demux/image.c
++++ b/modules/demux/image.c
+@@ -439,8 +439,7 @@
+     if (memcmp(&header[8], "WEBPVP8 ", 8))
+         return false;
+     /* skip headers */
+-    vlc_stream_Seek(s, 20);
+-    return true;
++    return vlc_stream_Seek(s, 20) == VLC_SUCCESS;
+ }
+ 
+ static bool IsSpiff(stream_t *s)
+@@ -574,7 +573,8 @@
+     const uint8_t *footer;
+     bool is_targa = vlc_stream_Peek(s, &footer, 26) >= 26 &&
+                     !memcmp(&footer[8], "TRUEVISION-XFILE.\x00", 18);
+-    vlc_stream_Seek(s, position);
++    if (vlc_stream_Seek(s, position) != VLC_SUCCESS)
++        return false;
+     return is_targa;
+ }
+ 
+--- a/modules/demux/mp4/mp4.c
++++ b/modules/demux/mp4/mp4.c
+@@ -3127,7 +3127,7 @@
+     uint64_t     i_dts;
+     unsigned int i_sample;
+     unsigned int i_chunk;
+-    int          i_index;
++    uint32_t     i_index;
+ 
+     /* FIXME see if it's needed to check p_track->i_chunk_count */
+     if( p_track->i_chunk_count == 0 )
+@@ -4083,7 +4083,7 @@
+         if( i_elst_last != tk->i_elst )
+         {
+             msg_Warn( p_demux, "elst old=%d new=%"PRIu32, i_elst_last, tk->i_elst );
+-            if( i_elst_last < elst->i_entry_count &&
++            if( i_elst_last >= 0 && (uint32_t)i_elst_last < elst->i_entry_count &&
+                 elst->i_media_time[i_elst_last] >= 0 )
+                 tk->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
+         }
+--- a/modules/demux/nuv.c
++++ b/modules/demux/nuv.c
+@@ -528,7 +528,8 @@
+                 *pi64 = p_sys->i_total_length;
+                 return VLC_SUCCESS;
+             }
+-            else if( vlc_stream_Tell( p_demux->s ) > p_sys->i_first_frame_offset )
++            else if( p_sys->i_first_frame_offset >= 0 &&
++                     vlc_stream_Tell( p_demux->s ) > (uint64_t)p_sys->i_first_frame_offset )
+             {
+                 /* This should give an approximation of the total duration */
+                 *pi64 = (double)( stream_Size( p_demux->s ) - p_sys->i_first_frame_offset ) /
+@@ -566,7 +567,7 @@
+     else
+     {
+         /* forward seek */
+-        if( i_pos > vlc_stream_Tell( p_demux->s ) )
++        if( (uint64_t)i_pos > vlc_stream_Tell( p_demux->s ) )
+         {
+             msg_Dbg( p_demux, "unable to seek, skipping frames (slow)" );
+         }
+@@ -759,7 +760,8 @@
+     if( fh.i_type != 'Q' )
+     {
+         msg_Warn( p_demux, "invalid seektable, frame type=%c", fh.i_type );
+-        vlc_stream_Seek( p_demux->s, i_original_pos );
++        if( vlc_stream_Seek( p_demux->s, i_original_pos ) != VLC_SUCCESS )
++            msg_Err( p_demux, "Failed to restore position after an invalid seek table" );
+         return VLC_EGENERIC;
+     }
+ 
+--- a/modules/demux/ogg.c
++++ b/modules/demux/ogg.c
+@@ -1357,7 +1357,8 @@
+                                                    p_stream->i_headers + p_oggpacket->bytes );
+             if( p_stream->p_headers )
+             {
+-                memcpy( &p_stream->p_headers[p_stream->i_headers], p_oggpacket->packet, p_oggpacket->bytes );
++                memcpy( (uint8_t *)p_stream->p_headers + p_stream->i_headers,
++                        p_oggpacket->packet, p_oggpacket->bytes );
+                 p_stream->i_headers += p_oggpacket->bytes;
+             }
+             else
+@@ -3110,7 +3111,7 @@
+                                    logical_stream_t *p_stream,
+                                    ogg_packet *p_oggpacket )
+ {
+-    if( p_oggpacket->bytes >= 28 &&
++    if( p_oggpacket->bytes >= 32 &&
+         !memcmp( p_oggpacket->packet, "Annodex", 7 ) )
+     {
+         oggpack_buffer opb;
+@@ -3149,16 +3150,18 @@
+ 
+         /* we are guaranteed that the first header field will be
+          * the content-type (by the Annodex standard) */
+-        long value_size = 0;
+-        if( !strncasecmp( (char*)(&p_oggpacket->packet[28]), "Content-Type: ", 14 ) )
++        size_t value_size = 0;
++        if( !strncasecmp( (const char*)(&p_oggpacket->packet[28]), "Content-Type: ", 14 ) )
+         {
+             uint8_t *p = memchr( &p_oggpacket->packet[42], '\r',
+-                                 p_oggpacket->bytes - 1 );
+-            value_size = p ? p - &p_oggpacket->packet[42] : p_oggpacket->bytes - 42;
++                                 p_oggpacket->bytes - 42 );
++            value_size = p ? (size_t)(p - &p_oggpacket->packet[42])
++                           : (size_t)(p_oggpacket->bytes - 42);
+         }
+ 
+         char debug_string[32] = {0};
+-        strncpy(debug_string, &p_oggpacket->packet[42], __MIN(value_size, 31));
++        memcpy(debug_string, &p_oggpacket->packet[42],
++               __MIN(value_size, sizeof(debug_string) - 1));
+         msg_Dbg( p_demux, "AnxData packet info: %"PRId64" / %"PRId64", %d, ``%s''",
+                  granule_rate_numerator, granule_rate_denominator,
+                  p_stream->i_secondary_header_packets, debug_string );
+@@ -3286,17 +3289,15 @@
+     p_stream->p_skel->i_indexlastnum = GetQWLE( &p_oggpacket->packet[32] );
+     unsigned const char *p_fwdbyte = &p_oggpacket->packet[42];
+     unsigned const char *p_boundary = p_oggpacket->packet + p_oggpacket->bytes;
+-    uint64_t i_offset = 0;
+-    uint64_t i_time = 0;
+     uint64_t i_keypoints_found = 0;
++    /* Walk both fields to validate the entry count. Their values are decoded
++     * again from the retained index when seeking. */
+ 
+     while( p_fwdbyte < p_boundary && i_keypoints_found < i_keypoints )
+     {
+         uint64_t i_val;
+         p_fwdbyte = Read7BitsVariableLE( p_fwdbyte, p_boundary, &i_val );
+-        i_offset += i_val;
+         p_fwdbyte = Read7BitsVariableLE( p_fwdbyte, p_boundary, &i_val );
+-        i_time += i_val * p_stream->p_skel->i_indexstampden;
+         i_keypoints_found++;
+     }
+ 
+--- a/modules/demux/oggseek.c
++++ b/modules/demux/oggseek.c
+@@ -307,7 +307,8 @@
+     }
+ 
+ clean:
+-    vlc_stream_Seek( p_demux->s, i_backup_pos );
++    if ( vlc_stream_Seek( p_demux->s, i_backup_pos ) != VLC_SUCCESS )
++        msg_Err( p_demux, "Failed to restore position after probing the end" );
+ 
+     ogg_sync_clear( &oy );
+     ogg_stream_clear( &os );
+@@ -993,6 +994,12 @@
+                 p_stream, i_granule, false );
+     }
+ 
++    if ( i_pagepos == SEGMENT_NOT_FOUND )
++    {
++        if ( vlc_stream_Seek( p_demux->s, i_startpos ) != VLC_SUCCESS )
++            msg_Err( p_demux, "Failed to restore position after a missing keyframe" );
++        return VLC_EGENERIC;
++    }
+     OggDebug( msg_Dbg( p_demux, "=================== Seeked To %"PRId64" granule %"PRId64, i_pagepos, i_granule ) );
+     return VLC_SUCCESS;
+ }
+@@ -1079,7 +1086,8 @@
+ 
+     if ( vlc_stream_Read ( p_demux->s, header, PAGE_HEADER_BYTES ) < PAGE_HEADER_BYTES )
+     {
+-        vlc_stream_Seek( p_demux->s, i_in_pos );
++        if ( vlc_stream_Seek( p_demux->s, i_in_pos ) != VLC_SUCCESS )
++            msg_Err( p_demux, "Failed to restore position after a short page header" );
+         msg_Dbg ( p_demux, "Reached clean EOF in ogg file" );
+         return 0;
+     }
+@@ -1088,7 +1096,8 @@
+ 
+     if ( vlc_stream_Read ( p_demux->s, header+PAGE_HEADER_BYTES, i_nsegs ) < i_nsegs )
+     {
+-        vlc_stream_Seek( p_demux->s, i_in_pos );
++        if ( vlc_stream_Seek( p_demux->s, i_in_pos ) != VLC_SUCCESS )
++            msg_Err( p_demux, "Failed to restore position after a short segment table" );
+         msg_Warn ( p_demux, "Reached broken EOF in ogg file" );
+         return 0;
+     }

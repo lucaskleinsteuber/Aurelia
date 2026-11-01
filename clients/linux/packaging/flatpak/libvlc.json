@@ -1,0 +1,44 @@
+{
+  "name": "libvlc",
+  "post-install": [
+    "install -Dm644 COPYING /app/share/doc/aurelia-desktop/notices/libvlc/COPYING.GPLv2",
+    "install -Dm644 COPYING.LIB /app/share/doc/aurelia-desktop/notices/libvlc/COPYING.LGPLv2.1",
+    "/app/lib/vlc/vlc-cache-gen /app/lib/vlc/plugins",
+    "sh verify-libvlc.sh"
+  ],
+  "sources": [
+    {
+      "type": "archive",
+      "url": "https://download.videolan.org/pub/videolan/vlc/3.0.24/vlc-3.0.24.tar.xz",
+      "sha256": "e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf"
+    },
+    {
+      "type": "patch",
+      "path": "vlc-modern-toolchain.patch"
+    },
+    {
+      "type": "patch",
+      "path": "vlc-core-modern-toolchain.patch"
+    },
+    {
+      "type": "patch",
+      "path": "vlc-demux-seek.patch"
+    },
+    {
+      "type": "patch",
+      "path": "vlc-plugins-modern-toolchain.patch"
+    },
+    {
+      "type": "file",
+      "path": "build-libvlc.sh"
+    },
+    {
+      "type": "file",
+      "path": "verify-libvlc.sh"
+    }
+  ],
+  "buildsystem": "simple",
+  "build-commands": [
+    "sh build-libvlc.sh"
+  ]
+}

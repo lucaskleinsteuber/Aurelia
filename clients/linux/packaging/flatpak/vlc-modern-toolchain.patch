@@ -1,0 +1,319 @@
+From: Aurelia contributors
+Subject: Preserve hardening, assertions and warning-free compilation on the current SDK
+
+Respect SDK _FORTIFY_SOURCE in released configure probes and config.h. Modernize the
+legacy Autoconf K&R probe for Clang22. Use proper GNU make pattern-rule prerequisites;
+read the bundled revision for release tarballs without attempting a nonexistent Git repo.
+Mark the unused SDP parameter in the disabled stream-output stub. Preserve unconditional
+upstream development TODO reminders as comments; input-clock and native-window behavior
+remain those of the pinned release. Aurelia uses its own Avalonia frame-callback window.
+
+--- a/configure
++++ b/configure
+@@ -4564,9 +4564,7 @@
+ /* Most of the following tests are stolen from RCS 5.7 src/conf.sh.  */
+ struct buf { int x; };
+ struct buf * (*rcsopen) (struct buf *, struct stat *, int);
+-static char *e (p, i)
+-     char **p;
+-     int i;
++static char *e (char **p, int i)
+ {
+   return p[i];
+ }
+@@ -7624,7 +7622,7 @@
+     done
+ 
+ 
+-printf "%s\n" "#define _FORTIFY_SOURCE 2" >>confdefs.h
++printf "%s\n" "#ifndef _FORTIFY_SOURCE" "#define _FORTIFY_SOURCE 2" "#endif" >>confdefs.h
+ 
+ 
+ printf "%s\n" "#define _FILE_OFFSET_BITS 64" >>confdefs.h
+@@ -19875,7 +19873,7 @@
+       # Commands to make compiler produce verbose output that lists
+       # what "hidden" libraries, object files and flags are used when
+       # linking a shared library.
+-      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 
+     else
+       GXX=no
+@@ -20371,7 +20369,7 @@
+             # explicitly linking system object files so we need to strip them
+             # from the output so that they don't get included in the library
+             # dependencies.
+-            output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $EGREP " \-L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
++            output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $EGREP " -L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
+             ;;
+           *)
+             if test yes = "$GXX"; then
+@@ -20436,7 +20434,7 @@
+ 	    # explicitly linking system object files so we need to strip them
+ 	    # from the output so that they don't get included in the library
+ 	    # dependencies.
+-	    output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $GREP " \-L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
++	    output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $GREP " -L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
+ 	    ;;
+           *)
+ 	    if test yes = "$GXX"; then
+@@ -20775,7 +20773,7 @@
+ 	      # Commands to make compiler produce verbose output that lists
+ 	      # what "hidden" libraries, object files and flags are used when
+ 	      # linking a shared library.
+-	      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++	      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 
+ 	    else
+ 	      # FIXME: insert proper C++ library support
+@@ -20859,7 +20857,7 @@
+ 	        # Commands to make compiler produce verbose output that lists
+ 	        # what "hidden" libraries, object files and flags are used when
+ 	        # linking a shared library.
+-	        output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++	        output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 	      else
+ 	        # g++ 2.7 appears to require '-G' NOT '-shared' on this
+ 	        # platform.
+@@ -20870,7 +20868,7 @@
+ 	        # Commands to make compiler produce verbose output that lists
+ 	        # what "hidden" libraries, object files and flags are used when
+ 	        # linking a shared library.
+-	        output_verbose_link_cmd='$CC -G $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++	        output_verbose_link_cmd='$CC -G $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 	      fi
+ 
+ 	      hardcode_libdir_flag_spec_CXX='$wl-R $wl$libdir'
+@@ -53753,6 +53751,8 @@
+ ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
+ 
++have_sapi="no"
++if test "${SYS}" = "mingw32"; then
+ ac_fn_cxx_check_type "$LINENO" "ISpObjectToken" "ac_cv_type_ISpObjectToken" "#include <windows.h>
+                #include <sapi.h>
+                #include <sphelper.h>
+@@ -53768,6 +53768,8 @@
+ else $as_nop
+   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: WARNING: sapi.h not found. Text to Speech renderer for Windows disabled" >&5
+ printf "%s\n" "$as_me: WARNING: sapi.h not found. Text to Speech renderer for Windows disabled" >&2;}
++fi
++
+ fi
+ 
+  if test "${have_sapi}" = "yes"; then
+@@ -58151,7 +58153,7 @@
+ 
+ fi
+ 
+-if test "$enable_qt" = "no"
++if test "$enable_qt" = "no" -a "${enable_skins2}" != "no"
+ then :
+ 
+   if test "${enable_skins2}" = "yes"
+--- a/config.h.in
++++ b/config.h.in
+@@ -919,7 +919,9 @@
+ #undef _FILE_OFFSET_BITS
+ 
+ /* Define to 2 to get glibc warnings. */
++#ifndef _FORTIFY_SOURCE
+ #undef _FORTIFY_SOURCE
++#endif
+ 
+ /* Extensions to ISO C99 from ISO C11. */
+ #undef _ISOC11_SOURCE
+--- a/src/input/clock.c
++++ b/src/input/clock.c
+@@ -536,7 +536,8 @@
+     vlc_mutex_unlock( &cl->lock );
+ }
+ 
+-#warning "input_clock_SetJitter needs more work"
++/* Upstream TODO: further refine input_clock_SetJitter. This is a development reminder,
++ * not a failed compiler capability or a build-dependent condition. */
+ void input_clock_SetJitter( input_clock_t *cl,
+                             vlc_tick_t i_pts_delay, int i_cr_average )
+ {
+--- a/src/video_output/event.h
++++ b/src/video_output/event.h
+@@ -39,7 +39,8 @@
+ 
+ static inline void vout_SendEventClose(vout_thread_t *vout)
+ {
+-#warning FIXME: implement video close event
++/* Upstream TODO: implement the video-window close event. Aurelia owns its window
++ * and closes playback through libvlc_media_player_stop, not this native-window hook. */
+     /* FIXME: this code is disabled as it breaks the non-playlist cases */
+     //playlist_Stop(pl_Get(vout));
+     (void) vout;
+--- a/src/missing.c
++++ b/src/missing.c
+@@ -184,7 +184,7 @@
+                      const struct sockaddr *src, size_t srclen,
+                      const struct sockaddr *addr, size_t addrlen)
+ {
+-    VLC_UNUSED (obj); VLC_UNUSED (cfg); VLC_UNUSED (src); VLC_UNUSED (srclen);
++    VLC_UNUSED (sdp); VLC_UNUSED (obj); VLC_UNUSED (cfg); VLC_UNUSED (src); VLC_UNUSED (srclen);
+     VLC_UNUSED (addr); VLC_UNUSED (addrlen);
+     return 0;
+ }
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -146,7 +146,7 @@
+ pkgconfig_DATA = vlc-plugin.pc
+ CLEANFILES += $(pkgconfig_DATA)
+ 
+-.pc.in.pc: $(top_builddir)/config.status
++%.pc: %.pc.in $(top_builddir)/config.status
+ 	$(AM_V_GEN)cd "$(top_builddir)" && \
+ 	$(SHELL) ./config.status --file="src/$@"
+ 
+@@ -159,7 +159,7 @@
+ endif
+ EXTRA_DIST += libvlc_win32_rc.rc.in
+ 
+-.rc.in.rc: $(top_builddir)/config.status
++%.rc: %.rc.in $(top_builddir)/config.status
+ 	cd "$(top_builddir)" && \
+ 	$(SHELL) ./config.status --file="src/$@"
+ 
+@@ -563,7 +563,7 @@
+ 
+ stamp-revision:
+ 	$(AM_V_at)rm -f -- revision.tmp
+-	$(AM_V_GEN)if ! git -c safe.directory='*' \
++	$(AM_V_GEN)if test ! -e "$(top_srcdir)/.git" || ! git -c safe.directory='*' \
+ 			-C "$(top_srcdir)" describe \
+ 			--tags --long --match '?.*.*' --always; then \
+ 		cat $(srcdir)/revision.txt ; \
+--- a/src/Makefile.in
++++ b/src/Makefile.in
+@@ -3734,11 +3734,11 @@
+ 	echo ";") >> "$@.tmp"
+ 	$(AM_V_at)mv -f -- "$@.tmp" "$@"
+ 
+-.pc.in.pc: $(top_builddir)/config.status
++%.pc: %.pc.in $(top_builddir)/config.status
+ 	$(AM_V_GEN)cd "$(top_builddir)" && \
+ 	$(SHELL) ./config.status --file="src/$@"
+ 
+-.rc.in.rc: $(top_builddir)/config.status
++%.rc: %.rc.in $(top_builddir)/config.status
+ 	cd "$(top_builddir)" && \
+ 	$(SHELL) ./config.status --file="src/$@"
+ 
+@@ -3765,7 +3765,7 @@
+ 
+ stamp-revision:
+ 	$(AM_V_at)rm -f -- revision.tmp
+-	$(AM_V_GEN)if ! git -c safe.directory='*' \
++	$(AM_V_GEN)if test ! -e "$(top_srcdir)/.git" || ! git -c safe.directory='*' \
+ 			-C "$(top_srcdir)" describe \
+ 			--tags --long --match '?.*.*' --always; then \
+ 		cat $(srcdir)/revision.txt ; \
+--- a/lib/Makefile.am
++++ b/lib/Makefile.am
+@@ -76,7 +76,7 @@
+ 
+ pkgconfig_DATA = libvlc.pc
+ 
+-.pc.in.pc: $(top_builddir)/config.status
++%.pc: %.pc.in $(top_builddir)/config.status
+ 	$(AM_V_GEN)cd "$(top_builddir)" && \
+ 	$(SHELL) ./config.status --file="lib/$@"
+ 
+--- a/lib/Makefile.in
++++ b/lib/Makefile.in
+@@ -1580,7 +1580,7 @@
+ 	$(AM_V_GEN)cd "$(top_builddir)" && \
+ 	$(SHELL) ./config.status --file="src/$@"
+ 
+-.pc.in.pc: $(top_builddir)/config.status
++%.pc: %.pc.in $(top_builddir)/config.status
+ 	$(AM_V_GEN)cd "$(top_builddir)" && \
+ 	$(SHELL) ./config.status --file="lib/$@"
+ 
+--- a/m4/libtool.m4
++++ b/m4/libtool.m4
+@@ -6445,7 +6445,7 @@
+       # Commands to make compiler produce verbose output that lists
+       # what "hidden" libraries, object files and flags are used when
+       # linking a shared library.
+-      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 
+     else
+       GXX=no
+@@ -6820,7 +6820,7 @@
+             # explicitly linking system object files so we need to strip them
+             # from the output so that they don't get included in the library
+             # dependencies.
+-            output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $EGREP " \-L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
++            output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $EGREP " -L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
+             ;;
+           *)
+             if test yes = "$GXX"; then
+@@ -6885,7 +6885,7 @@
+ 	    # explicitly linking system object files so we need to strip them
+ 	    # from the output so that they don't get included in the library
+ 	    # dependencies.
+-	    output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $GREP " \-L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
++	    output_verbose_link_cmd='templist=`($CC -b $CFLAGS -v conftest.$objext 2>&1) | $GREP " -L"`; list= ; for z in $templist; do case $z in conftest.$objext) list="$list $z";; *.$objext);; *) list="$list $z";;esac; done; func_echo_all "$list"'
+ 	    ;;
+           *)
+ 	    if test yes = "$GXX"; then
+@@ -7224,7 +7224,7 @@
+ 	      # Commands to make compiler produce verbose output that lists
+ 	      # what "hidden" libraries, object files and flags are used when
+ 	      # linking a shared library.
+-	      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++	      output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 
+ 	    else
+ 	      # FIXME: insert proper C++ library support
+@@ -7308,7 +7308,7 @@
+ 	        # Commands to make compiler produce verbose output that lists
+ 	        # what "hidden" libraries, object files and flags are used when
+ 	        # linking a shared library.
+-	        output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++	        output_verbose_link_cmd='$CC -shared $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 	      else
+ 	        # g++ 2.7 appears to require '-G' NOT '-shared' on this
+ 	        # platform.
+@@ -7319,7 +7319,7 @@
+ 	        # Commands to make compiler produce verbose output that lists
+ 	        # what "hidden" libraries, object files and flags are used when
+ 	        # linking a shared library.
+-	        output_verbose_link_cmd='$CC -G $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " \-L"'
++	        output_verbose_link_cmd='$CC -G $CFLAGS -v conftest.$objext 2>&1 | $GREP -v "^Configured with:" | $GREP " -L"'
+ 	      fi
+ 
+ 	      _LT_TAGVAR(hardcode_libdir_flag_spec, $1)='$wl-R $wl$libdir'
+--- a/configure.ac
++++ b/configure.ac
+@@ -3467,12 +3467,15 @@
+ dnl SAPI (text to Speech renderer for Windows)
+ dnl
+ AC_LANG_PUSH([C++])
++have_sapi="no"
++AS_IF([test "${SYS}" = "mingw32"], [
+ AC_CHECK_TYPES([ISpObjectToken],[
+               have_sapi="yes"
+             ],[AC_MSG_WARN([sapi.h not found. Text to Speech renderer for Windows disabled])],
+               [#include <windows.h>
+                #include <sapi.h>
+                #include <sphelper.h>])
++])
+ AM_CONDITIONAL([HAVE_SAPI], [test "${have_sapi}" = "yes"])
+ AC_LANG_POP([C++])
+ 
+@@ -4069,7 +4072,7 @@
+ dnl
+ dnl Simple test for skins2 dependency
+ dnl
+-AS_IF([test "$enable_qt" = "no"], [
++AS_IF([test "$enable_qt" = "no" -a "${enable_skins2}" != "no"], [
+   AS_IF([test "${enable_skins2}" = "yes"], [
+     AC_MSG_ERROR([The skins2 module depends on the Qt interface. Without it you will not be able to open any dialog box from the interface, which makes the skins2 interface rather useless. Install the Qt development package or alternatively you can also configure with: --disable-qt --disable-skins2.])
+   ], [

@@ -1,0 +1,5 @@
+#!/bin/sh
+# The Flatpak has its own decoder libraries and plugins, independent of the host's VLC.
+export LD_LIBRARY_PATH="/app/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export VLC_PLUGIN_PATH=/app/lib/vlc/plugins
+exec /app/lib/aurelia-desktop/aurelia-desktop "$@"

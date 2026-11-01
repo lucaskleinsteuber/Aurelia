@@ -12,7 +12,6 @@
       Aurelia is a self-hosted media server with native apps. Aurelia for Linux browses your library,
       plays your movies and TV shows, and can host the Aurelia server on this computer.
     </p>
-    <p>This is a preview build.</p>
   </description>
   <launchable type="desktop-id">io.github.lucasfd3.Aurelia.desktop</launchable>
   <url type="homepage">https://github.com/lucasfd3/Aurelia</url>

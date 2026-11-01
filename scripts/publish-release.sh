@@ -11,6 +11,13 @@
 # the release is the copy that is kept (AURELIA_KEEP_LOCAL_BUILDS=1 keeps it).
 set -euo pipefail
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# The Linux desktop has an independent version counter and release channel. Its releases must
+# never become the Mac/server updater's "latest" release.
+if [ "${1:-}" = --linux-app ]; then
+  shift
+  exec bash "$repository_root/scripts/publish-linux-app-release.sh" "$@"
+fi
+[ "$#" -eq 0 ] || { echo "Usage: publish-release.sh [--linux-app]" >&2; exit 1; }
 . "$repository_root/scripts/workspace-paths.sh"
 project="$repository_root/src/Aurelia.Server/Aurelia.Server.csproj"
 

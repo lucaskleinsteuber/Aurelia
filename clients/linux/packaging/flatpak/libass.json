@@ -1,0 +1,21 @@
+{
+  "name": "libass",
+  "post-install": [
+    "install -Dm644 COPYING /app/share/doc/aurelia-desktop/notices/libass/COPYING"
+  ],
+  "sources": [
+    {
+      "type": "archive",
+      "url": "https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz",
+      "sha256": "2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc"
+    },
+    {
+      "type": "file",
+      "path": "build-libass.sh"
+    }
+  ],
+  "buildsystem": "simple",
+  "build-commands": [
+    "sh build-libass.sh"
+  ]
+}

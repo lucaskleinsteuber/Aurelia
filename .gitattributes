@@ -1,2 +1,4 @@
 # Keep upstream license and notice text verbatim, including its whitespace.
 docs/licenses/*.txt -whitespace
+# Unified diffs prefix upstream context (including blank lines and tabs) with one space.
+clients/linux/packaging/flatpak/*.patch whitespace=-blank-at-eol,-space-before-tab

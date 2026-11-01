@@ -1,0 +1,700 @@
+From: Aurelia contributors
+Subject: Correct plugin diagnostics with current compiler and dependency APIs
+
+Keep decoder-only declarations consistent with ENABLE_SOUT, use const-qualified read-only
+lookup results, handle output format/control failures, preserve NUL termination in private
+metadata tables, and fix real JSON flag precedence and early VAAPI cleanup initialization.
+Modernize libass and optional JPEG API handling without suppressing compiler warnings.
+The generated reentrant CSS parser never consumes its local syntax-error count; diagnostics
+and recovery remain in yyerror and the existing parser state. The ID3 score table retains
+its exact 21 standardized index/value pairs in C and C++ compatible initializer syntax.
+
+--- a/modules/codec/avcodec/video.c
++++ b/modules/codec/avcodec/video.c
+@@ -697,6 +697,7 @@
+     AV_PIX_FMT_NONE,
+ };
+ 
++#ifdef _WIN32
+ static int ExtractAV1Profile(AVCodecContext *p_context, const es_format_t *fmt_in, decoder_sys_t *p_sys)
+ {
+     av1_OBU_sequence_header_t *sequence_hdr = NULL;
+@@ -756,8 +757,13 @@
+     return VLC_SUCCESS;
+ }
+ 
++#endif
++
+ int InitVideoHwDec( vlc_object_t *obj )
+ {
++#ifndef _WIN32
++    VLC_UNUSED(obj);
++#endif
+ #ifdef _WIN32
+     decoder_t *p_dec = container_of(obj, decoder_t, obj);
+ 
+--- a/modules/codec/avcodec/vaapi.c
++++ b/modules/codec/avcodec/vaapi.c
+@@ -42,7 +42,7 @@
+ # include <va/va_drm.h>
+ #endif
+ #include <libavcodec/avcodec.h>
+-#if FF_API_STRUCT_VAAPI_CONTEXT
++#if defined(FF_API_STRUCT_VAAPI_CONTEXT) && FF_API_STRUCT_VAAPI_CONTEXT
+ #include <libavcodec/vaapi.h>
+ #else
+ #include <libavutil/hwcontext_vaapi.h>
+@@ -52,7 +52,7 @@
+ #include "va.h"
+ #include "../../hw/vaapi/vlc_vaapi.h"
+ 
+-#if !FF_API_STRUCT_VAAPI_CONTEXT
++#if !defined(FF_API_STRUCT_VAAPI_CONTEXT) || !FF_API_STRUCT_VAAPI_CONTEXT
+ struct vaapi_context
+ {
+     VADisplay display;
+@@ -71,7 +71,7 @@
+ #endif
+ };
+ 
+-static int GetVaProfile(AVCodecContext *ctx, const es_format_t *fmt,
++static int GetVaProfile(AVCodecContext *ctx,
+                         VAProfile *va_profile, int *vlc_chroma,
+                         unsigned *pic_count)
+ {
+@@ -194,7 +194,7 @@
+     VAProfile i_profile;
+     unsigned count;
+     int i_vlc_chroma;
+-    if (GetVaProfile(ctx, fmt, &i_profile, &i_vlc_chroma, &count) != VLC_SUCCESS)
++    if (GetVaProfile(ctx, &i_profile, &i_vlc_chroma, &count) != VLC_SUCCESS)
+         goto error;
+ 
+     sys = malloc(sizeof *sys);
+@@ -211,7 +211,7 @@
+     sys->hw_ctx.config_id = VA_INVALID_ID;
+     sys->hw_ctx.context_id = VA_INVALID_ID;
+ 
+-#if FF_API_STRUCT_VAAPI_CONTEXT
++#if defined(FF_API_STRUCT_VAAPI_CONTEXT) && FF_API_STRUCT_VAAPI_CONTEXT
+     sys->hw_ctx.config_id =
+         vlc_vaapi_CreateConfigChecked(o, sys->hw_ctx.display, i_profile,
+                                       VAEntrypointVLD, i_vlc_chroma);
+@@ -313,7 +313,7 @@
+     VAProfile i_profile;
+     unsigned count;
+     int i_vlc_chroma;
+-    if (GetVaProfile(ctx, fmt, &i_profile, &i_vlc_chroma, &count) != VLC_SUCCESS)
++    if (GetVaProfile(ctx, &i_profile, &i_vlc_chroma, &count) != VLC_SUCCESS)
+         return VLC_EGENERIC;
+ 
+     vlc_va_sys_t *sys;
+@@ -359,7 +359,7 @@
+     if (!sys->pool)
+         goto error;
+ 
+-#if FF_API_STRUCT_VAAPI_CONTEXT
++#if defined(FF_API_STRUCT_VAAPI_CONTEXT) && FF_API_STRUCT_VAAPI_CONTEXT
+     /* Create a context */
+     sys->hw_ctx.context_id =
+         vlc_vaapi_CreateContext(o, sys->hw_ctx.display, sys->hw_ctx.config_id,
+--- a/modules/audio_output/pulse.c
++++ b/modules/audio_output/pulse.c
+@@ -704,7 +704,7 @@
+ static const char *str_map(const char *key, const char *const table[][2],
+                            size_t n)
+ {
+-     const char **r = bsearch(key, table, n, sizeof (*table), strcmp_void);
++     const char *const *r = bsearch(key, table, n, sizeof (*table), strcmp_void);
+      return (r != NULL) ? r[1] : NULL;
+ }
+ 
+--- a/modules/codec/subsusf.c
++++ b/modules/codec/subsusf.c
+@@ -278,8 +278,8 @@
+ {
+     if( psz_attribute && psz_tag_start )
+     {
+-        char *psz_tag_end = strchr( psz_tag_start, '>' );
+-        char *psz_found   = strcasestr( psz_tag_start, psz_attribute );
++        const char *psz_tag_end = strchr( psz_tag_start, '>' );
++        const char *psz_found = strcasestr( psz_tag_start, psz_attribute );
+ 
+         if( psz_found )
+         {
+--- a/modules/codec/ttml/ttml.c
++++ b/modules/codec/ttml/ttml.c
+@@ -388,7 +388,7 @@
+         key.time = time;
+         key.p_last = NULL;
+ 
+-        tt_time_t *lookup = bsearch( &key, p_times, i_times,
++        const tt_time_t *lookup = bsearch( &key, p_times, i_times,
+                                      sizeof(tt_time_t), tt_bsearch_searchkey_Compare );
+         if( lookup )
+             key.p_last = lookup;
+--- a/modules/codec/ttml/ttml.h
++++ b/modules/codec/ttml/ttml.h
+@@ -51,7 +51,7 @@
+ struct tt_searchkey
+ {
+     tt_time_t time;
+-    tt_time_t *p_last;
++    const tt_time_t *p_last;
+ };
+ 
+ enum
+--- a/modules/codec/oggspots.c
++++ b/modules/codec/oggspots.c
+@@ -391,7 +391,11 @@
+ 
+     p_pic->b_force = true;
+     p_dec->fmt_out.i_codec = p_dec->fmt_out.video.i_chroma;
+-    decoder_UpdateVideoFormat(p_dec);
++    if (decoder_UpdateVideoFormat(p_dec) != VLC_SUCCESS)
++    {
++        picture_Release(p_pic);
++        return NULL;
++    }
+ 
+     return p_pic;
+ 
+--- a/modules/demux/flac.c
++++ b/modules/demux/flac.c
+@@ -273,7 +273,8 @@
+     unsigned i_frame_size = FLAC_FRAME_SIZE_MIN;
+ 
+     bool b_canfastseek = false;
+-    (int) vlc_stream_Control( p_demux->s, STREAM_CAN_FASTSEEK, &b_canfastseek );
++    if (vlc_stream_Control(p_demux->s, STREAM_CAN_FASTSEEK, &b_canfastseek) != VLC_SUCCESS)
++        b_canfastseek = false;
+ 
+     uint64_t i_start_pos = vlc_stream_Tell( p_demux->s );
+ 
+--- a/modules/demux/webvtt.c
++++ b/modules/demux/webvtt.c
+@@ -347,6 +347,7 @@
+ 
+ static block_t *demux_Range( demux_t *p_demux, vlc_tick_t i_start, vlc_tick_t i_end )
+ {
++    VLC_UNUSED(i_end);
+     demux_sys_t *p_sys = p_demux->p_sys;
+ 
+     block_t *p_list = NULL;
+--- a/modules/codec/webvtt/CSSGrammar.c
++++ b/modules/codec/webvtt/CSSGrammar.c
+@@ -1637,8 +1637,7 @@
+ YY_INITIAL_VALUE (static YYSTYPE yyval_default;)
+ YYSTYPE yylval YY_INITIAL_VALUE (= yyval_default);
+ 
+-    /* Number of syntax errors so far.  */
+-    int yynerrs;
++    /* This reentrant parser reports errors through yyerror; no local count is consumed. */
+ 
+     yy_state_fast_t yystate;
+     /* Number of tokens to shift before error messages enabled.  */
+@@ -1692,7 +1691,6 @@
+ 
+   yystate = 0;
+   yyerrstatus = 0;
+-  yynerrs = 0;
+   yychar = YYEMPTY; /* Cause a token to be read.  */
+   goto yysetstate;
+ 
+@@ -2926,7 +2924,6 @@
+   /* If not already recovering from an error, report this error.  */
+   if (!yyerrstatus)
+     {
+-      ++yynerrs;
+ #if ! YYERROR_VERBOSE
+       yyerror (scanner, css_parser, YY_("syntax error"));
+ #else
+--- a/modules/codec/speex.c
++++ b/modules/codec/speex.c
+@@ -86,10 +86,12 @@
+ #define ENC_DTX_LONGTEXT N_( \
+     "Enable discontinuous transmission (DTX)." )
+ 
++#ifdef ENABLE_SOUT
+ static const int pi_enc_mode_values[] = { 0, 1, 2 };
+ static const char * const ppsz_enc_mode_descriptions[] = {
+     N_("Narrow-band (8kHz)"), N_("Wide-band (16kHz)"), N_("Ultra-wideband (32kHz)"), NULL
+ };
++#endif
+ 
+ vlc_module_begin ()
+     set_category( CAT_INPUT )
+@@ -140,9 +142,11 @@
+ 
+ vlc_module_end ()
+ 
++#ifdef ENABLE_SOUT
+ static const char *const ppsz_enc_options[] = {
+     "mode", "complexity", "cbr", "quality", "max-bitrate", "vad", "dtx", NULL
+ };
++#endif
+ 
+ /*****************************************************************************
+  * decoder_sys_t : speex decoder descriptor
+--- a/modules/codec/theora.c
++++ b/modules/codec/theora.c
+@@ -139,9 +139,11 @@
+ #endif
+ vlc_module_end ()
+ 
++#ifdef ENABLE_SOUT
+ static const char *const ppsz_enc_options[] = {
+     "quality", NULL
+ };
++#endif
+ 
+ /*****************************************************************************
+  * OpenDecoder: probe the decoder and return score
+--- a/modules/codec/dvbsub.c
++++ b/modules/codec/dvbsub.c
+@@ -142,7 +142,9 @@
+ #endif
+ vlc_module_end ()
+ 
++#ifdef ENABLE_SOUT
+ static const char *const ppsz_enc_options[] = { "x", "y", NULL };
++#endif
+ 
+ /****************************************************************************
+  * Local structures
+--- a/modules/demux/mp4/mpeg4.h
++++ b/modules/demux/mp4/mpeg4.h
+@@ -29,6 +29,7 @@
+                                               vlc_fourcc_t *pi_codec,
+                                               int *pi_profile)
+ {
++    VLC_UNUSED(pi_profile);
+     /* See 14496-1 and http://mp4ra.org/#/object_types */
+     switch(oti)
+     {
+--- a/modules/demux/mp4/meta.c
++++ b/modules/demux/mp4/meta.c
+@@ -63,7 +63,7 @@
+ static const struct
+ {
+     const uint32_t xa9_type;
+-    const char metadata[25];
++    const char metadata[26];
+ } xa9typetoextrameta[] = {
+     { ATOM_0xa9wrt, N_("Writer") },
+     { ATOM_0xa9com, N_("Composer") },
+--- a/modules/demux/asf/libasf.c
++++ b/modules/demux/asf/libasf.c
+@@ -1284,7 +1284,7 @@
+         else if( i_type == ASF_METADATA_TYPE_BYTE )
+         {
+             /* Byte array */
+-            static const char hex[16] = "0123456789ABCDEF";
++            static const char hex[] = "0123456789ABCDEF";
+ 
+             p_ec->ppsz_value[i] = malloc( 2*i_size + 1 );
+             if( p_ec->ppsz_value[i] )
+--- a/modules/demux/avformat/demux.c
++++ b/modules/demux/avformat/demux.c
+@@ -1126,7 +1126,7 @@
+ 
+         case DEMUX_GET_META:
+         {
+-            static const char names[][10] = {
++            static const char names[][11] = {
+                 [vlc_meta_Title] = "title",
+                 [vlc_meta_Artist] = "artist",
+                 [vlc_meta_Genre] = "genre",
+--- a/modules/demux/mkv/demux.cpp
++++ b/modules/demux/mkv/demux.cpp
+@@ -538,6 +538,7 @@
+ 
+ bool demux_sys_t::AnalyseAllSegmentsFound( demux_t *p_demux, matroska_stream_c *p_stream1, bool b_initial )
+ {
++    VLC_UNUSED(b_initial);
+     int i_upper_lvl = 0;
+     EbmlElement *p_l0;
+     bool b_keep_stream = false;
+--- a/modules/misc/webservices/json.c
++++ b/modules/misc/webservices/json.c
+@@ -374,7 +374,7 @@
+ 
+                   if (top->type == json_array)
+                      flags = (flags & ~ (flag_need_comma | flag_seek_value)) | flag_next;
+-                  else if (!state.settings.settings & json_relaxed_commas)
++                  else if (!(state.settings.settings & json_relaxed_commas))
+                   {  sprintf (error, "%d:%d: Unexpected ]", cur_line, e_off);
+                      goto e_failed;
+                   }
+@@ -529,7 +529,7 @@
+ 
+                   case '"':
+ 
+-                     if (flags & flag_need_comma && (!state.settings.settings & json_relaxed_commas))
++                     if (flags & flag_need_comma && (!(state.settings.settings & json_relaxed_commas)))
+                      {
+                         sprintf (error, "%d:%d: Expected , before \"", cur_line, e_off);
+                         goto e_failed;
+--- a/modules/packetizer/hxxx_sei.c
++++ b/modules/packetizer/hxxx_sei.c
+@@ -54,7 +54,7 @@
+ 
+     /* While a NAL can technically be up to 65535 bytes, an SEI NAL
+        will never be anywhere near that size */
+-    if (bs_remain(&s_ep3b) / 8 > sizeof(buf))
++    if (bs_remain(&s_ep3b) / 8 > (int)sizeof(buf))
+         return;
+ 
+     while (bs_remain(&s_ep3b) > 0)
+--- a/modules/hw/vaapi/filters.c
++++ b/modules/hw/vaapi/filters.c
+@@ -280,6 +280,7 @@
+     vlc_vaapi_PicAttachContext(dest);
+     picture_CopyProperties(dest, src);
+ 
++    VABufferID pipeline_buf = VA_INVALID_ID;
+     void *      p_va_params;
+ 
+     if (vlc_vaapi_MapBuffer(VLC_OBJECT(filter), filter_sys->va.dpy,
+@@ -301,7 +302,6 @@
+     if (pf_prepare_render_surface)
+         pf_prepare_render_surface(filter_sys->p_data);
+ 
+-    VABufferID                          pipeline_buf = VA_INVALID_ID;
+     VAProcPipelineParameterBuffer *     pipeline_params;
+ 
+     pipeline_buf =
+--- a/modules/codec/cea708.c
++++ b/modules/codec/cea708.c
+@@ -1676,7 +1676,7 @@
+             i_ret = CEA708_Decode_G0( c, h );
+         else if( c >= 0x80 && c <= 0x9F )
+             i_ret = CEA708_Decode_C1( c, h );
+-        else if( c > 0x9F )
++        else /* uint8_t c is necessarily in the remaining G1 range. */
+             i_ret = CEA708_Decode_G1( c, h );
+ 
+         if( i_ret & CEA708_STATUS_OUTPUT )
+--- a/modules/codec/jpeg.c
++++ b/modules/codec/jpeg.c
+@@ -631,7 +631,7 @@
+     }
+ 
+     JSAMPIMAGE p_row_pointers = NULL;
+-#if JPEG_LIB_VERSION_MAJOR > 9 || (JPEG_LIB_VERSION_MAJOR == 9 && JPEG_LIB_VERSION_MINOR >= 4)
++#if defined(JPEG_LIB_VERSION_MAJOR) && (JPEG_LIB_VERSION_MAJOR > 9 || (JPEG_LIB_VERSION_MAJOR == 9 && JPEG_LIB_VERSION_MINOR >= 4))
+     size_t size = p_block->i_buffer;
+ #else
+     unsigned long size = p_block->i_buffer;
+--- a/modules/codec/libass.c
++++ b/modules/codec/libass.c
+@@ -448,7 +448,7 @@
+ #endif
+         const double src_ratio = (double)p_fmt_src->i_visible_width / p_fmt_src->i_visible_height;
+         const double dst_ratio = (double)p_fmt_dst->i_visible_width / p_fmt_dst->i_visible_height;
+-        ass_set_aspect_ratio( p_sys->p_renderer, dst_ratio / src_ratio, 1 );
++        ass_set_pixel_aspect( p_sys->p_renderer, dst_ratio / src_ratio );
+         p_sys->fmt = fmt;
+     }
+ 
+--- a/modules/audio_filter/channel_mixer/remap.c
++++ b/modules/audio_filter/channel_mixer/remap.c
+@@ -299,7 +299,7 @@
+             assert( wg4_i < sizeof( pi_vlc_chan_order_wg4 )/sizeof( pi_vlc_chan_order_wg4[0] ) );
+         }
+         unsigned channel_wg4idx_len = sizeof( channel_wg4idx )/sizeof( channel_wg4idx[0] );
+-        uint8_t *pi_chnidx = memchr( channel_wg4idx, wg4_i, channel_wg4idx_len );
++        const uint8_t *pi_chnidx = memchr( channel_wg4idx, wg4_i, channel_wg4idx_len );
+         assert( pi_chnidx != NULL );
+         uint8_t chnidx = pi_chnidx - channel_wg4idx;
+         int64_t val = var_InheritInteger( p_this, channel_name[chnidx] );
+--- a/modules/video_output/vdummy.c
++++ b/modules/video_output/vdummy.c
+@@ -147,8 +147,9 @@
+ {
+     VLC_UNUSED(vd);
+     VLC_UNUSED(subpicture);
+-    if ( vd->fmt.i_width*vd->fmt.i_height >= sizeof(vlc_tick_t) &&
+-         (picture->p->i_pitch * picture->p->i_lines) >= sizeof(vlc_tick_t) ) {
++    if ((uint64_t)vd->fmt.i_width * vd->fmt.i_height >= sizeof(vlc_tick_t) &&
++        picture->p->i_pitch >= 0 && picture->p->i_lines >= 0 &&
++        (size_t)picture->p->i_pitch * picture->p->i_lines >= sizeof(vlc_tick_t)) {
+         vlc_tick_t date;
+         memcpy(&date, picture->p->p_pixels, sizeof(date));
+         msg_Dbg(vd, "VOUT got %"PRIu64" ms offset",
+--- a/modules/video_filter/deinterlace/algo_ivtc.c
++++ b/modules/video_filter/deinterlace/algo_ivtc.c
+@@ -1097,14 +1097,11 @@
+         if( p_ivtc->b_sequence_valid )
+         {
+             /* Determine TFF/BFF. */
+-            int i_vote_invalid = 0;
+             int i_vote_tff     = 0;
+             int i_vote_bff     = 0;
+             for( int i = 0; i < IVTC_DETECTION_HISTORY_SIZE; ++i )
+             {
+-                if( pi_tfd[i] == TFD_INVALID )
+-                    i_vote_invalid++;
+-                else if( pi_tfd[i] == TFD_TFF )
++                if( pi_tfd[i] == TFD_TFF )
+                     i_vote_tff++;
+                 else if( pi_tfd[i] == TFD_BFF )
+                     i_vote_bff++;
+--- a/modules/meta_engine/ID3Pictures.h
++++ b/modules/meta_engine/ID3Pictures.h
+@@ -50,27 +50,27 @@
+      * The 21 types are defined in id3v2 standard:
+      * http://www.id3.org/id3v2.4.0-frames */
+ static const char ID3v2_cover_scores[] = {
+-    [ID3_PICTURE_OTHER]                 = 0,
+-    [ID3_PICTURE_FILE_ICON]             = 1,
+-    [ID3_PICTURE_OTHER_FILE_ICON]       = 4,
+-    [ID3_PICTURE_FRONT_COVER]           = 20,
+-    [ID3_PICTURE_BACK_COVER]            = 19,
+-    [ID3_PICTURE_LEAFLET_PAGE]          = 13,
+-    [ID3_PICTURE_MEDIA]                 = 18,
+-    [ID3_PICTURE_LEAD_ARTIST]           = 17,
+-    [ID3_PICTURE_ARTIST]                = 16,
+-    [ID3_PICTURE_CONDUCTOR]             = 14,
+-    [ID3_PICTURE_BAND]                  = 15,
+-    [ID3_PICTURE_COMPOSER]              = 9,
+-    [ID3_PICTURE_LYRICIST]              = 8,
+-    [ID3_PICTURE_RECORDING_LOCATION]    = 7,
+-    [ID3_PICTURE_DURING_RECORDING]      = 10,
+-    [ID3_PICTURE_DURING_PERFORMANCE]    = 11,
+-    [ID3_PICTURE_MOVIE_SCREEN_CAPTURE]  = 6,
+-    [ID3_PICTURE_COLORED_FISH]          = 1,
+-    [ID3_PICTURE_ILLUSTRATION]          = 12,
+-    [ID3_PICTURE_BAND_LOGO]             = 3,
+-    [ID3_PICTURE_PUBLISHER_LOGO]        = 2
++    0 /* ID3_PICTURE_OTHER */,
++    1 /* ID3_PICTURE_FILE_ICON */,
++    4 /* ID3_PICTURE_OTHER_FILE_ICON */,
++    20 /* ID3_PICTURE_FRONT_COVER */,
++    19 /* ID3_PICTURE_BACK_COVER */,
++    13 /* ID3_PICTURE_LEAFLET_PAGE */,
++    18 /* ID3_PICTURE_MEDIA */,
++    17 /* ID3_PICTURE_LEAD_ARTIST */,
++    16 /* ID3_PICTURE_ARTIST */,
++    14 /* ID3_PICTURE_CONDUCTOR */,
++    15 /* ID3_PICTURE_BAND */,
++    9 /* ID3_PICTURE_COMPOSER */,
++    8 /* ID3_PICTURE_LYRICIST */,
++    7 /* ID3_PICTURE_RECORDING_LOCATION */,
++    10 /* ID3_PICTURE_DURING_RECORDING */,
++    11 /* ID3_PICTURE_DURING_PERFORMANCE */,
++    6 /* ID3_PICTURE_MOVIE_SCREEN_CAPTURE */,
++    1 /* ID3_PICTURE_COLORED_FISH */,
++    12 /* ID3_PICTURE_ILLUSTRATION */,
++    3 /* ID3_PICTURE_BAND_LOGO */,
++    2 /* ID3_PICTURE_PUBLISHER_LOGO */
+ };
+ 
+ static_assert(ARRAY_SIZE(ID3v2_cover_scores) == ID3_PICTURE_COUNT, "mismatched scoring table size");
+--- a/modules/video_filter/scale.c
++++ b/modules/video_filter/scale.c
+@@ -53,6 +53,23 @@
+ /*****************************************************************************
+  * OpenFilter: probe the filter and return score
+  *****************************************************************************/
++static bool UpdateOutputFormat(filter_t *filter)
++{
++    const video_format_t *input = &filter->fmt_in.video;
++    video_format_t *output = &filter->fmt_out.video;
++    if (input->i_width == 0 || input->i_height == 0 ||
++        output->i_width == 0 || output->i_height == 0)
++        return false;
++    if (filter->b_allow_fmt_out_change)
++    {
++        /* Derive from the input each time; never compound the previous frame's SAR. */
++        output->i_sar_num = input->i_sar_num != 0 ? input->i_sar_num : 1;
++        output->i_sar_den = input->i_sar_den != 0 ? input->i_sar_den : 1;
++        video_format_ScaleCropAr(output, input);
++    }
++    return true;
++}
++
+ static int OpenFilter( vlc_object_t *p_this )
+ {
+     filter_t *p_filter = (filter_t*)p_this;
+@@ -72,8 +89,8 @@
+     if( p_filter->fmt_in.video.orientation != p_filter->fmt_out.video.orientation )
+         return VLC_EGENERIC;
+ 
+-#warning Converter cannot (really) change output format.
+-    video_format_ScaleCropAr( &p_filter->fmt_out.video, &p_filter->fmt_in.video );
++    if (!UpdateOutputFormat(p_filter))
++        return VLC_EGENERIC;
+     p_filter->pf_video_filter = Filter;
+ 
+     msg_Dbg( p_filter, "%ix%i -> %ix%i", p_filter->fmt_in.video.i_width,
+@@ -92,8 +109,11 @@
+ 
+     if( !p_pic ) return NULL;
+ 
+-#warning Converter cannot (really) change output format.
+-    video_format_ScaleCropAr( &p_filter->fmt_out.video, &p_filter->fmt_in.video );
++    if (!UpdateOutputFormat(p_filter))
++    {
++        picture_Release(p_pic);
++        return NULL;
++    }
+ 
+     /* Request output picture */
+     p_pic_dst = filter_NewPicture( p_filter );
+--- a/lib/media_list.c
++++ b/lib/media_list.c
+@@ -252,8 +252,9 @@
+ 
+     if( libvlc_media_list_add_media( p_mlist, p_md ) )
+     {
+-#warning Missing error handling!
+-        /* printerr and leaks */
++        libvlc_media_release(p_md);
++        input_item_Release(p_input_item);
++        libvlc_printerr("Could not add media to the list");
+         return -1;
+     }
+ 
+--- a/modules/demux/adaptive/logic/NearOptimalAdaptationLogic.hpp
++++ b/modules/demux/adaptive/logic/NearOptimalAdaptationLogic.hpp
+@@ -67,7 +67,6 @@
+                 std::map<uint64_t, float>   utilities;
+                 unsigned                    currentBps;
+                 unsigned                    usedBps;
+-                vlc_object_t *              p_obj;
+                 vlc_mutex_t                 lock;
+         };
+     }
+--- a/modules/demux/adaptive/logic/NearOptimalAdaptationLogic.cpp
++++ b/modules/demux/adaptive/logic/NearOptimalAdaptationLogic.cpp
+@@ -54,7 +54,6 @@
+     : AbstractAdaptationLogic(obj)
+     , currentBps( 0 )
+     , usedBps( 0 )
+-    , p_obj( obj )
+ {
+     vlc_mutex_init(&lock);
+ }
+--- a/modules/video_output/opengl/converter.h
++++ b/modules/video_output/opengl/converter.h
+@@ -54,7 +54,7 @@
+ 
+ #ifdef HAVE_LIBPLACEBO
+ # include <libplacebo/config.h>
+-# if PL_API_VER >= 157
++# if defined(PL_API_VER) && PL_API_VER >= 157
+ #  include <libplacebo/log.h>
+ #  include <libplacebo/shaders.h>
+ # endif
+@@ -280,7 +280,7 @@
+     /* Pointer to object gl, set by the caller */
+     vlc_gl_t *gl;
+ 
+-# if PL_API_VER >= 157
++# if defined(PL_API_VER) && PL_API_VER >= 157
+     pl_log pl_ctx;
+ # else
+     /* libplacebo context, created by the caller (optional) */
+@@ -349,7 +349,7 @@
+     bool yuv_color;
+     GLfloat yuv_coefficients[16];
+ 
+-# if PL_API_VER >= 157
++# if defined(PL_API_VER) && PL_API_VER >= 157
+     pl_shader pl_sh;
+ # else
+     struct pl_shader *pl_sh;
+--- a/modules/video_output/opengl/converter_vaapi.c
++++ b/modules/video_output/opengl/converter_vaapi.c
+@@ -110,8 +110,6 @@
+ static void
+ vaegl_release_last_pic(const opengl_tex_converter_t *tc, struct priv *priv)
+ {
+-    vlc_object_t *o = VLC_OBJECT(tc->gl);
+-
+     for (unsigned i = 0; i < priv->last.num_planes; ++i)
+         vaegl_image_destroy(tc, priv->last.egl_images[i]);
+ 
+@@ -119,6 +117,7 @@
+     for (unsigned i = 0; i < priv->last.va_surface_descriptor.num_objects; ++i)
+         close(priv->last.va_surface_descriptor.objects[i].fd);
+ #else
++    vlc_object_t *o = VLC_OBJECT(tc->gl);
+     vlc_vaapi_ReleaseBufferHandle(o, priv->vadpy, priv->last.va_image.buf);
+ 
+     vlc_vaapi_DestroyImage(o, priv->vadpy, priv->last.va_image.image_id);
+--- a/modules/video_filter/adjust.c
++++ b/modules/video_filter/adjust.c
+@@ -265,7 +265,7 @@
+     }
+ 
+     const float f_max = f_range - 1.f;
+-    const unsigned i_max = f_max;
++    const int i_max = f_max;
+     const int i_range = f_range;
+     const unsigned i_size = i_range;
+     const unsigned i_mid = i_range >> 1;
+--- a/modules/video_filter/puzzle_bezier.c
++++ b/modules/video_filter/puzzle_bezier.c
+@@ -83,11 +83,11 @@
+             f_bez_y = bezier_val(ps_new_pt,f_sub_t,i_main_t,y);
+ 
+             if ( f_bez_x < ((float) i_width) / 2 ) {
+-                if ( abs ( f_bez_y ) > ( f_bez_x * ( 0.9 * ((float)i_lines) / ((float)i_width) ) ) )
++                if ( fabsf ( f_bez_y ) > ( f_bez_x * ( 0.9 * ((float)i_lines) / ((float)i_width) ) ) )
+                     b_fit = false;
+             }
+             else  {
+-                if ( abs ( f_bez_y ) > ( ( ((float)i_width) - f_bez_x ) * ( 0.9 * ((float)i_lines) / ((float)i_width) ) ) )
++                if ( fabsf ( f_bez_y ) > ( ( ((float)i_width) - f_bez_x ) * ( 0.9 * ((float)i_lines) / ((float)i_width) ) ) )
+                     b_fit = false;
+             }
+         }
+--- a/modules/video_filter/oldmovie.c
++++ b/modules/video_filter/oldmovie.c
+@@ -457,7 +457,7 @@
+             p_sys->i_sliding_speed += 5;
+ 
+         /* check if offset is close to 0 and then ready to stop */
+-        if ( abs( p_sys->i_sliding_ofs ) < abs( p_sys->i_sliding_speed
++        if ( abs( p_sys->i_sliding_ofs ) < labs( p_sys->i_sliding_speed
+              * p_sys->i_height[Y_PLANE]
+              * ( p_sys->i_cur_time - p_sys->i_last_time ) / CLOCK_FREQ )
+              ||  abs( p_sys->i_sliding_ofs ) < p_sys->i_height[Y_PLANE] * 100 / 20 ) {
+--- a/modules/video_filter/vhs.c
++++ b/modules/video_filter/vhs.c
+@@ -470,7 +470,7 @@
+             p_sys->i_sliding_speed += 1;
+ 
+         /* check if offset is close to 0 and then ready to stop */
+-        if ( abs( p_sys->i_sliding_ofs ) < abs( p_sys->i_sliding_speed
++        if ( abs( p_sys->i_sliding_ofs ) < labs( p_sys->i_sliding_speed
+              * p_sys->i_height[Y_PLANE]
+              * ( p_sys->i_cur_time - p_sys->i_last_time ) / CLOCK_FREQ )
+              || abs( p_sys->i_sliding_ofs ) < p_sys->i_height[Y_PLANE] * 100 / 20 ) {
+--- a/modules/spu/logo.c
++++ b/modules/spu/logo.c
+@@ -31,6 +31,7 @@
+ #endif
+ #include <assert.h>
+ 
++#include <limits.h>
+ #include <vlc_common.h>
+ #include <vlc_plugin.h>
+ #include <vlc_filter.h>
+@@ -545,10 +546,10 @@
+         {
+             int i_dx, i_dy;
+             vlc_mouse_GetMotion( &i_dx, &i_dy, p_old, p_new );
+-            p_sys->i_pos_x = VLC_CLIP( p_sys->i_pos_x + i_dx, 0,
+-                                    p_filter->fmt_in.video.i_width  - i_logo_w );
+-            p_sys->i_pos_y = VLC_CLIP( p_sys->i_pos_y + i_dy, 0,
+-                                    p_filter->fmt_in.video.i_height - i_logo_h );
++            const int64_t max_x = __MAX(INT64_C(0), (int64_t)p_filter->fmt_in.video.i_width - i_logo_w);
++            const int64_t max_y = __MAX(INT64_C(0), (int64_t)p_filter->fmt_in.video.i_height - i_logo_h);
++            p_sys->i_pos_x = VLC_CLIP((int64_t)p_sys->i_pos_x + i_dx, INT64_C(0), __MIN(max_x, INT_MAX));
++            p_sys->i_pos_y = VLC_CLIP((int64_t)p_sys->i_pos_y + i_dy, INT64_C(0), __MIN(max_y, INT_MAX));
+         }
+ 
+         if( p_sys->b_mouse_grab || b_over )

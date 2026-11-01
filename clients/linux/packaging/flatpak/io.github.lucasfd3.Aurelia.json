@@ -1,0 +1,75 @@
+{
+  "app-id": "io.github.lucasfd3.Aurelia",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "26.08",
+  "sdk": "org.freedesktop.Sdk",
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.llvm22"],
+  "command": "aurelia-desktop",
+  "finish-args": [
+    "--share=network",
+    "--share=ipc",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--socket=pulseaudio",
+    "--device=dri",
+    "--filesystem=host:ro",
+    "--talk-name=org.freedesktop.secrets",
+    "--talk-name=org.freedesktop.ScreenSaver",
+    "--talk-name=org.freedesktop.Notifications",
+    "--talk-name=org.freedesktop.Flatpak",
+    "--system-talk-name=org.freedesktop.login1",
+    "--talk-name=org.kde.StatusNotifierWatcher",
+    "--own-name=org.mpris.MediaPlayer2.aurelia"
+  ],
+  "build-options": {
+    "prepend-path": "/usr/lib/sdk/llvm22/bin",
+    "env": {
+      "CC": "clang",
+      "CXX": "clang++",
+      "PKG_CONFIG_PATH": "/app/lib/pkgconfig:/app/share/pkgconfig",
+      "LD_LIBRARY_PATH": "/app/lib"
+    }
+  },
+  "cleanup": [
+    "/include",
+    "/lib/pkgconfig",
+    "/share/man",
+    "*.a",
+    "*.la"
+  ],
+  "modules": [
+    "ffmpeg-libav.json",
+    "libass.json",
+    "libebml.json",
+    "libmatroska.json",
+    "libvlc.json",
+    {
+      "name": "aurelia-desktop",
+      "buildsystem": "simple",
+      "build-commands": [
+        "mkdir -p /app/lib /app/bin /app/share",
+        "cp -a lib/aurelia-desktop /app/lib/",
+        "install -Dm755 aurelia-desktop-flatpak /app/bin/aurelia-desktop",
+        "cp -a share/applications share/metainfo share/icons share/doc /app/share/",
+        "install -Dm644 Flatpak-NOTICES.md /app/share/doc/aurelia-desktop/notices/Flatpak.md",
+        "test -f /app/lib/libvlc.so.5 && test -f /app/lib/vlc/plugins/codec/libavcodec_plugin.so",
+        "test -f /app/lib/vlc/plugins/audio_output/libpulse_plugin.so"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "path": "tree.tar.gz",
+          "strip-components": 1
+        },
+        {
+          "type": "file",
+          "path": "aurelia-desktop-flatpak"
+        },
+        {
+          "type": "file",
+          "path": "Flatpak-NOTICES.md"
+        }
+      ]
+    }
+  ]
+}
