@@ -12,6 +12,7 @@ using Aurelia.Linux.Core.Settings;
 using Aurelia.Linux.Library;
 using Aurelia.Linux.Management;
 using Aurelia.Linux.Views;
+using Avalonia.Threading;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -64,6 +65,12 @@ public sealed class SettingsWindow : Window
     private readonly ListBox categories = new() { Classes = { "sidebar" } };
     private readonly ScrollViewer content = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     private readonly SheetHost sheets = new();
+    private System.Action? detachUpdater;
+
+    public Func<Task<bool>>? InstallUpdate { get; set; }
+
+    public System.Action? QuitAfterUpdate { get; set; }
+
     private readonly TextBox search = new() { PlaceholderText = "Search settings…", Margin = new Thickness(12, 0, 12, 10) };
 
     public SettingsWindow(AppSession session, LibraryShell? shell, AppServices services, SettingsCategory category = SettingsCategory.General)
@@ -71,6 +78,7 @@ public sealed class SettingsWindow : Window
         this.session = session;
         this.shell = shell;
         this.services = services;
+        Closed += (_, _) => detachUpdater?.Invoke();
         Title = "Aurelia Settings";
         Width = 920;
         Height = 680;
@@ -164,6 +172,8 @@ public sealed class SettingsWindow : Window
 
     private void ShowSelected()
     {
+        detachUpdater?.Invoke();
+        detachUpdater = null;
         if (categories.SelectedItem is not ListBoxItem { Tag: SettingsCategory category }) return;
         var page = new StackPanel { Spacing = 22, Margin = new Thickness(36, 58, 36, 40), MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Left };
         page.Children.Add(PageTitle(CategoryName(category)));
@@ -265,7 +275,7 @@ public sealed class SettingsWindow : Window
             Toggle("Keep This PC Awake While the Server Runs", null, current.KeepAwake, value => Save(current with { KeepAwake = value })),
         };
         var notes = new StackPanel { Spacing = 6, Margin = new Thickness(16, 8) };
-        notes.Children.Add(AdminScope.Note("The server can't be reached while this PC is asleep or turned off. With Aurelia closed, its icon stays in the notification area."));
+        notes.Children.Add(AdminScope.Note("The server can't be reached while this PC is asleep or turned off. Open Aurelia from the application launcher to return to its window. A notification-area icon is also shown where the desktop supports it."));
         if (HostingSettings.FirewallHint(session.Server!.Address.Port) is { } hint) notes.Children.Add(new SelectableTextBlock { Text = hint, Classes = { "subdued" }, FontSize = 12, TextWrapping = TextWrapping.Wrap });
         rows.Add(notes);
         rows.Add(problem);
@@ -543,12 +553,78 @@ public sealed class SettingsWindow : Window
             Value("Installed Version", AppInfo.DisplayVersion),
             Toggle("Check for Updates Automatically", "Once a day, Aurelia looks for a newer version.",
                 Prefs.Store.Read<bool?>("automaticUpdateChecks") ?? true, value => Prefs.Store.Write("automaticUpdateChecks", value))));
-        page.Children.Add(new TextBlock
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } };
+        var notes = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxHeight = 220 };
+        var check = new Button { Content = "Check for Updates", Classes = { "chip" } };
+        var install = new Button { Content = "Download & Install…", Classes = { "primary" }, IsVisible = false };
+        if (services.Updater is { } updater)
         {
-            Text = "Updates are offered once Aurelia for Linux is published. Until then, new test versions are installed for you.",
-            Classes = { "subdued" },
-            TextWrapping = TextWrapping.Wrap,
-        });
+            void RefreshUpdate()
+            {
+                status.Text = updater.Status;
+                notes.Text = updater.Available?.Notes;
+                notes.IsVisible = !string.IsNullOrWhiteSpace(notes.Text);
+                check.IsEnabled = !updater.IsBusy && !updater.RestartRequired;
+                install.IsEnabled = !updater.IsBusy;
+                install.IsVisible = updater.Available is not null || updater.RestartRequired;
+                install.Content = updater.RestartRequired ? "Quit Aurelia" : "Download & Install…";
+            }
+            System.ComponentModel.PropertyChangedEventHandler changed = (_, _) => Dispatcher.UIThread.Post(RefreshUpdate);
+            updater.PropertyChanged += changed;
+            detachUpdater = () => updater.PropertyChanged -= changed;
+            RefreshUpdate();
+            check.Click += async (_, _) => await updater.CheckAsync(userInitiated: true);
+            install.Click += async (_, _) =>
+            {
+                if (updater.RestartRequired) { QuitAfterUpdate?.Invoke(); return; }
+                if (updater.Available is not { } release || !await sheets.ConfirmAsync("Install Aurelia " + release.Version + "?",
+                    "Aurelia downloads the package and checks its SHA-256 checksum. Your package manager then asks for authorization. Playback and this computer's server stop before installation; your library and settings stay. Quit and reopen Aurelia afterwards.", "Install Update", false)) return;
+                if (InstallUpdate is { } action) await action();
+                else await updater.InstallAsync();
+            };
+        }
+        else
+        {
+            status.Text = "Updates are unavailable in this test session.";
+            check.IsEnabled = false;
+        }
+        page.Children.Add(status);
+        page.Children.Add(notes);
+        page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { check, install } });
+        if (services.UpdateTokens is { } tokens)
+        {
+            var token = new TextBox { PasswordChar = '•', PlaceholderText = "GitHub token", MinWidth = 250 };
+            AutomationProperties.SetName(token, "GitHub Update Token");
+            var message = new TextBlock { TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } };
+            var save = new Button { Content = "Save Token", Classes = { "chip" } };
+            var remove = new Button { Content = "Remove Token", Classes = { "chip" } };
+            save.Click += async (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(token.Text)) { message.Text = "Enter a token first."; return; }
+                try
+                {
+                    await tokens.SaveAsync(token.Text.Trim(), CancellationToken.None);
+                    token.Text = "";
+                    message.Text = "The token is saved in your desktop keyring.";
+                }
+                catch (CredentialStoreUnavailableException error) { message.Text = error.Message; }
+            };
+            remove.Click += async (_, _) =>
+            {
+                try { await tokens.DeleteAsync(CancellationToken.None); message.Text = "The saved token was removed."; }
+                catch (CredentialStoreUnavailableException error) { message.Text = error.Message; }
+            };
+            page.Children.Add(Section("GitHub Access", new StackPanel
+            {
+                Spacing = 10,
+                Margin = new Thickness(16, 12),
+                Children =
+                {
+                    new TextBlock { Text = "For a private repository, use a fine-grained GitHub token with Contents: Read-only access to lucasfd3/Aurelia. It stays in your desktop keyring and is sent only to GitHub's API.", TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } },
+                    token, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { save, remove } }, message,
+                },
+            }));
+        }
     }
 
     private void Advanced(StackPanel page)

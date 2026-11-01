@@ -11,8 +11,13 @@ public static class AppInfo
     public const string ApplicationId = "io.github.lucasfd3.Aurelia";
 
     /// <summary>Version and build, for example "0.1.0 (1)".</summary>
-    public static string DisplayVersion { get; } = FormatVersion(
-        typeof(AppInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+    private static string? InformationalVersion => typeof(AppInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+
+    public static string DisplayVersion { get; } = FormatVersion(InformationalVersion);
+
+    public static Version CurrentVersion { get; } = Version.TryParse(InformationalVersion?.Split('+')[0], out var version) ? version : new Version(0, 0, 0);
+
+    public static int Build { get; } = int.TryParse(InformationalVersion?.Split("build.").Last().Split('.')[0], out var build) ? build : 0;
 
     public static string FormatVersion(string? informationalVersion)
     {

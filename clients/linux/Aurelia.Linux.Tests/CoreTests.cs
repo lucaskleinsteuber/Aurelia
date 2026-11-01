@@ -59,6 +59,20 @@ public sealed class CoreTests
 
 public sealed class StartupTests
 {
+    [Fact]
+    public void ABackgroundLoginEntryStartsOnlyAnEnabledLocalHost()
+    {
+        var settings = new Core.Settings.MemorySettingsStore();
+        settings.Write("hostKeepRunning", true);
+        Assert.False(Program.StartsBackgroundServer(settings));
+        settings.Write("operatingMode", "client");
+        Assert.False(Program.StartsBackgroundServer(settings));
+        settings.Write("operatingMode", "host");
+        Assert.True(Program.StartsBackgroundServer(settings));
+        settings.Write("hostKeepRunning", false);
+        Assert.False(Program.StartsBackgroundServer(settings));
+    }
+
     /// <summary>Checks startup policy without replacing Avalonia's already initialized headless platform.</summary>
     [Theory]
     [InlineData(true, null, DisplayBackendPreference.WaylandWithX11Fallback)]

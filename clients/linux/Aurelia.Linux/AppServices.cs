@@ -1,9 +1,11 @@
 using Aurelia.Linux.Core.Api;
+using Aurelia.Linux.Core;
 using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Platform;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Core.Settings;
 using Aurelia.Linux.Core.Hosting;
+using Aurelia.Linux.Core.Updates;
 using Aurelia.Linux.Playback;
 
 namespace Aurelia.Linux;
@@ -23,12 +25,15 @@ public sealed record AppServices(
     string? StateDirectory = null,
     IPlaybackSystem? PlaybackSystem = null,
     Func<ILocalServerHost>? CreateHost = null,
-    IHostingSystem? HostingSystem = null)
+    IHostingSystem? HostingSystem = null,
+    AppUpdater? Updater = null,
+    IUpdateTokenStore? UpdateTokens = null)
 {
     public static AppServices CreateDefault()
     {
         var paths = AppPaths.FromEnvironment();
         var settings = new JsonFileSettingsStore(paths.SettingsFile);
+        var tokens = new UpdateTokenStore();
         return new(
             settings,
             DesktopButtonLayoutReader.Read(),
@@ -43,7 +48,9 @@ public sealed record AppServices(
             paths.StateDirectory,
             new LinuxPlaybackSystem(action => Avalonia.Threading.Dispatcher.UIThread.Post(action)),
             () => new LocalServerHost(LocalServerOptions.ForThisComputer(paths)),
-            new LinuxHostingSystem(paths));
+            new LinuxHostingSystem(paths),
+            new AppUpdater(new GitHubReleaseSource(tokens), new LinuxPackageInstaller(), settings, paths.CacheDirectory, AppInfo.CurrentVersion, AppInfo.Build),
+            tokens);
     }
 
     /// <summary>Services that touch nothing outside the process, for tests.</summary>

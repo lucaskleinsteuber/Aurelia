@@ -44,7 +44,8 @@ of the Mac's colored ones, placed where the desktop puts them. KDE Plasma's `But
 `ButtonsOnRight` in kwinrc are read first, then GNOME's `button-layout` (also used by Cinnamon, Budgie
 and MATE), otherwise they sit on the right. Pressing on empty space in the top 52 pixels moves the
 window and a double click maximizes it (`Controls/AppWindowBehavior.cs`); F11 switches full screen,
-F9 the sidebar, Ctrl+Q quits. The sidebar can be dragged between 210 and 300 pixels wide.
+F9 the sidebar, Ctrl+Q quits. Opening Aurelia from the application launcher again brings back
+the existing window, including a host running in the background; it does not start a second host. The sidebar can be dragged between 210 and 300 pixels wide.
 
 ## Screens and settings
 
@@ -78,7 +79,9 @@ most twelve hours, and the sidebar's profile button switches profiles.
 When a profile opens, `Library/LibraryStore.cs` loads Home, every title, the collections and the
 watchlist together and keeps them current with `Library/LibrarySync.cs`: a 30-second long poll of
 `/api/v1/sync/changes` with the Mac app's refresh plan (Home plus changed titles, or everything);
-its cursor is kept per server, profile and session. `Library/LibraryClient.cs` holds every library
+its cursor is kept per server, profile and session. Home also refreshes at the server's next
+recommendation deadline even when sync reports no changes; resting or closing the profile cancels
+that timer. `Library/LibraryClient.cs` holds every library
 endpoint; catalog lists load page by page (100, or 500 on servers that allow it) and start again
 when the library changes while loading.
 
@@ -90,7 +93,10 @@ and detail pages for titles (seasons, episodes, trailers, extras, cast and crew,
 people and collections. Every title has the Mac app's context menu; season and series changes
 are made on the series and ask first with the number of episodes. Artwork is requested in the
 smallest width that stays sharp (320, 640, 1280, 1920) and kept in memory (96 MB) and on disk
-(512 MB, only artwork with a revision). Ctrl+F opens the library search, Alt+Left goes back.
+(512 MB, only artwork with a revision). Resting the pointer or keyboard focus on a movie/show for 150 ms prepares
+its detail, playback plan and hero still. The profile-local cache holds at most twelve entries for
+30 seconds, with two preparations at once; leaving or removing the card cancels its work. It opens
+no ticket or video stream. Ctrl+F opens the library search, Alt+Left goes back.
 
 ## Settings
 
@@ -105,13 +111,31 @@ app's, with a search field (`Settings/SettingsWindow.cs`):
   "Restore Playback Defaults".
 - Profiles and Devices: the open profile, switching profiles, and changing, turning on or removing
   the own PIN (owners and administrators always keep one); a PIN change locks the profile.
-- Updates: the installed version and automatic checks.
+- Updates: the installed version, daily automatic checks, release notes and a confirmed package update.
 - Advanced: the server connection (name, address, fingerprint, profile) and "Disconnect This PC".
 
 When nothing plays and nobody used Aurelia for the chosen minutes, Aurelia lets go of a server on
 another computer so it can sleep: the sync stops, idle connections close and "Aurelia Is Resting"
 shows. Any click or key wakes the server and continues with the open profile. Ctrl+/ lists the
 keyboard shortcuts.
+
+## App updates
+
+Settings → Updates checks the stable Linux app releases on GitHub, independently of the Mac/server
+versions (`linux-app-<version>-<build>` tags). It chooses the package for the installed format,
+requires a higher build and a version that does not go backwards, and downloads only complete
+release assets from this repository. Daily checks can be turned off; Check for Updates always
+works manually. A private repository needs a fine-grained GitHub token with Contents: Read-only
+access, saved only in a separate desktop-keyring entry. Neither server credentials nor the update
+token is stored in settings or forwarded with a download redirect.
+
+Download & Install asks first, checks the package size and the exact SHA-256 from the release's
+`SHA256SUMS`, and only then stops playback and this PC's server. Native packages use `pkexec` with
+`apt-get`, `dnf`/`zypper` or `pacman`; the desktop shows the administrator prompt. Flatpak uses the
+host's per-user Flatpak installation. A cancelled or failed install can be retried; a stopped
+host is started again on failure. After success, Quit Aurelia closes even a background host, so
+reopening starts the newly installed version. The package manager replaces app files and leaves
+the user's data, settings and keyring entries in place.
 
 ## Server management
 
@@ -302,3 +326,8 @@ scripts/install-linux-app.sh <ssh host>
 
 installs the newest build on a Linux computer with its own package manager. It replaces only the
 package; settings in the home folder stay.
+
+## Feature inventory
+
+[LINUX_APP_PARITY.md](LINUX_APP_PARITY.md) maps each Mac capability to the Linux implementation,
+the relevant test scenario, source-review limits and the separate desktop/package checks.

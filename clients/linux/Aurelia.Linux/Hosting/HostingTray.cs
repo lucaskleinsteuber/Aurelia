@@ -47,7 +47,7 @@ internal sealed class HostingTray : IDisposable
     private static WindowIcon? Picture()
     {
         if (Application.Current?.FindResource("IconAurelia") is not Geometry mark) return null;
-        var bitmap = new RenderTargetBitmap(new PixelSize(64, 64));
+        using var bitmap = new RenderTargetBitmap(new PixelSize(64, 64));
         using (var context = bitmap.CreateDrawingContext())
         {
             context.DrawRectangle(new SolidColorBrush(Color.Parse("#0A84FF")), null, new RoundedRect(new Rect(0, 0, 64, 64), 14));

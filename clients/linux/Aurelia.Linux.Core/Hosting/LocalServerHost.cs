@@ -353,6 +353,7 @@ public sealed class LocalServerHost : ILocalServerHost
             "--lan-port", settings.LanHttpsPort.ToString(CultureInfo.InvariantCulture),
             "--host-parent-pid", Environment.ProcessId.ToString(CultureInfo.InvariantCulture), "--local-https",
         }) start.ArgumentList.Add(argument);
+        HostedServerEnvironment.Configure(start.Environment);
         if (lan) start.ArgumentList.Add("--lan");
         start.Environment["AURELIA_LAN_ENABLED"] = lan ? "true" : "false";
         start.Environment["AURELIA_HOST_READY_NONCE"] = nonce;
@@ -767,6 +768,7 @@ public sealed class LocalServerHost : ILocalServerHost
                 RedirectStandardOutput = true,
                 RedirectStandardError = true
             };
+            HostedServerEnvironment.Configure(start.Environment);
             foreach (var argument in new[] { "database", "restore-prepared", "--id", restore.ToString("D"), "--data-dir", options.DataDirectory })
                 start.ArgumentList.Add(argument);
             var succeeded = false;

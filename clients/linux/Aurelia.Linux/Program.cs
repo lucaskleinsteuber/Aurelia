@@ -1,4 +1,8 @@
 using Aurelia.Linux.Core;
+using Aurelia.Linux.Core.Platform;
+using Aurelia.Linux.Core.Flow;
+using Aurelia.Linux.Core.Settings;
+using Avalonia.Media;
 using Avalonia;
 
 namespace Aurelia.Linux;
@@ -8,7 +12,24 @@ public enum DisplayBackendPreference { PlatformDefault, WaylandWithX11Fallback, 
 public static class Program
 {
     [STAThread]
-    public static int Main(string[] args) => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    public static int Main(string[] args)
+    {
+        using var instance = new AppInstance(AppPaths.FromEnvironment().ConfigDirectory);
+        if (!instance.IsOwner)
+        {
+            try { instance.NotifyExistingAsync(!args.Contains("--background", StringComparer.Ordinal)).GetAwaiter().GetResult(); return 0; }
+            catch (Exception error) when (error is IOException or OperationCanceledException)
+            {
+                Console.Error.WriteLine("Aurelia is already running, but its window could not be reached. Try again in a moment.");
+                return 1;
+            }
+        }
+        // A stale login entry must not open a window or start hosting after it was disabled.
+        if (args.Contains("--background", StringComparer.Ordinal)
+            && !StartsBackgroundServer(new JsonFileSettingsStore(AppPaths.FromEnvironment().SettingsFile))) return 0;
+        App.Instance = instance;
+        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     /// <summary>
     /// Wayland first, as most current desktops run it; X11 when there is no Wayland session or when
@@ -16,7 +37,8 @@ public static class Program
     /// </summary>
     public static AppBuilder BuildAvaloniaApp()
     {
-        var builder = AppBuilder.Configure<App>().WithInterFont();
+        var builder = AppBuilder.Configure<App>().WithInterFont()
+            .With(new FontManagerOptions { DefaultFamilyName = "avares://Avalonia.Fonts.Inter/Assets#Inter" });
         var preference = SelectDisplayBackend(OperatingSystem.IsLinux(), Environment.GetEnvironmentVariable("AURELIA_DISPLAY_BACKEND"));
         if (preference == DisplayBackendPreference.PlatformDefault) return builder.UsePlatformDetect();
         // X11 is configured first: it is the fallback that UseWaylandWithFallback switches to.
@@ -27,6 +49,9 @@ public static class Program
             .UseHarfBuzz()
             .With(new WaylandPlatformOptions { AppId = AppInfo.ApplicationId });
     }
+
+    public static bool StartsBackgroundServer(ISettingsStore settings) =>
+        new AppFlow(settings).Mode == OperatingMode.Host && HostingSettings.Read(settings).KeepRunning;
 
     /// <summary>Pure startup policy; inspecting it never registers another graphics platform in a running app.</summary>
     public static DisplayBackendPreference SelectDisplayBackend(bool isLinux, string? requested) => !isLinux

@@ -49,7 +49,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
         {
             if (e.PropertyName == nameof(AppSession.Library)) StartPlayOn();
         };
-        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Close) });
+        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Quit) });
         Closing += (_, e) =>
         {
             // With "Also when Aurelia is closed", closing only hides the window; the server keeps running.
@@ -65,10 +65,18 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
         Activated += (_, _) => NoteUse();
         Deactivated += (_, _) => lastUse = services.Time.GetUtcNow();
         restCheck = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-        restCheck.Tick += (_, _) => CheckRest();
+        restCheck.Tick += (_, _) =>
+        {
+            CheckRest();
+            if (services.Updater is { } updater) _ = updater.CheckAsync(userInitiated: false);
+        };
         restCheck.Start();
         ShowScreen();
-        if (startSession) Opened += async (_, _) => await Session.StartAsync(StartHostingAsync);
+        if (startSession) Opened += async (_, _) =>
+        {
+            await Session.StartAsync(StartHostingAsync);
+            if (services.Updater is { } updater) await updater.CheckAsync(userInitiated: false);
+        };
         Closed += (_, _) =>
         {
             Dispose();
@@ -88,6 +96,21 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
     private void OnFlowChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(AppFlow.Screen)) ShowScreen();
+        if (e.PropertyName == nameof(AppFlow.Mode) && Flow.Mode == OperatingMode.Client) _ = DisableBackgroundHostingAsync();
+    }
+
+    private async Task DisableBackgroundHostingAsync()
+    {
+        var current = HostingSettings.Read(services.Settings);
+        HostingSettings.Write(services.Settings, current with { KeepRunning = false, StartAtSignIn = false });
+        try
+        {
+            if (services.HostingSystem is { } system) await system.ConfigureBackgroundAsync(false, false);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or InvalidOperationException or Tmds.DBus.Protocol.DBusExceptionBase)
+        {
+            Session.Message = "Automatic background startup could not be removed. Aurelia will ignore the old login entry in client mode.";
+        }
     }
 
     private void ShowScreen()
@@ -243,7 +266,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
             open.Activate();
             return open;
         }
-        settings = new Settings.SettingsWindow(Session, shell, services, category);
+        settings = new Settings.SettingsWindow(Session, shell, services, category) { InstallUpdate = InstallUpdateAsync, QuitAfterUpdate = Quit };
         settings.Closed += (_, _) => settings = null;
         settings.HostingChanged += () =>
         {
@@ -252,6 +275,24 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
         };
         settings.Show(this);
         return settings;
+    }
+
+    private async Task<bool> InstallUpdateAsync()
+    {
+        if (services.Updater is not { } updater) return false;
+        var restartHost = hosting?.Host.State is LocalServerState.Running or LocalServerState.SetupRequired;
+        var stopped = false;
+        var installed = await updater.InstallAsync(async () =>
+        {
+            if (Player is { } player) await player.CloseAsync();
+            if (restartHost && hosting is not null)
+            {
+                await hosting.Host.StopAsync();
+                stopped = true;
+            }
+        });
+        if (!installed && stopped && hosting is not null) await hosting.StartAsync();
+        return installed;
     }
 
     private void NoteUse()
@@ -304,6 +345,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
     public void Dispose()
     {
         restCheck.Stop();
+        services.Updater?.Dispose();
         playOn?.Cancel();
         playOn?.Dispose();
         playOn = null;
