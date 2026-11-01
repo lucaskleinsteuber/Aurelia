@@ -1,11 +1,16 @@
+using System.ComponentModel;
+using Aurelia.Contracts;
 using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core;
 using Aurelia.Linux.Core.Flow;
+using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Library;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Chrome;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 
 namespace Aurelia.Linux.Views;
@@ -15,30 +20,41 @@ public sealed record SidebarItem(LibraryDestination Destination, string Title, G
 
 /// <summary>
 /// The window's frame: the blurred sidebar with the library pages, and the page beside it. Pages
-/// stay full height beneath the sidebar, like the Mac app's.
+/// stay full height beneath the sidebar, like the Mac app's. Each sidebar page stays alive while
+/// another is shown, so its scroll position and artwork stay; detail pages open over it and Back
+/// (or Alt+Left) returns.
 /// </summary>
-public sealed partial class LibraryShell : UserControl
+public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 {
     public const double MinimumSidebarWidth = 210;
     public const double MaximumSidebarWidth = 300;
 
+    private readonly Dictionary<LibraryDestination, LibraryPageBase> pages = [];
+    private readonly List<LibraryPageBase> details = [];
     private double sidebarWidth;
     private double? resizeStartWidth;
     private double resizeStartX;
     private bool sidebarVisible = true;
     private double leadingInset;
     private AppSession? session;
+    private LibraryContext? context;
+    private bool restoring;
 
     public LibraryShell()
     {
         InitializeComponent();
         SidebarBackdrop.Source = PageLayer;
         sidebarWidth = Sidebar.Width;
-
-        SidebarList.ItemsSource = SidebarLayout.Default.VisibleItems(supportsWatchlist: true)
-            .Select(destination => new SidebarItem(destination, destination.Title(), Icon(destination)))
-            .ToList();
-        SidebarList.SelectionChanged += (_, _) => ShowSelectedPage();
+        BuildSidebar(SidebarLayout.Default, supportsWatchlist: true);
+        SidebarList.SelectionChanged += (_, _) =>
+        {
+            if (restoring) return;
+            details.Clear();
+            ShowCurrentPage();
+            if (context is { } open)
+                open.Store.Preferences.SaveLastDestination(open.Store.Client.Server.ServerId, open.Store.Client.Profile.User.Id, Destination);
+            if (Destination == LibraryDestination.Home && context is { } current) _ = current.Store.RefreshHomeAsync();
+        };
         SidebarToggle.Click += (_, _) => SidebarVisible = !SidebarVisible;
         ProfileButton.Click += async (_, _) =>
         {
@@ -61,8 +77,16 @@ public sealed partial class LibraryShell : UserControl
             resizeStartWidth = null;
             e.Pointer.Capture(null);
         };
+        ErrorDismiss.Click += (_, _) => context?.Store.ClearError();
+        ErrorRetry.Click += async (_, _) =>
+        {
+            if (context is null) return;
+            context.Store.ClearError();
+            await context.Store.RefreshAsync();
+        };
+        KeyDown += OnKeyDown;
         SidebarList.SelectedIndex = 0;
-        ShowSelectedPage();
+        ShowCurrentPage();
         UpdateSidebarLayout();
     }
 
@@ -107,33 +131,213 @@ public sealed partial class LibraryShell : UserControl
         }
     }
 
-    /// <summary>The connection whose profile shows at the foot of the sidebar; clicking it switches profiles.</summary>
+    /// <summary>The connection whose profile shows at the foot of the sidebar and whose library the pages show.</summary>
     public AppSession? Session
     {
         get => session;
         set
         {
+            if (session is not null) session.PropertyChanged -= OnSessionChanged;
             session = value;
-            ProfileFooter.Children.Clear();
-            if (value?.Profile is { } profile)
-            {
-                ProfileFooter.Children.Add(new ProfileAvatar(profile.User.Id, profile.User.Username, 30));
-                ProfileFooter.Children.Add(new TextBlock { Text = profile.User.Username, FontWeight = FontWeight.SemiBold, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
-                AutomationProperties.SetName(ProfileButton, $"Switch Profile, {profile.User.Username}");
-            }
-            else
-            {
-                ProfileFooter.Children.Add(ConnectionLabel);
-            }
+            if (session is not null) session.PropertyChanged += OnSessionChanged;
+            ShowProfile();
+            AttachLibrary(session?.Library);
         }
     }
 
-    /// <summary>The page shown now.</summary>
-    internal LibraryPage? CurrentPage => PageHost.Content as LibraryPage;
+    /// <summary>The page shown now: the open detail page, or the sidebar page.</summary>
+    internal LibraryPageBase? CurrentPage => PageHost.Content as LibraryPageBase;
 
-    private void ShowSelectedPage()
+    internal SheetHost SheetHost => Sheets;
+
+    internal int DetailDepth => details.Count;
+
+    public void OpenDetail(CatalogItemSummary item)
     {
-        PageHost.Content = new LibraryPage(Destination) { SidebarOverlap = sidebarVisible ? sidebarWidth : 0 };
+        if (context is null) return;
+        Push(new DetailPage(context, item));
+    }
+
+    public void OpenCollection(CollectionSummary collection)
+    {
+        if (context is null) return;
+        Push(new CollectionDetailPage(context, collection));
+    }
+
+    public void OpenPerson(string name, string? personKey)
+    {
+        if (context is null) return;
+        Push(new PersonPage(context, name, personKey));
+    }
+
+    public void Back()
+    {
+        if (details.Count == 0) return;
+        details.RemoveAt(details.Count - 1);
+        ShowCurrentPage();
+    }
+
+    public void Play(CatalogItemSummary item, bool fromLastPosition) =>
+        _ = Sheets.ConfirmAsync("Playback Is Coming", $"Playing “{item.Title}” arrives with the player in the next test build.", "OK", destructive: false);
+
+    public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected)
+    {
+        if (context is null) return;
+        _ = Sheets.ShowAsync(new CollectionEditorSheet(context, Sheets, collection, preselected));
+    }
+
+    public Task<bool> ConfirmAsync(string title, string message, string confirmLabel, bool destructive) =>
+        Sheets.ConfirmAsync(title, message, confirmLabel, destructive);
+
+    /// <summary>Ctrl+F: from Home or a detail page it opens Library; otherwise it focuses the page's search.</summary>
+    public void FindInLibrary()
+    {
+        if (context is null) return;
+        details.Clear();
+        if (Destination is not (LibraryDestination.Library or LibraryDestination.Movies or LibraryDestination.TvShows or LibraryDestination.RecentlyAdded))
+            Destination = LibraryDestination.Library;
+        ShowCurrentPage();
+        if (CurrentPage is BrowsePage browse) Avalonia.Threading.Dispatcher.UIThread.Post(browse.FocusSearch);
+    }
+
+    private void OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (Sheets.IsShowing) return;
+        if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control)
+        {
+            FindInLibrary();
+            e.Handled = true;
+        }
+        else if ((e.Key == Key.Left && e.KeyModifiers == KeyModifiers.Alt) || (e.Key == Key.Escape && details.Count > 0))
+        {
+            Back();
+            e.Handled = true;
+        }
+    }
+
+    private void OnSessionChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AppSession.Library)) AttachLibrary(session?.Library);
+        if (e.PropertyName == nameof(AppSession.Profile)) ShowProfile();
+    }
+
+    private void AttachLibrary(LibraryStore? store)
+    {
+        if (context?.Store is { } old) old.PropertyChanged -= OnStoreChanged;
+        pages.Clear();
+        details.Clear();
+        context = store is null ? null : new LibraryContext(store, this);
+        if (store is not null)
+        {
+            store.PropertyChanged += OnStoreChanged;
+            BuildSidebar(store.Preferences.Sidebar(), store.Client.SupportsWatchlist);
+            RestoreDestination(store);
+        }
+        ShowCurrentPage();
+        UpdateError();
+    }
+
+    private void OnStoreChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(LibraryStore.Error)) UpdateError();
+    }
+
+    private void UpdateError()
+    {
+        var message = context?.Store.Error;
+        ErrorBanner.IsVisible = message is not null;
+        ErrorText.Text = message;
+    }
+
+    /// <summary>The start screen preference, or the last page for this server and profile, as on the Mac.</summary>
+    private void RestoreDestination(LibraryStore store)
+    {
+        var prefs = store.Preferences;
+        LibraryDestination target = prefs.StartScreen switch
+        {
+            "home" or "continueWatching" => LibraryDestination.Home,
+            "library" => LibraryDestination.Library,
+            "movies" => LibraryDestination.Movies,
+            "series" => LibraryDestination.TvShows,
+            "collections" => LibraryDestination.Collections,
+            "watchlist" => store.Client.SupportsWatchlist ? LibraryDestination.Watchlist : LibraryDestination.Library,
+            "recentlyAdded" => LibraryDestination.RecentlyAdded,
+            _ => prefs.LastDestination(store.Client.Server.ServerId, store.Client.Profile.User.Id) ?? LibraryDestination.Home,
+        };
+        if (target == LibraryDestination.Watchlist && !store.Client.SupportsWatchlist) target = LibraryDestination.Home;
+        restoring = true;
+        Destination = SidebarItems.Any(item => item.Destination == target) ? target : SidebarItems.Count > 0 ? SidebarItems[0].Destination : LibraryDestination.Library;
+        restoring = false;
+    }
+
+    private void BuildSidebar(SidebarLayout layout, bool supportsWatchlist)
+    {
+        var selected = SidebarList.SelectedItem as SidebarItem;
+        restoring = true;
+        SidebarList.ItemsSource = layout.VisibleItems(supportsWatchlist)
+            .Select(destination => new SidebarItem(destination, destination.Title(), Icon(destination)))
+            .ToList();
+        SidebarList.SelectedItem = SidebarItems.FirstOrDefault(item => item.Destination == selected?.Destination) ?? (SidebarItems.Count > 0 ? SidebarItems[0] : null);
+        restoring = false;
+    }
+
+    private void Push(LibraryPageBase page)
+    {
+        details.Add(page);
+        ShowCurrentPage();
+    }
+
+    private void ShowCurrentPage()
+    {
+        if (context is null)
+        {
+            PageHost.Content = new TextBlock
+            {
+                Text = "Loading your library…",
+                Classes = { "subdued" },
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            return;
+        }
+        var page = details.Count > 0 ? details[^1] : PageFor(Destination);
+        page.SidebarOverlap = sidebarVisible ? sidebarWidth : 0;
+        PageHost.Content = page;
+    }
+
+    private LibraryPageBase PageFor(LibraryDestination destination)
+    {
+        if (pages.TryGetValue(destination, out var existing)) return existing;
+        LibraryPageBase page = destination switch
+        {
+            LibraryDestination.Home => new HomePage(context!),
+            LibraryDestination.Library => new BrowsePage(context!, BrowseSection.Library),
+            LibraryDestination.Movies => new BrowsePage(context!, BrowseSection.Movies),
+            LibraryDestination.TvShows => new BrowsePage(context!, BrowseSection.TvShows),
+            LibraryDestination.RecentlyAdded => new BrowsePage(context!, BrowseSection.RecentlyAdded),
+            LibraryDestination.Collections => new CollectionsPage(context!),
+            LibraryDestination.Watchlist => new WatchlistPage(context!),
+            LibraryDestination.History => new HistoryPage(context!),
+            _ => new StatisticsPage(context!),
+        };
+        page.Rebuild();
+        pages[destination] = page;
+        return page;
+    }
+
+    private void ShowProfile()
+    {
+        ProfileFooter.Children.Clear();
+        if (session?.Profile is { } profile)
+        {
+            ProfileFooter.Children.Add(new ProfileAvatar(profile.User.Id, profile.User.Username, 30));
+            ProfileFooter.Children.Add(new TextBlock { Text = profile.User.Username, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            AutomationProperties.SetName(ProfileButton, $"Switch Profile, {profile.User.Username}");
+        }
+        else
+        {
+            ProfileFooter.Children.Add(ConnectionLabel);
+        }
     }
 
     private void UpdateSidebarLayout()

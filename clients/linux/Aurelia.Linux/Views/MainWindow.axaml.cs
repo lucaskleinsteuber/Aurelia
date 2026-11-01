@@ -3,6 +3,8 @@ using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Flow;
+using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Settings;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -35,7 +37,8 @@ public sealed partial class MainWindow : Window
         var discovery = new DiscoveryCache(services.CreateDiscovery());
         var api = new AureliaApi(services.Transport);
         Session = new AppSession(Flow, api, services.Credentials,
-            new ServerWakeUp(api, services.WakeOnLan, () => discovery.Latest, services.Time), services.DeviceName, services.Time);
+            new ServerWakeUp(api, services.WakeOnLan, () => discovery.Latest, services.Time), services.DeviceName, services.Time,
+            new GeneralPreferences(services.Settings), new ArtworkCache(services.ArtworkDirectory));
         Flow.PropertyChanged += OnFlowChanged;
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Close) });
         ShowScreen();

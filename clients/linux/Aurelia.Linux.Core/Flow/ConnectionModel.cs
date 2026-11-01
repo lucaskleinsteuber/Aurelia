@@ -121,7 +121,7 @@ public sealed class ConnectionModel : ObservableObject, IDisposable
         try
         {
             var paired = await session.Api.PairAsync(server, Code, session.DeviceName, CancellationToken.None);
-            await session.CompletePairingAsync(paired);
+            await session.CompletePairingAsync(paired, server.Info.Capabilities);
         }
         catch (AureliaApiException failure)
         {

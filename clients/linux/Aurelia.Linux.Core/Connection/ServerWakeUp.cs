@@ -18,6 +18,9 @@ public enum ConnectionStatus
 /// seconds. A server that answers at another address it announces on the network is accepted
 /// only with the same id and key, and that address is remembered.
 /// </summary>
+/// <summary>A server that answered, with what it reported about itself.</summary>
+public sealed record ReachedServer(StoredServer Server, Aurelia.Contracts.ServerInfoResponse Info);
+
 public sealed class ServerWakeUp(AureliaApi api, IWakeOnLan wakeOnLan, Func<IReadOnlyList<DiscoveredServer>> discovered, TimeProvider time)
 {
     public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
@@ -27,7 +30,7 @@ public sealed class ServerWakeUp(AureliaApi api, IWakeOnLan wakeOnLan, Func<IRea
     public static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(20);
 
     /// <summary>Returns the server as reached (possibly at a new address), or null when it stayed silent.</summary>
-    public async Task<StoredServer?> ReachAsync(StoredServer server, Action<ConnectionStatus> report, CancellationToken cancellation)
+    public async Task<ReachedServer?> ReachAsync(StoredServer server, Action<ConnectionStatus> report, CancellationToken cancellation)
     {
         report(ConnectionStatus.Connecting);
         if (await ProbeAsync(server, cancellation) is { } reached) return reached;
@@ -50,7 +53,7 @@ public sealed class ServerWakeUp(AureliaApi api, IWakeOnLan wakeOnLan, Func<IRea
         return null;
     }
 
-    private async Task<StoredServer?> ProbeAsync(StoredServer server, CancellationToken cancellation)
+    private async Task<ReachedServer?> ProbeAsync(StoredServer server, CancellationToken cancellation)
     {
         var candidates = new List<Uri> { server.Address };
         candidates.AddRange(discovered().Where(found => found.ServerId == server.ServerId && found.Address != server.Address)
@@ -61,7 +64,7 @@ public sealed class ServerWakeUp(AureliaApi api, IWakeOnLan wakeOnLan, Func<IRea
             {
                 var at = server with { Address = address };
                 var info = await api.ServerInfoAsync(at, cancellation, ProbeTimeout);
-                return at with { WakeOnLanAddresses = info.WakeOnLanAddresses is { Count: > 0 } known ? known : server.WakeOnLanAddresses };
+                return new ReachedServer(at with { WakeOnLanAddresses = info.WakeOnLanAddresses is { Count: > 0 } known ? known : server.WakeOnLanAddresses }, info);
             }
             catch (AureliaApiException error) when (error.IsUnreachable)
             {

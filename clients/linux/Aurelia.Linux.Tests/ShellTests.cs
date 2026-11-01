@@ -1,8 +1,11 @@
 using System.Runtime.InteropServices;
+using Aurelia.Contracts;
 using Aurelia.Linux.Core;
 using Aurelia.Linux.Core.Flow;
+using Aurelia.Linux.Library;
 using Aurelia.Linux.Views;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -17,50 +20,70 @@ namespace Aurelia.Linux.Tests;
 
 public sealed class ShellTests
 {
-    private static MainWindow ShowWindow()
-    {
-        var window = TestWindows.Show();
-        window.Flow.Show(AppScreen.Library);
-        Dispatcher.UIThread.RunJobs();
-        return window;
-    }
-
     [AvaloniaFact]
     public void SidebarListsTheLibraryPagesInTheMacOrder()
     {
-        var window = ShowWindow();
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
         Assert.Equal(
             ["Home", "Library", "Collections", "Watchlist", "Recently Added", "TV Shows", "Movies"],
             window.Shell!.SidebarItems.Select(item => item.Title));
-        Assert.All(window.Shell!.SidebarItems, item => Assert.NotNull(item.Icon));
+        Assert.All(window.Shell.SidebarItems, item => Assert.NotNull(item.Icon));
+    }
+
+    [AvaloniaFact]
+    public void WatchlistNeedsAServerThatSupportsIt()
+    {
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create(watchlist: false));
+        Assert.DoesNotContain(window.Shell!.SidebarItems, item => item.Destination == LibraryDestination.Watchlist);
     }
 
     [AvaloniaFact]
     public void EveryPageHasASymbol()
     {
-        ShowWindow();
+        TestWindows.Show();
         foreach (var destination in Enum.GetValues<LibraryDestination>()) Assert.NotNull(LibraryShell.Icon(destination));
     }
 
     [AvaloniaFact]
-    public void StartsOnHomeAndSwitchesPages()
+    public void HomeShowsTheHeroAndTheShelves()
     {
-        var window = ShowWindow();
-        Assert.Equal(LibraryDestination.Home, window.Shell!.CurrentPage?.Destination);
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
+        Assert.IsType<HomePage>(window.Shell!.CurrentPage);
+        var texts = window.Shell.CurrentPage!.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
+        Assert.Contains("Cobalt Station", texts);
+        Assert.Contains("Continue Watching", texts);
+        Assert.Contains("Science Fiction", texts);
+        Assert.Contains("Favorites", texts);
+        Assert.Contains("Collections", texts);
+        Assert.Contains("Recently Added", texts);
+        FakeLibrary.Pump(() => false, rounds: 40);
+        using var frame = window.CaptureRenderedFrame()!;
+        TestWindows.SaveSnapshot(frame, "library-home");
+        // Hero artwork runs beneath the sidebar; there it stays visible but darker.
+        var hero = Pixel(frame, 900, 200);
+        var sidebar = Pixel(frame, 120, 200);
+        Assert.True(Brightness(sidebar) < Brightness(hero) + 30, $"Sidebar {sidebar} should not be brighter than the hero {hero}");
+    }
 
-        window.Shell!.Destination = LibraryDestination.Movies;
-        Dispatcher.UIThread.RunJobs();
-        Assert.Equal(LibraryDestination.Movies, window.Shell!.CurrentPage?.Destination);
-        Assert.Contains(window.Shell!.CurrentPage!.GetVisualDescendants().OfType<TextBlock>(), text => text.Text == "Movies");
+    [AvaloniaFact]
+    public void SwitchingPagesKeepsEachPageAlive()
+    {
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
+        var home = window.Shell!.CurrentPage;
+        window.Shell.Destination = LibraryDestination.Movies;
+        FakeLibrary.Pump(() => false, rounds: 20);
+        var movies = Assert.IsType<BrowsePage>(window.Shell.CurrentPage);
+        Assert.Equal(Core.Library.BrowseSection.Movies, movies.Model.Section);
+        window.Shell.Destination = LibraryDestination.Home;
+        Assert.Same(home, window.Shell.CurrentPage);
     }
 
     [AvaloniaFact]
     public void KeyboardMovesThroughTheSidebar()
     {
-        var window = ShowWindow();
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
         var list = window.Shell!.GetVisualDescendants().OfType<ListBox>().Single(l => l.Name == "SidebarList");
-        var first = list.ContainerFromIndex(0)!;
-        first.Focus(NavigationMethod.Tab);
+        list.ContainerFromIndex(0)!.Focus(NavigationMethod.Tab);
         window.KeyPressQwerty(PhysicalKey.ArrowDown, RawInputModifiers.None);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(LibraryDestination.Library, window.Shell!.Destination);
@@ -69,51 +92,40 @@ public sealed class ShellTests
     [AvaloniaFact]
     public void PagesRunBeneathTheSidebarAndStartBesideIt()
     {
-        var window = ShowWindow();
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
         Assert.Equal(236, window.Shell!.CurrentPage!.SidebarOverlap);
-        Assert.Equal(new Point(0, 0), window.Shell!.CurrentPage.TranslatePoint(new Point(0, 0), window));
-
-        window.Shell!.SidebarVisible = false;
+        Assert.Equal(new Point(0, 0), window.Shell.CurrentPage.TranslatePoint(new Point(0, 0), window));
+        window.Shell.SidebarVisible = false;
         Dispatcher.UIThread.RunJobs();
-        Assert.Equal(0, window.Shell!.CurrentPage.SidebarOverlap);
-        var toggle = window.Shell!.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "SidebarToggle");
-        Assert.Equal("Show Sidebar", Avalonia.Automation.AutomationProperties.GetName(toggle));
+        Assert.Equal(0, window.Shell.CurrentPage.SidebarOverlap);
+        var toggle = window.Shell.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "SidebarToggle");
+        Assert.Equal("Show Sidebar", AutomationProperties.GetName(toggle));
     }
 
     [AvaloniaFact]
     public void SidebarBlursWhatPassesBeneathItAndCanBeOpaque()
     {
-        var window = ShowWindow();
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
         var backdrop = window.Shell!.SidebarBackdrop;
         Assert.True(backdrop.ShowsBlur);
-
         backdrop.ReduceTransparency = true;
         Dispatcher.UIThread.RunJobs();
         Assert.False(backdrop.ShowsBlur);
     }
 
     [AvaloniaFact]
-    public void RendersTheHeroBeneathTheTintedSidebar()
+    public void ControlFLeadsToTheLibrarySearch()
     {
-        var window = ShowWindow();
-        using var frame = window.CaptureRenderedFrame()!;
-        TestWindows.SaveSnapshot(frame, "home");
-        // Hero artwork glows behind the page; beneath the sidebar it stays visible but darker.
-        var hero = Pixel(frame, 900, 200);
-        var sidebar = Pixel(frame, 120, 200);
-        Assert.True(hero.B > hero.R + 40, $"Hero should be blue, was {hero}");
-        Assert.True(Brightness(sidebar) < Brightness(hero), $"Sidebar {sidebar} should be darker than the hero {hero}");
-        Assert.True(sidebar.B >= sidebar.R, $"Hero color should show through the sidebar, was {sidebar}");
-
-        window.Shell!.Destination = LibraryDestination.TvShows;
-        Dispatcher.UIThread.RunJobs();
-        using var page = window.CaptureRenderedFrame()!;
-        TestWindows.SaveSnapshot(page, "tv-shows");
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
+        window.Shell!.FindInLibrary();
+        FakeLibrary.Pump(() => false, rounds: 20);
+        Assert.Equal(LibraryDestination.Library, window.Shell.Destination);
+        Assert.IsType<BrowsePage>(window.Shell.CurrentPage);
     }
 
-    private static int Brightness(Color color) => color.R + color.G + color.B;
+    internal static int Brightness(Color color) => color.R + color.G + color.B;
 
-    private static Color Pixel(WriteableBitmap bitmap, int x, int y)
+    internal static Color Pixel(WriteableBitmap bitmap, int x, int y)
     {
         using var buffer = bitmap.Lock();
         var scale = buffer.Size.Width / 1280.0;

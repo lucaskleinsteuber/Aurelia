@@ -216,4 +216,114 @@
     <Setter Property="Background" Value="#2E3236" />
     <Setter Property="BorderBrush" Value="{StaticResource AureliaAccentBrush}" />
   </Style>
+
+  <!-- A card on a shelf or grid: no button chrome, a gentle lift on hover, pressed down a little. -->
+  <Style Selector="Button.card">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.18" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.card /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.card:pointerover">
+    <Setter Property="RenderTransform" Value="scale(1.035) translateY(-3px)" />
+  </Style>
+  <Style Selector="Button.card:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.card:pressed">
+    <Setter Property="RenderTransform" Value="scale(0.96)" />
+  </Style>
+  <Style Selector="Button.card:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- The paging arrows on a shelf. -->
+  <Style Selector="Button.railArrow">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="52" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Background" Value="#CC23272B" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaPrimaryTextBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.railArrow:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#E6383C40" />
+    <Setter Property="Foreground" Value="#FFFFFFFF" />
+  </Style>
+
+  <!-- Filter chips on library pages. -->
+  <Style Selector="ToggleButton.chip, Button.chip">
+    <Setter Property="CornerRadius" Value="15" />
+    <Setter Property="Padding" Value="14,5" />
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Background" Value="{StaticResource AureliaSurfaceBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource AureliaPrimaryTextBrush}" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="ToggleButton.chip:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#F5F5F7" />
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+  <Style Selector="ToggleButton.chip:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#111316" />
+  </Style>
+
+  <!-- A round action next to the hero's main button (favorite, watchlist, more). -->
+  <Style Selector="Button.heroAction">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="Background" Value="#66383C40" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.heroAction:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#99484C52" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+
+  <!-- A sheet over the dimmed window. -->
+  <Style Selector="Border.sheet">
+    <Setter Property="Background" Value="#2A2E32" />
+    <Setter Property="CornerRadius" Value="{StaticResource AureliaCardRadius}" />
+    <Setter Property="Padding" Value="26" />
+    <Setter Property="BorderBrush" Value="#26FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BoxShadow" Value="0 20 60 0 #80000000" />
+  </Style>
+  <Style Selector="Button.destructive">
+    <Setter Property="Background" Value="#C8423A" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="CornerRadius" Value="15" />
+    <Setter Property="Padding" Value="16,6" />
+  </Style>
+  <Style Selector="Button.destructive:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#DE4B42" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+
+  <Style Selector="Border.banner">
+    <Setter Property="Background" Value="#F02A2E32" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="Padding" Value="18,10" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BoxShadow" Value="0 10 30 0 #66000000" />
+  </Style>
 </Styles>

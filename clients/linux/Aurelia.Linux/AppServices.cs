@@ -14,7 +14,8 @@ public sealed record AppServices(
     Func<IServerDiscovery> CreateDiscovery,
     IWakeOnLan WakeOnLan,
     TimeProvider Time,
-    string DeviceName)
+    string DeviceName,
+    string? ArtworkDirectory = null)
 {
     public static AppServices CreateDefault()
     {
@@ -27,7 +28,8 @@ public sealed record AppServices(
             () => new MdnsServerDiscovery(),
             new UdpWakeOnLan(),
             TimeProvider.System,
-            Environment.MachineName);
+            Environment.MachineName,
+            Path.Combine(paths.CacheDirectory, "artwork"));
     }
 
     /// <summary>Services that touch nothing outside the process, for tests.</summary>

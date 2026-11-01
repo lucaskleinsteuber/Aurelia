@@ -73,6 +73,25 @@ open at once, others take a four- to eight-digit PIN, and a server whose profile
 asks for its password and the owner's new PIN. A profile closes after its server-given expiry, at
 most twelve hours, and the sidebar's profile button switches profiles.
 
+## Library
+
+When a profile opens, `Library/LibraryStore.cs` loads Home, every title, the collections and the
+watchlist together and keeps them current with `Library/LibrarySync.cs`: a 30-second long poll of
+`/api/v1/sync/changes` with the Mac app's refresh plan (Home plus changed titles, or everything);
+its cursor is kept per server, profile and session. `Library/LibraryClient.cs` holds every library
+endpoint; catalog lists load page by page (100, or 500 on servers that allow it) and start again
+when the library changes while loading.
+
+The pages follow the Mac app: Home (the recommendation as a full-bleed hero, Continue Watching,
+three genre rows, Favorites, Collections, Recently Added), Library, Movies, TV Shows and Recently
+Added (search after 220 ms, filter chips, sort, filters remembered per server, profile and page),
+Collections (smart lists, collections, film series to save), Watchlist, History and Statistics,
+and detail pages for titles (seasons, episodes, trailers, extras, cast and crew, information),
+people and collections. Every title has the Mac app's context menu; season and series changes
+are made on the series and ask first with the number of episodes. Artwork is requested in the
+smallest width that stays sharp (320, 640, 1280, 1920) and kept in memory (96 MB) and on disk
+(512 MB, only artwork with a revision). Ctrl+F opens the library search, Alt+Left goes back.
+
 ## Video
 
 The player arrives in a later version. A test on KDE Plasma (Wayland) with the distribution's
@@ -105,8 +124,9 @@ restores, checks formatting, builds Release with warnings as errors and runs all
 - `Aurelia.Linux.Tests`: logic, and headless interface tests that draw the real views with Skia
   (frames are saved to `Local/Test Results/LinuxApp-<run>/snapshots`). They need no screen and do
   not take over one. Screens that talk to a server use a scripted fake server.
-- `Aurelia.Linux.IntegrationTests`: the app's connection logic against the real Aurelia server in
-  the same process, with a temporary data folder and synthetic accounts. It is a separate project
+- `Aurelia.Linux.IntegrationTests`: the app's connection and library logic against the real
+  Aurelia server in the same process, with a temporary data folder, synthetic accounts and a
+  library made of one-byte files named like videos. It is a separate project
   because the server's SkiaSharp 4 and Avalonia's SkiaSharp 3 cannot load together.
 - The real desktop keyring is tested only on a Linux desktop with `AURELIA_TEST_KEYRING=1`, using
   its own entry that the test removes again.

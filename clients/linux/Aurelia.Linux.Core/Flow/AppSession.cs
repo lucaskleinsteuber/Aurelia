@@ -1,6 +1,8 @@
 using Aurelia.Contracts;
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Connection;
+using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Settings;
 
 namespace Aurelia.Linux.Core.Flow;
 
@@ -21,13 +23,19 @@ public sealed class AppSession : ObservableObject
     private readonly TimeProvider time;
     private CancellationTokenSource? reaching;
     private CancellationTokenSource? profileTimer;
+    private CancellationTokenSource? syncing;
+    private LibraryStore? library;
+    private IReadOnlyList<string> capabilities = [];
     private StoredServer? server;
     private ProfileSession? profile;
     private ConnectionStatus status;
     private string? message;
 
-    public AppSession(AppFlow flow, AureliaApi api, ICredentialStore credentials, ServerWakeUp wakeUp, string deviceName, TimeProvider? time = null)
+    public AppSession(AppFlow flow, AureliaApi api, ICredentialStore credentials, ServerWakeUp wakeUp, string deviceName, TimeProvider? time = null,
+        GeneralPreferences? preferences = null, ArtworkCache? artwork = null)
     {
+        Preferences = preferences ?? new GeneralPreferences(new MemorySettingsStore());
+        Artwork = artwork ?? new ArtworkCache(null);
         this.flow = flow;
         Api = api;
         this.credentials = credentials;
@@ -39,6 +47,24 @@ public sealed class AppSession : ObservableObject
     public AureliaApi Api { get; }
 
     public string DeviceName { get; }
+
+    public GeneralPreferences Preferences { get; }
+
+    public ArtworkCache Artwork { get; }
+
+    /// <summary>The features the server reported (server/info capabilities).</summary>
+    public IReadOnlyList<string> Capabilities
+    {
+        get => capabilities;
+        private set => SetProperty(ref capabilities, value);
+    }
+
+    /// <summary>The open profile's library, kept current by the sync loop; null without an open profile.</summary>
+    public LibraryStore? Library
+    {
+        get => library;
+        private set => SetProperty(ref library, value);
+    }
 
     public StoredServer? Server
     {
@@ -105,7 +131,8 @@ public sealed class AppSession : ObservableObject
                 flow.Show(AppScreen.ServerUnreachable);
                 return;
             }
-            if (reached != saved) await SaveAsync(reached);
+            Capabilities = reached.Info.Capabilities ?? [];
+            if (reached.Server != saved) await SaveAsync(reached.Server);
             Status = ConnectionStatus.Loading;
             flow.Show(AppScreen.ProfilePicker);
         }
@@ -129,8 +156,9 @@ public sealed class AppSession : ObservableObject
     public void StopWaiting() => reaching?.Cancel();
 
     /// <summary>Saves a new pairing in the keyring and opens its profile picker.</summary>
-    public async Task CompletePairingAsync(StoredServer paired)
+    public async Task CompletePairingAsync(StoredServer paired, IReadOnlyList<string>? serverCapabilities = null)
     {
+        if (serverCapabilities is not null) Capabilities = serverCapabilities;
         await SaveAsync(paired);
         Message = null;
         flow.Show(AppScreen.ProfilePicker);
@@ -140,6 +168,15 @@ public sealed class AppSession : ObservableObject
     public void OpenProfile(ProfileSession session)
     {
         Profile = session;
+        if (Server is { } saved)
+        {
+            var store = new LibraryStore(new LibraryClient(Api, saved, session, Capabilities), Artwork, Preferences, HandleSessionFailure);
+            Library = store;
+            syncing?.Cancel();
+            var sync = new CancellationTokenSource();
+            syncing = sync;
+            _ = StartLibraryAsync(store, sync.Token);
+        }
         profileTimer?.Cancel();
         var timer = new CancellationTokenSource();
         profileTimer = timer;
@@ -164,6 +201,7 @@ public sealed class AppSession : ObservableObject
     {
         if (error.Code is "device_session_revoked" || (error.IsAuthenticationFailure && Profile is null))
         {
+            CloseLibrary();
             Profile = null;
             Message = "This computer is no longer paired with the server. Pair it again.";
             flow.Show(AppScreen.Connection);
@@ -171,6 +209,7 @@ public sealed class AppSession : ObservableObject
         }
         if (error.IsAuthenticationFailure || error.Code is "profile_session_expired" or "profile_session_revoked")
         {
+            CloseLibrary();
             Profile = null;
             flow.Show(AppScreen.ProfilePicker);
         }
@@ -204,8 +243,22 @@ public sealed class AppSession : ObservableObject
         flow.Show(AppScreen.Connection);
     }
 
+    private async Task StartLibraryAsync(LibraryStore store, CancellationToken cancellation)
+    {
+        await store.RefreshAsync();
+        if (!cancellation.IsCancellationRequested) await new LibrarySync(store, Preferences.Store, time).RunAsync(cancellation);
+    }
+
+    private void CloseLibrary()
+    {
+        syncing?.Cancel();
+        syncing = null;
+        Library = null;
+    }
+
     private async Task EndProfileAsync()
     {
+        CloseLibrary();
         profileTimer?.Cancel();
         profileTimer = null;
         if (Profile is { } open && Server is { } saved)
@@ -232,6 +285,7 @@ public sealed class AppSession : ObservableObject
         {
             return;
         }
+        CloseLibrary();
         Profile = null;
         flow.Show(AppScreen.ProfilePicker);
     }

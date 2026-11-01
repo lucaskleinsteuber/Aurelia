@@ -231,5 +231,7 @@ public sealed partial class AureliaApi : IDisposable
 
     private static bool IsValidSecret(string? value) => value is { Length: >= 32 and <= 512 } && !value.Any(char.IsWhiteSpace);
 
+    internal static AureliaApiException Timeout() => AureliaApiException.Unreachable();
+
     internal sealed record NoContent;
 }

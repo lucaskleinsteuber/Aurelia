@@ -111,9 +111,7 @@ public sealed class WindowTests
     [AvaloniaFact]
     public void SidebarWidthStaysBetweenTheMacLimits()
     {
-        var window = TestWindows.Show();
-        window.Flow.Show(AppScreen.Library);
-        Dispatcher.UIThread.RunJobs();
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
         window.Shell!.SidebarWidth = 500;
         Assert.Equal(LibraryShell.MaximumSidebarWidth, window.Shell.SidebarWidth);
         window.Shell.SidebarWidth = 100;

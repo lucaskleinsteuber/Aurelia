@@ -14,8 +14,21 @@ internal sealed class FakeServer : IServerTransport
     public static readonly Guid ServerId = Guid.Parse("7a1d2c3b-0000-4000-8000-0000000000aa");
 
     private readonly Dictionary<string, Queue<(HttpStatusCode Status, string Body)>> answers = [];
+    private readonly Dictionary<string, byte[]> images = [];
 
     public List<string> Requests { get; } = [];
+
+    /// <summary>Every request with its query string, for checking filters.</summary>
+    public List<string> RequestUris { get; } = [];
+
+    /// <summary>Request bodies by "METHOD path", for checking what the app sent.</summary>
+    public Dictionary<string, string> Bodies { get; } = [];
+
+    public FakeServer Image(string path, byte[] bytes)
+    {
+        images[path] = bytes;
+        return this;
+    }
 
     public FakeServer Answer(string method, string path, string json, HttpStatusCode status = HttpStatusCode.OK)
     {
@@ -39,14 +52,18 @@ internal sealed class FakeServer : IServerTransport
 
     private sealed class Handler(FakeServer server) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var key = request.Method.Method + " " + request.RequestUri!.AbsolutePath;
             server.Requests.Add(key);
+            server.RequestUris.Add(request.Method.Method + " " + request.RequestUri.PathAndQuery);
+            if (request.Content is not null) server.Bodies[key] = await request.Content.ReadAsStringAsync(cancellationToken);
+            if (server.images.TryGetValue(request.RequestUri.AbsolutePath, out var image))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(image) };
             if (!server.answers.TryGetValue(key, out var queue) || queue.Count == 0)
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
             var (status, body) = queue.Count > 1 ? queue.Dequeue() : queue.Peek();
-            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") });
+            return new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         }
     }
 }

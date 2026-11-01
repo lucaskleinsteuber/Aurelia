@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:Aurelia.Linux.Controls"
              xmlns:views="clr-namespace:Aurelia.Linux.Views"
+             xmlns:library="clr-namespace:Aurelia.Linux.Library"
              x:Class="Aurelia.Linux.Views.LibraryShell">
   <Grid>
     <!-- Pages run full height beneath the sidebar; each insets its content beside it. -->
@@ -44,5 +45,16 @@
             HotKey="F9" ToolTip.Tip="Hide Sidebar (F9)" AutomationProperties.Name="Hide Sidebar">
       <PathIcon Data="{StaticResource IconSidebar}" Width="17" Height="17" />
     </Button>
+
+    <!-- A problem from the server, with a way to try again, like the Mac app's error banner. -->
+    <Border x:Name="ErrorBanner" Classes="banner" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24">
+      <StackPanel Orientation="Horizontal" Spacing="14">
+        <TextBlock x:Name="ErrorText" VerticalAlignment="Center" MaxWidth="560" TextWrapping="Wrap" />
+        <Button x:Name="ErrorRetry" Content="Try Again" Classes="chip" />
+        <Button x:Name="ErrorDismiss" Content="Dismiss" Classes="link" />
+      </StackPanel>
+    </Border>
+
+    <library:SheetHost x:Name="Sheets" />
   </Grid>
 </UserControl>
