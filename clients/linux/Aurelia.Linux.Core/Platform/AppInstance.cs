@@ -22,9 +22,14 @@ public sealed class AppInstance : IDisposable
 
     public AppInstance(string settingsDirectory)
     {
-        var id = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(settingsDirectory))))[..24];
-        name = "aurelia-desktop-" + id;
         var directory = Path.GetFullPath(settingsDirectory);
+        var identity = OperatingSystem.IsWindows() ? directory : Environment.UserName + "\n" + directory;
+        var id = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..24];
+        var pipe = "aurelia-desktop-" + id;
+        // Unix named pipes use filesystem sockets, whose paths have a small fixed limit.
+        // TMPDIR can be long and can differ between a desktop launcher and a terminal.
+        // Keep both launches on the same bounded path; CurrentUserOnly still authenticates peers.
+        name = OperatingSystem.IsWindows() ? pipe : Path.Combine("/tmp", pipe);
         Settings.PrivateFiles.CreateDirectory(directory);
         var path = Path.Combine(directory, "instance.lock");
         var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };

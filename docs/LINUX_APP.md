@@ -14,18 +14,18 @@ Linux x64. Platform specifics stay behind small adapters so the code stays porta
 
 Download a package from an **Aurelia for Linux** release on [GitHub](https://github.com/lucasfd3/Aurelia/releases).
 These releases use `linux-app-<version>-<build>` tags and have an independent version from the
-Mac app and standalone Linux server. For example, install version 1.0.0 (5) with the command for
+Mac app and standalone Linux server. For example, install version 1.0.0 (6) with the command for
 your distribution:
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./Aurelia-Desktop-1.0.0-5-amd64.deb
+sudo apt install ./Aurelia-Desktop-1.0.0-6-amd64.deb
 # Fedora
-sudo dnf install ./Aurelia-Desktop-1.0.0-5-x86_64.rpm
+sudo dnf install ./Aurelia-Desktop-1.0.0-6-x86_64.rpm
 # Arch / CachyOS
-sudo pacman -U ./Aurelia-Desktop-1.0.0-5-x86_64.pkg.tar.zst
+sudo pacman -U ./Aurelia-Desktop-1.0.0-6-x86_64.pkg.tar.zst
 # Flatpak, per-user installation
-flatpak install --user ./Aurelia-Desktop-1.0.0-5-x86_64.flatpak
+flatpak install --user ./Aurelia-Desktop-1.0.0-6-x86_64.flatpak
 flatpak run io.github.lucasfd3.Aurelia
 ```
 
