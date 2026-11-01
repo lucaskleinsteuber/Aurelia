@@ -27,7 +27,10 @@ public sealed class AdminScope
         Client = new ManagementClient(session.Api, library.Client, AskPasswordAsync);
     }
 
-    public ManagementClient Client { get; }
+    public ManagementClient Client { get; private set; }
+
+    public void RefreshClient() => Client = new ManagementClient(session.Api,
+        (session.Library ?? throw new InvalidOperationException("Open a profile first.")).Client, AskPasswordAsync);
 
     public SheetHost Sheets { get; }
 

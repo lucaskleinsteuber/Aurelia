@@ -123,8 +123,8 @@ and they fail.
 
 - Server: summary with state, facts and Restart Server; health; for a Linux package server its
   updates and power saving; new devices and automatic backups with Back Up Now; scrub previews; and
-  under Advanced Settings the details, network (read-only: a Linux server is set up with
-  `sudo aurelia setup`), sign-in and streaming limits, library maintenance and job queue, backups
+  under Advanced Settings the details, network (a reversible trial for desktop-hosted servers;
+  a standalone Linux server is set up with `sudo aurelia setup`), sign-in and streaming limits, library maintenance and job queue, backups
   (retention, verify, encrypted export, restore with a passphrase) and diagnostics. Server settings
   are edited as JSON, so fields this app does not know are saved back unchanged.
 - Profiles and Devices (owner): every profile with role, PIN and access, the profile editor (role,
@@ -146,8 +146,54 @@ Requests go out as they are. Only when the server answers `approval_required` do
 query, SHA-256 of the exact body) and send it again with `X-Aurelia-Approval`. When management is
 locked, the Server Password prompt opens above whatever sheet is open, `POST /api/v1/management/unlock`
 unlocks it for ten minutes, and the request is retried. Sheets stack, so an editor stays open
-beneath the prompt. Network changes of a server hosted in Aurelia on a Mac need a 60-second trial
-with reconnection; they come with hosting on this PC.
+beneath the prompt. Network changes of a server hosted in the desktop app use the trial below.
+
+## Hosting on this PC
+
+“Set Up This PC” starts the self-contained server bundled in the app, as a child process
+(`Hosting/LocalServerHost.cs`). Its data stays in `$XDG_DATA_HOME/aurelia-desktop/server`; removing
+or updating the app package does not remove it. HTTP bootstrap traffic stays on 127.0.0.1:43110.
+After setup, the app talks to its own server over pinned HTTPS on the chosen port, even with home
+network access off. The server receives arguments directly, without a shell, and a lifeline pipe
+stops it when the app exits or crashes. The host watches for failures and retries at most three
+times in ten minutes before asking the person to try again. It never starts a second server over
+an existing Aurelia server on the same port; that screen offers to connect to the existing one.
+
+Setup asks for a server name, owner name, Server Password and HTTPS port. The first owner PIN
+opens that owner profile immediately, followed by “Choose Storage Locations”. Adding a folder
+still requires reviewing and confirming its import preview; choosing “Not Now” opens the empty
+library. An existing server with no saved local credential shows “Welcome Back”. “Forgot PIN?”
+on the local profile picker resets the owner PIN with the Server Password, then returns to the
+picker. Passwords and device credentials are kept out of settings and logs.
+
+Settings → Server → “When the Server Runs” chooses whether closing the window stops the server
+or keeps Aurelia in the notification area. The tray offers reopening and quitting. Start at sign-in
+requires background hosting and launches `aurelia-desktop --background`; Keep This PC Awake requests
+a sleep inhibitor while the server runs. Flatpak uses the desktop portals for background permission
+and inhibition. Native packages use the desktop's autostart location and login-session inhibitor.
+These settings do not bypass sleep or shutdown, and they show a firewall hint for the selected port
+without changing firewall rules.
+
+### Network changes with automatic rollback
+
+For desktop-hosted servers, Settings → Server → Advanced Settings → Network edits the name,
+home-network HTTPS access, port, network advertisement and optional private CIDRs. The request
+preserves the current settings revision and fields introduced by newer servers. A remote client
+cannot turn off its only connection; disabling network access is done on the server computer and
+requires acknowledging that other devices will lose access.
+
+“Try Network Settings (60-second rollback)” restarts the server with those settings. The server
+host owns the deadline and restores the previous settings if confirmation never arrives, including
+when the editor closes or the app restarts. The app retains its editor during this expected restart
+and displays the trial address and deadline. “Verify New Connection & Keep Settings” checks the
+same server id and pinned key at that address, opens a fresh owner profile with its PIN, unlocks
+management with the Server Password, then confirms over that new HTTPS connection. Only then is
+the new address saved in the keyring. Failure leaves the saved original address intact. The
+confirmation and watchdog rollback serialize their journal updates so a confirmed change cannot
+be overwritten by an expiring trial.
+
+A standalone Linux server package has its own service and configuration; its network information
+remains read-only here, with a pointer to `sudo aurelia setup`.
 
 ## Player
 
@@ -222,7 +268,9 @@ restores, checks formatting, builds Release with warnings as errors and runs all
   not take over one. Screens that talk to a server use a scripted fake server.
 - `Aurelia.Linux.IntegrationTests`: the app's connection and library logic against the real
   Aurelia server in the same process, with a temporary data folder, synthetic accounts and a
-  library made of one-byte files named like videos. It is a separate project
+  library made of one-byte files named like videos. Hosting tests also launch the real server
+  executable against temporary state, verify crash recovery and port conflicts, confirm a new
+  HTTPS address and expire an isolated trial journal to exercise production rollback. It is a separate project
   because the server's SkiaSharp 4 and Avalonia's SkiaSharp 3 cannot load together.
 - The real desktop keyring is tested only on a Linux desktop with `AURELIA_TEST_KEYRING=1`, using
   its own entry that the test removes again.

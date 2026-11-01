@@ -34,9 +34,13 @@ public sealed class ServerPage : StackPanel
     private JsonObject? configuration;
     private bool showsAdvanced;
 
-    public ServerPage(AdminScope scope)
+    private readonly Control? localHosting;
+
+    /// <param name="localHosting">When this computer hosts the server: when it runs, set here.</param>
+    public ServerPage(AdminScope scope, Control? localHosting = null)
     {
         this.scope = scope;
+        this.localHosting = localHosting;
         Spacing = 22;
         Children.Add(new TextBlock { Text = "Loading server settings…", Classes = { "subdued" } });
         _ = ReloadAsync();
@@ -76,9 +80,13 @@ public sealed class ServerPage : StackPanel
             var power = await PowerAsync();
             if (power is not null) Children.Add(power);
         }
-        else if (Hosting == ServerHosting.MacApp)
+        else if (localHosting is not null)
         {
-            Children.Add(Section("Hosting", Block(Note("This server runs in Aurelia on a Mac. Whether it keeps running when Aurelia is closed is chosen in Aurelia on that Mac."))));
+            Children.Add(localHosting);
+        }
+        else if (Hosting is ServerHosting.MacApp or ServerHosting.DesktopApp)
+        {
+            Children.Add(Section("Hosting", Block(Note("This server runs in Aurelia on another computer. Whether it keeps running when Aurelia is closed is chosen in Aurelia on that computer."))));
         }
         Children.Add(await EssentialsAsync());
         Children.Add(await ScrubPreviewsAsync());
@@ -478,11 +486,12 @@ public sealed class ServerPage : StackPanel
     }
 
     /// <summary>
-    /// The network settings. A Linux package server is set up on the server itself; other servers'
-    /// network changes need a 60-second trial that this app offers once it hosts servers itself.
+    /// Hosted servers use a reversible trial; a standalone Linux service is configured on its computer.
     /// </summary>
     private StackPanel Network()
     {
+        if (capabilities?.NativeHostOperations == true)
+            return new NetworkSettingsSection(scope, Stored, Active, ReloadAsync);
         var lan = Active["lanAccessEnabled"]?.GetValue<bool>() == true;
         var port = Active["lanHttpsPort"]?.GetValue<int>() ?? 43111;
         var networks = Stored["allowedNetworks"] is JsonArray list && list.Count > 0 ? string.Join(", ", list.Select(n => n?.GetValue<string>())) : "Any private network";

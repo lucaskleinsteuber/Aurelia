@@ -59,22 +59,12 @@ public sealed class CoreTests
 
 public sealed class StartupTests
 {
-    /// <summary>The display backend is chosen on Linux only, so this runs in the Linux CI and on Linux hosts.</summary>
+    /// <summary>Checks startup policy without replacing Avalonia's already initialized headless platform.</summary>
     [Theory]
-    [InlineData(null)]
-    [InlineData("x11")]
-    public void ChoosesADisplayBackendOnLinux(string? backend)
-    {
-        Assert.SkipUnless(OperatingSystem.IsLinux(), "The display backend is only chosen on Linux.");
-        var previous = Environment.GetEnvironmentVariable("AURELIA_DISPLAY_BACKEND");
-        try
-        {
-            Environment.SetEnvironmentVariable("AURELIA_DISPLAY_BACKEND", backend);
-            Assert.NotNull(Program.BuildAvaloniaApp());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("AURELIA_DISPLAY_BACKEND", previous);
-        }
-    }
+    [InlineData(true, null, DisplayBackendPreference.WaylandWithX11Fallback)]
+    [InlineData(true, "x11", DisplayBackendPreference.X11)]
+    [InlineData(true, "unknown", DisplayBackendPreference.WaylandWithX11Fallback)]
+    [InlineData(false, "x11", DisplayBackendPreference.PlatformDefault)]
+    public void ChoosesADisplayBackendWithoutChangingTheRunningPlatform(bool linux, string? backend, DisplayBackendPreference expected) =>
+        Assert.Equal(expected, Program.SelectDisplayBackend(linux, backend));
 }

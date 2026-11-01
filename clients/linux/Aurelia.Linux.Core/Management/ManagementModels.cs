@@ -23,6 +23,9 @@ public enum ServerHosting
     /// <summary>Hosted by Aurelia on a Mac, which controls its network and restarts.</summary>
     MacApp,
 
+    /// <summary>Hosted by Aurelia on a Linux or Windows PC, which controls its restarts.</summary>
+    DesktopApp,
+
     Other,
 }
 
@@ -32,6 +35,7 @@ public static class ServerHostingKind
     {
         { LinuxPackage: true } => ServerHosting.LinuxPackage,
         { NativeHostOperations: true, Platform: "macos" } => ServerHosting.MacApp,
+        { NativeHostOperations: true } => ServerHosting.DesktopApp,
         _ => ServerHosting.Other,
     };
 
@@ -39,6 +43,7 @@ public static class ServerHostingKind
     {
         ServerHosting.LinuxPackage => "Linux Server",
         ServerHosting.MacApp => "Aurelia on a Mac",
+        ServerHosting.DesktopApp => "Aurelia on a PC",
         _ => null,
     };
 }

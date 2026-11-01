@@ -26,10 +26,14 @@ public sealed class ProfilePickerView : UserControl
     private readonly TextBox pin = new() { PasswordChar = '•', MaxLength = 8, Width = 200, FontSize = 22, HorizontalContentAlignment = HorizontalAlignment.Center };
     private readonly TextBlock error = new() { Foreground = new SolidColorBrush(Color.Parse("#FF6B6B")), HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.Wrap };
     private readonly ProgressBar loading = new() { IsIndeterminate = true, Width = 120, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly Action? forgotOwnerPin;
     private int shownFailures;
 
-    public ProfilePickerView(ProfilePickerModel model, AppSession session)
+    /// <param name="forgotOwnerPin">On this computer's own server: resets the owner's PIN with the Server Password.</param>
+    /// <param name="useAnotherServer">On this computer's own server: stops it and connects elsewhere.</param>
+    public ProfilePickerView(ProfilePickerModel model, AppSession session, Action? forgotOwnerPin = null, Func<Task>? useAnotherServer = null)
     {
+        this.forgotOwnerPin = forgotOwnerPin;
         this.model = model;
         this.session = session;
         DataContext = model;
@@ -47,7 +51,12 @@ public sealed class ProfilePickerView : UserControl
             otherServer.IsVisible = false;
             confirmOther.IsVisible = true;
         };
-        confirmOther.Click += async (_, _) => await session.DisconnectAsync();
+        confirmOther.Content = useAnotherServer is null ? "Forget This Server" : "Stop This PC's Server and Connect Elsewhere";
+        confirmOther.Click += async (_, _) =>
+        {
+            if (useAnotherServer is null) await session.DisconnectAsync();
+            else await useAnotherServer();
+        };
         picker = new StackPanel
         {
             Spacing = 34,
@@ -180,6 +189,16 @@ public sealed class ProfilePickerView : UserControl
         pinEntry.Children.Add(ScreenParts.Detail("Enter your PIN."));
         pinEntry.Children.Add(pin);
         pinEntry.Children.Add(submit);
+        if (forgotOwnerPin is not null && profile.Role == Aurelia.Contracts.UserRole.Owner)
+        {
+            var forgot = new Button { Content = "Forgot PIN?", Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Center };
+            forgot.Click += (_, _) =>
+            {
+                model.CancelPin();
+                forgotOwnerPin();
+            };
+            pinEntry.Children.Add(forgot);
+        }
         pinEntry.Children.Add(cancel);
         Avalonia.Threading.Dispatcher.UIThread.Post(() => pin.Focus());
     }

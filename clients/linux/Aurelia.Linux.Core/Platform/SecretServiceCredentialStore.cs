@@ -29,7 +29,11 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         this.label = label;
     }
 
-    public async Task<StoredServer?> LoadAsync(CancellationToken cancellation)
+    public async Task<StoredServer?> LoadAsync(CancellationToken cancellation) =>
+        StoredServerSerializer.Deserialize(await LoadValueAsync(cancellation) ?? "");
+
+    /// <summary>Reads only this store's purpose from the keyring; tokens use a separate purpose.</summary>
+    public async Task<string?> LoadValueAsync(CancellationToken cancellation)
     {
         var connection = Connection();
         try
@@ -39,7 +43,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             foreach (var item in items)
             {
                 var secret = await GetSecretAsync(connection, item, session);
-                if (StoredServerSerializer.Deserialize(Encoding.UTF8.GetString(secret)) is { } server) return server;
+                return Encoding.UTF8.GetString(secret);
             }
             return null;
         }
@@ -49,7 +53,11 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         }
     }
 
-    public async Task SaveAsync(StoredServer server, CancellationToken cancellation)
+    public Task SaveAsync(StoredServer server, CancellationToken cancellation) =>
+        SaveValueAsync(StoredServerSerializer.Serialize(server), cancellation);
+
+    /// <summary>Writes a value to this store's purpose, never to a settings or token file.</summary>
+    public async Task SaveValueAsync(string secret, CancellationToken cancellation)
     {
         var connection = Connection();
         try
@@ -57,7 +65,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             var session = await OpenSessionAsync(connection);
             var collection = await DefaultCollectionAsync(connection);
             await UnlockAsync(connection, [collection]);
-            var value = Encoding.UTF8.GetBytes(StoredServerSerializer.Serialize(server));
+            var value = Encoding.UTF8.GetBytes(secret);
             var (_, prompt) = await connection.CallMethodAsync(CreateItemMessage(connection, collection, session, value), (message, _) =>
             {
                 var reader = message.GetBodyReader();
@@ -78,7 +86,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         {
             foreach (var item in await UnlockedItemsAsync(connection))
             {
-                var prompt = await connection.CallMethodAsync(Call(connection, item, ItemInterface, "Delete", null, _ => { }),
+                var prompt = await connection.CallMethodAsync(Call(connection, item, ItemInterface, "Delete", null, (ref MessageWriter _) => { }),
                     (message, _) => message.GetBodyReader().ReadObjectPathAsString(), null);
                 await CompletePromptAsync(connection, prompt);
             }
@@ -94,7 +102,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
 
     /// <summary>A "plain" session: the secret travels unencrypted, but only over this user's private session bus.</summary>
     private static Task<string> OpenSessionAsync(DBusConnection connection) =>
-        connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "OpenSession", "sv", writer =>
+        connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "OpenSession", "sv", (ref MessageWriter writer) =>
         {
             writer.WriteString("plain");
             writer.WriteVariantString("");
@@ -108,7 +116,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     private async Task<string[]> UnlockedItemsAsync(DBusConnection connection)
     {
         var (unlocked, locked) = await connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "SearchItems", "a{ss}",
-            writer => WriteStringDictionary(writer, attributes)), (message, _) =>
+            (ref MessageWriter writer) => WriteStringDictionary(ref writer, attributes)), (message, _) =>
         {
             var reader = message.GetBodyReader();
             return (reader.ReadArrayOfObjectPath().Select(path => path.ToString()).ToArray(),
@@ -121,7 +129,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     private static async Task<string[]> UnlockAsync(DBusConnection connection, string[] objects)
     {
         var (unlocked, prompt) = await connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "Unlock", "ao",
-            writer => writer.WriteArray(objects.Select(path => new ObjectPath(path)).ToArray())), (message, _) =>
+            (ref MessageWriter writer) => writer.WriteArray(objects.Select(path => new ObjectPath(path)).ToArray())), (message, _) =>
         {
             var reader = message.GetBodyReader();
             return (reader.ReadArrayOfObjectPath().Select(path => path.ToString()).ToArray(), reader.ReadObjectPathAsString());
@@ -134,10 +142,10 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     private static async Task<string> DefaultCollectionAsync(DBusConnection connection)
     {
         var path = await connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "ReadAlias", "s",
-            writer => writer.WriteString("default")), (message, _) => message.GetBodyReader().ReadObjectPathAsString(), null);
+            (ref MessageWriter writer) => writer.WriteString("default")), (message, _) => message.GetBodyReader().ReadObjectPathAsString(), null);
         if (path != NoPrompt) return path;
         // A keyring without a default collection (rare): ask the desktop to create one.
-        var (created, prompt) = await connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "CreateCollection", "a{sv}s", writer =>
+        var (created, prompt) = await connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "CreateCollection", "a{sv}s", (ref MessageWriter writer) =>
         {
             var start = writer.WriteDictionaryStart();
             writer.WriteDictionaryEntryStart();
@@ -153,11 +161,11 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         if (created != NoPrompt) return created;
         await CompletePromptAsync(connection, prompt);
         return await connection.CallMethodAsync(Call(connection, ServicePath, ServiceInterface, "ReadAlias", "s",
-            writer => writer.WriteString("default")), (message, _) => message.GetBodyReader().ReadObjectPathAsString(), null);
+            (ref MessageWriter writer) => writer.WriteString("default")), (message, _) => message.GetBodyReader().ReadObjectPathAsString(), null);
     }
 
     private static Task<byte[]> GetSecretAsync(DBusConnection connection, string item, string session) =>
-        connection.CallMethodAsync(Call(connection, item, ItemInterface, "GetSecret", "o", writer => writer.WriteObjectPath(session)),
+        connection.CallMethodAsync(Call(connection, item, ItemInterface, "GetSecret", "o", (ref MessageWriter writer) => writer.WriteObjectPath(session)),
             (message, _) =>
             {
                 var reader = message.GetBodyReader();
@@ -170,7 +178,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             }, null);
 
     private MessageBuffer CreateItemMessage(DBusConnection connection, string collection, string session, byte[] value) =>
-        Call(connection, collection, CollectionInterface, "CreateItem", "a{sv}(oayays)b", writer =>
+        Call(connection, collection, CollectionInterface, "CreateItem", "a{sv}(oayays)b", (ref MessageWriter writer) =>
         {
             var properties = writer.WriteDictionaryStart();
             writer.WriteDictionaryEntryStart();
@@ -179,7 +187,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
             writer.WriteDictionaryEntryStart();
             writer.WriteString("org.freedesktop.Secret.Item.Attributes");
             writer.WriteSignature("a{ss}");
-            WriteStringDictionary(writer, attributes);
+            WriteStringDictionary(ref writer, attributes);
             writer.WriteDictionaryEnd(properties);
             writer.WriteStructureStart();
             writer.WriteObjectPath(session);
@@ -201,12 +209,12 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
                 if (notification.Exception is { } error) completed.TrySetException(error);
                 else if (notification.HasValue) completed.TrySetResult(notification.Value);
             }, ObserverFlags.None, false, null);
-        await connection.CallMethodAsync(Call(connection, prompt, PromptInterface, "Prompt", "s", writer => writer.WriteString("")));
+        await connection.CallMethodAsync(Call(connection, prompt, PromptInterface, "Prompt", "s", (ref MessageWriter writer) => writer.WriteString("")));
         if (await completed.Task)
             throw new CredentialStoreUnavailableException("The keyring stayed locked, so Aurelia cannot use its saved connection.");
     }
 
-    private static void WriteStringDictionary(MessageWriter writer, IReadOnlyDictionary<string, string> values)
+    private static void WriteStringDictionary(ref MessageWriter writer, IReadOnlyDictionary<string, string> values)
     {
         var start = writer.WriteDictionaryStart();
         foreach (var (key, value) in values)
@@ -219,11 +227,15 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     }
 
     private static MessageBuffer Call(DBusConnection connection, string path, string @interface, string member, string? signature,
-        Action<MessageWriter> body)
+        WriteMessageBody body)
     {
-        using var writer = connection.GetMessageWriter();
-        writer.WriteMethodCallHeader(destination: Bus, path: path, @interface: @interface, signature: signature, member: member);
-        body(writer);
-        return writer.CreateMessage();
+        var writer = connection.GetMessageWriter();
+        try
+        {
+            writer.WriteMethodCallHeader(destination: Bus, path: path, @interface: @interface, signature: signature, member: member);
+            body(ref writer);
+            return writer.CreateMessage();
+        }
+        finally { writer.Dispose(); }
     }
 }

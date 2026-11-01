@@ -19,6 +19,7 @@ public sealed class KeyringTests
         var cancellation = TestContext.Current.CancellationToken;
         var first = new StoredServer(Guid.NewGuid(), "Test Server", new Uri("https://192.0.2.10:43111"), new string('B', 64),
             "synthetic-device-token-not-a-real-credential-01", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(1));
+        Exception? originalFailure = null;
         try
         {
             Assert.Null(await store.LoadAsync(cancellation));
@@ -29,9 +30,18 @@ public sealed class KeyringTests
             await store.SaveAsync(second, cancellation);
             Assert.Equal("Renamed Server", (await store.LoadAsync(cancellation))?.Name);
         }
+        catch (Exception failure)
+        {
+            originalFailure = failure;
+            throw;
+        }
         finally
         {
-            await store.DeleteAsync(cancellation);
+            try { await store.DeleteAsync(cancellation); }
+            catch (Exception) when (originalFailure is not null)
+            {
+                // Keep the operation that failed, rather than replacing it with a cleanup failure.
+            }
         }
         Assert.Null(await store.LoadAsync(cancellation));
     }

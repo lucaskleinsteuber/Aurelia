@@ -3,6 +3,7 @@ using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Platform;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Core.Settings;
+using Aurelia.Linux.Core.Hosting;
 using Aurelia.Linux.Playback;
 
 namespace Aurelia.Linux;
@@ -20,13 +21,16 @@ public sealed record AppServices(
     string? ArtworkDirectory = null,
     IVideoEngineFactory? Engines = null,
     string? StateDirectory = null,
-    IPlaybackSystem? PlaybackSystem = null)
+    IPlaybackSystem? PlaybackSystem = null,
+    Func<ILocalServerHost>? CreateHost = null,
+    IHostingSystem? HostingSystem = null)
 {
     public static AppServices CreateDefault()
     {
         var paths = AppPaths.FromEnvironment();
+        var settings = new JsonFileSettingsStore(paths.SettingsFile);
         return new(
-            new JsonFileSettingsStore(paths.SettingsFile),
+            settings,
             DesktopButtonLayoutReader.Read(),
             new PinnedServerTransport(),
             new SecretServiceCredentialStore(),
@@ -37,12 +41,14 @@ public sealed record AppServices(
             Path.Combine(paths.CacheDirectory, "artwork"),
             new VlcEngineFactory(),
             paths.StateDirectory,
-            new LinuxPlaybackSystem(action => Avalonia.Threading.Dispatcher.UIThread.Post(action)));
+            new LinuxPlaybackSystem(action => Avalonia.Threading.Dispatcher.UIThread.Post(action)),
+            () => new LocalServerHost(LocalServerOptions.ForThisComputer(paths)),
+            new LinuxHostingSystem(paths));
     }
 
     /// <summary>Services that touch nothing outside the process, for tests.</summary>
     public static AppServices ForTests(ISettingsStore? settings = null, WindowButtonLayout? layout = null, IServerTransport? transport = null,
-        ICredentialStore? credentials = null, IVideoEngineFactory? engines = null, TimeProvider? time = null) => new(
+        ICredentialStore? credentials = null, IVideoEngineFactory? engines = null, TimeProvider? time = null, ILocalServerHost? host = null) => new(
             settings ?? new MemorySettingsStore(),
             layout ?? WindowButtonLayout.Default,
             transport ?? new PinnedServerTransport(),
@@ -51,5 +57,7 @@ public sealed record AppServices(
             new NoWakeOnLan(),
             time ?? TimeProvider.System,
             "Test PC",
-            Engines: engines);
+            Engines: engines,
+            CreateHost: host is null ? null : () => host,
+            HostingSystem: new NoHostingSystem());
 }

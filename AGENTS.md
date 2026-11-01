@@ -99,8 +99,9 @@ These rules apply to every task in this repository.
   counters. Every Aurelia product (Mac app and server, Linux server, tvOS, and
   any Windows or other client) follows Semantic Versioning (MAJOR.MINOR.PATCH): MAJOR for
   changes that break existing clients, servers or data; MINOR for new features;
-  PATCH for fixes only. Choose the next version by these rules, state it, and
-  confirm it with the user before building; the build number rises by exactly
+  PATCH for fixes only. Choose the next version independently by these rules and
+  state the version and reason before building. Do not ask the owner to choose or
+  confirm a version; the build number rises by exactly
   one per build. The current Mac release is 1.26.3 (120); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.3.1 (24).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
@@ -110,8 +111,9 @@ These rules apply to every task in this repository.
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published.
-- Aurelia for Linux (`clients/linux`, preview, 0.2.0 (3)) is the native Linux desktop
-  app and is meant to become the full Mac app on Linux. It is a separate product with
+- Aurelia for Linux (`clients/linux`, preview, 0.3.0 (4)) is the native Linux desktop
+  app, with library browsing, playback, settings, server administration and optional hosting
+  on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
   its own version counter (`Version` and `AureliaLinuxBuildNumber` in
   `clients/linux/Directory.Build.props`), written in C# with Avalonia, Linux x64 only,
   with platform specifics behind small adapters. It shares only `src/Aurelia.Contracts`
@@ -121,7 +123,9 @@ These rules apply to every task in this repository.
   `scripts/package-linux-app.sh`) and install each verified test build on the owner's
   CachyOS laptop (`Local/LinuxLaptop/ssh_config`) with `scripts/install-linux-app.sh`
   without asking; installing replaces only the package. Synthetic data only, no real
-  playback in tests. It is not published yet. See `docs/LINUX_APP.md`.
+  playback in tests. Hosting and network-trial tests use isolated server processes and temporary
+  state; never start a second host over the installed server or use personal libraries for them.
+  It is not published yet. See `docs/LINUX_APP.md`.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
   repository in `Local/Aurelia Desktop (archived)`. Do not
   restore, build or test it unless the user asks for it.

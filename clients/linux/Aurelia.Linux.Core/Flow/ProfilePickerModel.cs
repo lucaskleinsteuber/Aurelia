@@ -151,6 +151,12 @@ public sealed class ProfilePickerModel : ObservableObject
         {
             await session.Api.InitializeProfilesAsync(server, password, newPin, CancellationToken.None);
             await LoadAsync();
+            // The owner just chose this PIN: open the owner's profile without asking for it again.
+            if (Profiles.FirstOrDefault(profile => profile.Role == UserRole.Owner) is { } owner)
+            {
+                IsBusy = false;
+                await UnlockAsync(owner, newPin);
+            }
         }
         catch (AureliaApiException failure)
         {

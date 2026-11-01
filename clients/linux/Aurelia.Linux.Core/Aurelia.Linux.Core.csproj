@@ -9,6 +9,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Aurelia.Linux.Tests" />
+    <InternalsVisibleTo Include="Aurelia.Linux.IntegrationTests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />

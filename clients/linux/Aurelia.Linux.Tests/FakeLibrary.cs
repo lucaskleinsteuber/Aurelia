@@ -149,7 +149,7 @@ internal static class FakeLibrary
     {
         var colors = new[] { ("#5B7CFF", "#14161C"), ("#FF8C66", "#2A1414"), ("#5CD6CC", "#0E2224"), ("#BD7DFF", "#1A1230"), ("#FFB85C", "#2A1E0E") };
         var (top, bottom) = colors[seed % colors.Length];
-        var bitmap = new RenderTargetBitmap(new PixelSize(320, 240));
+        using var bitmap = new RenderTargetBitmap(new PixelSize(320, 240));
         using (var context = bitmap.CreateDrawingContext())
         {
             context.FillRectangle(new LinearGradientBrush

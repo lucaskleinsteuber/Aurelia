@@ -64,6 +64,8 @@ public sealed class RealServer : WebApplicationFactory<Program>
         Directory.CreateDirectory(shows);
         await File.WriteAllBytesAsync(Path.Combine(movies, "Alpha Voyage (2020).mkv"), [1]);
         await File.WriteAllBytesAsync(Path.Combine(movies, "Beta Harbor (2021).mkv"), [2]);
+        await File.WriteAllTextAsync(Path.Combine(movies, "Alpha Voyage (2020).eng.srt"), "1\n00:00:00,000 --> 00:00:01,000\nSynthetic subtitle.\n");
+        await File.WriteAllTextAsync(Path.Combine(movies, "Beta Harbor (2021).eng.srt"), "1\n00:00:00,000 --> 00:00:01,000\nSynthetic subtitle.\n");
         await File.WriteAllBytesAsync(Path.Combine(shows, "Cobalt Station - S01E01.mkv"), [3]);
         await File.WriteAllBytesAsync(Path.Combine(shows, "Cobalt Station - S01E02.mkv"), [4]);
         foreach (var (name, path, kind) in new[] { ("Movies", movies, LibraryKind.Movies), ("TV Shows", Path.Combine(dataDirectory, "media", "Shows"), LibraryKind.TvShows) })
@@ -104,6 +106,9 @@ public sealed class RealServer : WebApplicationFactory<Program>
         builder.UseSetting("Aurelia:DataDirectory", dataDirectory);
         builder.UseSetting("Aurelia:ListenUrl", "http://127.0.0.1:0");
         builder.UseSetting("Aurelia:BootstrapToken", BootstrapToken);
+        // These media files contain a single byte. Codec discovery must not depend on whether
+        // ffmpeg happens to be installed on the host; this suite never decodes or plays media.
+        builder.UseSetting("Aurelia:Ffmpeg", "off");
         builder.ConfigureLogging(logging => logging.SetMinimumLevel(LogLevel.Warning));
     }
 

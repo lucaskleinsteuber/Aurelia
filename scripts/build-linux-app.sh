@@ -12,7 +12,6 @@ export DOTNET_ROOT="${DOTNET_ROOT:-$(dirname -- "$DOTNET_BIN")}" DOTNET_NOLOGO=1
 project="$repository_root/clients/linux/Aurelia.Linux/Aurelia.Linux.csproj"
 packaging="$repository_root/clients/linux/packaging"
 app_id=io.github.lucasfd3.Aurelia
-
 # The tests also prune old builds and results first.
 "$repository_root/scripts/test-linux-app.sh"
 
@@ -23,11 +22,16 @@ tree="$output/tree"
 rm -rf "$output"
 mkdir -p "$tree/usr/bin" "$tree/usr/share/applications" "$tree/usr/share/metainfo" \
   "$tree/usr/share/icons/hicolor/scalable/apps" "$tree/usr/share/doc/aurelia-desktop"
-
 "$DOTNET_BIN" restore "$project" --runtime linux-x64
 "$DOTNET_BIN" publish "$project" --configuration Release --runtime linux-x64 --self-contained true \
   --no-restore -p:DebugType=none --output "$tree/usr/lib/aurelia-desktop"
 chmod 0755 "$tree/usr/lib/aurelia-desktop/aurelia-desktop"
+# The server for "Set Up This PC" comes with the app; the app starts it on demand.
+server_project="$repository_root/src/Aurelia.Server/Aurelia.Server.csproj"
+"$DOTNET_BIN" restore "$server_project" --runtime linux-x64
+"$DOTNET_BIN" publish "$server_project" --configuration Release --runtime linux-x64 --self-contained true \
+  --no-restore -p:DebugType=none --output "$tree/usr/lib/aurelia-desktop/server"
+chmod 0755 "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server"
 ln -s ../lib/aurelia-desktop/aurelia-desktop "$tree/usr/bin/aurelia-desktop"
 cp "$packaging/$app_id.desktop" "$tree/usr/share/applications/"
 sed -e "s/@VERSION@/$version/" -e "s/@DATE@/$(date -u +%Y-%m-%d)/" "$packaging/$app_id.metainfo.xml" \
@@ -38,6 +42,9 @@ notices="$tree/usr/share/doc/aurelia-desktop/notices"
 assets_path=$("$DOTNET_BIN" msbuild "$project" -getProperty:ProjectAssetsFile)
 zsh "$repository_root/scripts/collect-third-party-notices.sh" \
   "$tree/usr/lib/aurelia-desktop/aurelia-desktop.deps.json" "$assets_path" "$notices" "$packaging/THIRD_PARTY_NOTICES.md"
+server_assets=$("$DOTNET_BIN" msbuild "$server_project" -getProperty:ProjectAssetsFile)
+zsh "$repository_root/scripts/collect-third-party-notices.sh" \
+  "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server.deps.json" "$server_assets" "$notices/server"
 cp "$repository_root/docs/licenses/Inter-OFL-1.1.txt" "$notices/"
 printf '%s (%s)\n' "$version" "$build" > "$tree/usr/lib/aurelia-desktop/VERSION"
 

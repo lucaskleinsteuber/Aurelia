@@ -61,9 +61,13 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
             var target = reader.ReadString();
             if (member == "GetAll")
             {
-                using var writer = context.CreateReplyWriter("a{sv}");
-                WriteProperties(writer, target == RootInterface ? RootProperties() : PlayerValues());
-                context.Reply(writer.CreateMessage());
+                var writer = context.CreateReplyWriter("a{sv}");
+                try
+                {
+                    WriteProperties(ref writer, target == RootInterface ? RootProperties() : PlayerValues());
+                    context.Reply(writer.CreateMessage());
+                }
+                finally { writer.Dispose(); }
             }
             else if (member == "Get")
             {
@@ -75,9 +79,13 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
                     context.ReplyError("org.freedesktop.DBus.Error.UnknownProperty", "Unknown property.");
                     return ValueTask.CompletedTask;
                 }
-                using var writer = context.CreateReplyWriter("v");
-                value.Write(writer);
-                context.Reply(writer.CreateMessage());
+                var writer = context.CreateReplyWriter("v");
+                try
+                {
+                    value.Write(ref writer);
+                    context.Reply(writer.CreateMessage());
+                }
+                finally { writer.Dispose(); }
             }
             else
             {
@@ -159,7 +167,7 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
         {
             if (awake && inhibitCookie is null)
             {
-                inhibitCookie = await bus.CallMethodAsync(Call(bus, "Inhibit", "ss", writer =>
+                inhibitCookie = await bus.CallMethodAsync(Call(bus, "Inhibit", "ss", (ref MessageWriter writer) =>
                 {
                     writer.WriteString("Aurelia");
                     writer.WriteString("Playing a video");
@@ -168,7 +176,7 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
             else if (!awake && inhibitCookie is { } cookie)
             {
                 inhibitCookie = null;
-                await bus.CallMethodAsync(Call(bus, "UnInhibit", "u", writer => writer.WriteUInt32(cookie)));
+                await bus.CallMethodAsync(Call(bus, "UnInhibit", "u", (ref MessageWriter writer) => writer.WriteUInt32(cookie)));
             }
         }
         catch (DBusExceptionBase)
@@ -177,13 +185,17 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
         }
     }
 
-    private static MessageBuffer Call(DBusConnection bus, string member, string signature, Action<MessageWriter> body)
+    private static MessageBuffer Call(DBusConnection bus, string member, string signature, WriteMessageBody body)
     {
-        using var writer = bus.GetMessageWriter();
-        writer.WriteMethodCallHeader(destination: "org.freedesktop.ScreenSaver", path: "/org/freedesktop/ScreenSaver",
-            @interface: "org.freedesktop.ScreenSaver", signature: signature, member: member);
-        body(writer);
-        return writer.CreateMessage();
+        var writer = bus.GetMessageWriter();
+        try
+        {
+            writer.WriteMethodCallHeader(destination: "org.freedesktop.ScreenSaver", path: "/org/freedesktop/ScreenSaver",
+                @interface: "org.freedesktop.ScreenSaver", signature: signature, member: member);
+            body(ref writer);
+            return writer.CreateMessage();
+        }
+        finally { writer.Dispose(); }
     }
 
     private void EmitChanged()
@@ -191,12 +203,16 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
         if (!registered || DBusConnection.Session is not { } bus) return;
         try
         {
-            using var writer = bus.GetMessageWriter();
-            writer.WriteSignalHeader(destination: null, path: ObjectPath, @interface: PropertiesInterface, member: "PropertiesChanged", signature: "sa{sv}as");
-            writer.WriteString(PlayerInterface);
-            WriteProperties(writer, PlayerValues().Where(p => p.Name is "PlaybackStatus" or "Metadata" or "CanGoNext" or "CanGoPrevious").ToList());
-            writer.WriteArray(Array.Empty<string>());
-            bus.TrySendMessage(writer.CreateMessage());
+            var writer = bus.GetMessageWriter();
+            try
+            {
+                writer.WriteSignalHeader(destination: null, path: ObjectPath, @interface: PropertiesInterface, member: "PropertiesChanged", signature: "sa{sv}as");
+                writer.WriteString(PlayerInterface);
+                WriteProperties(ref writer, PlayerValues().Where(p => p.Name is "PlaybackStatus" or "Metadata" or "CanGoNext" or "CanGoPrevious").ToList());
+                writer.WriteArray(Array.Empty<string>());
+                bus.TrySendMessage(writer.CreateMessage());
+            }
+            finally { writer.Dispose(); }
         }
         catch (Exception error) when (error is DBusExceptionBase or InvalidOperationException)
         {
@@ -212,13 +228,13 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
 
     private static List<Property> RootProperties() =>
     [
-        new("CanQuit", w => w.WriteVariantBool(false)),
-        new("CanRaise", w => w.WriteVariantBool(false)),
-        new("HasTrackList", w => w.WriteVariantBool(false)),
-        new("Identity", w => w.WriteVariantString("Aurelia")),
-        new("DesktopEntry", w => w.WriteVariantString(AppInfo.ApplicationId)),
-        new("SupportedUriSchemes", w => w.WriteVariant(VariantValue.Array(Array.Empty<string>()))),
-        new("SupportedMimeTypes", w => w.WriteVariant(VariantValue.Array(Array.Empty<string>()))),
+        new("CanQuit", (ref MessageWriter w) => w.WriteVariantBool(false)),
+        new("CanRaise", (ref MessageWriter w) => w.WriteVariantBool(false)),
+        new("HasTrackList", (ref MessageWriter w) => w.WriteVariantBool(false)),
+        new("Identity", (ref MessageWriter w) => w.WriteVariantString("Aurelia")),
+        new("DesktopEntry", (ref MessageWriter w) => w.WriteVariantString(AppInfo.ApplicationId)),
+        new("SupportedUriSchemes", (ref MessageWriter w) => w.WriteVariant(VariantValue.Array(Array.Empty<string>()))),
+        new("SupportedMimeTypes", (ref MessageWriter w) => w.WriteVariant(VariantValue.Array(Array.Empty<string>()))),
     ];
 
     private List<Property> PlayerValues()
@@ -228,9 +244,9 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
         var item = player?.Item;
         return
         [
-            new("PlaybackStatus", w => w.WriteVariantString(Status(player))),
-            new("Rate", w => w.WriteVariantDouble(player?.Rate ?? 1)),
-            new("Metadata", w =>
+            new("PlaybackStatus", (ref MessageWriter w) => w.WriteVariantString(Status(player))),
+            new("Rate", (ref MessageWriter w) => w.WriteVariantDouble(player?.Rate ?? 1)),
+            new("Metadata", (ref MessageWriter w) =>
             {
                 w.WriteSignature("a{sv}");
                 var start = w.WriteDictionaryStart();
@@ -254,32 +270,32 @@ public sealed class LinuxPlaybackSystem(Action<Action> post) : IPlaybackSystem, 
                 }
                 w.WriteDictionaryEnd(start);
             }),
-            new("Volume", w => w.WriteVariantDouble(player?.Volume ?? 1)),
-            new("Position", w => w.WriteVariantInt64((player?.Position ?? 0) * 1000)),
-            new("MinimumRate", w => w.WriteVariantDouble(PlayerPolicy.Rates[0])),
-            new("MaximumRate", w => w.WriteVariantDouble(PlayerPolicy.Rates[^1])),
-            new("CanGoNext", w => w.WriteVariantBool(player?.NextItem is not null)),
-            new("CanGoPrevious", w => w.WriteVariantBool(player?.HasPrevious == true)),
-            new("CanPlay", w => w.WriteVariantBool(player is not null)),
-            new("CanPause", w => w.WriteVariantBool(player is not null)),
-            new("CanSeek", w => w.WriteVariantBool(player is not null)),
-            new("CanControl", w => w.WriteVariantBool(true)),
+            new("Volume", (ref MessageWriter w) => w.WriteVariantDouble(player?.Volume ?? 1)),
+            new("Position", (ref MessageWriter w) => w.WriteVariantInt64((player?.Position ?? 0) * 1000)),
+            new("MinimumRate", (ref MessageWriter w) => w.WriteVariantDouble(PlayerPolicy.Rates[0])),
+            new("MaximumRate", (ref MessageWriter w) => w.WriteVariantDouble(PlayerPolicy.Rates[^1])),
+            new("CanGoNext", (ref MessageWriter w) => w.WriteVariantBool(player?.NextItem is not null)),
+            new("CanGoPrevious", (ref MessageWriter w) => w.WriteVariantBool(player?.HasPrevious == true)),
+            new("CanPlay", (ref MessageWriter w) => w.WriteVariantBool(player is not null)),
+            new("CanPause", (ref MessageWriter w) => w.WriteVariantBool(player is not null)),
+            new("CanSeek", (ref MessageWriter w) => w.WriteVariantBool(player is not null)),
+            new("CanControl", (ref MessageWriter w) => w.WriteVariantBool(true)),
         ];
     }
 
-    private static void WriteProperties(MessageWriter writer, List<Property> properties)
+    private static void WriteProperties(ref MessageWriter writer, List<Property> properties)
     {
         var start = writer.WriteDictionaryStart();
         foreach (var property in properties)
         {
             writer.WriteDictionaryEntryStart();
             writer.WriteString(property.Name);
-            property.Write(writer);
+            property.Write(ref writer);
         }
         writer.WriteDictionaryEnd(start);
     }
 
-    private readonly record struct Property(string Name, Action<MessageWriter> Write);
+    private readonly record struct Property(string Name, WriteMessageBody Write);
 
     private const string Introspection = """
         <interface name="org.mpris.MediaPlayer2">

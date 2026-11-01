@@ -2,8 +2,12 @@ using Aurelia.Linux;
 using Aurelia.Linux.Tests;
 using Avalonia;
 using Avalonia.Headless;
+using Xunit;
 
 [assembly: AvaloniaTestApplication(typeof(TestAppBuilder))]
+// The headless views share one UI dispatcher. Parallel test classes queue behind it and can
+// exhaust the runner's dispatch timeout before a test starts on a slower Linux computer.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace Aurelia.Linux.Tests;
 

@@ -2,6 +2,7 @@ using Aurelia.Contracts;
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Management;
 using Aurelia.Linux.Core.Settings;
 
 namespace Aurelia.Linux.Core.Flow;
@@ -24,6 +25,7 @@ public sealed class AppSession : ObservableObject
     private CancellationTokenSource? reaching;
     private CancellationTokenSource? profileTimer;
     private CancellationTokenSource? syncing;
+    private CancellationTokenSource? networkTimer;
     private LibraryStore? library;
     private IReadOnlyList<string> capabilities = [];
     private bool isResting;
@@ -52,6 +54,48 @@ public sealed class AppSession : ObservableObject
     public GeneralPreferences Preferences { get; }
 
     public ArtworkCache Artwork { get; }
+
+    /// <summary>Expected restart during a network trial: retain the settings editor until confirmation or rollback.</summary>
+    public bool NetworkConfirmationPending { get; private set; }
+
+    public void BeginNetworkConfirmation(DateTimeOffset deadline)
+    {
+        networkTimer?.Cancel();
+        var timer = new CancellationTokenSource();
+        networkTimer = timer;
+        NetworkConfirmationPending = true;
+        syncing?.Cancel();
+        syncing = null;
+        profileTimer?.Cancel();
+        _ = ExpireNetworkTrialAsync(deadline, timer.Token);
+    }
+
+    public async Task AcceptConfirmedNetworkAsync(ConfirmedNetwork confirmed)
+    {
+        if (!NetworkConfirmationPending || Server is not { } previous || Profile is not { } owner
+            || previous.ServerId != confirmed.Server.ServerId || previous.SessionId != confirmed.Server.SessionId
+            || !ServerIdentity.Matches(previous.Fingerprint, confirmed.Server.Fingerprint) || owner.User.Id != confirmed.Profile.User.Id)
+            throw AureliaApiException.IdentityMismatch();
+        networkTimer?.Cancel();
+        NetworkConfirmationPending = false;
+        CloseLibrary();
+        await SaveAsync(confirmed.Server);
+        OpenProfile(confirmed.Profile);
+    }
+
+    private async Task ExpireNetworkTrialAsync(DateTimeOffset deadline, CancellationToken cancellation)
+    {
+        try
+        {
+            // The host checks its journal once a second; leave it time to restore and restart.
+            await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(0, (deadline - time.GetUtcNow()).TotalMilliseconds)) + TimeSpan.FromSeconds(2), time, cancellation);
+            NetworkConfirmationPending = false;
+            ServerInterrupted();
+            Message = "The network trial ended. The previous settings return automatically; open your profile again.";
+            await ReachServerAsync();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+    }
 
     /// <summary>The features the server reported (server/info capabilities).</summary>
     public IReadOnlyList<string> Capabilities
@@ -102,9 +146,34 @@ public sealed class AppSession : ObservableObject
         set => SetProperty(ref message, value);
     }
 
-    /// <summary>Reads the saved pairing and reaches its server; without one, shows the welcome choice.</summary>
-    public async Task StartAsync()
+    /// <summary>
+    /// Set after this computer's new server was set up: once the owner's profile is open, Aurelia asks
+    /// for the first storage locations, as the Mac app's InitialLibrarySetupView.
+    /// </summary>
+    public bool NeedsInitialLibrarySetup { get; set; }
+
+    /// <summary>This computer's own server no longer accepts the saved owner credential.</summary>
+    public event Action? LocalSignInNeeded;
+
+    /// <summary>
+    /// Reads the saved pairing and reaches its server; without one, shows the welcome choice. When this
+    /// computer hosts the server, <paramref name="startHosting"/> starts it and the host setup takes over.
+    /// </summary>
+    public async Task StartAsync(Func<Task>? startHosting = null)
     {
+        if (flow.Mode == OperatingMode.Host && startHosting is not null)
+        {
+            try
+            {
+                if (await credentials.LoadAsync(CancellationToken.None) is { LocallyManaged: true } local) Server = local;
+            }
+            catch (CredentialStoreUnavailableException error)
+            {
+                Message = error.Message;
+            }
+            await startHosting();
+            return;
+        }
         StoredServer? saved;
         try
         {
@@ -194,12 +263,46 @@ public sealed class AppSession : ObservableObject
         var remaining = session.ExpiresAt - time.GetUtcNow();
         if (remaining <= TimeSpan.Zero || remaining > MaximumProfileSession) remaining = MaximumProfileSession;
         _ = ExpireProfileAsync(remaining, timer.Token);
-        flow.Show(AppScreen.Library);
+        flow.Show(NeedsInitialLibrarySetup && session.User.Role == UserRole.Owner ? AppScreen.InitialLibrarySetup : AppScreen.Library);
+    }
+
+    /// <summary>The first storage locations are added, or skipped for now: show the library.</summary>
+    public void CompleteInitialLibrarySetup()
+    {
+        NeedsInitialLibrarySetup = false;
+        if (Profile is not null) flow.Show(AppScreen.Library);
+    }
+
+    /// <summary>This computer's server restarted or stopped; its profile sessions ended with it.</summary>
+    public void ServerInterrupted()
+    {
+        if (NetworkConfirmationPending) return;
+        CloseLibrary();
+        profileTimer?.Cancel();
+        profileTimer = null;
+        Profile = null;
+    }
+
+    /// <summary>Forgets the connection to this computer's own server, before connecting elsewhere.</summary>
+    public async Task ForgetLocalServerAsync()
+    {
+        CancelNetworkConfirmation();
+        ServerInterrupted();
+        try
+        {
+            await credentials.DeleteAsync(CancellationToken.None);
+        }
+        catch (CredentialStoreUnavailableException error)
+        {
+            Message = error.Message;
+        }
+        Server = null;
     }
 
     /// <summary>Ends the open profile on the server and returns to "Who's watching?".</summary>
     public async Task SwitchProfileAsync()
     {
+        CancelNetworkConfirmation();
         await EndProfileAsync();
         flow.Show(AppScreen.ProfilePicker);
     }
@@ -210,10 +313,17 @@ public sealed class AppSession : ObservableObject
     /// </summary>
     public void HandleSessionFailure(AureliaApiException error)
     {
+        if (NetworkConfirmationPending) return;
         if (error.Code is "device_session_revoked" || (error.IsAuthenticationFailure && Profile is null))
         {
             CloseLibrary();
             Profile = null;
+            if (Server is { LocallyManaged: true })
+            {
+                // This computer's own server: sign in again with the Server Password.
+                LocalSignInNeeded?.Invoke();
+                return;
+            }
             Message = "This computer is no longer paired with the server. Pair it again.";
             flow.Show(AppScreen.Connection);
             return;
@@ -229,6 +339,7 @@ public sealed class AppSession : ObservableObject
     /// <summary>Forgets the server: removes the pairing here and, when it answers, on the server too.</summary>
     public async Task DisconnectAsync()
     {
+        CancelNetworkConfirmation();
         var saved = Server;
         await EndProfileAsync();
         try
@@ -296,6 +407,13 @@ public sealed class AppSession : ObservableObject
         syncing?.Cancel();
         syncing = null;
         Library = null;
+    }
+
+    private void CancelNetworkConfirmation()
+    {
+        networkTimer?.Cancel();
+        networkTimer = null;
+        NetworkConfirmationPending = false;
     }
 
     private async Task EndProfileAsync()

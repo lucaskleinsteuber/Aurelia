@@ -25,7 +25,7 @@ public sealed class ManagementScreenTests
     private static string Json<T>(T value) => JsonSerializer.Serialize(value, AureliaJson.Options);
 
     /// <summary>The invented library plus answers for every management request.</summary>
-    private static FakeServer Server()
+    internal static FakeServer Server()
     {
         var now = DateTimeOffset.UtcNow;
         var readiness = new ServerReadinessSummary("ready", [new ServerComponentStatus("database", "ready")], now);

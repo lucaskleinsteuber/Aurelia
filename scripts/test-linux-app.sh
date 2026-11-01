@@ -19,8 +19,15 @@ mkdir -p "$results" "$other_root/Logs"
   "$DOTNET_BIN" restore "$solution"
   "$DOTNET_BIN" format "$solution" --verify-no-changes --no-restore
   "$DOTNET_BIN" build "$solution" --configuration Release --no-restore
-  AURELIA_LINUX_SNAPSHOTS="$results/snapshots" "$DOTNET_BIN" test "$solution" --configuration Release --no-build \
-    --results-directory "$results" --logger "trx;LogFileName=tests.trx"
+  for suite in Aurelia.Linux.Tests Aurelia.Linux.IntegrationTests; do
+    AURELIA_LINUX_SNAPSHOTS="$results/snapshots" "$DOTNET_BIN" test "$repository_root/clients/linux/$suite/$suite.csproj" \
+      --configuration Release --no-build --results-directory "$results/$suite" --logger "trx;LogFileName=tests.trx"
+  done
 } 2>&1 | tee "$log"
+# A runner pipeline error can otherwise leave a successful exit code with tests unexecuted.
+if grep -Fq '[FATAL ERROR]' "$log"; then
+  echo "The test runner aborted before completing the suite; see $log." >&2
+  exit 1
+fi
 echo "Aurelia for Linux test results: $results"
 echo "Aurelia for Linux test log: $log"

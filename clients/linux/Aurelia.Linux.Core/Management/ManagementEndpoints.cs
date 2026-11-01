@@ -47,7 +47,11 @@ public sealed partial class ManagementClient
     /// <summary>Tries new network settings for 60 seconds; they are kept only after <see cref="ConfirmNetworkAsync"/> over the new connection.</summary>
     public Task<JsonObject> TryNetworkAsync(object request) => SendAsync<JsonObject>(HttpMethod.Post, "/api/v1/server/operations/network", request);
 
-    public Task<JsonNode> ConfirmNetworkAsync(Guid operation) => SendAsync<JsonNode>(HttpMethod.Post, $"/api/v1/server/operations/{operation}/confirm", null);
+    public Task<HostOperationStatus> StartNetworkTrialAsync(JsonObject settings, bool confirmDisconnect) =>
+        SendAsync<HostOperationStatus>(HttpMethod.Post, "/api/v1/server/operations/network", new { settings, confirmRemoteAccessDisabled = confirmDisconnect });
+
+    public Task<JsonNode> ConfirmNetworkAsync(Guid operation, CancellationToken cancellation = default) =>
+        SendAsync<JsonNode>(HttpMethod.Post, $"/api/v1/server/operations/{operation}/confirm", null, cancellation);
 
     // Backups (owner).
     public Task<IReadOnlyList<ServerBackupSummary>> BackupsAsync() => GetAsync<IReadOnlyList<ServerBackupSummary>>("/api/v1/server/backups");

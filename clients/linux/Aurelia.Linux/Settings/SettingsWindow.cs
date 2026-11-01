@@ -2,9 +2,11 @@ using Aurelia.Contracts;
 using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core;
 using Aurelia.Linux.Core.Api;
+using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Flow;
 using Aurelia.Linux.Core.Library;
 using Aurelia.Linux.Core.Platform;
+using Aurelia.Linux.Core.Hosting;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Core.Settings;
 using Aurelia.Linux.Library;
@@ -57,6 +59,7 @@ public sealed class SettingsWindow : Window
     };
 
     private readonly AppSession session;
+    private readonly AppServices services;
     private readonly LibraryShell? shell;
     private readonly ListBox categories = new() { Classes = { "sidebar" } };
     private readonly ScrollViewer content = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
@@ -67,6 +70,7 @@ public sealed class SettingsWindow : Window
     {
         this.session = session;
         this.shell = shell;
+        this.services = services;
         Title = "Aurelia Settings";
         Width = 920;
         Height = 680;
@@ -172,7 +176,7 @@ public sealed class SettingsWindow : Window
             case SettingsCategory.Library: page.Children.Add(new LibraryPage(Admin(), Prefs, Refresh)); break;
             case SettingsCategory.Metadata: page.Children.Add(new MetadataPage(Admin())); break;
             case SettingsCategory.ProfilesAndDevices: Profiles(page); break;
-            case SettingsCategory.Server: page.Children.Add(new ServerPage(Admin())); break;
+            case SettingsCategory.Server: page.Children.Add(new ServerPage(Admin(), session.Server is { LocallyManaged: true } ? LocalHosting() : null)); break;
             case SettingsCategory.Updates: Updates(page); break;
             default: Advanced(page); break;
         }
@@ -200,6 +204,72 @@ public sealed class SettingsWindow : Window
             SettingsCategory.Server => manages && user!.Role == UserRole.Owner,
             _ => true,
         };
+    }
+
+    /// <summary>Raised when the hosting choices change, so the window updates its icon and keep-awake lock.</summary>
+    public event Action? HostingChanged;
+
+    /// <summary>The Mac's "When the Server Runs" for the server this computer hosts.</summary>
+    private StackPanel LocalHosting()
+    {
+        var current = HostingSettings.Read(Prefs.Store);
+        var hosting = services.HostingSystem;
+        DockPanel? login = null;
+        StackPanel? section = null;
+        var problem = AdminScope.Message();
+        async void Save(HostingPreferences updated)
+        {
+            if (section is not null) section.IsEnabled = false;
+            problem.IsVisible = false;
+            try
+            {
+                updated = updated with { StartAtSignIn = updated.KeepRunning && updated.StartAtSignIn };
+                if (hosting is not null && (updated.KeepRunning != current.KeepRunning || updated.StartAtSignIn != current.StartAtSignIn))
+                    await hosting.ConfigureBackgroundAsync(updated.KeepRunning, updated.StartAtSignIn);
+                current = updated;
+                HostingSettings.Write(Prefs.Store, current);
+            }
+            catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or InvalidOperationException or Tmds.DBus.Protocol.DBusExceptionBase)
+            {
+                problem.Text = failure.Message;
+                problem.IsVisible = true;
+                // Rebuild from saved values after a denied desktop permission request.
+                ShowSelected();
+                if (content.Content is StackPanel page)
+                {
+                    var failureMessage = AdminScope.Message();
+                    failureMessage.Text = failure.Message;
+                    failureMessage.IsVisible = true;
+                    page.Children.Add(failureMessage);
+                }
+                return;
+            }
+            finally
+            {
+                if (section is not null) section.IsEnabled = true;
+            }
+            if (login is not null)
+            {
+                login.IsEnabled = current.KeepRunning;
+                if (!current.KeepRunning && login.Children.OfType<ToggleSwitch>().FirstOrDefault() is { IsChecked: true } toggle) toggle.IsChecked = false;
+            }
+            HostingChanged?.Invoke();
+        }
+        login = Toggle("Start Automatically When You Log In", "Aurelia starts in the background and keeps the server running.", current.StartAtSignIn, value => Save(current with { StartAtSignIn = value }));
+        login.IsEnabled = current.KeepRunning;
+        var rows = new List<Control>
+        {
+            Choice("Run the Server", null, [(false, "Only while Aurelia is open"), (true, "Also when Aurelia is closed")], current.KeepRunning,
+                value => Save(current with { KeepRunning = value })),
+            login,
+            Toggle("Keep This PC Awake While the Server Runs", null, current.KeepAwake, value => Save(current with { KeepAwake = value })),
+        };
+        var notes = new StackPanel { Spacing = 6, Margin = new Thickness(16, 8) };
+        notes.Children.Add(AdminScope.Note("The server can't be reached while this PC is asleep or turned off. With Aurelia closed, its icon stays in the notification area."));
+        if (HostingSettings.FirewallHint(session.Server!.Address.Port) is { } hint) notes.Children.Add(new SelectableTextBlock { Text = hint, Classes = { "subdued" }, FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        rows.Add(notes);
+        rows.Add(problem);
+        return section = Section("When the Server Runs", [.. rows]);
     }
 
     private void General(StackPanel page)

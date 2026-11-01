@@ -63,7 +63,7 @@ public sealed class PlaybackFlowTests : IDisposable
         Assert.Equal(400, (int)wrongPath.StatusCode);
 
         var subtitles = await client.SubtitlesAsync(ticket, TestContext.Current.CancellationToken);
-        Assert.NotNull(subtitles);
+        Assert.True(Assert.Single(subtitles).IsSidecar);
         await client.RevokeAsync(ticket.Id, TestContext.Current.CancellationToken);
     }
 
