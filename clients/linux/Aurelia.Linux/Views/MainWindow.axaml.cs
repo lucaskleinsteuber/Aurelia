@@ -47,6 +47,15 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
             if (e.PropertyName == nameof(AppSession.Library)) StartPlayOn();
         };
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Close) });
+        KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.OemComma, KeyModifiers.Control), Command = new RelayCommand(() => OpenSettings()) });
+        AddHandler(PointerMovedEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerPressedEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(KeyDownEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        Activated += (_, _) => NoteUse();
+        Deactivated += (_, _) => lastUse = services.Time.GetUtcNow();
+        restCheck = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        restCheck.Tick += (_, _) => CheckRest();
+        restCheck.Start();
         ShowScreen();
         if (startSession) Opened += async (_, _) => await Session.StartAsync();
         Closed += (_, _) =>
@@ -92,13 +101,80 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
         var created = new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session };
         if (Remote is not null) created.AttachRemote(Remote);
         created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
+        created.SettingsRequested += () => OpenSettings();
         return created;
     }
 
     private CancellationTokenSource? playOn;
+    private readonly DispatcherTimer restCheck;
+    private DateTimeOffset lastUse = DateTimeOffset.UtcNow;
+    private Settings.SettingsWindow? settings;
+
+    /// <summary>Opens Settings, or brings the open Settings window forward.</summary>
+    public Settings.SettingsWindow OpenSettings(Settings.SettingsCategory category = Settings.SettingsCategory.General)
+    {
+        if (settings is { } open)
+        {
+            open.Category = category;
+            open.Activate();
+            return open;
+        }
+        settings = new Settings.SettingsWindow(Session, shell, services, category);
+        settings.Closed += (_, _) => settings = null;
+        settings.Show(this);
+        return settings;
+    }
+
+    private void NoteUse()
+    {
+        lastUse = services.Time.GetUtcNow();
+        if (Session.IsResting) _ = WakeFromRestAsync();
+    }
+
+    /// <summary>Lets the server rest when nothing plays and nobody used Aurelia for the chosen minutes, as on the Mac.</summary>
+    internal void CheckRest()
+    {
+        var prefs = Session.Preferences;
+        var withoutUse = services.Time.GetUtcNow() - lastUse;
+        if (Session.IsResting || Session.Library is null) return;
+        if (!Core.Settings.GeneralPreferences.ShouldRest(prefs.RestsWhenUnused, prefs.RestMinutes, withoutUse, Player is not null, Session.ConnectedElsewhere)) return;
+        playOn?.Cancel();
+        Session.Rest();
+        RestHost.Content = RestView();
+        RestHost.IsVisible = true;
+    }
+
+    private async Task WakeFromRestAsync()
+    {
+        RestHost.IsVisible = false;
+        RestHost.Content = null;
+        await Session.ResumeFromRestAsync();
+    }
+
+    private Panel RestView()
+    {
+        var name = Session.Server?.Name ?? "your server";
+        var minutes = Session.Preferences.RestMinutes;
+        var resume = new Button { Content = "Continue", Classes = { "primary" }, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center };
+        resume.Click += async (_, _) => await WakeFromRestAsync();
+        return ScreenParts.Backdrop(new StackPanel
+        {
+            Spacing = 14,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            Children =
+            {
+                ScreenParts.Symbol("IconSleep", 46),
+                ScreenParts.Title("Aurelia Is Resting"),
+                ScreenParts.Detail($"Nothing played and no one used Aurelia for {minutes} minutes, so it let go of {name}. The server can save power now."),
+                ScreenParts.Detail("Click anywhere or press a key to continue."),
+                resume,
+            },
+        });
+    }
 
     public void Dispose()
     {
+        restCheck.Stop();
         playOn?.Cancel();
         playOn?.Dispose();
         playOn = null;

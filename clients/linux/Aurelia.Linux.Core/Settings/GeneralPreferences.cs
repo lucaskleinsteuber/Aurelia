@@ -19,6 +19,10 @@ public sealed class GeneralPreferences(ISettingsStore store)
     public const string ReduceMotionKey = "reduceMotion";
     public const string HideOfflineTitlesKey = "hideOfflineTitles";
     public const string SidebarOrderKey = "sidebarItemOrder";
+    public const string RestsWhenUnusedKey = "restsWhenUnused";
+    public const string RestMinutesKey = "restMinutes";
+    public const string ActivityPageKey = "settingsActivityPage";
+    public static readonly int[] RestMinuteChoices = [5, 10, 15, 30, 60];
 
     public ISettingsStore Store { get; } = store;
 
@@ -55,6 +59,33 @@ public sealed class GeneralPreferences(ISettingsStore store)
         get => Store.Read<bool?>(HideOfflineTitlesKey) ?? false;
         set => Store.Write(HideOfflineTitlesKey, value);
     }
+
+    /// <summary>"Let the Server Rest When Unused" (Settings › General), on by default as on the Mac.</summary>
+    public bool RestsWhenUnused
+    {
+        get => Store.Read<bool?>(RestsWhenUnusedKey) ?? true;
+        set => Store.Write(RestsWhenUnusedKey, value);
+    }
+
+    public int RestMinutes
+    {
+        get => Store.Read<int?>(RestMinutesKey) is { } minutes && RestMinuteChoices.Contains(minutes) ? minutes : 15;
+        set => Store.Write(RestMinutesKey, RestMinuteChoices.Contains(value) ? value : 15);
+    }
+
+    /// <summary>"statistics" or "history" in Settings › Activity.</summary>
+    public string ActivityPage
+    {
+        get => Store.Read<string>(ActivityPageKey) == "history" ? "history" : "statistics";
+        set => Store.Write(ActivityPageKey, value == "history" ? "history" : "statistics");
+    }
+
+    /// <summary>
+    /// Whether Aurelia lets go of its server now (Mac: AureliaRest): only for a server on another
+    /// computer, while nothing plays and nobody used Aurelia for the chosen minutes.
+    /// </summary>
+    public static bool ShouldRest(bool enabled, int minutes, TimeSpan withoutUse, bool playing, bool connectedElsewhere) =>
+        enabled && connectedElsewhere && !playing && withoutUse >= TimeSpan.FromMinutes(minutes);
 
     /// <summary>The last page shown, per server and profile.</summary>
     public LibraryDestination? LastDestination(Guid serverId, Guid userId) =>

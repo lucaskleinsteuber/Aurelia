@@ -110,6 +110,24 @@ public sealed partial class AureliaApi : IDisposable
         SendAsync<NoContent>(Pinned(server.Address, server.Fingerprint), HttpMethod.Post, "/api/v1/profile/end",
             session.Token, null, inspecting: false, cancellation);
 
+    /// <summary>PUT /api/v1/profile/pin-protection: changes, turns on or removes the open profile's own PIN.</summary>
+    public Task<UserSummary> UpdateOwnPinAsync(StoredServer server, ProfileSession session, UpdateOwnPinProtectionRequest request, CancellationToken cancellation)
+    {
+        if (request.Pin is { } pin && !ProfilePin.IsValid(pin)) throw new AureliaApiException(400, "invalid_profile_pin", "Enter a PIN with four to eight digits.");
+        return SendAsync<UserSummary>(Pinned(server.Address, server.Fingerprint), HttpMethod.Put, "/api/v1/profile/pin-protection",
+            session.Token, request, inspecting: false, cancellation);
+    }
+
+    /// <summary>Closes idle connections, so a resting server is not kept awake.</summary>
+    public void DropConnections()
+    {
+        lock (gate)
+        {
+            foreach (var client in pinnedClients.Values) client.Dispose();
+            pinnedClients.Clear();
+        }
+    }
+
     /// <summary>DELETE /api/v1/device: removes this computer's pairing on the server.</summary>
     public Task DisconnectDeviceAsync(StoredServer server, CancellationToken cancellation) =>
         SendAsync<NoContent>(Pinned(server.Address, server.Fingerprint), HttpMethod.Delete, "/api/v1/device",

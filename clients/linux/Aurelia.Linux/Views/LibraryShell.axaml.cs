@@ -58,6 +58,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
             if (Destination == LibraryDestination.Home && context is { } current) _ = current.Store.RefreshHomeAsync();
         };
         SidebarToggle.Click += (_, _) => SidebarVisible = !SidebarVisible;
+        SettingsButton.Click += (_, _) => SettingsRequested?.Invoke();
         ProfileButton.Click += async (_, _) =>
         {
             if (session is not null) await session.SwitchProfileAsync();
@@ -206,6 +207,38 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         ShowCurrentPage();
     }
 
+    /// <summary>Raised by the gear next to the profile; the window opens Settings.</summary>
+    public event Action? SettingsRequested;
+
+    /// <summary>Lists the keyboard shortcuts, as the Mac app's Keyboard Shortcuts sheet.</summary>
+    public void ShowShortcuts()
+    {
+        var rows = new (string Keys, string Action)[]
+        {
+            ("Ctrl+F", "Search the library"), ("F9", "Show or hide the sidebar"), ("Alt+Left, Esc", "Back from a title"),
+            ("Ctrl+,", "Settings"), ("F11", "Full screen"), ("Ctrl+Q", "Quit"),
+            ("Space", "Play or pause"), ("Left / Right", "Seek back or forward"), ("M", "Mute"), ("F", "Full screen in the player"),
+            ("P / N", "Previous or next episode"), ("Esc", "Leave full screen, then close the player"),
+        };
+        var list = new StackPanel { Spacing = 6, Width = 440 };
+        list.Children.Add(new TextBlock { Text = "Keyboard Shortcuts", FontSize = 18, FontWeight = FontWeight.Bold, Margin = new Thickness(0, 0, 0, 6) });
+        foreach (var (keys, action) in rows)
+        {
+            list.Children.Add(new DockPanel
+            {
+                Children =
+                {
+                    new TextBlock { Text = keys, FontWeight = FontWeight.SemiBold, Width = 140 }.Also(t => DockPanel.SetDock(t, Dock.Left)),
+                    new TextBlock { Text = action, Classes = { "subdued" } },
+                },
+            });
+        }
+        var done = new Button { Content = "Done", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0), IsDefault = true };
+        done.Click += (_, _) => Sheets.Close(true);
+        list.Children.Add(done);
+        _ = Sheets.ShowAsync(list);
+    }
+
     /// <summary>Raised when a page asks to play a title; the window opens the player.</summary>
     public event Action<CatalogItemSummary, bool>? PlayRequested;
 
@@ -219,6 +252,21 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     public Task<bool> ConfirmAsync(string title, string message, string confirmLabel, bool destructive) =>
         Sheets.ConfirmAsync(title, message, confirmLabel, destructive);
+
+    /// <summary>Applies a changed sidebar layout from Settings › Sidebar.</summary>
+    public void ReloadSidebar()
+    {
+        if (context is null) return;
+        BuildSidebar(context.Store.Preferences.Sidebar(), context.Store.Client.SupportsWatchlist);
+        ShowCurrentPage();
+    }
+
+    /// <summary>Builds the pages again after a display setting changed (poster size, watched titles).</summary>
+    public void RebuildPages()
+    {
+        foreach (var page in pages.Values) page.Rebuild();
+        foreach (var page in details) page.Rebuild();
+    }
 
     /// <summary>Ctrl+F: from Home or a detail page it opens Library; otherwise it focuses the page's search.</summary>
     public void FindInLibrary()
@@ -237,6 +285,11 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control)
         {
             FindInLibrary();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Oem2 && e.KeyModifiers == KeyModifiers.Control)
+        {
+            ShowShortcuts();
             e.Handled = true;
         }
         else if ((e.Key == Key.Left && e.KeyModifiers == KeyModifiers.Alt) || (e.Key == Key.Escape && details.Count > 0))

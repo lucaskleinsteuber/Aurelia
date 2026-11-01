@@ -376,4 +376,9 @@
     <Setter Property="CornerRadius" Value="12" />
     <Setter Property="Padding" Value="8" />
   </Style>
+
+  <Style Selector="Button.link:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#4DFFFFFF" />
+  </Style>
 </Styles>

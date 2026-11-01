@@ -42,14 +42,14 @@ public sealed record AppServices(
 
     /// <summary>Services that touch nothing outside the process, for tests.</summary>
     public static AppServices ForTests(ISettingsStore? settings = null, WindowButtonLayout? layout = null, IServerTransport? transport = null,
-        ICredentialStore? credentials = null, IVideoEngineFactory? engines = null) => new(
+        ICredentialStore? credentials = null, IVideoEngineFactory? engines = null, TimeProvider? time = null) => new(
             settings ?? new MemorySettingsStore(),
             layout ?? WindowButtonLayout.Default,
             transport ?? new PinnedServerTransport(),
             credentials ?? new MemoryCredentialStore(),
             () => new NoServerDiscovery(),
             new NoWakeOnLan(),
-            TimeProvider.System,
+            time ?? TimeProvider.System,
             "Test PC",
             Engines: engines);
 }

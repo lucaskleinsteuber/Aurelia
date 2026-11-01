@@ -26,6 +26,7 @@ public sealed class AppSession : ObservableObject
     private CancellationTokenSource? syncing;
     private LibraryStore? library;
     private IReadOnlyList<string> capabilities = [];
+    private bool isResting;
     private StoredServer? server;
     private ProfileSession? profile;
     private ConnectionStatus status;
@@ -83,6 +84,16 @@ public sealed class AppSession : ObservableObject
         get => status;
         private set => SetProperty(ref status, value);
     }
+
+    /// <summary>Aurelia let go of the server because nobody used it (see <see cref="RestAsync"/>).</summary>
+    public bool IsResting
+    {
+        get => isResting;
+        private set => SetProperty(ref isResting, value);
+    }
+
+    /// <summary>True when the saved server runs on another computer, the only case in which Aurelia rests.</summary>
+    public bool ConnectedElsewhere => Server is { } saved && !saved.LocallyManaged && !ServerAddress.IsLoopback(saved.Address);
 
     /// <summary>A problem to show on the current screen, or null.</summary>
     public string? Message
@@ -241,6 +252,37 @@ public sealed class AppSession : ObservableObject
         }
         Server = null;
         flow.Show(AppScreen.Connection);
+    }
+
+    /// <summary>
+    /// Lets go of the server so it can sleep, as the Mac app does: the sync stops and idle connections
+    /// close. The profile stays open; using Aurelia again wakes the server and continues.
+    /// </summary>
+    public void Rest()
+    {
+        if (IsResting) return;
+        syncing?.Cancel();
+        syncing = null;
+        Api.DropConnections();
+        IsResting = true;
+    }
+
+    /// <summary>Wakes and reaches the server after a rest, then reloads the library and resumes its sync.</summary>
+    public async Task ResumeFromRestAsync()
+    {
+        if (!IsResting || Server is not { } saved) return;
+        IsResting = false;
+        Status = ConnectionStatus.Connecting;
+        var reached = await wakeUp.ReachAsync(saved, value => Status = value, CancellationToken.None);
+        Status = ConnectionStatus.Idle;
+        if (reached is null)
+        {
+            CloseLibrary();
+            flow.Show(AppScreen.ServerUnreachable);
+            return;
+        }
+        if (Profile is { } open && open.ExpiresAt > time.GetUtcNow()) OpenProfile(open);
+        else await SwitchProfileAsync();
     }
 
     private async Task StartLibraryAsync(LibraryStore store, CancellationToken cancellation)

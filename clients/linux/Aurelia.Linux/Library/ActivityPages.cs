@@ -152,7 +152,7 @@ public sealed class HistoryPage : LibraryPageBase
                 Children =
                 {
                     poster.Also(p => DockPanel.SetDock(p, Dock.Left)),
-                    new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { state, open, remove } }.Also(p => DockPanel.SetDock(p, Dock.Right)),
+                    new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { state, open.Also(o => o.IsVisible = showsTitle), remove } }.Also(p => DockPanel.SetDock(p, Dock.Right)),
                     details.Also(d => d.Margin = new Thickness(12, 0)),
                 },
             },

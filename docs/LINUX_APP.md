@@ -92,6 +92,27 @@ are made on the series and ask first with the number of episodes. Artwork is req
 smallest width that stays sharp (320, 640, 1280, 1920) and kept in memory (96 MB) and on disk
 (512 MB, only artwork with a revision). Ctrl+F opens the library search, Alt+Left goes back.
 
+## Settings
+
+Settings open with Ctrl+, or the gear next to the profile, in a window of their own like the Mac
+app's, with a search field (`Settings/SettingsWindow.cs`):
+
+- General: start screen, poster size, watched titles in rows, Reduce Motion, and "Let the Server
+  Rest When Unused" with its minutes.
+- Sidebar: the pages, their order and visibility (one always stays), and the startup screen.
+- Activity: statistics and history.
+- Playback: all twelve player settings with the Mac app's choices, "Forget Track Choices" and
+  "Restore Playback Defaults".
+- Profiles and Devices: the open profile, switching profiles, and changing, turning on or removing
+  the own PIN (owners and administrators always keep one); a PIN change locks the profile.
+- Updates: the installed version and automatic checks.
+- Advanced: the server connection (name, address, fingerprint, profile) and "Disconnect This PC".
+
+When nothing plays and nobody used Aurelia for the chosen minutes, Aurelia lets go of a server on
+another computer so it can sleep: the sync stops, idle connections close and "Aurelia Is Resting"
+shows. Any click or key wakes the server and continues with the open profile. Ctrl+/ lists the
+keyboard shortcuts.
+
 ## Player
 
 `Playback/PlaybackController.cs` runs a playback the way the Mac app does. It asks the server for a
