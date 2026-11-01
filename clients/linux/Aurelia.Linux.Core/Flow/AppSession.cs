@@ -399,7 +399,9 @@ public sealed class AppSession : ObservableObject
     private async Task StartLibraryAsync(LibraryStore store, CancellationToken cancellation)
     {
         await store.RefreshAsync();
-        if (!cancellation.IsCancellationRequested) await new LibrarySync(store, Preferences.Store, time).RunAsync(cancellation);
+        if (!cancellation.IsCancellationRequested)
+            await Task.WhenAll(new LibrarySync(store, Preferences.Store, time).RunAsync(cancellation),
+                new RecommendationRefresh(store, time).RunAsync(cancellation));
     }
 
     private void CloseLibrary()

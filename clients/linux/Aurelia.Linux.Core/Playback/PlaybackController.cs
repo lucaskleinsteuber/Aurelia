@@ -87,6 +87,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private IReadOnlyList<MediaTrack> subtitleTracks = [];
     private int audioTrack = -1;
     private int subtitleTrack = -1;
+    private IReadOnlyList<PlaybackChapter> chapters = [];
+    private int chapter = -1;
     private bool tracksApplied;
     private SleepTimer sleepTimer = SleepTimer.Off;
     private DateTimeOffset? sleepAt;
@@ -111,6 +113,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         this.settings = settings;
         this.outbox = outbox;
         this.time = time;
+        Diagnostics = new PlaybackDiagnostics(time);
         this.post = post;
         this.system = system ?? new NoPlaybackSystem();
         memory = new TrackMemory(settings, client.Library.Profile.User.Id);
@@ -123,6 +126,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     public event Action? Closed;
 
     public PlaybackPreferences Preferences { get; private set; }
+
+    public PlaybackDiagnostics Diagnostics { get; }
 
     public CatalogItemSummary? Item
     {
@@ -148,6 +153,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         private set
         {
             if (!SetProperty(ref state, value)) return;
+            Record(PlaybackDiagnosticKind.StateChanged);
             system.KeepAwake(Preferences.PreventSleep && value is PlayerState.Playing or PlayerState.Loading or PlayerState.Recovering);
             system.Update(this);
         }
@@ -222,6 +228,26 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref subtitleTrack, value);
     }
 
+    public IReadOnlyList<PlaybackChapter> Chapters
+    {
+        get => chapters;
+        private set => SetProperty(ref chapters, value);
+    }
+
+    public int Chapter
+    {
+        get => chapter;
+        private set => SetProperty(ref chapter, value);
+    }
+
+    public void SelectChapter(PlaybackChapter selected)
+    {
+        if (engine is null || !Chapters.Contains(selected)) return;
+        engine.Chapter = selected.Index;
+        Chapter = selected.Index;
+        SeekTo(selected.PositionMilliseconds);
+    }
+
     public SleepTimer SleepTimer
     {
         get => sleepTimer;
@@ -258,12 +284,19 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     public PlaybackClient Client => client;
 
+    public IScrubPreviewDecoderFactory? PreviewDecoders => engines as IScrubPreviewDecoderFactory;
+
+    /// <summary>A separate relay for a local timeline still, using the current ticket and its pinned connection.</summary>
+    public LoopbackStreamRelay? CreatePreviewRelay() => ticket is { } current
+        ? new LoopbackStreamRelay(client.StreamConnection, client.StreamToken, client.StreamUri(current), "preview") : null;
+
     /// <summary>The decoder in use; it changes when the title or Night Mode changes, or after recovery.</summary>
     public IVideoEngine? Engine => engine;
 
     /// <summary>Starts a title: a series plays its next episode, an episode continues with the ones after it.</summary>
     public async Task StartAsync(CatalogItemSummary title, bool resume, long? startAt = null)
     {
+        Record(PlaybackDiagnosticKind.Started);
         var target = title;
         queue.Clear();
         previous.Clear();
@@ -311,6 +344,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         var target = PlayerPolicy.Clamp(milliseconds, Duration);
         engine.Seek(target);
         Position = target;
+        Record(PlaybackDiagnosticKind.Seeked);
         upNextDismissed = false;
         lastMovement = time.GetUtcNow();
         _ = SaveProgressAsync(finished: false);
@@ -322,6 +356,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         if (engine is null) return;
         engine.AudioTrack = track.Id;
         AudioTrack = track.Id;
+        Record(PlaybackDiagnosticKind.AudioChanged);
         memory.RememberAudio(track, seriesId);
     }
 
@@ -331,6 +366,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         if (engine is null) return;
         engine.SubtitleTrack = track?.Id ?? -1;
         SubtitleTrack = track?.Id ?? -1;
+        Record(PlaybackDiagnosticKind.SubtitleChanged);
         memory.RememberSubtitle(track, seriesId);
     }
 
@@ -405,6 +441,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     {
         if (closed) return;
         closed = true;
+        Record(PlaybackDiagnosticKind.Stopped);
         clock?.Dispose();
         await SaveProgressAsync(finished: false);
         await ReleaseAsync(revoke: true);
@@ -426,6 +463,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         observedPlayback = false;
         AudioTracks = [];
         SubtitleTracks = [];
+        Chapters = [];
+        Chapter = -1;
         await ReleaseAsync(revoke: !keepTicket);
         try
         {
@@ -457,6 +496,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         }
         catch (AureliaApiException failure)
         {
+            Record(PlaybackDiagnosticKind.Failed, failure: failure);
             if (failure.IsTransient) await RecoverAsync(failure.Message);
             else Fail(failure.Message);
         }
@@ -507,6 +547,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         if (engine.SubtitleTracks.Count != SubtitleTracks.Count) SubtitleTracks = engine.SubtitleTracks;
         AudioTrack = engine.AudioTrack;
         SubtitleTrack = engine.SubtitleTrack;
+        if (!Chapters.SequenceEqual(engine.Chapters)) Chapters = engine.Chapters;
+        Chapter = engine.Chapter;
         if (!tracksApplied && (engine.AudioTracks.Count > 0 || engine.SubtitleTracks.Count > 0)) ApplyTrackPreferences();
         RaiseClockChanged();
     });
@@ -572,6 +614,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     private async Task FinishTitleAsync()
     {
+        Record(PlaybackDiagnosticKind.Ended);
         await SaveProgressAsync(finished: true);
         if (SleepTimer.EndOfEpisode)
         {
@@ -613,6 +656,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             if (ticket != current || relay is null) return;
             ticket = renewed;
             relay.UpdateSource(client.StreamUri(renewed));
+            Record(PlaybackDiagnosticKind.TicketRenewed);
             _ = RevokeQuietlyAsync(current.Id);
         }
         catch (AureliaApiException)
@@ -634,6 +678,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         }
         State = PlayerState.Recovering;
         var wait = TimeSpan.FromSeconds(RecoveryDelays[recoveryAttempt++]);
+        Record(PlaybackDiagnosticKind.RecoveryAttempt, recoveryAttempt);
         var resumeAt = Position;
         await ReleaseAsync(revoke: true);
         try
@@ -652,6 +697,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     {
         Error = reason;
         State = PlayerState.Failed;
+        Record(PlaybackDiagnosticKind.Failed);
         recoveryStarted = null;
     }
 
@@ -664,7 +710,12 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         var (result, saved) = await outbox.SaveAsync(client, pending, CancellationToken.None);
         if (result == ProgressResult.Saved && saved is not null) revision = saved.Revision;
         if (result == ProgressResult.Conflict) HasConflict = true;
+        if (result == ProgressResult.Conflict) Record(PlaybackDiagnosticKind.ProgressConflict);
+        if (result == ProgressResult.Waiting) Record(PlaybackDiagnosticKind.ProgressPending);
     }
+
+    private void Record(PlaybackDiagnosticKind kind, int? attempt = null, AureliaApiException? failure = null) =>
+        Diagnostics.Record(kind, Position, Duration, State, attempt, failure);
 
     private async Task ReleaseAsync(bool revoke)
     {

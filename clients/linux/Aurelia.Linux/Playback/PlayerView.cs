@@ -11,6 +11,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 
 namespace Aurelia.Linux.Playback;
@@ -41,6 +42,8 @@ public sealed class PlayerView : UserControl, IDisposable
     private readonly Button speed;
     private readonly Button sleep;
     private readonly Button notes;
+    private readonly Button chapters;
+    private readonly Canvas chapterMarkers = new() { IsHitTestVisible = false };
     private readonly Button mute;
     private readonly Slider volume = new() { Minimum = 0, Maximum = 1, Width = 110, Classes = { "volume" } };
     private readonly Border upNext = new() { Classes = { "upNext" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 40, 190) };
@@ -60,6 +63,9 @@ public sealed class PlayerView : UserControl, IDisposable
     private DispatcherTimer? hideTimer;
     private bool draggingTimeline;
     private bool updatingTimeline;
+    private bool exportingDiagnostics;
+
+    internal Func<Task<Stream?>>? DiagnosticsDestination { get; set; }
 
     public PlayerView(PlaybackController controller, Window? window)
     {
@@ -67,6 +73,9 @@ public sealed class PlayerView : UserControl, IDisposable
         this.window = window;
         Focusable = true;
         Background = Brushes.Black;
+        var diagnostics = new MenuItem { Header = "Export Playback Diagnostics…" };
+        diagnostics.Click += async (_, _) => await ExportDiagnosticsAsync();
+        ContextMenu = new ContextMenu { Items = { diagnostics } };
         previews = new ScrubPreviews(controller);
         sceneNotes = new SceneNotes(controller);
         playPause = Control("IconPause", "Pause", controller.PlayPause, large: true);
@@ -80,6 +89,8 @@ public sealed class PlayerView : UserControl, IDisposable
         sleep = Menu("IconSleep", "Sleep Timer", SleepMenu);
         notes = Control("IconNote", "Scene Notes", () => { });
         notes.Flyout = new Flyout { Content = sceneNotes.Editor(), Placement = PlacementMode.TopEdgeAlignedRight };
+        chapters = Menu("IconChapters", "Chapters", ChapterMenu);
+        chapterMarkers.SizeChanged += (_, _) => DrawChapterMarkers();
         mute = Control("IconVolume", "Mute (M)", () => controller.Muted = !controller.Muted);
         var fullScreen = Control("IconFullScreen", "Full Screen (F)", ToggleFullScreen);
         var close = Control("IconChevronLeft", "Back", () => _ = controller.CloseAsync());
@@ -114,7 +125,7 @@ public sealed class PlayerView : UserControl, IDisposable
             },
         };
         var center = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 18, HorizontalAlignment = HorizontalAlignment.Center, Children = { previous, back10, playPause, forward10, next } };
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(16, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Children = { speed, audio, subtitles, sleep, notes, mute, volume, fullScreen } };
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(16, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Children = { speed, audio, subtitles, sleep, notes, chapters, mute, volume, fullScreen } };
         var bottom = new Border
         {
             VerticalAlignment = VerticalAlignment.Bottom,
@@ -125,7 +136,7 @@ public sealed class PlayerView : UserControl, IDisposable
                 Spacing = 8,
                 Children =
                 {
-                    new Panel { Children = { timeline, previewBubble } },
+                    new Panel { Children = { timeline, chapterMarkers, previewBubble } },
                     new DockPanel { Children = { elapsed.Also(t => DockPanel.SetDock(t, Dock.Left)), remaining.Also(t => DockPanel.SetDock(t, Dock.Right)), endsAt } },
                     new Grid
                     {
@@ -188,13 +199,28 @@ public sealed class PlayerView : UserControl, IDisposable
 
     internal PlaybackController Controller => controller;
 
-    public void Dispose() => surface.Dispose();
+    public void Dispose()
+    {
+        controller.PropertyChanged -= OnControllerChanged;
+        sceneNotes.CuesChanged -= ShowCues;
+        hideTimer?.Stop();
+        previewImage.Source = null;
+        previews.Dispose();
+        surface.Dispose();
+    }
 
     internal bool ControlsVisible => chrome.IsVisible;
 
     private void OnControllerChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(PlaybackController.Engine)) AttachEngine();
+        if (e.PropertyName is nameof(PlaybackController.Chapters) or nameof(PlaybackController.Duration)) DrawChapterMarkers();
+        if (e.PropertyName == nameof(PlaybackController.Item))
+        {
+            previewImage.Source = null;
+            previewBubble.IsVisible = false;
+            previews.Reset();
+        }
         if (e.PropertyName is nameof(PlaybackController.Position)) sceneNotes.Advance(controller.Position);
         Update();
     }
@@ -212,6 +238,7 @@ public sealed class PlayerView : UserControl, IDisposable
         ToolTip.SetTip(playPause, playing ? "Pause (Space)" : "Play (Space)");
         previous.IsVisible = controller.HasPrevious;
         next.IsVisible = controller.NextItem is not null;
+        chapters.IsVisible = controller.Chapters.Count > 0;
         ((PathIcon)mute.Content!).Data = Application.Current?.FindResource(controller.Muted ? "IconMuted" : "IconVolume") as Geometry;
         AutomationProperties.SetName(mute, controller.Muted ? "Unmute (M)" : "Mute (M)");
         if (!draggingTimeline && controller.Duration > 0)
@@ -247,6 +274,9 @@ public sealed class PlayerView : UserControl, IDisposable
             retry.Click += (_, _) => _ = controller.RetryAsync();
             statusActions.Children.Add(back);
             statusActions.Children.Add(retry);
+            var diagnostics = new Button { Content = "Export Playback Diagnostics…", Classes = { "chip" } };
+            diagnostics.Click += async (_, _) => await ExportDiagnosticsAsync();
+            statusActions.Children.Add(diagnostics);
             ShowControls();
         }
         sleep.Classes.Set("active", controller.SleepTimer.IsOn);
@@ -313,7 +343,7 @@ public sealed class PlayerView : UserControl, IDisposable
         hideTimer.Tick += (_, _) =>
         {
             hideTimer?.Stop();
-            var menuOpen = this.GetVisualDescendantsOfType<Popup>().Any(p => p.IsOpen) || draggingTimeline;
+            var menuOpen = this.GetVisualDescendantsOfType<Popup>().Any(p => p.IsOpen) || draggingTimeline || exportingDiagnostics || ContextMenu?.IsOpen == true;
             if (controller.State == PlayerState.Playing && !menuOpen && !IsPointerOverControls())
             {
                 chrome.IsVisible = false;
@@ -325,6 +355,46 @@ public sealed class PlayerView : UserControl, IDisposable
 
     private bool IsPointerOverControls() => chrome.Children.OfType<Control>().Any(child => child.IsPointerOver && child.VerticalAlignment == VerticalAlignment.Bottom && child.IsPointerOver);
 
+    internal async Task ExportDiagnosticsAsync()
+    {
+        if (exportingDiagnostics) return;
+        exportingDiagnostics = true;
+        ShowControls();
+        try
+        {
+            Stream? output = null;
+            if (DiagnosticsDestination is { } destination) output = await destination();
+            else if (TopLevel.GetTopLevel(this)?.StorageProvider is { } storage)
+            {
+                var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = "Export Playback Diagnostics",
+                    SuggestedFileName = "Aurelia Playback Diagnostics.json",
+                    DefaultExtension = "json",
+                    FileTypeChoices = [new FilePickerFileType("JSON") { Patterns = ["*.json"] }],
+                });
+                if (file is not null) output = await file.OpenWriteAsync();
+            }
+            if (output is null) return;
+            await using (output)
+            {
+                if (output.CanSeek) output.SetLength(0);
+                await output.WriteAsync(controller.Diagnostics.Export());
+                await output.FlushAsync();
+            }
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            statusText.Text = "Diagnostics could not be exported. Choose another location and try again.";
+            statusText.IsVisible = true;
+        }
+        finally
+        {
+            exportingDiagnostics = false;
+            ShowControls();
+        }
+    }
+
     private async void ShowPreview(double x)
     {
         if (controller.Duration <= 0 || timeline.Bounds.Width <= 0) return;
@@ -334,7 +404,7 @@ public sealed class PlayerView : UserControl, IDisposable
         previewBubble.Margin = new Thickness(Math.Clamp(x - 128, 0, Math.Max(0, timeline.Bounds.Width - 256)), 0, 0, 36);
         previewBubble.IsVisible = true;
         var picture = await previews.GetAsync(at);
-        if (picture is not null && previewTime.Text == PlayerPolicy.TimeLabel(at)) previewImage.Source = picture;
+        if (previewTime.Text == PlayerPolicy.TimeLabel(at)) previewImage.Source = picture;
         previewImage.IsVisible = previewImage.Source is not null;
     }
 
@@ -355,6 +425,25 @@ public sealed class PlayerView : UserControl, IDisposable
     private List<Control> SpeedMenu() =>
         [.. PlayerPolicy.Rates.Select(rate => Choice(rate == 1 ? "Standard" : rate.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "×",
             controller.Rate == rate, () => controller.Rate = rate))];
+
+    private List<Control> ChapterMenu() =>
+        [.. controller.Chapters.Select(chapter => Choice(chapter.Title + "  " + PlayerPolicy.TimeLabel(chapter.PositionMilliseconds),
+            controller.Chapter == chapter.Index, () => controller.SelectChapter(chapter)))];
+
+    private void DrawChapterMarkers()
+    {
+        chapterMarkers.Children.Clear();
+        if (controller.Duration <= 0 || chapterMarkers.Bounds.Width <= 0) return;
+        foreach (var chapter in controller.Chapters.Where(chapter => chapter.PositionMilliseconds > 0))
+        {
+            var marker = new Border { Width = 1, Height = 7, Background = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)) };
+            Canvas.SetLeft(marker, chapterMarkers.Bounds.Width * Math.Clamp((double)chapter.PositionMilliseconds / controller.Duration, 0, 1));
+            Canvas.SetTop(marker, Math.Max(0, chapterMarkers.Bounds.Height / 2 - 3.5));
+            chapterMarkers.Children.Add(marker);
+        }
+    }
+
+    internal int ChapterMarkerCount => chapterMarkers.Children.Count;
 
     private List<Control> AudioMenu()
     {

@@ -8,7 +8,7 @@ namespace Aurelia.Linux.Playback;
 /// complete frame is swapped to the front for the screen to copy. Frames stay at full size, since
 /// the graphics card scales them while drawing. Nothing is written to disk.
 /// </summary>
-public sealed class VideoFrames : IDisposable
+public sealed class VideoFrames(int maximumWidth = 0) : IDisposable
 {
     private readonly Lock gate = new();
     private IntPtr front;
@@ -25,6 +25,18 @@ public sealed class VideoFrames : IDisposable
     public int Pitch => Width * 4;
 
     public long Version { get; private set; }
+
+    /// <summary>Copies a complete still without retaining decoder-owned buffers; only small preview frames may use it.</summary>
+    internal Aurelia.Linux.Core.Playback.ScrubPreviewFrame? Snapshot()
+    {
+        lock (gate)
+        {
+            if (front == IntPtr.Zero || Version == 0 || Width <= 0 || Height <= 0 || (long)Width * Height > 320 * 320) return null;
+            var pixels = new byte[Width * Height * 4];
+            Marshal.Copy(front, pixels, 0, pixels.Length);
+            return new Aurelia.Linux.Core.Playback.ScrubPreviewFrame(Width, Height, pixels);
+        }
+    }
 
     public void Attach(MediaPlayer player)
     {
@@ -61,8 +73,14 @@ public sealed class VideoFrames : IDisposable
         }
     }
 
-    private uint Format(ref IntPtr opaque, IntPtr chroma, ref uint width, ref uint height, ref uint pitches, ref uint lines)
+    internal uint Format(ref IntPtr opaque, IntPtr chroma, ref uint width, ref uint height, ref uint pitches, ref uint lines)
     {
+        if (maximumWidth > 0 && Math.Max(width, height) > maximumWidth)
+        {
+            var scale = (double)maximumWidth / Math.Max(width, height);
+            width = Math.Max(1, (uint)(width * scale));
+            height = Math.Max(1, (uint)(height * scale));
+        }
         Marshal.Copy("RV32"u8.ToArray(), 0, chroma, 4);
         pitches = width * 4;
         lines = height;
@@ -84,13 +102,13 @@ public sealed class VideoFrames : IDisposable
         lock (gate) Free();
     }
 
-    private IntPtr LockFrame(IntPtr opaque, IntPtr planes)
+    internal IntPtr LockFrame(IntPtr opaque, IntPtr planes)
     {
         lock (gate) Marshal.WriteIntPtr(planes, back);
         return IntPtr.Zero;
     }
 
-    private void Display(IntPtr opaque, IntPtr picture)
+    internal void Display(IntPtr opaque, IntPtr picture)
     {
         lock (gate)
         {

@@ -3,6 +3,8 @@ namespace Aurelia.Linux.Core.Playback;
 /// <summary>An audio or subtitle track the decoder offers.</summary>
 public sealed record MediaTrack(int Id, string Name, string? Language = null, bool IsForced = false);
 
+public sealed record PlaybackChapter(int Index, string Title, long PositionMilliseconds);
+
 public enum EngineEnd
 {
     Ended,
@@ -56,6 +58,10 @@ public interface IVideoEngine : IDisposable
 
     /// <summary>-1 turns subtitles off.</summary>
     int SubtitleTrack { get; set; }
+
+    IReadOnlyList<PlaybackChapter> Chapters { get; }
+
+    int Chapter { get; set; }
 }
 
 public interface IVideoEngineFactory

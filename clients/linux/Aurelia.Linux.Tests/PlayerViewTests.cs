@@ -1,4 +1,6 @@
 using Aurelia.Contracts;
+using System.Text;
+using System.Text.Json;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Playback;
 using Aurelia.Linux.Views;
@@ -120,5 +122,49 @@ public sealed class PlayerViewTests
         Assert.Contains("Playing in 12 s", texts);
         using var frame = window.CaptureRenderedFrame()!;
         TestWindows.SaveSnapshot(frame, "player-up-next");
+    }
+
+    [AvaloniaFact]
+    public void ChaptersShowAMenuAndTimelineMarkersAndSeekThroughTheEngine()
+    {
+        var (window, engines, view) = Play(FakeLibrary.MovieA);
+        engines.Last.Chapters = [new PlaybackChapter(0, "Departure", 0), new PlaybackChapter(1, "The Signal", 600_000)];
+        engines.Last.Chapter = 0;
+        engines.Last.Advance(0);
+        FakeLibrary.Pump(() => window.Player!.Chapters.Count == 2);
+        var button = view.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Chapters");
+        Assert.True(button.IsEffectivelyVisible);
+        var flyout = Assert.IsType<MenuFlyout>(button.Flyout);
+        flyout.ShowAt(button);
+        Dispatcher.UIThread.RunJobs();
+        var entry = flyout.Items.OfType<MenuItem>().Single(item => item.Header as string == "The Signal  10:00");
+        entry.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(1, engines.Last.Chapter);
+        Assert.Equal(600_000, engines.Last.Time);
+        Assert.Equal(1, view.ChapterMarkerCount);
+        flyout.Hide();
+        using var frame = window.CaptureRenderedFrame()!;
+        TestWindows.SaveSnapshot(frame, "player-chapters");
+        _ = window.Player!.CloseAsync();
+    }
+
+    [AvaloniaFact]
+    public async Task ExportsSanitizedDiagnosticsOnlyWhenADestinationIsChosen()
+    {
+        var (window, _, view) = Play(FakeLibrary.MovieA);
+        Assert.Contains(view.ContextMenu!.Items.OfType<MenuItem>(), item => item.Header as string == "Export Playback Diagnostics…");
+        var output = new MemoryStream();
+        output.Write(new byte[10000]);
+        view.DiagnosticsDestination = () => Task.FromResult<Stream?>(output);
+        await view.ExportDiagnosticsAsync();
+        var json = Encoding.UTF8.GetString(output.ToArray());
+        using var document = JsonDocument.Parse(json);
+        Assert.NotEmpty(document.RootElement.GetProperty("events").EnumerateArray());
+        Assert.DoesNotContain("Quiet Orbit", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("token", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("192.168", json, StringComparison.Ordinal);
+        view.DiagnosticsDestination = () => Task.FromResult<Stream?>(null);
+        await view.ExportDiagnosticsAsync();
+        await window.Player!.CloseAsync();
     }
 }

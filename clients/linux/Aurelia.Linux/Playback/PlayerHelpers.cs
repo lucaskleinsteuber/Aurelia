@@ -11,51 +11,139 @@ using Avalonia.Media.Imaging;
 namespace Aurelia.Linux.Playback;
 
 /// <summary>
-/// Timeline preview pictures from the server (GET /media/{id}/scrub-previews/{seconds}), one per
-/// interval of the timeline (at least 10 s, at most 720 per title), kept in memory while the title
-/// plays: at most 120 pictures. The pointer's picture waits 90 ms, so sweeping across the timeline
-/// asks only for where it rests.
+/// Timeline stills: prefer the server's prepared picture, otherwise decode a silent local still
+/// through its own authenticated loopback relay. Pictures stay in a bounded memory cache for the
+/// current title. A new pointer request cancels stale work; closing releases every bitmap.
 /// </summary>
-internal sealed class ScrubPreviews(PlaybackController controller)
+internal sealed class ScrubPreviews(PlaybackController controller) : IDisposable
 {
     private const int MemoryLimit = 120;
-    private readonly Dictionary<(Guid, long), Bitmap?> cache = [];
-    private readonly LinkedList<(Guid, long)> order = new();
-    private long requested = -1;
+    private readonly Dictionary<long, Bitmap?> cache = [];
+    private readonly LinkedList<long> order = new();
+    private CancellationTokenSource? request;
+    private Guid? mediaId;
+    private bool disposed;
+    private Task decoderWork = Task.CompletedTask;
+
+    internal int CachedPictures => cache.Values.Count(picture => picture is not null);
 
     public async Task<Bitmap?> GetAsync(long position)
     {
-        if (controller.Item is not { } item || controller.Duration <= 0) return null;
+        if (disposed || controller.Item is not { } item || controller.Duration <= 0) return null;
+        if (mediaId != item.Id)
+        {
+            request?.Cancel();
+            Clear();
+            mediaId = item.Id;
+        }
         var interval = ScrubPreviewPlan.Interval(controller.Duration);
         var bucket = ScrubPreviewPlan.Bucket(position, interval);
-        var key = (item.Id, bucket);
-        if (cache.TryGetValue(key, out var known)) return known;
-        requested = bucket;
-        await Task.Delay(90);
-        if (requested != bucket) return null;
-        var seconds = (int)(ScrubPreviewPlan.SnapshotPosition(bucket, interval, controller.Duration) / 1000);
-        var bytes = await controller.Client.ScrubPreviewAsync(item.Id, seconds, CancellationToken.None);
-        Bitmap? picture = null;
-        if (bytes is { Length: > 0 })
+        request?.Cancel();
+        if (cache.TryGetValue(bucket, out var known)) return known ?? Nearest(bucket, interval);
+        using var current = new CancellationTokenSource();
+        request = current;
+        try
         {
-            try
+            await Task.Delay(90, current.Token);
+            var at = ScrubPreviewPlan.SnapshotPosition(bucket, interval, controller.Duration);
+            var bytes = await controller.Client.ScrubPreviewAsync(item.Id, (int)(at / 1000), current.Token);
+            current.Token.ThrowIfCancellationRequested();
+            Bitmap? picture = Decode(bytes);
+            if (picture is null && controller.PreviewDecoders is { } factory && controller.CreatePreviewRelay() is { } relay)
             {
-                using var stream = new MemoryStream(bytes);
-                picture = Bitmap.DecodeToWidth(stream, 320);
+                await using (relay)
+                {
+                    // Only one native preview decoder at a time. Cancelled pointer requests wait
+                    // for the previous decoder to stop before the newest one can open.
+                    await decoderWork.WaitAsync(current.Token);
+                    current.Token.ThrowIfCancellationRequested();
+                    using var decoder = factory.CreatePreviewDecoder();
+                    var capture = decoder.CaptureAsync(relay.Start(), at, current.Token);
+                    decoderWork = capture;
+                    try
+                    {
+                        if (await capture is { } frame && !current.IsCancellationRequested) picture = Decode(frame);
+                    }
+                    finally
+                    {
+                        if (decoderWork == capture) decoderWork = Task.CompletedTask;
+                    }
+                }
             }
-            catch (Exception error) when (error is ArgumentException or InvalidOperationException)
+            if (disposed || current.IsCancellationRequested || controller.Item?.Id != item.Id)
             {
-                picture = null;
+                picture?.Dispose();
+                return null;
             }
+            cache[bucket] = picture;
+            order.AddLast(bucket);
+            while (order.Count > MemoryLimit)
+            {
+                if (cache.Remove(order.First!.Value, out var old)) old?.Dispose();
+                order.RemoveFirst();
+            }
+            return picture ?? Nearest(bucket, interval);
         }
-        cache[key] = picture;
-        order.AddLast(key);
-        while (order.Count > MemoryLimit)
+        catch (OperationCanceledException)
         {
-            cache.Remove(order.First!.Value);
-            order.RemoveFirst();
+            return null;
         }
-        return picture;
+        catch (Exception failure) when (failure is IOException or InvalidOperationException or ArgumentException or LibVLCSharp.Shared.VLCException)
+        {
+            return disposed ? null : Nearest(bucket, interval);
+        }
+        finally
+        {
+            if (request == current) request = null;
+        }
+    }
+
+    private Bitmap? Nearest(long bucket, long interval) =>
+        ScrubPreviewPlan.Nearest(bucket, interval, at => cache.GetValueOrDefault(at) is not null) is { } found ? cache[found] : null;
+
+    private static Bitmap? Decode(byte[]? bytes)
+    {
+        if (bytes is not { Length: > 0 }) return null;
+        try
+        {
+            using var stream = new MemoryStream(bytes);
+            return Bitmap.DecodeToWidth(stream, 320);
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static WriteableBitmap? Decode(ScrubPreviewFrame frame)
+    {
+        if (frame.Width is <= 0 or > 320 || frame.Height is <= 0 or > 320 || frame.Pixels.Length != (long)frame.Width * frame.Height * 4) return null;
+        var bitmap = new WriteableBitmap(new PixelSize(frame.Width, frame.Height), new Vector(96, 96), Avalonia.Platform.PixelFormat.Bgra8888, Avalonia.Platform.AlphaFormat.Opaque);
+        using var buffer = bitmap.Lock();
+        for (var row = 0; row < frame.Height; row++)
+            System.Runtime.InteropServices.Marshal.Copy(frame.Pixels, row * frame.Width * 4, buffer.Address + row * buffer.RowBytes, frame.Width * 4);
+        return bitmap;
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        Reset();
+    }
+
+    public void Reset()
+    {
+        request?.Cancel();
+        request = null;
+        mediaId = null;
+        Clear();
+    }
+
+    private void Clear()
+    {
+        foreach (var picture in cache.Values) picture?.Dispose();
+        cache.Clear();
+        order.Clear();
     }
 }
 

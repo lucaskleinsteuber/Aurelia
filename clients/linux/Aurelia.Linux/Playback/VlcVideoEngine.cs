@@ -10,7 +10,7 @@ namespace Aurelia.Linux.Playback;
 /// Creates VLC players with the Mac app's options. Linux uses the distribution's libVLC 3 (found
 /// by LibVLCSharp); Night Mode adds VLC's compressor with the Mac app's settings.
 /// </summary>
-public sealed partial class VlcEngineFactory : IVideoEngineFactory
+public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPreviewDecoderFactory
 {
     private static readonly string[] BaseOptions = ["--no-video-title-show", "--network-caching=500", "--no-metadata-network-access", "--no-play-and-pause"];
 
@@ -24,6 +24,20 @@ public sealed partial class VlcEngineFactory : IVideoEngineFactory
     private static bool initialized;
     private LibVLC? normal;
     private LibVLC? night;
+    private LibVLC? previews;
+
+    public IScrubPreviewDecoder CreatePreviewDecoder()
+    {
+        lock (Gate)
+        {
+            if (!initialized)
+            {
+                LibVLCSharp.Shared.Core.Initialize();
+                initialized = true;
+            }
+            return new VlcScrubPreviewDecoder(previews ??= new LibVLC([.. BaseOptions, "--no-audio", "--no-spu"]));
+        }
+    }
 
     public IVideoEngine Create(bool nightMode)
     {
@@ -52,6 +66,7 @@ public sealed partial class VlcVideoEngine : IVideoEngine
     private readonly LibVLC library;
     private readonly MediaPlayer player;
     private Media? media;
+    private PlaybackChapter[] chapterDescriptions = [];
 
     public VlcVideoEngine(LibVLC library)
     {
@@ -64,6 +79,7 @@ public sealed partial class VlcVideoEngine : IVideoEngine
         player.Paused += (_, _) => Changed?.Invoke();
         player.ESAdded += (_, _) => Changed?.Invoke();
         player.ESSelected += (_, _) => Changed?.Invoke();
+        player.ChapterChanged += (_, _) => Changed?.Invoke();
         player.EndReached += (_, _) => Finished?.Invoke(EngineEnd.Ended);
         player.EncounteredError += (_, _) => Finished?.Invoke(EngineEnd.Failed);
     }
@@ -116,8 +132,25 @@ public sealed partial class VlcVideoEngine : IVideoEngine
         set => player.SetSpu(value);
     }
 
+    public IReadOnlyList<PlaybackChapter> Chapters
+    {
+        get
+        {
+            if (chapterDescriptions.Length == Math.Max(0, player.ChapterCount)) return chapterDescriptions;
+            return chapterDescriptions = [.. player.FullChapterDescriptions(-1).Select((chapter, index) => new PlaybackChapter(index,
+                string.IsNullOrWhiteSpace(chapter.Name) ? $"Chapter {index + 1}" : chapter.Name, Math.Max(0, chapter.TimeOffset)))];
+        }
+    }
+
+    public int Chapter
+    {
+        get => player.Chapter;
+        set => player.Chapter = value;
+    }
+
     public void Open(Uri url, long startMilliseconds)
     {
+        chapterDescriptions = [];
         media?.Dispose();
         media = new Media(library, url);
         media.AddOption(":http-reconnect");

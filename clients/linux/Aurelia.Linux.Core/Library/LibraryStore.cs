@@ -10,7 +10,7 @@ namespace Aurelia.Linux.Core.Library;
 /// after a change it reloads what the change touched and raises <see cref="Changed"/>. When the
 /// server refuses the profile, <paramref name="onSessionFailure"/> returns the app to the picker.
 /// </summary>
-public sealed class LibraryStore(LibraryClient client, ArtworkCache artwork, GeneralPreferences preferences, Action<AureliaApiException> onSessionFailure)
+public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artwork, GeneralPreferences preferences, Action<AureliaApiException> onSessionFailure)
     : ObservableObject
 {
     private const int BrowseCacheSize = 24;
@@ -23,6 +23,9 @@ public sealed class LibraryStore(LibraryClient client, ArtworkCache artwork, Gen
     private bool isLoading;
     private string? error;
     private long revision;
+    private long homeRequest;
+    private int activeSnapshots;
+    private bool deferredHomeRefresh;
 
     /// <summary>Raised after any data changed, so pages reload what they show.</summary>
     public event Action? Changed;
@@ -77,6 +80,8 @@ public sealed class LibraryStore(LibraryClient client, ArtworkCache artwork, Gen
     /// <summary>Loads Home, the catalog, collections and the watchlist together.</summary>
     public async Task RefreshAsync()
     {
+        var request = ++homeRequest;
+        activeSnapshots++;
         IsLoading = true;
         try
         {
@@ -85,6 +90,7 @@ public sealed class LibraryStore(LibraryClient client, ArtworkCache artwork, Gen
             var collectionsTask = Client.CollectionsAsync(CancellationToken.None);
             var watchlistTask = Client.SupportsWatchlist ? Client.WatchlistAsync(CancellationToken.None) : Task.FromResult<WatchlistResponse?>(null)!;
             await Task.WhenAll(homeTask, catalogTask, collectionsTask, watchlistTask);
+            if (request != homeRequest) return;
             Home = homeTask.Result;
             Catalog = catalogTask.Result;
             Collections = collectionsTask.Result;
@@ -95,24 +101,38 @@ public sealed class LibraryStore(LibraryClient client, ArtworkCache artwork, Gen
         }
         catch (AureliaApiException failure)
         {
-            Report(failure);
+            if (request == homeRequest) Report(failure);
         }
         finally
         {
-            IsLoading = false;
+            activeSnapshots--;
+            IsLoading = activeSnapshots > 0;
+            if (activeSnapshots == 0 && deferredHomeRefresh)
+            {
+                deferredHomeRefresh = false;
+                await RefreshHomeAsync();
+            }
         }
     }
 
-    public async Task RefreshHomeAsync()
+    public async Task RefreshHomeAsync(CancellationToken cancellation = default)
     {
+        if (activeSnapshots > 0)
+        {
+            deferredHomeRefresh = true;
+            return;
+        }
+        var request = ++homeRequest;
         try
         {
-            Home = await Client.HomeAsync(CancellationToken.None);
+            var value = await Client.HomeAsync(cancellation);
+            if (request != homeRequest) return;
+            Home = value;
             NotifyChanged();
         }
         catch (AureliaApiException failure)
         {
-            Report(failure);
+            if (request == homeRequest) Report(failure);
         }
     }
 
@@ -265,7 +285,9 @@ public sealed class LibraryStore(LibraryClient client, ArtworkCache artwork, Gen
         }
         try
         {
-            Home = await Client.HomeAsync(CancellationToken.None);
+            var request = ++homeRequest;
+            var latestHome = await Client.HomeAsync(CancellationToken.None);
+            if (request == homeRequest) Home = latestHome;
             if (changes.ChangedMediaIds.Count > 0)
             {
                 var updated = Catalog.ToDictionary(item => item.Id);
@@ -334,6 +356,7 @@ public sealed class LibraryStore(LibraryClient client, ArtworkCache artwork, Gen
     {
         browseCache.Clear();
         browseOrder.Clear();
+        ClearPreparedDetails();
     }
 
     private void NotifyChanged()

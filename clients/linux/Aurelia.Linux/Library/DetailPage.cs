@@ -48,6 +48,8 @@ public sealed class DetailPage : LibraryPageBase
     public DetailPage(LibraryContext context, CatalogItemSummary item) : base(context)
     {
         initial = item;
+        if (context.Store.PreparedDetail(item.Id) is { } prepared)
+            (detail, plan) = prepared;
         AttachedToVisualTree += async (_, _) => await LoadAsync();
     }
 

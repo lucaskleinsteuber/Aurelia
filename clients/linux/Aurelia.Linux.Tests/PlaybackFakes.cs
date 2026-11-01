@@ -42,6 +42,10 @@ internal sealed class SimulatedEngine : IVideoEngine
 
     public int SubtitleTrack { get; set; } = -1;
 
+    public IReadOnlyList<PlaybackChapter> Chapters { get; set; } = [];
+
+    public int Chapter { get; set; } = -1;
+
     public void Open(Uri url, long startMilliseconds)
     {
         OpenedUrl = url;

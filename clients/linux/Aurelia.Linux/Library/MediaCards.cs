@@ -40,6 +40,7 @@ internal static class MediaCards
         var card = Card(new StackPanel { Spacing = 8, Children = { picture, caption } }, item.Title);
         card.Click += (_, _) => context.OpenDetail(item);
         card.ContextMenu = MediaMenu.For(context, item);
+        PrepareOnFocus(card, context, item);
         return card;
     }
 
@@ -79,6 +80,7 @@ internal static class MediaCards
             else context.OpenDetail(item);
         };
         card.ContextMenu = MediaMenu.For(context, item);
+        PrepareOnFocus(card, context, item);
         return card;
     }
 
@@ -159,6 +161,40 @@ internal static class MediaCards
         var button = new Button { Classes = { "card" }, Content = content };
         AutomationProperties.SetName(button, name);
         return button;
+    }
+
+    private static void PrepareOnFocus(Button card, LibraryContext context, CatalogItemSummary item)
+    {
+        CancellationTokenSource? preparing = null;
+        void Cancel()
+        {
+            preparing?.Cancel();
+            preparing?.Dispose();
+            preparing = null;
+        }
+        async void Prepare(object? sender, EventArgs args)
+        {
+            Cancel();
+            var attempt = new CancellationTokenSource();
+            var cancellation = attempt.Token;
+            preparing = attempt;
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(150), cancellation);
+                await context.Store.PrepareDetailAsync(item, cancellation);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            finally
+            {
+                if (ReferenceEquals(preparing, attempt)) preparing = null;
+                attempt.Dispose();
+            }
+        }
+        card.PointerEntered += Prepare;
+        card.GotFocus += Prepare;
+        card.PointerExited += (_, _) => { if (!card.IsKeyboardFocusWithin) Cancel(); };
+        card.LostFocus += (_, _) => { if (!card.IsPointerOver) Cancel(); };
+        card.DetachedFromVisualTree += (_, _) => Cancel();
     }
 
     private static Border Rounded(Control child, double radius) => new() { CornerRadius = new CornerRadius(radius), ClipToBounds = true, Child = child };
