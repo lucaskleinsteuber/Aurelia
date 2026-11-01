@@ -1,5 +1,6 @@
 using Aurelia.Contracts;
 using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Playback;
 
 namespace Aurelia.Linux.Library;
 
@@ -21,6 +22,9 @@ public interface ILibraryNavigator
     void Play(CatalogItemSummary item, bool fromLastPosition);
 
     void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected);
+
+    /// <summary>Play On: other players in the household, or null before a profile is open.</summary>
+    RemotePlayback? Remote { get; }
 
     /// <summary>Asks the person to confirm a change; true when they chose <paramref name="confirmLabel"/>.</summary>
     Task<bool> ConfirmAsync(string title, string message, string confirmLabel, bool destructive);

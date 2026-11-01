@@ -38,7 +38,7 @@ internal static class FakeLibrary
             position > 0 ? new PlaybackProgressResponse(id, position, 3_600_000, false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1) : null,
             DateTimeOffset.UtcNow.AddDays(-2), kind == MediaKind.Episode ? "Cobalt Station" : null, season, episode, parent, state);
 
-    public static FakeServer Create(bool watchlist = true)
+    public static FakeServer Create(bool watchlist = true, bool pictures = true)
     {
         artworkCount = 0;
         var series = Item(SeriesId, MediaKind.Series, "Cobalt Station", 2024, ["Science Fiction", "Drama"]);
@@ -77,6 +77,7 @@ internal static class FakeLibrary
             .Answer("GET", "/api/v1/watchlist", Json(new WatchlistResponse([movieB], [MovieB])))
             .Answer("GET", $"/api/v1/catalog/items/{SeriesId}", Json(detail))
             .Answer("GET", $"/api/v1/media/{SeriesId}/playback-plan", Json(plan))
+            .Answer("GET", $"/api/v1/media/{EpisodeOne}/playback-plan", Json(plan))
             .Answer("GET", $"/api/v1/media/{SeriesId}/watch-state", Json(new WatchStateResponse(SeriesId, WatchStateScope.Season, 1, CatalogWatchState.InProgress, 2, "token-1", false)))
             .Answer("PUT", $"/api/v1/media/{SeriesId}/watch-state", Json(new WatchStateResponse(SeriesId, WatchStateScope.Season, 1, CatalogWatchState.Completed, 2, "token-2", false)))
             .Answer("PUT", $"/api/v1/media/{MovieB}/favorite", "{}")
@@ -88,20 +89,31 @@ internal static class FakeLibrary
                 [.. Enumerable.Range(1, 12).Select(week => new PeriodHours($"2026-W{week + 30}", week % 5 + 0.5))], [],
                 [new NamedCount("Science Fiction", 8, 14.5), new NamedCount("Drama", 5, 9)], [new NamedCount("Cobalt Station", 6, 6.5)],
                 3, 9, "Saturday", "evening", 0.72, [2026])))
+            .Answer("POST", $"/api/v1/media/{MovieA}/playback", Json(new PlaybackSourceResponse(Guid.NewGuid(), MovieA, "/api/v1/streams/ticket-a",
+                "video/x-matroska", 1000, DateTimeOffset.UtcNow.AddHours(4), new PlaybackProgressResponse(MovieA, 1_200_000, 3_600_000, false, null, null, 2))))
+            .Answer("POST", $"/api/v1/media/{EpisodeOne}/playback", Json(new PlaybackSourceResponse(Guid.NewGuid(), EpisodeOne, "/api/v1/streams/ticket-e1",
+                "video/x-matroska", 1000, DateTimeOffset.UtcNow.AddHours(4), new PlaybackProgressResponse(EpisodeOne, 600_000, 3_600_000, false, null, null, 1))))
+            .Answer("PUT", $"/api/v1/media/{MovieA}/progress", Json(new PlaybackProgressResponse(MovieA, 1, 3_600_000, false, null, null, 3)))
+            .Answer("PUT", $"/api/v1/media/{EpisodeOne}/progress", Json(new PlaybackProgressResponse(EpisodeOne, 1, 3_600_000, false, null, null, 2)))
+            .Answer("GET", $"/api/v1/media/{MovieA}/notes", "[]")
+            .Answer("GET", $"/api/v1/media/{EpisodeOne}/notes", "[]")
             .Answer("GET", "/api/v1/statistics/year/2026", Json(new YearInReview(2026, 31.5, 12, 7, 18, "Science Fiction", "Cobalt Station", "Saturday", 4.5)));
-        foreach (var art in ArtworkIds()) server.Image($"/api/v1/artwork/{art.Id}", Picture(art.Index));
+        if (pictures)
+        {
+            foreach (var art in ArtworkIds()) server.Image($"/api/v1/artwork/{art.Id}", Picture(art.Index));
+        }
         return server;
     }
 
     /// <summary>Opens the main window with the invented library and an open owner profile.</summary>
-    public static MainWindow ShowLibrary(FakeServer server)
+    public static MainWindow ShowLibrary(FakeServer server, SimulatedEngines? engines = null)
     {
         var keyring = new MemoryCredentialStore
         {
             Server = new StoredServer(FakeServer.ServerId, "Living Room Server", new Uri("https://192.168.1.20:43111"), FakeServer.Fingerprint,
                 "device-token-synthetic-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30)),
         };
-        var window = TestWindows.Show(AppServices.ForTests(transport: server, credentials: keyring));
+        var window = TestWindows.Show(AppServices.ForTests(transport: server, credentials: keyring, engines: engines));
         Pump(() => window.Flow.Screen == Core.Flow.AppScreen.ProfilePicker);
         window.Session.OpenProfile(new ProfileSession(
             new UserSummary(OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow), Guid.NewGuid(), "profile-token-synthetic-0000000000000000001", DateTimeOffset.UtcNow.AddHours(12)));

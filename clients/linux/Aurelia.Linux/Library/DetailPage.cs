@@ -205,6 +205,20 @@ public sealed class DetailPage : LibraryPageBase
                     () => _ = store.SetWatchlistAsync(item.Id, !listed)));
             }
         }
+        if (Context.Navigator.Remote is { } remote && target is not null && LibraryPresentation.IsPlayable(target))
+        {
+            var playOn = RoundAction("IconNetwork", "Play On…", () => { });
+            var flyout = new MenuFlyout();
+            flyout.Opening += async (_, _) =>
+            {
+                var players = await remote.PlayersAsync();
+                flyout.ItemsSource = players.Count == 0
+                    ? new List<Control> { new MenuItem { Header = "No other players are open", IsEnabled = false } }
+                    : players.Select(device => MenuItem("Play on " + device.DeviceName, () => _ = remote.PlayAsync(device, target))).Cast<Control>().ToList();
+            };
+            playOn.Flyout = flyout;
+            actions.Children.Add(playOn);
+        }
         var more = RoundAction("IconMore", "More Actions", () => { });
         more.Flyout = new MenuFlyout { ItemsSource = MediaMenu.Items(Context, item) };
         actions.Children.Add(more);

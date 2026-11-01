@@ -4,6 +4,8 @@ using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Flow;
 using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Playback;
+using Aurelia.Linux.Playback;
 using Aurelia.Linux.Core.Settings;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -11,7 +13,7 @@ using Avalonia.Threading;
 
 namespace Aurelia.Linux.Views;
 
-public sealed partial class MainWindow : Window
+public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
 {
     private readonly AppServices services;
     private LibraryShell? shell;
@@ -40,11 +42,16 @@ public sealed partial class MainWindow : Window
             new ServerWakeUp(api, services.WakeOnLan, () => discovery.Latest, services.Time), services.DeviceName, services.Time,
             new GeneralPreferences(services.Settings), new ArtworkCache(services.ArtworkDirectory));
         Flow.PropertyChanged += OnFlowChanged;
+        Session.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AppSession.Library)) StartPlayOn();
+        };
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Close) });
         ShowScreen();
         if (startSession) Opened += async (_, _) => await Session.StartAsync();
         Closed += (_, _) =>
         {
+            Dispose();
             discovery.Dispose();
             api.Dispose();
         };
@@ -75,9 +82,92 @@ public sealed partial class MainWindow : Window
             AppScreen.Connection => new ConnectionView(new ConnectionModel(Session, services.CreateDiscovery(), action => Dispatcher.UIThread.Post(action)), Flow),
             AppScreen.ServerUnreachable => new ServerUnreachableView(Session),
             AppScreen.ProfilePicker => ProfilePicker(),
-            _ => shell ??= new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session },
+            _ => shell ??= NewShell(),
         };
         ScreenHost.Content = screen;
+    }
+
+    private LibraryShell NewShell()
+    {
+        var created = new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session };
+        if (Remote is not null) created.AttachRemote(Remote);
+        created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
+        return created;
+    }
+
+    private CancellationTokenSource? playOn;
+
+    public void Dispose()
+    {
+        playOn?.Cancel();
+        playOn?.Dispose();
+        playOn = null;
+        Remote?.Dispose();
+    }
+
+    /// <summary>Remote control of another device in the household, for the open profile.</summary>
+    public RemotePlayback? Remote { get; private set; }
+
+    /// <summary>Play On while a profile is open: announce this computer and follow commands from other devices.</summary>
+    private void StartPlayOn()
+    {
+        playOn?.Cancel();
+        playOn = null;
+        Remote?.Stop();
+        Remote = null;
+        if (Session.Library is not { } library) return;
+        var client = new PlaybackClient(Session.Api, library.Client);
+        Remote = new RemotePlayback(client, services.Settings, services.Time);
+        shell?.AttachRemote(Remote);
+        if (services.Engines is null) return;
+        playOn = new CancellationTokenSource();
+        _ = new PlayOnReceiver(client, services.Settings, services.DeviceName, this, action => Dispatcher.UIThread.Post(action), services.Time).RunAsync(playOn.Token);
+    }
+
+    /// <summary>Another device asked this computer to play a title.</summary>
+    void IPlayOnTarget.Play(Guid mediaId, double? positionSeconds) => _ = PlayRemoteAsync(mediaId, positionSeconds);
+
+    private async Task PlayRemoteAsync(Guid mediaId, double? positionSeconds)
+    {
+        if (Session.Library is not { } library) return;
+        try
+        {
+            var item = await library.Client.SummaryAsync(mediaId, CancellationToken.None);
+            await PlayAsync(item, resume: true, positionSeconds is { } seconds ? (long)(seconds * 1000) : null);
+        }
+        catch (AureliaApiException failure)
+        {
+            library.Report(failure);
+        }
+    }
+
+    /// <summary>The player while a title plays, else null.</summary>
+    public PlaybackController? Player { get; private set; }
+
+    /// <summary>Opens the player over the library for a title (a series plays its next episode).</summary>
+    public async Task PlayAsync(Aurelia.Contracts.CatalogItemSummary item, bool resume, long? startAt = null)
+    {
+        if (Session.Library is not { } library || services.Engines is null) return;
+        if (Player is { } running) await running.CloseAsync();
+        var outbox = new ProgressOutbox(services.StateDirectory is { } state ? Path.Combine(state, "pending-progress.json") : null);
+        var player = new PlaybackController(new PlaybackClient(Session.Api, library.Client), services.Engines, services.Settings, outbox,
+            services.Time, action => Dispatcher.UIThread.Post(action), services.PlaybackSystem);
+        Player = player;
+        var view = new PlayerView(player, this);
+        player.Closed += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (Player != player) return;
+            Player = null;
+            PlayerHost.Content = null;
+            PlayerHost.IsVisible = false;
+            view.Dispose();
+            if (WindowState == WindowState.FullScreen) WindowState = WindowState.Normal;
+            _ = library.RefreshHomeAsync();
+        });
+        PlayerHost.Content = view;
+        PlayerHost.IsVisible = true;
+        await outbox.FlushAsync(player.Client, CancellationToken.None);
+        await player.StartAsync(item, resume, startAt);
     }
 
     private ProfilePickerView ProfilePicker()

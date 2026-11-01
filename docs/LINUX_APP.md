@@ -92,26 +92,65 @@ are made on the series and ask first with the number of episodes. Artwork is req
 smallest width that stays sharp (320, 640, 1280, 1920) and kept in memory (96 MB) and on disk
 (512 MB, only artwork with a revision). Ctrl+F opens the library search, Alt+Left goes back.
 
-## Video
+## Player
 
-The player arrives in a later version. A test on KDE Plasma (Wayland) with the distribution's
-libVLC 3.0 and synthetic test clips decided how it will draw video:
+`Playback/PlaybackController.cs` runs a playback the way the Mac app does. It asks the server for a
+ticket (`POST /api/v1/media/{id}/playback`) and starts `Playback/LoopbackStreamRelay.cs`: VLC reads
+plain HTTP from a random port on 127.0.0.1 with a secret path, and the relay forwards each byte range
+over the pinned HTTPS connection with the profile's token, which never reaches the decoder. A body
+shorter than announced counts as a broken stream. VLC opens directly at the resume position (the
+Automatic Resume and start-over settings decide it). The remembered audio and subtitle choice
+applies (the series' own first, then the last choice, then the default language), and the server's
+sidecar subtitle files are added. Progress is saved every 15 seconds and at every pause, seek, end
+and close, with the revision it builds on (`Playback/ProgressOutbox.cs`; saves that could not be
+sent wait in `$XDG_STATE_HOME/aurelia-desktop/pending-progress.json`). A conflict offers to keep
+this computer's position. Other behavior:
+
+- Up Next appears for titles of at least five minutes in the last seconds of the countdown, and
+  the next episode starts at the natural end unless the card was cancelled.
+- The sleep timer runs for a number of minutes or until the end of the episode and tells the
+  server when it ends.
+- The ticket is renewed five minutes before it expires.
+- A stall (no movement for 15 seconds, or no first frame within 30) or a broken stream is recovered
+  at the last position after 1, 2, 4, 8, 15 and 30 seconds, for at most two minutes.
+- Night Mode reopens the title with VLC's compressor at the same position.
+
+`Playback/PlayerView.cs` is laid out like the Mac player:
+
+- the title at the top;
+- the timeline with server preview pictures and "Ends at";
+- previous episode, back, play/pause, forward and next episode;
+- menus for playback rate, audio (with Night Mode), subtitles and the sleep timer;
+- scene notes, volume and full screen;
+- keys: Space, ←/→, M, F, Esc, P, N and Ctrl+Shift+←/→.
+
+The controls hide after the chosen delay. `Platform/LinuxPlaybackSystem.cs` publishes the player
+through MPRIS (`org.mpris.MediaPlayer2.aurelia`, for media keys and the desktop's media controls)
+and keeps the screen awake with `org.freedesktop.ScreenSaver` while playing.
+
+Play On (`Playback/PlayOn.cs`): while a profile is open this computer announces itself every 15
+seconds and follows play, pause, resume, seek, skip and stop commands from other devices (with the
+position of "play" and the pause state). The title page sends titles to other players, and a remote
+bar controls them.
+
+### How video is drawn
+
+A test on KDE Plasma (Wayland) with the distribution's libVLC 3.0 and synthetic test clips decided
+how video is drawn:
 
 | Approach | Controls above the video | CPU, 1080p H.264 | CPU, 2160p HEVC |
 | --- | --- | --- | --- |
 | VLC draws into an embedded X11 window (XWayland) | no: the video covers them | about 4 % of one core | about 5 % |
 | VLC hands decoded frames to Avalonia, which draws them (native Wayland) | yes | about 40 % of one core | about 55 % |
 
-Embedding is efficient but hides anything drawn above the video, and it needs X11. Frames drawn
-by Avalonia work on Wayland and X11 with the player's controls on top, so the player uses VLC's
-frame callbacks (`libvlc_video_set_callbacks`). Notes for the player:
+The player uses VLC's frame callbacks (`Playback/VideoFrames.cs`, `Controls/VideoSurface.cs`):
+they work on Wayland and X11 with the controls on top. Hardware decoding uses `:avcodec-hw=vaapi_drm`,
+since without a VLC window VLC would otherwise decode in software; frames are handed over at full
+size, because letting VLC scale 4K down cost more and dropped frames. A later improvement is to take
+frames as YUV and convert them on the graphics card.
 
-- Hardware decoding needs the media option `:avcodec-hw=vaapi_drm` (with a fallback to `any`);
-  without a VLC window, VLC otherwise decodes in software.
-- Frames are handed over at full size. Letting VLC scale 4K down to 1080p cost more and dropped
-  frames; Avalonia scales on the graphics card while drawing.
-- A later improvement is to take the frames as YUV and convert them to RGB on the graphics card,
-  which saves VLC's color conversion on the processor.
+The automated tests drive the player with a simulated engine through the same controller and
+views; real playback is checked by hand on a Linux desktop.
 
 ## Building and testing
 

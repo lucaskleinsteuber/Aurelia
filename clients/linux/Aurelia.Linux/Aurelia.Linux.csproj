@@ -4,6 +4,8 @@
     <!-- The executable is installed as /usr/bin/aurelia-desktop; `aurelia` belongs to the server package. -->
     <AssemblyName>aurelia-desktop</AssemblyName>
     <RootNamespace>Aurelia.Linux</RootNamespace>
+    <!-- Video frames are copied between VLC's buffers and the screen without extra allocations. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />
@@ -11,6 +13,7 @@
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Avalonia.Wayland" />
+    <PackageReference Include="LibVLCSharp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Aurelia.Linux.Core/Aurelia.Linux.Core.csproj" />

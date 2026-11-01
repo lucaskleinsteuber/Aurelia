@@ -326,4 +326,54 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BoxShadow" Value="0 10 30 0 #66000000" />
   </Style>
+
+  <!-- Player controls over the picture. -->
+  <Style Selector="Button.playerControl">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#F2FFFFFF" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.playerControl:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#33FFFFFF" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.playerControl.active">
+    <Setter Property="Foreground" Value="{StaticResource AureliaAccentBrush}" />
+  </Style>
+  <Style Selector="Button.playerPrimary">
+    <Setter Property="Width" Value="62" />
+    <Setter Property="Height" Value="62" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="31" />
+    <Setter Property="Background" Value="#26FFFFFF" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.playerPrimary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#40FFFFFF" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="TextBlock.playerTime">
+    <Setter Property="Foreground" Value="#D9FFFFFF" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontFeatures" Value="+tnum" />
+  </Style>
+  <Style Selector="Border.upNext">
+    <Setter Property="Background" Value="#E6202326" />
+    <Setter Property="CornerRadius" Value="{StaticResource AureliaCardRadius}" />
+    <Setter Property="Padding" Value="20" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Border.previewBubble">
+    <Setter Property="Background" Value="#E6202326" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="8" />
+  </Style>
 </Styles>

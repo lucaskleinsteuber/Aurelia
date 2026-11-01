@@ -24,6 +24,13 @@ internal sealed class FakeServer : IServerTransport
     /// <summary>Request bodies by "METHOD path", for checking what the app sent.</summary>
     public Dictionary<string, string> Bodies { get; } = [];
 
+    /// <summary>Replaces every prepared answer for a request with this one.</summary>
+    public FakeServer Replace(string method, string path, string json, HttpStatusCode status = HttpStatusCode.OK)
+    {
+        answers.Remove(method + " " + path);
+        return Answer(method, path, json, status);
+    }
+
     public FakeServer Image(string path, byte[] bytes)
     {
         images[path] = bytes;

@@ -1,7 +1,9 @@
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Platform;
+using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Core.Settings;
+using Aurelia.Linux.Playback;
 
 namespace Aurelia.Linux;
 
@@ -15,7 +17,10 @@ public sealed record AppServices(
     IWakeOnLan WakeOnLan,
     TimeProvider Time,
     string DeviceName,
-    string? ArtworkDirectory = null)
+    string? ArtworkDirectory = null,
+    IVideoEngineFactory? Engines = null,
+    string? StateDirectory = null,
+    IPlaybackSystem? PlaybackSystem = null)
 {
     public static AppServices CreateDefault()
     {
@@ -29,12 +34,15 @@ public sealed record AppServices(
             new UdpWakeOnLan(),
             TimeProvider.System,
             Environment.MachineName,
-            Path.Combine(paths.CacheDirectory, "artwork"));
+            Path.Combine(paths.CacheDirectory, "artwork"),
+            new VlcEngineFactory(),
+            paths.StateDirectory,
+            new LinuxPlaybackSystem(action => Avalonia.Threading.Dispatcher.UIThread.Post(action)));
     }
 
     /// <summary>Services that touch nothing outside the process, for tests.</summary>
     public static AppServices ForTests(ISettingsStore? settings = null, WindowButtonLayout? layout = null, IServerTransport? transport = null,
-        ICredentialStore? credentials = null) => new(
+        ICredentialStore? credentials = null, IVideoEngineFactory? engines = null) => new(
             settings ?? new MemorySettingsStore(),
             layout ?? WindowButtonLayout.Default,
             transport ?? new PinnedServerTransport(),
@@ -42,5 +50,6 @@ public sealed record AppServices(
             () => new NoServerDiscovery(),
             new NoWakeOnLan(),
             TimeProvider.System,
-            "Test PC");
+            "Test PC",
+            Engines: engines);
 }

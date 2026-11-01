@@ -10,6 +10,8 @@
   <!-- No title bar: the content reaches the top edge and Aurelia draws its own window buttons. -->
   <Panel>
     <ContentControl x:Name="ScreenHost" />
+    <!-- The player covers the library while it plays, as on the Mac. -->
+    <ContentControl x:Name="PlayerHost" IsVisible="False" />
     <controls:WindowChrome x:Name="Chrome" />
   </Panel>
 </Window>

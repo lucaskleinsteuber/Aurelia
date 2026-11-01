@@ -55,6 +55,20 @@
       </StackPanel>
     </Border>
 
+    <!-- Remote control of another device that plays a title from here (Play On). -->
+    <Border x:Name="RemoteBar" Classes="banner" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <StackPanel VerticalAlignment="Center" Spacing="2">
+          <TextBlock x:Name="RemoteDevice" Classes="subdued" FontSize="12" />
+          <TextBlock x:Name="RemoteTitle" FontWeight="SemiBold" MaxWidth="320" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+        <Button x:Name="RemoteBack" Classes="playerControl" AutomationProperties.Name="Back 10 Seconds"><PathIcon Data="{StaticResource IconBackward}" Width="16" Height="16" /></Button>
+        <Button x:Name="RemotePlayPause" Classes="playerControl" AutomationProperties.Name="Play or Pause"><PathIcon x:Name="RemotePlayPauseIcon" Data="{StaticResource IconPause}" Width="16" Height="16" /></Button>
+        <Button x:Name="RemoteForward" Classes="playerControl" AutomationProperties.Name="Forward 10 Seconds"><PathIcon Data="{StaticResource IconForward}" Width="16" Height="16" /></Button>
+        <Button x:Name="RemoteStop" Content="Stop" Classes="chip" />
+      </StackPanel>
+    </Border>
+
     <library:SheetHost x:Name="Sheets" />
   </Grid>
 </UserControl>

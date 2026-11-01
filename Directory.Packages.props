@@ -13,6 +13,8 @@
     <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.1.4" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <PackageVersion Include="Avalonia.Wayland" Version="12.1.4" />
+    <!-- Playback in Aurelia for Linux: the distribution's VLC (libVLC 3) through LibVLCSharp. -->
+    <PackageVersion Include="LibVLCSharp" Version="3.10.2" />
     <!-- The D-Bus library Avalonia itself uses, for the keyring (Secret Service) and media keys (MPRIS). -->
     <PackageVersion Include="Tmds.DBus.Protocol" Version="0.94.1" />
     <!-- Avalonia's headless test runner is built on xUnit v3; the server tests stay on v2. -->

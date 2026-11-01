@@ -4,6 +4,7 @@ using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core;
 using Aurelia.Linux.Core.Flow;
 using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Library;
 using Avalonia;
 using Avalonia.Automation;
@@ -39,6 +40,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     private AppSession? session;
     private LibraryContext? context;
     private bool restoring;
+    private RemotePlayback? remote;
 
     public LibraryShell()
     {
@@ -85,6 +87,10 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
             await context.Store.RefreshAsync();
         };
         KeyDown += OnKeyDown;
+        RemoteBack.Click += (_, _) => _ = remote?.SendAsync("skip", -10);
+        RemoteForward.Click += (_, _) => _ = remote?.SendAsync("skip", 10);
+        RemotePlayPause.Click += (_, _) => _ = remote?.SendAsync(remote.Device?.IsPaused == true ? "resume" : "pause");
+        RemoteStop.Click += (_, _) => _ = remote?.SendAsync("stop");
         SidebarList.SelectedIndex = 0;
         ShowCurrentPage();
         UpdateSidebarLayout();
@@ -150,6 +156,29 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     internal SheetHost SheetHost => Sheets;
 
+    public RemotePlayback? Remote => remote;
+
+    /// <summary>Shows the remote control while another device plays a title sent from here.</summary>
+    public void AttachRemote(RemotePlayback playback)
+    {
+        if (remote is not null) remote.PropertyChanged -= OnRemoteChanged;
+        remote = playback;
+        remote.PropertyChanged += OnRemoteChanged;
+        UpdateRemote();
+    }
+
+    private void OnRemoteChanged(object? sender, PropertyChangedEventArgs e) => UpdateRemote();
+
+    private void UpdateRemote()
+    {
+        var device = remote?.Device;
+        RemoteBar.IsVisible = device is not null;
+        if (device is null) return;
+        RemoteDevice.Text = "Playing on " + device.DeviceName;
+        RemoteTitle.Text = device.Title ?? "";
+        RemotePlayPauseIcon.Data = Icon(device.IsPaused ? "IconPlay" : "IconPause");
+    }
+
     internal int DetailDepth => details.Count;
 
     public void OpenDetail(CatalogItemSummary item)
@@ -177,8 +206,10 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         ShowCurrentPage();
     }
 
-    public void Play(CatalogItemSummary item, bool fromLastPosition) =>
-        _ = Sheets.ConfirmAsync("Playback Is Coming", $"Playing “{item.Title}” arrives with the player in the next test build.", "OK", destructive: false);
+    /// <summary>Raised when a page asks to play a title; the window opens the player.</summary>
+    public event Action<CatalogItemSummary, bool>? PlayRequested;
+
+    public void Play(CatalogItemSummary item, bool fromLastPosition) => PlayRequested?.Invoke(item, fromLastPosition);
 
     public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected)
     {
@@ -351,6 +382,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         if (CurrentPage is { } page) page.SidebarOverlap = sidebarVisible ? sidebarWidth : 0;
     }
 
-    internal static Geometry? Icon(LibraryDestination destination) =>
-        Application.Current?.FindResource("Icon" + destination) as Geometry;
+    internal static Geometry? Icon(LibraryDestination destination) => Icon("Icon" + destination);
+
+    private static Geometry? Icon(string key) => Application.Current?.FindResource(key) as Geometry;
 }
