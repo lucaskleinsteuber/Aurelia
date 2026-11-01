@@ -113,6 +113,42 @@ another computer so it can sleep: the sync stops, idle connections close and "Au
 shows. Any click or key wakes the server and continues with the open profile. Ctrl+/ lists the
 keyboard shortcuts.
 
+## Server management
+
+Owners and administrators manage the server from Settings, as in the Mac app
+(`Aurelia.Linux.Core/Management`, `Aurelia.Linux/Management`). Library appears for owners and for
+administrators with the whole library, Metadata for both, and Server only for the owner, because
+the server accepts its requests only from the owner; the Mac app shows them to administrators too
+and they fail.
+
+- Server: summary with state, facts and Restart Server; health; for a Linux package server its
+  updates and power saving; new devices and automatic backups with Back Up Now; scrub previews; and
+  under Advanced Settings the details, network (read-only: a Linux server is set up with
+  `sudo aurelia setup`), sign-in and streaming limits, library maintenance and job queue, backups
+  (retention, verify, encrypted export, restore with a passphrase) and diagnostics. Server settings
+  are edited as JSON, so fields this app does not know are saved back unchanged.
+- Profiles and Devices (owner): every profile with role, PIN and access, the profile editor (role,
+  enabled, PIN, entire library or selected titles), deleting a profile (never the last owner),
+  approving an Apple TV or browser code, the browser address, a pairing code for another computer
+  with its countdown, and signing out devices.
+- Library: storage locations chosen from the server's folders, each added waiting for an import
+  preview; the preview lists every file with filters and search, assignments (movie, series, episode,
+  extra, trailer, ignore) and confirmation. Rescan, monitoring, removing a location (files stay),
+  scan activity, trailer reviews, Library Health (duplicates, offline titles, unmatched metadata,
+  excluded items with reimport), Hide Offline Titles and Reset Library.
+- Metadata: the owner's TMDB token, Enrich Library, the review queue, unused artwork and the
+  running job. On every title, administrators find Edit Metadata (all fields, cast and crew,
+  poster and backdrop with upload and crop, the source file) and Remove from Library, and on the
+  detail page Find Metadata Match.
+
+Requests go out as they are. Only when the server answers `approval_required` does the client ask
+`POST /api/v1/management/approval` for a one-use approval of exactly that request (method, path with
+query, SHA-256 of the exact body) and send it again with `X-Aurelia-Approval`. When management is
+locked, the Server Password prompt opens above whatever sheet is open, `POST /api/v1/management/unlock`
+unlocks it for ten minutes, and the request is retried. Sheets stack, so an editor stays open
+beneath the prompt. Network changes of a server hosted in Aurelia on a Mac need a 60-second trial
+with reconnection; they come with hosting on this PC.
+
 ## Player
 
 `Playback/PlaybackController.cs` runs a playback the way the Mac app does. It asks the server for a

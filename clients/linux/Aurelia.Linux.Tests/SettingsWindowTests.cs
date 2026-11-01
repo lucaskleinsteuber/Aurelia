@@ -39,12 +39,13 @@ public sealed class SettingsWindowTests
         var (_, settings, _) = Open();
         Assert.Equal(
             [SettingsCategory.General, SettingsCategory.Sidebar, SettingsCategory.Activity, SettingsCategory.Playback,
-             SettingsCategory.ProfilesAndDevices, SettingsCategory.Updates, SettingsCategory.Advanced],
+             SettingsCategory.Library, SettingsCategory.Metadata, SettingsCategory.ProfilesAndDevices, SettingsCategory.Server,
+             SettingsCategory.Updates, SettingsCategory.Advanced],
             settings.VisibleCategories);
         Snapshot(settings, "settings-general");
         Assert.Equal([SettingsCategory.Playback], SettingsWindow.Matching("subtitle"));
         Assert.Contains(SettingsCategory.Advanced, SettingsWindow.Matching("fingerprint"));
-        Assert.Equal(7, SettingsWindow.Matching(" ").Count);
+        Assert.Equal(10, SettingsWindow.Matching(" ").Count);
     }
 
     [AvaloniaFact]

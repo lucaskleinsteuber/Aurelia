@@ -220,7 +220,7 @@ public sealed class DetailPage : LibraryPageBase
             actions.Children.Add(playOn);
         }
         var more = RoundAction("IconMore", "More Actions", () => { });
-        more.Flyout = new MenuFlyout { ItemsSource = MediaMenu.Items(Context, item) };
+        more.Flyout = new MenuFlyout { ItemsSource = MediaMenu.Items(Context, item, onDetail: true) };
         actions.Children.Add(more);
         if (item.WatchState == CatalogWatchState.Completed)
             actions.Children.Add(new TextBlock { Text = "Watched", VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), Margin = new Thickness(6, 0) });

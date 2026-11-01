@@ -6,6 +6,7 @@ using Aurelia.Linux.Core.Flow;
 using Aurelia.Linux.Core.Library;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Library;
+using Aurelia.Linux.Management;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -252,6 +253,21 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     public Task<bool> ConfirmAsync(string title, string message, string confirmLabel, bool destructive) =>
         Sheets.ConfirmAsync(title, message, confirmLabel, destructive);
+
+    public async Task ManageTitleAsync(CatalogItemSummary item, TitleAction action)
+    {
+        if (session?.Library is not { CanManageMedia: true } library) return;
+        var scope = new AdminScope(session, Sheets);
+        var changed = action switch
+        {
+            TitleAction.EditMetadata => await Sheets.ShowAsync(new MetadataEditorSheet(scope, item.Id)),
+            TitleAction.FindMatch => await Sheets.ShowAsync(new MetadataMatchSheet(scope, item.Id, item.Title)),
+            _ => await TitleAdmin.RemoveAsync(scope, item),
+        };
+        if (!changed) return;
+        if (action == TitleAction.Remove && details.Count > 0 && details[^1] is DetailPage { Item.Id: var shown } && shown == item.Id) Back();
+        await library.RefreshAsync();
+    }
 
     /// <summary>Applies a changed sidebar layout from Settings › Sidebar.</summary>
     public void ReloadSidebar()

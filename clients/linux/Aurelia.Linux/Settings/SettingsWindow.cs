@@ -8,6 +8,7 @@ using Aurelia.Linux.Core.Platform;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Core.Settings;
 using Aurelia.Linux.Library;
+using Aurelia.Linux.Management;
 using Aurelia.Linux.Views;
 using Avalonia;
 using Avalonia.Automation;
@@ -26,14 +27,18 @@ public enum SettingsCategory
     Sidebar,
     Activity,
     Playback,
+    Library,
+    Metadata,
     ProfilesAndDevices,
+    Server,
     Updates,
     Advanced,
 }
 
 /// <summary>
 /// Aurelia's settings, as the Mac app's Settings window: a list of categories with a search field
-/// and the chosen category beside it. Owner and administrator categories join in a later version.
+/// and the chosen category beside it. Library and Metadata appear for owners and administrators,
+/// Server only for the owner, whose requests alone the server accepts there.
 /// </summary>
 public sealed class SettingsWindow : Window
 {
@@ -43,7 +48,10 @@ public sealed class SettingsWindow : Window
         [SettingsCategory.Sidebar] = ["sidebar", "order", "pages", "hide", "show", "reset"],
         [SettingsCategory.Activity] = ["history", "statistics", "watch time", "streak", "year"],
         [SettingsCategory.Playback] = ["resume", "next", "episode", "up next", "sleep", "night", "rate", "speed", "volume", "seek", "audio", "subtitle", "language", "track", "controls"],
-        [SettingsCategory.ProfilesAndDevices] = ["profile", "pin", "lock", "switch"],
+        [SettingsCategory.Library] = ["storage", "location", "folder", "scan", "import", "health", "duplicate", "offline", "reset", "monitor"],
+        [SettingsCategory.Metadata] = ["tmdb", "metadata", "artwork", "match", "review", "enrich", "token"],
+        [SettingsCategory.ProfilesAndDevices] = ["profile", "pin", "lock", "switch", "device", "pair", "code", "apple tv", "browser", "revoke"],
+        [SettingsCategory.Server] = ["server", "health", "backup", "restore", "power", "update", "restart", "diagnostics", "network", "limits", "scrub", "preview", "maintenance"],
         [SettingsCategory.Updates] = ["update", "version", "release"],
         [SettingsCategory.Advanced] = ["server", "address", "fingerprint", "connection", "disconnect", "pair"],
     };
@@ -142,7 +150,7 @@ public sealed class SettingsWindow : Window
     {
         var selected = Category;
         categories.Items.Clear();
-        foreach (var category in Matching(search.Text))
+        foreach (var category in Matching(search.Text).Where(IsAvailable))
         {
             categories.Items.Add(new ListBoxItem { Content = CategoryName(category), Tag = category });
         }
@@ -161,7 +169,10 @@ public sealed class SettingsWindow : Window
             case SettingsCategory.Sidebar: Sidebar(page); break;
             case SettingsCategory.Activity: Activity(page); break;
             case SettingsCategory.Playback: Playback(page); break;
+            case SettingsCategory.Library: page.Children.Add(new LibraryPage(Admin(), Prefs, Refresh)); break;
+            case SettingsCategory.Metadata: page.Children.Add(new MetadataPage(Admin())); break;
             case SettingsCategory.ProfilesAndDevices: Profiles(page); break;
+            case SettingsCategory.Server: page.Children.Add(new ServerPage(Admin())); break;
             case SettingsCategory.Updates: Updates(page); break;
             default: Advanced(page); break;
         }
@@ -169,6 +180,27 @@ public sealed class SettingsWindow : Window
     }
 
     private GeneralPreferences Prefs => session.Preferences;
+
+    private AdminScope? admin;
+
+    /// <summary>One management scope per window, so the Server Password prompt opens over this window.</summary>
+    private AdminScope Admin() => admin ??= new AdminScope(session, sheets);
+
+    /// <summary>Like the Mac: Library for those who manage storage, Metadata for administrators, Server for the owner.</summary>
+    internal bool IsAvailable(SettingsCategory category) => IsAvailable(category, session.Library is null ? null : session.Profile?.User);
+
+    /// <param name="user">The open profile, or null while no library is open.</param>
+    public static bool IsAvailable(SettingsCategory category, UserSummary? user)
+    {
+        var manages = user?.Role is UserRole.Owner or UserRole.Admin;
+        return category switch
+        {
+            SettingsCategory.Library => manages && (user!.Role == UserRole.Owner || user.AccessMode != ProfileAccessMode.SelectedTitles),
+            SettingsCategory.Metadata => manages,
+            SettingsCategory.Server => manages && user!.Role == UserRole.Owner,
+            _ => true,
+        };
+    }
 
     private void General(StackPanel page)
     {
@@ -432,6 +464,7 @@ public sealed class SettingsWindow : Window
                 actions,
             },
         }));
+        if (profile.User.Role == UserRole.Owner && session.Library is not null) page.Children.Add(new PeoplePage(Admin()));
     }
 
     private void Updates(StackPanel page)

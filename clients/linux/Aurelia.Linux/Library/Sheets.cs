@@ -18,7 +18,8 @@ namespace Aurelia.Linux.Library;
 /// </summary>
 public sealed class SheetHost : Panel
 {
-    private TaskCompletionSource<bool>? pending;
+    // Sheets stack: the Server Password prompt can open above an editor and return to it.
+    private readonly Stack<(Control Frame, TaskCompletionSource<bool> Result)> open = new();
 
     public SheetHost()
     {
@@ -36,32 +37,39 @@ public sealed class SheetHost : Panel
 
     public bool IsShowing => IsVisible;
 
-    internal Control? Current => Children.Count > 0 ? Children[0] : null;
+    internal Control? Current => open.Count > 0 ? open.Peek().Frame : null;
 
     public Task<bool> ShowAsync(Control sheet)
     {
-        Close(false);
-        pending = new TaskCompletionSource<bool>();
-        Children.Clear();
-        Children.Add(new Border
+        if (open.Count > 0) open.Peek().Frame.IsVisible = false;
+        var frame = new Border
         {
             Classes = { "sheet" },
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             Child = sheet,
-        });
+        };
+        var result = new TaskCompletionSource<bool>();
+        open.Push((frame, result));
+        Children.Add(frame);
         IsVisible = true;
         Avalonia.Threading.Dispatcher.UIThread.Post(() => sheet.GetVisualDescendantsOfType<TextBox>().FirstOrDefault()?.Focus());
-        return pending.Task;
+        return result.Task;
     }
 
+    /// <summary>Closes the topmost sheet; the one below it, if any, shows again.</summary>
     public void Close(bool result)
     {
-        IsVisible = false;
-        Children.Clear();
-        var finished = pending;
-        pending = null;
-        finished?.TrySetResult(result);
+        if (open.Count == 0)
+        {
+            IsVisible = false;
+            return;
+        }
+        var (frame, pending) = open.Pop();
+        Children.Remove(frame);
+        if (open.Count > 0) open.Peek().Frame.IsVisible = true;
+        else IsVisible = false;
+        pending.TrySetResult(result);
     }
 
     /// <summary>A question with a confirm and a Cancel button.</summary>

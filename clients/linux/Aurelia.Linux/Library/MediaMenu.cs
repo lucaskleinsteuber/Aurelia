@@ -7,7 +7,8 @@ namespace Aurelia.Linux.Library;
 /// <summary>
 /// The context menu on every title, in the Mac app's order: Play, Resume, Go to Series, Mark as
 /// Watched/Unwatched (with season and series variants), Favorites, Watchlist, Add to Collection and
-/// Continue Watching. It is built when it opens, so it always shows the current state.
+/// Continue Watching, then Edit Metadata and Remove from Library for administrators. It is built
+/// when it opens, so it always shows the current state.
 /// </summary>
 internal static class MediaMenu
 {
@@ -19,7 +20,7 @@ internal static class MediaMenu
         return menu;
     }
 
-    internal static List<Control> Items(LibraryContext context, CatalogItemSummary item)
+    internal static List<Control> Items(LibraryContext context, CatalogItemSummary item, bool onDetail = false)
     {
         var store = context.Store;
         var items = new List<Control>();
@@ -66,6 +67,14 @@ internal static class MediaMenu
         {
             items.Add(Item(item.ContinueWatchingHidden ? "Show in Continue Watching" : "Remove from Continue Watching",
                 () => _ = store.SetContinueWatchingHiddenAsync(item.Id, !item.ContinueWatchingHidden)));
+        }
+        // Owners and administrators edit and remove titles; media files are never changed.
+        if (store.CanManageMedia && item.Kind is MediaKind.Movie or MediaKind.Series or MediaKind.Episode)
+        {
+            items.Add(new Separator());
+            items.Add(Item("Edit Metadata…", () => _ = context.Navigator.ManageTitleAsync(item, TitleAction.EditMetadata)));
+            if (onDetail) items.Add(Item("Find Metadata Match…", () => _ = context.Navigator.ManageTitleAsync(item, TitleAction.FindMatch)));
+            items.Add(Item("Remove from Library…", () => _ = context.Navigator.ManageTitleAsync(item, TitleAction.Remove)));
         }
         return items;
     }

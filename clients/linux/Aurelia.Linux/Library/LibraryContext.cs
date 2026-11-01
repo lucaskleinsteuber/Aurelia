@@ -28,6 +28,16 @@ public interface ILibraryNavigator
 
     /// <summary>Asks the person to confirm a change; true when they chose <paramref name="confirmLabel"/>.</summary>
     Task<bool> ConfirmAsync(string title, string message, string confirmLabel, bool destructive);
+
+    /// <summary>An administrator's change to a title: edit its metadata, match it or remove it from the library.</summary>
+    Task ManageTitleAsync(CatalogItemSummary item, TitleAction action) => Task.CompletedTask;
+}
+
+public enum TitleAction
+{
+    EditMetadata,
+    FindMatch,
+    Remove,
 }
 
 public sealed class LibraryContext(LibraryStore store, ILibraryNavigator navigator)

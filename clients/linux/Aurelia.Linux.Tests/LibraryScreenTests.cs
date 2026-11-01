@@ -66,7 +66,8 @@ public sealed class LibraryScreenTests
         var headers = MediaMenu.Items(context, episode).OfType<MenuItem>().Select(m => m.Header as string).ToList();
         Assert.Equal(
             ["Play", "Resume", "Go to Series", "Mark as Watched", "Mark Season as Watched", "Mark Season as Unwatched",
-             "Mark Series as Watched", "Mark Series as Unwatched", "Add to Collection", "Remove from Continue Watching"],
+             "Mark Series as Watched", "Mark Series as Unwatched", "Add to Collection", "Remove from Continue Watching",
+             "Edit Metadata…", "Remove from Library…"],
             headers);
         var movie = store.Catalog.Single(item => item.Id == FakeLibrary.MovieB);
         var movieHeaders = MediaMenu.Items(context, movie).OfType<MenuItem>().Select(m => m.Header as string).ToList();

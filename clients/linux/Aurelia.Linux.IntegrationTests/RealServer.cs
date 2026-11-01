@@ -31,6 +31,9 @@ public sealed class RealServer : WebApplicationFactory<Program>
 
     public IServerTransport Transport { get; }
 
+    /// <summary>Where the synthetic media of <see cref="SeedLibraryAsync"/> lives; tests may add folders beside it.</summary>
+    public string MediaDirectory => Path.Combine(dataDirectory, "media");
+
     /// <summary>Creates the owner account, sets up profiles and returns a fresh eight-digit pairing code.</summary>
     public async Task<string> CreatePairingCodeAsync()
     {
