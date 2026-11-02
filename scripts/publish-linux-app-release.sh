@@ -55,7 +55,11 @@ done
 
 verification="$other_root/Test Results/LinuxAppRelease-$tag-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$verification"
-release_id=$(gh api "repos/$repository/releases/tags/$tag" --jq .id)
+# A draft may not have a Git tag yet; GitHub's /releases/tags endpoint then returns 404.
+# gh release view also resolves these untagged drafts and exposes their stable REST URL.
+release_id=$(gh release view "$tag" --json apiUrl --jq '.apiUrl | split("/") | last')
+[[ "$release_id" =~ ^[0-9]+$ ]] \
+  || { echo "GitHub did not return a numeric release id; the release stays a draft." >&2; exit 1; }
 gh api "repos/$repository/releases/$release_id" > "$verification/release.json"
 for file in "${files[@]}"; do
   name=${file##*/}
