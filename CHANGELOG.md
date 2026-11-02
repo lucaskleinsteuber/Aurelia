@@ -12,6 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac/server 1.27.2 (126) - 03.11.2026
+
+### Fixed
+
+- Package the sandbox-safe installer handoff and exact request acknowledgement for the normal update from the repaired 1.27.1 preparation build.
+- Retain Dialogue Boost, Volume Leveling and existing settings, with installation outcomes recorded separately from download success.
+
 ## Mac/server 1.27.1 (125) - 03.11.2026
 
 ### Fixed

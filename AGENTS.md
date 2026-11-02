@@ -102,7 +102,7 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.27.0 (124); the independent tvOS
+  one per build. The current Mac release is 1.27.1 (125); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.4.0 (26).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
@@ -111,7 +111,7 @@ These rules apply to every task in this repository.
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published.
-- Aurelia for Linux (`clients/linux`, 1.0.2 (8)) is the native Linux desktop
+- Aurelia for Linux (`clients/linux`, 1.1.0 (9)) is the native Linux desktop
   app, with library browsing, playback, settings, server administration and optional hosting
   on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
   its own version counter (`Version` and `AureliaLinuxBuildNumber` in
@@ -251,6 +251,8 @@ These rules apply to every task in this repository.
   tokens, and preserves them. Copy only verified release assets and license notices,
   never private history. The owner operates the real Mac/Arch update dialogs; after
   verification restore the normal source and make the test repository private.
+  During these tests keep the preparation installed until the app updater installs
+  the target; never install the target directly to claim a successful update.
   Never rely on NSWorkspace launch arguments from the sandboxed Mac app. Use the
   bounded App Group request and matching acknowledgement before quitting; verify
   changes with `scripts/test-update-installer.sh` and the windowless real-sandbox
