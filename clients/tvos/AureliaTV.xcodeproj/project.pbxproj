@@ -9,6 +9,7 @@
 		A30000000000000000000001 /* TVVLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006; };
 		A30000000000000000000002 /* TVVLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A30000000000000000000003 /* TVVLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007; };
+		A300000000000000000000F1 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000F1; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -32,6 +33,7 @@
 		A20000000000000000000005 /* BuildNumber.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildNumber.xcconfig; sourceTree = "<group>"; };
 		A20000000000000000000006 /* TVVLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = TVVLCKit.xcframework; sourceTree = "<group>"; };
 		A20000000000000000000007 /* TVVLCKit-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "TVVLCKit-COPYING.txt"; sourceTree = "<group>"; };
+		A200000000000000000000F1 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = ../../LICENSE; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -116,7 +118,7 @@
 
 /* Begin PBXResourcesBuildPhase section */
         A4000000000000000000000A = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		A40000000000000000000004 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A30000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
+		A40000000000000000000004 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A30000000000000000000003, A300000000000000000000F1, ); runOnlyForDeploymentPostprocessing = 0; };
 		A40000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 

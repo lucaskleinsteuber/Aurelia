@@ -159,4 +159,6 @@ is ever stored. More in [Aurelia in a web browser](docs/WEB_APP.md).
 | [Distribution and updates](docs/FREE_DISTRIBUTION.md) | Signing, Gatekeeper and keeping local builds running |
 | [Client protocol](docs/CLIENT_PROTOCOL.md) and [compatibility](docs/CLIENT_COMPATIBILITY.md) | How the apps talk to the server |
 | [Build and verification](docs/TRANSPORT_TESTING.md) | Building from source and running the checks |
+| [Changelog](CHANGELOG.md) | Changes by product and version |
+| [MIT license](LICENSE) | Copyright (c) 2026 Lucas Kleinsteuber |
 | [Third-party notices](THIRD_PARTY_NOTICES.md) | Licenses of included components |

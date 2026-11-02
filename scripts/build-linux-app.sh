@@ -63,6 +63,8 @@ server_assets=$("$DOTNET_BIN" msbuild "$server_project" -getProperty:ProjectAsse
 zsh "$repository_root/scripts/collect-third-party-notices.sh" \
   "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server.deps.json" "$server_assets" "$notices/server"
 cp "$repository_root/docs/licenses/Inter-OFL-1.1.txt" "$notices/"
+mkdir -p "$tree/usr/share/licenses/aurelia-desktop"
+cp "$repository_root/LICENSE" "$tree/usr/share/licenses/aurelia-desktop/LICENSE"
 printf '%s (%s)\n' "$version" "$build" > "$tree/usr/lib/aurelia-desktop/VERSION"
 cp "$output/SOURCE_COMMIT" "$tree/usr/lib/aurelia-desktop/SOURCE_COMMIT"
 

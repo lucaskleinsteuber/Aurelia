@@ -61,7 +61,7 @@ fi
 DEVELOPER_DIR="$developer_dir" xcodebuild "${arguments[@]}" build 2>&1 | tee "$log"
 app="$build_root/DerivedData/Build/Products/Release-appletvos/Aurelia.app"
 framework="$app/Frameworks/TVVLCKit.framework/TVVLCKit"
-if [[ ! -f "$app/Aurelia" || ! -f "$framework" || ! -f "$app/TVVLCKit-COPYING.txt" ]]; then
+if [[ ! -f "$app/Aurelia" || ! -f "$app/LICENSE" || ! -f "$framework" || ! -f "$app/TVVLCKit-COPYING.txt" ]]; then
   print -u2 "The built TV application, player dependency or license is incomplete."
   exit 1
 fi

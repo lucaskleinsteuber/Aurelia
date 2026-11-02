@@ -36,6 +36,7 @@ for arch in x64 arm64; do
   assets_path=$("$DOTNET_BIN" msbuild "$project" -getProperty:ProjectAssetsFile)
   zsh "$repository_root/scripts/collect-third-party-notices.sh" \
     "$stage/server/Aurelia.Server.deps.json" "$assets_path" "$stage/notices"
+  cp "$repository_root/LICENSE" "$stage/notices/Aurelia-LICENSE.txt"
   for file in install.sh aurelia aurelia.service aurelia-autosleep aurelia-sleep-settings aurelia-autosleep.service \
     aurelia-autosleep.timer aurelia-wake-on-lan aurelia-wake-on-lan.service aurelia-start.socket \
     aurelia-start.service aurelia-update-request.path aurelia-update-request.service aurelia-update-check.timer \

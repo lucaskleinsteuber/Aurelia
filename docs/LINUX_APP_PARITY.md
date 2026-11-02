@@ -9,11 +9,11 @@ the scenario it exercises, not proof of every interaction in that row. “Source
 implementation exists but has no dedicated automated assertion yet. Headless tests draw the real
 Avalonia views without opening desktop windows. Integration tests use the real server with
 synthetic accounts and media; simulated player tests never load a real decoder. Desktop, package,
-portal and physical playback checks must be reported separately in the build summary.
+portal and physical playback checks must be reported separately with the release verification.
 
 In the tables, UI test names are in `Aurelia.Linux.Tests`; server integration test names are in
 `Aurelia.Linux.IntegrationTests`. Linux paths are relative to `clients/linux`. This document is a
-source and coverage map; the build summary records which tests actually ran for a release.
+source and coverage map; private test receipts record which tests actually ran for a release.
 
 ## Window and navigation
 

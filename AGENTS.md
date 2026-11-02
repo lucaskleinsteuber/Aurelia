@@ -78,7 +78,7 @@ These rules apply to every task in this repository.
   folder of the checkout (`AURELIA_OTHER_ROOT` may select another place). Never
   commit anything from it and never remove `/Local/` from `.gitignore`. Standard
   subdirectories are `Build/`, `Package Cache/`, `Test Results/` and `Logs/`;
-  `Local/` also holds the build summaries, icon drafts, the Linux server's SSH
+  `Local/` also holds icon drafts, the Linux server's SSH
   access and the archived desktop client. Build and test scripts first run
   `scripts/prune-workspace.sh`, which keeps the newest build per platform, ten
   test results and 30 days of logs; new scripts that write there should call it
@@ -102,11 +102,11 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.26.4 (121); the independent tvOS
-  client is named Aurelia, requires tvOS 26, and is at 1.3.1 (24).
+  one per build. The current Mac release is 1.26.5 (122); the independent tvOS
+  client is named Aurelia, requires tvOS 26, and is at 1.3.2 (25).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
-- The iPhone and iPad client (`clients/ios`, preview, 1.0.2 (3)) follows the same
+- The iPhone and iPad client (`clients/ios`, preview, 1.0.3 (4)) follows the same
   rules as tvOS: its own Xcode project and version counter, code copied from the
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
@@ -212,23 +212,31 @@ These rules apply to every task in this repository.
   of the release workflow. Git/GitHub history, tags, commits, and published
   builds are the rollback mechanism.
 
-## Build summary and Git discipline
+## Changelog and Git discipline
 
 - Work directly on `main` unless the user explicitly requests a branch.
 - Before committing, inspect the full diff and audit it for secrets, personal or
   unportable paths, generated data, databases, binaries, media, caches, and test
   results.
 - Use a short English description of the completed change as the commit subject,
-  without a version/build number. The approved subject for the current TV update
-  is `Add scrub previews, Up Next and faster resume on tvOS`. Push to `origin/main`
+  without a version/build number. Add `[skip ci]` as requested by the owner to avoid
+  starting GitHub server test runs; perform the relevant verification locally. Push to `origin/main`
   and verify the remote hash after each independent completed change.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
-- After verification, create exactly one concise English Markdown summary in
-  `Local/Aurelia Build summarys/`.
-  Include objective, behavior, important files, verification, installation,
-  known limitations, and the verified final Git hash. Do not commit that
-  summary.
+- Keep one concise English `CHANGELOG.md` in the repository root, following
+  Keep a Changelog 1.1.0 (https://keepachangelog.com/en/1.1.0/). Use an Unreleased
+  section for pending work, dated versions in reverse chronological order and only
+  relevant Added, Changed, Deprecated, Removed, Fixed or Security sections.
+  Use DD.MM.YYYY for changelog dates, as explicitly requested by the owner.
+  Identify the product because Mac/server, Linux, tvOS and iOS versions are independent.
+  Preserve historical version numbers; new versions follow Semantic Versioning 2.0.0
+  (https://semver.org/spec/v2.0.0.html). Describe notable user-visible changes in a few
+  concrete bullets (typically two to six), using historical commits and release notes
+  to cover all recorded builds from Build 1; never invent missing builds or release
+  dates. Omit test logs, file inventories and Git commit dumps. Never create
+  separate Markdown build summaries. Private diagnostics and test receipts stay in
+  the ignored `Local/Logs/` and `Local/Test Results/` directories.
 
 ## Public distribution
 

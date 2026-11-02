@@ -211,6 +211,7 @@ else
 fi
 mkdir -p "$candidate/Contents/Resources/Server"
 mkdir -p "$candidate/Contents/Resources/ThirdPartyNotices"
+cp "$repository_root/LICENSE" "$candidate/Contents/Resources/LICENSE"
 for runtime in osx-arm64; do
   /usr/bin/ditto "$publish_root/$runtime" "$candidate/Contents/Resources/Server/$runtime"
   assets_path=$("$dotnet_bin" msbuild "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \

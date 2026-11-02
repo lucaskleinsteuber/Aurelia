@@ -9,6 +9,7 @@
 		B30000000000000000000001 /* MobileVLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006; };
 		B30000000000000000000002 /* MobileVLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B30000000000000000000003 /* MobileVLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007; };
+		B300000000000000000000F1 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000F1; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -23,6 +24,7 @@
 		B20000000000000000000005 /* BuildNumber.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildNumber.xcconfig; sourceTree = "<group>"; };
 		B20000000000000000000006 /* MobileVLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = MobileVLCKit.xcframework; sourceTree = "<group>"; };
 		B20000000000000000000007 /* MobileVLCKit-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "MobileVLCKit-COPYING.txt"; sourceTree = "<group>"; };
+		B200000000000000000000F1 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = ../../LICENSE; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -91,7 +93,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		B40000000000000000000004 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B30000000000000000000003, ); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000004 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B30000000000000000000003, B300000000000000000000F1, ); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 

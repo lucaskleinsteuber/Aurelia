@@ -86,7 +86,7 @@ Name: $name
 Version: $version
 Release: $build
 Summary: $summary
-License: Unknown
+License: MIT
 URL: $homepage
 ExclusiveArch: x86_64
 AutoReqProv: no
@@ -129,7 +129,7 @@ pkgrel=$build
 pkgdesc="$summary"
 arch=(x86_64)
 url="$homepage"
-license=(unknown)
+license=('MIT')
 depends=(glibc gcc-libs icu openssl zlib polkit fontconfig freetype2 ttf-dejavu libx11 libice libsm wayland libxkbcommon libglvnd libvlc vlc-plugins-base vlc-plugin-ffmpeg vlc-plugin-pulse vlc-plugin-ass vlc-plugin-freetype)
 optdepends=('ffmpeg: browser conversion and server-generated scrub previews when hosting here')
 options=(!strip !debug)

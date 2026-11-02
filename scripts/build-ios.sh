@@ -54,7 +54,7 @@ DEVELOPER_DIR="$developer_dir" xcodebuild "${arguments[@]}" build 2>&1 | tee "$l
 app="$build_root/DerivedData/Build/Products/$products/Aurelia.app"
 framework="$app/Frameworks/MobileVLCKit.framework/MobileVLCKit"
 
-if [[ ! -f "$app/Aurelia" || ! -f "$framework" || ! -f "$app/MobileVLCKit-COPYING.txt" ]]; then
+if [[ ! -f "$app/Aurelia" || ! -f "$app/LICENSE" || ! -f "$framework" || ! -f "$app/MobileVLCKit-COPYING.txt" ]]; then
   print -u2 "The built iOS application, player dependency or license is incomplete."
   exit 1
 fi
