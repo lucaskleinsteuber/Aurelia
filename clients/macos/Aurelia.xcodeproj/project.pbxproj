@@ -94,6 +94,7 @@
 		B40000000000000000000003 /* AureliaTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = AureliaTests; sourceTree = "<group>"; };
 		B40000000000000000000004 /* AureliaUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = AureliaUITests; sourceTree = "<group>"; };
 		E70000000000000000000006 /* AureliaServerHost */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = AureliaServerHost; sourceTree = "<group>"; };
+		F99100000000000000000001 /* UpdateHandoff */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = UpdateHandoff; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -111,6 +112,7 @@
 				E7000000000000000000000B /* HostLaunchSecurity.swift */,
 				F80000000000000000000013,
 				E7000000000000000000000D /* ServerDataMigrator.swift */,
+				F99100000000000000000001 /* UpdateHandoff */,
 				A40000000000000000000002 /* Aurelia */,
 				E70000000000000000000006 /* AureliaServerHost */,
 				B40000000000000000000003 /* AureliaTests */,
@@ -171,7 +173,7 @@
 			);
 			buildRules = ();
 			dependencies = (E70000000000000000000011 /* PBXTargetDependency */);
-			fileSystemSynchronizedGroups = (A40000000000000000000002 /* Aurelia */);
+			fileSystemSynchronizedGroups = (A40000000000000000000002 /* Aurelia */, F99100000000000000000001 /* UpdateHandoff */);
 			name = Aurelia;
 			packageProductDependencies = ();
 			productName = "Aurelia";
@@ -222,7 +224,7 @@
 			);
 			buildRules = ();
 			dependencies = ();
-			fileSystemSynchronizedGroups = (E70000000000000000000006 /* AureliaServerHost */);
+			fileSystemSynchronizedGroups = (E70000000000000000000006 /* AureliaServerHost */, F99100000000000000000001 /* UpdateHandoff */);
 			name = AureliaServerHost;
 			packageProductDependencies = ();
 			productName = "Aurelia Server Host";

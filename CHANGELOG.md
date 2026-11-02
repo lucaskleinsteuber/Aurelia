@@ -12,6 +12,15 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac/server 1.27.1 (125) - 03.11.2026
+
+### Fixed
+
+- Hand updates from the sandboxed app to its same-team helper through a bounded, single-use request in their existing App Group. macOS discards NSWorkspace launch arguments from sandboxed callers.
+- Wait for acknowledgement of the exact request and build before quitting; show a clear failure and keep the app open when the helper does not acknowledge.
+- Start installation after Launch Services completes helper launch, then record success or failure for the next app start.
+- Validate request age, filename, UUID directory, file type and size; reject symlinks and replayed requests.
+
 ## Mac/server 1.27.0 (124) - 02.11.2026
 
 ### Added

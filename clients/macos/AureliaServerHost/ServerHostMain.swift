@@ -24,6 +24,15 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    if UpdateInstaller.hasPendingRequest() {
+      // Return from launch first so Launch Services can acknowledge the new
+      // helper to the sandboxed app before we wait for that app to quit.
+      Task { @MainActor [self] in
+        _ = UpdateInstaller.runPendingIfRequested()
+        finishTermination()
+      }
+      return
+    }
     ProcessInfo.processInfo.disableAutomaticTermination(
       "Aurelia Server Host is managing the local server")
     ProcessInfo.processInfo.disableSuddenTermination()

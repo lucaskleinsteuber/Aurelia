@@ -12,6 +12,48 @@ enum UpdateInstaller {
   private static let logger = Logger(
     subsystem: "com.lucas.aurelia.media.server-host", category: "update")
 
+  static func hasPendingRequest() -> Bool {
+    let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().standardizedFileURL
+    guard app.path == "/Applications/Aurelia.app",
+      let root = MacUpdateInstallRequest.updatesDirectory()
+    else { return false }
+    return FileManager.default.fileExists(
+      atPath: root.appendingPathComponent(MacUpdateInstallRequest.pendingName).path)
+  }
+
+  static func runPendingIfRequested() -> Bool {
+    let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().standardizedFileURL
+    // Synthetic host tests and other copies never inspect the installed app's requests.
+    guard app.path == "/Applications/Aurelia.app",
+      let root = MacUpdateInstallRequest.updatesDirectory()
+    else { return false }
+    var request: MacUpdateInstallRequest?
+    do {
+      guard let claimed = try MacUpdateInstallRequest.claim(in: root) else { return false }
+      request = claimed
+      let image = try claimed.image(in: root)
+      try claimed.writeStatus("accepted", in: root)
+      try UpdateInstallation.withDownloadedImage(at: image) {
+        try install(image: image, expectedBuild: claimed.build, appPID: claimed.appPID, app: app)
+      }
+      try? claimed.writeStatus("installed", in: root)
+      logger.notice(
+        "Installed build \(claimed.build, privacy: .public) through the App Group handoff.")
+      open(app)
+    } catch {
+      let message =
+        (error as? InstallError)?.message
+        ?? "The update request could not be completed. Please try again."
+      if let request { try? request.writeStatus("failed", message: message, in: root) }
+      logger.error("App Group update failed: \(message, privacy: .public)")
+      report(message)
+      open(app)
+    }
+    return true
+  }
+
   static func runIfRequested(_ arguments: [String]) -> Bool {
     guard let index = arguments.firstIndex(of: "--install-update"), arguments.count >= index + 4,
       let build = Int(arguments[index + 2]), let pid = pid_t(arguments[index + 3])

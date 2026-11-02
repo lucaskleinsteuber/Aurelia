@@ -48,6 +48,12 @@ final class AppUpdater: ObservableObject {
     currentVersion =
       bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
+    if let root = MacUpdateInstallRequest.updatesDirectory(),
+      let outcome = MacUpdateInstallRequest.status(in: root), outcome.phase == "failed",
+      outcome.build > currentBuild
+    {
+      state = .failed(outcome.message ?? "The previous update could not be completed. Try again.")
+    }
   }
 
   func saveToken(_ token: String) throws {
@@ -211,6 +217,7 @@ final class AppUpdater: ObservableObject {
     guard let repository else { return }
     state = .downloading
     var downloadedImage: URL?
+    var pendingRequest: MacUpdateInstallRequest?
     do {
       let folder = try Self.updatesDirectory()
       let token = AppUpdateSource.token(defaults: defaults, load: tokenStore.load)
@@ -224,20 +231,33 @@ final class AppUpdater: ObservableObject {
       let configuration = NSWorkspace.OpenConfiguration()
       configuration.activates = false
       configuration.createsNewApplicationInstance = true
-      configuration.arguments = [
-        "--install-update", destination.path, String(release.build), String(getpid()),
-      ]
+      let request = try MacUpdateInstallRequest.prepare(
+        image: destination, build: release.build, appPID: getpid(), root: folder)
+      try request.save(in: folder)
+      pendingRequest = request
       _ = try await NSWorkspace.shared.openApplication(at: helper, configuration: configuration)
+      // NSWorkspace ignores arguments from a sandboxed caller. Do not quit until
+      // the same-team helper has acknowledged this exact validated request.
+      try await request.waitForAcknowledgement(in: folder)
       Self.logger.notice("Installing Aurelia \(release.version, privacy: .public); quitting.")
       AppModel.active?.isPreparingApplicationUpdate = true
       NSApp.terminate(nil)
     } catch {
+      if let pendingRequest, let root = MacUpdateInstallRequest.updatesDirectory() {
+        let path = root.appendingPathComponent(MacUpdateInstallRequest.pendingName)
+        if let data = try? Data(contentsOf: path),
+          let saved = try? JSONDecoder().decode(MacUpdateInstallRequest.self, from: data),
+          saved.id == pendingRequest.id
+        {
+          try? FileManager.default.removeItem(at: path)
+        }
+      }
       if let downloadedImage {
         try? FileManager.default.removeItem(at: downloadedImage.deletingLastPathComponent())
       }
       let message =
         (error as? AppUpdateError)?.message
-        ?? "The update installer couldn't be started. Try again."
+        ?? "The update installer did not acknowledge the request. Aurelia has stayed open; try again."
       state = .failed(message)
       alert("Couldn't Install the Update", message)
     }

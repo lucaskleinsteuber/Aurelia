@@ -18,9 +18,12 @@ never evidence that the installed app is current.
 
 ## Test sequence
 
-1. Verify and directly install Mac/server 1.26.6 (123) and Linux Desktop 1.0.2 (8).
+1. The original Mac/server 1.26.6 (123) preparation exposed a real sandbox handoff
+   failure: Launch Services discards its installer arguments. Repair that installed
+   updater with Mac/server 1.27.1 (125); then test the normal update to 1.27.2 (126).
+   Linux Desktop uses the original 1.0.2 (8) preparation.
 2. Publish the verified audio releases through the normal channels: Mac/server
-   1.27.0 (124) and Linux Desktop 1.1.0 (9). Copy the exact verified downloads into
+   1.27.2 (126) and Linux Desktop 1.1.0 (9). Copy the exact verified downloads into
    the separate public test repository, with license notices and a short README.
    Do not copy private source, history, credentials or diagnostic files.
 3. Enable Public Update Test in both apps. The owner starts the normal update
@@ -44,3 +47,9 @@ The owner assesses speech and loud/quiet transitions manually.
 publishers render the same four rows, overriding only their own verified candidate.
 Prepared future builds must not be recorded as already delivered. Existing tags,
 package names, bundle IDs and independent update channels remain compatible.
+
+The Mac installer exchanges a bounded, single-use request and matching acknowledgement
+through the existing App Group. Launch arguments are not its transport. Verify the
+production parser with `scripts/test-update-installer.sh` and the real, windowless
+sandbox/NSWorkspace handoff with `scripts/test-update-handoff-sandbox.sh` before
+building. Both use isolated invented data and create no playback engine.
