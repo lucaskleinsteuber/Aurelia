@@ -15,10 +15,16 @@ struct IOSPlaybackSettingsView: View {
           .accessibilityIdentifier("settings-resume")
         Toggle("Play Next Episode Automatically", isOn: $value.automaticallyPlayNextEpisode)
           .accessibilityIdentifier("settings-next")
-        Toggle("Night Mode", isOn: $value.nightMode)
-          .accessibilityIdentifier("settings-night-mode")
+        Picker("Dialogue Boost", selection: $value.dialogueBoost) {
+          ForEach(DialogueBoost.allCases, id: \.self) { Text($0.title).tag($0) }
+        }.accessibilityIdentifier("settings-dialogue-boost")
+        Picker("Volume Leveling", selection: $value.volumeLeveling) {
+          ForEach(VolumeLeveling.allCases, id: \.self) { Text($0.title).tag($0) }
+        }.accessibilityIdentifier("settings-volume-leveling")
       } footer: {
-        Text("Night Mode evens out loud and quiet passages.")
+        Text(
+          "Emphasize speech and reduce differences between quiet and loud passages. Sleep applies stronger volume leveling."
+        )
       }
       Section {
         Picker("Playback Rate", selection: $value.defaultPlaybackRate) {

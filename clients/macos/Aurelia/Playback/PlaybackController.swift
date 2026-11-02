@@ -617,7 +617,19 @@ final class PlaybackController: ObservableObject {
     enqueueProgressSave(isFinished: false)
   }
 
-  /// Opens the current title again at the same position, for example after night mode changed:
+  @discardableResult
+  func setDialogueBoost(_ mode: DialogueBoost) -> Bool {
+    let result = engine.applyDialogueBoost(mode)
+    guard result != .unavailable else {
+      errorMessage = "Dialogue Boost is unavailable in this VLC installation."
+      return false
+    }
+    PlaybackPreferencesStore.shared.preferences.dialogueBoost = mode
+    if result == .reloadRequired { reopenForAudioChange() }
+    return true
+  }
+
+  /// Opens the current title again at the same position, for example after Volume Leveling changed:
   /// the audio processing of a VLC player is fixed when it opens a title.
   func reopenForAudioChange() {
     guard !stopped, !authorizationFailed, !terminalFailure, !recovering, !endHandled,

@@ -6,6 +6,8 @@ import UIKit
 final class TVVideoEngine: TVPlaybackEngine {
   typealias Terminal = TVVideoTerminal
 
+  private(set) var audioProcessingError: String?
+
   var onUpdate: (() -> Void)?
   var onTerminal: ((Terminal) -> Void)?
 
@@ -64,7 +66,18 @@ final class TVVideoEngine: TVPlaybackEngine {
 
   func load(url: URL, resumeAt: Int64) {
     stop()
-    player = Self.makePlayer(nightMode: preferences.nightMode)
+    player = Self.makePlayer(leveling: preferences.volumeLeveling)
+    let processing = AudioProcessing(
+      dialogue: preferences.dialogueBoost, leveling: preferences.volumeLeveling)
+    audioProcessingError = nil
+    guard
+      processing.filters.isEmpty
+        || TVAudioFilter.apply(processing, on: player, output: "audiounit_ios")
+    else {
+      audioProcessingError =
+        "Dialogue Boost or Volume Leveling is unavailable in this VLC installation. Turn it off in Playback settings."
+      return
+    }
     player.drawable = videoView
     generation = UUID()
     acceptsEvents = true
@@ -277,25 +290,25 @@ final class TVVideoEngine: TVPlaybackEngine {
     }
   }
 
-  /// Night mode compresses the soundtrack: peaks above -24 dB are reduced 4:1 and the result is
-  /// raised by 12 dB, so explosions stay calmer and quiet speech becomes easier to hear.
-  static let nightModeOptions = [
-    "--compressor-rms-peak=0.2", "--compressor-attack=15", "--compressor-release=300",
-    "--compressor-threshold=-24", "--compressor-ratio=4", "--compressor-knee=6",
-    "--compressor-makeup-gain=12",
-  ]
+  static let nightModeOptions = VolumeLeveling.standard.options
+
+  func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult {
+    let result = TVAudioFilter.applyDialogue(mode, leveling: preferences.volumeLeveling, on: player)
+    if result == .applied { preferences.dialogueBoost = mode }
+    return result
+  }
 
   /// Loads VLC's modules once after launch, so the first Play does not pay for it.
   static func warmUp() {
     _ = makePlayer().state
   }
 
-  private static func makePlayer(nightMode: Bool = false) -> VLCMediaPlayer {
+  private static func makePlayer(leveling: VolumeLeveling = .off) -> VLCMediaPlayer {
     let player = VLCMediaPlayer(
       options: [
         "--quiet", "--no-video-title-show", "--no-play-and-pause", "--no-metadata-network-access",
-      ] + (nightMode ? nightModeOptions : []))
-    if nightMode { TVAudioFilter.enable("compressor", on: player, output: "audiounit_ios") }
+      ] + leveling.options)
+
     return player
   }
 }

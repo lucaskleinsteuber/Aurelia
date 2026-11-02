@@ -13,6 +13,7 @@ for module in \
   video_chroma/libswscale_plugin.so \
   audio_output/libpulse_plugin.so \
   audio_filter/libcompressor_plugin.so \
+  audio_filter/libequalizer_plugin.so \
   audio_filter/libscaletempo_plugin.so \
   codec/liblibass_plugin.so \
   text_renderer/libfreetype_plugin.so \
@@ -30,4 +31,8 @@ for module in \
 done
 nm -D --defined-only /app/lib/libvlc.so.5 | grep 'libvlc_video_set_callbacks' >/dev/null \
   || { echo "The libVLC frame callback API is missing." >&2; exit 1; }
+nm -D --defined-only /app/lib/libvlc.so.5 | grep 'libvlc_media_player_set_equalizer' >/dev/null \
+  || { echo "The public VLC equalizer API is missing." >&2; exit 1; }
+nm -D --defined-only /app/lib/libvlccore.so.9 | grep 'var_SetChecked' >/dev/null \
+  || { echo "The VLC audio chain configuration entry point is missing." >&2; exit 1; }
 echo "Verified $count required VLC modules, their entry points and linked libraries; no media opened."

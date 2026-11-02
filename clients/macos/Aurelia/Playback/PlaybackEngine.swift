@@ -3,184 +3,6 @@ import Combine
 @preconcurrency import Foundation
 @preconcurrency import VLCKit
 
-struct PlaybackTrack: Identifiable, Equatable, Sendable {
-  let id: Int32
-  let title: String
-
-  var preference: PlaybackTrackPreference {
-    PlaybackTrackPreference(
-      language: Self.language(in: title),
-      title: title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-  }
-
-  private static func language(in title: String) -> String? {
-    guard let open = title.lastIndex(of: "["),
-      let close = title[open...].firstIndex(of: "]"),
-      open < close
-    else { return nil }
-    let value = title[title.index(after: open)..<close]
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-      .lowercased()
-    return value.isEmpty ? nil : value
-  }
-}
-
-/// The default languages of Settings › Playback, matched against VLC's "[eng]" track tags.
-enum PlaybackLanguage {
-  static let choices = ["en", "de", "fr", "es", "it", "ja"]
-  private static let aliases: [String: Set<String>] = [
-    "en": ["en", "eng"], "de": ["de", "deu", "ger"], "fr": ["fr", "fra", "fre"],
-    "es": ["es", "spa"], "it": ["it", "ita"], "ja": ["ja", "jpn"],
-  ]
-
-  static func isChoice(_ value: String, off: String) -> Bool {
-    value == off || choices.contains(value)
-  }
-
-  static func matches(_ code: String?, _ language: String) -> Bool {
-    guard let code = code?.split(whereSeparator: { $0 == "-" || $0 == "_" }).first else {
-      return false
-    }
-    return aliases[language, default: [language]].contains(code.lowercased())
-  }
-
-  /// The first track in that language, or nil for "original", "off" or no match.
-  static func track(in tracks: [PlaybackTrack], for language: String) -> PlaybackTrack? {
-    guard choices.contains(language) else { return nil }
-    let matching = tracks.filter { matches($0.preference.language, language) }
-    return matching.first { !$0.title.localizedCaseInsensitiveContains("forced") } ?? matching.first
-  }
-}
-
-struct PlaybackTrackPreference: Codable, Equatable, Sendable {
-  let language: String?
-  let title: String
-}
-
-struct PlaybackChapter: Identifiable, Equatable, Sendable {
-  let index: Int32
-  let title: String
-  let timeOffsetMilliseconds: Int64
-  let durationMilliseconds: Int64
-
-  var id: Int32 { index }
-}
-
-struct PlaybackPreferences: Codable, Equatable, Sendable {
-  static let supportedRates: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
-  static let defaultValue = PlaybackPreferences(
-    automaticResume: true,
-    defaultPlaybackRate: 1,
-    defaultVolume: 1,
-    controlsAutoHideDelay: 2,
-    seekInterval: 10,
-    preventSleepDuringPlayback: true,
-    automaticallyPlayNextEpisode: true,
-    nightMode: false,
-    upNextCountdownSeconds: 20,
-    resumeThresholdSeconds: 0,
-    defaultAudioLanguage: "original",
-    defaultSubtitleLanguage: "off")
-
-  var automaticResume: Bool
-  var defaultPlaybackRate: Double
-  var defaultVolume: Double
-  var controlsAutoHideDelay: Double
-  var seekInterval: Int
-  var preventSleepDuringPlayback: Bool
-  var automaticallyPlayNextEpisode: Bool
-  /// Softens loud scenes and lifts quiet dialogue.
-  var nightMode: Bool
-  /// How long before the end the next episode is offered.
-  var upNextCountdownSeconds: Int
-  /// Resume starts over when less than this was watched.
-  var resumeThresholdSeconds: Int
-  /// Used until a sound track is chosen for a series ("original" keeps the file's default).
-  var defaultAudioLanguage: String
-  /// Used until subtitles are chosen for a series ("off" keeps the file's own default).
-  var defaultSubtitleLanguage: String
-
-  init(
-    automaticResume: Bool,
-    defaultPlaybackRate: Double,
-    defaultVolume: Double,
-    controlsAutoHideDelay: Double,
-    seekInterval: Int,
-    preventSleepDuringPlayback: Bool,
-    automaticallyPlayNextEpisode: Bool,
-    nightMode: Bool,
-    upNextCountdownSeconds: Int = 20,
-    resumeThresholdSeconds: Int = 0,
-    defaultAudioLanguage: String = "original",
-    defaultSubtitleLanguage: String = "off"
-  ) {
-    self.automaticResume = automaticResume
-    self.defaultPlaybackRate = defaultPlaybackRate
-    self.defaultVolume = defaultVolume
-    self.controlsAutoHideDelay = controlsAutoHideDelay
-    self.seekInterval = seekInterval
-    self.preventSleepDuringPlayback = preventSleepDuringPlayback
-    self.automaticallyPlayNextEpisode = automaticallyPlayNextEpisode
-    self.nightMode = nightMode
-    self.upNextCountdownSeconds = upNextCountdownSeconds
-    self.resumeThresholdSeconds = resumeThresholdSeconds
-    self.defaultAudioLanguage = defaultAudioLanguage
-    self.defaultSubtitleLanguage = defaultSubtitleLanguage
-  }
-
-  var normalized: PlaybackPreferences {
-    var value = self
-    if !Self.supportedRates.contains(value.defaultPlaybackRate) {
-      value.defaultPlaybackRate = 1
-    }
-    value.defaultVolume = min(max(value.defaultVolume, 0), 1)
-    value.controlsAutoHideDelay = min(max(value.controlsAutoHideDelay, 1), 10)
-    value.seekInterval = min(max(value.seekInterval, 5), 60)
-    value.upNextCountdownSeconds = min(max(value.upNextCountdownSeconds, 5), 30)
-    value.resumeThresholdSeconds = min(max(value.resumeThresholdSeconds, 0), 120)
-    if !PlaybackLanguage.isChoice(value.defaultAudioLanguage, off: "original") {
-      value.defaultAudioLanguage = "original"
-    }
-    if !PlaybackLanguage.isChoice(value.defaultSubtitleLanguage, off: "off") {
-      value.defaultSubtitleLanguage = "off"
-    }
-    return value
-  }
-}
-
-extension PlaybackPreferences {
-  private enum CodingKeys: String, CodingKey {
-    case automaticResume, defaultPlaybackRate, defaultVolume, controlsAutoHideDelay
-    case seekInterval, preventSleepDuringPlayback, automaticallyPlayNextEpisode, nightMode
-    case upNextCountdownSeconds, resumeThresholdSeconds
-    case defaultAudioLanguage, defaultSubtitleLanguage
-  }
-
-  /// Settings saved before a newer option existed keep their values; the new option starts off.
-  init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-    self.init(
-      automaticResume: try container.decode(Bool.self, forKey: .automaticResume),
-      defaultPlaybackRate: try container.decode(Double.self, forKey: .defaultPlaybackRate),
-      defaultVolume: try container.decode(Double.self, forKey: .defaultVolume),
-      controlsAutoHideDelay: try container.decode(Double.self, forKey: .controlsAutoHideDelay),
-      seekInterval: try container.decode(Int.self, forKey: .seekInterval),
-      preventSleepDuringPlayback: try container.decode(
-        Bool.self, forKey: .preventSleepDuringPlayback),
-      automaticallyPlayNextEpisode: try container.decode(
-        Bool.self, forKey: .automaticallyPlayNextEpisode),
-      nightMode: try container.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false,
-      upNextCountdownSeconds: try container.decodeIfPresent(
-        Int.self, forKey: .upNextCountdownSeconds) ?? 20,
-      resumeThresholdSeconds: try container.decodeIfPresent(
-        Int.self, forKey: .resumeThresholdSeconds) ?? 0,
-      defaultAudioLanguage: try container.decodeIfPresent(
-        String.self, forKey: .defaultAudioLanguage) ?? "original",
-      defaultSubtitleLanguage: try container.decodeIfPresent(
-        String.self, forKey: .defaultSubtitleLanguage) ?? "off")
-  }
-}
-
 @MainActor
 protocol PlaybackEngine: AnyObject {
   var onUpdate: (() -> Void)? { get set }
@@ -204,6 +26,7 @@ protocol PlaybackEngine: AnyObject {
   /// The active profile ID so track choices stay scoped per profile.
   var profileScope: UUID? { get set }
 
+  func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult
   func attach(to view: NSView)
   func load(url: URL)
   /// Opens `url` directly at `milliseconds`, where the engine can, instead of starting at the
@@ -222,6 +45,7 @@ protocol PlaybackEngine: AnyObject {
 }
 
 extension PlaybackEngine {
+  func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult { .unavailable }
   var isSeekable: Bool { false }
   func load(url: URL, startAt milliseconds: Int64) { load(url: url) }
   func addSubtitleSlave(url: URL) {}
@@ -251,18 +75,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
     "--no-play-and-pause",
   ]
 
-  /// Night mode compresses the soundtrack: peaks above -24 dB are reduced 4:1 and the result is
-  /// raised by 12 dB, so explosions stay calmer and quiet speech becomes easier to hear. The
-  /// compressor itself is switched on by `makePlayer(nightMode:output:)`.
-  static let nightModeOptions = [
-    "--compressor-rms-peak=0.2",
-    "--compressor-attack=15",
-    "--compressor-release=300",
-    "--compressor-threshold=-24",
-    "--compressor-ratio=4",
-    "--compressor-knee=6",
-    "--compressor-makeup-gain=12",
-  ]
+  static let nightModeOptions = VolumeLeveling.standard.options
 
   static func playerOptions(nightMode: Bool) -> [String] {
     defaultPlayerOptions + (nightMode ? nightModeOptions : [])
@@ -275,11 +88,17 @@ final class VLCPlaybackEngine: PlaybackEngine {
   }
 
   /// A player for one title; `output` is the audio output module, Core Audio by default.
-  static func makePlayer(nightMode: Bool, output: String = "auhal", extraOptions: [String] = [])
-    -> VLCMediaPlayer
-  {
-    let player = VLCMediaPlayer(options: playerOptions(nightMode: nightMode) + extraOptions)
-    if nightMode { VLCAudioFilter.enable("compressor", on: player, output: output) }
+  static func makePlayer(
+    nightMode: Bool = false, output: String = "auhal", extraOptions: [String] = [],
+    dialogueBoost: DialogueBoost = .off, volumeLeveling: VolumeLeveling? = nil
+  ) -> VLCMediaPlayer {
+    let processing = AudioProcessing(
+      dialogue: dialogueBoost, leveling: volumeLeveling ?? (nightMode ? .standard : .off))
+    let player = VLCMediaPlayer(
+      options: defaultPlayerOptions + processing.leveling.options + extraOptions)
+    if !processing.filters.isEmpty {
+      _ = VLCAudioFilter.apply(processing, on: player, output: output)
+    }
     return player
   }
 
@@ -312,11 +131,17 @@ final class VLCPlaybackEngine: PlaybackEngine {
     playerFactory: @escaping @MainActor () -> VLCMediaPlayer = {
       // A player is created for every title, so a changed night mode applies to the next load.
       VLCPlaybackEngine.makePlayer(
-        nightMode: PlaybackPreferencesStore.shared.preferences.nightMode)
+        dialogueBoost: PlaybackPreferencesStore.shared.preferences.dialogueBoost,
+        volumeLeveling: PlaybackPreferencesStore.shared.preferences.volumeLeveling)
     }
   ) {
     self.playerFactory = playerFactory
     player = playerFactory()
+  }
+
+  func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult {
+    VLCAudioFilter.applyDialogue(
+      mode, leveling: PlaybackPreferencesStore.shared.preferences.volumeLeveling, on: player)
   }
 
   private func observeCurrentPlayer() {
@@ -460,6 +285,17 @@ final class VLCPlaybackEngine: PlaybackEngine {
     // A separate player prevents delayed terminal events from a previous input
     // from being interpreted as the end of a retry or the next episode.
     player = playerFactory()
+    let preferences = PlaybackPreferencesStore.shared.preferences
+    let processing = AudioProcessing(
+      dialogue: preferences.dialogueBoost, leveling: preferences.volumeLeveling)
+    guard
+      processing.filters.isEmpty || VLCAudioFilter.apply(processing, on: player, output: "auhal")
+    else {
+      onError?(
+        "Dialogue Boost or Volume Leveling is unavailable in this VLC installation. Turn it off in Playback settings."
+      )
+      return
+    }
     player.drawable = attachedVideoView
     appliedTrackPreferences = false
     deliveredTerminalEvent = false

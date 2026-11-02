@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Aurelia.Linux.Core.Settings;
 
 namespace Aurelia.Linux.Core.Playback;
@@ -16,8 +17,15 @@ public sealed record PlaybackPreferences(
     int ControlsHideDelaySeconds = 2,
     int SeekIntervalSeconds = 10,
     string DefaultAudioLanguage = "original",
-    string DefaultSubtitleLanguage = "off")
+    string DefaultSubtitleLanguage = "off",
+    DialogueBoost DialogueBoost = DialogueBoost.Off,
+    VolumeLeveling? VolumeLeveling = null)
 {
+    [JsonIgnore]
+    public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);
+    [JsonIgnore]
+    public AudioProcessing AudioProcessing => new(DialogueBoost, EffectiveLeveling);
+
     public const string Key = "playback.preferences.v1";
     public static readonly int[] Countdowns = [5, 10, 15, 20, 30];
     public static readonly int[] ResumeThresholds = [0, 30, 60, 120];
@@ -30,6 +38,9 @@ public sealed record PlaybackPreferences(
         var defaults = new PlaybackPreferences();
         return this with
         {
+            DialogueBoost = Enum.IsDefined(DialogueBoost) ? DialogueBoost : Playback.DialogueBoost.Off,
+            VolumeLeveling = Enum.IsDefined(EffectiveLeveling) ? EffectiveLeveling : Playback.VolumeLeveling.Off,
+            NightMode = Enum.IsDefined(EffectiveLeveling) && EffectiveLeveling != Playback.VolumeLeveling.Off,
             UpNextCountdownSeconds = Countdowns.Contains(UpNextCountdownSeconds) ? UpNextCountdownSeconds : defaults.UpNextCountdownSeconds,
             ResumeThresholdSeconds = ResumeThresholds.Contains(ResumeThresholdSeconds) ? ResumeThresholdSeconds : 0,
             DefaultRate = PlayerPolicy.Rates.Contains(DefaultRate) ? DefaultRate : 1,

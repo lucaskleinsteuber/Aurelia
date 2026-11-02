@@ -637,11 +637,16 @@ struct AppSettingsView: View {
         .accessibilityIdentifier("playback-prevent-sleep")
 
         VStack(alignment: .leading, spacing: 2) {
-          Toggle("Night Mode", isOn: $playbackPreferences.preferences.nightMode)
-            .accessibilityIdentifier("playback-night-mode")
-          Text("Softens loud scenes and makes quiet dialogue easier to hear.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+          Picker("Dialogue Boost", selection: $playbackPreferences.preferences.dialogueBoost) {
+            ForEach(DialogueBoost.allCases, id: \.self) { Text($0.title).tag($0) }
+          }.accessibilityIdentifier("playback-dialogue-boost")
+          Picker("Volume Leveling", selection: $playbackPreferences.preferences.volumeLeveling) {
+            ForEach(VolumeLeveling.allCases, id: \.self) { Text($0.title).tag($0) }
+          }.accessibilityIdentifier("playback-volume-leveling")
+          Text(
+            "Emphasize speech and reduce differences between quiet and loud passages. Sleep applies stronger volume leveling."
+          )
+          .font(.caption).foregroundStyle(.secondary)
         }
       }
       .toggleStyle(.switch)

@@ -243,6 +243,55 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AudioChangesPreservePositionPauseRateAndTracks()
+    {
+        var player = Controller();
+        await player.StartAsync(Item(Movie), resume: false);
+        engines.Last.Advance(90_000);
+        player.SelectAudio(engines.Last.AudioTracks[1]);
+        player.SelectSubtitle(engines.Last.SubtitleTracks[1]);
+        player.Rate = 1.25;
+        player.PlayPause();
+        var original = engines.Last;
+        player.SetDialogueBoost(DialogueBoost.Strong);
+        Assert.Same(original, engines.Last);
+        Assert.Equal(DialogueBoost.Strong, original.DialogueBoost);
+        await player.SetVolumeLevelingAsync(VolumeLeveling.Sleep);
+        Assert.NotSame(original, engines.Last);
+        Assert.Equal(90_000, engines.Last.OpenedAt);
+        Assert.Equal(PlayerState.Paused, player.State);
+        Assert.False(engines.Last.IsPlaying);
+        Assert.Equal(1.25, engines.Last.Rate);
+        Assert.Equal(2, engines.Last.AudioTrack);
+        Assert.Equal(4, engines.Last.SubtitleTrack);
+        var saved = PlaybackPreferences.Load(settings);
+        Assert.Equal(VolumeLeveling.Sleep, saved.EffectiveLeveling);
+        Assert.Equal(DialogueBoost.Strong, saved.DialogueBoost);
+        Assert.Equal(DialogueBoost.Strong, engines.Last.DialogueBoost);
+        var compressed = engines.Last;
+        player.SetDialogueBoost(DialogueBoost.Standard);
+        await Settle();
+        Assert.NotSame(compressed, engines.Last);
+        Assert.Equal(DialogueBoost.Standard, engines.Last.DialogueBoost);
+        Assert.Equal(90_000, engines.Last.OpenedAt);
+        Assert.Equal(PlayerState.Paused, player.State);
+        Assert.Equal(1.25, engines.Last.Rate);
+        Assert.Equal(2, engines.Last.AudioTrack);
+        Assert.Equal(4, engines.Last.SubtitleTrack);
+    }
+
+    [Fact]
+    public async Task MissingDialogueSupportIsVisibleAndDoesNotSaveAnActivePreset()
+    {
+        var player = Controller();
+        await player.StartAsync(Item(Movie), resume: false);
+        engines.Last.SupportsDialogue = false;
+        player.SetDialogueBoost(DialogueBoost.Standard);
+        Assert.Contains("unavailable", player.Error, StringComparison.Ordinal);
+        Assert.Equal(DialogueBoost.Off, PlaybackPreferences.Load(settings).DialogueBoost);
+    }
+
+    [Fact]
     public async Task NightModeReopensTheTitleAtTheSamePosition()
     {
         var player = Controller();

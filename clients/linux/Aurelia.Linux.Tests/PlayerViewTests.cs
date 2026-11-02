@@ -98,7 +98,10 @@ public sealed class PlayerViewTests
         Dispatcher.UIThread.RunJobs();
         var headers = flyout.Items.OfType<MenuItem>().Select(m => m.Header as string).ToList();
         Assert.Contains("Track 1 - [English]", headers);
-        Assert.Contains("Night Mode", headers);
+        Assert.Contains("Dialogue Boost", headers);
+        Assert.Contains("Volume Leveling", headers);
+        Assert.Contains("Strong", headers);
+        Assert.Contains("Sleep", headers);
         flyout.Hide();
         var speed = view.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Playback Rate");
         var rates = Assert.IsType<MenuFlyout>(speed.Flyout);

@@ -102,7 +102,7 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.26.5 (122); the independent tvOS
+  one per build. The current Mac release is 1.26.6 (123); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.3.2 (25).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
@@ -253,6 +253,8 @@ These rules apply to every task in this repository.
   verification restore the normal source and make the test repository private.
   See `docs/UPDATE_TEST.md`. Audio acceptance uses logic/configuration/migration
   tests and the owner's listening check; no automatic signal or hearing tests.
+  Keep the four clients’ independent speech EQ/compressor presets aligned with
+  `docs/AUDIO_PROCESSING.md`, preserving legacy Night Mode settings and full filter chains.
 - Keep the README concise and user-facing. Put build/test/API details in linked
   documentation, not the README. Do not add personal names or machine paths.
 - Preserve bundle IDs, App Groups, Keychain identifiers, and signing identity

@@ -31,7 +31,7 @@ your home network unless you want it to.
 <!-- release-versions:start -->
 | Product | Version | Build | Download / availability |
 | --- | --- | --- | --- |
-| **Mac & Server** | 1.26.5 | 122 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.26.5-122) |
+| **Mac & Server** | 1.26.6 | 123 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.26.6-123) |
 | **Linux Desktop** | 1.0.1 | 7 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.0.1-7) |
 | **Apple TV** | 1.3.2 | 25 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/clients/tvos/README.md) |
 | **iPhone & iPad** | 1.0.3 | 4 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md) |
@@ -81,7 +81,7 @@ survive later scans. Details and artwork from TMDB are optional and use your own
 
 **Made for watching.** Fullscreen playback of the original files with remembered audio and
 subtitle choices per profile and series, subtitle files next to the video, timeline previews,
-a sleep timer, Night Mode for clear dialogue and Up Next for series. *Play On* sends a title to
+a sleep timer, Dialogue Boost, Volume Leveling and Up Next for series. *Play On* sends a title to
 another screen at home.
 
 **Everyone has their own profile.** Progress, favorites, Watchlist, collections, scene notes and
@@ -170,6 +170,7 @@ is ever stored. More in [Aurelia in a web browser](docs/WEB_APP.md).
 | [Aurelia in a web browser](docs/WEB_APP.md) | Signing in, what plays in a browser, and its limits |
 | [Security model](docs/SECURITY_MODEL.md) | Profiles, roles, pairing and what administrators can do |
 | [Backups and recovery](docs/DATABASE_RECOVERY.md) | Keeping the library database safe |
+| [Audio processing](docs/AUDIO_PROCESSING.md) | Dialogue Boost, Volume Leveling and their limits |
 | [Distribution and updates](docs/FREE_DISTRIBUTION.md) | Signing, Gatekeeper and keeping local builds running |
 | [Client protocol](docs/CLIENT_PROTOCOL.md) and [compatibility](docs/CLIENT_COMPATIBILITY.md) | How the apps talk to the server |
 | [Build and verification](docs/TRANSPORT_TESTING.md) | Building from source and running the checks |

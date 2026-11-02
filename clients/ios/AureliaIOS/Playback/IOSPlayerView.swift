@@ -452,12 +452,26 @@ struct IOSPlayerView: View {
             }))
       result.append(
         MenuSection(
-          title: "Sound",
-          rows: [
-            MenuRow(id: "night-mode", title: "Night Mode", selected: controller.nightMode) {
-              controller.setNightMode(!controller.nightMode)
+          title: "Dialogue Boost",
+          rows: DialogueBoost.allCases.map { mode in
+            MenuRow(
+              id: "dialogue-\(mode.rawValue)", title: mode.title,
+              selected: controller.dialogueBoost == mode
+            ) {
+              controller.setDialogueBoost(mode)
             }
-          ]))
+          }))
+      result.append(
+        MenuSection(
+          title: "Volume Leveling",
+          rows: VolumeLeveling.allCases.map { mode in
+            MenuRow(
+              id: "leveling-\(mode.rawValue)", title: mode.title,
+              selected: controller.volumeLeveling == mode
+            ) {
+              controller.setVolumeLeveling(mode)
+            }
+          }))
       return result
     case .rate:
       return [

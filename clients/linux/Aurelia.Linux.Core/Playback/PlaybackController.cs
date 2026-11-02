@@ -90,6 +90,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private IReadOnlyList<PlaybackChapter> chapters = [];
     private int chapter = -1;
     private bool tracksApplied;
+    private bool pauseAfterReopen;
     private SleepTimer sleepTimer = SleepTimer.Off;
     private DateTimeOffset? sleepAt;
     private bool upNextDismissed;
@@ -370,14 +371,46 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         memory.RememberSubtitle(track, seriesId);
     }
 
-    /// <summary>Night Mode compresses loud and quiet sounds; it reopens the title at the same position.</summary>
-    public async Task SetNightModeAsync(bool on)
+    public Task SetNightModeAsync(bool on) => SetVolumeLevelingAsync(on ? VolumeLeveling.Standard : VolumeLeveling.Off);
+
+    public void SetDialogueBoost(DialogueBoost mode)
     {
-        if (Preferences.NightMode == on) return;
-        Preferences = Preferences with { NightMode = on };
+        if (Preferences.DialogueBoost == mode) return;
+        var result = engine?.TrySetDialogueBoost(mode) ?? AudioChangeResult.Applied;
+        if (result == AudioChangeResult.Unavailable)
+        {
+            Error = "Dialogue Boost is unavailable in this VLC installation.";
+            return;
+        }
+        Preferences = Preferences with { DialogueBoost = mode };
         Preferences.Save(settings);
         OnPropertyChanged(nameof(Preferences));
-        if (Item is { } current) await LoadAsync(current, Position, keepTicket: true);
+        if (result == AudioChangeResult.ReloadRequired) _ = ReopenAudioAsync();
+    }
+
+    /// <summary>Reopen with the other compressor, preserving pause, speed and remembered tracks.</summary>
+    public async Task SetVolumeLevelingAsync(VolumeLeveling mode)
+    {
+        if (Preferences.EffectiveLeveling == mode) return;
+        Preferences = Preferences with { VolumeLeveling = mode, NightMode = mode != VolumeLeveling.Off };
+        Preferences.Save(settings);
+        OnPropertyChanged(nameof(Preferences));
+        await ReopenAudioAsync();
+    }
+
+    private async Task ReopenAudioAsync()
+    {
+        var paused = State == PlayerState.Paused;
+        var selectedAudio = AudioTracks.FirstOrDefault(track => track.Id == AudioTrack);
+        var selectedSubtitle = SubtitleTracks.FirstOrDefault(track => track.Id == SubtitleTrack);
+        if (selectedAudio is not null) memory.RememberAudio(selectedAudio, seriesId);
+        memory.RememberSubtitle(selectedSubtitle, seriesId);
+        if (Item is { } current)
+        {
+            pauseAfterReopen = paused;
+            await LoadAsync(current, Position, keepTicket: true);
+            if (paused && engine is not null) { engine.Pause(); State = PlayerState.Paused; }
+        }
     }
 
     public void SetSleepTimer(SleepTimer timer)
@@ -477,7 +510,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             relay = new LoopbackStreamRelay(client.StreamConnection, client.StreamToken, client.StreamUri(ticket));
             relay.Failed += status => post(() => _ = RecoverAsync($"The stream stopped ({status})."));
             var url = relay.Start();
-            engine = engines.Create(Preferences.NightMode);
+            engine = engines.Create(Preferences.AudioProcessing);
             OnPropertyChanged(nameof(Engine));
             engine.Changed += OnEngineChanged;
             engine.Finished += OnEngineFinished;
@@ -494,6 +527,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             _ = AddSidecarSubtitlesAsync(ticket, relay);
             StartClock();
         }
+        catch (InvalidOperationException failure) { Fail(failure.Message); }
         catch (AureliaApiException failure)
         {
             Record(PlaybackDiagnosticKind.Failed, failure: failure);
@@ -538,7 +572,13 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             Position = clockTime;
         }
         if (engine.Length > 0) Duration = engine.Length;
-        if (engine.IsPlaying && State is PlayerState.Loading or PlayerState.Recovering)
+        if (pauseAfterReopen && engine.IsPlaying)
+        {
+            pauseAfterReopen = false;
+            engine.Pause();
+            State = PlayerState.Paused;
+        }
+        else if (engine.IsPlaying && State is PlayerState.Loading or PlayerState.Recovering)
         {
             State = PlayerState.Playing;
             stableSince = now;

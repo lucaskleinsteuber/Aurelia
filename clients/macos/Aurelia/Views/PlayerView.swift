@@ -220,6 +220,7 @@ struct PlayerView: View {
       notification in
       if notification.object as? NSWindow === windowPresentation.window { cursor.retire() }
     }
+    .modifier(PlayerAudioPreferencesModifier(preferences: preferencesStore, controller: controller))
     .onChange(of: preferencesStore.preferences.controlsAutoHideDelay) {
       revealControls()
     }
@@ -394,16 +395,24 @@ struct PlayerView: View {
               revealControls()
             }
           })
-          + [
-            .divider,
+          + [.divider, PlayerMenuOption(title: "Dialogue Boost", enabled: false)]
+          + DialogueBoost.allCases.map { mode in
             PlayerMenuOption(
-              title: "Night Mode", selected: preferencesStore.preferences.nightMode
+              title: mode.title, selected: preferencesStore.preferences.dialogueBoost == mode
             ) {
-              preferencesStore.preferences.nightMode.toggle()
-              controller.reopenForAudioChange()
+              preferencesStore.preferences.dialogueBoost = mode
               revealControls()
-            },
-          ]
+            }
+          }
+          + [.divider, PlayerMenuOption(title: "Volume Leveling", enabled: false)]
+          + VolumeLeveling.allCases.map { mode in
+            PlayerMenuOption(
+              title: mode.title, selected: preferencesStore.preferences.volumeLeveling == mode
+            ) {
+              preferencesStore.preferences.volumeLeveling = mode
+              revealControls()
+            }
+          }
       ) {
         PlayerControlLabel { Image(systemName: "waveform") }
       }
@@ -1425,4 +1434,18 @@ struct AirPlayRoutePickerButton: NSViewRepresentable {
   }
 
   func updateNSView(_ nsView: AVRoutePickerView, context: Context) {}
+}
+
+@MainActor
+private struct PlayerAudioPreferencesModifier: ViewModifier {
+  @ObservedObject var preferences: PlaybackPreferencesStore
+  let controller: PlaybackController
+
+  func body(content: Content) -> some View {
+    content
+      .onChange(of: preferences.preferences.dialogueBoost) { old, new in
+        if !controller.setDialogueBoost(new) { preferences.preferences.dialogueBoost = old }
+      }
+      .onChange(of: preferences.preferences.volumeLeveling) { controller.reopenForAudioChange() }
+  }
 }

@@ -453,7 +453,13 @@ public sealed class PlayerView : UserControl, IDisposable
         if (controller.AudioTracks.Count == 0) items.Add(new MenuItem { Header = "No audio tracks available", IsEnabled = false });
         foreach (var track in controller.AudioTracks) items.Add(Choice(track.Name, controller.AudioTrack == track.Id, () => controller.SelectAudio(track)));
         items.Add(new Separator());
-        items.Add(Choice("Night Mode", controller.Preferences.NightMode, () => _ = controller.SetNightModeAsync(!controller.Preferences.NightMode)));
+        items.Add(new MenuItem { Header = "Dialogue Boost", IsEnabled = false });
+        foreach (var mode in Enum.GetValues<DialogueBoost>())
+            items.Add(Choice(mode.ToString(), controller.Preferences.DialogueBoost == mode, () => controller.SetDialogueBoost(mode)));
+        items.Add(new Separator());
+        items.Add(new MenuItem { Header = "Volume Leveling", IsEnabled = false });
+        foreach (var mode in Enum.GetValues<VolumeLeveling>())
+            items.Add(Choice(mode.ToString(), controller.Preferences.EffectiveLeveling == mode, () => _ = controller.SetVolumeLevelingAsync(mode)));
         return items;
     }
 

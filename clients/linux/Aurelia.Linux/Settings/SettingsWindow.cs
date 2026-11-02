@@ -426,7 +426,10 @@ public sealed class SettingsWindow : Window
         var seek = new NumericUpDown { Minimum = 5, Maximum = 60, Increment = 5, Value = current.SeekIntervalSeconds, Width = 140, FormatString = "0 s" };
         seek.ValueChanged += (_, _) => Save(PlaybackPreferences.Load(Prefs.Store) with { SeekIntervalSeconds = (int)(seek.Value ?? 10) });
         page.Children.Add(Section("Sound and Controls",
-            Toggle("Night Mode", "Evens out loud and quiet sounds.", current.NightMode, value => Save(PlaybackPreferences.Load(Prefs.Store) with { NightMode = value })),
+            Choice("Dialogue Boost", "Emphasize speech locally.", [.. Enum.GetValues<DialogueBoost>().Select(value => (value, value.ToString()))],
+                current.DialogueBoost, value => Save(PlaybackPreferences.Load(Prefs.Store) with { DialogueBoost = value })),
+            Choice("Volume Leveling", "Reduce loud/quiet differences; Sleep applies stronger leveling.", [.. Enum.GetValues<VolumeLeveling>().Select(value => (value, value.ToString()))],
+                current.EffectiveLeveling, value => Save(PlaybackPreferences.Load(Prefs.Store) with { VolumeLeveling = value, NightMode = value != VolumeLeveling.Off })),
             Choice("Default Playback Rate", null, [.. PlayerPolicy.Rates.Select(r => (r, r == 1 ? "Standard" : r.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "×"))],
                 current.DefaultRate, value => Save(PlaybackPreferences.Load(Prefs.Store) with { DefaultRate = value })),
             Row("Default Volume", null, volume),

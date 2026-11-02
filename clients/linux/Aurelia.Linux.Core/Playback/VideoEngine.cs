@@ -25,6 +25,8 @@ public interface IVideoEngine : IDisposable
     /// <summary>Opens <paramref name="url"/> directly at <paramref name="startMilliseconds"/> and starts playing.</summary>
     void Open(Uri url, long startMilliseconds);
 
+    AudioChangeResult TrySetDialogueBoost(DialogueBoost mode) => AudioChangeResult.Unavailable;
+
     void Play();
 
     void Pause();
@@ -68,4 +70,6 @@ public interface IVideoEngineFactory
 {
     /// <summary>Night mode is part of a player's audio chain, so it is chosen when the player is made.</summary>
     IVideoEngine Create(bool nightMode);
+
+    IVideoEngine Create(AudioProcessing processing) => Create(processing.Leveling != VolumeLeveling.Off);
 }

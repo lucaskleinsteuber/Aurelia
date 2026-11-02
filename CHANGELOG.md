@@ -12,6 +12,58 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac/server 1.27.0 (124) - 02.11.2026
+
+### Added
+
+- Independent Dialogue Boost choices (Off, Standard, Strong) and Volume Leveling choices (Off, Standard, Sleep) in Playback settings and the player’s Audio menu.
+- Speech equalizer curves with headroom, mapped to VLC’s actual frequency bands; stronger Sleep compression for quiet/loud transitions.
+- Visible errors when the installed VLC lacks the required audio filters; processing stays local and leaves media files unchanged.
+
+### Changed
+
+- Migrate saved Night Mode to Volume Leveling Standard while retaining other settings and track preferences.
+- Preserve the complete compressor/equalizer chain and reopen at the same position with pause, speed and track choices when a combined-filter change requires it.
+
+## Linux app 1.1.0 (9) - 02.11.2026
+
+### Added
+
+- Independent Dialogue Boost choices (Off, Standard, Strong) and Volume Leveling choices (Off, Standard, Sleep) in Playback settings and the player’s Audio menu.
+- Speech equalizer curves with headroom, mapped to VLC’s actual frequency bands; stronger Sleep compression for quiet/loud transitions.
+- Visible errors when the installed VLC lacks the required audio filters; processing stays local and leaves media files unchanged.
+
+### Changed
+
+- Migrate saved Night Mode to Volume Leveling Standard while retaining other settings and track preferences.
+- Preserve the complete compressor/equalizer chain and reopen at the same position with pause, speed and track choices when a combined-filter change requires it.
+
+## Apple TV 1.4.0 (26) - 02.11.2026
+
+### Added
+
+- Independent Dialogue Boost choices (Off, Standard, Strong) and Volume Leveling choices (Off, Standard, Sleep) in Playback settings and the player’s Audio menu.
+- Speech equalizer curves with headroom, mapped to VLC’s actual frequency bands; stronger Sleep compression for quiet/loud transitions.
+- Visible errors when the installed VLC lacks the required audio filters; processing stays local and leaves media files unchanged.
+
+### Changed
+
+- Migrate saved Night Mode to Volume Leveling Standard while retaining other settings and track preferences.
+- Preserve the complete compressor/equalizer chain and reopen at the same position with pause, speed and track choices when a combined-filter change requires it.
+
+## iOS 1.1.0 (5) - 02.11.2026
+
+### Added
+
+- Independent Dialogue Boost choices (Off, Standard, Strong) and Volume Leveling choices (Off, Standard, Sleep) in Playback settings and the player’s Audio menu.
+- Speech equalizer curves with headroom, mapped to VLC’s actual frequency bands; stronger Sleep compression for quiet/loud transitions.
+- Visible errors when the installed VLC lacks the required audio filters; processing stays local and leaves media files unchanged.
+
+### Changed
+
+- Migrate saved Night Mode to Volume Leveling Standard while retaining other settings and track preferences.
+- Preserve the complete compressor/equalizer chain and reopen at the same position with pause, speed and track choices when a combined-filter change requires it.
+
 ## Mac/server 1.26.6 (123) - 02.11.2026
 
 ### Fixed

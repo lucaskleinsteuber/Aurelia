@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Aurelia.Linux.Core.Playback;
 using LibVLCSharp.Shared;
@@ -8,22 +9,15 @@ namespace Aurelia.Linux.Playback;
 
 /// <summary>
 /// Creates VLC players with the Mac app's options. Linux uses the distribution's libVLC 3 (found
-/// by LibVLCSharp); Night Mode adds VLC's compressor with the Mac app's settings.
+/// by LibVLCSharp); audio processing uses the same profiles as the Apple clients.
 /// </summary>
 public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPreviewDecoderFactory
 {
     private static readonly string[] BaseOptions = ["--no-video-title-show", "--network-caching=500", "--no-metadata-network-access", "--no-play-and-pause"];
 
-    private static readonly string[] NightOptions =
-    [
-        "--audio-filter=compressor", "--compressor-rms-peak=0.2", "--compressor-attack=15", "--compressor-release=300",
-        "--compressor-threshold=-24", "--compressor-ratio=4", "--compressor-knee=6", "--compressor-makeup-gain=12",
-    ];
-
     private static readonly Lock Gate = new();
     private static bool initialized;
-    private LibVLC? normal;
-    private LibVLC? night;
+    private readonly Dictionary<VolumeLeveling, LibVLC> audioLibraries = [];
     private LibVLC? previews;
 
     public IScrubPreviewDecoder CreatePreviewDecoder()
@@ -39,7 +33,9 @@ public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPrevie
         }
     }
 
-    public IVideoEngine Create(bool nightMode)
+    public IVideoEngine Create(bool nightMode) => Create(new AudioProcessing(Leveling: nightMode ? VolumeLeveling.Standard : VolumeLeveling.Off));
+
+    public IVideoEngine Create(AudioProcessing processing)
     {
         lock (Gate)
         {
@@ -48,10 +44,21 @@ public sealed partial class VlcEngineFactory : IVideoEngineFactory, IScrubPrevie
                 LibVLCSharp.Shared.Core.Initialize();
                 initialized = true;
             }
-            var library = nightMode
-                ? night ??= new LibVLC([.. BaseOptions, .. NightOptions])
-                : normal ??= new LibVLC(BaseOptions);
-            return new VlcVideoEngine(library);
+            if (!audioLibraries.TryGetValue(processing.Leveling, out var library))
+            {
+                library = new LibVLC([.. BaseOptions, .. processing.Options]);
+                audioLibraries.Add(processing.Leveling, library);
+            }
+            var available = library.AudioFilters.Select(filter => filter.Name).ToHashSet(StringComparer.Ordinal);
+            if (processing.Filters.Any(filter => !available.Contains(filter)))
+                throw new InvalidOperationException("Dialogue Boost or Volume Leveling is unavailable in this VLC installation. Install VLC’s equalizer and compressor filters, or turn these settings off.");
+            var engine = new VlcVideoEngine(library, processing);
+            if (!engine.ConfigureAudio(processing.Dialogue, recreateOutput: true))
+            {
+                engine.Dispose();
+                throw new InvalidOperationException("The VLC equalizer could not apply Dialogue Boost.");
+            }
+            return engine;
         }
     }
 }
@@ -65,12 +72,14 @@ public sealed partial class VlcVideoEngine : IVideoEngine
 {
     private readonly LibVLC library;
     private readonly MediaPlayer player;
+    private readonly VolumeLeveling leveling;
     private Media? media;
     private PlaybackChapter[] chapterDescriptions = [];
 
-    public VlcVideoEngine(LibVLC library)
+    public VlcVideoEngine(LibVLC library, AudioProcessing? processing = null)
     {
         this.library = library;
+        leveling = processing?.Leveling ?? VolumeLeveling.Off;
         player = new MediaPlayer(library);
         Frames.Attach(player);
         player.TimeChanged += (_, _) => Changed?.Invoke();
@@ -158,6 +167,52 @@ public sealed partial class VlcVideoEngine : IVideoEngine
         if (url.IsLoopback) media.AddOption(":network-caching=300");
         if (startMilliseconds > 0) media.AddOption(":start-time=" + (startMilliseconds / 1000.0).ToString("0.000", CultureInfo.InvariantCulture));
         player.Play(media);
+    }
+
+    [LibraryImport("libvlccore.so.9", EntryPoint = "var_SetChecked", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int SetPlayerString(nint player, string name, int type, nint value);
+
+    public AudioChangeResult TrySetDialogueBoost(DialogueBoost mode)
+    {
+        if (mode != DialogueBoost.Off && !library.AudioFilters.Any(filter => filter.Name == "equalizer")) return AudioChangeResult.Unavailable;
+        // The public EQ setter replaces the active output's whole filter list.
+        // Reopen with both filters rather than silently losing compression.
+        if (leveling != VolumeLeveling.Off) return AudioChangeResult.ReloadRequired;
+        return ConfigureAudio(mode, recreateOutput: false) ? AudioChangeResult.Applied : AudioChangeResult.Unavailable;
+    }
+
+    internal bool ConfigureAudio(DialogueBoost mode, bool recreateOutput)
+    {
+        if (mode == DialogueBoost.Off)
+        {
+            if (!player.UnsetEqualizer()) return false;
+        }
+        else
+        {
+            if (!library.AudioFilters.Any(filter => filter.Name == "equalizer")) return false;
+            using var equalizer = new Equalizer();
+            if (equalizer.BandCount == 0) return false;
+            var processing = new AudioProcessing(mode);
+            if (!equalizer.SetPreamp(processing.Preamp)) return false;
+            for (uint index = 0; index < equalizer.BandCount; index++)
+            {
+                var frequency = equalizer.BandFrequency(index);
+                if (!float.IsFinite(frequency) || frequency <= 0 || !equalizer.SetAmp(processing.Gain(frequency), index)) return false;
+            }
+            if (!player.SetEqualizer(equalizer)) return false;
+        }
+        if (leveling == VolumeLeveling.Off) return true;
+        // libVLC's equalizer setter replaces the player's audio-filter variable.
+        // Restore the complete chain before opening a title. Live EQ is used only
+        // with compression off, so it cannot erase another active filter.
+        var chain = Marshal.StringToCoTaskMemUTF8(string.Join(':', new AudioProcessing(mode, leveling).Filters));
+        try
+        {
+            if (SetPlayerString(player.NativeReference, "audio-filter", 0x0040, chain) != 0) return false;
+        }
+        catch (Exception error) when (error is DllNotFoundException or EntryPointNotFoundException) { return false; }
+        finally { Marshal.FreeCoTaskMem(chain); }
+        return !recreateOutput || (mode == DialogueBoost.Off && leveling == VolumeLeveling.Off) || player.SetAudioOutput("pulse");
     }
 
     public void Play() => player.SetPause(false);

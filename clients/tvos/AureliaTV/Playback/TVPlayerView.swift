@@ -13,7 +13,9 @@ struct TVPlayerView: View {
 
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, retry,
-      closeMenu, nightMode, upNextPlay, upNextCancel
+      closeMenu, upNextPlay, upNextCancel
+    case dialogueBoost(DialogueBoost)
+    case volumeLeveling(VolumeLeveling)
     case audioTrack(Int32)
     case subtitleTrack(Int32)
     case rateOption(Double)
@@ -466,8 +468,22 @@ struct TVPlayerView: View {
                     id: .audioTrack(track.id)
                   ) { controller.selectAudio(track.id) }.id(track.id)
                 }
-                option("Night Mode", selected: controller.nightMode, id: .nightMode) {
-                  controller.setNightMode(!controller.nightMode)
+                Text("Dialogue Boost").font(.headline).foregroundStyle(.secondary)
+                ForEach(DialogueBoost.allCases, id: \.self) { mode in
+                  option(
+                    mode.title, selected: controller.dialogueBoost == mode, id: .dialogueBoost(mode)
+                  ) {
+                    controller.setDialogueBoost(mode)
+                  }
+                }
+                Text("Volume Leveling").font(.headline).foregroundStyle(.secondary)
+                ForEach(VolumeLeveling.allCases, id: \.self) { mode in
+                  option(
+                    mode.title, selected: controller.volumeLeveling == mode,
+                    id: .volumeLeveling(mode)
+                  ) {
+                    controller.setVolumeLeveling(mode)
+                  }
                 }
               case .subtitles:
                 option("Off", selected: controller.selectedSubtitle < 0, id: .subtitleTrack(-1)) {

@@ -48,7 +48,13 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
   // nil explicitly means Off, matching the default on the Mac.
   var preferredSubtitleTrack: TVPlaybackTrackPreference?
   /// Softens loud scenes and lifts quiet dialogue.
-  var nightMode = false
+  var dialogueBoost: DialogueBoost = .off
+  var volumeLeveling: VolumeLeveling = .off
+  /// Compatibility accessor for older code and the persisted Night Mode key.
+  var nightMode: Bool {
+    get { volumeLeveling != .off }
+    set { volumeLeveling = newValue ? .standard : .off }
+  }
 
   var normalized: Self {
     var value = self
@@ -68,7 +74,8 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
 
   private enum CodingKeys: String, CodingKey {
     case automaticResume, automaticallyPlayNextEpisode, defaultPlaybackRate, controlsDelay
-    case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode
+    case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode, dialogueBoost,
+      volumeLeveling
   }
 
   init(from decoder: Decoder) throws {
@@ -83,7 +90,25 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
       TVPlaybackTrackPreference.self, forKey: .preferredAudioTrack)
     preferredSubtitleTrack = try values.decodeIfPresent(
       TVPlaybackTrackPreference.self, forKey: .preferredSubtitleTrack)
-    nightMode = try values.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false
+    let legacy = try values.decodeIfPresent(Bool.self, forKey: .nightMode) ?? false
+    volumeLeveling =
+      try values.decodeIfPresent(VolumeLeveling.self, forKey: .volumeLeveling)
+      ?? (legacy ? .standard : .off)
+    dialogueBoost = try values.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost) ?? .off
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encode(automaticResume, forKey: .automaticResume)
+    try values.encode(automaticallyPlayNextEpisode, forKey: .automaticallyPlayNextEpisode)
+    try values.encode(defaultPlaybackRate, forKey: .defaultPlaybackRate)
+    try values.encode(controlsDelay, forKey: .controlsDelay)
+    try values.encode(seekInterval, forKey: .seekInterval)
+    try values.encode(preferredAudioTrack, forKey: .preferredAudioTrack)
+    try values.encode(preferredSubtitleTrack, forKey: .preferredSubtitleTrack)
+    try values.encode(nightMode, forKey: .nightMode)
+    try values.encode(dialogueBoost, forKey: .dialogueBoost)
+    try values.encode(volumeLeveling, forKey: .volumeLeveling)
   }
 
   /// These preferences with a series' own track choices, where it has them.

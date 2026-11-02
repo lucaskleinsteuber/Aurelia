@@ -302,17 +302,35 @@ final class IOSPlaybackController: ObservableObject {
   }
 
   var nightMode: Bool { preferences.nightMode }
+  var dialogueBoost: DialogueBoost { preferences.dialogueBoost }
+  var volumeLeveling: VolumeLeveling { preferences.volumeLeveling }
 
-  /// The player's audio processing is fixed when a title opens, so night mode reconnects and
-  /// continues at the current position.
-  func setNightMode(_ enabled: Bool) {
-    guard !closed, preferences.nightMode != enabled else { return }
-    preferences.nightMode = enabled
+  func setNightMode(_ enabled: Bool) { setVolumeLeveling(enabled ? .standard : .off) }
+
+  func setDialogueBoost(_ mode: DialogueBoost) {
+    guard !closed, preferences.dialogueBoost != mode else { return }
+    let result = engine.applyDialogueBoost(mode)
+    guard result != .unavailable else {
+      progressMessage = "Dialogue Boost is unavailable in this VLC installation."
+      return
+    }
+    preferences.dialogueBoost = mode
+    persistPreferences()
+    trackMenu = nil
+    if result == .reloadRequired, started, errorMessage == nil {
+      recoveryBudget = IOSPlaybackRecoveryBudget()
+      recover(message: "Applying Dialogue Boost…")
+    }
+  }
+
+  func setVolumeLeveling(_ mode: VolumeLeveling) {
+    guard !closed, preferences.volumeLeveling != mode else { return }
+    preferences.volumeLeveling = mode
     persistPreferences()
     trackMenu = nil
     guard started, errorMessage == nil else { return }
     recoveryBudget = IOSPlaybackRecoveryBudget()
-    recover(message: enabled ? "Turning on Night Mode…" : "Turning off Night Mode…")
+    recover(message: "Applying Volume Leveling…")
   }
 
   /// The profile's preferences with this series' own track choices.
@@ -534,6 +552,10 @@ final class IOSPlaybackController: ObservableObject {
       engine.applyPreferences(effectivePreferences)
       engine.playbackRate = desiredRate
       engine.load(url: localURL, resumeAt: resumeAt ?? resumePosition)
+      if let error = engine.audioProcessingError {
+        fail(error)
+        return
+      }
       Task { [weak self, api] in
         guard let tracks = try? await api.streamSubtitles(ticketID: created.id) else { return }
         await MainActor.run {

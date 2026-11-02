@@ -26,8 +26,13 @@ struct TVPlaybackSettingsView: View {
             value: value.automaticallyPlayNextEpisode ? "On" : "Off",
             id: "settings-next"
           ) { value.automaticallyPlayNextEpisode.toggle() }
-          row("Night Mode", value: value.nightMode ? "On" : "Off", id: "settings-night-mode") {
-            value.nightMode.toggle()
+          row("Dialogue Boost", value: value.dialogueBoost.title, id: "settings-dialogue-boost") {
+            value.dialogueBoost = Self.next(after: value.dialogueBoost, in: DialogueBoost.allCases)
+          }
+          row("Volume Leveling", value: value.volumeLeveling.title, id: "settings-volume-leveling")
+          {
+            value.volumeLeveling = Self.next(
+              after: value.volumeLeveling, in: VolumeLeveling.allCases)
           }
           Spacer().frame(height: 18)
           row(

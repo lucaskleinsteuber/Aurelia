@@ -21,6 +21,15 @@ internal sealed class SimulatedEngine : IVideoEngine
     public bool Unloaded { get; private set; }
 
     public bool NightMode { get; init; }
+    public DialogueBoost DialogueBoost { get; set; }
+    public bool SupportsDialogue { get; set; } = true;
+    public AudioChangeResult TrySetDialogueBoost(DialogueBoost mode)
+    {
+        if (!SupportsDialogue) return AudioChangeResult.Unavailable;
+        if (NightMode) return AudioChangeResult.ReloadRequired;
+        DialogueBoost = mode;
+        return AudioChangeResult.Applied;
+    }
 
     public long Time { get; private set; }
 
@@ -102,6 +111,13 @@ internal sealed class SimulatedEngines : IVideoEngineFactory
     public List<SimulatedEngine> Created { get; } = [];
 
     public SimulatedEngine Last => Created[^1];
+
+    public IVideoEngine Create(AudioProcessing processing)
+    {
+        var engine = new SimulatedEngine { NightMode = processing.Leveling != VolumeLeveling.Off, DialogueBoost = processing.Dialogue };
+        Created.Add(engine);
+        return engine;
+    }
 
     public IVideoEngine Create(bool nightMode)
     {

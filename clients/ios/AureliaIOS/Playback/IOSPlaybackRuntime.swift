@@ -22,6 +22,8 @@ protocol IOSPlaybackEngine: AnyObject {
   var subtitleTracks: [IOSPlaybackTrack] { get }
   var audioTrackID: Int32 { get }
   var subtitleTrackID: Int32 { get }
+  var audioProcessingError: String? { get }
+  func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult
   func applyPreferences(_ preferences: IOSPlaybackPreferences)
   func sample()
   func attach(to view: UIView)
@@ -36,6 +38,8 @@ protocol IOSPlaybackEngine: AnyObject {
 }
 
 extension IOSPlaybackEngine {
+  var audioProcessingError: String? { nil }
+  func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult { .applied }
   func addSubtitleSlave(url: URL) {}
 }
 
