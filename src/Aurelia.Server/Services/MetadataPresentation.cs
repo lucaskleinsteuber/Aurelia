@@ -8,6 +8,11 @@ public static class MetadataPresentation
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>Portrait cards use the series poster when an episode has no poster of its own.</summary>
+    public static ArtworkSummary? CardPoster(MediaItem item, MediaMetadataSummary metadata) =>
+        metadata.Poster ?? (item.Kind == MediaKind.Episode && item.Parent is not null
+            ? ToSummary(item.Parent).Poster : null);
+
     public static HashSet<string> ManualFields(MediaMetadata? metadata)
     {
         var fields = ParseList(metadata?.ManualFieldsJson).ToHashSet(StringComparer.Ordinal);

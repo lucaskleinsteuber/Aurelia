@@ -626,6 +626,7 @@ public sealed class PresentationService(
         return database.MediaItems.AsNoTracking()
         .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
         .Include(item => item.Parent)!.ThenInclude(parent => parent!.Metadata)
+            .ThenInclude(metadata => metadata!.Artwork)
         .Include(item => item.Favorites.Where(value => value.UserId == userId))
         .Include(item => item.PlaybackProgress.Where(value => value.UserId == userId))
         .Include(item => item.LibraryRoot)
@@ -672,7 +673,14 @@ public sealed class PresentationService(
                 DetectedTitle = item.Parent.DetectedTitle,
                 OverrideTitle = item.Parent.OverrideTitle,
                 Metadata = item.Parent.Metadata == null ? null : new MediaMetadata
-                { ManualTitle = item.Parent.Metadata.ManualTitle, ProviderTitle = item.Parent.Metadata.ProviderTitle },
+                {
+                    ManualTitle = item.Parent.Metadata.ManualTitle,
+                    ProviderTitle = item.Parent.Metadata.ProviderTitle,
+                    ManualFieldsJson = item.Parent.Metadata.ManualFieldsJson,
+                    ManualPosterId = item.Parent.Metadata.ManualPosterId,
+                    Artwork = item.Parent.Metadata.Artwork.Where(art => art.Kind == ArtworkKind.Poster).Select(art => new ArtworkAsset
+                    { Id = art.Id, Kind = art.Kind, IsManual = art.IsManual, ContentType = art.ContentType, ContentLength = art.ContentLength, Revision = art.Revision }).ToList(),
+                },
             },
             Metadata = item.Metadata == null ? null : new MediaMetadata
             {
@@ -725,7 +733,7 @@ public sealed class PresentationService(
             ? LibraryReachabilityService.ProbeFile(item.SourcePath) : item.Availability;
         return new CatalogItemSummary(
             item.Id, item.Kind, metadata.Title, metadata.OriginalTitle, metadata.Year, metadata.Overview,
-            metadata.Genres, metadata.Poster, metadata.Backdrop ?? metadata.Still, availability,
+            metadata.Genres, MetadataPresentation.CardPoster(item, metadata), metadata.Backdrop ?? metadata.Still, availability,
             item.Favorites.Any(value => value.UserId == userId),
             progress is null ? null : new PlaybackProgressResponse(item.Id, progress.PositionMilliseconds, progress.DurationMilliseconds, progress.IsCompleted, progress.LastPlayedAt, progress.UpdatedAt, progress.Revision, progress.LastMutationId),
             item.CreatedAt,

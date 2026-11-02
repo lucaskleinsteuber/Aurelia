@@ -37,6 +37,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
             .Include(e => e.MediaItem)
                 .ThenInclude(item => item.Parent)
                     .ThenInclude(parent => parent!.Metadata)
+                        .ThenInclude(metadata => metadata!.Artwork)
             .ToListAsync(cancellationToken);
 
         var items = events.Select(e =>
@@ -63,7 +64,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
                 eyebrow,
                 metadata.Year,
                 item.Kind,
-                metadata.Poster,
+                MetadataPresentation.CardPoster(item, metadata),
                 e.Timestamp,
                 e.PositionMilliseconds,
                 e.DurationMilliseconds,
