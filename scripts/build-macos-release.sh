@@ -190,6 +190,8 @@ DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   build
 
 /usr/bin/ditto "$derived_data/Build/Products/Release/Aurelia.app" "$candidate"
+python3 "$repository_root/scripts/verify-vlc-audio-filters.py" \
+  "$candidate/Contents/Frameworks/VLCKit.framework/VLCKit"
 for agent in com.lucas.aurelia.media.host.background com.lucas.aurelia.media.host.login; do
   agent_plist="$candidate/Contents/Library/LaunchAgents/$agent.plist"
   /usr/bin/plutil -lint "$agent_plist"
