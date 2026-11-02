@@ -12,14 +12,14 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
-## Mac/server 1.27.2 (126) - 03.11.2026
+## [Mac/server 1.27.2 (126)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.2-126) - 03.11.2026
 
 ### Fixed
 
 - Package the sandbox-safe installer handoff and exact request acknowledgement for the normal update from the repaired 1.27.1 preparation build.
 - Retain Dialogue Boost, Volume Leveling and existing settings, with installation outcomes recorded separately from download success.
 
-## Mac/server 1.27.1 (125) - 03.11.2026
+## [Mac/server 1.27.1 (125)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.1-125) - 03.11.2026
 
 ### Fixed
 
@@ -28,7 +28,7 @@ versioned commit, so their skipped numbers are preserved.
 - Start installation after Launch Services completes helper launch, then record success or failure for the next app start.
 - Validate request age, filename, UUID directory, file type and size; reject symlinks and replayed requests.
 
-## Mac/server 1.27.0 (124) - 02.11.2026
+## [Mac/server 1.27.0 (124)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.0-124) - 02.11.2026
 
 ### Added
 
@@ -41,7 +41,7 @@ versioned commit, so their skipped numbers are preserved.
 - Migrate saved Night Mode to Volume Leveling Standard while retaining other settings and track preferences.
 - Preserve the complete compressor/equalizer chain and reopen at the same position with pause, speed and track choices when a combined-filter change requires it.
 
-## Linux app 1.1.0 (9) - 02.11.2026
+## [Linux app 1.1.0 (9)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.1.0-9) - 02.11.2026
 
 ### Added
 
@@ -80,7 +80,7 @@ versioned commit, so their skipped numbers are preserved.
 - Migrate saved Night Mode to Volume Leveling Standard while retaining other settings and track preferences.
 - Preserve the complete compressor/equalizer chain and reopen at the same position with pause, speed and track choices when a combined-filter change requires it.
 
-## Mac/server 1.26.6 (123) - 02.11.2026
+## [Mac/server 1.26.6 (123)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.26.6-123) - 02.11.2026
 
 ### Fixed
 
@@ -92,7 +92,7 @@ versioned commit, so their skipped numbers are preserved.
 - Explicit Public Update Test setting for anonymous downloads from the separate test repository, preserving saved tokens without reading them.
 - Shared product version table in the README and regular release descriptions.
 
-## Linux app 1.0.2 (8) - 02.11.2026
+## [Linux app 1.0.2 (8)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.0.2-8) - 02.11.2026
 
 ### Fixed
 
