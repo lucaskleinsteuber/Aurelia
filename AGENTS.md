@@ -102,7 +102,7 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.26.3 (120); the independent tvOS
+  one per build. The current Mac release is 1.26.4 (121); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.3.1 (24).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.

@@ -19,6 +19,8 @@ printf '%s\n' "$matches" | sed '/./s|^|./|' | awk -F: '
     allow["./clients/macos/Aurelia/Hosting/ServerDataMigrator.swift:Aurelia Home Server"] = 1
     allow["./clients/macos/Aurelia/Networking/BonjourBrowser.swift:aurelia-home"] = 1
     allow["./clients/macos/AureliaTests/ServerDiscoveryTests.swift:aurelia-home"] = 1
+    allow["./clients/linux/Aurelia.Linux.Core/Connection/ServerDiscovery.cs:aurelia-home"] = 1
+    allow["./docs/LINUX_APP.md:aurelia-home"] = 1
     allow["./clients/tvos/AureliaTV/Core/TVBonjourBrowser.swift:aurelia-home"] = 1
     allow["./clients/tvos/Configuration/AureliaTV-Info.plist:aurelia-home"] = 1
     allow["./clients/macos/AureliaTests/AureliaTests.swift:aurelia-home"] = 1
