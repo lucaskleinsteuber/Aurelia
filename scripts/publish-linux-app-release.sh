@@ -25,8 +25,9 @@ cd "$repository_root"
 [ -z "$(git status --porcelain --untracked-files=normal)" ] \
   || { echo "Commit all source changes before publishing." >&2; exit 1; }
 head=$(git rev-parse HEAD)
-remote_head=$(git ls-remote origin refs/heads/main | cut -f1)
-[ "$head" = "$remote_head" ] || { echo "Push HEAD to origin/main before publishing." >&2; exit 1; }
+git fetch --quiet origin main
+git merge-base --is-ancestor "$head" origin/main \
+  || { echo "Push this source commit to origin/main before publishing." >&2; exit 1; }
 [ "$(cat "$output/SOURCE_COMMIT")" = "$head" ] && [ "$(cat "$output/SOURCE_CLEAN")" = true ] \
   || { echo "Rebuild the packages from this committed source before publishing." >&2; exit 1; }
 repository=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
