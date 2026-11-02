@@ -34,23 +34,57 @@ public interface IReleaseSource
 }
 
 /// <summary>Only the GitHub API receives the optional token. Redirects receive no credentials.</summary>
-public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHandler? handler = null) : IReleaseSource, IDisposable
+public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHandler? handler = null,
+    ISettingsStore? settings = null, string? auditPath = null) : IReleaseSource, IDisposable
 {
     private readonly HttpClient client = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromMinutes(30) };
 
     public async Task<JsonArray> ReleasesAsync(CancellationToken cancellation)
     {
-        using var response = await GetAsync(new Uri($"https://api.github.com/repos/{AppRelease.Repository}/releases?per_page=100"), false, cancellation);
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
-            throw new IOException("GitHub could not read the releases. For a private repository, save a GitHub token with read access to its contents.");
-        response.EnsureSuccessStatusCode();
-        var json = await response.Content.ReadAsStringAsync(cancellation);
-        return JsonNode.Parse(json) as JsonArray ?? throw new IOException("GitHub returned an invalid release list.");
+        var repository = UpdateFeed.Repository(settings);
+        var first = $"https://api.github.com/repos/{repository}/releases?per_page=100";
+        Uri? next = new(first);
+        var results = new JsonArray();
+        for (var page = 1; page <= 10 && next is not null; page++)
+        {
+            using var response = await GetAsync(next, false, cancellation);
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
+                throw new IOException(repository == UpdateFeed.PublicTestRepository
+                    ? "The public update test feed is unavailable. Turn off Public Update Test to use the normal release feed."
+                    : "GitHub could not read the releases. For a private repository, save a GitHub token with read access to its contents.");
+            response.EnsureSuccessStatusCode();
+            await using var input = await response.Content.ReadAsStreamAsync(cancellation);
+            using var output = new MemoryStream();
+            await CopyBoundedAsync(input, output, 2 * 1024 * 1024, cancellation);
+            var batch = JsonNode.Parse(output.ToArray()) as JsonArray ?? throw new IOException("GitHub returned an invalid release list.");
+            foreach (var node in batch) results.Add(node?.DeepClone());
+            next = null;
+            if (response.Headers.TryGetValues("Link", out var links))
+            {
+                foreach (var link in string.Join(',', links).Split(','))
+                {
+                    if (!link.Contains("rel=\"next\"", StringComparison.Ordinal)) continue;
+                    var trimmed = link.Trim();
+                    var end = trimmed.IndexOf('>');
+                    if (next is not null || !link.TrimStart().StartsWith('<') || end < 0
+                        || !Uri.TryCreate(trimmed[1..end], UriKind.Absolute, out var address)
+                        || address.Scheme != "https" || address.Host != "api.github.com" || !address.IsDefaultPort
+                        || address.UserInfo.Length != 0 || address.Fragment.Length != 0
+                        || (address.AbsolutePath != $"/repos/{repository}/releases" && !System.Text.RegularExpressions.Regex.IsMatch(address.AbsolutePath, @"\A/repositories/[0-9]+/releases\z")))
+                        throw new IOException("GitHub returned an unexpected release page address.");
+                    // GitHub may use its numeric repository route in Link. Never follow that
+                    // supplied route: construct the next page within our already selected feed.
+                    next = new Uri(first + "&page=" + (page + 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+        }
+        if (next is not null) throw new IOException("The release search could not be completed. Try again later.");
+        return results;
     }
 
     public async Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation)
     {
-        if (!AppRelease.IsAssetUrl(release.Checksums.AbsoluteUri)) throw new IOException("The checksum address is invalid.");
+        if (release.SourceRepository != UpdateFeed.Repository(settings) || !AppRelease.IsAssetUrl(release.Checksums.AbsoluteUri, release.SourceRepository)) throw new IOException("The checksum address is invalid.");
         using var response = await GetAsync(release.Checksums, true, cancellation);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
@@ -61,7 +95,7 @@ public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHan
 
     public async Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation)
     {
-        if (!AppRelease.IsAssetUrl(release.Download.AbsoluteUri)) throw new IOException("The package address is invalid.");
+        if (release.SourceRepository != UpdateFeed.Repository(settings) || !AppRelease.IsAssetUrl(release.Download.AbsoluteUri, release.SourceRepository)) throw new IOException("The package address is invalid.");
         using var response = await GetAsync(release.Download, true, cancellation);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is { } length && length != release.Bytes)
@@ -73,7 +107,9 @@ public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHan
 
     private async Task<HttpResponseMessage> GetAsync(Uri uri, bool asset, CancellationToken cancellation)
     {
-        var token = await tokens.LoadAsync(cancellation);
+        var publicTest = UpdateFeed.IsPublicTest(settings)
+            || uri.AbsolutePath.StartsWith($"/repos/{UpdateFeed.PublicTestRepository}/", StringComparison.Ordinal);
+        var token = publicTest ? null : await tokens.LoadAsync(cancellation);
         if (token is not null && token.Any(c => c <= 32 || c >= 127)) throw new IOException("The saved GitHub token is invalid. Save a new token in Updates.");
         for (var redirects = 0; redirects <= 5; redirects++)
         {
@@ -84,6 +120,18 @@ public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHan
             {
                 request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
                 if (!string.IsNullOrWhiteSpace(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+            if (publicTest && auditPath is not null)
+            {
+                // The audit contains neither paths, signed query strings nor credential values.
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(auditPath)!);
+                    if (File.Exists(auditPath) && new FileInfo(auditPath).Length > 64 * 1024) File.Delete(auditPath);
+                    await File.AppendAllTextAsync(auditPath, System.Text.Json.JsonSerializer.Serialize(new
+                    { host = uri.Host, authorizationPresent = request.Headers.Authorization is not null }) + "\n", cancellation);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             }
             var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
             if ((int)response.StatusCode is < 300 or >= 400) return response;
@@ -168,18 +216,30 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
     public string Status { get; private set; } = "Check for a newer version of Aurelia for Linux.";
     public bool IsBusy { get; private set; }
     public bool RestartRequired { get; private set; }
+    public bool PublicUpdateTestEnabled => UpdateFeed.IsPublicTest(settings);
+    private string CheckKey => "lastUpdateCheck." + UpdateFeed.Repository(settings);
+
+    public void SetPublicUpdateTest(bool enabled)
+    {
+        if (IsBusy || RestartRequired) return;
+        settings.Write(UpdateFeed.PublicTestKey, enabled);
+        Available = null;
+        Status = "Check for a newer version of Aurelia for Linux.";
+        Notify();
+    }
 
     public async Task CheckAsync(bool userInitiated, CancellationToken cancellation = default)
     {
         if (IsBusy || RestartRequired || (!userInitiated && ((settings.Read<bool?>("automaticUpdateChecks") ?? true) == false
-            || settings.Read<DateTimeOffset?>("lastUpdateCheck") is { } last && clock.GetUtcNow() - last < TimeSpan.FromDays(1)))) return;
+            || settings.Read<DateTimeOffset?>(CheckKey) is { } last && clock.GetUtcNow() - last < TimeSpan.FromDays(1)))) return;
         IsBusy = true;
         Status = "Checking for updates…";
         Notify();
         try
         {
-            settings.Write("lastUpdateCheck", clock.GetUtcNow());
-            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild);
+            settings.Write(CheckKey, clock.GetUtcNow());
+            Available = null;
+            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild, UpdateFeed.Repository(settings));
             Status = Available is { } release ? $"Aurelia {release.Version} ({release.Build}) is available." : "Aurelia is up to date.";
         }
         catch (Exception error) when (error is HttpRequestException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or CredentialStoreUnavailableException)

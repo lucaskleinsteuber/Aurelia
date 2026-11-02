@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OSLog
 
 enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
   case github(Int)
@@ -15,7 +16,7 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
     case .rateLimited:
       "GitHub's rate limit was reached. Try again later, or add a GitHub token under Settings › Updates › Advanced."
     case .notModified:
-      "Aurelia is up to date."
+      "GitHub returned no release information. Try again."
     case .privateRepository:
       "The repository couldn't be found (404). It may be private. You can add a GitHub token under Settings › Updates › Advanced."
     case .github(let status) where status == 401 || status == 403:
@@ -152,12 +153,21 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
   }
 
   private final class Redirects: NSObject, URLSessionTaskDelegate, Sendable {
+    let publicTest: Bool
+    init(publicTest: Bool) { self.publicTest = publicTest }
+
     func urlSession(
       _ session: URLSession, task: URLSessionTask,
       willPerformHTTPRedirection response: HTTPURLResponse,
       newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
     ) {
-      completionHandler(AppUpdateLogic.redirectedRequest(request))
+      let sanitized = AppUpdateLogic.redirectedRequest(request)
+      if publicTest, let sanitized {
+        let authorized = sanitized.value(forHTTPHeaderField: "Authorization") != nil
+        Logger(subsystem: "com.lucas.aurelia.media", category: "UpdateTest")
+          .notice("Public update redirect; authorization present: \(authorized, privacy: .public)")
+      }
+      completionHandler(sanitized)
     }
   }
 
@@ -184,7 +194,11 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
       if !completed, let destination { try? FileManager.default.removeItem(at: destination) }
     }
     do {
-      let (bytes, response) = try await session.bytes(for: request, delegate: Redirects())
+      let (bytes, response) = try await session.bytes(
+        for: request,
+        delegate: Redirects(
+          publicTest: request.url?.path.hasPrefix(
+            "/repos/\(AppUpdateSource.publicTestRepository)/") == true))
       // Validate headers before creating a destination or consuming a potentially huge response.
       _ = try AppUpdateTransferAccumulator(response: response, maximumBytes: maximumBytes)
       if let destination {
@@ -243,6 +257,35 @@ struct AppUpdateClient: Sendable {
     let release = try AppUpdateLogic.validatedRelease(
       fromLatest: result.data, repository: repository)
     return (release, result.etag)
+  }
+
+  func catalog(
+    repository: String, token: String?, cached: AppUpdateCatalogCache?
+  ) async throws -> (release: AppRelease, cache: AppUpdateCatalogCache?) {
+    guard AppUpdateLogic.isRepository(repository),
+      let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")
+    else { throw AppUpdateError.invalidURL }
+    let cachedRelease = cached.flatMap {
+      try? AppUpdateLogic.validatedRelease(fromLatest: $0.data, repository: repository)
+    }
+    do {
+      let result = try await transfer(
+        url, token: token, ifNoneMatch: cachedRelease == nil ? nil : cached?.etag,
+        maximumBytes: 2 * 1_024 * 1_024)
+      let release = try AppUpdateLogic.validatedRelease(
+        fromLatest: result.data, repository: repository)
+      return (release, result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) })
+    } catch AppUpdateError.notModified {
+      if let cached, let cachedRelease { return (cachedRelease, cached) }
+      // An unexpected 304 without a usable body is not proof that the app is current.
+      let result = try await transfer(url, token: token, maximumBytes: 2 * 1_024 * 1_024)
+      return (
+        try AppUpdateLogic.validatedRelease(fromLatest: result.data, repository: repository),
+        result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) }
+      )
+    } catch AppUpdateError.github(404) where token == nil || token?.isEmpty == true {
+      throw AppUpdateError.privateRepository
+    }
   }
 
   func latest(
@@ -307,6 +350,13 @@ struct AppUpdateClient: Sendable {
       request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
     }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+    if url.path.hasPrefix("/repos/\(AppUpdateSource.publicTestRepository)/") {
+      guard request.value(forHTTPHeaderField: "Authorization") == nil else {
+        throw AppUpdateError.invalidURL
+      }
+      Logger(subsystem: "com.lucas.aurelia.media", category: "UpdateTest")
+        .notice("Public update request; authorization present: false")
+    }
     do {
       return try await transport.transfer(
         request, maximumBytes: maximumBytes, destination: destination)

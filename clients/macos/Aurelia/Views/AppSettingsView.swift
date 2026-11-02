@@ -1060,14 +1060,29 @@ struct AppSettingsView: View {
       symbol: "key.fill",
       description: "Only needed while the repository is private."
     ) {
-      GitHubTokenSettingsView(updater: updater)
-        .frame(maxWidth: .infinity, alignment: .leading)
+      Toggle(
+        "Public Update Test",
+        isOn: Binding(
+          get: { updater.publicUpdateTestEnabled }, set: { updater.setPublicUpdateTest($0) }
+        )
+      )
+      .disabled(
+        updater.state == .checking || updater.state == .downloading || updater.state == .installing)
+      if updater.publicUpdateTestEnabled {
+        Text(
+          "Uses Aurelia’s temporary public test feed without reading your saved GitHub token. Turn this off after the test."
+        )
+        .font(.callout).foregroundStyle(.secondary)
+      } else {
+        GitHubTokenSettingsView(updater: updater)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
     }
   }
 
   private var updateStatusText: String {
     switch updater.state {
-    case .idle: updater.repository == nil ? "Release builds only" : "Up to date"
+    case .idle: updater.repository == nil ? "Release builds only" : "Not checked yet"
     case .checking: "Checking for updates…"
     case .upToDate: "Up to date"
     case .available(let release): "\(release.version) (\(release.build)) is available"
@@ -1408,4 +1423,3 @@ struct SidebarCustomizerView: View {
     visibilityRevision += 1
   }
 }
-

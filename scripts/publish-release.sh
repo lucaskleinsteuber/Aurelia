@@ -4,7 +4,7 @@
 # `sudo aurelia update` installs, and the Apple silicon Mac app that scripts/build-macos-release.sh
 # made, as a disk image. GitHub adds the source code of the tag by itself. A release is visible to
 # everyone who can see the repository; the owner wants every Mac/server version published this way.
-# An existing release of the same tag gets the downloads added or replaced. A new release stays a
+# An existing published release is never changed. A new release stays a
 # draft until every download is uploaded, so the Mac updater never sees a half-uploaded release.
 # The release text comes from a notes file when there is one (see below).
 # Once GitHub lists every download, the local build output of this version is deleted, because
@@ -85,6 +85,12 @@ else
 $downloads"
 fi
 
+notes="$notes
+
+## Product versions
+
+$(python3 "$repository_root/scripts/release-versions.py" --product mac --version "$version" --build "$build")"
+
 # Large uploads sometimes fail over HTTP/2 with HTTP 408; retry them one by one over HTTP/1.1.
 upload() {
   gh release upload "$tag" "$@" --clobber && return 0
@@ -97,6 +103,8 @@ upload() {
 
 cd "$repository_root"
 if gh release view "$tag" >/dev/null 2>&1; then
+  [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ] \
+    || { echo "$tag is already published; published downloads are not replaced." >&2; exit 1; }
   upload "${files[@]}"
   gh release edit "$tag" --notes "$notes" --draft=false
 else

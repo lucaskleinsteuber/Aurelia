@@ -240,6 +240,19 @@ These rules apply to every task in this repository.
 
 ## Public distribution
 
+- Keep independent MAJOR.MINOR.PATCH product versions. README and every regular
+  release show Mac & Server, Linux Desktop, Apple TV and iPhone & iPad with version,
+  build and download/development availability. Record only delivered or actually
+  verified versions in `docs/RELEASE_VERSIONS.json`; render with
+  `scripts/release-versions.py`. Mac/server stays Latest; Linux keeps its own tags.
+- The approved anonymous updater test uses only the separate
+  `lucaskleinsteuber/Aurelia-Update-Test` download repository. Keep the main repository
+  private. Public Update Test is explicitly enabled, skips loading/sending saved
+  tokens, and preserves them. Copy only verified release assets and license notices,
+  never private history. The owner operates the real Mac/Arch update dialogs; after
+  verification restore the normal source and make the test repository private.
+  See `docs/UPDATE_TEST.md`. Audio acceptance uses logic/configuration/migration
+  tests and the owner's listening check; no automatic signal or hearing tests.
 - Keep the README concise and user-facing. Put build/test/API details in linked
   documentation, not the README. Do not add personal names or machine paths.
 - Preserve bundle IDs, App Groups, Keychain identifiers, and signing identity

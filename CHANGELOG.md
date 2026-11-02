@@ -12,6 +12,30 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac/server 1.26.6 (123) - 02.11.2026
+
+### Fixed
+
+- Keep offering a validated newer release after GitHub answers with HTTP 304; save the release and ETag together, separately for each update source.
+- Check both the semantic version and increasing build number before offering a Mac update.
+
+### Added
+
+- Explicit Public Update Test setting for anonymous downloads from the separate test repository, preserving saved tokens without reading them.
+- Shared product version table in the README and regular release descriptions.
+
+## Linux app 1.0.2 (8) - 02.11.2026
+
+### Fixed
+
+- Search GitHub release pages beyond the first 100 entries; report an incomplete check when the bounded search cannot finish.
+- Keep downloaded packages and checksum addresses tied to the selected update source.
+
+### Added
+
+- Public Update Test setting with anonymous metadata, checksum and package requests; saved GitHub credentials remain untouched.
+- Bounded request diagnostics that record only the host and presence of Authorization, without tokens or signed URLs.
+
 ## [Mac/server 1.26.5 (122)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.26.5-122) - 02.11.2026
 
 ### Added

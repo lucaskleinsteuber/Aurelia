@@ -15,6 +15,114 @@ namespace Aurelia.Linux.Tests;
 
 public sealed class AppUpdateTests
 {
+    [Fact]
+    public async Task PublicTestPagesAndDownloadsNeverReadOrSendASavedToken()
+    {
+        var settings = new MemorySettingsStore();
+        settings.Write(UpdateFeed.PublicTestKey, true);
+        var audit = Path.Combine(Path.GetTempPath(), "aurelia-update-audit-" + Guid.NewGuid().ToString("N"), "audit.jsonl");
+        var page = ReleaseNode("linux-app-1.0.0-5");
+        foreach (var asset in page["assets"]!.AsArray().OfType<JsonObject>())
+            asset["url"] = asset["url"]!.GetValue<string>().Replace(AppRelease.Repository, UpdateFeed.PublicTestRepository, StringComparison.Ordinal);
+        var handler = new FeedHandler((request, index) =>
+        {
+            if (index == 1)
+            {
+                var first = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") };
+                first.Headers.Add("Link", "<https://api.github.com/repositories/123/releases?per_page=100&page=2>; rel=\"next\"");
+                return first;
+            }
+            if (index == 2) return new(HttpStatusCode.OK) { Content = new StringContent(new JsonArray(page).ToJsonString()) };
+            return new(HttpStatusCode.OK)
+            {
+                Content = request.RequestUri!.AbsolutePath.EndsWith("/10", StringComparison.Ordinal)
+                ? new ByteArrayContent(Package) : new StringContent("synthetic-checksums")
+            };
+        });
+        try
+        {
+            using var source = new GitHubReleaseSource(new UnreadableTokens(), handler, settings, audit);
+            var releases = await source.ReleasesAsync(TestContext.Current.CancellationToken);
+            Assert.EndsWith("/repos/" + UpdateFeed.PublicTestRepository + "/releases?per_page=100&page=2", handler.Requests[1], StringComparison.Ordinal);
+            var release = AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4, UpdateFeed.PublicTestRepository);
+            Assert.NotNull(release);
+            Assert.Null(AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4));
+            Assert.Equal("synthetic-checksums", await source.ChecksumsAsync(release, TestContext.Current.CancellationToken));
+            using var bytes = new MemoryStream();
+            await source.DownloadAsync(release, bytes, TestContext.Current.CancellationToken);
+            Assert.Equal(Package, bytes.ToArray());
+            Assert.All(handler.Authorization, Assert.Null);
+            var lines = await File.ReadAllLinesAsync(audit, TestContext.Current.CancellationToken);
+            Assert.Equal(4, lines.Length);
+            Assert.All(lines, line => Assert.Contains("\"authorizationPresent\":false", line, StringComparison.Ordinal));
+        }
+        finally { if (Directory.Exists(Path.GetDirectoryName(audit))) Directory.Delete(Path.GetDirectoryName(audit)!, true); }
+    }
+
+    [Fact]
+    public async Task ReleaseSearchLimitFailsInsteadOfReportingUpToDate()
+    {
+        var handler = new FeedHandler((_, index) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") };
+            response.Headers.Add("Link", $"<https://api.github.com/repos/{AppRelease.Repository}/releases?per_page=100&page={index + 1}>; rel=\"next\"");
+            return response;
+        });
+        using var source = new GitHubReleaseSource(new FakeTokens(), handler);
+        var failure = await Assert.ThrowsAsync<IOException>(() => source.ReleasesAsync(TestContext.Current.CancellationToken));
+        Assert.Contains("could not be completed", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(10, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task UnexpectedPaginationHostIsNeverContacted()
+    {
+        var handler = new FeedHandler((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") };
+            response.Headers.Add("Link", "<https://elsewhere.invalid/releases?page=2>; rel=\"next\"");
+            return response;
+        });
+        using var source = new GitHubReleaseSource(new FakeTokens(), handler);
+        await Assert.ThrowsAsync<IOException>(() => source.ReleasesAsync(TestContext.Current.CancellationToken));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ReturningToTheStandardFeedDropsTheTestOfferAndPreservesSettings()
+    {
+        var settings = new MemorySettingsStore();
+        settings.Write("unrelated", "preserved");
+        using var updater = new AppUpdater(new FakeSource(), new FakeInstaller(), settings, "unused", new Version(0, 3, 0), 4);
+        await updater.CheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.NotNull(updater.Available);
+        updater.SetPublicUpdateTest(true);
+        Assert.True(updater.PublicUpdateTestEnabled);
+        Assert.Null(updater.Available);
+        updater.SetPublicUpdateTest(false);
+        Assert.Equal(AppRelease.Repository, UpdateFeed.Repository(settings));
+        Assert.Equal("preserved", settings.Read<string>("unrelated"));
+    }
+
+    private sealed class UnreadableTokens : IUpdateTokenStore
+    {
+        public Task<string?> LoadAsync(CancellationToken cancellation) => throw new InvalidOperationException("Public mode must not read credentials.");
+        public Task SaveAsync(string token, CancellationToken cancellation) => throw new InvalidOperationException();
+        public Task DeleteAsync(CancellationToken cancellation) => throw new InvalidOperationException();
+    }
+
+    private sealed class FeedHandler(Func<HttpRequestMessage, int, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+        public List<string?> Authorization { get; } = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+        {
+            Requests.Add(request.RequestUri!.AbsoluteUri);
+            Authorization.Add(request.Headers.Authorization?.ToString());
+            return Task.FromResult(respond(request, Requests.Count));
+        }
+    }
+
     [AvaloniaFact]
     public void TheUpdatePageChecksAndRequiresConfirmationBeforeInstallation()
     {

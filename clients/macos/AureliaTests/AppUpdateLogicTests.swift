@@ -5,6 +5,91 @@ import Testing
 @testable import Aurelia
 
 struct AppUpdateLogicTests {
+  @Test func cachedNewReleaseRemainsAvailableAfter304() async throws {
+    let transport = StubUpdateTransport(steps: [
+      .tagged(releaseData(), "release-100"), .partialFailure(.notModified),
+    ])
+    let client = AppUpdateClient(transport: transport)
+    let first = try await client.catalog(repository: "owner/repo", token: nil, cached: nil)
+    let second = try await client.catalog(repository: "owner/repo", token: nil, cached: first.cache)
+    #expect(second.release == first.release)
+    #expect(AppUpdateLogic.isNewer(second.release, version: "1.12.0", build: 99))
+    #expect(
+      await transport.requests.last?.value(forHTTPHeaderField: "If-None-Match") == "release-100")
+    #expect(!AppUpdateLogic.isNewer(second.release, version: "1.14.0", build: 99))
+  }
+
+  @Test func unexpected304WithoutCacheRetriesUnconditionally() async throws {
+    let transport = StubUpdateTransport(steps: [
+      .partialFailure(.notModified), .body(releaseData()),
+    ])
+    let result = try await AppUpdateClient(transport: transport).catalog(
+      repository: "owner/repo", token: nil, cached: nil)
+    #expect(result.release.build == 100)
+    #expect(await transport.requests.count == 2)
+    #expect(
+      await transport.requests.allSatisfy { $0.value(forHTTPHeaderField: "If-None-Match") == nil })
+  }
+
+  @Test func cachedBodiesAndCheckTimesAreValidatedAndSeparatedByFeed() throws {
+    try withPreferences { defaults, _ in
+      let cached = AppUpdateCatalogCache(data: releaseData(), etag: "release-100")
+      AppUpdateCatalogCache.save(cached, repository: "owner/repo", defaults: defaults)
+      #expect(
+        AppUpdateCatalogCache.load(repository: "owner/repo", defaults: defaults)?.etag
+          == cached.etag)
+      AppUpdateCatalogCache.save(
+        cached, repository: AppUpdateSource.publicTestRepository, defaults: defaults)
+      #expect(
+        AppUpdateCatalogCache.load(
+          repository: AppUpdateSource.publicTestRepository, defaults: defaults) == nil)
+      defaults.set(true, forKey: AppUpdateSource.publicTestKey)
+      #expect(
+        AppUpdateSource.repository(standard: "owner/repo", defaults: defaults)
+          == AppUpdateSource.publicTestRepository)
+      defaults.set(false, forKey: AppUpdateSource.publicTestKey)
+      #expect(
+        AppUpdateSource.repository(standard: "owner/repo", defaults: defaults) == "owner/repo")
+      defaults.set(Date(), forKey: AppUpdatePreferences.checkKey("owner/repo"))
+      #expect(!AppUpdatePreferences.backgroundCheckIsDue(in: defaults, repository: "owner/repo"))
+      #expect(
+        AppUpdatePreferences.backgroundCheckIsDue(
+          in: defaults, repository: AppUpdateSource.publicTestRepository))
+    }
+  }
+
+  @Test func publicFeedRequestsHaveNoAuthorizationAndRejectAToken() async throws {
+    let data = releaseData(repository: AppUpdateSource.publicTestRepository)
+    let transport = StubUpdateTransport(steps: [.body(data)])
+    let client = AppUpdateClient(transport: transport)
+    _ = try await client.catalog(
+      repository: AppUpdateSource.publicTestRepository, token: nil, cached: nil)
+    #expect(
+      await transport.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
+    await #expect(throws: AppUpdateError.invalidURL) {
+      try await client.catalog(
+        repository: AppUpdateSource.publicTestRepository, token: "synthetic-never-sent", cached: nil
+      )
+    }
+    #expect(await transport.requests.count == 1)
+  }
+
+  @Test func publicTestDoesNotEvenReadTheSavedToken() throws {
+    try withPreferences { defaults, _ in
+      var reads = 0
+      let load = {
+        reads += 1
+        return "synthetic-token" as String?
+      }
+      defaults.set(true, forKey: AppUpdateSource.publicTestKey)
+      #expect(AppUpdateSource.token(defaults: defaults, load: load) == nil)
+      #expect(reads == 0)
+      defaults.set(false, forKey: AppUpdateSource.publicTestKey)
+      #expect(AppUpdateSource.token(defaults: defaults, load: load) == "synthetic-token")
+      #expect(reads == 1)
+    }
+  }
+
   @Test
   func tagsAreVersionAndBuild() {
     #expect(AppUpdateLogic.parseTag("1.12.1-99")! == ("1.12.1", 99))
@@ -446,15 +531,20 @@ struct AppUpdateLogicTests {
     tag: String = "1.13.0-100", imageName: String = "Aurelia-1.13.0-100-macOS-arm64.dmg",
     checksumName: String = "SHA256SUMS",
     imageURL: String = "https://api.github.com/repos/owner/repo/releases/assets/1",
-    notes: Any? = nil, imageSize: Any? = nil
+    notes: Any? = nil, imageSize: Any? = nil, repository: String = "owner/repo"
   ) -> Data {
-    var image: [String: Any] = ["name": imageName, "url": imageURL]
+    var image: [String: Any] = [
+      "name": imageName, "url": imageURL.replacingOccurrences(of: "owner/repo", with: repository),
+    ]
     if let imageSize { image["size"] = imageSize }
     var release: [String: Any] = [
       "tag_name": tag, "draft": false,
       "assets": [
         image,
-        ["name": checksumName, "url": "https://api.github.com/repos/owner/repo/releases/assets/2"],
+        [
+          "name": checksumName,
+          "url": "https://api.github.com/repos/\(repository)/releases/assets/2",
+        ],
       ],
     ]
     if let notes { release["body"] = notes }
@@ -489,6 +579,7 @@ struct AppUpdateLogicTests {
 private actor StubUpdateTransport: AppUpdateTransport {
   enum Step: Sendable {
     case body(Data)
+    case tagged(Data, String)
     case partialFailure(AppUpdateError)
   }
   private var steps: [Step]
@@ -506,10 +597,12 @@ private actor StubUpdateTransport: AppUpdateTransport {
     case .partialFailure(let failure):
       if let destination { try Data("partial".utf8).write(to: destination) }
       throw failure
-    case .body(let data):
+    case .body(let data), .tagged(let data, _):
+      var headers = ["Content-Length": String(data.count)]
+      if case .tagged(_, let etag) = step { headers["ETag"] = etag }
       let response = HTTPURLResponse(
         url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
-        headerFields: ["Content-Length": String(data.count)])!
+        headerFields: headers)!
       var accumulator = try AppUpdateTransferAccumulator(
         response: response, maximumBytes: maximumBytes,
         write: destination.map { url in { try $0.write(to: url, options: .withoutOverwriting) } })

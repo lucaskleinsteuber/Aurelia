@@ -1,6 +1,44 @@
 import CoreFoundation
 import Foundation
 
+enum AppUpdateSource {
+  static let publicTestRepository = "lucaskleinsteuber/Aurelia-Update-Test"
+  static let publicTestKey = "AureliaPublicUpdateTestEnabled"
+
+  static func token(defaults: UserDefaults, load: () -> String?) -> String? {
+    defaults.bool(forKey: publicTestKey) ? nil : load()
+  }
+
+  static func repository(standard: String?, defaults: UserDefaults) -> String? {
+    defaults.bool(forKey: publicTestKey) ? publicTestRepository : standard
+  }
+}
+
+/// One validated response and its validator are saved together, scoped to their repository.
+struct AppUpdateCatalogCache: Codable, Sendable {
+  let data: Data
+  let etag: String
+
+  static func key(_ repository: String) -> String { "AureliaUpdateCatalog.v1.\(repository)" }
+
+  static func load(repository: String, defaults: UserDefaults) -> Self? {
+    guard let bytes = defaults.data(forKey: key(repository)), bytes.count <= 3 * 1_024 * 1_024,
+      let value = try? JSONDecoder().decode(Self.self, from: bytes),
+      !value.etag.isEmpty, value.etag.utf8.count <= 1_024,
+      (try? AppUpdateLogic.validatedRelease(fromLatest: value.data, repository: repository)) != nil
+    else { return nil }
+    return value
+  }
+
+  static func save(_ value: Self?, repository: String, defaults: UserDefaults) {
+    if let value, let bytes = try? JSONEncoder().encode(value) {
+      defaults.set(bytes, forKey: key(repository))
+    } else {
+      defaults.removeObject(forKey: key(repository))
+    }
+  }
+}
+
 /// A GitHub release of this app that is newer than the one running.
 struct AppRelease: Equatable, Sendable {
   let tag: String
@@ -41,10 +79,16 @@ enum AppUpdatePreferences {
     defaults.object(forKey: automaticChecksKey) == nil || defaults.bool(forKey: automaticChecksKey)
   }
 
-  static func backgroundCheckIsDue(in defaults: UserDefaults, now: Date = Date()) -> Bool {
+  static func backgroundCheckIsDue(
+    in defaults: UserDefaults, now: Date = Date(), repository: String? = nil
+  ) -> Bool {
     guard checksAutomatically(in: defaults) else { return false }
-    let last = defaults.object(forKey: lastCheckKey) as? Date ?? .distantPast
+    let last = defaults.object(forKey: checkKey(repository)) as? Date ?? .distantPast
     return now.timeIntervalSince(last) >= checkInterval
+  }
+
+  static func checkKey(_ repository: String?) -> String {
+    repository.map { "\(lastCheckKey).\($0)" } ?? lastCheckKey
   }
 
   static func shouldOffer(
@@ -86,6 +130,13 @@ enum AppUpdateLogic {
 
   /// A release is newer when its build number is higher; build numbers only ever rise.
   static func isNewer(build: Int, than currentBuild: Int) -> Bool { build > currentBuild }
+
+  static func isNewer(_ release: AppRelease, version: String, build: Int) -> Bool {
+    guard release.build > build, let current = parseTag("\(version)-\(max(1, build))") else {
+      return false
+    }
+    return release.version.compare(current.version, options: .numeric) != .orderedAscending
+  }
 
   /// The SHA-256 the release's SHA256SUMS lists for a file, in lowercase hex.
   static func checksum(for fileName: String, in sums: String) -> String? {

@@ -49,7 +49,8 @@ public sealed record AppServices(
             new LinuxPlaybackSystem(action => Avalonia.Threading.Dispatcher.UIThread.Post(action)),
             () => new LocalServerHost(LocalServerOptions.ForThisComputer(paths)),
             new LinuxHostingSystem(paths),
-            new AppUpdater(new GitHubReleaseSource(tokens), new LinuxPackageInstaller(), settings, paths.CacheDirectory, AppInfo.CurrentVersion, AppInfo.Build),
+            new AppUpdater(new GitHubReleaseSource(tokens, settings: settings,
+                auditPath: Path.Combine(paths.CacheDirectory, "updates", "public-test-audit.jsonl")), new LinuxPackageInstaller(), settings, paths.CacheDirectory, AppInfo.CurrentVersion, AppInfo.Build),
             tokens);
     }
 

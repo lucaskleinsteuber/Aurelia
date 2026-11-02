@@ -7,9 +7,9 @@ public enum LinuxPackageKind { Debian, Rpm, Arch, Flatpak }
 
 /// <summary>A stable Linux app release, independent of the Mac/server releases in the repository.</summary>
 public sealed record AppRelease(string Tag, Version Version, int Build, string Notes, string FileName, Uri Download,
-    Uri Checksums, long Bytes)
+    Uri Checksums, long Bytes, string SourceRepository = UpdateFeed.StandardRepository)
 {
-    public const string Repository = "lucaskleinsteuber/Aurelia";
+    public const string Repository = UpdateFeed.StandardRepository;
     public const string TagPrefix = "linux-app-";
 
     public static (Version Version, int Build)? ParseTag(string tag)
@@ -33,8 +33,9 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
             _ => "x86_64.flatpak",
         });
 
-    public static AppRelease? Newest(JsonArray releases, LinuxPackageKind kind, Version currentVersion, int currentBuild)
+    public static AppRelease? Newest(JsonArray releases, LinuxPackageKind kind, Version currentVersion, int currentBuild, string repository = Repository)
     {
+        if (!UpdateFeed.IsAllowed(repository)) return null;
         var candidates = new List<AppRelease>();
         foreach (var node in releases.OfType<JsonObject>())
         {
@@ -46,17 +47,17 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
             var package = Asset(name);
             var sums = Asset("SHA256SUMS");
             if (package?["url"]?.GetValue<string>() is not { } address || sums?["url"]?.GetValue<string>() is not { } checksums
-                || !IsAssetUrl(address) || !IsAssetUrl(checksums) || package["size"]?.GetValue<long>() is not > 0) continue;
+                || !IsAssetUrl(address, repository) || !IsAssetUrl(checksums, repository) || package["size"]?.GetValue<long>() is not > 0) continue;
             candidates.Add(new(tag, parsed.Version, parsed.Build, node["body"]?.GetValue<string>() ?? "", name,
-                new Uri(address), new Uri(checksums), package["size"]!.GetValue<long>()));
+                new Uri(address), new Uri(checksums), package["size"]!.GetValue<long>(), repository));
         }
         return candidates.OrderByDescending(c => c.Version).ThenByDescending(c => c.Build).FirstOrDefault();
     }
 
-    public static bool IsAssetUrl(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+    public static bool IsAssetUrl(string value, string repository = Repository) => UpdateFeed.IsAllowed(repository) && Uri.TryCreate(value, UriKind.Absolute, out var uri)
         && uri.Scheme == "https" && uri.Host == "api.github.com" && uri.IsDefaultPort
         && uri.UserInfo.Length == 0 && uri.Query.Length == 0 && uri.Fragment.Length == 0
-        && uri.AbsolutePath.StartsWith($"/repos/{Repository}/releases/assets/", StringComparison.Ordinal)
+        && uri.AbsolutePath.StartsWith($"/repos/{repository}/releases/assets/", StringComparison.Ordinal)
         && long.TryParse(uri.Segments.Last(), NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0;
 
     public static string? Checksum(string fileName, string sums)

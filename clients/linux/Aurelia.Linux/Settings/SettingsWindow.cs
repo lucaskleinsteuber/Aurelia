@@ -592,7 +592,14 @@ public sealed class SettingsWindow : Window
         page.Children.Add(status);
         page.Children.Add(notes);
         page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { check, install } });
-        if (services.UpdateTokens is { } tokens)
+        if (services.Updater is { } feedUpdater)
+        {
+            var source = Toggle("Public Update Test", "Use Aurelia’s temporary public test feed without reading your saved GitHub token.",
+                feedUpdater.PublicUpdateTestEnabled, value => { feedUpdater.SetPublicUpdateTest(value); ShowSelected(); });
+            source.IsEnabled = !feedUpdater.IsBusy && !feedUpdater.RestartRequired;
+            page.Children.Add(Section("Advanced", source));
+        }
+        if (services.UpdateTokens is { } tokens && services.Updater?.PublicUpdateTestEnabled != true)
         {
             var token = new TextBox { PasswordChar = '•', PlaceholderText = "GitHub token", MinWidth = 250 };
             AutomationProperties.SetName(token, "GitHub Update Token");

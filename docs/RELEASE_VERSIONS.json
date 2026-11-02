@@ -1,0 +1,26 @@
+[
+  {
+    "product": "Mac & Server",
+    "version": "1.26.5",
+    "build": 122,
+    "tag": "1.26.5-122"
+  },
+  {
+    "product": "Linux Desktop",
+    "version": "1.0.1",
+    "build": 7,
+    "tag": "linux-app-1.0.1-7"
+  },
+  {
+    "product": "Apple TV",
+    "version": "1.3.2",
+    "build": 25,
+    "guide": "clients/tvos/README.md"
+  },
+  {
+    "product": "iPhone & iPad",
+    "version": "1.0.3",
+    "build": 4,
+    "guide": "docs/IOS_APP.md"
+  }
+]
