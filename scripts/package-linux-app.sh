@@ -113,6 +113,7 @@ cp -a "$work/tree/usr" %{buildroot}/
 /usr/share/metainfo/$app_id.metainfo.xml
 /usr/share/icons/hicolor/scalable/apps/$app_id.svg
 %doc /usr/share/doc/$name
+%license /usr/share/licenses/$name/LICENSE
 SPEC
 rpmbuild --quiet --define "_topdir $work/rpm" --define "_dbpath $work/rpm/db" -bb "$work/rpm/SPECS/$name.spec"
 cp "$work/rpm/RPMS/x86_64/$name-$version-$build.x86_64.rpm" "$output/$base-x86_64.rpm"
