@@ -25,6 +25,12 @@ public interface IVideoEngine : IDisposable
     /// <summary>Opens <paramref name="url"/> directly at <paramref name="startMilliseconds"/> and starts playing.</summary>
     void Open(Uri url, long startMilliseconds);
 
+    void Open(Uri url, long startMilliseconds, bool paused)
+    {
+        Open(url, startMilliseconds);
+        if (paused) Pause();
+    }
+
     AudioChangeResult TrySetDialogueBoost(DialogueBoost mode) => AudioChangeResult.Unavailable;
 
     void Play();

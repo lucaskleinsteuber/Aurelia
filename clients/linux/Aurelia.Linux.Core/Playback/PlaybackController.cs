@@ -331,6 +331,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         }
         else if (State == PlayerState.Paused)
         {
+            pauseAfterReopen = false;
             engine.Play();
             State = PlayerState.Playing;
         }
@@ -404,7 +405,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         var selectedAudio = AudioTracks.FirstOrDefault(track => track.Id == AudioTrack);
         var selectedSubtitle = SubtitleTracks.FirstOrDefault(track => track.Id == SubtitleTrack);
         if (selectedAudio is not null) memory.RememberAudio(selectedAudio, seriesId);
-        memory.RememberSubtitle(selectedSubtitle, seriesId);
+        if (tracksApplied) memory.RememberSubtitle(selectedSubtitle, seriesId);
         if (Item is { } current)
         {
             pauseAfterReopen = paused;
@@ -517,7 +518,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             engine.Rate = Rate;
             engine.Volume = (int)Math.Round(Volume * 100);
             engine.Muted = Muted;
-            engine.Open(url, resumeAt);
+            engine.Open(url, resumeAt, paused: pauseAfterReopen);
             Position = resumeAt;
             Duration = progress.DurationMilliseconds;
             openedAt = time.GetUtcNow();

@@ -278,6 +278,9 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
         Assert.Equal(1.25, engines.Last.Rate);
         Assert.Equal(2, engines.Last.AudioTrack);
         Assert.Equal(4, engines.Last.SubtitleTrack);
+        player.PlayPause();
+        Assert.Equal(PlayerState.Playing, player.State);
+        Assert.True(engines.Last.IsPlaying);
     }
 
     [Fact]

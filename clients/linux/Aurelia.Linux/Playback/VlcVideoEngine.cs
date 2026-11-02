@@ -157,11 +157,14 @@ public sealed partial class VlcVideoEngine : IVideoEngine
         set => player.Chapter = value;
     }
 
-    public void Open(Uri url, long startMilliseconds)
+    public void Open(Uri url, long startMilliseconds) => Open(url, startMilliseconds, paused: false);
+
+    public void Open(Uri url, long startMilliseconds, bool paused)
     {
         chapterDescriptions = [];
         media?.Dispose();
         media = new Media(library, url);
+        if (paused) media.AddOption(":start-paused");
         media.AddOption(":http-reconnect");
         media.AddOption(":avcodec-hw=vaapi_drm");
         if (url.IsLoopback) media.AddOption(":network-caching=300");

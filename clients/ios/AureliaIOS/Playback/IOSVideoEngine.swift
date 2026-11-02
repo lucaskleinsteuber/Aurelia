@@ -64,7 +64,9 @@ final class IOSVideoEngine: IOSPlaybackEngine {
     player.drawable = view
   }
 
-  func load(url: URL, resumeAt: Int64) {
+  func load(url: URL, resumeAt: Int64) { load(url: url, resumeAt: resumeAt, paused: false) }
+
+  func load(url: URL, resumeAt: Int64, paused: Bool) {
     stop()
     player = Self.makePlayer(leveling: preferences.volumeLeveling)
     let processing = AudioProcessing(
@@ -86,6 +88,7 @@ final class IOSVideoEngine: IOSPlaybackEngine {
     appliedAudioPreference = false
     appliedSubtitlePreference = false
     machine.reset(at: now)
+    machine.setWantsPlayback(!paused)
     // The decoder opens at the resume position; its first clock there is not watched time.
     if resumeAt > 0 { machine.seek(to: resumeAt, at: now) }
     let operation = generation
@@ -101,6 +104,7 @@ final class IOSVideoEngine: IOSPlaybackEngine {
       observers.append(observer)
     }
     let media = VLCMedia(url: url)
+    if paused { media.addOption(":start-paused") }
     // The decoder sees only a random loopback route. All remote TLS and
     // authentication is performed by IOSStreamRelay, with no video disk cache.
     // Half a second of prebuffer keeps seeks quick on a local network.

@@ -551,7 +551,7 @@ final class IOSPlaybackController: ObservableObject {
       let desiredRate = playbackRate
       engine.applyPreferences(effectivePreferences)
       engine.playbackRate = desiredRate
-      engine.load(url: localURL, resumeAt: resumeAt ?? resumePosition)
+      engine.load(url: localURL, resumeAt: resumeAt ?? resumePosition, paused: !wantsPlayback)
       if let error = engine.audioProcessingError {
         fail(error)
         return

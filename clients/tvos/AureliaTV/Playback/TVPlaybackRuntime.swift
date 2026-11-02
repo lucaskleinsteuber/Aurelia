@@ -28,6 +28,7 @@ protocol TVPlaybackEngine: AnyObject {
   func sample()
   func attach(to view: UIView)
   func load(url: URL, resumeAt: Int64)
+  func load(url: URL, resumeAt: Int64, paused: Bool)
   func play()
   func pause()
   func stop()
@@ -38,6 +39,10 @@ protocol TVPlaybackEngine: AnyObject {
 }
 
 extension TVPlaybackEngine {
+  func load(url: URL, resumeAt: Int64, paused: Bool) {
+    load(url: url, resumeAt: resumeAt)
+    if paused { pause() }
+  }
   var audioProcessingError: String? { nil }
   func applyDialogueBoost(_ mode: DialogueBoost) -> AudioChangeResult { .applied }
   func addSubtitleSlave(url: URL) {}
