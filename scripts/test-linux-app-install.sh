@@ -65,8 +65,8 @@ library = ctypes.CDLL('libvlc.so.5')
 assert getattr(library, 'libvlc_media_player_set_equalizer')
 assert getattr(ctypes.CDLL(ctypes.util.find_library('vlccore')), 'var_SetChecked')
 for module in ['libcompressor_plugin.so', 'libequalizer_plugin.so']:
-    assert any(pathlib.Path(root).glob('**/vlc/plugins/audio_filter/' + module)
-               for root in ['/usr/lib', '/usr/lib64']), module
+    assert any(path.is_file() for root in ['/usr/lib', '/usr/lib64']
+               for path in pathlib.Path(root).glob('**/vlc/plugins/audio_filter/' + module)), module
 PYTHON
 useradd --create-home --home-dir /tmp/aurelia-package-user aurelia-package-test
 runuser -u aurelia-package-test -- bash -s <<'LAUNCH'
