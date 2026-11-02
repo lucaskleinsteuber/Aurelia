@@ -797,11 +797,9 @@ final class TVAppModel: ObservableObject {
         let snapshots = await environment.outbox.pendingSnapshots(scope: scope)
         guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
         pendingProgress = snapshots
-        if change.storageFailed {
+        if change.requiresUserAttention {
           progressWarning =
             "Playback progress could not be saved on this Apple TV. Free storage and try again."
-        } else if change.state == .conflict {
-          progressWarning = "Progress changed on another device. Its newer position has been kept."
         }
         if let progress = change.progress {
           acknowledgedProgress[progress.mediaId] = progress
