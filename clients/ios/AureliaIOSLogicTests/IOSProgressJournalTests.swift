@@ -100,6 +100,31 @@ struct IOSProgressJournalTests {
     #expect(await outbox.latestPendingSnapshot(scope: otherIdentity, mediaID: mediaID) == nil)
   }
 
+  @Test func restoredBackgroundConflictIsSilentButStorageFailureNeedsAttention() async throws {
+    let store = IOSJournalTestStore()
+    let first = IOSProgressOutbox(journal: store)
+    #expect(
+      await first.enqueue(scope: scope, mediaID: mediaID, snapshot: snapshot, baselineRevision: 7))
+    let restored = IOSProgressOutbox(journal: store)
+    let stream = await restored.changes(scope: scope)
+    await restored.activate(scope: scope, client: IOSJournalClient(mode: .conflict))
+    #expect(await restored.flush(scope: scope, mediaID: mediaID) == .conflict)
+    var changes = stream.makeAsyncIterator()
+    let conflict = try #require(await changes.next())
+    #expect(conflict.state == .conflict && !conflict.requiresUserAttention)
+    #expect(await restored.pendingSnapshots(scope: scope).isEmpty)
+    let server = IOSPlaybackProgress(
+      mediaId: mediaID, positionMilliseconds: 81_000, durationMilliseconds: 100_000,
+      isCompleted: false, lastPlayedAt: nil, updatedAt: nil, revision: 9, lastMutationId: nil)
+    #expect(await restored.resumePosition(scope: scope, server: server) == 81_000)
+    #expect(
+      IOSProgressOutboxChange(
+        reason: .storageFailure, scope: scope, mediaID: mediaID, snapshot: nil,
+        progress: nil, state: nil, storageFailed: true
+      ).requiresUserAttention)
+    await restored.deactivate()
+  }
+
   @Test func aConflictKeepsTheServerPositionAndLeavesNothingStuck() async throws {
     let store = IOSJournalTestStore()
     let client = IOSJournalClient(mode: .conflict)

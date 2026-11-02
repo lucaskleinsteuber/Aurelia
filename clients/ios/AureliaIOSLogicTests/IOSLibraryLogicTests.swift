@@ -32,6 +32,27 @@ struct IOSLibraryLogicTests {
     #expect(values == [URLQueryItem(name: "query", value: "two words")])
   }
 
+  @Test func episodeCardsIdentifyTheirSeriesAndSelectedEpisode() throws {
+    var json = try #require(
+      JSONSerialization.jsonObject(with: JSONEncoder().encode(item(kind: .episode)))
+        as? [String: Any])
+    json["parentTitle"] = "Another Story"
+    json["parentId"] = serverID.uuidString
+    json["seasonNumber"] = 2
+    json["episodeNumber"] = 8
+    let episode = try JSONDecoder().decode(
+      IOSCatalogItem.self, from: JSONSerialization.data(withJSONObject: json))
+    #expect(episode.cardSubtitle == "Another Story · S02 E08")
+    #expect(episode.detailID == serverID && episode.id == mediaID)
+    #expect(item().cardSubtitle == "2026")
+    json["parentTitle"] = "  "
+    json.removeValue(forKey: "seasonNumber")
+    let partial = try JSONDecoder().decode(
+      IOSCatalogItem.self, from: JSONSerialization.data(withJSONObject: json))
+    #expect(partial.cardSubtitle == "Episode")
+    #expect(item(kind: .episode).cardSubtitle == "S01 E01")
+  }
+
   @Test(arguments: IOSWatchFilter.allCases)
   func watchFiltersUseExistingServerVocabulary(_ filter: IOSWatchFilter) throws {
     var query = IOSBrowseQuery()

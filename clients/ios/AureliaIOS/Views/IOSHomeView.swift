@@ -55,15 +55,6 @@ struct IOSHomeView: View {
     // The hero artwork reaches the top edge, under the status bar.
     .ignoresSafeArea(edges: .top)
     .toolbar(.hidden, for: .navigationBar)
-    .overlay(alignment: .top) {
-      // Keeps the clock and battery readable over shelves scrolling beneath them.
-      LinearGradient(
-        colors: [IOSDesign.canvas, IOSDesign.canvas.opacity(0)], startPoint: .top, endPoint: .bottom
-      )
-      .frame(height: 0).padding(.bottom, 16)
-      .background(IOSDesign.canvas.opacity(0.85).ignoresSafeArea(edges: .top))
-      .allowsHitTesting(false)
-    }
     .background(IOSDesign.canvas.ignoresSafeArea())
     .task(id: model.libraryRefresh) {
       await model.loadHome()

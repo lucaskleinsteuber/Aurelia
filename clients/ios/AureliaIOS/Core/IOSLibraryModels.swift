@@ -234,6 +234,25 @@ struct IOSSyncChanges: Decodable, Sendable {
 }
 
 extension IOSCatalogItem {
+  var kindLabel: String {
+    switch kind {
+    case .series: "TV Show"
+    case .episode: "Episode"
+    case .movie: "Movie"
+    default: "Video"
+    }
+  }
+
+  var cardSubtitle: String {
+    if kind == .episode {
+      let series = parentTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+      let context = [series.flatMap { $0.isEmpty ? nil : $0 }, episodeLabel]
+        .compactMap { $0 }.joined(separator: " · ")
+      return context.isEmpty ? "Episode" : context
+    }
+    return availabilityMessage ?? year.map(String.init) ?? kindLabel
+  }
+
   func replacing(progress: IOSPlaybackProgress? = nil, favorite: Bool? = nil) -> IOSCatalogItem {
     IOSCatalogItem(
       id: id, kind: kind, title: title, originalTitle: originalTitle, year: year,

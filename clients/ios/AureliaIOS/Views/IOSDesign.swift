@@ -102,14 +102,6 @@ extension IOSCatalogItem {
     return Double(progress.positionMilliseconds) / Double(progress.durationMilliseconds)
   }
   var isWatched: Bool { watchState == "completed" || progress?.isCompleted == true }
-  var kindLabel: String {
-    switch kind {
-    case .series: "TV Show"
-    case .episode: "Episode"
-    case .movie: "Movie"
-    default: "Video"
-    }
-  }
 }
 
 /// Cards dim slightly while pressed, like iOS's own artwork buttons.

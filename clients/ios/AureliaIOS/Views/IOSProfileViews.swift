@@ -26,10 +26,7 @@ struct IOSProfilesView: View {
       VStack(spacing: 32) {
         Text("Who’s watching?").font(.system(.largeTitle, weight: .bold))
           .multilineTextAlignment(.center)
-        LazyVGrid(
-          columns: [GridItem(.adaptive(minimum: 120, maximum: 160), spacing: 20, alignment: .top)],
-          spacing: 28
-        ) {
+        IOSProfileRows {
           ForEach(model.profiles) { profile in
             Button {
               model.openProfile(profile)
@@ -62,6 +59,49 @@ struct IOSProfilesView: View {
       .containerRelativeFrame(.vertical, alignment: .center) { length, _ in length }
     }
     .scrollBounceBehavior(.basedOnSize)
+  }
+}
+
+/// Center each row, including a single profile and the last partially filled row.
+private struct IOSProfileRows: Layout {
+  private func dimensions(_ proposal: ProposedViewSize, count: Int) -> (
+    width: CGFloat, columns: Int
+  ) {
+    let width = min(560, max(0, proposal.width ?? 560))
+    let columns = max(1, min(count, Int((width + 20) / 140)))
+    return (min(160, max(0, (width - CGFloat(columns - 1) * 20) / CGFloat(columns))), columns)
+  }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    let (width, columns) = dimensions(proposal, count: subviews.count)
+    let heights = subviews.map { $0.sizeThatFits(.init(width: width, height: nil)).height }
+    let rows = stride(from: 0, to: subviews.count, by: columns).map { start in
+      heights[start..<min(start + columns, heights.count)].max() ?? 0
+    }
+    return CGSize(
+      width: min(560, proposal.width ?? CGFloat(columns) * (width + 20) - 20),
+      height: rows.reduce(0, +) + CGFloat(max(0, rows.count - 1)) * 28)
+  }
+
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    let (width, columns) = dimensions(
+      .init(width: bounds.width, height: nil), count: subviews.count)
+    var y = bounds.minY
+    for start in stride(from: 0, to: subviews.count, by: columns) {
+      let end = min(start + columns, subviews.count)
+      let rowWidth = CGFloat(end - start) * width + CGFloat(end - start - 1) * 20
+      let heights = (start..<end).map {
+        subviews[$0].sizeThatFits(.init(width: width, height: nil)).height
+      }
+      for index in start..<end {
+        subviews[index].place(
+          at: CGPoint(x: bounds.midX - rowWidth / 2 + CGFloat(index - start) * (width + 20), y: y),
+          anchor: .topLeading, proposal: .init(width: width, height: heights[index - start]))
+      }
+      y += (heights.max() ?? 0) + 28
+    }
   }
 }
 
@@ -325,7 +365,8 @@ private struct IOSPINKeyStyle: ButtonStyle {
       }
       .contentShape(Circle())
       .opacity(enabled ? 1 : 0.4)
-      .animation(.easeOut(duration: configuration.isPressed ? 0.02 : 0.25), value: configuration.isPressed)
+      .animation(
+        .easeOut(duration: configuration.isPressed ? 0.02 : 0.25), value: configuration.isPressed)
   }
 }
 

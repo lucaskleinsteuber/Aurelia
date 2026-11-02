@@ -799,11 +799,9 @@ final class IOSAppModel: ObservableObject {
         let snapshots = await environment.outbox.pendingSnapshots(scope: scope)
         guard !Task.isCancelled, self.session?.sessionId == sessionID else { return }
         pendingProgress = snapshots
-        if change.storageFailed {
+        if change.requiresUserAttention {
           progressWarning =
             "Playback progress could not be saved on this device. Free storage and try again."
-        } else if change.state == .conflict {
-          progressWarning = "Progress changed on another device. Its newer position has been kept."
         }
         if let progress = change.progress {
           acknowledgedProgress[progress.mediaId] = progress

@@ -6,29 +6,33 @@ struct IOSPosterLabel: View {
   let item: IOSCatalogItem
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      IOSArtworkView(artwork: item.poster, width: 320, symbol: item.kind == .series ? "tv" : "film")
-        .aspectRatio(2 / 3, contentMode: .fit)
-        .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(5) }
-        .overlay(alignment: .bottom) {
-          if let fraction = item.progressFraction {
-            IOSProgressBar(fraction: fraction).padding(.horizontal, 8).padding(.bottom, 8)
-          }
+      IOSArtworkView(
+        artwork: item.poster, width: 320,
+        symbol: item.kind == .series || item.kind == .episode ? "tv" : "film"
+      )
+      .aspectRatio(2 / 3, contentMode: .fit)
+      .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(5) }
+      .overlay(alignment: .bottom) {
+        if let fraction = item.progressFraction {
+          IOSProgressBar(fraction: fraction).padding(.horizontal, 8).padding(.bottom, 8)
         }
-        .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
-        .overlay {
-          RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous)
-            .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
-        }
+      }
+      .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous)
+          .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+      }
       VStack(alignment: .leading, spacing: 1) {
         Text(item.title).font(.footnote.weight(.semibold)).lineLimit(1)
-        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Text(item.cardSubtitle).font(.caption).foregroundStyle(.secondary)
+          .lineLimit(item.kind == .episode ? 2 : 1)
+        if item.kind == .episode, let availability = item.availabilityMessage {
+          Text(availability).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        }
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .opacity(item.isPlayable || item.kind == .series ? 1 : 0.6)
-  }
-  private var subtitle: String {
-    item.availabilityMessage ?? item.year.map(String.init) ?? item.kindLabel
   }
 }
 
@@ -75,17 +79,18 @@ struct IOSArtworkView: View {
         }
       }
       .clipped()
-    .animation(.easeOut(duration: 0.2), value: image != nil)
-    .task(id: key) {
-      image = nil
-      guard let artwork, let api = model.client, key != nil else { return }
-      let sessionID = model.session?.sessionId
-      do {
-        let decoded = try await model.artwork.image(artwork: artwork, width: requestWidth, api: api)
-        guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
-        image = decoded
-      } catch {}
-    }
+      .animation(.easeOut(duration: 0.2), value: image != nil)
+      .task(id: key) {
+        image = nil
+        guard let artwork, let api = model.client, key != nil else { return }
+        let sessionID = model.session?.sessionId
+        do {
+          let decoded = try await model.artwork.image(
+            artwork: artwork, width: requestWidth, api: api)
+          guard !Task.isCancelled, model.session?.sessionId == sessionID else { return }
+          image = decoded
+        } catch {}
+      }
   }
 
   /// The server renders only these widths; any other request is rejected. A phone screen has

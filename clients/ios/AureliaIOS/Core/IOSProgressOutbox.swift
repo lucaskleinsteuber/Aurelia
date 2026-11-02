@@ -166,6 +166,10 @@ struct IOSProgressOutboxChange: Sendable {
   let progress: IOSPlaybackProgress?
   let state: IOSProgressSaveState?
   let storageFailed: Bool
+
+  /// Background reconciliation needs no acknowledgement when the server already has a newer
+  /// position. The active player reports its own conflicts without blocking library browsing.
+  var requiresUserAttention: Bool { storageFailed }
 }
 
 /// Only identifiers, positions and concurrency tokens enter the journal.
