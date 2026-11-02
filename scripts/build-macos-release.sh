@@ -190,8 +190,6 @@ DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   build
 
 /usr/bin/ditto "$derived_data/Build/Products/Release/Aurelia.app" "$candidate"
-python3 "$repository_root/scripts/verify-vlc-audio-filters.py" \
-  "$candidate/Contents/Frameworks/VLCKit.framework/VLCKit"
 for agent in com.lucas.aurelia.media.host.background com.lucas.aurelia.media.host.login; do
   agent_plist="$candidate/Contents/Library/LaunchAgents/$agent.plist"
   /usr/bin/plutil -lint "$agent_plist"
@@ -251,6 +249,8 @@ done < <(find "$candidate/Contents/Resources/Server" -type f -print0)
 
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   "$candidate/Contents/Frameworks/VLCKit.framework"
+python3 "$repository_root/scripts/verify-vlc-audio-filters.py" \
+  "$candidate/Contents/Frameworks/VLCKit.framework/VLCKit"
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app"
