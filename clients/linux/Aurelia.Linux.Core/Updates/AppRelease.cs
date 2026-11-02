@@ -9,7 +9,7 @@ public enum LinuxPackageKind { Debian, Rpm, Arch, Flatpak }
 public sealed record AppRelease(string Tag, Version Version, int Build, string Notes, string FileName, Uri Download,
     Uri Checksums, long Bytes)
 {
-    public const string Repository = "lucasfd3/Aurelia";
+    public const string Repository = "lucaskleinsteuber/Aurelia";
     public const string TagPrefix = "linux-app-";
 
     public static (Version Version, int Build)? ParseTag(string tag)

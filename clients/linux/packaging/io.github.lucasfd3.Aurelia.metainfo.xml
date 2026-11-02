@@ -14,7 +14,7 @@
     </p>
   </description>
   <launchable type="desktop-id">io.github.lucasfd3.Aurelia.desktop</launchable>
-  <url type="homepage">https://github.com/lucasfd3/Aurelia</url>
+  <url type="homepage">https://github.com/lucaskleinsteuber/Aurelia</url>
   <content_rating type="oars-1.1" />
   <releases>
     <release version="@VERSION@" date="@DATE@" />

@@ -111,7 +111,7 @@ These rules apply to every task in this repository.
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published.
-- Aurelia for Linux (`clients/linux`, 1.0.0 (6)) is the native Linux desktop
+- Aurelia for Linux (`clients/linux`, 1.0.1 (7)) is the native Linux desktop
   app, with library browsing, playback, settings, server administration and optional hosting
   on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
   its own version counter (`Version` and `AureliaLinuxBuildNumber` in

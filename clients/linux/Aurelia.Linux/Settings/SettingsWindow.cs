@@ -9,6 +9,7 @@ using Aurelia.Linux.Core.Platform;
 using Aurelia.Linux.Core.Hosting;
 using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Core.Settings;
+using Aurelia.Linux.Core.Updates;
 using Aurelia.Linux.Library;
 using Aurelia.Linux.Management;
 using Aurelia.Linux.Views;
@@ -620,7 +621,7 @@ public sealed class SettingsWindow : Window
                 Margin = new Thickness(16, 12),
                 Children =
                 {
-                    new TextBlock { Text = "For a private repository, use a fine-grained GitHub token with Contents: Read-only access to lucasfd3/Aurelia. It stays in your desktop keyring and is sent only to GitHub's API.", TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } },
+                    new TextBlock { Text = $"For a private repository, use a fine-grained GitHub token with Contents: Read-only access to {AppRelease.Repository}. It stays in your desktop keyring and is sent only to GitHub's API.", TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } },
                     token, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { save, remove } }, message,
                 },
             }));

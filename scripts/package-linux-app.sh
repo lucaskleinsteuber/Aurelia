@@ -22,7 +22,7 @@ name=aurelia-desktop
 app_id=io.github.lucasfd3.Aurelia
 base="Aurelia-Desktop-$version-$build"
 summary="Watch the movies and TV shows on your Aurelia server"
-homepage=https://github.com/lucasfd3/Aurelia
+homepage=https://github.com/lucaskleinsteuber/Aurelia
 formats="${AURELIA_LINUX_PACKAGE_FORMATS:-deb rpm arch flatpak}"
 normalized_formats=''
 for format in $formats; do

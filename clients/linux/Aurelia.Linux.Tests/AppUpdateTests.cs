@@ -72,6 +72,34 @@ public sealed class AppUpdateTests
     }
 
     [Fact]
+    public async Task ReadsTheCanonicalRepositoryAndItsUploadedAssetsWithoutARedirect()
+    {
+        var handler = new CanonicalRepositoryHandler();
+        using var source = new GitHubReleaseSource(new FakeTokens(), handler);
+
+        var releases = await source.ReleasesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases?per_page=100", Assert.Single(handler.Requests));
+        var release = AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4);
+        Assert.NotNull(release);
+        Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/10", release.Download.AbsoluteUri);
+        Assert.Equal("synthetic-checksums", await source.ChecksumsAsync(release, TestContext.Current.CancellationToken));
+        Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/11", handler.Requests[1]);
+    }
+
+    [Theory]
+    [InlineData("someone-else/Aurelia")]
+    [InlineData("lucaskleinsteuber/AnotherRepository")]
+    public void RejectsPackagesAndChecksumsFromAnotherRepository(string repository)
+    {
+        foreach (var index in new[] { 0, 1 })
+        {
+            var release = ReleaseNode("linux-app-1.0.0-5");
+            release["assets"]![index]!["url"] = $"https://api.github.com/repos/{repository}/releases/assets/10";
+            Assert.Null(AppRelease.Newest(new JsonArray(release), LinuxPackageKind.Arch, new Version(0, 3, 0), 4));
+        }
+    }
+
+    [Fact]
     public void ChecksumMustIdentifyTheExactPackageOnce()
     {
         var hash = new string('a', 64);
@@ -260,8 +288,8 @@ public sealed class AppUpdateTests
         ["draft"] = false,
         ["prerelease"] = false,
         ["assets"] = new JsonArray(
-            new JsonObject { ["name"] = FileName, ["state"] = "uploaded", ["size"] = (long)Package.Length, ["url"] = "https://api.github.com/repos/lucasfd3/Aurelia/releases/assets/10" },
-            new JsonObject { ["name"] = "SHA256SUMS", ["state"] = "uploaded", ["size"] = 100, ["url"] = "https://api.github.com/repos/lucasfd3/Aurelia/releases/assets/11" }),
+            new JsonObject { ["name"] = FileName, ["state"] = "uploaded", ["size"] = (long)Package.Length, ["url"] = "https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/10" },
+            new JsonObject { ["name"] = "SHA256SUMS", ["state"] = "uploaded", ["size"] = 100, ["url"] = "https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/11" }),
     };
 
     private sealed class FakeSource : IReleaseSource
@@ -310,6 +338,21 @@ public sealed class AppUpdateTests
             return Task.FromResult(Authorization.Count == 1
                 ? new HttpResponseMessage(HttpStatusCode.Found) { Headers = { Location = new Uri("https://release-assets.githubusercontent.com/test?temporary=1") } }
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("synthetic-checksums") });
+        }
+    }
+
+    private sealed class CanonicalRepositoryHandler : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
+        {
+            Requests.Add(request.RequestUri!.AbsoluteUri);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(Requests.Count == 1
+                    ? new JsonArray(ReleaseNode("linux-app-1.0.0-5")).ToJsonString()
+                    : "synthetic-checksums"),
+            });
         }
     }
 }
