@@ -32,9 +32,9 @@ your home network unless you want it to.
 | Product | Version | Build | Download / availability |
 | --- | --- | --- | --- |
 | **Mac & Server** | 1.26.6 | 123 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.26.6-123) |
-| **Linux Desktop** | 1.0.1 | 7 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.0.1-7) |
-| **Apple TV** | 1.3.2 | 25 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/clients/tvos/README.md) |
-| **iPhone & iPad** | 1.0.3 | 4 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md) |
+| **Linux Desktop** | 1.0.2 | 8 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.0.2-8) |
+| **Apple TV** | 1.4.0 | 26 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/clients/tvos/README.md) |
+| **iPhone & iPad** | 1.1.0 | 5 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md) |
 <!-- release-versions:end -->
 
 Each app has its own Semantic Versioning counter. Mac and server share one version.
