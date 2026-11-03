@@ -59,8 +59,6 @@ The owner assesses speech and loud/quiet transitions manually.
 ## Product versions
 
 `docs/RELEASE_VERSIONS.json` records delivered or actually verified product versions.
-`scripts/release-versions.py --readme` renders that record in the README. Both release
-publishers render the same four rows, overriding only their own verified candidate.
 Prepared future builds must not be recorded as already delivered. Existing tags,
 package names, bundle IDs and independent update channels remain compatible.
 

@@ -1,8 +1,8 @@
 # Security policy
 
 Please reproduce a suspected vulnerability on the latest release of the affected
-Aurelia product if you can do so safely. The [README](README.md#current-versions)
-lists the current versions for each product.
+Aurelia product if you can do so safely. See [GitHub Releases](https://github.com/lucaskleinsteuber/Aurelia/releases)
+for published builds.
 
 Report vulnerabilities through [GitHub Security Advisories](https://github.com/lucaskleinsteuber/Aurelia/security/advisories/new)
 when private reporting is available. Otherwise, use a private contact method listed

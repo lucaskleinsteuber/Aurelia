@@ -42,13 +42,6 @@ checksums="$output/SHA256SUMS"
 files+=("$checksums")
 notes_file="${AURELIA_RELEASE_NOTES:-$other_root/Release Notes/$tag.md}"
 [ -s "$notes_file" ] || { echo "Write the Linux desktop release notes to $notes_file first." >&2; exit 1; }
-rendered_notes=$(mktemp)
-trap 'rm -f "$rendered_notes"' EXIT
-cat "$notes_file" > "$rendered_notes"
-printf '\n\n## Product versions\n\n' >> "$rendered_notes"
-python3 "$repository_root/scripts/release-versions.py" --product linux --version "$version" --build "$build" >> "$rendered_notes"
-notes_file=$rendered_notes
-
 if gh release view "$tag" >/dev/null 2>&1; then
   [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ] \
     || { echo "$tag is already published; published downloads are not replaced." >&2; exit 1; }

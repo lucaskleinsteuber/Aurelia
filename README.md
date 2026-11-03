@@ -26,20 +26,6 @@ the Apple TV app: posters and backdrops, seasons and episodes, Continue Watching
 and a profile for everyone at home. Your files stay exactly where they are, and nothing leaves
 your home network unless you want it to.
 
-## Current versions
-
-<!-- release-versions:start -->
-| Product | Version | Build | Download / availability |
-| --- | --- | --- | --- |
-| **Mac & Server** | 1.27.8 | 132 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.8-132) |
-| **Linux Desktop** | 1.1.0 | 9 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.1.0-9) |
-| **Apple TV** | 1.4.0 | 26 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/clients/tvos/README.md) |
-| **iPhone & iPad** | 1.1.0 | 5 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md) |
-<!-- release-versions:end -->
-
-Each app has its own Semantic Versioning counter. Mac and server share one version.
-The Mac/server channel remains GitHub’s Latest release; Linux Desktop updates independently.
-
 ## At a glance
 
 | | |

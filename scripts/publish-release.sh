@@ -85,12 +85,6 @@ else
 $downloads"
 fi
 
-notes="$notes
-
-## Product versions
-
-$(python3 "$repository_root/scripts/release-versions.py" --product mac --version "$version" --build "$build")"
-
 # Large uploads sometimes fail over HTTP/2 with HTTP 408; retry them one by one over HTTP/1.1.
 upload() {
   gh release upload "$tag" "$@" --clobber && return 0

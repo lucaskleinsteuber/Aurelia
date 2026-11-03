@@ -240,11 +240,9 @@ These rules apply to every task in this repository.
 
 ## Public distribution
 
-- Keep independent MAJOR.MINOR.PATCH product versions. README and every regular
-  release show Mac & Server, Linux Desktop, Apple TV and iPhone & iPad with version,
-  build and download/development availability. Record only delivered or actually
-  verified versions in `docs/RELEASE_VERSIONS.json`; render with
-  `scripts/release-versions.py`. Mac/server stays Latest; Linux keeps its own tags.
+- Keep independent MAJOR.MINOR.PATCH product versions. Track verified releases in
+  `docs/RELEASE_VERSIONS.json`. Keep cross-product version tables out of the README
+  and release descriptions. Mac/server stays Latest; Linux keeps its own tags.
 - The owner amended the anonymous Mac updater test on 03.11.2026: use the main
   `lucaskleinsteuber/Aurelia` repository while they explicitly make it public, then
   restore its private visibility after the test. The existing Linux preparation
