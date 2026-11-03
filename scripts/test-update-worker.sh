@@ -54,7 +54,22 @@ import Foundation
   let root = URL(fileURLWithPath: ROOT)
   if Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String == "101" {
    try! JSONSerialization.data(withJSONObject: ["build": 101, "windows": NSApplication.shared.windows.count]).write(to: root.appendingPathComponent("relaunch.json"))
-   NSApplication.shared.terminate(nil); return
+   Task { @MainActor in
+    let label = try! String(contentsOf: root.appendingPathComponent("job.txt"), encoding: .utf8)
+    for _ in 0..<100 {
+     let probe = Process(); probe.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+     probe.arguments = ["list", label]; probe.standardOutput = FileHandle.nullDevice; probe.standardError = FileHandle.nullDevice
+     do { try probe.run() } catch { exit(6) }
+     probe.waitUntilExit()
+     if probe.terminationStatus != 0 {
+      try! Data("still running after installer cleanup".utf8).write(to: root.appendingPathComponent("relaunch-survived.txt"))
+      NSApplication.shared.terminate(nil); return
+     }
+     try? await Task.sleep(for: .milliseconds(50))
+    }
+    exit(7)
+   }
+   return
   }
   Task { @MainActor in
    do {
@@ -132,6 +147,9 @@ import Foundation
             print('PASS: production request, app quit, signed DMG, signature/team/build checks, bundle replacement and automatic relaunch completed; no windows or media.',flush=True)
         label=(root/'job.txt').read_text()
         wait_for(lambda:subprocess.run(['/bin/launchctl','list',label],capture_output=True).returncode!=0)
+        if mode=='install':
+            wait_for(lambda:(root/'relaunch-survived.txt').exists())
+            print('PASS: the automatically relaunched app remained alive after its installer job was removed.',flush=True)
         receipts.append({'scenario':mode,'passed':True,'transientJobRemoved':True})
     proof=artifacts/'Logs'/('update-worker-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'.json')
     proof.write_text(json.dumps(receipts,indent=2)+'\n')
