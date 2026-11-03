@@ -33,6 +33,8 @@ ensure_running() {
 # Updates come from the GitHub Releases of the repository the package was built from. A private
 # repository needs a read-only token, which only root may read.
 token_file=/etc/aurelia/github-token
+# "beta" here also offers GitHub pre-releases (test versions); set with: sudo aurelia update --beta on
+channel_file=/etc/aurelia/update-channel
 update_api=${AURELIA_UPDATE_API:-https://api.github.com}
 update_repository=${AURELIA_UPDATE_REPOSITORY:-$(cat "$install_root/REPOSITORY" 2>/dev/null || true)}
 update_token=""
@@ -92,11 +94,11 @@ github_failed() {
 }
 
 # The published release with the highest build that has a package for this computer ($arch) and
-# a checksum list, as build, version, file name, file and checksum addresses; drafts and
-# pre-releases are skipped. Prints nothing when there is none.
+# a checksum list, as build, version, file name, file and checksum addresses; drafts are skipped,
+# and pre-releases unless the beta channel is on. Prints nothing when there is none.
 newest_package() {
-  jq -r --arg arch "$arch" '
-    [ .[] | select((.draft | not) and (.prerelease | not))
+  jq -r --arg arch "$arch" --argjson beta "${beta_updates:-false}" '
+    [ .[] | select((.draft | not) and ($beta or (.prerelease | not)))
       | first(.assets[] | select(.name == "SHA256SUMS") | .url) as $sums
       | .assets[]
       | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
@@ -124,6 +126,7 @@ Aurelia Server
   aurelia version
   sudo aurelia update [--check] [--yes]       Install the newest version from GitHub
   sudo aurelia update --set-token             Save the GitHub token a private download needs
+  sudo aurelia update --beta on|off           Also install test versions (pre-releases)
                                               Updates can also be installed in Aurelia on a Mac
   sudo aurelia uninstall [--remove-data]      Server data stays unless --remove-data
 
@@ -283,6 +286,15 @@ case "$command" in
     check_only=false assume_yes=false set_token=false from_app=false
     while [ $# -gt 0 ]; do
       case "$1" in
+        --beta)
+          case "${2:-}" in
+            on) install -d -m 0755 "$(dirname "$channel_file")"; printf 'beta\n' > "$channel_file"
+                echo "Beta updates are on: sudo aurelia update also installs test versions." ;;
+            off) rm -f "$channel_file"
+                echo "Beta updates are off. An installed beta stays until a newer stable release arrives." ;;
+            *) echo "Use: sudo aurelia update --beta on|off" >&2; exit 2 ;;
+          esac
+          exit 0 ;;
         --check) check_only=true ;;
         --yes|-y) assume_yes=true ;;
         --set-token) set_token=true ;;
@@ -348,7 +360,14 @@ case "$command" in
     # although they exist, so it is only asked when the latest release has no package for this
     # computer, and an empty answer is asked again a few times before it counts.
     newest=""
-    status=$(github_fetch "$releases/latest" "$work/latest.json")
+    beta_updates=false
+    [ "$(cat "$channel_file" 2>/dev/null)" = beta ] && beta_updates=true
+    # GitHub's latest release is never a pre-release, so the beta channel reads the list.
+    if $beta_updates; then
+      status=404
+    else
+      status=$(github_fetch "$releases/latest" "$work/latest.json")
+    fi
     if [ "$status" = 200 ]; then
       jq '[.]' "$work/latest.json" > "$work/releases.json"
       newest=$(newest_package "$work/releases.json")

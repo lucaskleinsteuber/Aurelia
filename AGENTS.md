@@ -241,9 +241,10 @@ These rules apply to every task in this repository.
 
 ## Public distribution
 
-- Release channels: publish every new Mac and Linux Desktop test build as a beta
-  (`scripts/publish-release.sh --beta`, with `--linux-app` for Linux), a GitHub pre-release
-  that only apps with **Beta updates** turned on offer; the owner's apps have it on. Make a
+- Release channels: publish every new Mac, Server and Linux Desktop test build as a beta
+  (`scripts/publish-release.sh --beta`, with `--server` or `--linux-app`), a GitHub pre-release
+  that only apps with **Beta updates** turned on offer (servers: `sudo aurelia update --beta on`);
+  the owner's apps and server have it on. Make a
   stable release only when the owner says the tested beta is good, with
   `scripts/publish-release.sh --promote <tag>` (same downloads, no rebuild), usually one or two
   a week and never several a day. Only security or data-loss fixes may go stable directly.

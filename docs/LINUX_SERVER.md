@@ -52,6 +52,7 @@ built from:
 sudo aurelia update --check   # show the installed and the newest version
 sudo aurelia update           # asks, then downloads and installs the newest version
 sudo aurelia update --yes     # without asking
+sudo aurelia update --beta on # also install test versions (pre-releases); --beta off stops that
 ```
 
 From version 1.8.7 Aurelia on a Mac shows the installed and the newest version under

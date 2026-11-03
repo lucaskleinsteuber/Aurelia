@@ -214,12 +214,26 @@ public sealed partial class MetadataJobWorker(
             }
             var title = item.Metadata?.ManualTitle ?? item.OverrideTitle ?? item.DetectedTitle;
             var candidates = await tmdb.SearchAsync(settings.Token, settings.Language, item.Kind, title, item.Year, token);
+            // TMDB filters strictly by year, and some titles are only found by their main part. Each
+            // further search runs only when the previous one found nothing; the year still counts
+            // when the results are scored.
+            if (candidates.Count == 0 && item.Year is not null)
+            {
+                candidates = Rescore(await tmdb.SearchAsync(settings.Token, settings.Language, item.Kind, title, null, token), title, item.Year);
+            }
+            foreach (var fallback in MetadataMatcher.FallbackQueries(title))
+            {
+                if (candidates.Count > 0) break;
+                candidates = Rescore(await tmdb.SearchAsync(settings.Token, settings.Language, item.Kind, fallback, null, token), fallback, item.Year);
+                if (candidates.Count > 0) title = fallback;
+            }
             if (!await CanApplyAsync(token))
             {
                 await CompleteAsync(MetadataWorkState.Skipped);
                 return true;
             }
-            var match = MetadataMatcher.SelectAutomaticMatch(candidates, title, item.Year);
+            var match = MetadataMatcher.SelectAutomaticMatch(candidates, title, item.Year)
+                ?? await SelectBySignalsAsync(database, tmdb, settings.Token, item, candidates, title, token);
             if (match is not null)
             {
                 var details = await tmdb.GetAsync(settings.Token, settings.Language, match.MediaType, match.ProviderMediaId, token);
@@ -375,6 +389,42 @@ public sealed partial class MetadataJobWorker(
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception error) when (StorageRecovery.IsRecoverable(error)) { }
+    }
+
+    private static List<MetadataCandidateSummary> Rescore(IReadOnlyList<MetadataCandidateSummary> candidates, string title, int? year) =>
+        candidates.Select(candidate => candidate with
+        {
+            Confidence = MetadataMatcher.Score(title, year, candidate.Title, candidate.OriginalTitle, candidate.Year),
+        }).OrderByDescending(candidate => candidate.Confidence).ToList();
+
+    /// <summary>
+    /// Several titles with the same name: compares a series' seasons and episodes here with what TMDB
+    /// lists (at most four lookups), then how well known each title is.
+    /// </summary>
+    private static async Task<MetadataCandidateSummary?> SelectBySignalsAsync(
+        AureliaDbContext database, ITmdbClient tmdb, string providerToken, MediaItem item,
+        IReadOnlyList<MetadataCandidateSummary> candidates, string title, CancellationToken token)
+    {
+        MetadataMatcher.LocalShape? local = null;
+        Dictionary<string, TmdbShowShape>? shapes = null;
+        var normalized = FilenameMetadataParser.NormalizeMatchTitle(title);
+        var sameName = candidates.Where(candidate => candidate.MediaType == "tv"
+            && (FilenameMetadataParser.NormalizeMatchTitle(candidate.Title) == normalized
+                || FilenameMetadataParser.NormalizeMatchTitle(candidate.OriginalTitle ?? "") == normalized)).Take(4).ToList();
+        if (item.Kind == MediaKind.Series && item.Year is null && sameName.Count > 1)
+        {
+            var episodes = await database.MediaItems.AsNoTracking()
+                .Where(value => value.ParentId == item.Id && value.Kind == MediaKind.Episode)
+                .Select(value => value.SeasonNumber).ToListAsync(token);
+            local = new MetadataMatcher.LocalShape(episodes.Max(), episodes.Count);
+            shapes = [];
+            foreach (var candidate in sameName)
+            {
+                shapes[candidate.ProviderMediaId] = await tmdb.GetShowShapeAsync(providerToken, candidate.ProviderMediaId, token);
+            }
+        }
+
+        return MetadataMatcher.SelectBySignals(candidates, title, item.Year, local, shapes);
     }
 
     private static async Task StoreReviewAsync(AureliaDbContext database, MediaItem item, IReadOnlyList<MetadataCandidateSummary> candidates, CancellationToken token)

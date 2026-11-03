@@ -223,6 +223,9 @@ public static partial class FilenameMetadataParser
     {
         var title = value.Replace('.', ' ').Replace('_', ' ');
         title = NoiseExpression().Replace(title, string.Empty);
+        // Edition and container words at the end ("Remastered", "Mini Series", "Mp4") are not
+        // part of the title; a year before them stays, so it can still be recognized.
+        title = EditionSuffixExpression().Replace(title, string.Empty);
         title = WhitespaceExpression().Replace(title, " ");
         title = title.Trim(' ', '-', '–', '—', '[', ']', '(', ')');
         return string.IsNullOrWhiteSpace(title) ? null : title;
@@ -284,4 +287,7 @@ public static partial class FilenameMetadataParser
 
     [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
     private static partial Regex WhitespaceExpression();
+
+    [GeneratedRegex(@"(?<=\S)(?:[\s()\[\]-]+(?:remastered|restored|extended(?:[\s-]+(?:cut|edition|version))?|director'?s[\s-]+cut|unrated|uncut|theatrical[\s-]+cut|special[\s-]+edition|anniversary[\s-]+edition|imax|mini[\s-]?series|limited[\s-]+series|complete[\s-]+series|mp4|mkv|m4v|avi|mov))+[\s()\[\]-]*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EditionSuffixExpression();
 }

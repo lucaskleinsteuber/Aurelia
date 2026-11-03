@@ -12,6 +12,18 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Server 1.28.0 (135)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.28.0-135) - 04.11.2026
+
+### Added
+
+- Beta updates for the Linux server: `sudo aurelia update --beta on` also installs test versions.
+
+### Changed
+
+- Fewer titles need confirmation after a TMDB search: when several shows share a name, the one whose seasons and episodes fit the files, or a far better-known one, is chosen; a release year one off is accepted for a single exact title.
+- Titles TMDB does not find as a whole are searched again without the year filter and by their main part before a dash or colon.
+- File and folder names drop trailing edition and container words such as "Remastered", "Director's Cut", "Mini Series" or "Mp4", so a year before them is recognized.
+
 ## [Mac 1.28.0 (137)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.28.0-137) - 04.11.2026
 
 ### Added

@@ -404,7 +404,8 @@ public sealed record MetadataCandidateSummary(
     int? Year,
     string? Overview,
     string? PosterPath,
-    double Confidence);
+    double Confidence,
+    int? VoteCount = null);
 
 public sealed record SelectMetadataMatchRequest(
     string ProviderMediaId,

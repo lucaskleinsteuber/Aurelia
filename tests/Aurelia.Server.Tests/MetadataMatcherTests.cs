@@ -32,6 +32,68 @@ public sealed class MetadataMatcherTests
     }
 
     [Fact]
+    public void FilenamesDropEditionAndContainerWordsAndKeepTheYear()
+    {
+        Assert.Equal(new FilenameMetadataParser.MovieIdentity("Harbor Lights", 2000),
+            FilenameMetadataParser.Movie("/media/Harbor Lights 2000 Remastered.mkv"));
+        Assert.Equal(new FilenameMetadataParser.MovieIdentity("Harbor Lights", 2000),
+            FilenameMetadataParser.Movie("/media/Harbor.Lights.2000.Directors.Cut.mkv"));
+        Assert.Equal("One Day On Mars", FilenameMetadataParser.Series("/media/One Day On Mars Mini Series Mp4").Title);
+        // Only trailing words are removed: titles that merely contain such a word keep it.
+        Assert.Equal("Uncut Diamonds", FilenameMetadataParser.Series("/media/Uncut Diamonds").Title);
+        Assert.Equal("My Extended Family", FilenameMetadataParser.Series("/media/My Extended Family").Title);
+    }
+
+    [Fact]
+    public void SameNamedShowsAreToldApartBySeasonsEpisodesAndVotes()
+    {
+        var classic = Candidate("10", "Road Test", 1977, 0.96) with { VoteCount = 12 };
+        var modern = Candidate("11", "Road Test", 2002, 0.96) with { VoteCount = 2400 };
+        var remake = Candidate("12", "Road Test", 2010, 0.96) with { VoteCount = 300 };
+        Assert.Null(MetadataMatcher.SelectAutomaticMatch([classic, modern, remake], "Road Test", null));
+
+        // Only one show has as many seasons and episodes as the files here.
+        var shapes = new Dictionary<string, TmdbShowShape>
+        {
+            ["10"] = new(4, 40),
+            ["11"] = new(33, 250),
+            ["12"] = new(6, 70),
+        };
+        Assert.Equal(modern, MetadataMatcher.SelectBySignals(
+            [classic, modern, remake], "Road Test", null, new MetadataMatcher.LocalShape(20, 150), shapes));
+        // Several shows fit: the far better known one wins only with five times the votes.
+        Assert.Equal(modern, MetadataMatcher.SelectBySignals(
+            [classic, modern, remake], "Road Test", null, new MetadataMatcher.LocalShape(2, 10), shapes));
+        Assert.Null(MetadataMatcher.SelectBySignals(
+            [modern, remake with { VoteCount = 1000 }], "Road Test", null));
+        // Little-known titles never decide by votes.
+        Assert.Null(MetadataMatcher.SelectBySignals(
+            [classic with { VoteCount = 15 }, remake with { VoteCount = 0 }], "Road Test", null));
+        // A different title is never chosen, however popular.
+        Assert.Null(MetadataMatcher.SelectBySignals([modern], "Road Trip", null));
+    }
+
+    [Fact]
+    public void AYearOneOffIsAcceptedOnlyForASingleExactTitle()
+    {
+        var film = Candidate("20", "Quiet Harbor", 2019, 0.82);
+        Assert.Null(MetadataMatcher.SelectAutomaticMatch([film], "Quiet Harbor", 2018));
+        Assert.Equal(film, MetadataMatcher.SelectBySignals([film], "Quiet Harbor", 2018));
+        Assert.Null(MetadataMatcher.SelectBySignals([film], "Quiet Harbor", 2016));
+        Assert.Null(MetadataMatcher.SelectBySignals(
+            [film, Candidate("21", "Quiet Harbor", 2017, 0.82)], "Quiet Harbor", 2018));
+    }
+
+    [Fact]
+    public void LongTitlesAreAlsoSearchedByTheirMainPart()
+    {
+        Assert.Equal(["Die Jagd am Fluss"], MetadataMatcher.FallbackQueries("Die Jagd am Fluss - Eine lange Geschichte"));
+        Assert.Equal(["Deep Water"], MetadataMatcher.FallbackQueries("Deep Water: The Return"));
+        Assert.Empty(MetadataMatcher.FallbackQueries("Alien - Director"));
+        Assert.Empty(MetadataMatcher.FallbackQueries("Plain Title"));
+    }
+
+    [Fact]
     public void ExactYearAndOnePluralDifferenceAllowOnlyAnUnambiguousMatch()
     {
         var confidence = MetadataMatcher.Score(

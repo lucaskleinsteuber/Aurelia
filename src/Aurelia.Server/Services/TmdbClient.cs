@@ -33,7 +33,13 @@ public interface ITmdbClient
         string providerPath,
         string size,
         CancellationToken cancellationToken);
+
+    /// <summary>How many seasons and episodes TMDB lists for a show, to tell same-named shows apart.</summary>
+    Task<TmdbShowShape> GetShowShapeAsync(string token, string providerId, CancellationToken cancellationToken) =>
+        Task.FromResult(new TmdbShowShape(null, null));
 }
+
+public sealed record TmdbShowShape(int? Seasons, int? Episodes);
 
 public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : ITmdbClient
 {
@@ -82,8 +88,26 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
                 candidateYear,
                 GetString(result, "overview"),
                 GetString(result, "poster_path"),
-                confidence);
+                confidence,
+                result.TryGetProperty("vote_count", out var votes) && votes.ValueKind == JsonValueKind.Number
+                    && votes.TryGetInt32(out var voteCount) && voteCount >= 0 ? voteCount : null);
         }).OrderByDescending(candidate => candidate.Confidence).ToList();
+    }
+
+    public async Task<TmdbShowShape> GetShowShapeAsync(string token, string providerId, CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(providerId, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+        {
+            throw new MetadataException("invalid_metadata_match", "The metadata match is invalid.", StatusCodes.Status400BadRequest);
+        }
+
+        using var response = await SendAsync(token, $"tv/{providerId}", cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        static int? Count(JsonElement root, string name) =>
+            root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) && number >= 0
+                ? number : null;
+        return new TmdbShowShape(Count(document.RootElement, "number_of_seasons"), Count(document.RootElement, "number_of_episodes"));
     }
 
     public async Task<TmdbMetadata> GetAsync(
@@ -457,6 +481,73 @@ public static class MetadataMatcher
                 .Any(candidate => IsSinglePluralVariant(requestedTitle, candidate))
             ? best
             : null;
+    }
+
+    /// <summary>What this library holds of a series: its highest season number and its episode count.</summary>
+    public sealed record LocalShape(int? HighestSeason, int EpisodeCount);
+
+    /// <summary>
+    /// A second, careful step after <see cref="SelectAutomaticMatch"/>, for titles that are equal by name.
+    /// It accepts a candidate only when the other signals single it out: a year one off (regional release
+    /// dates), the only exact title, the only show with enough seasons and episodes for the files here, or
+    /// a show far better known than the rest with the same name (at least five times the votes).
+    /// </summary>
+    public static MetadataCandidateSummary? SelectBySignals(
+        IReadOnlyList<MetadataCandidateSummary> candidates,
+        string requestedTitle,
+        int? requestedYear,
+        LocalShape? local = null,
+        IReadOnlyDictionary<string, TmdbShowShape>? shapes = null)
+    {
+        var requested = Normalize(requestedTitle);
+        if (requested.Length == 0) return null;
+        var exact = candidates
+            .Where(candidate => Normalize(candidate.Title) == requested
+                || (candidate.OriginalTitle is { } original && Normalize(original) == requested))
+            .ToList();
+        if (exact.Count == 0) return null;
+        if (requestedYear is { } year)
+        {
+            var near = exact.Where(candidate => candidate.Year is { } candidateYear && Math.Abs(candidateYear - year) <= 1).ToList();
+            return near.Count == 1 ? near[0] : null;
+        }
+
+        if (exact.Count == 1) return exact[0];
+        var fitting = exact;
+        if (local is { } here && shapes is not null)
+        {
+            var fits = exact.Where(candidate => shapes.TryGetValue(candidate.ProviderMediaId, out var shape)
+                && shape.Seasons is { } seasons && seasons >= (here.HighestSeason ?? 1)
+                && (shape.Episodes is not { } episodes || episodes >= here.EpisodeCount)).ToList();
+            if (fits.Count == 1) return fits[0];
+            if (fits.Count > 1) fitting = fits;
+        }
+
+        var byVotes = fitting.OrderByDescending(candidate => candidate.VoteCount ?? 0).ToList();
+        var best = byVotes[0].VoteCount ?? 0;
+        var runnerUp = byVotes[1].VoteCount ?? 0;
+        return best >= 20 && best >= 5 * Math.Max(1, runnerUp) ? byVotes[0] : null;
+    }
+
+    /// <summary>
+    /// Shorter searches for a title TMDB does not find as a whole: the part before a dash or colon
+    /// ("Main Title - Long German Subtitle"), when it still has two words or more.
+    /// </summary>
+    public static IReadOnlyList<string> FallbackQueries(string title)
+    {
+        var queries = new List<string>();
+        foreach (var separator in new[] { " - ", " – ", " — ", ": " })
+        {
+            var index = title.IndexOf(separator, StringComparison.Ordinal);
+            if (index <= 0) continue;
+            var head = title[..index].Trim();
+            if (head.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 2 && !queries.Contains(head, StringComparer.OrdinalIgnoreCase))
+            {
+                queries.Add(head);
+            }
+        }
+
+        return queries;
     }
 
     public static bool IsUnambiguous(
