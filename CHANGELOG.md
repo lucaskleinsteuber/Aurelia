@@ -12,6 +12,12 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac/server 1.27.8 (132)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.8-132) - 03.11.2026
+
+### Changed
+
+- Provide a separate release to verify installation and automatic relaunch from the repaired Mac updater in 1.27.7.
+
 ## [Mac/server 1.27.7 (131)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.7-131) - 03.11.2026
 
 ### Fixed
