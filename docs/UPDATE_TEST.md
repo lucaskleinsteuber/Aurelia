@@ -33,10 +33,10 @@ never evidence that the installed app is current.
    exposed another real failure: Launch Services force-quit the subordinate GUI
    helper as the main app exited. Mac/server 1.27.5 (129) installs the independent
    worker repair. Its main-repository attempt to update to 1.27.6 (130) also failed
-   as described below. Mac/server 1.27.7 (131) is the next preparation build. Linux Desktop uses
+   as described below. Mac/server 1.27.7 (131) is the verified preparation build. Linux Desktop uses
    the original 1.0.2 (8) preparation.
 2. Publish the verified audio releases through the normal channels: Mac/server
-   the next verified Mac repair and Linux Desktop 1.1.0 (9). The Mac test uses the verified regular
+   1.27.8 (132) and Linux Desktop 1.1.0 (9). The Mac test uses the verified regular
    release in the temporarily public main repository. The Linux test keeps the exact
    verified packages already copied into the separate public download repository,
    with license notices and a short README; never copy private history or diagnostics there.
@@ -94,7 +94,9 @@ fixture without executing UI. A full run requires explicit per-run approval, the
 `AURELIA_UPDATE_UI_TESTS=1`; it shows temporary installer/test-app windows and checks
 survival, real DMG mount, identity/team/build/signature validation, replacement,
 automatic relaunch, and the new app remaining alive after the installer exits.
-It uses no automated input, personal App Group, server, library or media.
+It uses no automated input, personal App Group, server, library or media. The approved
+run on 03.11.2026 passed these synthetic checks. The owner-operated 131 → 132
+installation is a separate check.
 
 The client UI adds App Updates to startup, connection/rest and profile/PIN
 selection screens. It calls the standalone GitHub updater, without server/profile
