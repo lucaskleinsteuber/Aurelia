@@ -404,4 +404,11 @@
         fingerprint: TVUITestFixtures.fingerprint)
     }
   }
+
+  /// Answers every FRITZ!Box request with success; no network is used.
+  struct TVUITestRouterWakeTransport: TVRouterWakeTransport {
+    func send(_ request: URLRequest, username: String, password: String) async throws -> (
+      Data, Int
+    ) { (Data(), 200) }
+  }
 #endif

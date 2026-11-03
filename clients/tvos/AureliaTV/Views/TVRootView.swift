@@ -124,6 +124,7 @@ struct TVSavedServerView: View {
   @EnvironmentObject private var model: TVAppModel
   let name: String
   let chooseOtherServer: () -> Void
+  @State private var settingUpRouterWake = false
 
   var body: some View {
     VStack(spacing: 34) {
@@ -137,8 +138,12 @@ struct TVSavedServerView: View {
           )
           .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
           .frame(maxWidth: 1100)
-          Text("This Apple TV connects by itself as soon as the server is on.")
-            .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+          Text(
+            model.routerWake == nil
+              ? "This Apple TV connects by itself as soon as the server is on."
+              : "Aurelia asked your FRITZ!Box to wake it and connects as soon as the server is on."
+          )
+          .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
         }
         ZStack {
           if model.isBusy {
@@ -152,10 +157,18 @@ struct TVSavedServerView: View {
         ProgressView().scaleEffect(1.6).frame(height: 90)
         Text("Connecting to \(name)…").font(.system(size: 40, weight: .semibold))
       }
-      Button("Connect to Another Server", action: chooseOtherServer)
-        .font(.system(size: 24)).padding(.top, 20)
-        .accessibilityIdentifier("tv-other-server")
+      HStack(spacing: 30) {
+        if model.savedServerUnreachable {
+          Button(model.routerWake == nil ? "Wake with FRITZ!Box…" : "FRITZ!Box Wake Settings") {
+            settingUpRouterWake = true
+          }
+          .accessibilityIdentifier("tv-router-wake")
+        }
+        Button("Connect to Another Server", action: chooseOtherServer)
+          .accessibilityIdentifier("tv-other-server")
+      }.font(.system(size: 24)).padding(.top, 20)
     }
+    .fullScreenCover(isPresented: $settingUpRouterWake) { TVRouterWakeView() }
     .padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("tv-server-asleep")
     .task(id: model.savedServerUnreachable) {
@@ -250,6 +263,11 @@ struct TVConnectionMenu: View {
         } label: {
           Label("Playback Settings", systemImage: "play.rectangle").frame(width: 560)
         }.accessibilityIdentifier("profile-playback-settings")
+        NavigationLink {
+          TVRouterWakeView()
+        } label: {
+          Label("Wake with FRITZ!Box", systemImage: "power").frame(width: 560)
+        }.accessibilityIdentifier("profile-router-wake")
         Button {
           Task { await model.switchProfile() }
         } label: {

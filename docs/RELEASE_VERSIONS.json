@@ -19,8 +19,8 @@
   },
   {
     "product": "Apple TV",
-    "version": "1.4.0",
-    "build": 26,
+    "version": "1.5.0",
+    "build": 27,
     "guide": "clients/tvos/README.md"
   },
   {

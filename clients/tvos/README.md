@@ -21,7 +21,8 @@ like the Aurelia Mac app. Version 1.1.1 includes:
 - A clear "The Server Is Off" screen when the saved server does not answer: turn
   it on or open Aurelia on a Mac, and the Apple TV connects again by itself. The
   Apple TV also tries to wake the server with a Wake-on-LAN packet sent straight
-  to its last address
+  to its last address. With a FRITZ!Box, enter a FRITZ!Box user once (on that
+  screen or in the profile menu) and the router wakes the server reliably
 - Artwork kept on the Apple TV for each profile, so posters appear at once
   after the app restarts
 

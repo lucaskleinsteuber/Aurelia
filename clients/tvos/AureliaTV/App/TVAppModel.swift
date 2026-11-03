@@ -27,6 +27,8 @@ final class TVAppModel: ObservableObject {
   let artwork = TVArtworkPipeline()
   @Published var progressWarning: String?
   @Published private(set) var capabilities: TVCapabilities?
+  /// The FRITZ!Box sign-in used to wake the server, if one is set up on this Apple TV.
+  @Published private(set) var routerWake: TVRouterWake.Account?
   @Published private(set) var watchlistItems: [TVCatalogItem] = []
   @Published private(set) var watchlistIds: Set<UUID> = []
   @Published private(set) var home: TVHome?
@@ -69,6 +71,8 @@ final class TVAppModel: ObservableObject {
   /// screen left on for hours.
   private var wakeAllowedUntil: Date?
   private var isForeground = true
+  /// The FRITZ!Box is asked at most once a minute.
+  private var lastRouterWake: Date?
   private var outboxTransition: Task<Void, Never>?
 
   var client: TVAPIClient? {
@@ -77,7 +81,7 @@ final class TVAppModel: ObservableObject {
   }
 
   var browsePreferences: TVBrowsePreferenceStore { environment.browsePreferences }
-  init() {}
+  init() { routerWake = environment.routerWakeStore.load() }
 
   func start() async {
     guard !started else { return }
@@ -201,6 +205,45 @@ final class TVAppModel: ObservableObject {
   private func wakeIfAllowed(_ serverID: UUID) {
     guard isForeground, let until = wakeAllowedUntil, until > Date() else { return }
     TVWakeOnLan.wake(serverID: serverID)
+    guard let account = routerWake,
+      lastRouterWake.map({ Date().timeIntervalSince($0) >= 60 }) ?? true
+    else { return }
+    let cards = TVWakeOnLan.target(for: serverID)?.hardwareAddresses
+      .compactMap(TVWakeOnLan.hardwareAddress) ?? []
+    guard !cards.isEmpty else { return }
+    lastRouterWake = Date()
+    let transport = environment.routerWakeTransport
+    Task { _ = await TVRouterWake.wake(cards: cards, account: account, transport: transport) }
+  }
+
+  /// Checks the sign-in, then saves it. When the server's network card is known, the FRITZ!Box
+  /// is asked to wake it right away, which also proves the user may wake devices; a server that
+  /// is already on ignores it. Returns a message for the user when something is wrong.
+  func saveRouterWake(host: String, username: String, password: String) async -> String? {
+    guard let normalized = TVRouterWake.normalizedHost(host) else {
+      return TVRouterWake.Failure.invalidAddress.message
+    }
+    let account = TVRouterWake.Account(host: normalized, username: username, password: password)
+    let transport = environment.routerWakeTransport
+    let cards =
+      connection.flatMap { TVWakeOnLan.target(for: $0.serverID) }?.hardwareAddresses
+      .compactMap(TVWakeOnLan.hardwareAddress) ?? []
+    let failure =
+      cards.isEmpty
+      ? await TVRouterWake.check(account: account, transport: transport)
+      : await TVRouterWake.wake(cards: cards, account: account, transport: transport)
+    if let failure, failure != .unknownDevice { return failure.message }
+    do { try environment.routerWakeStore.save(account) } catch { return error.localizedDescription }
+    routerWake = account
+    if cards.isEmpty, connection != nil {
+      return "Saved. The server hasn’t told this Apple TV its network card yet; that happens the next time they connect."
+    }
+    return failure?.message
+  }
+
+  func removeRouterWake() {
+    environment.routerWakeStore.delete()
+    routerWake = nil
   }
 
   /// Stops trying the saved server, so another one can be chosen at once.

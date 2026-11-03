@@ -12,6 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Apple TV 1.5.0 (27) - 03.11.2026
+
+### Added
+
+- Wake a sleeping server through a FRITZ!Box: after you enter a FRITZ!Box user once, Apple TV asks the router to wake the server whenever it is off. This works without Apple's multicast permission.
+- Set it up from The Server Is Off screen or from the profile menu. The sign-in stays in this Apple TV's keychain, and the password is never shown again.
+
 ## [Mac 1.27.12 (136)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.12-136) - 03.11.2026
 
 ### Changed
