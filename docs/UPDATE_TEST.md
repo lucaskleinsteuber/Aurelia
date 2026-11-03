@@ -32,10 +32,11 @@ never evidence that the installed app is current.
    Mac/server 1.27.3 (127) repaired the quit path. Its attempt to update to 1.27.4
    exposed another real failure: Launch Services force-quit the subordinate GUI
    helper as the main app exited. Mac/server 1.27.5 (129) installs the independent
-   worker repair; the next normal update targets 1.27.6 (130). Linux Desktop uses
+   worker repair. Its main-repository attempt to update to 1.27.6 (130) also failed
+   as described below. Mac/server 1.27.7 (131) is the next preparation build. Linux Desktop uses
    the original 1.0.2 (8) preparation.
 2. Publish the verified audio releases through the normal channels: Mac/server
-   1.27.6 (130) and Linux Desktop 1.1.0 (9). The Mac test uses the verified regular
+   the next verified Mac repair and Linux Desktop 1.1.0 (9). The Mac test uses the verified regular
    release in the temporarily public main repository. The Linux test keeps the exact
    verified packages already copied into the separate public download repository,
    with license notices and a short README; never copy private history or diagnostics there.
@@ -76,11 +77,26 @@ AppKit's nested termination loop can hold that executor and starve its cleanup t
 `scripts/test-macos-termination.sh` exercises this production coordinator in actual
 sandboxed, windowless AppKit processes, including repeated quit requests.
 
-The AppKit helper submits a one-shot worker through launchd, then exits. Only that
-independent command-line role claims and acknowledges the request, installs, and
-relaunches the app; it removes its exact transient job afterward. No job file, login
-item or background-host preference is installed. `scripts/test-update-worker.sh`
-checks worker survival after its sandboxed parent exits, then performs the complete
-production transaction on signed invented bundles: request, real DMG mount, identity,
-team/build and signature checks, replacement, automatic relaunch and job cleanup.
-It creates no windows and accesses no personal App Group, server, library or media.
+The 1.27.5 preparation's main-repository attempt also failed: macOS unloaded the
+submitted background update job after the main app quit. The old fixture falsely
+passed because its caller was a background agent, unlike the real app. The corrected
+control uses a normal application and the production termination properties and
+reproduces the interruption.
+
+The repaired installer launches the visible native helper directly, keeping a progress
+window and menu-bar item present before acknowledging the request and throughout
+replacement/relaunch. Installation runs on a background queue while that UI stays
+responsive. No custom launchd job, login item or hosting preference is created.
+See Apple's [background-process rules](https://developer.apple.com/documentation/appkit/managing-ongoing-background-processes-in-your-mac).
+
+`scripts/test-update-worker.sh --build-only` compiles the optimized, signed synthetic
+fixture without executing UI. A full run requires explicit per-run approval, then
+`AURELIA_UPDATE_UI_TESTS=1`; it shows temporary installer/test-app windows and checks
+survival, real DMG mount, identity/team/build/signature validation, replacement,
+automatic relaunch, and the new app remaining alive after the installer exits.
+It uses no automated input, personal App Group, server, library or media.
+
+The client UI adds App Updates to startup, connection/rest and profile/PIN
+selection screens. It calls the standalone GitHub updater, without server/profile
+authorization. Local update settings skip server-administration fetches and errors;
+the optional profile-session close request is bounded to two seconds during update.

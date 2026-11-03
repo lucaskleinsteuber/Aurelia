@@ -230,8 +230,8 @@ struct APIClient: Sendable {
         path: "/api/v1/profiles/\(id.uuidString)/unlock", method: "POST",
         body: JSONEncoder().encode(Payload(pin: pin))))
   }
-  func endProfileSession() async throws {
-    _ = try await perform(path: "/api/v1/profile/end", method: "POST")
+  func endProfileSession(timeout: TimeInterval = 15) async throws {
+    _ = try await perform(path: "/api/v1/profile/end", method: "POST", timeout: timeout)
   }
   func disconnectPairedDevice() async throws {
     _ = try await perform(path: "/api/v1/device", method: "DELETE")

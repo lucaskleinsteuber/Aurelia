@@ -262,10 +262,17 @@ These rules apply to every task in this repository.
   Finish asynchronous application cleanup before the final AppKit quit; do not
   enter `terminateLater` from the updater's MainActor task. Verify the real,
   windowless AppKit termination with `scripts/test-macos-termination.sh`.
-  The subordinate GUI helper must not perform replacement after the main app exits:
-  macOS can force-quit it. Submit the independent one-shot worker instead. Verify its
-  lifetime and complete signed synthetic-DMG replacement/relaunch with
-  `scripts/test-update-worker.sh`; it uses no windows, personal data or media.
+  The installer must retain visible UI (progress window and menu-bar item) through
+  replacement and relaunch. macOS can kill both invisible helpers and submitted
+  background update jobs after the app quits. Launch the visible native helper directly.
+  `scripts/test-update-worker.sh --build-only` compiles its complete signed synthetic
+  fixture without UI. Running the fixture shows installer/test-app windows, requires
+  the per-run UI-test approval above, and uses `AURELIA_UPDATE_UI_TESTS=1` only after
+  that approval. Match the real app's normal application type, termination properties
+  and optimized compilation; testing an agent/background caller can falsely pass.
+  Client updates must remain available before profile unlock and while the server is
+  unreachable. Local update settings must not fetch server administration or depend on
+  its errors. No personal app state, server, credentials or media may be used by fixtures.
   See `docs/UPDATE_TEST.md`. Audio acceptance uses logic/configuration/migration
   tests and the owner's listening check; no automatic signal or hearing tests.
   Keep the four clients’ independent speech EQ/compressor presets aligned with

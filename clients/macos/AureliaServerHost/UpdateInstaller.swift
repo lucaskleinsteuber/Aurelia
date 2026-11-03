@@ -9,6 +9,33 @@ import OSLog
 /// left missing. Data, settings and the library are not touched. The sandboxed app cannot do
 /// this itself; this helper runs outside the sandbox.
 enum UpdateInstaller {
+  enum WorkerResult: Sendable {
+    case completed
+    case failed(URL, String)
+  }
+
+  nonisolated static func workerOperation() -> @Sendable () -> WorkerResult {
+    { runPendingWorker() }
+  }
+
+  static func runPendingWorker() -> WorkerResult {
+    let app = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().standardizedFileURL
+    guard app.path == "/Applications/Aurelia.app",
+      let root = MacUpdateInstallRequest.updatesDirectory(),
+      runPending(app: app, root: root, presentsFailure: false)
+    else { return .completed }
+    if let status = MacUpdateInstallRequest.status(in: root), status.phase == "failed" {
+      return .failed(app, status.message ?? "The update could not be completed. Please try again.")
+    }
+    return .completed
+  }
+
+  @MainActor static func presentWorkerFailure(app: URL, message: String) {
+    report(message)
+    open(app)
+  }
+
   private static let logger = Logger(
     subsystem: "com.lucas.aurelia.media.server-host", category: "update")
 

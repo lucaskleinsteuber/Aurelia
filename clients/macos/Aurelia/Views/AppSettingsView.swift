@@ -87,7 +87,11 @@ struct AppSettingsView: View {
     }
     .frame(minWidth: 840, idealWidth: 880, minHeight: 620, idealHeight: 680)
     .background(AureliaBackdrop())
-    .task {
+    .task(id: selectedCategory) {
+      guard needsServerAdministration, !model.requiresProfileSelection, !model.isStarting else {
+        isLoadingAdministration = false
+        return
+      }
       isLoadingAdministration = true
       await model.reloadAdministration()
       isLoadingAdministration = false
@@ -97,7 +101,11 @@ struct AppSettingsView: View {
       }
     }
     .onChange(of: scenePhase) {
-      if scenePhase == .active { Task { await model.reloadDevices() } }
+      if scenePhase == .active, needsServerAdministration, !model.requiresProfileSelection,
+        !model.isStarting
+      {
+        Task { await model.reloadDevices() }
+      }
     }
     .confirmationDialog(
       "Remove \(libraryToRemove?.name ?? "Storage Location")?",
@@ -225,6 +233,13 @@ struct AppSettingsView: View {
     }
   }
 
+  private var needsServerAdministration: Bool {
+    switch selectedCategory {
+    case .library, .metadata, .profilesAndDevices, .server: true
+    default: false
+    }
+  }
+
   // MARK: - Detail Area
 
   @ViewBuilder
@@ -242,12 +257,12 @@ struct AppSettingsView: View {
             categoryView(selectedCategory)
           }
 
-          if let error = model.administrationErrorMessage {
+          if selectedCategory != .updates, let error = model.administrationErrorMessage {
             Text(error)
               .foregroundStyle(.orange)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
-          if let error = model.errorMessage {
+          if selectedCategory != .updates, let error = model.errorMessage {
             Text(error)
               .foregroundStyle(.orange)
               .frame(maxWidth: .infinity, alignment: .leading)
@@ -1026,7 +1041,7 @@ struct AppSettingsView: View {
       "Mac App Updates",
       symbol: "macwindow.badge.plus",
       description:
-        "Aurelia looks for new versions in its GitHub releases. Your library, settings, and logins remain safe."
+        "App updates come directly from GitHub. No server connection or profile PIN is needed. Your library, settings, and sign-ins remain safe."
     ) {
       VStack(alignment: .leading, spacing: 14) {
         LabeledContent(
@@ -1049,7 +1064,7 @@ struct AppSettingsView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    if model.canManageMedia {
+    if model.canManageMedia, !model.requiresProfileSelection {
       AureliaSettingsSection(
         "Server Updates",
         symbol: "arrow.triangle.2.circlepath.circle",

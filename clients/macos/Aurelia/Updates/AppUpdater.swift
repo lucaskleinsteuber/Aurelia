@@ -229,7 +229,7 @@ final class AppUpdater: ObservableObject {
       let helper = Bundle.main.bundleURL
         .appendingPathComponent("Contents/Helpers/Aurelia Server Host.app")
       let configuration = NSWorkspace.OpenConfiguration()
-      configuration.activates = false
+      configuration.activates = true
       configuration.createsNewApplicationInstance = true
       let request = try MacUpdateInstallRequest.prepare(
         image: destination, build: release.build, appPID: getpid(), root: folder)

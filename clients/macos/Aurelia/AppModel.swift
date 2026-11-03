@@ -147,7 +147,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var isLeavingRest = false
   /// Whether a title plays now; the player reports it.
   private(set) var playerIsPlaying = false
-  var secondsWithoutUse: @MainActor () -> TimeInterval = { AureliaUseClock.shared.secondsWithoutUse }
+  var secondsWithoutUse: @MainActor () -> TimeInterval = {
+    AureliaUseClock.shared.secondsWithoutUse
+  }
   private var restWatchTask: Task<Void, Never>?
   private var serverWakeTask: Task<Bool, Never>?
   @Published private(set) var isWorking = false
@@ -1334,7 +1336,9 @@ final class AppModel: ObservableObject {
     cancelConnectionWork()
     await PlaybackShutdownCoordinator.shared.shutdown()
     if let profile, profile.isViewingSession {
-      try? await APIClient(profile: profile).endProfileSession()
+      // Updating the client must not depend on a remote server responding.
+      try? await APIClient(profile: profile).endProfileSession(
+        timeout: isPreparingApplicationUpdate ? 2 : 15)
     }
     profileExpiryTask?.cancel()
     managementExpiryTask?.cancel()

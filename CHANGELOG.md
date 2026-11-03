@@ -12,6 +12,14 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac/server 1.27.7 (131)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.7-131) - 03.11.2026
+
+### Fixed
+
+- Keep the Mac installer visible with a native progress window and menu-bar item instead of submitting an invisible background update job that macOS can terminate after the app quits.
+- Offer App Updates on startup, connection, resting and profile-selection screens without requiring a server connection or profile PIN.
+- Keep client update settings independent of server administration requests and errors; limit the optional server sign-out request to two seconds during a client update.
+
 ## [Mac/server 1.27.6 (130)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.6-130) - 03.11.2026
 
 ### Fixed
