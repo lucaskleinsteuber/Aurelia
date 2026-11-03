@@ -12,6 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac/server 1.27.3 (127) - 03.11.2026
+
+### Fixed
+
+- Finish asynchronous playback, connection and local-host cleanup before the final AppKit quit request. The previous update could enter a nested termination loop and leave Aurelia open until the installer timed out.
+- Coalesce repeated quit requests while cleanup is running, then accept termination only after cleanup completes.
+
 ## [Mac/server 1.27.2 (126)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.2-126) - 03.11.2026
 
 ### Fixed

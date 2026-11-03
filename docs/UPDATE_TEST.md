@@ -20,10 +20,12 @@ never evidence that the installed app is current.
 
 1. The original Mac/server 1.26.6 (123) preparation exposed a real sandbox handoff
    failure: Launch Services discards its installer arguments. Repair that installed
-   updater with Mac/server 1.27.1 (125); then test the normal update to 1.27.2 (126).
-   Linux Desktop uses the original 1.0.2 (8) preparation.
+   updater with Mac/server 1.27.1 (125). The next real attempt exposed a separate
+   AppKit termination deadlock: the app received acknowledgement but never exited.
+   Mac/server 1.27.3 (127) repairs that installed quit path; the final normal update
+   targets 1.27.4 (128). Linux Desktop uses the original 1.0.2 (8) preparation.
 2. Publish the verified audio releases through the normal channels: Mac/server
-   1.27.2 (126) and Linux Desktop 1.1.0 (9). Copy the exact verified downloads into
+   1.27.4 (128) and Linux Desktop 1.1.0 (9). Copy the exact verified downloads into
    the separate public test repository, with license notices and a short README.
    Do not copy private source, history, credentials or diagnostic files.
 3. Enable Public Update Test in both apps. The owner starts the normal update
@@ -53,3 +55,10 @@ through the existing App Group. Launch arguments are not its transport. Verify t
 production parser with `scripts/test-update-installer.sh` and the real, windowless
 sandbox/NSWorkspace handoff with `scripts/test-update-handoff-sandbox.sh` before
 building. Both use isolated invented data and create no playback engine.
+
+Before the final AppKit quit, asynchronous cleanup runs while the initial termination
+request returns `terminateCancel`. A second request returns `terminateNow` only after
+cleanup finishes. Do not return `terminateLater` from the updater's MainActor task:
+AppKit's nested termination loop can hold that executor and starve its cleanup task.
+`scripts/test-macos-termination.sh` exercises this production coordinator in actual
+sandboxed, windowless AppKit processes, including repeated quit requests.

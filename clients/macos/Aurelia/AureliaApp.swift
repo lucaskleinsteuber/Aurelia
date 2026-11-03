@@ -86,6 +86,8 @@ enum WindowClosePreference {
 
 @MainActor
 final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
+  private let termination = ApplicationTerminationCoordinator()
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApplication.shared.activate()
     Task {
@@ -109,10 +111,8 @@ final class AureliaAppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    Task {
-      await AppModel.active?.shutdown()
-      sender.reply(toApplicationShouldTerminate: true)
-    }
-    return .terminateLater
+    termination.request(
+      shutdown: { await AppModel.active?.shutdown() },
+      terminate: { sender.terminate(nil) })
   }
 }

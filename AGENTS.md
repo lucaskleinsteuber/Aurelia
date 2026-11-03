@@ -257,6 +257,9 @@ These rules apply to every task in this repository.
   bounded App Group request and matching acknowledgement before quitting; verify
   changes with `scripts/test-update-installer.sh` and the windowless real-sandbox
   `scripts/test-update-handoff-sandbox.sh`.
+  Finish asynchronous application cleanup before the final AppKit quit; do not
+  enter `terminateLater` from the updater's MainActor task. Verify the real,
+  windowless AppKit termination with `scripts/test-macos-termination.sh`.
   See `docs/UPDATE_TEST.md`. Audio acceptance uses logic/configuration/migration
   tests and the owner's listening check; no automatic signal or hearing tests.
   Keep the four clients’ independent speech EQ/compressor presets aligned with
