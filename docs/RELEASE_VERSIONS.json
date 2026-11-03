@@ -7,9 +7,9 @@
   },
   {
     "product": "Server",
-    "version": "1.27.10",
-    "build": 134,
-    "tag": "1.27.10-134"
+    "version": "1.28.0",
+    "build": 135,
+    "tag": "server-1.28.0-135"
   },
   {
     "product": "Linux Desktop",
