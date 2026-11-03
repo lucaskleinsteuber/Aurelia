@@ -10,8 +10,8 @@ struct AppUpdateLogicTests {
       .tagged(releaseData(), "release-100"), .partialFailure(.notModified),
     ])
     let client = AppUpdateClient(transport: transport)
-    let first = try await client.catalog(repository: "owner/repo", token: nil, cached: nil)
-    let second = try await client.catalog(repository: "owner/repo", token: nil, cached: first.cache)
+    let first = try await client.catalog(repository: "owner/repo", cached: nil)
+    let second = try await client.catalog(repository: "owner/repo", cached: first.cache)
     #expect(second.release == first.release)
     #expect(AppUpdateLogic.isNewer(second.release, version: "1.12.0", build: 99))
     #expect(
@@ -24,7 +24,7 @@ struct AppUpdateLogicTests {
       .partialFailure(.notModified), .body(releaseData()),
     ])
     let result = try await AppUpdateClient(transport: transport).catalog(
-      repository: "owner/repo", token: nil, cached: nil)
+      repository: "owner/repo", cached: nil)
     #expect(result.release.build == 100)
     #expect(await transport.requests.count == 2)
     #expect(
@@ -49,40 +49,6 @@ struct AppUpdateLogicTests {
         AppUpdatePreferences.backgroundCheckIsDue(
           in: defaults, repository: AppUpdateSource.publicTestRepository))
     }
-  }
-
-  @Test func legacyPublicFeedRequestsHaveNoAuthorizationAndRejectAToken() async throws {
-    let data = releaseData(repository: AppUpdateSource.legacyPublicTestRepository)
-    let transport = StubUpdateTransport(steps: [.body(data)])
-    let client = AppUpdateClient(transport: transport)
-    _ = try await client.catalog(
-      repository: AppUpdateSource.legacyPublicTestRepository, token: nil, cached: nil)
-    #expect(
-      await transport.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
-    await #expect(throws: AppUpdateError.invalidURL) {
-      try await client.catalog(
-        repository: AppUpdateSource.legacyPublicTestRepository, token: "synthetic-never-sent",
-        cached: nil
-      )
-    }
-    #expect(await transport.requests.count == 1)
-  }
-
-  @Test func mainRepositorySupportsAnonymousTestAndNormalPrivateAccess() async throws {
-    let repository = AppUpdateSource.publicTestRepository
-    #expect(repository == "lucaskleinsteuber/Aurelia")
-    let anonymous = StubUpdateTransport(steps: [.body(releaseData(repository: repository))])
-    _ = try await AppUpdateClient(transport: anonymous).catalog(
-      repository: repository, token: nil, cached: nil)
-    let request = try #require(await anonymous.requests.first)
-    #expect(AppUpdateSource.auditsAnonymousRequest(request))
-    #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
-    let normal = StubUpdateTransport(steps: [.body(releaseData(repository: repository))])
-    _ = try await AppUpdateClient(transport: normal).catalog(
-      repository: repository, token: "synthetic-private-token", cached: nil)
-    let authenticated = try #require(await normal.requests.first)
-    #expect(authenticated.value(forHTTPHeaderField: "Authorization") != nil)
-    #expect(!AppUpdateSource.auditsAnonymousRequest(authenticated))
   }
 
   @Test func retiringPublicTestClearsOnlyItsStaleUpdateState() throws {
@@ -333,9 +299,9 @@ struct AppUpdateLogicTests {
       .body(releaseData()), .body(checksums()), .body(Data("abc".utf8)),
     ])
     let client = AppUpdateClient(transport: transport)
-    let release = try await client.latest(repository: "owner/repo", token: "synthetic-test-token")
+    let release = try await client.latest(repository: "owner/repo")
     let image = try await client.download(
-      release, repository: "owner/repo", token: "synthetic-test-token", currentBuild: 99,
+      release, repository: "owner/repo", currentBuild: 99,
       folder: folder)
     #expect(try Data(contentsOf: image) == Data("abc".utf8))
     #expect(image.deletingLastPathComponent().deletingLastPathComponent() == folder)
@@ -362,7 +328,7 @@ struct AppUpdateLogicTests {
       fromLatest: releaseData(), repository: "owner/repo")
     do {
       _ = try await client.download(
-        release, repository: "owner/repo", token: "synthetic-test-token", currentBuild: 99,
+        release, repository: "owner/repo", currentBuild: 99,
         folder: folder)
       Issue.record("A failed download must never reach the installer.")
     } catch let error as AppUpdateError { #expect(error == failure) }
@@ -380,7 +346,7 @@ struct AppUpdateLogicTests {
       let release = try AppUpdateLogic.validatedRelease(fromLatest: releaseData())
       do {
         _ = try await client.download(
-          release, repository: "owner/repo", token: "synthetic-test-token", currentBuild: 99,
+          release, repository: "owner/repo", currentBuild: 99,
           folder: folder)
         Issue.record("An unchecked image must never reach the installer.")
       } catch let error as AppUpdateError {
@@ -397,7 +363,7 @@ struct AppUpdateLogicTests {
     let release = try AppUpdateLogic.validatedRelease(fromLatest: releaseData())
     do {
       _ = try await client.download(
-        release, repository: "owner/repo", token: "synthetic-test-token",
+        release, repository: "owner/repo",
         currentBuild: currentBuild,
         folder: URL(fileURLWithPath: "/does-not-exist"))
       Issue.record("An equal or older build must be rejected.")
@@ -721,7 +687,7 @@ struct AppUpdateFakeGitHubHarnessTests {
   }
 
   @Test
-  func harnessSimulatesFullReleaseLifecycleWithRedirectAndRemovesAuthorizationOnRedirect()
+  func harnessSimulatesAnonymousFullReleaseLifecycleWithRedirect()
     async throws
   {
     let folder = try testRunFolder()
@@ -794,12 +760,12 @@ struct AppUpdateFakeGitHubHarnessTests {
     }
 
     let release = try await client.latest(
-      repository: "owner/repo", token: "synthetic-secret-token")
+      repository: "owner/repo")
     #expect(release.version == "1.19.0")
     #expect(release.build == 109)
 
     let destination = try await client.download(
-      release, repository: "owner/repo", token: "synthetic-secret-token", currentBuild: 108,
+      release, repository: "owner/repo", currentBuild: 108,
       folder: folder)
 
     #expect(FileManager.default.fileExists(atPath: destination.path))
@@ -808,11 +774,11 @@ struct AppUpdateFakeGitHubHarnessTests {
     let requests = FakeGitHubURLProtocol.requests()
     #expect(requests.count == 4)
 
-    // Initial requests to api.github.com carry Authorization
+    // Initial requests to GitHub are anonymous
     let apiRequests = requests.filter { $0.url?.host == "api.github.com" }
     #expect(!apiRequests.isEmpty)
     for req in apiRequests {
-      #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic-secret-token")
+      #expect(req.value(forHTTPHeaderField: "Authorization") == nil)
     }
 
     // The redirected request to objects.githubusercontent.com must NEVER carry Authorization or Cookie
@@ -1055,7 +1021,7 @@ struct AppUpdateFakeGitHubHarnessTests {
   }
 
   @Test
-  func harnessClassifies404AsPrivateRepositoryWhenAnonymousAndGithub404WhenTokenPresent()
+  func harnessClassifiesMissingPublicReleaseFeed()
     async throws
   {
     let client = makeClient()
@@ -1069,19 +1035,12 @@ struct AppUpdateFakeGitHubHarnessTests {
 
     // Anonymous check gets privateRepository
     do {
-      _ = try await client.latest(repository: "owner/repo", token: nil)
+      _ = try await client.latest(repository: "owner/repo")
       Issue.record("Anonymous 404 must throw privateRepository")
     } catch let error as AppUpdateError {
       #expect(error == .privateRepository)
     }
 
-    // Token-bearing check gets github(404)
-    do {
-      _ = try await client.latest(repository: "owner/repo", token: "synthetic-token")
-      Issue.record("Token-bearing 404 must throw github(404)")
-    } catch let error as AppUpdateError {
-      #expect(error == .github(404))
-    }
   }
 
   @Test
@@ -1095,7 +1054,7 @@ struct AppUpdateFakeGitHubHarnessTests {
 
     do {
       _ = try await client.latest(
-        repository: "owner/repo", token: nil, ifNoneMatch: "W/\"etag-abc\"")
+        repository: "owner/repo", ifNoneMatch: "W/\"etag-abc\"")
       Issue.record("304 must throw notModified")
     } catch let error as AppUpdateError {
       #expect(error == .notModified)
@@ -1181,7 +1140,7 @@ struct AppUpdateFakeGitHubHarnessTests {
     }
 
     let (release, etag) = try await client.latestRelease(
-      repository: "owner/repo", token: nil)
+      repository: "owner/repo")
     #expect(release.version == "1.20.0")
     #expect(release.build == 110)
     #expect(etag == "W/\"etag-release-110\"")
@@ -1190,7 +1149,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         == "https://api.github.com/repos/owner/repo/releases/assets/501")
 
     let destination = try await client.download(
-      release, repository: "owner/repo", token: nil, currentBuild: 109, folder: folder)
+      release, repository: "owner/repo", currentBuild: 109, folder: folder)
 
     #expect(FileManager.default.fileExists(atPath: destination.path))
     #expect(try Data(contentsOf: destination) == syntheticDmgData)

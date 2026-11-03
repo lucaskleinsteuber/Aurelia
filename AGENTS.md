@@ -249,7 +249,7 @@ These rules apply to every task in this repository.
   Do not switch it back to private after update tests. The existing Linux preparation
   still uses `lucaskleinsteuber/Aurelia-Update-Test`; keep that artifact-only source
   available until its real test finishes, then make it private too. The Mac test is
-  complete. Mac builds retire the old test setting and use the normal release feed.
+  complete. Mac builds use the public release feed without a GitHub token.
   Linux Public Update Test skips loading or sending saved tokens and preserves them.
   Never copy private history into the artifact-only repository. The owner operates
   the real Mac/Arch update dialogs; restore normal sources after verification.

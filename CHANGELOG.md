@@ -12,6 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac 1.27.11 (135)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.11-135) - 03.11.2026
+
+### Changed
+
+- Check for and download Mac updates anonymously from the public GitHub release feed.
+- Remove the GitHub Access dialog and personal access token controls from Mac update settings.
+
 ## [Mac/server 1.27.10 (134)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.10-134) - 03.11.2026
 
 ### Fixed

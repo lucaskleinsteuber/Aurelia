@@ -2,9 +2,9 @@
 
 The anonymous Mac update test completed on 03.11.2026. The main repository is now
 public and stays public. Mac 1.27.5 through 1.27.9 can still show the old Public
-Update Test switch under Settings → Updates → Advanced. Turn it off to use the normal
-authenticated release feed. Newer builds retire the switch on startup and keep the
-saved token. Manage access under Settings → Updates → GitHub Access.
+Update Test switch under Settings → Updates → Advanced. Mac 1.27.10 retires the
+switch and may use a previously saved token. Later Mac builds use anonymous checks
+and downloads from the public release feed without a token setting.
 
 The existing Linux 1.0.2 preparation still uses the separate, artifact-only
 `lucaskleinsteuber/Aurelia-Update-Test` source. It remains available for its pending

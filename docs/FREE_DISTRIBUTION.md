@@ -143,15 +143,8 @@ background checks. *Check for Updates…* continues to work manually.
 To protect GitHub's anonymous rate limit (60 requests per hour per IP), checks send the HTTP
 `If-None-Match` header with the cached release `ETag`. When no newer release is published,
 GitHub answers with `304 Not Modified`, which consumes minimal quota and completes instantly.
-If rate limits are reached, the app displays a friendly notice suggesting the user try again later
-or configure a personal access token.
-
-When a repository is private, a GitHub personal access token can optionally be saved in the macOS
-Keychain under *Settings › Updates › GitHub Access*.
-If an anonymous check returns `404 Not Found`, the app informs the user that the repository may be
-private and offers to open the Settings window. Any configured token is sent exclusively to
-`api.github.com` over HTTPS and is never forwarded to redirect targets, asset CDNs, or public
-download mirrors (`github.com`).
+If GitHub limits requests, try again later. The Mac updater uses the public release
+feed and has no GitHub token setting.
 
 The update dialog shows GitHub's release notes as selectable plain text in a scrollable
 field, together with the disk image's published download size when available. *Later*
