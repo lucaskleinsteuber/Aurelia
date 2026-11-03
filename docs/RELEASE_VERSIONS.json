@@ -1,9 +1,9 @@
 [
   {
     "product": "Mac",
-    "version": "1.27.12",
-    "build": 136,
-    "tag": "1.27.12-136"
+    "version": "1.28.0",
+    "build": 137,
+    "tag": "1.28.0-137"
   },
   {
     "product": "Server",
