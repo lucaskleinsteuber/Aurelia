@@ -178,11 +178,9 @@ These rules apply to every task in this repository.
 
 ## Installation and version handling
 
-- After each successful, verified, launchable macOS app build made for the user to
-  test, install that build on this MacBook as `/Applications/Aurelia.app`; do
-  not wait for a separate install request. Never install a failed or incomplete
-  candidate. This rule applies only to the server-backed Aurelia app in this
-  repository, never to Aurelia Classic.
+- Publish verified macOS releases and let the owner install them through the
+  Aurelia updater. Do not replace or relaunch the installed Mac app directly
+  unless the owner explicitly requests a direct installation for that build.
 - Installation replaces only the app bundle. Preserve the existing library
   and all Aurelia setup state across builds and updates, including the server
   database, local server data, accounts, sessions, preferences, connection
