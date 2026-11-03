@@ -12,13 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
-## Mac/server 1.27.4 (128) - 03.11.2026
+## [Mac/server 1.27.4 (128)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.4-128) - 03.11.2026
 
 ### Fixed
 
 - Package the verified asynchronous quit repair for the normal update from the repaired 1.27.3 preparation, retaining signature checks, automatic relaunch and existing app data.
 
-## Mac/server 1.27.3 (127) - 03.11.2026
+## [Mac/server 1.27.3 (127)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.3-127) - 03.11.2026
 
 ### Fixed
 
