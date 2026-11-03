@@ -82,7 +82,7 @@ These rules apply to every task in this repository.
   access and the archived desktop client. Build and test scripts first run
   `scripts/prune-workspace.sh`, which keeps the newest build per platform, ten
   test results and 30 days of logs; new scripts that write there should call it
-  too. Builds are not kept as archives: a published Mac/server version is
+  too. Builds are not kept as archives: a published Mac or server version is
   deleted locally by `scripts/publish-release.sh`, and an installed tvOS or iOS
   build folder is deleted after `refresh-signing.sh --adopt-tv` or `--adopt-iphone`.
 - Runnable Mac test products must be staged under a unique
@@ -95,7 +95,7 @@ These rules apply to every task in this repository.
 
 ## Client versions and verification
 
-- macOS/server and tvOS are separate products with independent version/build
+- macOS, Server, and tvOS are separate products with independent version/build
   counters. Every Aurelia product (Mac app and server, Linux server, tvOS, and
   any Windows or other client) follows Semantic Versioning (MAJOR.MINOR.PATCH): MAJOR for
   changes that break existing clients, servers or data; MINOR for new features;
@@ -126,7 +126,7 @@ These rules apply to every task in this repository.
   playback in tests. Hosting and network-trial tests use isolated server processes and temporary
   state; never start a second host over the installed server or use personal libraries for them.
   Publish its deb, rpm, Arch and Flatpak packages with `scripts/publish-release.sh --linux-app`
-  under its independent `linux-app-<version>-<build>` tag, never as the Mac/server latest release.
+  under its independent `linux-app-<version>-<build>` tag, never as the Mac latest release.
   Verify native package lifecycle tests in Ubuntu, Fedora and Arch, the actual Flatpak bundle,
   and native Wayland/X11 startup separately from headless app tests. See `docs/LINUX_APP.md`.
 - The former Windows/Linux desktop client (last 0.2.0 (6)) is archived outside the
@@ -148,9 +148,12 @@ These rules apply to every task in this repository.
   modification time before/after without copying or modifying media. It does
   not authorize other titles, codec sweeps or playback soak gates.
 
-- For macOS/server, `AureliaBuildNumber` in `Directory.Build.props` is authoritative. Increment it
-  exactly once, only after the pre-version verification is green; never reuse
-  or decrease a build number.
+- The Mac version and build are authoritative in
+  `clients/macos/Configuration/BuildNumber.xcconfig`. The server version and
+  `AureliaBuildNumber` are authoritative in `Directory.Build.props`.
+  Increment the relevant counter only after its pre-version verification is green.
+  A Mac-only change does not bump the server. A server-only change does not bump
+  the Mac app. Never reuse or decrease a product's build number.
 - Use the pinned SDK and dependencies. At minimum run restore, format
   verification, warning-free .NET and Swift builds, all relevant tests, and the
   appropriate host smoke tests.
@@ -227,7 +230,7 @@ These rules apply to every task in this repository.
   section for pending work, dated versions in reverse chronological order and only
   relevant Added, Changed, Deprecated, Removed, Fixed or Security sections.
   Use DD.MM.YYYY for changelog dates, as explicitly requested by the owner.
-  Identify the product because Mac/server, Linux, tvOS and iOS versions are independent.
+  Identify the product because Mac, Server, Linux Desktop, tvOS and iOS versions are independent.
   Preserve historical version numbers; new versions follow Semantic Versioning 2.0.0
   (https://semver.org/spec/v2.0.0.html). Describe notable user-visible changes in a few
   concrete bullets (typically two to six), using historical commits and release notes
@@ -238,12 +241,12 @@ These rules apply to every task in this repository.
 
 ## Public distribution
 
-- Keep independent MAJOR.MINOR.PATCH product versions. Track verified releases in
-  `docs/RELEASE_VERSIONS.json`. Keep cross-product version tables out of the README
-  and release descriptions. Mac/server stays Latest; Linux keeps its own tags.
-- The owner amended the anonymous Mac updater test on 03.11.2026: use the main
-  `lucaskleinsteuber/Aurelia` repository while they explicitly make it public, then
-  restore its private visibility after the test. The existing Linux preparation
+- Track verified product releases in `docs/RELEASE_VERSIONS.json`. End each GitHub
+  release description with compact version and download links for every product,
+  including unchanged products. Keep the version overview out of the README.
+  Mac remains Latest. Server and Linux Desktop have independent release tags.
+- The owner wants the main `lucaskleinsteuber/Aurelia` repository to stay public.
+  Do not switch it back to private after update tests. The existing Linux preparation
   still uses `lucaskleinsteuber/Aurelia-Update-Test`; keep that artifact-only source
   available until its real test finishes, then make it private too. The Mac test is
   complete. Mac builds retire the old test setting and use the normal release feed.
@@ -286,10 +289,11 @@ These rules apply to every task in this repository.
   profile, App Group, or Keychain entitlements work on another user's Mac.
 - Never change repository visibility or rewrite historical author information
   without explicit user authorization.
-- The owner wants every Mac/server version that is installed for them published
-  as a GitHub Release with `scripts/publish-release.sh`: the Apple silicon Mac DMG,
-  the Linux server packages and GitHub's source archives. Push first, build the
-  Linux packages of the same version, publish, and verify the downloads. Then
-  update the owner's Linux server to that release with `sudo aurelia update
-  --yes`, without asking. tvOS builds are not published; they are
-  development-signed for one Apple TV.
+- Publish verified Mac builds with `scripts/publish-release.sh` and server builds
+  with `scripts/publish-release.sh --server`. Push the source first. The Mac release
+  contains the Apple silicon DMG. The server release has a
+  `server-<version>-<build>` tag with Linux x64 and arm64 packages. Verify all
+  release downloads. After a server release, update the owner's Linux server with
+  `sudo aurelia update --yes`. For the first standalone server release, follow the
+  compatibility note in `docs/LINUX_SERVER.md` if Latest is still a combined release.
+  tvOS builds are not published.

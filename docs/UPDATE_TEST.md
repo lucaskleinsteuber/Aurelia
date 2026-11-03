@@ -1,8 +1,8 @@
 # Anonymous desktop update test
 
-The anonymous Mac update test completed on 03.11.2026. The main repository is private
-again. Mac 1.27.5 through 1.27.9 can still show the old Public Update Test switch under
-Settings → Updates → Advanced. Turn it off in those builds to use the normal
+The anonymous Mac update test completed on 03.11.2026. The main repository is now
+public and stays public. Mac 1.27.5 through 1.27.9 can still show the old Public
+Update Test switch under Settings → Updates → Advanced. Turn it off to use the normal
 authenticated release feed. Newer builds retire the switch on startup and keep the
 saved token. Manage access under Settings → Updates → GitHub Access.
 
@@ -46,8 +46,9 @@ never evidence that the installed app is current.
 4. Verify installed bundle/package metadata, relaunch, settings and retained
    connection/sign-in state. Inspect the boolean-only request diagnostics.
 5. Turn off Public Update Test and verify normal authenticated behavior. After the
-   main-repository Mac test restore the main repository's private visibility; after
-   the independent Linux test restore the download repository's private visibility.
+   historical Mac test the main repository was returned to private. The owner later
+   made it public and asked to keep it public. After the independent Linux test,
+   restore the download repository's private visibility.
    Leave saved tokens and published regular assets intact.
 
 Logic tests, a real updater installation and the owner's listening check are

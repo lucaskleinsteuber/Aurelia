@@ -3,7 +3,7 @@ set -euo pipefail
 
 repository_root=${0:A:h:h}
 source "$repository_root/scripts/workspace-paths.sh"
-build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
+build_number=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9][0-9]*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
 source_candidate=${1:-"$other_root/Build/Build $build_number/Aurelia.app"}
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 runtime_root="/private/tmp/Aurelia/$run_id"

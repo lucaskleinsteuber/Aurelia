@@ -2,19 +2,15 @@
 set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-dotnet_build=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
 apple_build=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9][0-9]*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
-
-if [ -z "$dotnet_build" ] || [ -z "$apple_build" ] || [ "$dotnet_build" != "$apple_build" ]; then
-    echo "Build number mismatch: server=$dotnet_build macOS=$apple_build" >&2
-    exit 1
-fi
-
-echo "Build number $dotnet_build is synchronized."
-dotnet_version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' "$repository_root/Directory.Build.props")
 apple_version=$(sed -n 's/^MARKETING_VERSION = \(.*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
-if [ -z "$dotnet_version" ] || [ "$dotnet_version" != "$apple_version" ]; then
-    echo "Version mismatch: server=$dotnet_version macOS=$apple_version" >&2
-    exit 1
-fi
-echo "Version $dotnet_version is synchronized."
+server_build=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
+server_version=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' "$repository_root/Directory.Build.props")
+
+valid_version() {
+    printf '%s\n' "$1" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+}
+
+[ -n "$apple_build" ] && valid_version "$apple_version" || { echo "Invalid macOS version or build." >&2; exit 1; }
+[ -n "$server_build" ] && valid_version "$server_version" || { echo "Invalid server version or build." >&2; exit 1; }
+printf 'Mac %s (%s)\nServer %s (%s)\n' "$apple_version" "$apple_build" "$server_version" "$server_build"

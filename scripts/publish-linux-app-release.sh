@@ -1,6 +1,6 @@
 #!/bin/bash
 # Called by publish-release.sh --linux-app. Publishes all four verified Linux desktop packages
-# with an independent linux-app-<version>-<build> tag, never as the Mac/server "latest" release.
+# with an independent linux-app-<version>-<build> tag, never as the Mac "latest" release.
 # Uploads stay in a draft until GitHub reports every asset uploaded and the downloaded bytes
 # match the local SHA-256 values. No source, version, or Git history is changed by this script.
 set -euo pipefail
@@ -42,6 +42,15 @@ checksums="$output/SHA256SUMS"
 files+=("$checksums")
 notes_file="${AURELIA_RELEASE_NOTES:-$other_root/Release Notes/$tag.md}"
 [ -s "$notes_file" ] || { echo "Write the Linux desktop release notes to $notes_file first." >&2; exit 1; }
+rendered_notes=$(mktemp)
+trap 'rm -f "$rendered_notes"' EXIT
+{
+  cat "$notes_file"
+  printf '\n\n'
+  python3 "$repository_root/scripts/release-links.py" "$repository" --candidate "Linux Desktop" "$version" "$build" "$tag"
+} > "$rendered_notes"
+notes_file=$rendered_notes
+
 if gh release view "$tag" >/dev/null 2>&1; then
   [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ] \
     || { echo "$tag is already published; published downloads are not replaced." >&2; exit 1; }

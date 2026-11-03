@@ -32,6 +32,17 @@ the computer and restarts after a failure. If `ufw` is active, it allows the ser
 and Bonjour discovery. Installing a newer package the same way updates only the program; accounts,
 library, progress and settings stay.
 
+Server releases use independent `server-<version>-<build>` tags. The Mac app uses
+its own version and can ship UI updates without a new server package. Older
+combined releases remain available under their original tags.
+
+Installed updaters first look at GitHub's Latest release. While Latest is still the
+last combined Mac/server release, they can stop there because it contains a
+compatible server package. If a standalone server release ships before the first
+Mac-only release, download and verify the new server archive and run its
+`install.sh` over the existing installation once. After a Mac-only release becomes
+Latest, the updater falls back to the release list to find server packages.
+
 ### Updating from GitHub
 
 From version 1.8.5 the server updates itself from the GitHub Releases of the repository it was

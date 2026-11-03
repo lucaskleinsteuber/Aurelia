@@ -23,7 +23,7 @@ if [[ "$distribution" == developer-id ]]; then
   timestamp_option=--timestamp
 fi
 build_parent="$other_root/Build"
-build_number=$(sed -n 's:.*<AureliaBuildNumber>\([0-9][0-9]*\)</AureliaBuildNumber>.*:\1:p' "$repository_root/Directory.Build.props")
+build_number=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9][0-9]*\)$/\1/p' "$repository_root/clients/macos/Configuration/BuildNumber.xcconfig")
 if [[ -z "$build_number" ]]; then
   echo "Unable to read the Aurelia build number." >&2
   exit 1
