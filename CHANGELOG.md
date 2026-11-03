@@ -12,6 +12,12 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac/server 1.27.6 (130) - 03.11.2026
+
+### Fixed
+
+- Package the independent installer and automatic relaunch for the normal update from the repaired 1.27.5 preparation, using the owner's temporarily public main repository without reading a saved token.
+
 ## Mac/server 1.27.5 (129) - 03.11.2026
 
 ### Fixed
