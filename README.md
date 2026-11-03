@@ -31,7 +31,7 @@ your home network unless you want it to.
 <!-- release-versions:start -->
 | Product | Version | Build | Download / availability |
 | --- | --- | --- | --- |
-| **Mac & Server** | 1.27.4 | 128 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.4-128) |
+| **Mac & Server** | 1.27.6 | 130 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.6-130) |
 | **Linux Desktop** | 1.1.0 | 9 | [Downloads](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.1.0-9) |
 | **Apple TV** | 1.4.0 | 26 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/clients/tvos/README.md) |
 | **iPhone & iPad** | 1.1.0 | 5 | Development installation; [build from source](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md) |
