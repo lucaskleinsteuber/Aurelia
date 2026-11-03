@@ -24,8 +24,7 @@ final class AppUpdater: ObservableObject {
   @Published private(set) var state: State = .idle
   @Published private(set) var hasToken: Bool = false
   /// "owner/name" baked in by build-macos-release.sh; builds from Xcode have none.
-  @Published private(set) var repository: String?
-  private let standardRepository: String?
+  let repository: String?
   let currentVersion: String
   let currentBuild: Int
   let tokenStore: AppUpdateTokenStore
@@ -40,11 +39,9 @@ final class AppUpdater: ObservableObject {
     self.client = client
     self.defaults = defaults
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
-    let standard = configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
-    standardRepository = standard
-    repository = AppUpdateSource.repository(standard: standard, defaults: defaults)
-    self.hasToken =
-      AppUpdateSource.token(defaults: defaults, load: tokens.load) != nil
+    repository = configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
+    AppUpdateSource.retirePublicTest(in: defaults)
+    hasToken = tokens.load() != nil
     currentVersion =
       bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
@@ -73,16 +70,6 @@ final class AppUpdater: ObservableObject {
 
   var canCheck: Bool { repository != nil }
 
-  var publicUpdateTestEnabled: Bool { defaults.bool(forKey: AppUpdateSource.publicTestKey) }
-
-  func setPublicUpdateTest(_ enabled: Bool) {
-    guard state != .checking, state != .downloading, state != .installing else { return }
-    defaults.set(enabled, forKey: AppUpdateSource.publicTestKey)
-    repository = AppUpdateSource.repository(standard: standardRepository, defaults: defaults)
-    hasToken = AppUpdateSource.token(defaults: defaults, load: tokenStore.load) != nil
-    state = .idle
-  }
-
   /// At launch, at most once a day; it speaks up only when there is news.
   func checkInBackgroundIfDue() {
     guard canCheck, AppUpdatePreferences.backgroundCheckIsDue(in: defaults, repository: repository)
@@ -105,7 +92,7 @@ final class AppUpdater: ObservableObject {
     }
     state = .checking
     do {
-      let token = AppUpdateSource.token(defaults: defaults, load: tokenStore.load)
+      let token = tokenStore.load()
       let result = try await client.catalog(
         repository: repository, token: token,
         cached: AppUpdateCatalogCache.load(repository: repository, defaults: defaults))
@@ -129,19 +116,9 @@ final class AppUpdater: ObservableObject {
         }
       }
     } catch AppUpdateError.privateRepository {
-      let message =
-        publicUpdateTestEnabled
-        ? "The public update test feed is unavailable. Turn off Public Update Test to use the normal release feed."
-        : AppUpdateError.privateRepository.message
-      state = .failed(message)
+      state = .failed(AppUpdateError.privateRepository.message)
       Self.logger.notice("Update check got 404 for repository; may be private.")
-      if userInitiated {
-        if publicUpdateTestEnabled {
-          alert("Update Test Unavailable", message)
-        } else {
-          offerPrivateRepoTokenAlert()
-        }
-      }
+      if userInitiated { offerPrivateRepoTokenAlert() }
     } catch {
       let message =
         (error as? AppUpdateError)?.message
@@ -156,7 +133,7 @@ final class AppUpdater: ObservableObject {
     let alert = NSAlert()
     alert.messageText = "Repository May Be Private"
     alert.informativeText =
-      "The repository couldn't be found (404). If it is private, you can add a GitHub token in Settings › Updates › Advanced."
+      "The repository couldn't be found (404). If it is private, you can add a GitHub token in Settings › Updates › GitHub Access."
     alert.addButton(withTitle: "Open Settings")
     alert.addButton(withTitle: "OK")
     if alert.runModal() == .alertFirstButtonReturn {
@@ -223,7 +200,7 @@ final class AppUpdater: ObservableObject {
     var pendingRequest: MacUpdateInstallRequest?
     do {
       let folder = try Self.updatesDirectory()
-      let token = AppUpdateSource.token(defaults: defaults, load: tokenStore.load)
+      let token = tokenStore.load()
       let destination = try await client.download(
         release, repository: repository, token: token, currentBuild: currentBuild, folder: folder)
       downloadedImage = destination

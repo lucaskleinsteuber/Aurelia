@@ -7,12 +7,11 @@ enum AppUpdateSource {
   static let legacyPublicTestRepository = "lucaskleinsteuber/Aurelia-Update-Test"
   static let publicTestKey = "AureliaPublicUpdateTestEnabled"
 
-  static func token(defaults: UserDefaults, load: () -> String?) -> String? {
-    defaults.bool(forKey: publicTestKey) ? nil : load()
-  }
-
-  static func repository(standard: String?, defaults: UserDefaults) -> String? {
-    defaults.bool(forKey: publicTestKey) ? publicTestRepository : standard
+  static func retirePublicTest(in defaults: UserDefaults) {
+    guard defaults.bool(forKey: publicTestKey) else { return }
+    defaults.removeObject(forKey: publicTestKey)
+    defaults.removeObject(forKey: AppUpdatePreferences.checkKey(publicTestRepository))
+    defaults.removeObject(forKey: AppUpdateCatalogCache.key(publicTestRepository))
   }
 
   static func auditsAnonymousRequest(_ request: URLRequest) -> Bool {

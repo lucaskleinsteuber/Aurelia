@@ -43,13 +43,6 @@ struct AppUpdateLogicTests {
       #expect(
         AppUpdateCatalogCache.load(
           repository: AppUpdateSource.publicTestRepository, defaults: defaults) == nil)
-      defaults.set(true, forKey: AppUpdateSource.publicTestKey)
-      #expect(
-        AppUpdateSource.repository(standard: "owner/repo", defaults: defaults)
-          == AppUpdateSource.publicTestRepository)
-      defaults.set(false, forKey: AppUpdateSource.publicTestKey)
-      #expect(
-        AppUpdateSource.repository(standard: "owner/repo", defaults: defaults) == "owner/repo")
       defaults.set(Date(), forKey: AppUpdatePreferences.checkKey("owner/repo"))
       #expect(!AppUpdatePreferences.backgroundCheckIsDue(in: defaults, repository: "owner/repo"))
       #expect(
@@ -92,19 +85,25 @@ struct AppUpdateLogicTests {
     #expect(!AppUpdateSource.auditsAnonymousRequest(authenticated))
   }
 
-  @Test func publicTestDoesNotEvenReadTheSavedToken() throws {
+  @Test func retiringPublicTestClearsOnlyItsStaleUpdateState() throws {
     try withPreferences { defaults, _ in
-      var reads = 0
-      let load = {
-        reads += 1
-        return "synthetic-token" as String?
-      }
+      let testFeed = AppUpdateSource.publicTestRepository
+      let testCheck = AppUpdatePreferences.checkKey(testFeed)
+      let testCache = AppUpdateCatalogCache.key(testFeed)
+      let normalCheck = AppUpdatePreferences.checkKey("owner/repo")
       defaults.set(true, forKey: AppUpdateSource.publicTestKey)
-      #expect(AppUpdateSource.token(defaults: defaults, load: load) == nil)
-      #expect(reads == 0)
-      defaults.set(false, forKey: AppUpdateSource.publicTestKey)
-      #expect(AppUpdateSource.token(defaults: defaults, load: load) == "synthetic-token")
-      #expect(reads == 1)
+      defaults.set(Date(), forKey: testCheck)
+      defaults.set(Data([0]), forKey: testCache)
+      defaults.set(Date(), forKey: normalCheck)
+      AppUpdateSource.retirePublicTest(in: defaults)
+      #expect(defaults.object(forKey: AppUpdateSource.publicTestKey) == nil)
+      #expect(defaults.object(forKey: testCheck) == nil)
+      #expect(defaults.object(forKey: testCache) == nil)
+      #expect(defaults.object(forKey: normalCheck) != nil)
+
+      defaults.set(Date(), forKey: testCheck)
+      AppUpdateSource.retirePublicTest(in: defaults)
+      #expect(defaults.object(forKey: testCheck) != nil)
     }
   }
 

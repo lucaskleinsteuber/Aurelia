@@ -12,6 +12,16 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac/server 1.27.10 (134)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.10-134) - 03.11.2026
+
+### Fixed
+
+- Retire the temporary public update test and resume regular GitHub update checks with the saved token.
+
+### Changed
+
+- Put Mac and server updates on one settings page and move GitHub access into a separate dialog.
+
 ## [Mac/server 1.27.9 (133)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.9-133) - 03.11.2026
 
 ### Changed

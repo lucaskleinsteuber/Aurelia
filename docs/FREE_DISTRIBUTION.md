@@ -147,7 +147,7 @@ If rate limits are reached, the app displays a friendly notice suggesting the us
 or configure a personal access token.
 
 When a repository is private, a GitHub personal access token can optionally be saved in the macOS
-Keychain under *Settings › Updates › Advanced* ("Only needed while the repository is private").
+Keychain under *Settings › Updates › GitHub Access*.
 If an anonymous check returns `404 Not Found`, the app informs the user that the repository may be
 private and offers to open the Settings window. Any configured token is sent exclusively to
 `api.github.com` over HTTPS and is never forwarded to redirect targets, asset CDNs, or public

@@ -61,7 +61,7 @@ hdiutil verify -quiet "$dmg"
 files=("${linux[@]}" "$dmg" "$output/SHA256SUMS")
 
 downloads="- **Mac:** Aurelia-$tag-macOS-arm64.dmg, for Macs with Apple silicon (Intel Macs stay on 1.25.1). Open it and drag Aurelia to Applications. It is signed for development and not notarized, so it runs on the Macs registered for this developer account.
-- **Linux server:** the package for x64 or arm64; see docs/LINUX_SERVER.md. Installed servers update with \`sudo aurelia update\` or in Aurelia on a Mac under Settings › Server › Updates.
+- **Linux server:** the package for x64 or arm64; see docs/LINUX_SERVER.md. Installed servers update with \`sudo aurelia update\` or in Aurelia on a Mac under Settings › Updates › Server Updates.
 - **Source code:** attached by GitHub below."
 
 # Readable notes (what is new, what was fixed) come from a Markdown file, by default

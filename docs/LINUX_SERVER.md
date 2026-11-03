@@ -44,7 +44,7 @@ sudo aurelia update --yes     # without asking
 ```
 
 From version 1.8.7 Aurelia on a Mac shows the installed and the newest version under
-Settings › Server › Updates and installs an update with one click. The server looks for a new
+Settings › Updates › Server Updates and installs an update with one click. The server looks for a new
 version once a day by itself (`aurelia-update-check.timer`); installing always waits for the
 owner. A click leaves a request in `/var/lib/aurelia`, where `aurelia-update-request.path` notices
 it and runs `aurelia update` as root, which reports back in `/var/lib/aurelia/update-status`.

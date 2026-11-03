@@ -101,13 +101,12 @@ struct ServerManagementView: View {
       ServerHealthCard(health: health)
     }
     // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
-    // power saving and updates of the Linux package.
+    // power saving of the Linux package.
     if let client, capabilities != nil || model.isLocalHost {
       if hosting.hostsOnMac {
         ServerHostingEditor(
           client: client, available: capabilities?.nativeHostOperations == true)
       } else if hosting == .linuxPackage {
-        ServerUpdatesEditor(client: client)
         ServerPowerEditor(client: client)
       }
     }

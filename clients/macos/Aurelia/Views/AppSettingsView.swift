@@ -58,6 +58,7 @@ struct AppSettingsView: View {
   @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
 
   // Navigation & Search State
+  @State private var showingUpdateAccess = false
   @State private var selectedCategory: SettingsCategory = .general
   @State private var searchText = ""
 
@@ -1059,43 +1060,30 @@ struct AppSettingsView: View {
             || updater.state == .installing
         )
         .accessibilityIdentifier("updates-check")
+
+        Button("GitHub Access…") { showingUpdateAccess = true }
+          .sheet(isPresented: $showingUpdateAccess) {
+            VStack(alignment: .leading, spacing: 16) {
+              Text("GitHub Access").font(.headline)
+              GitHubTokenSettingsView(updater: updater)
+              Button("Done") { showingUpdateAccess = false }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(24)
+            .frame(width: 440)
+          }
       }
       .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    if model.canManageMedia, !model.requiresProfileSelection {
-      AureliaSettingsSection(
-        "Server Updates",
-        symbol: "arrow.triangle.2.circlepath.circle",
-        description: "Keep your Aurelia Server backend synchronized and updated."
-      ) {
-        ServerUpdatesWrapper()
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-    }
-
-    AureliaSettingsSection(
-      "Advanced",
-      symbol: "key.fill",
-      description: "Only needed while the repository is private."
-    ) {
-      Toggle(
-        "Public Update Test",
-        isOn: Binding(
-          get: { updater.publicUpdateTestEnabled }, set: { updater.setPublicUpdateTest($0) }
-        )
-      )
-      .disabled(
-        updater.state == .checking || updater.state == .downloading || updater.state == .installing)
-      if updater.publicUpdateTestEnabled {
-        Text(
-          "Uses lucaskleinsteuber/Aurelia without reading your saved GitHub token. The repository must be public. Turn this off after the test."
-        )
-        .font(.callout).foregroundStyle(.secondary)
-      } else {
-        GitHubTokenSettingsView(updater: updater)
-          .frame(maxWidth: .infinity, alignment: .leading)
+    if model.canManageMedia, !model.requiresProfileSelection, let profile = model.profile {
+      ServerUpdatesEditor(client: APIClient(profile: profile))
+        .id(profile.sessionId)
+    } else {
+      AureliaSettingsSection("Server Updates", symbol: "arrow.down.circle") {
+        Text("Connect to your server and unlock an administrator profile to manage its updates.")
+          .foregroundStyle(.secondary)
       }
     }
   }
@@ -1209,16 +1197,6 @@ struct AppSettingsView: View {
 }
 
 // MARK: - Server Component Wrappers
-
-private struct ServerUpdatesWrapper: View {
-  @EnvironmentObject private var model: AppModel
-
-  var body: some View {
-    if let profile = model.profile {
-      ServerUpdatesEditor(client: APIClient(profile: profile))
-    }
-  }
-}
 
 private struct GitHubTokenSettingsView: View {
   @ObservedObject var updater: AppUpdater

@@ -14,13 +14,13 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
   var message: String {
     switch self {
     case .rateLimited:
-      "GitHub's rate limit was reached. Try again later, or add a GitHub token under Settings › Updates › Advanced."
+      "GitHub's rate limit was reached. Try again later, or add a GitHub token under Settings › Updates › GitHub Access."
     case .notModified:
       "GitHub returned no release information. Try again."
     case .privateRepository:
-      "The repository couldn't be found (404). It may be private. You can add a GitHub token under Settings › Updates › Advanced."
+      "The repository couldn't be found (404). It may be private. You can add a GitHub token under Settings › Updates › GitHub Access."
     case .github(let status) where status == 401 || status == 403:
-      "GitHub answered with an error (\(status)). Try again later."
+      "GitHub denied access (\(status)). Check your token under Settings › Updates › GitHub Access."
     case .github(404):
       "GitHub has no release for this repository yet."
     case .github(let status): "GitHub answered with an error (\(status)). Try again later."

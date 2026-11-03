@@ -245,8 +245,9 @@ These rules apply to every task in this repository.
   `lucaskleinsteuber/Aurelia` repository while they explicitly make it public, then
   restore its private visibility after the test. The existing Linux preparation
   still uses `lucaskleinsteuber/Aurelia-Update-Test`; keep that artifact-only source
-  available until its real test finishes, then make it private too. Public Update Test
-  is explicitly enabled, skips loading/sending saved tokens, and preserves them.
+  available until its real test finishes, then make it private too. The Mac test is
+  complete. Mac builds retire the old test setting and use the normal release feed.
+  Linux Public Update Test skips loading or sending saved tokens and preserves them.
   Never copy private history into the artifact-only repository. The owner operates
   the real Mac/Arch update dialogs; restore normal sources after verification.
   During these tests keep the preparation installed until the app updater installs

@@ -6,6 +6,7 @@ struct ServerUpdatesEditor: View {
   @EnvironmentObject private var model: AppModel
   let client: APIClient
   @State private var status: ServerUpdateStatus?
+  @State private var loaded = false
   @State private var working = false
   @State private var confirmingInstall = false
   @State private var message: String?
@@ -14,7 +15,7 @@ struct ServerUpdatesEditor: View {
     Group {
       if let status, status.available {
         AureliaSettingsSection(
-          "Updates",
+          "Server Updates",
           symbol: "arrow.down.circle",
           description:
             "Aurelia Server looks for a new version once a day. Installing waits for you."
@@ -58,6 +59,16 @@ struct ServerUpdatesEditor: View {
             "The server stops for about a minute while it updates; playback pauses meanwhile. Accounts, library and settings stay."
           )
         }
+      } else {
+        AureliaSettingsSection("Server Updates", symbol: "arrow.down.circle") {
+          Text(
+            message
+              ?? (status == nil && !loaded
+                ? "Checking server update support…"
+                : "This server is updated outside this page. A server hosted by this Mac is updated with the Mac app.")
+          )
+          .foregroundStyle(.secondary)
+        }
       }
     }
     .task(id: model.administrationGeneration) { await load() }
@@ -99,6 +110,7 @@ struct ServerUpdatesEditor: View {
   }
 
   private func load(quietly: Bool = false) async {
+    defer { loaded = true }
     let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
     do {
       status = try await model.currentAdministration {

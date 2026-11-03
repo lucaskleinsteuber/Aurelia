@@ -1,18 +1,17 @@
 # Anonymous desktop update test
 
-Mac and Linux Desktop have an explicitly enabled **Public Update Test** setting under
-Settings → Updates → Advanced. On 03.11.2026 the owner requested the main
-`lucaskleinsteuber/Aurelia` repository for the next anonymous Mac test: they make it
-public temporarily, and it returns to private after that test. Mac 1.27.5 and later
-use this fixed main source when the setting is enabled. Disabling it restores normal
-authenticated behavior without deleting the saved token.
+The anonymous Mac update test completed on 03.11.2026. The main repository is private
+again. Mac 1.27.5 through 1.27.9 can still show the old Public Update Test switch under
+Settings → Updates → Advanced. Turn it off in those builds to use the normal
+authenticated release feed. Newer builds retire the switch on startup and keep the
+saved token. Manage access under Settings → Updates → GitHub Access.
 
 The existing Linux 1.0.2 preparation still uses the separate, artifact-only
 `lucaskleinsteuber/Aurelia-Update-Test` source. It remains available for its pending
 owner-operated test and returns to private afterward. Neither setting changes server
 updates. Repository visibility changes always require the owner's explicit instruction.
 
-While enabled, the clients do not read, send, replace or delete a saved GitHub token.
+While the test mode was enabled on Mac or is enabled on Linux, the clients do not read, send, replace or delete a saved GitHub token.
 Release metadata, checksums and packages must belong to the selected repository.
 Redirects retain no Authorization or Cookie headers. The bounded Linux diagnostic
 records only host and whether Authorization is present; Mac records that boolean in
@@ -23,7 +22,7 @@ reuses that release; without a usable body it retries without a validator. Linux
 searches up to ten pages of 100 releases. Reaching the limit is an incomplete check,
 never evidence that the installed app is current.
 
-## Test sequence
+## Test sequence (including the completed Mac test)
 
 1. The original Mac/server 1.26.6 (123) preparation exposed a real sandbox handoff
    failure: Launch Services discards its installer arguments. Repair that installed
