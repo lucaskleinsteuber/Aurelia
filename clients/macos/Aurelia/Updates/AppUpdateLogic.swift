@@ -213,9 +213,9 @@ enum AppUpdateLogic {
       releaseNotes: object["body"] as? String ?? "", downloadBytes: bytes)
   }
 
-  static func releaseNotesText(_ notes: String) -> String {
+  static func releaseNotesText(_ notes: String) -> String? {
     notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      ? "No release notes were provided for this version." : notes
+      ? nil : notes
   }
 
   static func downloadSizeText(_ bytes: Int64?) -> String {

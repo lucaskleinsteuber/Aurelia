@@ -12,6 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac/server 1.27.9 (133)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.9-133) - 03.11.2026
+
+### Changed
+
+- Remove the App Updates button from the main window. Check for Updates remains available in the Aurelia menu before signing in.
+- Use a smaller update confirmation with shorter text and a compact area for release notes.
+
 ## [Mac/server 1.27.8 (132)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.8-132) - 03.11.2026
 
 ### Changed

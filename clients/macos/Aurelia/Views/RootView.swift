@@ -71,16 +71,6 @@ struct RootView: View {
     .frame(
       minWidth: model.playback == nil ? 760 : 320, minHeight: model.playback == nil ? 560 : 180
     )
-    .overlay(alignment: .topTrailing) {
-      if model.playback == nil,
-        model.isStarting || model.operatingMode == nil || model.profile == nil
-          || model.requiresProfileSelection || model.serverUnreachable || model.isResting
-      {
-        ClientUpdateButton()
-          .padding(.top, 16)
-          .padding(.trailing, 20)
-      }
-    }
     .sheet(isPresented: $model.isMediaManagerPresented) {
       MediaManagerView().environmentObject(model)
     }

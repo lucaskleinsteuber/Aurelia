@@ -441,9 +441,7 @@ struct AppUpdateLogicTests {
     let missing = try AppUpdateLogic.validatedRelease(fromLatest: releaseData())
     #expect(missing.releaseNotes.isEmpty)
     #expect(missing.downloadBytes == nil)
-    #expect(
-      AppUpdateLogic.releaseNotesText(" \n\t") == "No release notes were provided for this version."
-    )
+    #expect(AppUpdateLogic.releaseNotesText(" \n\t") == nil)
     #expect(AppUpdateLogic.downloadSizeText(nil) == "Download size unavailable.")
   }
 

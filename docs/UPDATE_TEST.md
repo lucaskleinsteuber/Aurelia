@@ -96,9 +96,10 @@ survival, real DMG mount, identity/team/build/signature validation, replacement,
 automatic relaunch, and the new app remaining alive after the installer exits.
 It uses no automated input, personal App Group, server, library or media. The approved
 run on 03.11.2026 passed these synthetic checks. The owner-operated 131 → 132
-installation is a separate check.
+installation also succeeded on 03.11.2026, as confirmed by the owner and the
+installer status for build 132. The main repository was returned to private.
 
-The client UI adds App Updates to startup, connection/rest and profile/PIN
-selection screens. It calls the standalone GitHub updater, without server/profile
-authorization. Local update settings skip server-administration fetches and errors;
-the optional profile-session close request is bounded to two seconds during update.
+The Aurelia menu’s Check for Updates command is available before profile unlock
+and while the server is unreachable. Local update settings skip server administration
+requests and errors. The optional profile session close request is bounded to two
+seconds during an update.

@@ -168,11 +168,13 @@ final class AppUpdater: ObservableObject {
     let alert = NSAlert()
     alert.messageText = "Aurelia \(release.version) Is Available"
     alert.informativeText =
-      "You have \(currentVersion) (\(currentBuild)). Install \(release.version) (\(release.build)) now? Aurelia quits, updates and opens again; your library, settings and sign-ins stay.\n\n\(AppUpdateLogic.downloadSizeText(release.downloadBytes))"
+      "Aurelia will reopen after installing the update. \(AppUpdateLogic.downloadSizeText(release.downloadBytes))"
     alert.addButton(withTitle: "Install and Restart")
     alert.addButton(withTitle: "Later")
     alert.addButton(withTitle: "Skip This Version")
-    alert.accessoryView = releaseNotesView(release.releaseNotes)
+    if let notes = AppUpdateLogic.releaseNotesText(release.releaseNotes) {
+      alert.accessoryView = releaseNotesView(notes)
+    }
     switch alert.runModal() {
     case .alertFirstButtonReturn:
       Task { await install(release) }
@@ -184,9 +186,10 @@ final class AppUpdater: ObservableObject {
   }
 
   private func releaseNotesView(_ notes: String) -> NSScrollView {
-    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 200))
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 76))
     scroll.hasVerticalScroller = true
-    scroll.borderType = .bezelBorder
+    scroll.autohidesScrollers = true
+    scroll.drawsBackground = false
     let text = NSTextView(frame: scroll.contentView.bounds)
     text.isEditable = false
     text.isSelectable = true
@@ -204,8 +207,8 @@ final class AppUpdater: ObservableObject {
     text.textContainerInset = NSSize(width: 8, height: 8)
     text.font = .systemFont(ofSize: NSFont.systemFontSize)
     text.textColor = .textColor
-    text.backgroundColor = .textBackgroundColor
-    text.string = AppUpdateLogic.releaseNotesText(notes)
+    text.drawsBackground = false
+    text.string = notes
     text.setAccessibilityLabel("Release Notes")
     scroll.documentView = text
     return scroll
