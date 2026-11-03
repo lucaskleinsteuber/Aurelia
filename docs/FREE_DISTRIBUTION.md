@@ -146,8 +146,8 @@ GitHub answers with `304 Not Modified`, which consumes minimal quota and complet
 If GitHub limits requests, try again later. The Mac updater uses the public release
 feed and has no GitHub token setting.
 
-The update dialog shows GitHub's release notes as selectable plain text in a scrollable
-field, together with the disk image's published download size when available. *Later*
+The update dialog shows the new version and the disk image's published download size.
+Release notes are available on GitHub. *Later*
 dismisses the offer; *Skip This Version* remembers that version on this Mac and suppresses
 its automatic offers, including another build of the same version. Future versions are
 still offered. A manual check also offers skipped versions, so they can still be installed.
@@ -155,15 +155,14 @@ still offered. A manual check also offers skipped versions, so they can still be
 The app downloads the release's disk image and `SHA256SUMS` and checks the image against its
 checksum. Disk images stream directly to a private download folder while SHA-256 is calculated;
 they are not buffered in memory. Files are downloaded through their API asset address on
-`api.github.com`, which works for a private repository with the token and for a public one
-without; the public `github.com` download link is used only when a release lacks the API address. Release descriptions and checksum lists
+`api.github.com` or the public GitHub download URL. Release descriptions and checksum lists
 are limited to 2 MiB and 1 MiB, and images to 2 GiB. Downloads have an overall time limit, reject
 HTML and oversized or incomplete responses, and remove partial files after failures. Consumed images
 and their empty managed UUID folders are also removed after installation failures, including the
 diagnostic no-relaunch path. Cleanup preserves unexpected files and rejects linked download folders.
 Rate limiting, private repositories, invalid releases, checksum mismatches, interrupted downloads
 and insufficient disk space have specific error messages. Asset URLs must belong to the configured
-GitHub repository; storage redirects use HTTPS and never retain the token or cookies.
+GitHub repository; storage redirects use HTTPS and strip authorization headers and cookies.
 
 It then quits and hands the image to the server host helper, which runs outside
 the sandbox. The helper waits until the app and its server have stopped, then mounts the

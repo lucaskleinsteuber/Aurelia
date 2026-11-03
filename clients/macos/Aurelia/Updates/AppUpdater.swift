@@ -113,9 +113,6 @@ final class AppUpdater: ObservableObject {
     alert.addButton(withTitle: "Install and Restart")
     alert.addButton(withTitle: "Later")
     alert.addButton(withTitle: "Skip This Version")
-    if let notes = AppUpdateLogic.releaseNotesText(release.releaseNotes) {
-      alert.accessoryView = releaseNotesView(notes)
-    }
     switch alert.runModal() {
     case .alertFirstButtonReturn:
       Task { await install(release) }
@@ -124,35 +121,6 @@ final class AppUpdater: ObservableObject {
     default:
       break
     }
-  }
-
-  private func releaseNotesView(_ notes: String) -> NSScrollView {
-    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 76))
-    scroll.hasVerticalScroller = true
-    scroll.autohidesScrollers = true
-    scroll.drawsBackground = false
-    let text = NSTextView(frame: scroll.contentView.bounds)
-    text.isEditable = false
-    text.isSelectable = true
-    text.isRichText = false
-    text.isAutomaticLinkDetectionEnabled = false
-    text.isHorizontallyResizable = false
-    text.isVerticallyResizable = true
-    text.minSize = NSSize(width: 0, height: scroll.contentSize.height)
-    text.maxSize = NSSize(
-      width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-    text.autoresizingMask = [.width]
-    text.textContainer?.widthTracksTextView = true
-    text.textContainer?.containerSize = NSSize(
-      width: scroll.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-    text.textContainerInset = NSSize(width: 8, height: 8)
-    text.font = .systemFont(ofSize: NSFont.systemFontSize)
-    text.textColor = .textColor
-    text.drawsBackground = false
-    text.string = notes
-    text.setAccessibilityLabel("Release Notes")
-    scroll.documentView = text
-    return scroll
   }
 
   /// Downloads and checks the release, then lets the helper replace the app after it quits.

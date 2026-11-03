@@ -12,6 +12,12 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac 1.27.12 (136)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.12-136) - 03.11.2026
+
+### Changed
+
+- Remove release notes from the Mac update confirmation. The dialog shows the new version and download size.
+
 ## [Mac 1.27.11 (135)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.11-135) - 03.11.2026
 
 ### Changed

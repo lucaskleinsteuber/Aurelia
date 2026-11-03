@@ -58,12 +58,11 @@ struct AppRelease: Equatable, Sendable {
   let diskImageURL: URL
   let checksumsURL: URL
   let pageURL: URL?
-  let releaseNotes: String
   let downloadBytes: Int64?
 
   init(
     tag: String, version: String, build: Int, diskImageName: String, diskImageURL: URL,
-    checksumsURL: URL, pageURL: URL?, releaseNotes: String = "", downloadBytes: Int64? = nil
+    checksumsURL: URL, pageURL: URL?, downloadBytes: Int64? = nil
   ) {
     self.tag = tag
     self.version = version
@@ -72,7 +71,6 @@ struct AppRelease: Equatable, Sendable {
     self.diskImageURL = diskImageURL
     self.checksumsURL = checksumsURL
     self.pageURL = pageURL
-    self.releaseNotes = releaseNotes
     self.downloadBytes = downloadBytes
   }
 }
@@ -209,12 +207,7 @@ enum AppUpdateLogic {
       tag: tag, version: parsed.version, build: parsed.build, diskImageName: imageName,
       diskImageURL: image, checksumsURL: sums,
       pageURL: page.flatMap { isReleasePageURL($0, repository: repository) ? $0 : nil },
-      releaseNotes: object["body"] as? String ?? "", downloadBytes: bytes)
-  }
-
-  static func releaseNotesText(_ notes: String) -> String? {
-    notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      ? nil : notes
+      downloadBytes: bytes)
   }
 
   static func downloadSizeText(_ bytes: Int64?) -> String {

@@ -389,7 +389,7 @@ struct AppUpdateLogicTests {
     }
   }
 
-  @Test func releaseNotesAndDownloadSizeComeFromTheMatchingImage() throws {
+  @Test func downloadSizeComesFromTheMatchingImage() throws {
     let notes = "## Changes\n\n- Keeps **Markdown** as plain text.\n<https://example.invalid>"
     var object = try #require(
       JSONSerialization.jsonObject(with: releaseData(notes: notes, imageSize: Int64(147_000_000)))
@@ -399,14 +399,10 @@ struct AppUpdateLogicTests {
     object["assets"] = assets
     let release = try AppUpdateLogic.validatedRelease(
       fromLatest: JSONSerialization.data(withJSONObject: object))
-    #expect(release.releaseNotes == notes)
     #expect(release.downloadBytes == 147_000_000)
-    #expect(AppUpdateLogic.releaseNotesText(release.releaseNotes) == notes)
     #expect(AppUpdateLogic.downloadSizeText(release.downloadBytes).hasPrefix("Download size: "))
     let missing = try AppUpdateLogic.validatedRelease(fromLatest: releaseData())
-    #expect(missing.releaseNotes.isEmpty)
     #expect(missing.downloadBytes == nil)
-    #expect(AppUpdateLogic.releaseNotesText(" \n\t") == nil)
     #expect(AppUpdateLogic.downloadSizeText(nil) == "Download size unavailable.")
   }
 
@@ -421,7 +417,6 @@ struct AppUpdateLogicTests {
       let release = try AppUpdateLogic.validatedRelease(
         fromLatest: releaseData(notes: 42, imageSize: size))
       #expect(release.downloadBytes == nil)
-      #expect(release.releaseNotes.isEmpty)
     }
   }
 
