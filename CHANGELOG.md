@@ -12,6 +12,14 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac/server 1.27.5 (129) - 03.11.2026
+
+### Fixed
+
+- Run Mac installation in an independent, one-shot worker. macOS was terminating the hidden subordinate helper when Aurelia exited, interrupting replacement and relaunch after a successful download.
+- Remove the transient worker job after completion without installing a login item or changing background-host preferences.
+- Point the explicitly enabled anonymous Mac update test at the main Aurelia repository, as requested, while preserving saved tokens without reading or sending them. Normal authenticated updates still work after the repository becomes private again.
+
 ## [Mac/server 1.27.4 (128)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.27.4-128) - 03.11.2026
 
 ### Fixed

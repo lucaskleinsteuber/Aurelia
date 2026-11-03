@@ -29,6 +29,12 @@ enum UpdateInstaller {
     guard app.path == "/Applications/Aurelia.app",
       let root = MacUpdateInstallRequest.updatesDirectory()
     else { return false }
+    return runPending(app: app, root: root)
+  }
+
+  /// The complete production transaction can be exercised against signed invented apps.
+  /// Production entry points always derive their installed location and App Group above.
+  static func runPending(app: URL, root: URL, presentsFailure: Bool = true) -> Bool {
     var request: MacUpdateInstallRequest?
     do {
       guard let claimed = try MacUpdateInstallRequest.claim(in: root) else { return false }
@@ -48,8 +54,10 @@ enum UpdateInstaller {
         ?? "The update request could not be completed. Please try again."
       if let request { try? request.writeStatus("failed", message: message, in: root) }
       logger.error("App Group update failed: \(message, privacy: .public)")
-      report(message)
-      open(app)
+      if presentsFailure {
+        report(message)
+        open(app)
+      }
     }
     return true
   }

@@ -14,6 +14,11 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
   private var workspaceObservers: [NSObjectProtocol] = []
 
   static func main() {
+    if UpdateWorkerLaunch.runIfRequested(
+      CommandLine.arguments, work: { _ = UpdateInstaller.runPendingIfRequested() })
+    {
+      return
+    }
     // The app starts this helper in a second role to install an update it downloaded.
     if UpdateInstaller.runIfRequested(CommandLine.arguments) { return }
     let application = NSApplication.shared
@@ -25,10 +30,18 @@ final class ServerHostApplication: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     if UpdateInstaller.hasPendingRequest() {
-      // Return from launch first so Launch Services can acknowledge the new
-      // helper to the sandboxed app before we wait for that app to quit.
+      // The GUI helper is subordinate to Aurelia: loginwindow force-quits it
+      // when Aurelia exits, even after a successful handshake. Only the independent
+      // one-shot worker claims/acknowledges the request and performs installation.
       Task { @MainActor [self] in
-        _ = UpdateInstaller.runPendingIfRequested()
+        do {
+          guard let executable = Bundle.main.executableURL else {
+            throw CocoaError(.executableNotLoadable)
+          }
+          try UpdateWorkerLaunch.submit(executable: executable)
+        } catch {
+          Self.logger.error("Could not start the independent update worker.")
+        }
         finishTermination()
       }
       return

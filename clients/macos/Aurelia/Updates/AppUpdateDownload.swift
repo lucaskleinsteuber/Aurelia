@@ -197,8 +197,7 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
       let (bytes, response) = try await session.bytes(
         for: request,
         delegate: Redirects(
-          publicTest: request.url?.path.hasPrefix(
-            "/repos/\(AppUpdateSource.publicTestRepository)/") == true))
+          publicTest: AppUpdateSource.auditsAnonymousRequest(request)))
       // Validate headers before creating a destination or consuming a potentially huge response.
       _ = try AppUpdateTransferAccumulator(response: response, maximumBytes: maximumBytes)
       if let destination {
@@ -350,10 +349,12 @@ struct AppUpdateClient: Sendable {
       request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
     }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-    if url.path.hasPrefix("/repos/\(AppUpdateSource.publicTestRepository)/") {
+    if url.path.hasPrefix("/repos/\(AppUpdateSource.legacyPublicTestRepository)/") {
       guard request.value(forHTTPHeaderField: "Authorization") == nil else {
         throw AppUpdateError.invalidURL
       }
+    }
+    if AppUpdateSource.auditsAnonymousRequest(request) {
       Logger(subsystem: "com.lucas.aurelia.media", category: "UpdateTest")
         .notice("Public update request; authorization present: false")
     }

@@ -1075,7 +1075,7 @@ struct AppSettingsView: View {
         updater.state == .checking || updater.state == .downloading || updater.state == .installing)
       if updater.publicUpdateTestEnabled {
         Text(
-          "Uses Aurelia’s temporary public test feed without reading your saved GitHub token. Turn this off after the test."
+          "Uses lucaskleinsteuber/Aurelia without reading your saved GitHub token. The repository must be public. Turn this off after the test."
         )
         .font(.callout).foregroundStyle(.secondary)
       } else {

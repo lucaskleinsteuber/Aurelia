@@ -2,7 +2,9 @@ import CoreFoundation
 import Foundation
 
 enum AppUpdateSource {
-  static let publicTestRepository = "lucaskleinsteuber/Aurelia-Update-Test"
+  // The owner requested the main repository for the next anonymous Mac update test.
+  static let publicTestRepository = "lucaskleinsteuber/Aurelia"
+  static let legacyPublicTestRepository = "lucaskleinsteuber/Aurelia-Update-Test"
   static let publicTestKey = "AureliaPublicUpdateTestEnabled"
 
   static func token(defaults: UserDefaults, load: () -> String?) -> String? {
@@ -11,6 +13,15 @@ enum AppUpdateSource {
 
   static func repository(standard: String?, defaults: UserDefaults) -> String? {
     defaults.bool(forKey: publicTestKey) ? publicTestRepository : standard
+  }
+
+  static func auditsAnonymousRequest(_ request: URLRequest) -> Bool {
+    guard request.value(forHTTPHeaderField: "Authorization") == nil,
+      let path = request.url?.path
+    else { return false }
+    return [publicTestRepository, legacyPublicTestRepository].contains {
+      path.hasPrefix("/repos/\($0)/")
+    }
   }
 }
 

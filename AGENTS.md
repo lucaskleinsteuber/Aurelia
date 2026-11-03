@@ -245,12 +245,14 @@ These rules apply to every task in this repository.
   build and download/development availability. Record only delivered or actually
   verified versions in `docs/RELEASE_VERSIONS.json`; render with
   `scripts/release-versions.py`. Mac/server stays Latest; Linux keeps its own tags.
-- The approved anonymous updater test uses only the separate
-  `lucaskleinsteuber/Aurelia-Update-Test` download repository. Keep the main repository
-  private. Public Update Test is explicitly enabled, skips loading/sending saved
-  tokens, and preserves them. Copy only verified release assets and license notices,
-  never private history. The owner operates the real Mac/Arch update dialogs; after
-  verification restore the normal source and make the test repository private.
+- The owner amended the anonymous Mac updater test on 03.11.2026: use the main
+  `lucaskleinsteuber/Aurelia` repository while they explicitly make it public, then
+  restore its private visibility after the test. The existing Linux preparation
+  still uses `lucaskleinsteuber/Aurelia-Update-Test`; keep that artifact-only source
+  available until its real test finishes, then make it private too. Public Update Test
+  is explicitly enabled, skips loading/sending saved tokens, and preserves them.
+  Never copy private history into the artifact-only repository. The owner operates
+  the real Mac/Arch update dialogs; restore normal sources after verification.
   During these tests keep the preparation installed until the app updater installs
   the target; never install the target directly to claim a successful update.
   Never rely on NSWorkspace launch arguments from the sandboxed Mac app. Use the
@@ -260,6 +262,10 @@ These rules apply to every task in this repository.
   Finish asynchronous application cleanup before the final AppKit quit; do not
   enter `terminateLater` from the updater's MainActor task. Verify the real,
   windowless AppKit termination with `scripts/test-macos-termination.sh`.
+  The subordinate GUI helper must not perform replacement after the main app exits:
+  macOS can force-quit it. Submit the independent one-shot worker instead. Verify its
+  lifetime and complete signed synthetic-DMG replacement/relaunch with
+  `scripts/test-update-worker.sh`; it uses no windows, personal data or media.
   See `docs/UPDATE_TEST.md`. Audio acceptance uses logic/configuration/migration
   tests and the owner's listening check; no automatic signal or hearing tests.
   Keep the four clients’ independent speech EQ/compressor presets aligned with

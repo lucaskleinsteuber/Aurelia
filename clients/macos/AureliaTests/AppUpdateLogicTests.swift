@@ -58,20 +58,38 @@ struct AppUpdateLogicTests {
     }
   }
 
-  @Test func publicFeedRequestsHaveNoAuthorizationAndRejectAToken() async throws {
-    let data = releaseData(repository: AppUpdateSource.publicTestRepository)
+  @Test func legacyPublicFeedRequestsHaveNoAuthorizationAndRejectAToken() async throws {
+    let data = releaseData(repository: AppUpdateSource.legacyPublicTestRepository)
     let transport = StubUpdateTransport(steps: [.body(data)])
     let client = AppUpdateClient(transport: transport)
     _ = try await client.catalog(
-      repository: AppUpdateSource.publicTestRepository, token: nil, cached: nil)
+      repository: AppUpdateSource.legacyPublicTestRepository, token: nil, cached: nil)
     #expect(
       await transport.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
     await #expect(throws: AppUpdateError.invalidURL) {
       try await client.catalog(
-        repository: AppUpdateSource.publicTestRepository, token: "synthetic-never-sent", cached: nil
+        repository: AppUpdateSource.legacyPublicTestRepository, token: "synthetic-never-sent",
+        cached: nil
       )
     }
     #expect(await transport.requests.count == 1)
+  }
+
+  @Test func mainRepositorySupportsAnonymousTestAndNormalPrivateAccess() async throws {
+    let repository = AppUpdateSource.publicTestRepository
+    #expect(repository == "lucaskleinsteuber/Aurelia")
+    let anonymous = StubUpdateTransport(steps: [.body(releaseData(repository: repository))])
+    _ = try await AppUpdateClient(transport: anonymous).catalog(
+      repository: repository, token: nil, cached: nil)
+    let request = try #require(await anonymous.requests.first)
+    #expect(AppUpdateSource.auditsAnonymousRequest(request))
+    #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+    let normal = StubUpdateTransport(steps: [.body(releaseData(repository: repository))])
+    _ = try await AppUpdateClient(transport: normal).catalog(
+      repository: repository, token: "synthetic-private-token", cached: nil)
+    let authenticated = try #require(await normal.requests.first)
+    #expect(authenticated.value(forHTTPHeaderField: "Authorization") != nil)
+    #expect(!AppUpdateSource.auditsAnonymousRequest(authenticated))
   }
 
   @Test func publicTestDoesNotEvenReadTheSavedToken() throws {
