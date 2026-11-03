@@ -13,9 +13,9 @@
   },
   {
     "product": "Linux Desktop",
-    "version": "1.1.0",
-    "build": 9,
-    "tag": "linux-app-1.1.0-9"
+    "version": "1.2.0",
+    "build": 10,
+    "tag": "linux-app-1.2.0-10"
   },
   {
     "product": "Apple TV",
