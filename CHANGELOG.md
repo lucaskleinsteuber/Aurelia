@@ -12,6 +12,18 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac 1.28.0 (137)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.28.0-137) - 04.11.2026
+
+### Added
+
+- A **Beta updates** switch in Settings › Updates. With it on, Aurelia also offers test versions (GitHub pre-releases); with it off, you get only stable releases, which come less often.
+
+## [Linux Desktop 1.2.0 (10)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.2.0-10) - 04.11.2026
+
+### Added
+
+- A **Beta updates** switch in Settings › Updates. With it on, Aurelia also offers test versions (GitHub pre-releases); with it off, you get only stable releases, which come less often.
+
 ## Apple TV 1.5.0 (27) - 03.11.2026
 
 ### Added

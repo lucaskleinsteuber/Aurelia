@@ -73,11 +73,14 @@ final class AppUpdater: ObservableObject {
     }
     state = .checking
     do {
+      let beta = AppUpdatePreferences.betaUpdates(in: defaults)
       let result = try await client.catalog(
         repository: repository,
-        cached: AppUpdateCatalogCache.load(repository: repository, defaults: defaults))
+        cached: AppUpdateCatalogCache.load(repository: repository, beta: beta, defaults: defaults),
+        beta: beta)
       let release = result.release
-      AppUpdateCatalogCache.save(result.cache, repository: repository, defaults: defaults)
+      AppUpdateCatalogCache.save(
+        result.cache, repository: repository, beta: beta, defaults: defaults)
       defaults.set(Date(), forKey: AppUpdatePreferences.checkKey(repository))
       if AppUpdateLogic.isNewer(release, version: currentVersion, build: currentBuild) {
         state = .available(release)
@@ -107,7 +110,10 @@ final class AppUpdater: ObservableObject {
 
   private func offer(_ release: AppRelease) {
     let alert = NSAlert()
-    alert.messageText = "Aurelia \(release.version) Is Available"
+    alert.messageText =
+      release.isBeta
+      ? "Aurelia \(release.version) Beta Is Available"
+      : "Aurelia \(release.version) Is Available"
     alert.informativeText =
       "Aurelia will reopen after installing the update. \(AppUpdateLogic.downloadSizeText(release.downloadBytes))"
     alert.addButton(withTitle: "Install and Restart")

@@ -31,6 +31,68 @@ struct AppUpdateLogicTests {
       await transport.requests.allSatisfy { $0.value(forHTTPHeaderField: "If-None-Match") == nil })
   }
 
+  @Test func betaChannelPicksTheHighestMacBuildIncludingPreReleases() throws {
+    func object(_ tag: String, prerelease: Bool, draft: Bool = false) throws -> Any {
+      let name = "Aurelia-\(tag)-macOS-arm64.dmg"
+      var release = try #require(
+        JSONSerialization.jsonObject(with: releaseData(tag: tag, imageName: name))
+          as? [String: Any])
+      release["prerelease"] = prerelease
+      release["draft"] = draft
+      return release
+    }
+    let list = try JSONSerialization.data(withJSONObject: [
+      try object("1.13.0-100", prerelease: false),
+      try object("1.14.0-102", prerelease: true),
+      try object("1.15.0-103", prerelease: true, draft: true),
+      [
+        "tag_name": "linux-app-9.0.0-500", "prerelease": true, "draft": false,
+        "assets": [] as [Any],
+      ],
+      try object("1.13.1-101", prerelease: false),
+    ])
+    let newest = try AppUpdateLogic.newestRelease(fromList: list, repository: "owner/repo")
+    #expect(newest.tag == "1.14.0-102")
+    #expect(newest.isBeta)
+    // Stable Macs never see a pre-release, even as GitHub's "latest" answer.
+    var latest = try #require(
+      JSONSerialization.jsonObject(with: releaseData()) as? [String: Any])
+    latest["prerelease"] = true
+    #expect(throws: AppUpdateError.self) {
+      try AppUpdateLogic.validatedRelease(
+        fromLatest: JSONSerialization.data(withJSONObject: latest))
+    }
+    #expect(try AppUpdateLogic.validatedRelease(fromLatest: releaseData()).isBeta == false)
+    #expect(throws: AppUpdateError.self) {
+      try AppUpdateLogic.newestRelease(fromList: Data("[]".utf8))
+    }
+  }
+
+  @Test func betaChannelUsesTheReleaseListAndItsOwnCache() async throws {
+    #expect(
+      AppUpdateClient.catalogURL(repository: "owner/repo", beta: true)?.absoluteString
+        == "https://api.github.com/repos/owner/repo/releases?per_page=20")
+    #expect(
+      AppUpdateClient.catalogURL(repository: "owner/repo", beta: false)?.absoluteString
+        == "https://api.github.com/repos/owner/repo/releases/latest")
+    let list = try JSONSerialization.data(withJSONObject: [
+      try JSONSerialization.jsonObject(with: releaseData())
+    ])
+    let transport = StubUpdateTransport(steps: [.tagged(list, "list-1")])
+    let result = try await AppUpdateClient(transport: transport).catalog(
+      repository: "owner/repo", cached: nil, beta: true)
+    #expect(result.release.build == 100)
+    #expect(await transport.requests.first?.url?.query == "per_page=20")
+    try withPreferences { defaults, _ in
+      #expect(!AppUpdatePreferences.betaUpdates(in: defaults))
+      AppUpdateCatalogCache.save(result.cache, repository: "owner/repo", beta: true, defaults: defaults)
+      #expect(
+        AppUpdateCatalogCache.load(repository: "owner/repo", beta: true, defaults: defaults) != nil)
+      // A beta list is not a valid stable answer, so the stable feed keeps nothing.
+      #expect(AppUpdateCatalogCache.load(repository: "owner/repo", defaults: defaults) == nil)
+    }
+  }
+
   @Test func cachedBodiesAndCheckTimesAreValidatedAndSeparatedByFeed() throws {
     try withPreferences { defaults, _ in
       let cached = AppUpdateCatalogCache(data: releaseData(), etag: "release-100")

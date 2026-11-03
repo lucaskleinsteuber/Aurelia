@@ -180,6 +180,23 @@ public sealed class AppUpdateTests
     }
 
     [Fact]
+    public void BetaReleasesAreOfferedOnlyWhenBetaUpdatesAreOn()
+    {
+        var stable = ReleaseNode("linux-app-1.0.0-5");
+        var beta = ReleaseNode("linux-app-1.1.0-6");
+        beta["prerelease"] = true;
+        beta["assets"]![0]!["name"] = "Aurelia-Desktop-1.1.0-6-x86_64.pkg.tar.zst";
+        var releases = new JsonArray(beta, stable);
+
+        var normal = AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4);
+        Assert.Equal("linux-app-1.0.0-5", normal?.Tag);
+        Assert.False(normal?.IsBeta);
+        var tester = AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4, includeBeta: true);
+        Assert.Equal("linux-app-1.1.0-6", tester?.Tag);
+        Assert.True(tester?.IsBeta);
+    }
+
+    [Fact]
     public async Task ReadsTheCanonicalRepositoryAndItsUploadedAssetsWithoutARedirect()
     {
         var handler = new CanonicalRepositoryHandler();

@@ -1,8 +1,20 @@
 #!/bin/bash
 # Publish one verified product from pushed source. The Mac retains the Latest channel,
 # while server and Linux desktop releases use their own tags.
+#   --beta    publishes a GitHub pre-release: only apps with "Beta updates" on offer it.
+#   --promote <tag>  turns a tested beta into the stable release without rebuilding it.
 set -euo pipefail
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "${1:-}" = --promote ]; then
+  shift
+  exec bash "$repository_root/scripts/promote-release.sh" "$@"
+fi
+export AURELIA_RELEASE_BETA=false
+if [ "${1:-}" = --beta ]; then
+  AURELIA_RELEASE_BETA=true
+  shift
+fi
+beta=$AURELIA_RELEASE_BETA
 if [ "${1:-}" = --linux-app ]; then
   shift
   exec bash "$repository_root/scripts/publish-linux-app-release.sh" "$@"
@@ -10,8 +22,10 @@ fi
 case "$#:${1:-}" in
   0:) product=Mac; latest=true ;;
   1:--server) product=Server; latest=false ;;
-  *) echo "Usage: publish-release.sh [--server | --linux-app]" >&2; exit 1 ;;
+  *) echo "Usage: publish-release.sh [--beta] [--server | --linux-app] | --promote <tag>" >&2; exit 1 ;;
 esac
+# A beta never becomes GitHub's Latest release; promoting it later does.
+if [ "$beta" = true ]; then latest=false; fi
 . "$repository_root/scripts/workspace-paths.sh"
 "$repository_root/scripts/verify-build-number.sh"
 
@@ -89,6 +103,12 @@ repository=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 notes="$notes
 
 $(python3 "$repository_root/scripts/release-links.py" "$repository" --candidate "$product" "$version" "$build" "$tag")"
+if [ "$beta" = true ]; then
+  title="$title Beta"
+  notes="$(cat "$repository_root/scripts/beta-notice.md")
+
+$notes"
+fi
 notes_output=$(mktemp)
 trap 'rm -f "$notes_output"; if [ -n "${stage:-}" ]; then rm -rf "$stage"; fi' EXIT
 printf '%s\n' "$notes" > "$notes_output"
@@ -107,7 +127,7 @@ if gh release view "$tag" >/dev/null 2>&1; then
   [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ] \
     || { echo "$tag is already published; published downloads are not replaced." >&2; exit 1; }
 else
-  gh release create "$tag" --target "$head" --latest="$latest" --draft \
+  gh release create "$tag" --target "$head" --latest="$latest" --prerelease="$beta" --draft \
     --title "$title" --notes-file "$notes_output"
 fi
 upload "${files[@]}"
@@ -120,7 +140,8 @@ for file in "${files[@]}"; do
     'any(.[]; .name == $name and .state == "uploaded" and .digest == $digest)' \
     <<<"$assets" >/dev/null || { echo "Could not verify the uploaded ${file##*/}." >&2; exit 1; }
 done
-gh release edit "$tag" --notes-file "$notes_output" --draft=false --latest="$latest"
+gh release edit "$tag" --notes-file "$notes_output" --draft=false --latest="$latest" \
+  --prerelease="$beta"
 echo "Published $title as $tag."
 
 if [ "${AURELIA_KEEP_LOCAL_BUILDS:-0}" != 1 ]; then

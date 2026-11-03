@@ -44,7 +44,11 @@ notes_file="${AURELIA_RELEASE_NOTES:-$other_root/Release Notes/$tag.md}"
 [ -s "$notes_file" ] || { echo "Write the Linux desktop release notes to $notes_file first." >&2; exit 1; }
 rendered_notes=$(mktemp)
 trap 'rm -f "$rendered_notes"' EXIT
+beta=${AURELIA_RELEASE_BETA:-false}
+title="Aurelia for Linux $version ($build)"
+if [ "$beta" = true ]; then title="$title Beta"; fi
 {
+  if [ "$beta" = true ]; then cat "$repository_root/scripts/beta-notice.md"; printf '\n'; fi
   cat "$notes_file"
   printf '\n\n'
   python3 "$repository_root/scripts/release-links.py" "$repository" --candidate "Linux Desktop" "$version" "$build" "$tag"
@@ -55,8 +59,8 @@ if gh release view "$tag" >/dev/null 2>&1; then
   [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ] \
     || { echo "$tag is already published; published downloads are not replaced." >&2; exit 1; }
 else
-  gh release create "$tag" --target "$head" --latest=false --draft \
-    --title "Aurelia for Linux $version ($build)" --notes-file "$notes_file"
+  gh release create "$tag" --target "$head" --latest=false --prerelease="$beta" --draft \
+    --title "$title" --notes-file "$notes_file"
 fi
 for file in "${files[@]}"; do
   gh release upload "$tag" "$file" --clobber || GODEBUG=http2client=0 gh release upload "$tag" "$file" --clobber
@@ -85,7 +89,7 @@ for file in "${files[@]}"; do
 done
 jq -e '(.assets | length) == 5' "$verification/release.json" >/dev/null \
   || { echo "The draft contains unexpected downloads; it stays a draft for review." >&2; exit 1; }
-gh release edit "$tag" --notes-file "$notes_file" --draft=false --latest=false
+gh release edit "$tag" --notes-file "$notes_file" --draft=false --latest=false --prerelease="$beta"
 gh api "repos/$repository/releases/$release_id" > "$verification/release.json"
 jq -e --arg tag "$tag" '.tag_name == $tag and .draft == false and (.assets | length) == 5' \
   "$verification/release.json" >/dev/null

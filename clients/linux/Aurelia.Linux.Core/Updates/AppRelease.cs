@@ -5,9 +5,10 @@ namespace Aurelia.Linux.Core.Updates;
 
 public enum LinuxPackageKind { Debian, Rpm, Arch, Flatpak }
 
-/// <summary>A stable Linux app release, independent of the Mac/server releases in the repository.</summary>
+/// <summary>A Linux app release, independent of the Mac/server releases in the repository. A beta is a
+/// GitHub pre-release, offered only when beta updates are on.</summary>
 public sealed record AppRelease(string Tag, Version Version, int Build, string Notes, string FileName, Uri Download,
-    Uri Checksums, long Bytes, string SourceRepository = UpdateFeed.StandardRepository)
+    Uri Checksums, long Bytes, string SourceRepository = UpdateFeed.StandardRepository, bool IsBeta = false)
 {
     public const string Repository = UpdateFeed.StandardRepository;
     public const string TagPrefix = "linux-app-";
@@ -33,13 +34,15 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
             _ => "x86_64.flatpak",
         });
 
-    public static AppRelease? Newest(JsonArray releases, LinuxPackageKind kind, Version currentVersion, int currentBuild, string repository = Repository)
+    public static AppRelease? Newest(JsonArray releases, LinuxPackageKind kind, Version currentVersion, int currentBuild, string repository = Repository,
+        bool includeBeta = false)
     {
         if (!UpdateFeed.IsAllowed(repository)) return null;
         var candidates = new List<AppRelease>();
         foreach (var node in releases.OfType<JsonObject>())
         {
-            if (node["draft"]?.GetValue<bool>() == true || node["prerelease"]?.GetValue<bool>() == true
+            var beta = node["prerelease"]?.GetValue<bool>() == true;
+            if (node["draft"]?.GetValue<bool>() == true || (beta && !includeBeta)
                 || node["tag_name"]?.GetValue<string>() is not { } tag || ParseTag(tag) is not { } parsed
                 || parsed.Build <= currentBuild || parsed.Version < currentVersion || node["assets"] is not JsonArray assets) continue;
             var name = PackageName(parsed.Version, parsed.Build, kind);
@@ -49,7 +52,7 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
             if (package?["url"]?.GetValue<string>() is not { } address || sums?["url"]?.GetValue<string>() is not { } checksums
                 || !IsAssetUrl(address, repository) || !IsAssetUrl(checksums, repository) || package["size"]?.GetValue<long>() is not > 0) continue;
             candidates.Add(new(tag, parsed.Version, parsed.Build, node["body"]?.GetValue<string>() ?? "", name,
-                new Uri(address), new Uri(checksums), package["size"]!.GetValue<long>(), repository));
+                new Uri(address), new Uri(checksums), package["size"]!.GetValue<long>(), repository, beta));
         }
         return candidates.OrderByDescending(c => c.Version).ThenByDescending(c => c.Build).FirstOrDefault();
     }

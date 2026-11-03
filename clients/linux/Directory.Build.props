@@ -2,9 +2,9 @@
   <!-- Aurelia for Linux is its own product with its own version and build counter (see AGENTS.md). -->
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
-    <AureliaLinuxBuildNumber>9</AureliaLinuxBuildNumber>
-    <Version>1.1.0</Version>
-    <FileVersion>1.1.0.$(AureliaLinuxBuildNumber)</FileVersion>
-    <InformationalVersion>1.1.0+build.$(AureliaLinuxBuildNumber)</InformationalVersion>
+    <AureliaLinuxBuildNumber>10</AureliaLinuxBuildNumber>
+    <Version>1.2.0</Version>
+    <FileVersion>1.2.0.$(AureliaLinuxBuildNumber)</FileVersion>
+    <InformationalVersion>1.2.0+build.$(AureliaLinuxBuildNumber)</InformationalVersion>
   </PropertyGroup>
 </Project>

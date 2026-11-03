@@ -29,22 +29,26 @@ struct AppUpdateCatalogCache: Codable, Sendable {
   let data: Data
   let etag: String
 
-  static func key(_ repository: String) -> String { "AureliaUpdateCatalog.v1.\(repository)" }
+  /// Stable and beta answers come from different GitHub addresses, so each has its own entry.
+  static func key(_ repository: String, beta: Bool = false) -> String {
+    beta ? "AureliaUpdateCatalog.beta.v1.\(repository)" : "AureliaUpdateCatalog.v1.\(repository)"
+  }
 
-  static func load(repository: String, defaults: UserDefaults) -> Self? {
-    guard let bytes = defaults.data(forKey: key(repository)), bytes.count <= 3 * 1_024 * 1_024,
+  static func load(repository: String, beta: Bool = false, defaults: UserDefaults) -> Self? {
+    guard let bytes = defaults.data(forKey: key(repository, beta: beta)),
+      bytes.count <= 3 * 1_024 * 1_024,
       let value = try? JSONDecoder().decode(Self.self, from: bytes),
       !value.etag.isEmpty, value.etag.utf8.count <= 1_024,
-      (try? AppUpdateLogic.validatedRelease(fromLatest: value.data, repository: repository)) != nil
+      (try? AppUpdateLogic.release(in: value.data, beta: beta, repository: repository)) != nil
     else { return nil }
     return value
   }
 
-  static func save(_ value: Self?, repository: String, defaults: UserDefaults) {
+  static func save(_ value: Self?, repository: String, beta: Bool = false, defaults: UserDefaults) {
     if let value, let bytes = try? JSONEncoder().encode(value) {
-      defaults.set(bytes, forKey: key(repository))
+      defaults.set(bytes, forKey: key(repository, beta: beta))
     } else {
-      defaults.removeObject(forKey: key(repository))
+      defaults.removeObject(forKey: key(repository, beta: beta))
     }
   }
 }
@@ -59,10 +63,12 @@ struct AppRelease: Equatable, Sendable {
   let checksumsURL: URL
   let pageURL: URL?
   let downloadBytes: Int64?
+  /// A GitHub pre-release, offered only to Macs that turned on beta updates.
+  let isBeta: Bool
 
   init(
     tag: String, version: String, build: Int, diskImageName: String, diskImageURL: URL,
-    checksumsURL: URL, pageURL: URL?, downloadBytes: Int64? = nil
+    checksumsURL: URL, pageURL: URL?, downloadBytes: Int64? = nil, isBeta: Bool = false
   ) {
     self.tag = tag
     self.version = version
@@ -72,6 +78,7 @@ struct AppRelease: Equatable, Sendable {
     self.checksumsURL = checksumsURL
     self.pageURL = pageURL
     self.downloadBytes = downloadBytes
+    self.isBeta = isBeta
   }
 }
 
@@ -81,7 +88,13 @@ enum AppUpdatePreferences {
   static let skippedVersionsKey = "AureliaSkippedUpdateVersions"
   static let lastCheckKey = "AureliaLastUpdateCheck"
   static let latestETagKey = "AureliaUpdateLatestETag"
+  /// Off by default: only the owner's test Macs see pre-releases.
+  static let betaUpdatesKey = "AureliaBetaUpdates"
   static let checkInterval: TimeInterval = 24 * 3_600
+
+  static func betaUpdates(in defaults: UserDefaults) -> Bool {
+    defaults.bool(forKey: betaUpdatesKey)
+  }
 
   static func checksAutomatically(in defaults: UserDefaults) -> Bool {
     defaults.object(forKey: automaticChecksKey) == nil || defaults.bool(forKey: automaticChecksKey)
@@ -169,11 +182,42 @@ enum AppUpdateLogic {
   static func validatedRelease(fromLatest data: Data, repository: String? = nil) throws
     -> AppRelease
   {
+    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      throw AppUpdateError.invalidRelease
+    }
+    return try validatedRelease(object, allowsBeta: false, repository: repository)
+  }
+
+  /// The beta channel reads GitHub's release list: the Mac release with the highest build,
+  /// pre-releases included. Linux and server releases in the same list have other tags and are
+  /// passed over.
+  static func newestRelease(fromList data: Data, repository: String? = nil) throws -> AppRelease {
+    guard let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+      throw AppUpdateError.invalidRelease
+    }
+    let releases = list.compactMap {
+      try? validatedRelease($0, allowsBeta: true, repository: repository)
+    }
+    guard let newest = releases.max(by: { $0.build < $1.build }) else {
+      throw AppUpdateError.invalidRelease
+    }
+    return newest
+  }
+
+  static func release(in data: Data, beta: Bool, repository: String? = nil) throws -> AppRelease {
+    beta
+      ? try newestRelease(fromList: data, repository: repository)
+      : try validatedRelease(fromLatest: data, repository: repository)
+  }
+
+  private static func validatedRelease(
+    _ object: [String: Any], allowsBeta: Bool, repository: String?
+  ) throws -> AppRelease {
+    let isBeta = object["prerelease"] as? Bool == true
     guard
-      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let tag = object["tag_name"] as? String,
       object["draft"] as? Bool != true,
-      object["prerelease"] as? Bool != true,
+      allowsBeta || !isBeta,
       let assets = object["assets"] as? [[String: Any]]
     else { throw AppUpdateError.invalidRelease }
     guard let parsed = parseTag(tag) else { throw AppUpdateError.invalidTag }
@@ -207,7 +251,7 @@ enum AppUpdateLogic {
       tag: tag, version: parsed.version, build: parsed.build, diskImageName: imageName,
       diskImageURL: image, checksumsURL: sums,
       pageURL: page.flatMap { isReleasePageURL($0, repository: repository) ? $0 : nil },
-      downloadBytes: bytes)
+      downloadBytes: bytes, isBeta: isBeta)
   }
 
   static func downloadSizeText(_ bytes: Int64?) -> String {

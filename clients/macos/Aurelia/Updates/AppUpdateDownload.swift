@@ -258,28 +258,38 @@ struct AppUpdateClient: Sendable {
     return (release, result.etag)
   }
 
+  /// Stable: GitHub's latest release. Beta: the newest of the last releases, pre-releases
+  /// included.
+  static func catalogURL(repository: String, beta: Bool) -> URL? {
+    guard AppUpdateLogic.isRepository(repository) else { return nil }
+    return URL(
+      string: beta
+        ? "https://api.github.com/repos/\(repository)/releases?per_page=20"
+        : "https://api.github.com/repos/\(repository)/releases/latest")
+  }
+
   func catalog(
-    repository: String, cached: AppUpdateCatalogCache?
+    repository: String, cached: AppUpdateCatalogCache?, beta: Bool = false
   ) async throws -> (release: AppRelease, cache: AppUpdateCatalogCache?) {
-    guard AppUpdateLogic.isRepository(repository),
-      let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")
-    else { throw AppUpdateError.invalidURL }
+    guard let url = Self.catalogURL(repository: repository, beta: beta) else {
+      throw AppUpdateError.invalidURL
+    }
+    let limit: Int64 = 3 * 1_024 * 1_024
     let cachedRelease = cached.flatMap {
-      try? AppUpdateLogic.validatedRelease(fromLatest: $0.data, repository: repository)
+      try? AppUpdateLogic.release(in: $0.data, beta: beta, repository: repository)
     }
     do {
       let result = try await transfer(
-        url, ifNoneMatch: cachedRelease == nil ? nil : cached?.etag,
-        maximumBytes: 2 * 1_024 * 1_024)
-      let release = try AppUpdateLogic.validatedRelease(
-        fromLatest: result.data, repository: repository)
+        url, ifNoneMatch: cachedRelease == nil ? nil : cached?.etag, maximumBytes: limit)
+      let release = try AppUpdateLogic.release(
+        in: result.data, beta: beta, repository: repository)
       return (release, result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) })
     } catch AppUpdateError.notModified {
       if let cached, let cachedRelease { return (cachedRelease, cached) }
       // An unexpected 304 without a usable body is not proof that the app is current.
-      let result = try await transfer(url, maximumBytes: 2 * 1_024 * 1_024)
+      let result = try await transfer(url, maximumBytes: limit)
       return (
-        try AppUpdateLogic.validatedRelease(fromLatest: result.data, repository: repository),
+        try AppUpdateLogic.release(in: result.data, beta: beta, repository: repository),
         result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) }
       )
     } catch AppUpdateError.github(404) {

@@ -102,7 +102,7 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.27.12 (136); the independent tvOS
+  one per build. The current Mac release is 1.28.0 (137); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.5.0 (27).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
@@ -111,7 +111,7 @@ These rules apply to every task in this repository.
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published.
-- Aurelia for Linux (`clients/linux`, 1.1.0 (9)) is the native Linux desktop
+- Aurelia for Linux (`clients/linux`, 1.2.0 (10)) is the native Linux desktop
   app, with library browsing, playback, settings, server administration and optional hosting
   on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
   its own version counter (`Version` and `AureliaLinuxBuildNumber` in
@@ -241,6 +241,13 @@ These rules apply to every task in this repository.
 
 ## Public distribution
 
+- Release channels: publish every new Mac and Linux Desktop test build as a beta
+  (`scripts/publish-release.sh --beta`, with `--linux-app` for Linux), a GitHub pre-release
+  that only apps with **Beta updates** turned on offer; the owner's apps have it on. Make a
+  stable release only when the owner says the tested beta is good, with
+  `scripts/publish-release.sh --promote <tag>` (same downloads, no rebuild), usually one or two
+  a week and never several a day. Only security or data-loss fixes may go stable directly.
+  Record a version in `docs/RELEASE_VERSIONS.json` and the changelog when it becomes stable.
 - Track verified product releases in `docs/RELEASE_VERSIONS.json`. End each GitHub
   release description with compact version and download links for every product,
   including unchanged products. Keep the version overview out of the README.

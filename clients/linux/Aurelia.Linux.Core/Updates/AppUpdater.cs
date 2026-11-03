@@ -217,6 +217,18 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
     public bool IsBusy { get; private set; }
     public bool RestartRequired { get; private set; }
     public bool PublicUpdateTestEnabled => UpdateFeed.IsPublicTest(settings);
+    public const string BetaUpdatesKey = "betaUpdates";
+    /// <summary>Off by default: only test computers see pre-releases.</summary>
+    public bool BetaUpdatesEnabled => settings.Read<bool?>(BetaUpdatesKey) == true;
+
+    public void SetBetaUpdates(bool enabled)
+    {
+        if (IsBusy || RestartRequired) return;
+        settings.Write(BetaUpdatesKey, enabled);
+        Available = null;
+        Status = "Check for a newer version of Aurelia for Linux.";
+        Notify();
+    }
     private string CheckKey => "lastUpdateCheck." + UpdateFeed.Repository(settings);
 
     public void SetPublicUpdateTest(bool enabled)
@@ -239,8 +251,10 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
         {
             settings.Write(CheckKey, clock.GetUtcNow());
             Available = null;
-            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild, UpdateFeed.Repository(settings));
-            Status = Available is { } release ? $"Aurelia {release.Version} ({release.Build}) is available." : "Aurelia is up to date.";
+            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild, UpdateFeed.Repository(settings), BetaUpdatesEnabled);
+            Status = Available is { } release
+                ? $"Aurelia {release.Version} ({release.Build}){(release.IsBeta ? " Beta" : "")} is available."
+                : "Aurelia is up to date.";
         }
         catch (Exception error) when (error is HttpRequestException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or CredentialStoreUnavailableException)
         {

@@ -165,7 +165,9 @@ keyboard shortcuts.
 ## App updates
 
 Settings → Updates checks the stable Linux app releases on GitHub, independently of the Mac/server
-versions (`linux-app-<version>-<build>` tags). It chooses the package for the installed format,
+versions (`linux-app-<version>-<build>` tags). With **Beta updates** on, it also offers betas (GitHub
+pre-releases, published with `scripts/publish-release.sh --beta --linux-app`); turning it off keeps
+the installed beta until a newer stable release arrives. It chooses the package for the installed format,
 requires a higher build and a version that does not go backwards, and downloads only complete
 release assets from this repository. Daily checks can be turned off; Check for Updates always
 works manually. A private repository needs a fine-grained GitHub token with Contents: Read-only
@@ -387,7 +389,8 @@ under headless X11 and Wayland. The third checks the installed native app under 
 Wayland and X11 session, with isolated XDG directories and a private D-Bus; it also checks that a
 second background launch hands off to the existing instance. These checks do not open a video.
 
-Publish verified packages with `scripts/publish-release.sh --linux-app`. It requires clean,
+Publish verified packages with `scripts/publish-release.sh --beta --linux-app` (a test build), and
+make a tested beta stable with `scripts/publish-release.sh --promote linux-app-<version>-<build>`. Publishing requires clean,
 committed source matching `origin/main`, all four packages built from that commit and release
 notes in `Local/Release Notes/linux-app-<version>-<build>.md`. Downloads stay in a draft until
 their uploaded sizes and downloaded SHA-256 values match. The release does not replace the

@@ -595,6 +595,13 @@ public sealed class SettingsWindow : Window
         page.Children.Add(status);
         page.Children.Add(notes);
         page.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { check, install } });
+        if (services.Updater is { } betaUpdater)
+        {
+            var beta = Toggle("Beta updates", "Get test versions before everyone else. They may have bugs. Turn this off to stay on the stable version from the next stable release on.",
+                betaUpdater.BetaUpdatesEnabled, value => { betaUpdater.SetBetaUpdates(value); ShowSelected(); });
+            beta.IsEnabled = !betaUpdater.IsBusy && !betaUpdater.RestartRequired;
+            page.Children.Add(Section("Beta", beta));
+        }
         if (services.Updater is { } feedUpdater)
         {
             var source = Toggle("Public Update Test", "Use Aurelia’s temporary public test feed without reading your saved GitHub token.",

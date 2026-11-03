@@ -56,6 +56,7 @@ struct AppSettingsView: View {
   @AppStorage(AureliaRest.enabledKey) private var restsWhenUnused = true
   @AppStorage(AureliaRest.minutesKey) private var restMinutes = AureliaRest.defaultMinutes
   @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
+  @AppStorage(AppUpdatePreferences.betaUpdatesKey) private var betaUpdates = false
 
   // Navigation & Search State
   @State private var selectedCategory: SettingsCategory = .general
@@ -416,7 +417,7 @@ struct AppSettingsView: View {
       }
       if queryMatches(
         query,
-        "updates check new version mac app server release notes token github pat private"
+        "updates check new version mac app server release notes token github pat private beta test pre-release"
       ) {
         updatesSections
         let _ = { foundAny = true }()
@@ -1050,6 +1051,14 @@ struct AppSettingsView: View {
 
         Toggle("Check for updates automatically", isOn: $automaticUpdateChecks)
           .accessibilityIdentifier("updates-automatic")
+
+        Toggle("Beta updates", isOn: $betaUpdates)
+          .accessibilityIdentifier("updates-beta")
+        Text(
+          "Get test versions before everyone else. They may have bugs. Turn this off to stay on the stable version from the next stable release on."
+        )
+        .font(.callout).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
 
         Button("Check for Updates…") {
           Task { await updater.check(userInitiated: true) }
