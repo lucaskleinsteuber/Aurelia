@@ -18,7 +18,18 @@ network. Media files are only read, never changed.
 
 ## Installing and updating
 
-Unpack the download on the server and run its installer:
+On Ubuntu or Debian, one line installs Aurelia Server and then asks the setup questions,
+including whether the computer stays on all the time or saves power:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh | sudo bash
+```
+
+It picks the newest stable server release for this computer (x64 or arm64), checks the
+download against the release's `SHA256SUMS` and runs the package's installer described below.
+Run again, it updates an existing installation and asks nothing.
+
+To do the same by hand, unpack the download on the server and run its installer:
 
 ```sh
 tar -xzf Aurelia-Server-<version>-<build>-linux-x64.tar.gz
@@ -85,7 +96,11 @@ The token is kept in `/etc/aurelia/github-token`, which only root can read. When
 sudo aurelia setup --name "Living Room Server"
 ```
 
-This asks for the owner's name and the Server Password (twice) and turns on network access.
+This asks for the owner's name and the Server Password (twice), turns on network access and asks
+one question about power use: always on, save power (the computer sleeps after 15 unused minutes
+and Wake-on-LAN wakes it), or stop only Aurelia (for a computer that also does other work). Give
+the answer up front with `--power always`, `--power save` or `--power stop-only`; change it later
+with `sudo aurelia sleep` or in Aurelia on a Mac.
 Then connect the devices and compare the verification fingerprint they show with the one from
 `aurelia status`:
 

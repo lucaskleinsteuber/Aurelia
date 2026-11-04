@@ -12,6 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Server 1.29.0 (136) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.29.0-136) - 04.11.2026
+
+### Added
+
+- Install on Ubuntu or Debian with one line: `curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh | sudo bash`. It checks the download's checksum and then starts the setup.
+- `aurelia setup` asks one question about power use (always on, save power, or stop only Aurelia) and sets it up; `--power` answers it up front.
+
 ## [Server 1.28.0 (135)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.28.0-135) - 04.11.2026
 
 ### Added

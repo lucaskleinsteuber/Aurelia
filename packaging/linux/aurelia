@@ -110,7 +110,8 @@ usage() {
   cat <<'USAGE'
 Aurelia Server
 
-  sudo aurelia setup [--name "Server Name"]   Create the owner and turn on network access
+  sudo aurelia setup [--name "Server Name"] [--power always|save|stop-only]
+                                              Create the owner, turn on network access, choose power use
   aurelia approve [CODE]                      Allow an Apple TV that shows a code
   aurelia pair                                Show a code to enter on a Mac
   aurelia library add --path PATH [--kind automatic|movies|tv] [--name NAME]
@@ -141,9 +142,11 @@ case "$command" in
   setup)
     require_root setup
     name=""
+    power=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --name) name=${2:-}; shift 2 ;;
+        --power) power=${2:-}; shift 2 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
       esac
     done
@@ -160,6 +163,25 @@ case "$command" in
     systemctl start aurelia
     wait_until_ready
     "$server" server identity
+    # One question instead of the power settings: the answer sets them up.
+    if [ -z "$power" ]; then
+      echo
+      echo "Should this computer stay on all the time?"
+      echo "  1) Always on: Aurelia is ready at any moment. Uses the most power."
+      echo "  2) Save power: the computer sleeps after 15 unused minutes. Aurelia on a Mac,"
+      echo "     or a router such as a FRITZ!Box, wakes it again (Wake-on-LAN)."
+      echo "  3) Stop only Aurelia: for a computer that also does other work, such as a NAS."
+      echo "     Aurelia starts again within seconds when a device connects."
+      read -r -p "Choose 1, 2 or 3 [1]: " power || power=""
+    fi
+    echo
+    case "${power:-1}" in
+      2|save) "$0" sleep on --idle 15 --awake off ;;
+      3|stop-only) "$0" sleep server --idle 15 --awake off ;;
+      1|always) "$0" sleep off ;;
+      *) echo "Unknown choice; Aurelia stays always on." >&2; "$0" sleep off ;;
+    esac
+    echo "Change this any time in Aurelia on a Mac (Settings › Server › Power) or with: sudo aurelia sleep"
     echo
     echo "Next, connect your devices. The first one also asks for the owner's new viewing PIN."
     echo "  Apple TV: choose this server, then run here: aurelia approve CODE"
