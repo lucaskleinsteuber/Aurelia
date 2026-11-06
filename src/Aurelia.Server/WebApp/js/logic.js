@@ -434,15 +434,20 @@ export function resumeSeconds(progress) {
 /**
  * Saves the position of the open title with the protocol's guarded updates: every save names
  * the revision it builds on and a fresh mutation id; a failed save is repeated unchanged. When
- * another device saved a newer position meanwhile (409), that position stays and this player
- * stops saving until the title is opened again; no message repeats.
+ * the revision is outdated (409), the later position wins: this player's while someone watches
+ * here (it is sent again on the server's revision, read with `read`), otherwise the position
+ * another device saved afterwards stays and this player stops saving until the title is opened
+ * again; no message repeats.
  */
 export class ProgressSaver {
-  constructor({ mediaId, revision = 0, send, newId = () => crypto.randomUUID() }) {
+  constructor({ mediaId, revision = 0, send, read = null, newId = () => crypto.randomUUID(), now = () => Date.now() }) {
     this.mediaId = mediaId;
     this.revision = revision;
     this.send = send;
+    this.read = read;
     this.newId = newId;
+    this.now = now;
+    this.rebases = 0;
     this.stopped = false;
     this.pending = null;
     this.inFlight = null;
@@ -457,21 +462,23 @@ export class ProgressSaver {
       durationMilliseconds: Math.round(durationMilliseconds),
       isFinished: Boolean(isFinished),
     };
+    const recordedAt = this.now();
     if (this.inFlight) {
-      this.next = { values, options };
+      this.next = { values, options, recordedAt };
       return this.inFlight;
     }
-    return this.#run(values, options);
+    return this.#run(values, options, recordedAt);
   }
 
-  async #run(values, options) {
+  async #run(values, options, recordedAt) {
     // A save that failed is repeated first, with exactly the same mutation and values: the
     // server may have stored it even though the answer was lost. The newer position follows.
     if (this.pending && !sameValues(this.pending.values, values)) {
-      this.next = { values, options };
+      this.next = { values, options, recordedAt };
       values = this.pending.values;
+      recordedAt = this.pending.recordedAt;
     }
-    if (!this.pending) this.pending = { id: this.newId(), values, revision: this.revision };
+    if (!this.pending) this.pending = { id: this.newId(), values, revision: this.revision, recordedAt };
     const body = {
       ...this.pending.values,
       clientMutationId: this.pending.id,
@@ -479,21 +486,33 @@ export class ProgressSaver {
       expectedRevision: this.pending.revision,
     };
     let saved = false;
+    let rebased = false;
     this.inFlight = (async () => {
       try {
         const response = await this.send(this.mediaId, body, options);
         if (response && Number.isFinite(response.revision)) this.revision = response.revision;
         this.pending = null;
+        this.rebases = 0;
         saved = true;
       } catch (error) {
         if (error?.status === 409) {
-          this.stopped = true;
+          const current = this.read && this.rebases < 3
+            ? await this.read(this.mediaId).catch(() => null) : null;
+          if (current && Number.isFinite(current.revision)
+            && keepsLocalProgress(this.pending.recordedAt, current.updatedAt)) {
+            this.rebases += 1;
+            this.revision = current.revision;
+            rebased = true;
+          } else {
+            this.stopped = true;
+          }
           this.pending = null;
         }
       }
     })();
     await this.inFlight;
     this.inFlight = null;
+    if (rebased) return this.#run(values, options, recordedAt);
     // After a failure the waiting position stays queued for the next save, so an offline
     // player does not retry in a tight loop.
     if (saved && this.next && !this.stopped) {
@@ -503,6 +522,13 @@ export class ProgressSaver {
     }
     return saved;
   }
+}
+
+/** The later position wins; a few seconds of allowance cover clocks that differ slightly. */
+export function keepsLocalProgress(recordedAt, serverUpdatedAt) {
+  if (!Number.isFinite(recordedAt)) return false;
+  const server = serverUpdatedAt ? Date.parse(serverUpdatedAt) : NaN;
+  return !Number.isFinite(server) || recordedAt + 5000 >= server;
 }
 
 function sameValues(left, right) {

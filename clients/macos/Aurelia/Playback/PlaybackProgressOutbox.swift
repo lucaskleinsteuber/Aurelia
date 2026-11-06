@@ -53,6 +53,9 @@ final class PlaybackProgressOutbox {
 
   private var entries: [ProgressOutboxEntry] = []
   private var revisions: [UUID: Int64] = [:]
+  /// Conflicts answered by sending again on the server's revision, per title; a few in a row mean
+  /// another device is saving the same title right now.
+  private var rebases: [UUID: Int] = [:]
   private var client: (any PlaybackClientProtocol)?
   private var scope: PlaybackProgressScope?
   private var session: UUID?
@@ -279,12 +282,25 @@ final class PlaybackProgressOutbox {
             if !client.requiresProgressRevision {
               entries[index].baselineRevision = 0
             } else {
-              // An offline draft without a known baseline cannot safely adopt
-              // the newest server revision: that would overwrite another device.
-              entries[index].state = .conflict
-              _ = persist()
-              notify()
-              continue
+              // Without a known revision the server's current one is adopted only when this
+              // Mac's position is the later one, so another device's newer position stays.
+              let current = try await client.playbackProgress(mediaId: media)
+              guard operation == generation, !Task.isCancelled,
+                let index = entries.firstIndex(where: { $0.scope == scope && $0.media == media })
+              else { return }
+              if let revision = current.revision, revision >= 0, current.mediaId == media,
+                PlaybackProgressConflict.keepsLocal(
+                  recordedAt: entries[index].pending.recordedAt,
+                  serverUpdatedAt: PlaybackProgressConflict.date(current.updatedAt))
+              {
+                revisions[media] = revision
+                entries[index].baselineRevision = revision
+              } else {
+                entries.remove(at: index)
+                _ = persist()
+                notify()
+                continue
+              }
             }
           }
           entries[index].mutation = ProgressMutation(
@@ -314,6 +330,7 @@ final class PlaybackProgressOutbox {
           throw APIClientError.invalidResponse
         }
         revisions[media] = revision
+        rebases[media] = nil
         if entries[index].pending.sequence == mutation.snapshot.sequence {
           entries.remove(at: index)
           capacityReached = false
@@ -333,6 +350,37 @@ final class PlaybackProgressOutbox {
         guard operation == generation, !Task.isCancelled else { return }
         let api = error as? APIClientError
         if api?.problemCode == "playback_progress_conflict" || api?.httpStatus == 409 {
+          // The revision this Mac knew is outdated. The later position wins: this Mac's when
+          // someone is watching here, otherwise the one another device saved afterwards.
+          if (rebases[media] ?? 0) < 3,
+            let current = try? await client.playbackProgress(mediaId: media),
+            operation == generation, !Task.isCancelled,
+            let index = entries.firstIndex(where: { $0.scope == scope && $0.media == media }),
+            let revision = current.revision, revision >= 0, current.mediaId == media
+          {
+            if PlaybackProgressConflict.keepsLocal(
+              recordedAt: entries[index].pending.recordedAt,
+              serverUpdatedAt: PlaybackProgressConflict.date(current.updatedAt))
+            {
+              rebases[media, default: 0] += 1
+              revisions[media] = revision
+              entries[index].baselineRevision = revision
+              entries[index].mutation = nil
+              entries[index].state = .pending
+              entries[index].nextAttempt = clock()
+            } else {
+              revisions[media] = revision
+              entries.remove(at: index)
+            }
+            guard persist() else {
+              notify()
+              return
+            }
+            notify()
+            continue
+          }
+          guard let index = entries.firstIndex(where: { $0.scope == scope && $0.media == media })
+          else { continue }
           entries[index].state = .conflict
         } else if api?.isAuthenticationFailure == true
           || api == .serverIdentityMismatch
@@ -476,5 +524,25 @@ final class PlaybackProgressOutbox {
     return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
       .appendingPathComponent("PlaybackState", isDirectory: true)
       .appendingPathComponent("pending-progress.json")
+  }
+}
+
+/// Which position wins when a save meets a newer revision on the server: the one recorded later.
+/// Someone watching on this Mac right now always has the later position; a position from another
+/// device wins only when it was saved after this one. A few seconds of allowance cover clocks that
+/// differ slightly.
+enum PlaybackProgressConflict {
+  static func keepsLocal(recordedAt: Date, serverUpdatedAt: Date?) -> Bool {
+    guard let serverUpdatedAt else { return true }
+    return recordedAt.addingTimeInterval(5) >= serverUpdatedAt
+  }
+
+  static func date(_ value: String?) -> Date? {
+    guard let value else { return nil }
+    let parser = ISO8601DateFormatter()
+    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = parser.date(from: value) { return date }
+    parser.formatOptions = [.withInternetDateTime]
+    return parser.date(from: value)
   }
 }

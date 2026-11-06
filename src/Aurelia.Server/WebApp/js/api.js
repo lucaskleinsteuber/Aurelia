@@ -126,6 +126,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
       request(`/api/v1/media/${id(mediaId)}/notes/${id(noteId)}?${new URLSearchParams({ revision })}`, { ...options, method: "DELETE" }),
     sleepTimerEnded: () => request("/api/v1/playback/sleep-timer-ended", { method: "POST", keepalive: true }),
     revokePlayback: (playbackId) => request(`/api/v1/playback/${id(playbackId)}`, { method: "DELETE", keepalive: true }),
+    progress: (mediaId) => request(`/api/v1/media/${id(mediaId)}/progress`),
     saveProgress: (mediaId, body, { keepalive = false } = {}) =>
       request(`/api/v1/media/${id(mediaId)}/progress`, { method: "PUT", body, keepalive }),
     approved,

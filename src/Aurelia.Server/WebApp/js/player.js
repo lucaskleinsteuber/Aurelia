@@ -223,6 +223,7 @@ export class Player {
       mediaId: this.item.id,
       revision: this.source.progress?.revision ?? 0,
       send: (mediaId, body, options) => this.api.saveProgress(mediaId, body, options),
+      read: (mediaId) => this.api.progress(mediaId),
     });
     this.resumeAt = playbackStartSeconds(this.startIntent, this.source.progress, this.preferences.automaticResume,
       this.preferences.resumeThresholdSeconds);

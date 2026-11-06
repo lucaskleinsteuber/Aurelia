@@ -6,7 +6,9 @@ struct TVProgressJournalTests {
   private let scope = TVProgressScope(
     serverID: UUID(), profileID: UUID(), fingerprint: String(repeating: "C", count: 64))
   private let mediaID = UUID()
-  private let snapshot = TVProgressSnapshot(position: 42_000, duration: 100_000, finished: false)
+  // Without a time, like samples journaled by older builds.
+  private let snapshot = TVProgressSnapshot(
+    position: 42_000, duration: 100_000, finished: false, capturedAt: nil)
 
   @Test func defaultsJournalSurvivesANewStoreAndOutboxInstance() async throws {
     let suite = "Aurelia-TV-Journal-Test-\(UUID())"

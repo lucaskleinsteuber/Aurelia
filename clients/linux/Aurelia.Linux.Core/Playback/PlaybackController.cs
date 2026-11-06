@@ -747,7 +747,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         if (Item is not { } current || Duration <= 0 || (!observedPlayback && !finished)) return;
         lastSave = time.GetUtcNow();
         var pending = new PendingProgress(client.Library.Server.ServerId, client.Library.Profile.User.Id, current.Id,
-            finished ? Duration : Position, Duration, finished, revision, Guid.NewGuid());
+            finished ? Duration : Position, Duration, finished, revision, Guid.NewGuid(), time.GetUtcNow());
         var (result, saved) = await outbox.SaveAsync(client, pending, CancellationToken.None);
         if (result == ProgressResult.Saved && saved is not null) revision = saved.Revision;
         if (result == ProgressResult.Conflict) HasConflict = true;

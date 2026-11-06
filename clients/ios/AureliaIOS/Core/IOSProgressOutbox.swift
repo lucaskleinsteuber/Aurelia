@@ -23,12 +23,15 @@ struct IOSProgressSnapshot: Codable, Equatable, Sendable {
   let position: Int64
   let duration: Int64
   let finished: Bool
+  /// When the player took it; missing in snapshots journaled by older builds.
+  let capturedAt: Date?
 
-  init(position: Int64, duration: Int64, finished: Bool, id: UUID = UUID()) {
+  init(position: Int64, duration: Int64, finished: Bool, id: UUID = UUID(), capturedAt: Date? = Date()) {
     self.id = id
     self.position = position
     self.duration = duration
     self.finished = finished
+    self.capturedAt = capturedAt
   }
 
   var isValid: Bool {
@@ -197,6 +200,9 @@ actor IOSProgressOutbox {
   /// it cannot overwrite that position; opening the title again starts from the server's.
   private var stoppedAfterConflict: Set<String> = []
   private var confirmedProgress: [String: IOSPlaybackProgress] = [:]
+  /// Conflicts answered by sending again with the server's revision, per title; a few in a row
+  /// mean another device is saving the same title right now.
+  private var rebases: [String: Int] = [:]
   private var observers:
     [UUID: (IOSProgressScope, AsyncStream<IOSProgressOutboxChange>.Continuation)] = [:]
   private(set) var storageFailed = false
@@ -484,6 +490,7 @@ actor IOSProgressOutbox {
         else { throw IOSCoreError.invalidResponse }
         guard let index = entryIndex(scope: scope, mediaID: mediaID) else { continue }
         knownRevisions[revisionKey(scope: scope, mediaID: mediaID)] = result.revision
+        rebases[revisionKey(scope: scope, mediaID: mediaID)] = nil
         rememberConfirmed(result, scope: scope)
         let beforeAcknowledgement = entries
         if entries[index].latest.id == mutation.snapshot.id {
@@ -504,6 +511,27 @@ actor IOSProgressOutbox {
         guard operation == generation, !Task.isCancelled else { return }
         guard let index = entryIndex(scope: scope, mediaID: mediaID) else { continue }
         if let api = error as? IOSCoreError, api.isConflict {
+          // The revision this device knew is outdated. When its own position is the newer one,
+          // as while someone is watching here, it is sent again on the server's revision instead
+          // of being thrown away.
+          let key = revisionKey(scope: scope, mediaID: mediaID)
+          if (rebases[key] ?? 0) < 3, let current = try? await client.readProgress(mediaID: mediaID) {
+            guard operation == generation, !Task.isCancelled else { return }
+            if let index = entryIndex(scope: scope, mediaID: mediaID), current.mediaId == mediaID,
+              current.revision >= 0,
+              IOSProgressConflict.keepsLocal(
+                capturedAt: entries[index].latest.capturedAt,
+                serverUpdatedAt: current.updatedAt.flatMap(IOSServerDate.parse))
+            {
+              rebases[key, default: 0] += 1
+              knownRevisions[key] = current.revision
+              entries[index].mutation = nil
+              entries[index].revision = current.revision
+              _ = persist()
+              continue
+            }
+          }
+          guard let index = entryIndex(scope: scope, mediaID: mediaID) else { continue }
           // Another device saved a newer position. Report it once and keep the server's
           // position: the open player stops saving this title until it is opened again, and the
           // entry is not kept, so the title is not stuck after that.
@@ -632,5 +660,17 @@ actor IOSProgressOutbox {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
       .appendingPathComponent("AureliaIOS", isDirectory: true)
       .appendingPathComponent("ProgressOutbox.json")
+  }
+}
+
+/// Which position wins when a save meets a newer revision on the server: the one recorded later.
+/// Someone watching on this device right now always has the later position; a position from another
+/// device wins only when it was saved after this one was taken. A small allowance covers clocks that
+/// differ by a few seconds.
+enum IOSProgressConflict {
+  static func keepsLocal(capturedAt: Date?, serverUpdatedAt: Date?) -> Bool {
+    guard let capturedAt else { return false }
+    guard let serverUpdatedAt else { return true }
+    return capturedAt.addingTimeInterval(5) >= serverUpdatedAt
   }
 }

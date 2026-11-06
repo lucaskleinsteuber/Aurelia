@@ -87,7 +87,18 @@ public sealed class PlaybackFlowTests : IDisposable
         Assert.Equal(ProgressResult.Conflict, conflict);
         Assert.Empty(outbox.Pending);
 
-        var finished = first with { PositionMilliseconds = 3_600_000, IsFinished = true, ExpectedRevision = saved.Revision, ClientMutationId = Guid.NewGuid() };
+        // Someone watching here has the later position: it is sent again on the server's revision.
+        var watching = first with { PositionMilliseconds = 1_200_000, ClientMutationId = Guid.NewGuid(), RecordedAt = DateTimeOffset.UtcNow };
+        var (rebased, rebasedSaved) = await outbox.SaveAsync(client, watching, TestContext.Current.CancellationToken);
+        Assert.Equal(ProgressResult.Saved, rebased);
+        Assert.Equal(1_200_000, (await client.ProgressAsync(movie.Id, TestContext.Current.CancellationToken)).PositionMilliseconds);
+        Assert.Empty(outbox.Pending);
+        // A sample taken before another device's later save does not overwrite it.
+        var older = first with { PositionMilliseconds = 30_000, ClientMutationId = Guid.NewGuid(), RecordedAt = DateTimeOffset.UtcNow.AddHours(-1) };
+        Assert.Equal(ProgressResult.Conflict, (await outbox.SaveAsync(client, older, TestContext.Current.CancellationToken)).Result);
+        Assert.Equal(1_200_000, (await client.ProgressAsync(movie.Id, TestContext.Current.CancellationToken)).PositionMilliseconds);
+
+        var finished = first with { PositionMilliseconds = 3_600_000, IsFinished = true, ExpectedRevision = rebasedSaved!.Revision, ClientMutationId = Guid.NewGuid() };
         Assert.Equal(ProgressResult.Saved, (await outbox.SaveAsync(client, finished, TestContext.Current.CancellationToken)).Result);
         Assert.True((await client.ProgressAsync(movie.Id, TestContext.Current.CancellationToken)).IsCompleted);
     }

@@ -14,7 +14,8 @@ public sealed record PendingProgress(
     long DurationMilliseconds,
     bool IsFinished,
     long ExpectedRevision,
-    Guid ClientMutationId);
+    Guid ClientMutationId,
+    DateTimeOffset? RecordedAt = null);
 
 public enum ProgressResult
 {
@@ -28,8 +29,10 @@ public enum ProgressResult
 /// Saves playback positions like the Mac app's outbox: each save carries the revision it builds on
 /// and a mutation id that is written to disk before sending, so a retry repeats it exactly. Saves
 /// that could not be sent stay in <c>$XDG_STATE_HOME/aurelia-desktop/pending-progress.json</c>
-/// (readable only by this user, at most 256 entries) and are sent again later. A conflict means
-/// another device moved on; the player then offers to keep this computer's position.
+/// (readable only by this user, at most 256 entries) and are sent again later. When the revision
+/// is outdated, the later position wins: this computer's while someone watches here (it is sent
+/// again on the server's revision), otherwise the one another device saved afterwards, and the
+/// player offers to keep this computer's position.
 /// </summary>
 public sealed class ProgressOutbox(string? path)
 {
@@ -61,7 +64,11 @@ public sealed class ProgressOutbox(string? path)
         }
     }
 
-    private async Task<(ProgressResult, PlaybackProgressResponse?)> SendAsync(PlaybackClient client, PendingProgress progress, CancellationToken cancellation)
+    /// <summary>A few seconds of allowance for clocks that differ slightly.</summary>
+    public static bool KeepsLocal(DateTimeOffset? recordedAt, DateTimeOffset? serverUpdatedAt) =>
+        recordedAt is { } local && (serverUpdatedAt is not { } server || local.AddSeconds(5) >= server);
+
+    private async Task<(ProgressResult, PlaybackProgressResponse?)> SendAsync(PlaybackClient client, PendingProgress progress, CancellationToken cancellation, int rebases = 0)
     {
         try
         {
@@ -75,6 +82,24 @@ public sealed class ProgressOutbox(string? path)
         catch (AureliaApiException error) when (error.Status == 409 || error.Code == "playback_progress_conflict")
         {
             Remove(progress);
+            if (rebases < 3 && progress.RecordedAt is not null)
+            {
+                PlaybackProgressResponse current;
+                try
+                {
+                    current = await client.ProgressAsync(progress.MediaId, cancellation);
+                }
+                catch (AureliaApiException)
+                {
+                    return (ProgressResult.Conflict, null);
+                }
+                if (KeepsLocal(progress.RecordedAt, current.UpdatedAt))
+                {
+                    var rebased = progress with { ExpectedRevision = current.Revision, ClientMutationId = Guid.NewGuid() };
+                    Store(rebased);
+                    return await SendAsync(client, rebased, cancellation, rebases + 1);
+                }
+            }
             return (ProgressResult.Conflict, null);
         }
         catch (AureliaApiException error) when (error.IsTransient)

@@ -168,6 +168,32 @@ test("another device's newer progress wins and this player stops saving quietly"
   assert.equal(sent.length, 1);
 });
 
+test("an outdated revision is sent again when this player has the later position", async () => {
+  const { sent, send, newId } = recorder([failure(409, "playback_progress_conflict"), { revision: 10 }, { revision: 11 }]);
+  const saver = new logic.ProgressSaver({
+    mediaId: "m", revision: 3, send, newId, now: () => Date.parse("2026-11-06T20:00:00Z"),
+    read: async () => ({ revision: 9, updatedAt: "2026-11-06T19:40:00Z" }),
+  });
+  assert.equal(await saver.save(1_200_000, 2_800_000), true);
+  assert.equal(saver.stopped, false);
+  assert.equal(await saver.save(1_215_000, 2_800_000), true);
+  assert.deepEqual(sent.map((body) => [body.expectedRevision, body.positionMilliseconds]),
+    [[3, 1_200_000], [9, 1_200_000], [10, 1_215_000]]);
+});
+
+test("a position another device saved later stays, and this player stops", async () => {
+  const { sent, send, newId } = recorder([failure(409, "playback_progress_conflict")]);
+  const saver = new logic.ProgressSaver({
+    mediaId: "m", revision: 3, send, newId, now: () => Date.parse("2026-11-06T20:00:00Z"),
+    read: async () => ({ revision: 9, updatedAt: "2026-11-06T20:30:00Z" }),
+  });
+  assert.equal(await saver.save(5000, 60_000), false);
+  assert.equal(saver.stopped, true);
+  assert.equal(sent.length, 1);
+  assert.equal(logic.keepsLocalProgress(Date.parse("2026-11-06T20:00:00Z"), "2026-11-06T20:00:04Z"), true);
+  assert.equal(logic.keepsLocalProgress(Date.parse("2026-11-06T20:00:00Z"), null), true);
+});
+
 test("positions arriving while a save runs are coalesced to the newest one", async () => {
   let release;
   const gate = new Promise((resolve) => (release = resolve));

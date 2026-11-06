@@ -77,37 +77,79 @@ struct PlaybackProgressOutboxTests {
   }
 
   @Test
-  func conflictNeverAutomaticallyOverwritesAnotherDevice() async throws {
+  func aLaterPositionFromAnotherDeviceIsNeverOverwritten() async throws {
     let client = OutboxTestClient()
     let outbox = PlaybackProgressOutbox()
     outbox.activate(client: client)
     outbox.noteBaseline(client.progress, profile: client.profile)
+    // Another device saved after this Mac's sample was taken.
     client.revision = 8
+    client.serverUpdatedAt = "2099-01-01T00:00:00Z"
     #expect(enqueue(outbox, client, 70_000))
-    try await waitUntil { outbox.state(media: client.media, profile: client.profile) == .conflict }
-    outbox.retryAfterReconnect()
-    outbox.retryAfterPlaybackAuthorization(media: client.media, profile: client.profile)
-    outbox.activate(client: client)
-    #expect(enqueue(outbox, client, 75_000))
-    for _ in 0..<20 { await Task.yield() }
+    try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
+    #expect(outbox.state(media: client.media, profile: client.profile) == nil)
     #expect(client.writes.count == 1)
     #expect(client.revision == 8)
-    try await outbox.resolveConflict(media: client.media, profile: client.profile)
+    // Watching on, this Mac saves again on the server's revision.
+    client.serverUpdatedAt = nil
+    #expect(enqueue(outbox, client, 75_000))
     try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
     #expect(client.writes.last?.revision == 8)
-    #expect(client.writes.last?.position == 75_000)
     #expect(client.revision == 9)
     outbox.deactivate()
   }
 
   @Test
-  func unknownBaselineDoesNotAdoptTheLatestServerRevisionOnReplay() async throws {
+  func anOutdatedRevisionIsSentAgainWhenThisMacHasTheLaterPosition() async throws {
     let client = OutboxTestClient()
     let outbox = PlaybackProgressOutbox()
     outbox.activate(client: client)
-    #expect(enqueue(outbox, client, 20_000))
+    outbox.noteBaseline(client.progress, profile: client.profile)
+    client.revision = 8
+    client.serverUpdatedAt = "2000-01-01T00:00:00Z"
+    #expect(enqueue(outbox, client, 100_000))
+    try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
+    #expect(client.writes.count == 2)
+    #expect(client.writes.last?.revision == 8)
+    #expect(client.writes.last?.position == 100_000)
+    #expect(client.revision == 9)
+    #expect(outbox.state(media: client.media, profile: client.profile) == nil)
+    outbox.deactivate()
+  }
+
+  @Test
+  func aDeviceSavingTheSameTitleAtOnceEndsInAConflictToResolve() async throws {
+    let client = OutboxTestClient()
+    let outbox = PlaybackProgressOutbox()
+    outbox.activate(client: client)
+    outbox.noteBaseline(client.progress, profile: client.profile)
+    client.failure = APIClientError.httpFailure(
+      status: 409, retryAfter: nil, code: "playback_progress_conflict", message: nil)
+    #expect(enqueue(outbox, client, 70_000))
     try await waitUntil { outbox.state(media: client.media, profile: client.profile) == .conflict }
+    #expect(client.writes.count == 4)
+    client.failure = nil
+    try await outbox.resolveConflict(media: client.media, profile: client.profile)
+    try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
+    #expect(client.writes.last?.position == 70_000)
+    outbox.deactivate()
+  }
+
+  @Test
+  func unknownBaselineAdoptsTheServerRevisionOnlyForTheLaterPosition() async throws {
+    let client = OutboxTestClient()
+    let outbox = PlaybackProgressOutbox()
+    outbox.activate(client: client)
+    client.revision = 5
+    client.serverUpdatedAt = "2099-01-01T00:00:00Z"
+    #expect(enqueue(outbox, client, 20_000))
+    try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
     #expect(client.writes.isEmpty)
+    client.serverUpdatedAt = "2000-01-01T00:00:00Z"
+    #expect(enqueue(outbox, client, 25_000))
+    try await waitUntil { outbox.pendingCount(profile: client.profile) == 0 }
+    #expect(client.writes.last?.revision == 5)
+    #expect(client.revision == 6)
     outbox.deactivate()
   }
 
@@ -510,6 +552,8 @@ private final class OutboxTestClient: PlaybackClientProtocol {
   var loseAcknowledgement = false
   var wrongAcknowledgement = false
   var omitRevision = false
+  /// When the server's position was saved; nil means the server did not say.
+  var serverUpdatedAt: String?
   var failure: Error?
   private var heldWrite: CheckedContinuation<Void, Never>?
   private var heldRevocations: [CheckedContinuation<Void, Never>] = []
@@ -527,7 +571,7 @@ private final class OutboxTestClient: PlaybackClientProtocol {
     PlaybackProgressResponse(
       mediaId: media, positionMilliseconds: writes.last?.position ?? 0,
       durationMilliseconds: 120_000,
-      isCompleted: false, lastPlayedAt: nil, updatedAt: nil,
+      isCompleted: false, lastPlayedAt: nil, updatedAt: serverUpdatedAt,
       revision: omitRevision ? nil : revision,
       lastMutationId: lastMutation)
   }

@@ -12,6 +12,36 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Apple TV 1.5.1 (28) - 06.11.2026
+
+### Fixed
+
+- Keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
+
+## iPhone & iPad 1.1.1 (6) - 06.11.2026
+
+### Fixed
+
+- Keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
+
+## [Mac 1.28.2 (139) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.28.2-139) - 06.11.2026
+
+### Fixed
+
+- Keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
+
+## [Server 1.29.1 (137) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.29.1-137) - 06.11.2026
+
+### Fixed
+
+- Browser player: keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
+
+## Linux Desktop 1.2.1 (11) - 06.11.2026
+
+### Fixed
+
+- Keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
+
 ## [Mac 1.28.1 (138) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.28.1-138) - 06.11.2026
 
 ### Fixed

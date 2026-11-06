@@ -199,6 +199,39 @@ struct TVPlayerLogicTests {
     await outbox.deactivate()
   }
 
+  @Test func anOutdatedRevisionIsSentAgainWhenThisAppleTVHasTheNewerPosition() async throws {
+    let outbox = TVProgressOutbox()
+    let client = TVPlayerFakeProgressClient(mode: .staleRevisionOnce)
+    await outbox.activate(scope: scope, client: client)
+    #expect(
+      await outbox.enqueue(
+        scope: scope, mediaID: mediaID,
+        snapshot: TVProgressSnapshot(position: 1_200_000, duration: 2_800_000, finished: false),
+        baselineRevision: 7))
+    let retry = try await client.attempt(2)
+    #expect(retry.expectedRevision == 9)
+    #expect(retry.snapshot.position == 1_200_000)
+    try await eventually { await outbox.count(scope: scope) == 0 }
+    // Later samples keep saving on the new revision.
+    #expect(
+      await outbox.enqueue(
+        scope: scope, mediaID: mediaID,
+        snapshot: TVProgressSnapshot(position: 1_215_000, duration: 2_800_000, finished: false),
+        baselineRevision: 7))
+    #expect(try await client.attempt(3).expectedRevision == 10)
+    await outbox.deactivate()
+  }
+
+  @Test func theLaterPositionWinsAConflict() {
+    let now = Date()
+    #expect(TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(-60)))
+    #expect(TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(3)))
+    #expect(!TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: now.addingTimeInterval(60)))
+    #expect(TVProgressConflict.keepsLocal(capturedAt: now, serverUpdatedAt: nil))
+    // A sample from an older build has no time and never overwrites the server.
+    #expect(!TVProgressConflict.keepsLocal(capturedAt: nil, serverUpdatedAt: now))
+  }
+
   @Test func aConflictStopsTheOpenPlayerUntilTheTitleIsOpenedAgain() async throws {
     let outbox = TVProgressOutbox()
     let client = TVPlayerFakeProgressClient(mode: .conflict)
@@ -398,7 +431,9 @@ struct TVPlayerLogicTests {
 }
 
 private actor TVPlayerFakeProgressClient: TVProgressClient {
-  enum Mode { case hold, accept, conflict, invalidRequest }
+  /// conflict: another device saved later. staleRevisionOnce: this Apple TV's revision was
+  /// outdated once, but its position is the newer one.
+  enum Mode { case hold, accept, conflict, invalidRequest, staleRevisionOnce }
   let mode: Mode
   private var sent: [TVProgressMutation] = []
   private var held: [(TVProgressMutation, CheckedContinuation<TVPlaybackProgress, Error>)] = []
@@ -409,13 +444,21 @@ private actor TVPlayerFakeProgressClient: TVProgressClient {
   func readProgress(mediaID: UUID) async throws -> TVPlaybackProgress {
     TVPlaybackProgress(
       mediaId: mediaID, positionMilliseconds: 0, durationMilliseconds: 100_000,
-      isCompleted: false, lastPlayedAt: nil, updatedAt: nil, revision: 7, lastMutationId: nil)
+      isCompleted: false, lastPlayedAt: nil,
+      updatedAt: mode == .conflict ? "2099-01-01T00:00:00Z" : "2000-01-01T00:00:00Z",
+      revision: mode == .staleRevisionOnce ? 9 : 7, lastMutationId: nil)
   }
 
   func sendProgress(_ mutation: TVProgressMutation) async throws -> TVPlaybackProgress {
     sent.append(mutation)
     switch mode {
     case .accept: return result(mutation)
+    case .staleRevisionOnce:
+      if sent.count == 1 {
+        throw TVCoreError.server(
+          status: 409, code: "playback_progress_conflict", message: nil, retryAfter: nil)
+      }
+      return result(mutation)
     case .conflict:
       throw TVCoreError.server(
         status: 409, code: "playback_progress_conflict", message: nil, retryAfter: nil)
