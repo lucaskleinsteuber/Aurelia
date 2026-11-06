@@ -27,7 +27,8 @@ curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/pack
 
 It picks the newest stable server release for this computer (x64 or arm64), checks the
 download against the release's `SHA256SUMS` and runs the package's installer described below.
-Run again, it updates an existing installation and asks nothing.
+Run again, it updates an existing installation and asks nothing. It reads GitHub without an
+account, so it works only while the repository is public; otherwise install by hand as below.
 
 To do the same by hand, unpack the download on the server and run its installer:
 

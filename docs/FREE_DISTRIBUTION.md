@@ -134,8 +134,10 @@ unnecessary with one-year profiles.
 
 *Aurelia › Check for Updates…* asks GitHub for the newest release of the repository the app
 was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
-app's Info.plist; builds made in Xcode have none and cannot update). For public repositories,
-updates check and download anonymously without requiring any personal access token. The app
+app's Info.plist; builds made in Xcode have none and cannot update). The repository is private,
+so the app needs a fine-grained GitHub token with read-only access to its contents: save it under
+*Settings › Updates › GitHub Access…*. It stays in this Mac's Keychain and is sent only to
+`api.github.com`, never along a redirect to the download host. A public repository needs none. The app
 also looks at launch when at least 24 hours have passed since its last successful check.
 *Settings › Updates › Check for updates automatically* is on by default; turning it off stops
 background checks. *Check for Updates…* continues to work manually.
@@ -143,8 +145,8 @@ background checks. *Check for Updates…* continues to work manually.
 To protect GitHub's anonymous rate limit (60 requests per hour per IP), checks send the HTTP
 `If-None-Match` header with the cached release `ETag`. When no newer release is published,
 GitHub answers with `304 Not Modified`, which consumes minimal quota and completes instantly.
-If GitHub limits requests, try again later. The Mac updater uses the public release
-feed and has no GitHub token setting.
+If GitHub limits requests, try again later. With *Beta updates* on, the app reads the list of
+recent releases instead of the latest one, so it also finds pre-releases.
 
 The update dialog shows the new version and the disk image's published download size.
 Release notes are available on GitHub. *Later*

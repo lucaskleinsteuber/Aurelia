@@ -12,6 +12,12 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac 1.28.1 (138) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.28.1-138) - 06.11.2026
+
+### Fixed
+
+- Find and download updates from the private repository again: save a read-only GitHub token under Settings › Updates › GitHub Access. It stays in the Keychain and is sent only to GitHub's API.
+
 ## [Server 1.29.0 (136) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.29.0-136) - 04.11.2026
 
 ### Added

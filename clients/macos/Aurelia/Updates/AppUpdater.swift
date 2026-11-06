@@ -22,22 +22,27 @@ final class AppUpdater: ObservableObject {
   private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "updates")
 
   @Published private(set) var state: State = .idle
+  @Published private(set) var hasToken: Bool = false
   /// "owner/name" baked in by build-macos-release.sh; builds from Xcode have none.
   let repository: String?
   let currentVersion: String
   let currentBuild: Int
+  /// The private repository's releases need a read-only GitHub token from the Keychain.
+  let tokenStore: AppUpdateTokenStore
   private let client: AppUpdateClient
   private let defaults: UserDefaults
 
   init(
-    bundle: Bundle = .main,
+    tokens: AppUpdateTokenStore = AppUpdateTokenStore(), bundle: Bundle = .main,
     client: AppUpdateClient = AppUpdateClient(), defaults: UserDefaults = .standard
   ) {
+    self.tokenStore = tokens
     self.client = client
     self.defaults = defaults
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
     repository = configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
     AppUpdateSource.retirePublicTest(in: defaults)
+    hasToken = tokens.load() != nil
     currentVersion =
       bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     currentBuild = Int(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
@@ -47,6 +52,21 @@ final class AppUpdater: ObservableObject {
     {
       state = .failed(outcome.message ?? "The previous update could not be completed. Try again.")
     }
+  }
+
+  func saveToken(_ token: String) throws {
+    let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      try deleteToken()
+      return
+    }
+    try tokenStore.save(trimmed)
+    hasToken = true
+  }
+
+  func deleteToken() throws {
+    try tokenStore.delete()
+    hasToken = false
   }
 
   var canCheck: Bool { repository != nil }
@@ -75,7 +95,7 @@ final class AppUpdater: ObservableObject {
     do {
       let beta = AppUpdatePreferences.betaUpdates(in: defaults)
       let result = try await client.catalog(
-        repository: repository,
+        repository: repository, token: tokenStore.load(),
         cached: AppUpdateCatalogCache.load(repository: repository, beta: beta, defaults: defaults),
         beta: beta)
       let release = result.release
@@ -139,7 +159,8 @@ final class AppUpdater: ObservableObject {
     do {
       let folder = try Self.updatesDirectory()
       let destination = try await client.download(
-        release, repository: repository, currentBuild: currentBuild, folder: folder)
+        release, repository: repository, token: tokenStore.load(), currentBuild: currentBuild,
+        folder: folder)
       downloadedImage = destination
 
       state = .installing

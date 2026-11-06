@@ -105,7 +105,7 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.28.0 (137); the independent tvOS
+  one per build. The current Mac release is 1.28.1 (138); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.5.0 (27).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
@@ -256,11 +256,15 @@ These rules apply to every task in this repository.
   release description with compact version and download links for every product,
   including unchanged products. Keep the version overview out of the README.
   Mac remains Latest. Server and Linux Desktop have independent release tags.
-- The owner wants the main `lucaskleinsteuber/Aurelia` repository to stay public.
-  Do not switch it back to private after update tests. The existing Linux preparation
+- The main `lucaskleinsteuber/Aurelia` repository is private by the owner's decision
+  (06.11.2026). Never change its visibility. Updates therefore need a read-only GitHub token:
+  the Mac app keeps it in the Keychain (Settings › Updates › GitHub Access), the Linux app in the
+  desktop keyring and the Linux server in `/etc/aurelia/github-token`; a token is sent only to
+  `api.github.com` and never across a redirect. The one-line Linux install and the Docker build
+  read GitHub anonymously and work only for a public repository. The existing Linux preparation
   still uses `lucaskleinsteuber/Aurelia-Update-Test`; keep that artifact-only source
   available until its real test finishes, then make it private too. The Mac test is
-  complete. Mac builds use the public release feed without a GitHub token.
+  complete.
   Linux Public Update Test skips loading or sending saved tokens and preserves them.
   Never copy private history into the artifact-only repository. The owner operates
   the real Mac/Arch update dialogs; restore normal sources after verification.

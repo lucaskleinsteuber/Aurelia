@@ -68,6 +68,43 @@ struct AppUpdateLogicTests {
     }
   }
 
+  @Test func privateRepositoryTokenGoesOnlyToGitHubsAPI() async throws {
+    let list = try JSONSerialization.data(withJSONObject: [
+      try JSONSerialization.jsonObject(with: releaseData())
+    ])
+    let transport = StubUpdateTransport(steps: [.body(list), .body(releaseData())])
+    let client = AppUpdateClient(transport: transport)
+    _ = try await client.catalog(
+      repository: "owner/repo", token: "synthetic-private-token", cached: nil, beta: true)
+    _ = try await client.catalog(
+      repository: "owner/repo", token: "synthetic-private-token", cached: nil)
+    let requests = await transport.requests
+    #expect(requests.count == 2)
+    #expect(
+      requests.allSatisfy {
+        $0.url?.host == "api.github.com"
+          && $0.value(forHTTPHeaderField: "Authorization") == "Bearer synthetic-private-token"
+      })
+    // A redirect to the download host drops the token.
+    var redirect = URLRequest(url: URL(string: "https://objects.githubusercontent.com/file")!)
+    redirect.setValue("Bearer synthetic-private-token", forHTTPHeaderField: "Authorization")
+    let sanitized = try #require(AppUpdateLogic.redirectedRequest(redirect))
+    #expect(sanitized.value(forHTTPHeaderField: "Authorization") == nil)
+  }
+
+  @Test func a404WithoutATokenPointsToGitHubAccess() async throws {
+    let anonymous = StubUpdateTransport(steps: [.partialFailure(.github(404))])
+    await #expect(throws: AppUpdateError.privateRepository) {
+      try await AppUpdateClient(transport: anonymous).catalog(repository: "owner/repo", cached: nil)
+    }
+    #expect(AppUpdateError.privateRepository.message.contains("GitHub Access"))
+    let withToken = StubUpdateTransport(steps: [.partialFailure(.github(404))])
+    await #expect(throws: AppUpdateError.github(404)) {
+      try await AppUpdateClient(transport: withToken).catalog(
+        repository: "owner/repo", token: "synthetic-private-token", cached: nil)
+    }
+  }
+
   @Test func betaChannelUsesTheReleaseListAndItsOwnCache() async throws {
     #expect(
       AppUpdateClient.catalogURL(repository: "owner/repo", beta: true)?.absoluteString

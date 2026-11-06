@@ -6,7 +6,8 @@ updates from the app.
 
 The image is built on your own computer from the newest stable server release on GitHub; the
 download is checked against the release's `SHA256SUMS`. ffmpeg, which lets browsers play MKV and
-other files, comes from Debian. Intel/AMD (amd64) and ARM (arm64) are supported.
+other files, comes from Debian. Intel/AMD (amd64) and ARM (arm64) are supported. The build reads
+GitHub without an account, so it works only while the repository is public.
 
 ## Start
 
