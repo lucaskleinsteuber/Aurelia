@@ -39,6 +39,9 @@ These rules apply to every task in this repository.
   media folder; keep it. The Mac app ships its own LGPL ffmpeg from
   `scripts/build-ffmpeg-macos.sh`, never a GPL build; the Linux server uses the
   distribution's ffmpeg, which Aurelia does not distribute.
+  For the same reason the Docker image (`packaging/docker`, `docs/DOCKER.md`) is built
+  on the user's computer from a verified server release and Debian's ffmpeg; do not
+  publish a built image.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,
