@@ -317,19 +317,31 @@ public sealed class SettingsWindow : Window
                 prefs.StartScreen, value => prefs.StartScreen = value),
         };
         var order = layout.Order.ToList();
+        var pageRows = new List<Control>();
         for (var index = 0; index < order.Count; index++)
         {
             var destination = order[index];
             var position = index;
             var visible = !layout.Hidden.Contains(destination);
-            var up = new Button { Content = "▲", Classes = { "link" }, IsEnabled = position > 0 };
-            var down = new Button { Content = "▼", Classes = { "link" }, IsEnabled = position < order.Count - 1 };
-            AutomationProperties.SetName(up, "Move Up, " + destination.Title());
-            AutomationProperties.SetName(down, "Move Down, " + destination.Title());
+            // Drag the handle to move a page; with the keyboard, Alt+Up and Alt+Down move it.
+            var handle = new Border
+            {
+                Width = 24,
+                Background = Brushes.Transparent,
+                Cursor = new Cursor(StandardCursorType.SizeNorthSouth),
+                Focusable = true,
+                Child = new TextBlock { Text = "≡", FontSize = 20, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Classes = { "subdued" } },
+            };
+            ToolTip.SetTip(handle, "Drag to move");
+            AutomationProperties.SetName(handle, "Move " + destination.Title() + " (drag, or Alt+Up and Alt+Down)");
+            handle.KeyDown += (_, e) =>
+            {
+                if (e.KeyModifiers != KeyModifiers.Alt || e.Key is not (Key.Up or Key.Down)) return;
+                e.Handled = true;
+                SaveSidebar(MoveTo(order, position, position + (e.Key == Key.Up ? -1 : 1)), layout.Hidden);
+            };
             var show = new ToggleSwitch { IsChecked = visible, OnContent = "", OffContent = "" };
             AutomationProperties.SetName(show, "Show " + destination.Title());
-            up.Click += (_, _) => SaveSidebar(Move(order, position, -1), layout.Hidden);
-            down.Click += (_, _) => SaveSidebar(Move(order, position, 1), layout.Hidden);
             show.IsCheckedChanged += (_, _) =>
             {
                 var hidden = new HashSet<LibraryDestination>(layout.Hidden);
@@ -343,24 +355,63 @@ public sealed class SettingsWindow : Window
                 }
                 SaveSidebar(order, hidden);
             };
-            rows.Add(new DockPanel
+            var row = new DockPanel
             {
                 Margin = new Thickness(16, 6),
                 Children =
                 {
-                    new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { up, down, show } }.Also(p => DockPanel.SetDock(p, Dock.Right)),
+                    show.Also(p => DockPanel.SetDock(p, Dock.Right)),
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
                         Spacing = 12,
                         Children =
                         {
+                            handle,
                             new PathIcon { Data = Application.Current?.FindResource("Icon" + destination) as Geometry, Width = 18, Height = 18, Foreground = Application.Current?.FindResource("AureliaAccentBrush") as IBrush },
                             new TextBlock { Text = destination.Title(), VerticalAlignment = VerticalAlignment.Center },
                         },
                     },
                 },
-            });
+            };
+            pageRows.Add(row);
+            rows.Add(row);
+            Point? start = null;
+            var target = position;
+            handle.PointerPressed += (_, e) =>
+            {
+                if (!e.GetCurrentPoint(handle).Properties.IsLeftButtonPressed) return;
+                start = e.GetPosition(page);
+                target = position;
+                e.Pointer.Capture(handle);
+                row.ZIndex = 1;
+                row.Opacity = 0.8;
+                e.Handled = true;
+            };
+            handle.PointerMoved += (_, e) =>
+            {
+                if (start is not { } from) return;
+                var offset = e.GetPosition(page).Y - from.Y;
+                row.RenderTransform = new TranslateTransform(0, offset);
+                target = DropIndex(pageRows, position, offset);
+            };
+            handle.PointerReleased += (_, e) =>
+            {
+                if (start is null) return;
+                start = null;
+                e.Pointer.Capture(null);
+                row.RenderTransform = null;
+                row.Opacity = 1;
+                row.ZIndex = 0;
+                if (target != position) SaveSidebar(MoveTo(order, position, target), layout.Hidden);
+            };
+            handle.PointerCaptureLost += (_, _) =>
+            {
+                start = null;
+                row.RenderTransform = null;
+                row.Opacity = 1;
+                row.ZIndex = 0;
+            };
         }
         page.Children.Add(Section(null, [.. rows]));
         page.Children.Add(Action("Reset Sidebar to Defaults", () =>
@@ -371,12 +422,23 @@ public sealed class SettingsWindow : Window
         }));
     }
 
-    private static List<LibraryDestination> Move(List<LibraryDestination> order, int index, int by)
+    /// <summary>The order with the page at <paramref name="from"/> moved to <paramref name="to"/>; the others keep theirs.</summary>
+    internal static List<LibraryDestination> MoveTo(IReadOnlyList<LibraryDestination> order, int from, int to)
     {
         var moved = order.ToList();
-        var target = Math.Clamp(index + by, 0, moved.Count - 1);
-        (moved[index], moved[target]) = (moved[target], moved[index]);
+        to = Math.Clamp(to, 0, moved.Count - 1);
+        if (from < 0 || from >= moved.Count || from == to) return moved;
+        var item = moved[from];
+        moved.RemoveAt(from);
+        moved.Insert(to, item);
         return moved;
+    }
+
+    /// <summary>Where a row dragged by <paramref name="offset"/> lands: past each neighbor whose middle it crossed.</summary>
+    internal static int DropIndex(IReadOnlyList<Control> rows, int from, double offset)
+    {
+        var step = rows.Count > 1 ? Math.Max(1, rows[0].Bounds.Height + rows[0].Margin.Top + rows[0].Margin.Bottom) : 1;
+        return Math.Clamp(from + (int)Math.Round(offset / step), 0, rows.Count - 1);
     }
 
     private void SaveSidebar(IReadOnlyList<LibraryDestination> order, IReadOnlySet<LibraryDestination> hidden)

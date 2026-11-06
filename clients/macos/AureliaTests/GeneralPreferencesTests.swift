@@ -153,4 +153,12 @@ struct GeneralPreferencesTests {
     #expect(SidebarPreferences.isVisible(.statistics))
     #expect(!SidebarPreferences.isVisible(.history))
   }
+
+  @Test func draggingASidebarItemMovesOnlyThatItem() {
+    let items: [LibraryDestination] = [.home, .library, .collections, .watchlist]
+    #expect(SidebarReorder.moving(.watchlist, to: 0, in: items) == [.watchlist, .home, .library, .collections])
+    #expect(SidebarReorder.moving(.home, to: 2, in: items) == [.library, .collections, .home, .watchlist])
+    #expect(SidebarReorder.moving(.library, to: 1, in: items) == items)
+    #expect(SidebarReorder.moving(.library, to: 9, in: items) == items)
+  }
 }

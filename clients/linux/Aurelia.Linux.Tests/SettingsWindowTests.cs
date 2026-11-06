@@ -5,6 +5,7 @@ using Aurelia.Linux.Core.Playback;
 using Aurelia.Linux.Core.Settings;
 using Aurelia.Linux.Settings;
 using Aurelia.Linux.Views;
+using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -74,13 +75,39 @@ public sealed class SettingsWindowTests
         FakeLibrary.Pump(() => false, rounds: 5);
         Assert.Contains(window.Shell.SidebarItems, item => item.Destination == LibraryDestination.History);
 
-        var down = settings.Page!.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Move Down, Home");
-        down.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Border Handle(string title) => settings.Page!.GetVisualDescendants().OfType<Border>()
+            .Single(b => AutomationProperties.GetName(b)?.StartsWith("Move " + title + " (", StringComparison.Ordinal) == true);
+        // Keyboard: Alt+Down on the handle moves Home one place down.
+        Handle("Home").RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Down, KeyModifiers = KeyModifiers.Alt });
         FakeLibrary.Pump(() => false, rounds: 5);
         Assert.Equal(LibraryDestination.Library, window.Session.Preferences.Sidebar().Order[0]);
+        Assert.Equal(LibraryDestination.Home, window.Session.Preferences.Sidebar().Order[1]);
+
+        // Mouse: dragging the third page's handle up by two rows makes it the first page.
+        var third = window.Session.Preferences.Sidebar().Order[2];
+        var handle = Handle(third.Title());
+        var rowHeight = handle.FindAncestorOfType<DockPanel>()!.Bounds.Height + 12;
+        var at = handle.TranslatePoint(new Point(handle.Bounds.Width / 2, handle.Bounds.Height / 2), settings)!.Value;
+        settings.MouseDown(at, MouseButton.Left);
+        settings.MouseMove(at.WithY(at.Y - rowHeight), RawInputModifiers.LeftMouseButton);
+        settings.MouseMove(at.WithY(at.Y - 2 * rowHeight), RawInputModifiers.LeftMouseButton);
+        settings.MouseUp(at.WithY(at.Y - 2 * rowHeight), MouseButton.Left);
+        FakeLibrary.Pump(() => false, rounds: 5);
+        Assert.Equal(third, window.Session.Preferences.Sidebar().Order[0]);
+        Assert.DoesNotContain(settings.Page!.GetVisualDescendants().OfType<Button>(), b => AutomationProperties.GetName(b)?.StartsWith("Move ", StringComparison.Ordinal) == true);
 
         foreach (var destination in window.Session.Preferences.Sidebar().Order) Show(destination.Title()).IsChecked = false;
         Assert.NotEmpty(window.Session.Preferences.Sidebar().VisibleItems(supportsWatchlist: true));
+    }
+
+    [Fact]
+    public void MovingASidebarPageKeepsTheOthersInOrder()
+    {
+        LibraryDestination[] order = [LibraryDestination.Home, LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Watchlist];
+        Assert.Equal([LibraryDestination.Watchlist, LibraryDestination.Home, LibraryDestination.Library, LibraryDestination.Collections], SettingsWindow.MoveTo(order, 3, 0));
+        Assert.Equal([LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Home, LibraryDestination.Watchlist], SettingsWindow.MoveTo(order, 0, 2));
+        Assert.Equal(order, SettingsWindow.MoveTo(order, 1, 1));
+        Assert.Equal([LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Watchlist, LibraryDestination.Home], SettingsWindow.MoveTo(order, 0, 9));
     }
 
     [AvaloniaFact]

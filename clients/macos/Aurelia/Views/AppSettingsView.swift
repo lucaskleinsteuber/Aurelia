@@ -1199,6 +1199,7 @@ struct SidebarCustomizerView: View {
     StartScreenPreference.lastScreen.rawValue
   @AppStorage(GeneralPreferenceKeys.sidebarVisibilityRevision) private var visibilityRevision = 0
   @State private var items: [LibraryDestination] = SidebarPreferences.loadOrder()
+  @State private var dragged: LibraryDestination?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 20) {
@@ -1224,11 +1225,24 @@ struct SidebarCustomizerView: View {
         "Modular Sidebar Navigation",
         symbol: "sidebar.left",
         description:
-          "Customize which items appear in the sidebar and arrange them in any order you prefer. Use the up and down arrows to move items, or toggle an item off to hide it."
+          "Customize which items appear in the sidebar and arrange them in any order you prefer. Drag an item by its handle to move it, or toggle it off to hide it."
       ) {
         VStack(spacing: 8) {
           ForEach(Array(items.enumerated()), id: \.element) { index, item in
             HStack(spacing: 12) {
+              Image(systemName: "line.3.horizontal")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 24)
+                .contentShape(Rectangle())
+                .help("Drag to Move")
+                .onDrag {
+                  dragged = item
+                  return NSItemProvider(object: item.rawValue as NSString)
+                }
+                .accessibilityHidden(true)
+                .accessibilityIdentifier("sidebar-drag-\(item.rawValue)")
+
               Image(systemName: item.symbol)
                 .font(.system(size: 15, weight: .medium))
                 .frame(width: 24)
@@ -1240,36 +1254,6 @@ struct SidebarCustomizerView: View {
 
               Spacer()
 
-              HStack(spacing: 4) {
-                Button {
-                  moveItem(from: index, to: index - 1)
-                } label: {
-                  Image(systemName: "arrow.up")
-                    .font(.system(size: 11, weight: .bold))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(index == 0)
-                .help("Move Up")
-                .accessibilityLabel("Move \(item.title) Up")
-                .accessibilityIdentifier("sidebar-move-up-\(item.rawValue)")
-
-                Button {
-                  moveItem(from: index, to: index + 1)
-                } label: {
-                  Image(systemName: "arrow.down")
-                    .font(.system(size: 11, weight: .bold))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(index == items.count - 1)
-                .help("Move Down")
-                .accessibilityLabel("Move \(item.title) Down")
-                .accessibilityIdentifier("sidebar-move-down-\(item.rawValue)")
-              }
-              .padding(.trailing, 8)
 
               Toggle(
                 "",
@@ -1290,6 +1274,15 @@ struct SidebarCustomizerView: View {
             .padding(.horizontal, 10)
             .background(AureliaDesign.raisedSurface.opacity(isItemVisible(item) ? 1.0 : 0.5))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .opacity(dragged == item ? 0.55 : 1)
+            .onDrop(
+              of: [.text],
+              delegate: SidebarReorderDropDelegate(
+                target: item, items: $items, dragged: $dragged, commit: saveOrder))
+            // Keyboard and VoiceOver users move items without dragging.
+            .accessibilityElement(children: .contain)
+            .accessibilityAction(named: "Move Up") { moveItem(from: index, to: index - 1) }
+            .accessibilityAction(named: "Move Down") { moveItem(from: index, to: index + 1) }
           }
 
           HStack {
@@ -1303,6 +1296,13 @@ struct SidebarCustomizerView: View {
             .padding(.top, 8)
             .accessibilityIdentifier("sidebar-reset-defaults")
           }
+        }
+        // A row dropped between rows or below the list keeps the order it was moved to.
+        .onDrop(of: [.text], isTargeted: nil) { _ in
+          guard dragged != nil else { return false }
+          dragged = nil
+          saveOrder()
+          return true
         }
       }
     }
@@ -1330,7 +1330,47 @@ struct SidebarCustomizerView: View {
   private func moveItem(from: Int, to: Int) {
     guard to >= 0 && to < items.count else { return }
     items.swapAt(from, to)
+    saveOrder()
+  }
+
+  private func saveOrder() {
     SidebarPreferences.saveOrder(items)
     visibilityRevision += 1
+  }
+}
+
+/// Reorders the sidebar list live while a row is dragged by its handle; the order is saved on drop.
+struct SidebarReorderDropDelegate: DropDelegate {
+  let target: LibraryDestination
+  @Binding var items: [LibraryDestination]
+  @Binding var dragged: LibraryDestination?
+  let commit: () -> Void
+
+  func dropEntered(info: DropInfo) {
+    guard let dragged, dragged != target, let to = items.firstIndex(of: target) else { return }
+    withAnimation(.easeInOut(duration: 0.15)) {
+      items = SidebarReorder.moving(dragged, to: to, in: items)
+    }
+  }
+
+  func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+  func performDrop(info: DropInfo) -> Bool {
+    dragged = nil
+    commit()
+    return true
+  }
+}
+
+enum SidebarReorder {
+  /// The list with `item` moved to `index`, keeping every other item in order.
+  static func moving<Item: Equatable>(_ item: Item, to index: Int, in items: [Item]) -> [Item] {
+    guard let from = items.firstIndex(of: item), index >= 0, index < items.count, from != index else {
+      return items
+    }
+    var result = items
+    result.remove(at: from)
+    result.insert(item, at: index)
+    return result
   }
 }
