@@ -157,13 +157,15 @@ is ever stored. More in [Aurelia in a web browser](docs/WEB_APP.md).
 - **Profiles stay private.** History, statistics and personal collections belong to one profile;
   administrators can't read them. See the [security model](docs/SECURITY_MODEL.md).
 - **No cloud.** The server runs on your hardware and sends nothing out, except optional TMDB
-  lookups and update checks on GitHub.
+  lookups and update checks on GitHub. Away from home, you connect through your own VPN; see
+  [Watching away from home](docs/REMOTE_ACCESS.md).
 
 ## Documentation
 
 | Guide | Covers |
 | --- | --- |
 | [Aurelia Server on Linux](docs/LINUX_SERVER.md) | Installing, updating, power saving and media drives |
+| [Watching away from home](docs/REMOTE_ACCESS.md) | A VPN through the FRITZ!Box or Tailscale; why no port forwarding |
 | [Aurelia for Linux](docs/LINUX_APP.md) | Installing the desktop app, hosting on a PC, updates and verification |
 | [iPhone and iPad](docs/IOS_APP.md) | What the preview does and how to install it on your own device |
 | [Aurelia in a web browser](docs/WEB_APP.md) | Signing in, what plays in a browser, and its limits |
