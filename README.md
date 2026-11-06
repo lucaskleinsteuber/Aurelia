@@ -106,6 +106,7 @@ flowchart LR
 | --- | --- |
 | **Mac** | Download the disk image from the [latest release](../../releases/latest), open it and drag Aurelia to Applications. It updates itself. |
 | **Linux server** (Ubuntu, Debian) | One line, then answer a few questions: `curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh \| sudo bash`. More in [Aurelia Server on Linux](docs/LINUX_SERVER.md). |
+| **Docker** (NAS) | Save one `compose.yaml` and run two commands; see [Aurelia Server with Docker](docs/DOCKER.md). |
 | **Linux desktop app** | deb, rpm, Arch or Flatpak from the newest **Aurelia for Linux** release; see [installing Aurelia for Linux](docs/LINUX_APP.md#installation). |
 | **Apple TV, iPhone, iPad** | Not in the App Store; build them from source with Xcode, see [tvOS](clients/tvos/README.md) and [iPhone and iPad](docs/IOS_APP.md). |
 | **Any browser** | Nothing to install: open the server's address at home (below). |
@@ -165,6 +166,7 @@ is ever stored. More in [Aurelia in a web browser](docs/WEB_APP.md).
 | Guide | Covers |
 | --- | --- |
 | [Aurelia Server on Linux](docs/LINUX_SERVER.md) | Installing, updating, power saving and media drives |
+| [Aurelia Server with Docker](docs/DOCKER.md) | Running the server on a NAS or with Docker Compose |
 | [Watching away from home](docs/REMOTE_ACCESS.md) | A VPN through the FRITZ!Box or Tailscale; why no port forwarding |
 | [Aurelia for Linux](docs/LINUX_APP.md) | Installing the desktop app, hosting on a PC, updates and verification |
 | [iPhone and iPad](docs/IOS_APP.md) | What the preview does and how to install it on your own device |

@@ -1,0 +1,19 @@
+# Aurelia Server with Docker Compose. Save this file, change the media folder below, then:
+#   docker compose run --rm aurelia setup
+#   docker compose up -d
+# See https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/DOCKER.md
+services:
+  aurelia:
+    build: https://github.com/lucaskleinsteuber/Aurelia.git#main:packaging/docker
+    image: aurelia-server:local
+    container_name: aurelia
+    # The host's network lets Macs, Apple TVs and phones find the server on their own (Bonjour).
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - aurelia-data:/data
+      # Your movies and shows, read-only. Change the left side to your folder.
+      - /srv/media:/media:ro
+
+volumes:
+  aurelia-data:

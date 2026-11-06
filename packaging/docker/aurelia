@@ -1,0 +1,52 @@
+#!/bin/bash
+# Aurelia Server commands inside the container, for example:
+#   docker compose run --rm aurelia setup      (once, before the server first starts)
+#   docker compose exec aurelia aurelia approve CODE
+set -euo pipefail
+server=/opt/aurelia/server/Aurelia.Server
+# Started as root only to hand the data folder to the aurelia user (a new volume or a folder
+# from the host belongs to root); everything then runs as aurelia.
+if [ "$(id -u)" -eq 0 ]; then
+  [ "$(stat -c %U /data)" = aurelia ] || chown -R aurelia:aurelia /data
+  chmod 0700 /data
+  exec setpriv --reuid=aurelia --regid=aurelia --init-groups --inh-caps=-all "$0" "$@"
+fi
+command=${1:-run}
+[ $# -gt 0 ] && shift
+case "$command" in
+  run) exec "$server" run --data-dir /data "$@" ;;
+  setup)
+    owner=${AURELIA_OWNER:-}
+    if [ -z "$owner" ]; then
+      read -r -p "Owner name (used to sign in): " owner
+    fi
+    [ -n "$owner" ] || { echo "An owner name is required." >&2; exit 2; }
+    arguments=(setup-owner --headless --data-dir /data --username "$owner" --device-name "${AURELIA_DEVICE_NAME:-Docker}")
+    [ -n "${AURELIA_SERVER_NAME:-}" ] && arguments+=(--server-name "$AURELIA_SERVER_NAME")
+    "$server" "${arguments[@]}"
+    echo
+    echo "Start the server with: docker compose up -d"
+    echo "Then connect your devices; the first one also asks for the owner's new viewing PIN:"
+    echo "  Apple TV: choose this server, then run: docker compose exec aurelia aurelia approve CODE"
+    echo "  Mac:      run: docker compose exec aurelia aurelia pair, then enter the code in Aurelia"
+    ;;
+  approve)
+    if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then code=$1; shift; exec "$server" pairing approve --code "$code" "$@"; fi
+    exec "$server" pairing approve "$@" ;;
+  pair) exec "$server" pairing create "$@" ;;
+  library|pairing|metadata|server|database) exec "$server" "$command" "$@" ;;
+  status) exec "$server" server identity ;;
+  version) cat /opt/aurelia/VERSION ;;
+  *)
+    cat <<'USAGE'
+Aurelia Server in a container
+
+  setup                    Create the owner (run once with: docker compose run --rm aurelia setup)
+  approve [CODE]           Allow an Apple TV or browser that shows a code
+  pair                     Show a code to enter on a Mac or Linux PC
+  library add --path /media/Movies [--kind automatic|movies|tv]
+  library list | scan --all
+  status | version
+USAGE
+    ;;
+esac
