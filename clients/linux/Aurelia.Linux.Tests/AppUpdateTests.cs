@@ -16,7 +16,7 @@ namespace Aurelia.Linux.Tests;
 public sealed class AppUpdateTests
 {
     [Fact]
-    public async Task PublicTestPagesAndDownloadsNeverReadOrSendASavedToken()
+    public async Task PublicTestPagesAndDownloadsSendNoCredentials()
     {
         var settings = new MemorySettingsStore();
         settings.Write(UpdateFeed.PublicTestKey, true);
@@ -41,7 +41,7 @@ public sealed class AppUpdateTests
         });
         try
         {
-            using var source = new GitHubReleaseSource(new UnreadableTokens(), handler, settings, audit);
+            using var source = new GitHubReleaseSource(handler, settings, audit);
             var releases = await source.ReleasesAsync(TestContext.Current.CancellationToken);
             Assert.EndsWith("/repos/" + UpdateFeed.PublicTestRepository + "/releases?per_page=100&page=2", handler.Requests[1], StringComparison.Ordinal);
             var release = AppRelease.Newest(releases, LinuxPackageKind.Arch, new Version(0, 3, 0), 4, UpdateFeed.PublicTestRepository);
@@ -68,7 +68,7 @@ public sealed class AppUpdateTests
             response.Headers.Add("Link", $"<https://api.github.com/repos/{AppRelease.Repository}/releases?per_page=100&page={index + 1}>; rel=\"next\"");
             return response;
         });
-        using var source = new GitHubReleaseSource(new FakeTokens(), handler);
+        using var source = new GitHubReleaseSource(handler);
         var failure = await Assert.ThrowsAsync<IOException>(() => source.ReleasesAsync(TestContext.Current.CancellationToken));
         Assert.Contains("could not be completed", failure.Message, StringComparison.Ordinal);
         Assert.Equal(10, handler.Requests.Count);
@@ -83,7 +83,7 @@ public sealed class AppUpdateTests
             response.Headers.Add("Link", "<https://elsewhere.invalid/releases?page=2>; rel=\"next\"");
             return response;
         });
-        using var source = new GitHubReleaseSource(new FakeTokens(), handler);
+        using var source = new GitHubReleaseSource(handler);
         await Assert.ThrowsAsync<IOException>(() => source.ReleasesAsync(TestContext.Current.CancellationToken));
         Assert.Single(handler.Requests);
     }
@@ -102,13 +102,6 @@ public sealed class AppUpdateTests
         updater.SetPublicUpdateTest(false);
         Assert.Equal(AppRelease.Repository, UpdateFeed.Repository(settings));
         Assert.Equal("preserved", settings.Read<string>("unrelated"));
-    }
-
-    private sealed class UnreadableTokens : IUpdateTokenStore
-    {
-        public Task<string?> LoadAsync(CancellationToken cancellation) => throw new InvalidOperationException("Public mode must not read credentials.");
-        public Task SaveAsync(string token, CancellationToken cancellation) => throw new InvalidOperationException();
-        public Task DeleteAsync(CancellationToken cancellation) => throw new InvalidOperationException();
     }
 
     private sealed class FeedHandler(Func<HttpRequestMessage, int, HttpResponseMessage> respond) : HttpMessageHandler
@@ -200,7 +193,7 @@ public sealed class AppUpdateTests
     public async Task ReadsTheCanonicalRepositoryAndItsUploadedAssetsWithoutARedirect()
     {
         var handler = new CanonicalRepositoryHandler();
-        using var source = new GitHubReleaseSource(new FakeTokens(), handler);
+        using var source = new GitHubReleaseSource(handler);
 
         var releases = await source.ReleasesAsync(TestContext.Current.CancellationToken);
         Assert.Equal("https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases?per_page=100", Assert.Single(handler.Requests));
@@ -382,13 +375,13 @@ public sealed class AppUpdateTests
     }
 
     [Fact]
-    public async Task TheGitHubTokenIsRemovedFromAssetRedirects()
+    public async Task UpdateRequestsCarryNoCredentials()
     {
         var handler = new RedirectHandler();
-        using var source = new GitHubReleaseSource(new FakeTokens(), handler);
+        using var source = new GitHubReleaseSource(handler);
         var release = AppRelease.Newest(new JsonArray(ReleaseNode("linux-app-1.0.0-5")), LinuxPackageKind.Arch, new Version(0, 3, 0), 4)!;
         await source.ChecksumsAsync(release, TestContext.Current.CancellationToken);
-        Assert.Equal(["Bearer synthetic-token", null], handler.Authorization);
+        Assert.Equal([null, null], handler.Authorization);
     }
 
     [Theory]
@@ -445,13 +438,6 @@ public sealed class AppUpdateTests
             }
             return Task.CompletedTask;
         }
-    }
-
-    private sealed class FakeTokens : IUpdateTokenStore
-    {
-        public Task<string?> LoadAsync(CancellationToken cancellation) => Task.FromResult<string?>("synthetic-token");
-        public Task SaveAsync(string token, CancellationToken cancellation) => Task.CompletedTask;
-        public Task DeleteAsync(CancellationToken cancellation) => Task.CompletedTask;
     }
 
     private sealed class RedirectHandler : HttpMessageHandler

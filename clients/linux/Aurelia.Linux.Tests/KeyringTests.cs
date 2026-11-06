@@ -12,27 +12,27 @@ namespace Aurelia.Linux.Tests;
 public sealed class KeyringTests
 {
     [Fact]
-    public async Task UpdateTokensStaySeparateFromThePairedServer()
+    public async Task SeparateEntriesStayApartFromThePairedServer()
     {
         Assert.SkipUnless(OperatingSystem.IsLinux() && Environment.GetEnvironmentVariable("AURELIA_TEST_KEYRING") == "1",
             "Uses isolated entries in the real Linux desktop keyring.");
         var suffix = Guid.NewGuid().ToString("N");
         var connection = new SecretServiceCredentialStore("test-connection-" + suffix, "Aurelia test entry (safe to delete)");
-        var tokens = new UpdateTokenStore("test-updates-" + suffix);
+        var tokens = new SecretServiceCredentialStore("test-values-" + suffix, "Aurelia test entry (safe to delete)");
         var cancellation = TestContext.Current.CancellationToken;
         var server = new StoredServer(Guid.NewGuid(), "Synthetic Server", new Uri("https://192.0.2.10:43111"), new string('B', 64),
             "synthetic-device-token-not-a-real-credential-02", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(1));
         try
         {
             await connection.SaveAsync(server, cancellation);
-            Assert.Null(await tokens.LoadAsync(cancellation));
-            await tokens.SaveAsync("synthetic-github-token-one", cancellation);
-            Assert.Equal("synthetic-github-token-one", await tokens.LoadAsync(cancellation));
-            await tokens.SaveAsync("synthetic-github-token-two", cancellation);
-            Assert.Equal("synthetic-github-token-two", await tokens.LoadAsync(cancellation));
+            Assert.Null(await tokens.LoadValueAsync(cancellation));
+            await tokens.SaveValueAsync("synthetic-github-token-one", cancellation);
+            Assert.Equal("synthetic-github-token-one", await tokens.LoadValueAsync(cancellation));
+            await tokens.SaveValueAsync("synthetic-github-token-two", cancellation);
+            Assert.Equal("synthetic-github-token-two", await tokens.LoadValueAsync(cancellation));
             Assert.Equal(server, await connection.LoadAsync(cancellation));
             await tokens.DeleteAsync(cancellation);
-            Assert.Null(await tokens.LoadAsync(cancellation));
+            Assert.Null(await tokens.LoadValueAsync(cancellation));
             Assert.Equal(server, await connection.LoadAsync(cancellation));
         }
         finally

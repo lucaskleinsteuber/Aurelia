@@ -26,14 +26,12 @@ public sealed record AppServices(
     IPlaybackSystem? PlaybackSystem = null,
     Func<ILocalServerHost>? CreateHost = null,
     IHostingSystem? HostingSystem = null,
-    AppUpdater? Updater = null,
-    IUpdateTokenStore? UpdateTokens = null)
+    AppUpdater? Updater = null)
 {
     public static AppServices CreateDefault()
     {
         var paths = AppPaths.FromEnvironment();
         var settings = new JsonFileSettingsStore(paths.SettingsFile);
-        var tokens = new UpdateTokenStore();
         return new(
             settings,
             DesktopButtonLayoutReader.Read(),
@@ -49,9 +47,8 @@ public sealed record AppServices(
             new LinuxPlaybackSystem(action => Avalonia.Threading.Dispatcher.UIThread.Post(action)),
             () => new LocalServerHost(LocalServerOptions.ForThisComputer(paths)),
             new LinuxHostingSystem(paths),
-            new AppUpdater(new GitHubReleaseSource(tokens, settings: settings,
-                auditPath: Path.Combine(paths.CacheDirectory, "updates", "public-test-audit.jsonl")), new LinuxPackageInstaller(), settings, paths.CacheDirectory, AppInfo.CurrentVersion, AppInfo.Build),
-            tokens);
+            new AppUpdater(new GitHubReleaseSource(settings: settings,
+                auditPath: Path.Combine(paths.CacheDirectory, "updates", "public-test-audit.jsonl")), new LinuxPackageInstaller(), settings, paths.CacheDirectory, AppInfo.CurrentVersion, AppInfo.Build));
     }
 
     /// <summary>Services that touch nothing outside the process, for tests.</summary>

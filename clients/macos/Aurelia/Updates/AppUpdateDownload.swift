@@ -14,13 +14,13 @@ enum AppUpdateError: Error, Equatable, LocalizedError, Sendable {
   var message: String {
     switch self {
     case .rateLimited:
-      "GitHub’s rate limit was reached. Try again later, or add a GitHub token under Settings › Updates › GitHub Access."
+      "GitHub’s rate limit was reached. Try again later."
     case .notModified:
       "GitHub returned no release information. Try again."
     case .privateRepository:
-      "The repository couldn’t be found (404). It is private: add a GitHub token under Settings › Updates › GitHub Access."
+      "The public release feed is unavailable (404)."
     case .github(let status) where status == 401 || status == 403:
-      "GitHub denied access (\(status)). Check your token under Settings › Updates › GitHub Access."
+      "GitHub denied access (\(status)). Try again later."
     case .github(404):
       "GitHub has no release for this repository yet."
     case .github(let status): "GitHub answered with an error (\(status)). Try again later."
@@ -241,7 +241,7 @@ struct AppUpdateClient: Sendable {
   }
 
   func latestRelease(
-    repository: String, token: String? = nil, ifNoneMatch: String? = nil
+    repository: String, ifNoneMatch: String? = nil
   ) async throws -> (release: AppRelease, etag: String?) {
     guard AppUpdateLogic.isRepository(repository),
       let url = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")
@@ -249,8 +249,8 @@ struct AppUpdateClient: Sendable {
     let result: AppUpdateTransfer
     do {
       result = try await transfer(
-        url, token: token, ifNoneMatch: ifNoneMatch, maximumBytes: 2 * 1_024 * 1_024)
-    } catch AppUpdateError.github(404) where token == nil || token?.isEmpty == true {
+        url, ifNoneMatch: ifNoneMatch, maximumBytes: 2 * 1_024 * 1_024)
+    } catch AppUpdateError.github(404) {
       throw AppUpdateError.privateRepository
     }
     let release = try AppUpdateLogic.validatedRelease(
@@ -269,7 +269,7 @@ struct AppUpdateClient: Sendable {
   }
 
   func catalog(
-    repository: String, token: String? = nil, cached: AppUpdateCatalogCache?, beta: Bool = false
+    repository: String, cached: AppUpdateCatalogCache?, beta: Bool = false
   ) async throws -> (release: AppRelease, cache: AppUpdateCatalogCache?) {
     guard let url = Self.catalogURL(repository: repository, beta: beta) else {
       throw AppUpdateError.invalidURL
@@ -280,32 +280,31 @@ struct AppUpdateClient: Sendable {
     }
     do {
       let result = try await transfer(
-        url, token: token, ifNoneMatch: cachedRelease == nil ? nil : cached?.etag,
-        maximumBytes: limit)
+        url, ifNoneMatch: cachedRelease == nil ? nil : cached?.etag, maximumBytes: limit)
       let release = try AppUpdateLogic.release(
         in: result.data, beta: beta, repository: repository)
       return (release, result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) })
     } catch AppUpdateError.notModified {
       if let cached, let cachedRelease { return (cachedRelease, cached) }
       // An unexpected 304 without a usable body is not proof that the app is current.
-      let result = try await transfer(url, token: token, maximumBytes: limit)
+      let result = try await transfer(url, maximumBytes: limit)
       return (
         try AppUpdateLogic.release(in: result.data, beta: beta, repository: repository),
         result.etag.map { AppUpdateCatalogCache(data: result.data, etag: $0) }
       )
-    } catch AppUpdateError.github(404) where token == nil || token?.isEmpty == true {
+    } catch AppUpdateError.github(404) {
       throw AppUpdateError.privateRepository
     }
   }
 
   func latest(
-    repository: String, token: String? = nil, ifNoneMatch: String? = nil
+    repository: String, ifNoneMatch: String? = nil
   ) async throws -> AppRelease {
-    try await latestRelease(repository: repository, token: token, ifNoneMatch: ifNoneMatch).release
+    try await latestRelease(repository: repository, ifNoneMatch: ifNoneMatch).release
   }
 
   func download(
-    _ release: AppRelease, repository: String, token: String? = nil, currentBuild: Int, folder: URL
+    _ release: AppRelease, repository: String, currentBuild: Int, folder: URL
   ) async throws -> URL {
     guard let tag = AppUpdateLogic.parseTag(release.tag), tag.build == release.build,
       tag.version == release.version,
@@ -322,14 +321,14 @@ struct AppUpdateClient: Sendable {
     do {
       try FileManager.default.createDirectory(
         at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-      let sums = try await transfer(release.checksumsURL, token: token, maximumBytes: 1_024 * 1_024)
+      let sums = try await transfer(release.checksumsURL, maximumBytes: 1_024 * 1_024)
       guard
         let expected = AppUpdateLogic.checksum(
           for: release.diskImageName, in: String(decoding: sums.data, as: UTF8.self))
       else { throw AppUpdateError.noChecksum }
       let destination = directory.appendingPathComponent(release.diskImageName)
       let image = try await transfer(
-        release.diskImageURL, token: token, maximumBytes: 2 * 1_024 * 1_024 * 1_024,
+        release.diskImageURL, maximumBytes: 2 * 1_024 * 1_024 * 1_024,
         destination: destination)
       guard image.sha256 == expected else { throw AppUpdateError.checksumMismatch }
       complete = true
@@ -340,15 +339,11 @@ struct AppUpdateClient: Sendable {
   }
 
   private func transfer(
-    _ url: URL, token: String? = nil, ifNoneMatch: String? = nil, maximumBytes: Int64,
+    _ url: URL, ifNoneMatch: String? = nil, maximumBytes: Int64,
     destination: URL? = nil
   ) async throws -> AppUpdateTransfer {
     var request = URLRequest(
       url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-    // Never send the token to any host except api.github.com.
-    if let token, !token.isEmpty, url.host?.lowercased() == "api.github.com" {
-      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    }
     if let ifNoneMatch, !ifNoneMatch.isEmpty {
       request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match")
     }

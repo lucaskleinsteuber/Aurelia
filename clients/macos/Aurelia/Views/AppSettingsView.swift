@@ -57,7 +57,6 @@ struct AppSettingsView: View {
   @AppStorage(AureliaRest.minutesKey) private var restMinutes = AureliaRest.defaultMinutes
   @AppStorage(AppUpdatePreferences.automaticChecksKey) private var automaticUpdateChecks = true
   @AppStorage(AppUpdatePreferences.betaUpdatesKey) private var betaUpdates = false
-  @State private var showingUpdateAccess = false
 
   // Navigation & Search State
   @State private var selectedCategory: SettingsCategory = .general
@@ -1069,19 +1068,6 @@ struct AppSettingsView: View {
             || updater.state == .installing
         )
         .accessibilityIdentifier("updates-check")
-
-        Button("GitHub Access…") { showingUpdateAccess = true }
-          .accessibilityIdentifier("updates-github-access")
-          .sheet(isPresented: $showingUpdateAccess) {
-            VStack(alignment: .leading, spacing: 16) {
-              Text("GitHub Access").font(.headline)
-              GitHubTokenSettingsView(updater: updater)
-              Button("Done") { showingUpdateAccess = false }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding(24)
-            .frame(width: 440)
-          }
       }
       .toggleStyle(.switch)
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -1202,81 +1188,6 @@ struct AppSettingsView: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-    }
-  }
-}
-
-// MARK: - GitHub Access
-
-/// The read-only token for the private repository's releases. It stays in this Mac's Keychain and
-/// is sent only to GitHub's API.
-private struct GitHubTokenSettingsView: View {
-  @ObservedObject var updater: AppUpdater
-  @State private var tokenInput = ""
-  @State private var isEditing = false
-  @State private var statusMessage: String?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if updater.hasToken && !isEditing {
-        HStack(spacing: 12) {
-          Label("GitHub token saved in Keychain", systemImage: "checkmark.shield.fill")
-            .foregroundStyle(.secondary)
-            .accessibilityIdentifier("updates-token-status")
-          Spacer()
-          Button("Change…") {
-            isEditing = true
-            tokenInput = ""
-            statusMessage = nil
-          }
-          .accessibilityIdentifier("updates-token-change")
-          Button("Remove", role: .destructive) {
-            do {
-              try updater.deleteToken()
-              statusMessage = "Token removed."
-            } catch {
-              statusMessage = error.localizedDescription
-            }
-          }
-          .accessibilityIdentifier("updates-token-remove")
-        }
-      } else {
-        VStack(alignment: .leading, spacing: 8) {
-          HStack(spacing: 8) {
-            SecureField("Fine-grained token (github_pat_…)", text: $tokenInput)
-              .textFieldStyle(.roundedBorder)
-              .accessibilityLabel("GitHub Personal Access Token")
-              .accessibilityIdentifier("updates-token-input")
-            Button("Save Token") {
-              do {
-                try updater.saveToken(tokenInput)
-                isEditing = false
-                tokenInput = ""
-                statusMessage = "Token saved in Keychain."
-              } catch {
-                statusMessage = error.localizedDescription
-              }
-            }
-            .disabled(tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityIdentifier("updates-token-save")
-            if isEditing {
-              Button("Cancel") {
-                isEditing = false
-                tokenInput = ""
-              }
-            }
-          }
-          Text(
-            "The Aurelia repository is private. A fine-grained token with read-only access to its contents lets this Mac find and download updates."
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        }
-      }
-      if let statusMessage {
-        Text(statusMessage).font(.caption).foregroundStyle(.secondary)
-      }
     }
   }
 }

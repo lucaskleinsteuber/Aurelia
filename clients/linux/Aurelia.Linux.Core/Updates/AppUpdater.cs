@@ -11,21 +11,6 @@ using Aurelia.Linux.Core.Api;
 
 namespace Aurelia.Linux.Core.Updates;
 
-public interface IUpdateTokenStore
-{
-    Task<string?> LoadAsync(CancellationToken cancellation);
-    Task SaveAsync(string token, CancellationToken cancellation);
-    Task DeleteAsync(CancellationToken cancellation);
-}
-
-public sealed class UpdateTokenStore(string purpose = "github-updates") : IUpdateTokenStore
-{
-    private readonly SecretServiceCredentialStore store = new(purpose, "Aurelia GitHub updates");
-    public Task<string?> LoadAsync(CancellationToken cancellation) => store.LoadValueAsync(cancellation);
-    public Task SaveAsync(string token, CancellationToken cancellation) => store.SaveValueAsync(token, cancellation);
-    public Task DeleteAsync(CancellationToken cancellation) => store.DeleteAsync(cancellation);
-}
-
 public interface IReleaseSource
 {
     Task<JsonArray> ReleasesAsync(CancellationToken cancellation);
@@ -33,8 +18,8 @@ public interface IReleaseSource
     Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation);
 }
 
-/// <summary>Only the GitHub API receives the optional token. Redirects receive no credentials.</summary>
-public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHandler? handler = null,
+/// <summary>Reads the public release feed anonymously; no request carries credentials.</summary>
+public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
     ISettingsStore? settings = null, string? auditPath = null) : IReleaseSource, IDisposable
 {
     private readonly HttpClient client = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromMinutes(30) };
@@ -51,7 +36,7 @@ public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHan
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound)
                 throw new IOException(repository == UpdateFeed.PublicTestRepository
                     ? "The public update test feed is unavailable. Turn off Public Update Test to use the normal release feed."
-                    : "GitHub could not read the releases. For a private repository, save a GitHub token with read access to its contents.");
+                    : "GitHub could not read the releases. Try again later.");
             response.EnsureSuccessStatusCode();
             await using var input = await response.Content.ReadAsStreamAsync(cancellation);
             using var output = new MemoryStream();
@@ -109,18 +94,12 @@ public sealed class GitHubReleaseSource(IUpdateTokenStore tokens, HttpMessageHan
     {
         var publicTest = UpdateFeed.IsPublicTest(settings)
             || uri.AbsolutePath.StartsWith($"/repos/{UpdateFeed.PublicTestRepository}/", StringComparison.Ordinal);
-        var token = publicTest ? null : await tokens.LoadAsync(cancellation);
-        if (token is not null && token.Any(c => c <= 32 || c >= 127)) throw new IOException("The saved GitHub token is invalid. Save a new token in Updates.");
         for (var redirects = 0; redirects <= 5; redirects++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             request.Headers.UserAgent.ParseAdd("Aurelia-Linux-Updater/1.0");
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(asset ? "application/octet-stream" : "application/vnd.github+json"));
-            if (redirects == 0)
-            {
-                request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-                if (!string.IsNullOrWhiteSpace(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            }
+            if (redirects == 0) request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
             if (publicTest && auditPath is not null)
             {
                 // The audit contains neither paths, signed query strings nor credential values.

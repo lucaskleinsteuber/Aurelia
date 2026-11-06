@@ -604,44 +604,10 @@ public sealed class SettingsWindow : Window
         }
         if (services.Updater is { } feedUpdater)
         {
-            var source = Toggle("Public Update Test", "Use Aurelia’s temporary public test feed without reading your saved GitHub token.",
+            var source = Toggle("Public Update Test", "Use Aurelia’s temporary public test feed.",
                 feedUpdater.PublicUpdateTestEnabled, value => { feedUpdater.SetPublicUpdateTest(value); ShowSelected(); });
             source.IsEnabled = !feedUpdater.IsBusy && !feedUpdater.RestartRequired;
             page.Children.Add(Section("Advanced", source));
-        }
-        if (services.UpdateTokens is { } tokens && services.Updater?.PublicUpdateTestEnabled != true)
-        {
-            var token = new TextBox { PasswordChar = '•', PlaceholderText = "GitHub token", MinWidth = 250 };
-            AutomationProperties.SetName(token, "GitHub Update Token");
-            var message = new TextBlock { TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } };
-            var save = new Button { Content = "Save Token", Classes = { "chip" } };
-            var remove = new Button { Content = "Remove Token", Classes = { "chip" } };
-            save.Click += async (_, _) =>
-            {
-                if (string.IsNullOrWhiteSpace(token.Text)) { message.Text = "Enter a token first."; return; }
-                try
-                {
-                    await tokens.SaveAsync(token.Text.Trim(), CancellationToken.None);
-                    token.Text = "";
-                    message.Text = "The token is saved in your desktop keyring.";
-                }
-                catch (CredentialStoreUnavailableException error) { message.Text = error.Message; }
-            };
-            remove.Click += async (_, _) =>
-            {
-                try { await tokens.DeleteAsync(CancellationToken.None); message.Text = "The saved token was removed."; }
-                catch (CredentialStoreUnavailableException error) { message.Text = error.Message; }
-            };
-            page.Children.Add(Section("GitHub Access", new StackPanel
-            {
-                Spacing = 10,
-                Margin = new Thickness(16, 12),
-                Children =
-                {
-                    new TextBlock { Text = $"For a private repository, use a fine-grained GitHub token with Contents: Read-only access to {AppRelease.Repository}. It stays in your desktop keyring and is sent only to GitHub's API.", TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } },
-                    token, new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { save, remove } }, message,
-                },
-            }));
         }
     }
 

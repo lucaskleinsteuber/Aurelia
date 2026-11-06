@@ -134,10 +134,8 @@ unnecessary with one-year profiles.
 
 *Aurelia › Check for Updates…* asks GitHub for the newest release of the repository the app
 was built from (`build-macos-release.sh` writes it into `AureliaUpdateRepository` in the
-app's Info.plist; builds made in Xcode have none and cannot update). The repository is private,
-so the app needs a fine-grained GitHub token with read-only access to its contents: save it under
-*Settings › Updates › GitHub Access…*. It stays in this Mac's Keychain and is sent only to
-`api.github.com`, never along a redirect to the download host. A public repository needs none. The app
+app's Info.plist; builds made in Xcode have none and cannot update). The repository is public,
+so updates check and download anonymously; the app has no GitHub token setting. The app
 also looks at launch when at least 24 hours have passed since its last successful check.
 *Settings › Updates › Check for updates automatically* is on by default; turning it off stops
 background checks. *Check for Updates…* continues to work manually.

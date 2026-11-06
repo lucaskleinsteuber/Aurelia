@@ -12,6 +12,12 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Mac 1.28.3 (140) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.28.3-140) - 06.11.2026
+
+### Removed
+
+- The GitHub Access setting: the repository is public again, so updates are checked and downloaded without a token.
+
 ## Apple TV 1.5.1 (28) - 06.11.2026
 
 ### Fixed
@@ -37,6 +43,10 @@ versioned commit, so their skipped numbers are preserved.
 - Browser player: keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
 
 ## Linux Desktop 1.2.1 (11) - 06.11.2026
+
+### Removed
+
+- The GitHub token setting under Updates: the repository is public, so updates need no token.
 
 ### Fixed
 

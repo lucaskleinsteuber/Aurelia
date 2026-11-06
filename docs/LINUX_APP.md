@@ -46,7 +46,7 @@ The desktop may ask for permission to start the app at login or keep it in the b
 Updates replace app files and preserve settings, keyring entries and the hosted library database.
 The native app and Flatpak keep separate filesystem app data directories; changing package format
 does not migrate settings or a hosted database automatically. They use the same desktop-keyring
-identity for the paired-server credential and GitHub update token, so changing or disconnecting a
+identity for the paired-server credential, so changing or disconnecting a
 connection in one format can affect the other. Choose one installation for everyday use, and avoid
 running both as hosts on the same port.
 
@@ -170,9 +170,8 @@ pre-releases, published with `scripts/publish-release.sh --beta --linux-app`); t
 the installed beta until a newer stable release arrives. It chooses the package for the installed format,
 requires a higher build and a version that does not go backwards, and downloads only complete
 release assets from this repository. Daily checks can be turned off; Check for Updates always
-works manually. A private repository needs a fine-grained GitHub token with Contents: Read-only
-access, saved only in a separate desktop-keyring entry. Neither server credentials nor the update
-token is stored in settings or forwarded with a download redirect.
+works manually. The release feed is public and read without any GitHub account or token; server
+credentials are never sent with update requests.
 
 Download & Install asks first, checks the package size and the exact SHA-256 from the release's
 `SHA256SUMS`, and only then stops playback and this PC's server. Native packages use `pkexec` with
