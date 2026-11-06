@@ -68,7 +68,7 @@ else
   hdiutil verify -quiet "$dmg"
   (cd "$output" && shasum -a 256 "./${dmg##*/}" > SHA256SUMS)
   files=("$dmg" "$output/SHA256SUMS")
-  title="Aurelia $version ($build)"
+  title="Aurelia for Mac $version ($build)"
   downloads="- **Mac:** Download ${dmg##*/} for Apple silicon. Open it and drag Aurelia to Applications. This development-signed build runs on Macs registered for its developer account."
 fi
 

@@ -39,31 +39,26 @@ your home network unless you want it to.
 | **Cost** | Free. Releases are published here on GitHub |
 | **Status** | In active development; the interface is in English |
 
-## Screenshots
+## Why Aurelia
 
-| Mac | Apple TV |
-| --- | --- |
-| <img src="docs/assets/screenshots/mac-detail.jpg" alt="A series in Aurelia for Mac with its seasons and episodes"> | <img src="docs/assets/screenshots/tv-home.jpg" alt="The Home page of Aurelia for Apple TV"> |
-| <img src="docs/assets/screenshots/mac-movies.jpg" alt="The Movies page in Aurelia for Mac with filters and sorting"> | <img src="docs/assets/screenshots/tv-detail.jpg" alt="A movie in Aurelia for Apple TV"> |
-
-| iPhone | | iPad |
-| --- | --- | --- |
-| <img src="docs/assets/screenshots/iphone-home.jpg" width="260" alt="Aurelia for iPhone: Home with a featured series and Continue Watching"> | <img src="docs/assets/screenshots/iphone-detail.jpg" width="260" alt="Aurelia for iPhone: a series with its episodes"> | <img src="docs/assets/screenshots/ipad-home.jpg" width="420" alt="Aurelia for iPad: Home with Continue Watching, Favorites and Collections"> |
-
-| Browser | |
-| --- | --- |
-| <img src="docs/assets/screenshots/web-home.jpg" alt="Aurelia in a browser: Home and Continue Watching"> | <img src="docs/assets/screenshots/web-detail.jpg" alt="Aurelia in a browser: a series and its episodes"> |
-| <img src="docs/assets/screenshots/web-player.jpg" alt="Aurelia browser player controls, shown paused over generated artwork"> | <img src="docs/assets/screenshots/web-settings.jpg" alt="Aurelia browser playback settings"> |
-
-<sub>All titles, pictures and names are invented and drawn by `scripts/make-showcase.swift`;
-`zsh scripts/capture-showcase.sh` makes the screenshots.</sub>
+- **Your files stay untouched.** Aurelia only reads your media. It never renames, moves or
+  converts files on disk, and it keeps no transcode cache that fills your drive.
+- **Native apps, not a website in a frame.** The Mac, Linux, Apple TV, iPhone and iPad apps are
+  built for each system and play the original files with every audio and subtitle track.
+- **No account and no cloud.** The server runs on your own computer. Nothing is sent out except
+  optional TMDB lookups and update checks.
+- **Easy to run.** Host the library inside the Mac or Linux app, or on an old PC as a small
+  server that sleeps when nobody watches and wakes when you open Aurelia.
 
 ## Highlights
 
+<img src="docs/assets/screenshots/mac-detail.jpg" alt="A series in Aurelia for Mac with its seasons and episodes">
+
 **A library that organizes itself.** Movies, series, seasons, episodes, extras and trailers
 are recognized from your folders. An import preview shows what was found before anything is
-added. Titles, descriptions, cast, covers and backgrounds can be edited, and your corrections
-survive later scans. Details and artwork from TMDB are optional and use your own token.
+added. Details and artwork come from TMDB if you want them (with your own free token): Aurelia
+compares title, year and, for series, the seasons and episodes you have, so most titles match
+without asking. Everything can be edited, and your corrections survive later scans.
 
 **Made for watching.** Fullscreen playback of the original files with remembered audio and
 subtitle choices per profile and series, subtitle files next to the video, timeline previews,
@@ -105,24 +100,42 @@ flowchart LR
     server -. "optional details" .-> tmdb["TMDB"]
 ```
 
+## Install
+
+| | How |
+| --- | --- |
+| **Mac** | Download the disk image from the [latest release](../../releases/latest), open it and drag Aurelia to Applications. It updates itself. |
+| **Linux server** (Ubuntu, Debian) | One line, then answer a few questions: `curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh \| sudo bash`. More in [Aurelia Server on Linux](docs/LINUX_SERVER.md). |
+| **Linux desktop app** | deb, rpm, Arch or Flatpak from the newest **Aurelia for Linux** release; see [installing Aurelia for Linux](docs/LINUX_APP.md#installation). |
+| **Apple TV, iPhone, iPad** | Not in the App Store; build them from source with Xcode, see [tvOS](clients/tvos/README.md) and [iPhone and iPad](docs/IOS_APP.md). |
+| **Any browser** | Nothing to install: open the server's address at home (below). |
+
+The Mac app is free and does not use Apple's paid developer program. For now it is signed for
+development and runs only on Macs registered for its developer account; a download for every
+Mac is planned. [Distribution and updates](docs/FREE_DISTRIBUTION.md) explains signing and how
+updates keep your library and settings.
+
 ## Getting started
 
-1. **Set up the server.** Open Aurelia on a Mac or Linux PC and choose whether this computer hosts your library or
-   connects to an existing server. On a new host, create the owner profile, add your media
-   folders and confirm the import preview. For a Linux server without a desktop, follow
-   [Aurelia Server on Linux](docs/LINUX_SERVER.md): unpack the download and run its installer.
+1. **Set up the server.** Open Aurelia on a Mac or Linux PC and choose whether this computer hosts
+   your library or connects to an existing server. On a new host, create the owner profile, add
+   your media folders and confirm the import preview. On a Linux PC without a screen, the
+   one-line install above asks the same questions.
 2. **Connect your devices.** Apple TV, iPhone, iPad and browsers find the server on your network
    and show an 8-digit code. Approve it on the Mac with *Enter Code from Apple TV or Browser…*.
    Another Mac or Linux PC connects with a pairing code from the host's device settings.
 3. **Choose your profile and watch.**
 
-Mac/server [releases](../../releases) carry a disk image of the Mac app and the Linux server packages.
-The Linux desktop app has its own releases, named **Aurelia for Linux**, with deb, rpm, Arch and
-Flatpak packages; see [installing Aurelia for Linux](docs/LINUX_APP.md#installation).
-The Mac app updates itself with *Aurelia › Check for Updates…* and keeps your library and
-settings; see [Updating the Mac app](docs/FREE_DISTRIBUTION.md#updating-the-mac-app). It is
-currently signed for development, so it runs on Macs registered for the developer account; a
-download for everyone is planned through GitHub, not the App Store.
+## Versions and updates
+
+Each app has its own version number (for example Mac 1.28.0 and Linux server 1.28.0), because a
+change in one app does not need a new version of the others. Every
+[release page](../../releases) ends with the current version and download of every app, so
+you never have to search for the newest Linux package.
+
+Stable releases come about once or twice a week. Test versions come first as **betas** (marked
+*Pre-release* on GitHub) and are offered only to apps that turned on **Beta updates** in
+Settings › Updates; a Linux server joins with `sudo aurelia update --beta on`.
 
 ## Watching in a browser
 

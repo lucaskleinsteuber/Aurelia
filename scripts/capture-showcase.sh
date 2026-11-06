@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Makes the README screenshots (JPEG) in docs/assets/screenshots from a fictional library: invented
+# Makes the two README screenshots (JPEG, Mac Home and a series) in docs/assets/screenshots from a fictional library: invented
 # titles and generated pictures from scripts/make-showcase.swift, shown by the Mac and Apple TV
 # apps in their DEBUG showcase mode. No server, media or personal data is involved.
 #
@@ -56,7 +56,7 @@ for manifest in root.glob("*/manifest.json"):
         for attachment in test.get("attachments", []):
             name = attachment.get("suggestedHumanReadableName", "")
             stem = name.split("_")[0]
-            if stem.startswith(("mac-", "tv-")):
+            if stem in ("mac-home", "mac-detail"):
                 shutil.copy(manifest.parent / attachment["exportedFileName"], output / f"{stem}.png")
                 count += 1
 # Smaller JPEG files for the repository.
