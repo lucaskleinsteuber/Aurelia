@@ -348,3 +348,15 @@ test("a malformed percent escape in the address opens Home instead of throwing",
   assert.deepEqual(logic.parseRoute("/title/%E0%A4%A"), { name: "home" });
   assert.deepEqual(logic.parseRoute("/%"), { name: "home" });
 });
+
+test("the change feed reports a server that stays offline and ends refused sessions", () => {
+  const offline = { status: 0, offline: true };
+  assert.equal(logic.syncFailure({ status: 401 }, 1, 0).action, "sessionEnded");
+  assert.equal(logic.syncFailure({ status: 403 }, 1, 0).action, "sessionEnded");
+  assert.equal(logic.syncFailure(offline, 1, 1).action, "wait");
+  assert.equal(logic.syncFailure(offline, 2, 2).action, "wait");
+  assert.equal(logic.syncFailure(offline, 3, logic.SYNC_OFFLINE_LIMIT).action, "offline");
+  assert.equal(logic.syncFailure({ status: 500 }, 9, 0).action, "wait");
+  assert.equal(logic.syncFailure(null, 9, 0).delay, 30_000);
+  assert.equal(logic.syncFailure(null, 1, 0).delay, 4_000);
+});

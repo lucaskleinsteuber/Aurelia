@@ -1506,6 +1506,7 @@ function startSync() {
     let generation;
     let first = true;
     let failures = 0;
+    let offlineInRow = 0;
     while (!controller.signal.aborted) {
       try {
         const changes = await api.changes(after, generation, controller.signal);
@@ -1515,11 +1516,17 @@ function startSync() {
         generation = changes.generation ?? generation;
         first = false;
         failures = 0;
+        offlineInRow = 0;
       } catch (error) {
         if (controller.signal.aborted || error?.name === "AbortError") return;
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return sessionEnded();
         failures += 1;
-        await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4))));
+        offlineInRow = error instanceof ApiError && error.offline ? offlineInRow + 1 : 0;
+        // An open page notices a server that went off, not only the next click. A playing
+        // title reports its own problems, so the feed keeps waiting while the player is open.
+        const next = logic.syncFailure(error instanceof ApiError ? error : null, failures, offlineInRow);
+        if (next.action === "sessionEnded") return sessionEnded();
+        if (next.action === "offline" && !state.player) return showServerOff();
+        await new Promise((resolve) => setTimeout(resolve, next.delay));
       }
     }
   })();

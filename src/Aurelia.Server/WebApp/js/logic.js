@@ -982,3 +982,16 @@ export function smartRulesJson(form) {
   };
   return JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== null)));
 }
+
+/** Offline answers in a row after which the change feed reports the server as off. */
+export const SYNC_OFFLINE_LIMIT = 3;
+
+/**
+ * What the change feed does after a failed request: end the session when it was refused,
+ * report the server as off after a few offline answers in a row, else wait and try again.
+ */
+export function syncFailure(error, failures, offlineInRow) {
+  if (error?.status === 401 || error?.status === 403) return { action: "sessionEnded" };
+  const delay = Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4));
+  return { action: error?.offline && offlineInRow >= SYNC_OFFLINE_LIMIT ? "offline" : "wait", delay };
+}
