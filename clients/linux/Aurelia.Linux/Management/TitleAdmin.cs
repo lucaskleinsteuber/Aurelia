@@ -359,6 +359,8 @@ public sealed class MetadataEditorSheet : UserControl
         {
             source.Add(Note("Edit an individual episode to change its video file."));
         }
+        if (document.Kind is MediaKind.Movie or MediaKind.Episode)
+            body.Children.Add(Card(Group("Subtitles", "IconSubtitles", new SubtitlePanel(scope, mediaId))));
         body.Children.Add(Card(Group("Source", "IconServer", [.. source])));
     }
 
@@ -1124,10 +1126,14 @@ public sealed class MetadataPage : StackPanel
         Children.Add(Section("Movie & TV Information", Block(
             Note("Use your own TMDB API Read Access Token to download metadata and artwork. File paths are never sent."),
             provider)));
+        Subtitles = new SubtitleSettingsBlock(scope);
+        Children.Add(Section("Subtitle Downloads", Block(Subtitles)));
         Loading = ReloadAsync();
     }
 
     internal Task Loading { get; private set; }
+
+    internal SubtitleSettingsBlock Subtitles { get; }
 
     public async Task ReloadAsync()
     {

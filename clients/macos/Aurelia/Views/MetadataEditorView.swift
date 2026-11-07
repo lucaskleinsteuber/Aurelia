@@ -269,6 +269,11 @@ struct MetadataEditorSheet: View {
         }
         .disabled(draft.document?.kind != .movie && draft.document?.kind != .series)
       }
+      if draft.document?.kind == .movie || draft.document?.kind == .episode {
+        AureliaSettingsSection("Subtitles", symbol: "captions.bubble") {
+          SubtitleDownloadPanel(mediaId: metadata.mediaId)
+        }
+      }
       AureliaSettingsSection("Source", symbol: "doc") { source }
     }
   }

@@ -598,6 +598,54 @@ struct APIClient: Sendable {
     return try Self.decode(MetadataProviderStatus.self, from: data)
   }
 
+  func subtitleProviderStatus() async throws -> SubtitleProviderStatus {
+    try await get("/api/v1/metadata/subtitles")
+  }
+
+  func configureSubtitles(_ request: UpdateSubtitleProviderRequest) async throws
+    -> SubtitleProviderStatus
+  {
+    let data = try await perform(
+      path: "/api/v1/metadata/subtitles", method: "PUT", body: try JSONEncoder().encode(request))
+    return try Self.decode(SubtitleProviderStatus.self, from: data)
+  }
+
+  func removeSubtitleKey() async throws -> SubtitleProviderStatus {
+    let data = try await perform(path: "/api/v1/metadata/subtitles/key", method: "DELETE")
+    return try Self.decode(SubtitleProviderStatus.self, from: data)
+  }
+
+  func removeSubtitleAccount() async throws -> SubtitleProviderStatus {
+    let data = try await perform(path: "/api/v1/metadata/subtitles/account", method: "DELETE")
+    return try Self.decode(SubtitleProviderStatus.self, from: data)
+  }
+
+  func downloadedSubtitles(mediaId: UUID) async throws -> [DownloadedSubtitle] {
+    try await get("/api/v1/media/\(mediaId.uuidString.lowercased())/subtitles")
+  }
+
+  func searchSubtitles(mediaId: UUID, language: String) async throws -> [SubtitleCandidate] {
+    let code = language.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+    return try await get(
+      "/api/v1/media/\(mediaId.uuidString.lowercased())/subtitles/search?language=\(code)")
+  }
+
+  func downloadSubtitle(mediaId: UUID, _ request: DownloadSubtitleRequest) async throws
+    -> DownloadedSubtitle
+  {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/subtitles", method: "POST",
+      body: try JSONEncoder().encode(request), timeout: 45)
+    return try Self.decode(DownloadedSubtitle.self, from: data)
+  }
+
+  func removeSubtitle(mediaId: UUID, id: UUID) async throws {
+    _ = try await perform(
+      path:
+        "/api/v1/media/\(mediaId.uuidString.lowercased())/subtitles/\(id.uuidString.lowercased())",
+      method: "DELETE")
+  }
+
   func startMetadataJob(libraryId: UUID? = nil) async throws -> MetadataJobSummary {
     let body = try libraryId.map {
       try JSONEncoder().encode(["libraryId": $0.uuidString.lowercased()])

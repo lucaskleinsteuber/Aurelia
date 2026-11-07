@@ -156,6 +156,36 @@ struct AureliaTests {
   }
 
   @Test
+  func subtitleDownloadsDecodeFromTheServer() throws {
+    let status = try JSONDecoder().decode(
+      SubtitleProviderStatus.self,
+      from: Data(
+        """
+        {"enabled":true,"hasApiKey":true,"hasAccount":false,"accountName":null,"languages":["de","en"],
+        "automatic":true,"provider":"OpenSubtitles","attribution":"Subtitles from OpenSubtitles.com",
+        "remainingDownloads":4,"resetsAt":null,"lastAutomaticRunAt":"2026-11-07T02:00:00Z","downloadedCount":3}
+        """.utf8))
+    #expect(status.languages.map(SubtitleLanguages.name) == ["German", "English"])
+    let candidate = try JSONDecoder().decode(
+      SubtitleCandidate.self,
+      from: Data(
+        """
+        {"fileId":"101","language":"de","release":null,"hashMatch":true,"hearingImpaired":true,
+        "foreignPartsOnly":false,"machineTranslated":false,"downloadCount":1204,"fromTrusted":false}
+        """.utf8))
+    #expect(candidate.details.hasPrefix("Matches this file · SDH · "))
+    let subtitle = try JSONDecoder().decode(
+      DownloadedSubtitle.self,
+      from: Data(
+        """
+        {"id":"00000000-0000-0000-0000-000000000011","language":"de","title":"German · Downloaded",
+        "hearingImpaired":false,"forced":false,"provider":"OpenSubtitles","release":"Invented.Release",
+        "downloadedAt":"2026-11-07T02:00:00Z","automatic":false}
+        """.utf8))
+    #expect(subtitle.title == "German · Downloaded")
+  }
+
+  @Test
   func serverAddressDefaultsToSecureLanPort() throws {
     let url = try APIClient.normalizedServerURL("192.168.1.20")
     #expect(url.absoluteString == "https://192.168.1.20:43111")

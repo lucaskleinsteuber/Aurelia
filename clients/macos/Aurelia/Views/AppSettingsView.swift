@@ -996,6 +996,9 @@ struct AppSettingsView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+    if model.canManageMedia {
+      SubtitleDownloadSettingsSection()
+    }
   }
 
   // MARK: - 5. Profiles and Devices

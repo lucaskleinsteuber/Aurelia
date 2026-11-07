@@ -36,7 +36,7 @@ internal static class SettingsRows
     {
         "Playing" => "IconPlay",
         "Sound and Controls" => "IconVolume",
-        "Languages" => "IconSubtitles",
+        "Languages" or "Subtitle Downloads" => "IconSubtitles",
         "Motion and Appearance" => "IconSparkle",
         "Library" or "Storage Locations" or "Library Maintenance" or "Library Health & Maintenance" or "Catalog Visibility" => "IconLibrary",
         "Server" or "Server Details" or "Server Connection" or "Hosting" or "When the Server Runs" => "IconServer",

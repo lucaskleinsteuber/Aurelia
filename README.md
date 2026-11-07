@@ -46,7 +46,7 @@ your home network unless you want it to.
 - **Native apps, not a website in a frame.** The Mac, Linux, Apple TV, iPhone and iPad apps are
   built for each system and play the original files with every audio and subtitle track.
 - **No account and no cloud.** The server runs on your own computer. Nothing is sent out except
-  optional TMDB lookups and update checks.
+  optional TMDB and OpenSubtitles lookups and update checks.
 - **Easy to run.** Host the library inside the Mac or Linux app, or on an old PC as a small
   server that sleeps when nobody watches and wakes when you open Aurelia.
 
@@ -61,7 +61,8 @@ compares title, year and, for series, the seasons and episodes you have, so most
 without asking. Everything can be edited, and your corrections survive later scans.
 
 **Made for watching.** Fullscreen playback of the original files with remembered audio and
-subtitle choices per profile and series, subtitle files next to the video, timeline previews,
+subtitle choices per profile and series, subtitle files next to the video, subtitles from
+OpenSubtitles (by hand or automatically, with your own free key), timeline previews,
 a sleep timer, Dialogue Boost, Volume Leveling and Up Next for series. *Play On* sends a title to
 another screen at home.
 
@@ -158,7 +159,7 @@ is ever stored. More in [Aurelia in a web browser](docs/WEB_APP.md).
 - **Profiles stay private.** History, statistics and personal collections belong to one profile;
   administrators can't read them. See the [security model](docs/SECURITY_MODEL.md).
 - **No cloud.** The server runs on your hardware and sends nothing out, except optional TMDB
-  lookups and update checks on GitHub. Away from home, you connect through your own VPN; see
+  and OpenSubtitles lookups and update checks on GitHub. Away from home, you connect through your own VPN; see
   [Watching away from home](docs/REMOTE_ACCESS.md).
 
 ## Documentation

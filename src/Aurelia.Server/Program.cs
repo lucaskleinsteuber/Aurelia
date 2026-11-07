@@ -188,6 +188,16 @@ builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
 builder.Services.AddSingleton<LibraryScanScheduler>();
 builder.Services.AddHostedService<LibraryScanWorker>();
 builder.Services.AddHostedService<MetadataJobWorker>();
+builder.Services.AddHttpClient<IOpenSubtitlesClient, OpenSubtitlesClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Aurelia v" + ServerProductVersion.Current);
+});
+builder.Services.AddSingleton<SubtitleProviderSettingsStore>();
+builder.Services.AddSingleton<DownloadedSubtitleStore>();
+builder.Services.AddSingleton<SubtitleQuota>();
+builder.Services.AddScoped<SubtitleDownloadService>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<SubtitleAutoDownloader>();
 builder.Services.AddSingleton<ContentRatingRefresh>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ContentRatingRefresh>());
 builder.Services.AddHostedService<LibraryMonitoringService>();
@@ -386,6 +396,7 @@ app.MapWebApp();
 app.MapLiveConversion();
 app.MapScrubPreviews();
 app.MapRemotePlayback();
+app.MapSubtitleDownloads();
 
 try
 {

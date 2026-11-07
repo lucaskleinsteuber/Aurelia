@@ -200,7 +200,9 @@ segment and no temporary file.
 3. An embedded or sidecar text track is read with `GET {streamPath}/subtitles/{index}` under the same
    ticket, session and profile rules. Track indices `0..999` refer to embedded subtitle tracks; indices
    `1000+` refer to sidecar subtitle tracks discovered next to the video or in `Subs/` or `Subtitles/`
-   directories. The response is `text/vtt; charset=utf-8`, private and uncached. SubRip (`.srt`),
+   directories; indices `2000+` refer to subtitles an administrator downloaded from OpenSubtitles,
+   which the server keeps in its data folder (`Subtitles/`), never beside the media. All of them are
+   listed by `GET {streamPath}/subtitles` with `isSidecar: true`. The response is `text/vtt; charset=utf-8`, private and uncached. SubRip (`.srt`),
    ASS/SSA (`.ass`, `.ssa`), `mov_text`, WebVTT (`.vtt`) and plain text are supported and converted
    in-memory; bitmap tracks (`.sub`/`.idx`) return `422 subtitle_not_supported`. All converted text
    subtitles are capped at 5 MB in memory with an LRU cache; no converted files are ever written to disk.
@@ -212,6 +214,27 @@ The server detects a usable mapper when discovering ffmpeg: native perceptual `s
 in FFmpeg 9, or the older `zscale` plus `tonemap` filters. If neither is present, a request that
 needs HDR picture re-encoding returns `422 hdr_conversion_unavailable`; original picture
 copying remains available. Picture conversion beyond 1080p is not part of `live-conversion-v1`.
+
+## Subtitle downloads
+
+The owner sets up OpenSubtitles.com with their own free API key and, optionally, an
+OpenSubtitles account for more downloads a day (`GET`/`PUT /api/v1/metadata/subtitles`,
+`DELETE …/key`, `DELETE …/account`). The key and password are written to private files in the
+server's `Secrets/` folder and never returned; the status says only whether they exist. Up to
+five languages (two-letter codes) are chosen in order of preference.
+
+Administrators list, search, download and remove the subtitles of one movie or episode:
+`GET /api/v1/media/{id}/subtitles`, `GET …/subtitles/search?language=de`,
+`POST …/subtitles` with `{fileId, language, release, hearingImpaired, foreignPartsOnly}` and
+`DELETE …/subtitles/{subtitleId}`. A search sends OpenSubtitles the TMDB id, season and episode,
+the language and the OpenSubtitles hash (file size plus the first and last 64 KiB); file names
+and paths are never sent. A used-up daily quota answers `429 subtitle_quota_reached`.
+
+With **automatic downloads** on, the server looks every six hours for matched, online movies
+and episodes without a subtitle in a chosen language (in the file, beside it or downloaded) and
+downloads the best human-made match, at most 25 per pass, each title and language at most once
+a week. Downloaded subtitles are not part of encrypted server backups; they can be downloaded
+again.
 
 ## Collections and smart lists
 

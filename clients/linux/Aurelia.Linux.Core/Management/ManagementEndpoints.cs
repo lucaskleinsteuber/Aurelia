@@ -183,6 +183,28 @@ public sealed partial class ManagementClient
 
     public Task<LibraryMutationResult> OperationAsync(Guid id) => GetAsync<LibraryMutationResult>($"/api/v1/library-operations/{id}");
 
+    // Subtitle downloads (OpenSubtitles).
+    public Task<SubtitleProviderStatus> SubtitleProviderAsync() => GetAsync<SubtitleProviderStatus>("/api/v1/metadata/subtitles");
+
+    public Task<SubtitleProviderStatus> SaveSubtitleProviderAsync(UpdateSubtitleProviderRequest request) =>
+        SendAsync<SubtitleProviderStatus>(HttpMethod.Put, "/api/v1/metadata/subtitles", request);
+
+    public Task<SubtitleProviderStatus> RemoveSubtitleKeyAsync() => SendAsync<SubtitleProviderStatus>(HttpMethod.Delete, "/api/v1/metadata/subtitles/key", null);
+
+    public Task<SubtitleProviderStatus> RemoveSubtitleAccountAsync() => SendAsync<SubtitleProviderStatus>(HttpMethod.Delete, "/api/v1/metadata/subtitles/account", null);
+
+    public Task<IReadOnlyList<DownloadedSubtitle>> DownloadedSubtitlesAsync(Guid mediaId) =>
+        GetAsync<IReadOnlyList<DownloadedSubtitle>>($"/api/v1/media/{mediaId}/subtitles");
+
+    public Task<IReadOnlyList<SubtitleCandidate>> SearchSubtitlesAsync(Guid mediaId, string language) =>
+        GetAsync<IReadOnlyList<SubtitleCandidate>>($"/api/v1/media/{mediaId}/subtitles/search?language={Uri.EscapeDataString(language)}");
+
+    public Task<DownloadedSubtitle> DownloadSubtitleAsync(Guid mediaId, DownloadSubtitleRequest request) =>
+        SendAsync<DownloadedSubtitle>(HttpMethod.Post, $"/api/v1/media/{mediaId}/subtitles", request);
+
+    public Task RemoveSubtitleAsync(Guid mediaId, Guid subtitleId) =>
+        SendAsync<JsonNode>(HttpMethod.Delete, $"/api/v1/media/{mediaId}/subtitles/{subtitleId}", null);
+
     // Metadata and TMDB.
     public Task<MetadataProviderStatus> ProviderAsync() => GetAsync<MetadataProviderStatus>("/api/v1/metadata/provider");
 

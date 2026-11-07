@@ -12,6 +12,7 @@ public static partial class LiveConversionEndpoints
         PlaybackService playback,
         LiveConversionService live,
         CatalogMutationGate mutations,
+        DownloadedSubtitleStore downloads,
         CancellationToken cancellationToken)
     {
         try
@@ -30,8 +31,16 @@ public static partial class LiveConversionEndpoints
             if (await live.ToolsAsync() is { } tools)
             {
                 var file = new OpenMediaFile(stream, source.ContentType, source.ContentLength, source.LastModified);
-                var probe = await live.ProbeAsync(tools, file, source.SourcePath, source.MediaId, cancellationToken);
-                if (probe.Subtitles is not null)
+                MediaProbeResult? probe = null;
+                try
+                {
+                    probe = await live.ProbeAsync(tools, file, source.SourcePath, source.MediaId, cancellationToken);
+                }
+                catch (PlaybackException exception) when (exception.Code == "media_probe_failed")
+                {
+                    // A header the server can't read still leaves the subtitle files beside it.
+                }
+                if (probe?.Subtitles is not null)
                 {
                     tracks.AddRange(probe.Subtitles.Select(track => new LiveSubtitleTrack(
                         track.Index, track.Codec, track.Language, track.Title, track.IsDefault, track.IsForced,
@@ -47,6 +56,7 @@ public static partial class LiveConversionEndpoints
                     1000 + i, sc.Format, sc.Language, sc.Title, sc.IsDefault, sc.IsForced, sc.Supported,
                     IsSidecar: true, IsSdh: sc.IsSdh));
             }
+            tracks.AddRange(SubtitleDownloadService.Tracks(downloads, source.MediaId));
 
             return Results.Ok(tracks);
         }
@@ -64,6 +74,7 @@ public static partial class LiveConversionEndpoints
         PlaybackService playback,
         LiveConversionService live,
         CatalogMutationGate mutations,
+        DownloadedSubtitleStore downloads,
         CancellationToken cancellationToken)
     {
         try
@@ -77,6 +88,19 @@ public static partial class LiveConversionEndpoints
             if (source is null) return Results.NotFound();
             await using var stream = source.Stream;
             (context.Items["Aurelia.StreamLease"] as ActiveStreamRegistry.Lease)?.BindMedia(source.MediaId);
+
+            // Downloaded subtitles (from the server's data folder) are mapped to 2000+.
+            if (index >= SubtitleDownloadService.DownloadedTrackBase)
+            {
+                var downloaded = downloads.List(source.MediaId);
+                var position = index - SubtitleDownloadService.DownloadedTrackBase;
+                if (position >= downloaded.Count || downloads.SubtitlePath(source.MediaId, downloaded[position].Id) is not { } path)
+                    return Problem("invalid_subtitle_track", "The subtitle track was not found.", StatusCodes.Status404NotFound);
+                var converted = await SidecarSubtitles.ReadAsWebVttAsync(path, cancellationToken);
+                context.Response.Headers.CacheControl = "private, no-store";
+                context.Response.Headers.XContentTypeOptions = "nosniff";
+                return Results.Bytes(converted, "text/vtt; charset=utf-8");
+            }
 
             // Sidecar subtitle stream indices are mapped to 1000+
             if (index >= 1000)

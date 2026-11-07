@@ -1321,3 +1321,87 @@ struct RemotePlaybackCommand: Codable, Identifiable, Sendable {
   let skipSeconds: Double?
   let createdAt: String
 }
+
+// MARK: - Subtitle downloads
+
+/// The server's OpenSubtitles setup. Keys and passwords never come back from the server.
+struct SubtitleProviderStatus: Codable, Equatable, Sendable {
+  let enabled: Bool
+  let hasApiKey: Bool
+  let hasAccount: Bool
+  let accountName: String?
+  let languages: [String]
+  let automatic: Bool
+  let provider: String
+  let attribution: String
+  let remainingDownloads: Int?
+  let resetsAt: String?
+  let lastAutomaticRunAt: String?
+  let downloadedCount: Int
+}
+
+struct UpdateSubtitleProviderRequest: Encodable, Sendable {
+  let enabled: Bool
+  let languages: [String]
+  let automatic: Bool
+  var apiKey: String? = nil
+  var accountName: String? = nil
+  var accountPassword: String? = nil
+}
+
+struct SubtitleCandidate: Codable, Identifiable, Equatable, Sendable {
+  let fileId: String
+  let language: String
+  let release: String?
+  let hashMatch: Bool
+  let hearingImpaired: Bool
+  let foreignPartsOnly: Bool
+  let machineTranslated: Bool
+  let downloadCount: Int
+  let fromTrusted: Bool
+  var id: String { fileId }
+
+  /// "Exact match · SDH · 1,204 downloads", the facts that help choose one.
+  var details: String {
+    var parts: [String] = []
+    if hashMatch { parts.append("Matches this file") }
+    if hearingImpaired { parts.append("SDH") }
+    if foreignPartsOnly { parts.append("Foreign parts only") }
+    if machineTranslated { parts.append("Machine translated") }
+    if fromTrusted { parts.append("Trusted") }
+    parts.append("\(downloadCount.formatted()) downloads")
+    return parts.joined(separator: " · ")
+  }
+}
+
+struct DownloadSubtitleRequest: Encodable, Sendable {
+  let fileId: String
+  let language: String
+  let release: String?
+  let hearingImpaired: Bool
+  let foreignPartsOnly: Bool
+}
+
+struct DownloadedSubtitle: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let language: String
+  let title: String
+  let hearingImpaired: Bool
+  let forced: Bool
+  let provider: String
+  let release: String?
+  let downloadedAt: String
+  let automatic: Bool
+}
+
+enum SubtitleLanguages {
+  /// The languages offered in Settings, by their English names.
+  static let choices = [
+    "en", "de", "fr", "es", "it", "nl", "pt", "sv", "da", "no", "fi", "pl", "cs", "tr", "ru", "ja",
+    "ko", "zh", "ar",
+  ]
+
+  static func name(_ code: String) -> String {
+    Locale(identifier: "en").localizedString(forLanguageCode: code) ?? code
+  }
+}

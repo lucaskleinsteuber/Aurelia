@@ -76,6 +76,8 @@ public sealed class ManagementScreenTests
             .Answer("GET", $"/api/v1/libraries/{LibraryId}/import-assignments", Json(new ImportAssignmentsSummary("r1", [])))
             .Answer("GET", "/api/v1/metadata/provider", Json(new MetadataProviderStatus(true, true, "en-US", 80_000_000, 2_000_000_000, "TMDB", "This product uses the TMDB API but is not endorsed or certified by TMDB.")))
             .Answer("GET", "/api/v1/metadata/jobs", "[]")
+            .Answer("GET", "/api/v1/metadata/subtitles", Json(new SubtitleProviderStatus(true, true, false, null, ["de", "en"], true, "OpenSubtitles",
+                "Subtitles from OpenSubtitles.com", 17, null, null, 3)))
             .Answer("GET", "/api/v1/library/health/duplicates", "[]");
     }
 
@@ -106,6 +108,42 @@ public sealed class ManagementScreenTests
         Assert.Contains(All<Button>(window.Shell.SheetHost), b => AutomationProperties.GetName(b) == "Use Automatic Value title");
         Assert.Contains(All<Button>(window.Shell.SheetHost), b => AutomationProperties.GetName(b) == "Move Diane Mercer Down");
         Snapshot(window, "metadata-editor");
+    }
+
+    [AvaloniaFact]
+    public void TheMetadataEditorSearchesAndDownloadsSubtitles()
+    {
+        var values = new MediaEditorValues("Quiet Orbit", 2024, null, 112, null, [], [], null, [], null, null);
+        var kept = new DownloadedSubtitle(Guid.NewGuid(), "en", "English · Downloaded", false, false, "OpenSubtitles", "Quiet.Orbit.2024.1080p", DateTimeOffset.UtcNow, true);
+        var added = kept with { Id = Guid.NewGuid(), Language = "de", Title = "German (SDH) · Downloaded", HearingImpaired = true, Automatic = false };
+        var subtitles = $"/api/v1/media/{FakeLibrary.MovieA}/subtitles";
+        var server = Server()
+            .Answer("GET", $"/api/v1/media/{FakeLibrary.MovieA}/editor",
+                Json(new MediaEditorDocument(FakeLibrary.MovieA, LibraryId, MediaKind.Movie, 3, values, [], "/srv/media/Films/Quiet Orbit (2024).mkv", "Quiet Orbit (2024).mkv", values)))
+            .Answer("GET", subtitles, Json(new[] { kept }))
+            .Answer("GET", subtitles, Json(new[] { kept, added }))
+            .Answer("GET", subtitles + "/search", Json(new[] { new SubtitleCandidate("101", "de", "Quiet.Orbit.German.SDH", true, true, false, false, 1204, true) }))
+            .Answer("POST", subtitles, Json(added));
+        var window = FakeLibrary.ShowLibrary(server);
+        var movie = window.Session.Library!.Catalog.Single(item => item.Id == FakeLibrary.MovieA);
+        _ = window.Shell!.ManageTitleAsync(movie, TitleAction.EditMetadata);
+        FakeLibrary.Pump(() => window.Shell.SheetHost.Current is not null && All<Button>(window.Shell.SheetHost).Any(b => b.Content as string == "Search OpenSubtitles"), rounds: 200);
+        var host = window.Shell.SheetHost;
+        Assert.Contains(All<TextBlock>(host), t => t.Text == "Subtitles");
+        Assert.Contains(All<TextBlock>(host), t => t.Text == "English · Downloaded");
+        Assert.Contains(All<TextBlock>(host), t => t.Text == "Automatic");
+        var language = All<ComboBox>(host).Single(box => AutomationProperties.GetName(box) == "Subtitle Language");
+        Assert.Equal("German", language.SelectedItem);
+
+        All<Button>(host).Single(b => b.Content as string == "Search OpenSubtitles").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        FakeLibrary.Pump(() => All<TextBlock>(host).Any(t => t.Text == "Quiet.Orbit.German.SDH"), rounds: 100);
+        Assert.Contains(server.RequestUris, uri => uri == $"GET {subtitles}/search?language=de");
+        Assert.Contains(All<TextBlock>(host), t => t.Text?.StartsWith("Matches this file · SDH · Trusted · 1,204 downloads", StringComparison.Ordinal) == true);
+
+        All<Button>(host).Single(b => b.Content as string == "Download").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        FakeLibrary.Pump(() => All<TextBlock>(host).Any(t => t.Text == "German (SDH) · Downloaded"), rounds: 100);
+        Assert.Contains("\"fileId\":\"101\"", server.Bodies[$"POST {subtitles}"], StringComparison.Ordinal);
+        Snapshot(window, "metadata-editor-subtitles");
     }
 
     private static void Snapshot(Window window, string name)
@@ -271,6 +309,11 @@ public sealed class ManagementScreenTests
         FakeLibrary.Pump(() => Shows(page, "Enabled"), rounds: 40);
         Assert.True(Shows(page, "TMDB"));
         Assert.Contains(All<Button>(page), b => b.Content as string == "Remove TMDB Token");
+        FakeLibrary.Pump(() => Shows(page, "Downloads Left Today"), rounds: 40);
+        Assert.True(Shows(page, "Subtitle Downloads"));
+        Assert.True(Shows(page, "German, English"));
+        Assert.Contains(All<ToggleSwitch>(page), toggle => AutomationProperties.GetName(toggle) == "Download missing subtitles automatically" && toggle.IsChecked == true);
+        Assert.Contains(All<Button>(page), b => b.Content as string == "Remove API Key");
         Snapshot(settings, "settings-metadata");
     }
 
