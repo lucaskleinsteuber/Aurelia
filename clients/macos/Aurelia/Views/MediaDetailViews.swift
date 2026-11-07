@@ -787,6 +787,12 @@ private struct DetailHero: View {
           .buttonStyle(AureliaPrimaryActionButtonStyle())
           .disabled(!canPlay || isPlayLoading)
           .accessibilityIdentifier("play-media")
+          // Parties others started for this title or one of its episodes.
+          WatchTogetherJoinButtons(
+            mediaIds: Set(
+              [detail.item.id] + detail.seasons.flatMap { $0.episodes.map(\.item.id) })
+          )
+          .buttonStyle(.bordered).controlSize(.large)
           if !remoteDevices.isEmpty, let onPlayOnDevice {
             Menu {
               ForEach(remoteDevices) { device in

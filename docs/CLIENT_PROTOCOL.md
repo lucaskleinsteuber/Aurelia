@@ -236,6 +236,31 @@ downloads the best human-made match, at most 25 per pass, each title and languag
 a week. Downloaded subtitles are not part of encrypted server backups; they can be downloaded
 again.
 
+## Watch Together
+
+Several devices at home play one title in step. The server keeps each party in memory: the
+title, whether it plays, the position at `updatedAt`, and its members (one profile on one
+device each). While `isPlaying` is true and `isWaiting` is false, the shared position now is
+`positionMilliseconds` plus the time since `updatedAt`; `serverTime` lets a client measure the
+offset between its clock and the server's.
+
+- `GET /api/v1/watch-together[?mediaId=]` lists parties for titles the profile may open.
+- `POST /api/v1/watch-together` with `{mediaId, positionMilliseconds, isPlaying, deviceName}`
+  starts one; `POST …/{id}/join` with `{deviceName}` joins. A profile session is in at most one
+  party.
+- `GET …/{id}?after={revision}&waitMs=20000` answers as soon as the revision is newer (long
+  poll, at most 25 s). Asking at least every 40 s keeps a member in the party; these polls do
+  not keep a power-saving server awake.
+- `POST …/{id}/commands` with `{action, positionMilliseconds?, mediaId?}`: `play`, `pause`,
+  `seek`, `buffering`, `ready` and `change` (to another title, such as the next episode).
+  A joining member, everyone after `change`, and a member that reports `buffering` hold the
+  party at the same picture until they report `ready`, for at most 30 seconds.
+- `DELETE …/{id}/members/me` leaves; the last member ends the party.
+
+The Mac and Linux players follow the party: they jump to the shared moment when they are more
+than 1.5 seconds apart (0.5 seconds while paused), and send their own play, pause, seek and
+title changes as commands. Answers that arrive out of order never undo a newer revision.
+
 ## Collections and smart lists
 
 The server reports capability `collections-v2`.

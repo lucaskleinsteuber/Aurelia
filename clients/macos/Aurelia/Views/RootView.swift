@@ -50,6 +50,8 @@ struct RootView: View {
 
       if let profile = model.profile, let playback = model.playback {
         PlayerView(profile: profile, presentation: playback)
+          // A new title (such as one a Watch Together party moved to) gets a new player.
+          .id(playback.id)
           .transition(.opacity)
           .zIndex(10)
       }

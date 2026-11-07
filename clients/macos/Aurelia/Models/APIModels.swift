@@ -1405,3 +1405,72 @@ enum SubtitleLanguages {
     Locale(identifier: "en").localizedString(forLanguageCode: code) ?? code
   }
 }
+
+// MARK: - Watch Together
+
+struct WatchPartySummary: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let mediaId: UUID
+  let title: String
+  let hostName: String
+  let memberCount: Int
+  let isPlaying: Bool
+}
+
+struct WatchPartyMember: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let name: String
+  let deviceName: String
+  let isBuffering: Bool
+  let isHost: Bool
+  let isYou: Bool
+}
+
+/// The shared state of a Watch Together party; dates are ISO 8601 strings from the server.
+struct WatchPartyState: Codable, Identifiable, Equatable, Sendable {
+  let id: UUID
+  let mediaId: UUID
+  let title: String
+  let isPlaying: Bool
+  let isWaiting: Bool
+  let positionMilliseconds: Int64
+  let updatedAt: String
+  let serverTime: String
+  let revision: Int64
+  let members: [WatchPartyMember]
+  let lastAction: String?
+  let lastActionBy: String?
+
+  var me: WatchPartyMember? { members.first { $0.isYou } }
+
+  /// "Mia paused", the last thing someone else did, for a short notice in the player.
+  var notice: String? {
+    guard let lastAction, let lastActionBy else { return nil }
+    switch lastAction {
+    case "play": return "\(lastActionBy) pressed play"
+    case "pause": return "\(lastActionBy) paused"
+    case "seek": return "\(lastActionBy) jumped to another moment"
+    case "joined": return "\(lastActionBy) joined"
+    case "left": return "\(lastActionBy) left"
+    case "change": return "\(lastActionBy) started \(title)"
+    default: return nil
+    }
+  }
+}
+
+struct CreateWatchPartyRequest: Encodable, Sendable {
+  let mediaId: UUID
+  let positionMilliseconds: Int64
+  let isPlaying: Bool
+  let deviceName: String?
+}
+
+struct JoinWatchPartyRequest: Encodable, Sendable {
+  let deviceName: String?
+}
+
+struct WatchPartyCommandRequest: Encodable, Sendable {
+  let action: String
+  var positionMilliseconds: Int64? = nil
+  var mediaId: UUID? = nil
+}

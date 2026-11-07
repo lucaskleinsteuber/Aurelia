@@ -168,6 +168,8 @@ final class PlaybackController: ObservableObject {
   let diagnostics = PlaybackDiagnostics()
 
   @Published private(set) var presentation: PlaybackPresentation
+  /// Watch Together listens here for play, pause and seek done on this Mac.
+  var userActionObserver: (@MainActor (PlaybackUserAction) -> Void)?
 
   private let client: any PlaybackClientProtocol
   private let engine: PlaybackEngine
@@ -533,6 +535,7 @@ final class PlaybackController: ObservableObject {
     }
     guard !wantsPlayback else { return true }
     wantsPlayback = true
+    userActionObserver?(.play(currentTimeMilliseconds))
     beginPlaybackActivityIfNeeded()
     pauseRequestPending = false
     lastMovementAt = recoveryClock()
@@ -555,7 +558,9 @@ final class PlaybackController: ObservableObject {
   @discardableResult
   func pause() -> Bool {
     guard canPause else { return false }
+    let wasWanted = wantsPlayback
     wantsPlayback = false
+    if wasWanted { userActionObserver?(.pause(currentTimeMilliseconds)) }
     stableMovementStartedAt = nil
     applyPausedIntentIfNeeded()
     showsStartScreen = false
@@ -613,6 +618,7 @@ final class PlaybackController: ObservableObject {
     observedPosition = target
     stableMovementStartedAt = nil
     lastMovementAt = recoveryClock()
+    userActionObserver?(.seek(target))
     engine.seek(to: target)
     enqueueProgressSave(isFinished: false)
   }

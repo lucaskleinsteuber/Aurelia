@@ -322,19 +322,29 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     public void PlayPause()
     {
-        if (engine is null) return;
-        if (State == PlayerState.Playing)
-        {
-            engine.Pause();
-            State = PlayerState.Paused;
-            _ = SaveProgressAsync(finished: false);
-        }
-        else if (State == PlayerState.Paused)
-        {
-            pauseAfterReopen = false;
-            engine.Play();
-            State = PlayerState.Playing;
-        }
+        if (State == PlayerState.Playing) Pause();
+        else if (State == PlayerState.Paused) Play();
+    }
+
+    /// <summary>Watch Together listens here for play, pause and seek done on this computer.</summary>
+    public event Action<PlaybackUserAction>? UserAction;
+
+    public void Play()
+    {
+        if (engine is null || State != PlayerState.Paused) return;
+        pauseAfterReopen = false;
+        engine.Play();
+        State = PlayerState.Playing;
+        UserAction?.Invoke(new PlaybackUserAction(PlaybackUserActionKind.Play, Position));
+    }
+
+    public void Pause()
+    {
+        if (engine is null || State != PlayerState.Playing) return;
+        engine.Pause();
+        State = PlayerState.Paused;
+        _ = SaveProgressAsync(finished: false);
+        UserAction?.Invoke(new PlaybackUserAction(PlaybackUserActionKind.Pause, Position));
     }
 
     /// <summary>Seeks by the seek interval (Settings › Playback), forward or back.</summary>
@@ -346,6 +356,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         var target = PlayerPolicy.Clamp(milliseconds, Duration);
         engine.Seek(target);
         Position = target;
+        UserAction?.Invoke(new PlaybackUserAction(PlaybackUserActionKind.Seek, target));
         Record(PlaybackDiagnosticKind.Seeked);
         upNextDismissed = false;
         lastMovement = time.GetUtcNow();

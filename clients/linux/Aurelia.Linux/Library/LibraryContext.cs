@@ -31,6 +31,11 @@ public interface ILibraryNavigator
 
     /// <summary>An administrator's change to a title: edit its metadata, match it or remove it from the library.</summary>
     Task ManageTitleAsync(CatalogItemSummary item, TitleAction action) => Task.CompletedTask;
+
+    /// <summary>Watch Together parties on the server, to join from a title's page.</summary>
+    Task<IReadOnlyList<WatchPartySummary>> WatchPartiesAsync() => Task.FromResult<IReadOnlyList<WatchPartySummary>>([]);
+
+    Task JoinWatchTogetherAsync(WatchPartySummary party) => Task.CompletedTask;
 }
 
 public enum TitleAction

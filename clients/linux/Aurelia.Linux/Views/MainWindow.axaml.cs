@@ -16,7 +16,7 @@ using Avalonia.Threading;
 
 namespace Aurelia.Linux.Views;
 
-public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
+public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHost, IDisposable
 {
     private readonly AppServices services;
     private LibraryShell? shell;
@@ -248,6 +248,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
         var created = new LibraryShell { LeadingInset = Chrome.LeadingWidth, Session = Session };
         if (Remote is not null) created.AttachRemote(Remote);
         created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
+        created.Together = this;
         created.SettingsRequested += () => OpenSettings();
         return created;
     }
@@ -394,6 +395,68 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
         }
     }
 
+    /// <summary>This computer's Watch Together party, if any.</summary>
+    public WatchTogetherSession? WatchParty { get; private set; }
+
+    public event Action? WatchPartyChanged;
+
+    private WatchTogetherSession? NewWatchParty()
+    {
+        if (Session.Library is not { } library) return null;
+        var party = new WatchTogetherSession(library.Client, services.DeviceName, services.Time, action => Dispatcher.UIThread.Post(action));
+        party.PropertyChanged += (_, _) => WatchPartyChanged?.Invoke();
+        party.OpenTitle = async mediaId =>
+        {
+            try
+            {
+                var item = await library.Client.SummaryAsync(mediaId, CancellationToken.None);
+                await PlayAsync(item, resume: false, startAt: party.State?.PositionMilliseconds ?? 0);
+            }
+            catch (AureliaApiException failure)
+            {
+                library.Report(failure);
+            }
+        };
+        return party;
+    }
+
+    public async Task StartWatchTogetherAsync(PlaybackController controller)
+    {
+        await LeaveWatchTogetherAsync();
+        if (controller.Item is not { } item || NewWatchParty() is not { } party) return;
+        WatchParty = party;
+        WatchPartyChanged?.Invoke();
+        if (await party.StartAsync(item.Id, controller.Position, controller.IsPlaying)) party.Attach(controller);
+    }
+
+    /// <summary>Joins a party and opens its title; the player then follows the others.</summary>
+    public async Task JoinWatchTogetherAsync(Aurelia.Contracts.WatchPartySummary summary)
+    {
+        await LeaveWatchTogetherAsync();
+        if (Session.Library is not { } library || NewWatchParty() is not { } party) return;
+        WatchParty = party;
+        WatchPartyChanged?.Invoke();
+        if (!await party.JoinAsync(summary.Id) || party.State is not { } state) return;
+        try
+        {
+            var item = await library.Client.SummaryAsync(state.MediaId, CancellationToken.None);
+            await PlayAsync(item, resume: false, startAt: state.PositionMilliseconds);
+        }
+        catch (AureliaApiException failure)
+        {
+            library.Report(failure);
+        }
+    }
+
+    public async Task LeaveWatchTogetherAsync()
+    {
+        if (WatchParty is not { } party) return;
+        WatchParty = null;
+        WatchPartyChanged?.Invoke();
+        await party.LeaveAsync();
+        party.Dispose();
+    }
+
     /// <summary>The player while a title plays, else null.</summary>
     public PlaybackController? Player { get; private set; }
 
@@ -406,9 +469,16 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IDisposable
         var player = new PlaybackController(new PlaybackClient(Session.Api, library.Client), services.Engines, services.Settings, outbox,
             services.Time, action => Dispatcher.UIThread.Post(action), services.PlaybackSystem);
         Player = player;
-        var view = new PlayerView(player, this);
+        var view = new PlayerView(player, this, this);
+        // A party this computer is in follows into the new player before it starts.
+        WatchParty?.Attach(player);
         player.Closed += () => Dispatcher.UIThread.Post(() =>
         {
+            if (WatchParty is { } party && party.IsFollowing(player))
+            {
+                // Closing the player leaves the party; opening its next title does not.
+                if (party.IsChangingTitle) party.Detach(); else _ = LeaveWatchTogetherAsync();
+            }
             if (Player != player) return;
             Player = null;
             PlayerHost.Content = null;

@@ -598,6 +598,47 @@ struct APIClient: Sendable {
     return try Self.decode(MetadataProviderStatus.self, from: data)
   }
 
+  func watchParties(mediaId: UUID? = nil) async throws -> [WatchPartySummary] {
+    try await get(
+      "/api/v1/watch-together" + (mediaId.map { "?mediaId=\($0.uuidString.lowercased())" } ?? ""))
+  }
+
+  func createWatchParty(_ request: CreateWatchPartyRequest) async throws -> WatchPartyState {
+    let data = try await perform(
+      path: "/api/v1/watch-together", method: "POST", body: try JSONEncoder().encode(request))
+    return try Self.decode(WatchPartyState.self, from: data)
+  }
+
+  func joinWatchParty(id: UUID, _ request: JoinWatchPartyRequest) async throws -> WatchPartyState {
+    let data = try await perform(
+      path: "/api/v1/watch-together/\(id.uuidString.lowercased())/join", method: "POST",
+      body: try JSONEncoder().encode(request))
+    return try Self.decode(WatchPartyState.self, from: data)
+  }
+
+  /// The party once its revision is newer than `after`, or after up to `waitMilliseconds`.
+  func watchParty(id: UUID, after: Int64?, waitMilliseconds: Int) async throws -> WatchPartyState {
+    var path = "/api/v1/watch-together/\(id.uuidString.lowercased())"
+    if let after { path += "?after=\(after)&waitMs=\(waitMilliseconds)" }
+    let data = try await perform(
+      path: path, method: "GET", timeout: TimeInterval(waitMilliseconds) / 1000 + 10)
+    return try Self.decode(WatchPartyState.self, from: data)
+  }
+
+  func sendWatchPartyCommand(id: UUID, _ request: WatchPartyCommandRequest) async throws
+    -> WatchPartyState
+  {
+    let data = try await perform(
+      path: "/api/v1/watch-together/\(id.uuidString.lowercased())/commands", method: "POST",
+      body: try JSONEncoder().encode(request))
+    return try Self.decode(WatchPartyState.self, from: data)
+  }
+
+  func leaveWatchParty(id: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/watch-together/\(id.uuidString.lowercased())/members/me", method: "DELETE")
+  }
+
   func subtitleProviderStatus() async throws -> SubtitleProviderStatus {
     try await get("/api/v1/metadata/subtitles")
   }

@@ -217,12 +217,29 @@ public sealed class DetailPage : LibraryPageBase
             actions.Children.Add(playOn);
             _ = OfferPlayOnAsync(playOn, remote, target);
         }
+        // Parties others started for this title or one of its episodes, to join with one click.
+        var ids = new HashSet<Guid> { item.Id };
+        if (detail is not null) foreach (var each in detail.Seasons.SelectMany(s => s.Episodes)) ids.Add(each.Item.Id);
+        _ = OfferWatchTogetherAsync(actions, ids);
         var more = RoundAction("IconMore", "More Actions", () => { });
         more.Flyout = new MenuFlyout { ItemsSource = MediaMenu.Items(Context, item, onDetail: true) };
         actions.Children.Add(more);
         if (item.WatchState == CatalogWatchState.Completed)
             actions.Children.Add(new TextBlock { Text = "Watched", VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), Margin = new Thickness(6, 0) });
         return actions;
+    }
+
+    private async Task OfferWatchTogetherAsync(Panel actions, HashSet<Guid> ids)
+    {
+        var parties = await Context.Navigator.WatchPartiesAsync();
+        foreach (var party in parties.Where(party => ids.Contains(party.MediaId)))
+        {
+            var join = new Button { Content = "Join " + party.HostName, Classes = { "chip" }, VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(join, "Watch Together with " + party.HostName);
+            ToolTip.SetTip(join, $"Watch {party.Title} together with {party.HostName}");
+            join.Click += (_, _) => _ = Context.Navigator.JoinWatchTogetherAsync(party);
+            actions.Children.Insert(Math.Min(1, actions.Children.Count), join);
+        }
     }
 
     private static async Task OfferPlayOnAsync(Button playOn, RemotePlayback remote, CatalogItemSummary target)

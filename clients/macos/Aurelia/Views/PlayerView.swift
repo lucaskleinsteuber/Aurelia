@@ -11,6 +11,7 @@ struct PlayerView: View {
   @StateObject private var previews = ScrubPreviewController()
   @State private var hoverPosition: Double?
   @State private var notesPresented = false
+  @State private var watchTogetherPresented = false
   @State private var upNextMedia: CatalogItemSummary?
   @State private var notesNavigationRevision: UInt64 = 0
   @ObservedObject private var preferencesStore = PlaybackPreferencesStore.shared
@@ -85,6 +86,13 @@ struct PlayerView: View {
             .transition(.opacity)
         }
 
+        if let party = model.watchParty {
+          WatchTogetherNotice(session: party)
+            .padding(.top, controlsVisible ? 96 : 32)
+            .frame(width: viewport.width, height: viewport.height, alignment: .top)
+            .allowsHitTesting(false)
+        }
+
         if let upNext = controller.upNext, controller.errorMessage == nil {
           upNextCard(upNext)
             .padding(.trailing, 28)
@@ -154,6 +162,8 @@ struct PlayerView: View {
       }
       revealControls()
       sceneNotes.reload()
+      // A party this Mac is in follows into the new player before it starts.
+      model.watchParty?.attach(controller)
       await controller.start()
     }
     .onDisappear {
@@ -166,8 +176,13 @@ struct PlayerView: View {
       SystemMediaPlaybackCoordinator.shared.unregister(controller)
       windowPresentation.restore()
       model.reportPlayerPlaying(false)
+      if let party = model.watchParty {
+        // Closing the player leaves the party; opening its next title does not.
+        if party.isChangingTitle { party.detach() } else { Task { await model.leaveWatchTogether() } }
+      }
       Task { await controller.shutdown() }
     }
+    .onChange(of: watchTogetherPresented) { interaction("watch-together", active: watchTogetherPresented) }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) {
       notification in
       guard let window = notification.object as? NSWindow,
@@ -646,6 +661,21 @@ struct PlayerView: View {
       .accessibilityLabel("Volume")
       .accessibilityValue("\(Int(controller.volume * 100)) percent")
       .focused($focusedControl, equals: "volume")
+
+      Button {
+        watchTogetherPresented.toggle()
+      } label: {
+        Image(systemName: model.watchParty?.state != nil ? "person.2.fill" : "person.2")
+          .frame(width: 42, height: 42)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Watch Together")
+      .help("Watch Together")
+      .accessibilityIdentifier("player-watch-together")
+      .focused($focusedControl, equals: "watch-together")
+      .popover(isPresented: $watchTogetherPresented, arrowEdge: .bottom) {
+        WatchTogetherPopover(controller: controller).environmentObject(model)
+      }
 
       if !isNativeFullScreen {
         Button {
@@ -1198,7 +1228,7 @@ private struct PlayerControlLabel<Content: View>: View {
 }
 
 extension View {
-  fileprivate func playerMaterial<S: Shape>(reduceTransparency: Bool, shape: S) -> some View {
+  func playerMaterial<S: Shape>(reduceTransparency: Bool, shape: S) -> some View {
     background {
       if reduceTransparency {
         shape.fill(Color(red: 0.11, green: 0.12, blue: 0.14).opacity(0.98))

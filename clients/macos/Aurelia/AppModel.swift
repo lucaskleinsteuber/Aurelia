@@ -91,6 +91,8 @@ final class AppModel: ObservableObject {
   @Published private(set) var watchlistItems: [CatalogItemSummary] = []
   @Published private(set) var watchlistIds: Set<UUID> = []
   @Published private(set) var playback: PlaybackPresentation?
+  /// The Watch Together party this Mac is in, if any.
+  @Published private(set) var watchParty: WatchTogetherSession?
   @Published private(set) var sceneNotesVersion: UInt64 = 0
   @Published private(set) var catalogVisibilityRevision: UInt64 = 0
   @Published private(set) var libraryCapabilities: Set<String> = []
@@ -2464,6 +2466,59 @@ final class AppModel: ObservableObject {
     await refreshHome()
   }
 
+  // MARK: Watch Together
+
+  /// Parties on the server, for one title or all.
+  func watchParties(mediaId: UUID? = nil) async -> [WatchPartySummary] {
+    guard let profile, !requiresProfileSelection else { return [] }
+    return (try? await APIClient(profile: profile).watchParties(mediaId: mediaId)) ?? []
+  }
+
+  private func makeWatchParty() -> WatchTogetherSession? {
+    guard let profile else { return nil }
+    let session = WatchTogetherSession(client: APIClient(profile: profile))
+    session.openTitle = { [weak self] mediaId, title in
+      guard let self else { return }
+      if self.playback?.mediaId == mediaId {
+        // The player already moved away from this title on its own; open it afresh.
+        self.playback = nil
+        Task { @MainActor in self.startPlayback(mediaId: mediaId, title: title) }
+      } else {
+        self.startPlayback(mediaId: mediaId, title: title)
+      }
+    }
+    return session
+  }
+
+  /// Starts a party for the title playing in `controller`.
+  func startWatchTogether(with controller: PlaybackController) async {
+    await leaveWatchTogether()
+    guard let session = makeWatchParty() else { return }
+    watchParty = session
+    if await session.start(
+      mediaId: controller.presentation.mediaId, position: controller.currentTimeMilliseconds,
+      playing: controller.isPlaying)
+    {
+      session.attach(controller)
+    }
+  }
+
+  /// Joins a party and opens its title; the player then follows the others.
+  func joinWatchTogether(_ party: WatchPartySummary) async {
+    await leaveWatchTogether()
+    guard let session = makeWatchParty() else { return }
+    watchParty = session
+    if await session.join(party), let state = session.state {
+      startPlayback(mediaId: state.mediaId, title: state.title)
+    }
+  }
+
+  func leaveWatchTogether() async {
+    guard let session = watchParty else { return }
+    watchParty = nil
+    await session.leave()
+  }
+
   func dismissPlayback() {
     beginPlaybackIntent()
     playback = nil
@@ -2660,6 +2715,7 @@ final class AppModel: ObservableObject {
   }
 
   func switchWatchingProfile() async {
+    await leaveWatchTogether()
     guard let device = deviceConnection, !isSelectingProfile else { return }
     let expected = UUID()
     isSelectingProfile = true

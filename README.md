@@ -64,7 +64,7 @@ without asking. Everything can be edited, and your corrections survive later sca
 subtitle choices per profile and series, subtitle files next to the video, subtitles from
 OpenSubtitles (by hand or automatically, with your own free key), timeline previews,
 a sleep timer, Dialogue Boost, Volume Leveling and Up Next for series. *Play On* sends a title to
-another screen at home.
+another screen at home, and *Watch Together* keeps several screens on the same moment.
 
 **Everyone has their own profile.** Progress, favorites, Watchlist, collections, scene notes and
 viewing history are separate per person. Profiles can be limited to chosen libraries or titles

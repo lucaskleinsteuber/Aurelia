@@ -245,6 +245,18 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     public void Play(CatalogItemSummary item, bool fromLastPosition) => PlayRequested?.Invoke(item, fromLastPosition);
 
+    /// <summary>The window that keeps this computer's Watch Together party.</summary>
+    public MainWindow? Together { get; set; }
+
+    public async Task<IReadOnlyList<WatchPartySummary>> WatchPartiesAsync()
+    {
+        if (context is null) return [];
+        try { return await context.Store.Client.WatchPartiesAsync(CancellationToken.None); }
+        catch (Exception failure) when (failure is Aurelia.Linux.Core.Api.AureliaApiException or HttpRequestException or TaskCanceledException) { return []; }
+    }
+
+    public Task JoinWatchTogetherAsync(WatchPartySummary party) => Together?.JoinWatchTogetherAsync(party) ?? Task.CompletedTask;
+
     public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected)
     {
         if (context is null) return;

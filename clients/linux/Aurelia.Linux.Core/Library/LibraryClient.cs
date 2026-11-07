@@ -184,6 +184,28 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
         }
     }
 
+    // Watch Together.
+    public Task<IReadOnlyList<WatchPartySummary>> WatchPartiesAsync(CancellationToken cancellation) =>
+        Get<IReadOnlyList<WatchPartySummary>>("/api/v1/watch-together", cancellation);
+
+    public Task<WatchPartyState> CreateWatchPartyAsync(CreateWatchPartyRequest request, CancellationToken cancellation) =>
+        Send<WatchPartyState>(HttpMethod.Post, "/api/v1/watch-together", request, cancellation);
+
+    public Task<WatchPartyState> JoinWatchPartyAsync(Guid partyId, JoinWatchPartyRequest request, CancellationToken cancellation) =>
+        Send<WatchPartyState>(HttpMethod.Post, $"/api/v1/watch-together/{partyId}/join", request, cancellation);
+
+    /// <summary>The party once its revision is newer than <paramref name="after"/>, or after the wait.</summary>
+    public Task<WatchPartyState> WatchPartyAsync(Guid partyId, long? after, int waitMilliseconds, CancellationToken cancellation) =>
+        Get<WatchPartyState>(after is { } revision
+            ? $"/api/v1/watch-together/{partyId}?after={revision.ToString(System.Globalization.CultureInfo.InvariantCulture)}&waitMs={waitMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+            : $"/api/v1/watch-together/{partyId}", cancellation, TimeSpan.FromMilliseconds(waitMilliseconds + 10_000));
+
+    public Task<WatchPartyState> WatchPartyCommandAsync(Guid partyId, WatchPartyCommandRequest request, CancellationToken cancellation) =>
+        Send<WatchPartyState>(HttpMethod.Post, $"/api/v1/watch-together/{partyId}/commands", request, cancellation);
+
+    public Task LeaveWatchPartyAsync(Guid partyId, CancellationToken cancellation) =>
+        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/watch-together/{partyId}/members/me", null, cancellation);
+
     private static string ScopeName(WatchStateScope scope) => scope switch
     {
         WatchStateScope.Season => "season",
