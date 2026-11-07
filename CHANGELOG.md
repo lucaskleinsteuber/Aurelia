@@ -12,7 +12,13 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
-## Mac 1.30.0 (142) Beta - 07.11.2026
+## [Server 1.30.1 (139) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.30.1-139) - 07.11.2026
+
+### Fixed
+
+- Titles matched before this version get their FSK rating once from their known TMDB match, a minute after the server starts. Matches, titles and manual edits stay unchanged.
+
+## [Mac 1.30.0 (142) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.30.0-142) - 07.11.2026
 
 ### Added
 
@@ -26,11 +32,11 @@ versioned commit, so their skipped numbers are preserved.
 
 - The number of titles next to Movies, TV Shows and Library no longer blinks for several seconds after opening Aurelia.
 
-## Server 1.30.0 (138) Beta - 07.11.2026
+## [Server 1.30.0 (138) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.30.0-138) - 07.11.2026
 
 ### Changed
 
-- Age ratings come from TMDB's German FSK rating ("FSK 12") where there is one; the US rating only where TMDB has no FSK. Find Missing Info or a full refresh updates titles matched earlier.
+- Age ratings come from TMDB's German FSK rating ("FSK 12") where there is one; the US rating only where TMDB has no FSK.
 
 ### Fixed
 

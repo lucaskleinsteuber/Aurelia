@@ -188,6 +188,8 @@ builder.Services.AddSingleton<IMediaLibraryScanner, MediaLibraryScanner>();
 builder.Services.AddSingleton<LibraryScanScheduler>();
 builder.Services.AddHostedService<LibraryScanWorker>();
 builder.Services.AddHostedService<MetadataJobWorker>();
+builder.Services.AddSingleton<ContentRatingRefresh>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ContentRatingRefresh>());
 builder.Services.AddHostedService<LibraryMonitoringService>();
 builder.Services.AddHostedService<MaintenanceService>();
 builder.Services.AddHostedService<BonjourAdvertisementService>();
