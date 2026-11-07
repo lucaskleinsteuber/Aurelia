@@ -2515,7 +2515,7 @@ final class AppModel: ObservableObject {
   /// Loads the posters of Home and the library in the background, a few at a time, so cards
   /// that scroll into view draw them in their first frame instead of fading them in.
   private func prefetchArtwork() {
-    guard let profile, !CinemaUITestFixture.playsSimulatedTitles else { return }
+    guard let profile, ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil else { return }
     let variants = libraryCapabilities.contains("artwork-variants-v1")
     var seen = Set<UUID>()
     var posters: [ArtworkSummary] = []
