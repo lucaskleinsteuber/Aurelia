@@ -44,6 +44,16 @@ public sealed class ProfilePickerView : UserControl
         this.session = session;
         DataContext = model;
         AutomationProperties.SetName(pin, "PIN");
+        // The capsule is the field; the theme's own focused box inside it must not show.
+        pin.TemplateApplied += (_, e) =>
+        {
+            if (e.NameScope.Find<Border>("PART_BorderElement") is { } box)
+            {
+                box.Background = Brushes.Transparent;
+                box.BorderBrush = Brushes.Transparent;
+                box.BorderThickness = new Thickness(0);
+            }
+        };
         pin[!TextBox.TextProperty] = new Binding(nameof(ProfilePickerModel.Pin)) { Mode = BindingMode.TwoWay };
         AutomationProperties.SetName(unlock, "Open Profile");
         ToolTip.SetTip(unlock, "Open Profile");

@@ -23,6 +23,7 @@ public sealed class SidebarBackground : Panel
 
     public const double BlurRadius = 48;
 
+    private readonly Rectangle canvasFill = new() { IsHitTestVisible = false };
     private readonly Rectangle blurred = new() { IsHitTestVisible = false };
     private readonly Rectangle tint = new() { IsHitTestVisible = false };
     private readonly Rectangle topShade = new() { IsHitTestVisible = false };
@@ -34,6 +35,9 @@ public sealed class SidebarBackground : Panel
         // The blurred copy reaches past the right edge so the blur does not fade out at the border.
         blurred.Margin = new Thickness(0, 0, -BlurRadius * 2, 0);
         blurred.Effect = new BlurEffect { Radius = BlurRadius };
+        // The blur fades out toward its edges (most visibly at the bottom); an opaque canvas
+        // beneath it keeps the unblurred page from showing through there.
+        Children.Add(canvasFill);
         Children.Add(blurred);
         Children.Add(tint);
         Children.Add(topShade);
@@ -65,6 +69,7 @@ public sealed class SidebarBackground : Panel
     private void Update()
     {
         var canvas = Application.Current?.FindResource("AureliaCanvasColor") is Color color ? color : Color.FromRgb(32, 35, 38);
+        canvasFill.Fill = new SolidColorBrush(canvas);
         if (ReduceTransparency || Source is null)
         {
             blurred.IsVisible = false;

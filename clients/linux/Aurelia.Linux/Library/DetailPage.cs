@@ -222,7 +222,10 @@ public sealed class DetailPage : LibraryPageBase
         if (detail is not null) foreach (var each in detail.Seasons.SelectMany(s => s.Episodes)) ids.Add(each.Item.Id);
         _ = OfferWatchTogetherAsync(actions, ids);
         var more = RoundAction("IconMore", "More Actions", () => { });
-        more.Flyout = new MenuFlyout { ItemsSource = MediaMenu.Items(Context, item, onDetail: true) };
+        var moreMenu = new MenuFlyout { ItemsSource = MediaMenu.Items(Context, item, onDetail: true) };
+        // Built again when it opens, so a finished download or a new favorite shows at once.
+        moreMenu.Opening += (_, _) => moreMenu.ItemsSource = MediaMenu.Items(Context, item, onDetail: true);
+        more.Flyout = moreMenu;
         actions.Children.Add(more);
         if (item.WatchState == CatalogWatchState.Completed)
             actions.Children.Add(new TextBlock { Text = "Watched", VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), Margin = new Thickness(6, 0) });

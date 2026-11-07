@@ -15,11 +15,13 @@ using Avalonia.Input;
 using Avalonia.VisualTree;
 using Xunit;
 
+using static Aurelia.Linux.Tests.TestWindows;
+
 namespace Aurelia.Linux.Tests;
 
-public sealed class SettingsWindowTests
+public sealed class SettingsViewTests
 {
-    private static (MainWindow Window, SettingsWindow Settings, FakeServer Server) Open(SettingsCategory category = SettingsCategory.General, MemoryCredentialStore? keyring = null)
+    private static (MainWindow Window, SettingsView Settings, FakeServer Server) Open(SettingsCategory category = SettingsCategory.General, MemoryCredentialStore? keyring = null)
     {
         var server = FakeLibrary.Create();
         var window = FakeLibrary.ShowLibrary(server, keyring: keyring);
@@ -28,9 +30,9 @@ public sealed class SettingsWindowTests
         return (window, settings, server);
     }
 
-    private static void Snapshot(Window window, string name)
+    private static void Snapshot(Control shown, string name)
     {
-        using var frame = window.CaptureRenderedFrame()!;
+        using var frame = HostOf(shown).CaptureRenderedFrame()!;
         TestWindows.SaveSnapshot(frame, name);
     }
 
@@ -44,9 +46,9 @@ public sealed class SettingsWindowTests
              SettingsCategory.Updates, SettingsCategory.Advanced],
             settings.VisibleCategories);
         Snapshot(settings, "settings-general");
-        Assert.Equal([SettingsCategory.Playback], SettingsWindow.Matching("subtitle"));
-        Assert.Contains(SettingsCategory.Advanced, SettingsWindow.Matching("fingerprint"));
-        Assert.Equal(10, SettingsWindow.Matching(" ").Count);
+        Assert.Equal([SettingsCategory.Playback], SettingsView.Matching("subtitle"));
+        Assert.Contains(SettingsCategory.Advanced, SettingsView.Matching("fingerprint"));
+        Assert.Equal(10, SettingsView.Matching(" ").Count);
     }
 
     [AvaloniaFact]
@@ -88,10 +90,10 @@ public sealed class SettingsWindowTests
         var handle = Handle(third.Title());
         var rowHeight = handle.FindAncestorOfType<DockPanel>()!.Bounds.Height + 12;
         var at = handle.TranslatePoint(new Point(handle.Bounds.Width / 2, handle.Bounds.Height / 2), settings)!.Value;
-        settings.MouseDown(at, MouseButton.Left);
-        settings.MouseMove(at.WithY(at.Y - rowHeight), RawInputModifiers.LeftMouseButton);
-        settings.MouseMove(at.WithY(at.Y - 2 * rowHeight), RawInputModifiers.LeftMouseButton);
-        settings.MouseUp(at.WithY(at.Y - 2 * rowHeight), MouseButton.Left);
+        HostOf(settings).MouseDown(at, MouseButton.Left);
+        HostOf(settings).MouseMove(at.WithY(at.Y - rowHeight), RawInputModifiers.LeftMouseButton);
+        HostOf(settings).MouseMove(at.WithY(at.Y - 2 * rowHeight), RawInputModifiers.LeftMouseButton);
+        HostOf(settings).MouseUp(at.WithY(at.Y - 2 * rowHeight), MouseButton.Left);
         FakeLibrary.Pump(() => false, rounds: 5);
         Assert.Equal(third, window.Session.Preferences.Sidebar().Order[0]);
         Assert.DoesNotContain(settings.Page!.GetVisualDescendants().OfType<Button>(), b => AutomationProperties.GetName(b)?.StartsWith("Move ", StringComparison.Ordinal) == true);
@@ -104,10 +106,10 @@ public sealed class SettingsWindowTests
     public void MovingASidebarPageKeepsTheOthersInOrder()
     {
         LibraryDestination[] order = [LibraryDestination.Home, LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Watchlist];
-        Assert.Equal([LibraryDestination.Watchlist, LibraryDestination.Home, LibraryDestination.Library, LibraryDestination.Collections], SettingsWindow.MoveTo(order, 3, 0));
-        Assert.Equal([LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Home, LibraryDestination.Watchlist], SettingsWindow.MoveTo(order, 0, 2));
-        Assert.Equal(order, SettingsWindow.MoveTo(order, 1, 1));
-        Assert.Equal([LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Watchlist, LibraryDestination.Home], SettingsWindow.MoveTo(order, 0, 9));
+        Assert.Equal([LibraryDestination.Watchlist, LibraryDestination.Home, LibraryDestination.Library, LibraryDestination.Collections], SettingsView.MoveTo(order, 3, 0));
+        Assert.Equal([LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Home, LibraryDestination.Watchlist], SettingsView.MoveTo(order, 0, 2));
+        Assert.Equal(order, SettingsView.MoveTo(order, 1, 1));
+        Assert.Equal([LibraryDestination.Library, LibraryDestination.Collections, LibraryDestination.Watchlist, LibraryDestination.Home], SettingsView.MoveTo(order, 0, 9));
     }
 
     [AvaloniaFact]

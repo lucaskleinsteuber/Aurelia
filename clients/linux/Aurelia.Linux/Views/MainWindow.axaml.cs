@@ -259,26 +259,39 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
     private CancellationTokenSource? playOn;
     private readonly DispatcherTimer restCheck;
     private DateTimeOffset lastUse = DateTimeOffset.UtcNow;
-    private Settings.SettingsWindow? settings;
+    private Settings.SettingsView? settings;
 
-    /// <summary>Opens Settings, or brings the open Settings window forward.</summary>
-    public Settings.SettingsWindow OpenSettings(Settings.SettingsCategory category = Settings.SettingsCategory.General)
+    /// <summary>Settings shown over the library, if open.</summary>
+    public Settings.SettingsView? OpenSettingsView => settings;
+
+    /// <summary>Opens Settings inside the window, or switches the open Settings to <paramref name="category"/>.</summary>
+    public Settings.SettingsView OpenSettings(Settings.SettingsCategory category = Settings.SettingsCategory.General)
     {
         if (settings is { } open)
         {
             open.Category = category;
-            open.Activate();
             return open;
         }
-        settings = new Settings.SettingsWindow(Session, shell, services, category) { InstallUpdate = InstallUpdateAsync, QuitAfterUpdate = Quit };
-        settings.Closed += (_, _) => settings = null;
-        settings.HostingChanged += () =>
+        var created = new Settings.SettingsView(Session, shell, services, category) { InstallUpdate = InstallUpdateAsync, QuitAfterUpdate = Quit };
+        settings = created;
+        created.Closed += (_, _) =>
+        {
+            if (!ReferenceEquals(settings, created)) return;
+            settings = null;
+            SettingsHost.Content = null;
+            SettingsHost.IsVisible = false;
+            shell?.Focus();
+        };
+        created.HostingChanged += () =>
         {
             _ = UpdateKeepAwakeAsync();
             if (tray is not null && !KeepsRunning && IsVisible) tray.IsVisible = false;
         };
-        settings.Show(this);
-        return settings;
+        SettingsHost.Content = created;
+        SettingsHost.IsVisible = true;
+        Controls.Motion.Appear(created, rise: 10, fromScale: 0.99);
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => created.Focus());
+        return created;
     }
 
     private async Task<bool> InstallUpdateAsync()

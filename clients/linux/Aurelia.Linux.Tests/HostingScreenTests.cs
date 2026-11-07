@@ -17,6 +17,8 @@ using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
 using Xunit;
 
+using static Aurelia.Linux.Tests.TestWindows;
+
 namespace Aurelia.Linux.Tests;
 
 /// <summary>The production hosting screens, with an invented server and no subprocess or desktop access.</summary>
@@ -60,9 +62,9 @@ public sealed class HostingScreenTests
         FakeLibrary.Pump(() => false, rounds: 10);
     }
 
-    private static void Snapshot(Window window, string name)
+    private static void Snapshot(Control shown, string name)
     {
-        using var frame = window.CaptureRenderedFrame()!;
+        using var frame = HostOf(shown).CaptureRenderedFrame()!;
         TestWindows.SaveSnapshot(frame, name);
     }
 

@@ -143,8 +143,8 @@ no ticket or video stream. Ctrl+F opens the library search, Alt+Left goes back.
 
 ## Settings
 
-Settings open with Ctrl+, or the gear next to the profile, in a window of their own like the Mac
-app's, with a search field (`Settings/SettingsWindow.cs`):
+Settings open with Ctrl+, or the gear next to the profile, inside the main window over the
+library (Done or Esc returns), with a search field (`Settings/SettingsView.cs`):
 
 - General: start screen, poster size, watched titles in rows, Reduce Motion, and "Let the Server
   Rest When Unused" with its minutes.

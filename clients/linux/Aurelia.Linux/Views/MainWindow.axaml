@@ -10,6 +10,8 @@
   <!-- No title bar: the content reaches the top edge and Aurelia draws its own window buttons. -->
   <Panel>
     <ContentControl x:Name="ScreenHost" />
+    <!-- Settings open inside the window, over the library. -->
+    <ContentControl x:Name="SettingsHost" IsVisible="False" />
     <!-- The player covers the library while it plays, as on the Mac. -->
     <ContentControl x:Name="PlayerHost" IsVisible="False" />
     <!-- Aurelia let go of its server so the server can sleep; any input continues. -->

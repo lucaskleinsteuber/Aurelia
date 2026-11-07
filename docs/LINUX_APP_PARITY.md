@@ -24,13 +24,13 @@ source and coverage map; private test receipts record which tests actually ran f
 | Dark blurred sidebar with opaque accessibility fallback | `Controls/SidebarBackground`, Reduce Transparency | `ShellTests.SidebarBlursWhatPassesBeneathItAndCanBeOpaque`. |
 | Content passes beneath the sidebar while labels remain beside it | `Views/LibraryShell`, page leading insets | `ShellTests.PagesRunBeneathTheSidebarAndStartBesideIt`. |
 | Sidebar resize and show/hide | Sidebar width 210–300, F9 | `WindowTests.SidebarWidthStaysBetweenTheMacLimits`, `SidebarToggleMovesBesideLeftWindowButtons`. |
-| Saved sidebar order, hidden pages and default start page | `Settings/GeneralPreferences`, `SettingsWindow` Sidebar | `LibraryLogicTests.TheSidebarLayoutIsSavedAndReset`, `SettingsWindowTests.TheSidebarPagesCanBeHiddenAndMovedButOneStays`. |
+| Saved sidebar order, hidden pages and default start page | `Settings/GeneralPreferences`, `SettingsView` Sidebar | `LibraryLogicTests.TheSidebarLayoutIsSavedAndReset`, `SettingsViewTests.TheSidebarPagesCanBeHiddenAndMovedButOneStays`. |
 | Reopen an already running app, including a hidden host | `Core/Platform/AppInstance`, same-user pipe and exclusive app lock | `AppInstanceTests.ASecondLaunchRaisesTheExistingWindowWithoutStartingAnotherOwner`, `AnEarlyShowRequestWaitsForTheWindowCallback`; native startup script can verify a second background invocation. |
 | Start reliably without preinstalled system fonts | Bundled Inter is also the startup font; native packages declare fallback fonts | Container startup is the release regression check; the application uses the same font assets on every distribution. |
 | Keep the current page when navigating | `Views/LibraryShell` page cache and detail stack | `ShellTests.SwitchingPagesKeepsEachPageAlive`; Alt+Left/Esc back behavior is source reviewed. |
 | Keyboard sidebar navigation and library search shortcut | Arrow keys, Ctrl+F | `ShellTests.KeyboardMovesThroughTheSidebar`, `ControlFLeadsToTheLibrarySearch`. |
 | Keyboard shortcuts help | Ctrl+/ sheet in `Views/LibraryShell` | Source review; Linux uses Ctrl where Mac uses Command. |
-| Reduce Motion | Stored preference in `SettingsWindow`; Linux pages use immediate transitions | `SettingsWindowTests.GeneralSettingsAreSavedAtOnce`; Mac hero sliding/zoom animations are platform-specific presentation. |
+| Reduce Motion | Stored preference in `SettingsView`; Linux pages use immediate transitions | `SettingsViewTests.GeneralSettingsAreSavedAtOnce`; Mac hero sliding/zoom animations are platform-specific presentation. |
 
 ## Connection and profiles
 
@@ -47,9 +47,9 @@ source and coverage map; private test receipts record which tests actually ran f
 | Initialize profiles with Server Password and owner PIN | `Flow/ProfilePickerModel`, `Views/ProfilePickerView` | `SetupScreenTests.AServerThatNeedsProfilesAsksForThePasswordAndPin`; `ConnectionFlowTests.SetsUpProfilesForTheFirstTime`. |
 | Choose a profile, check PIN, show failures | Profile picker, PIN 4–8 digits | `ConnectionFlowTests.ReportsAWrongCodeAndAWrongPin`; `SetupScreenTests.PairsChoosesAProfileAndOpensTheLibrary`. |
 | Limit viewing sessions and return to profile picker after restart | `Flow/AppSession` timer and authentication handling | `ConnectionFlowTests.TheScreensLeadFromConnectingToTheLibraryAndBackAfterARestart`; timer logic is source reviewed. |
-| Switch profile and change its own PIN | Settings → Profiles and Devices | `SettingsWindowTests.ChangingTheOwnPinChecksTheEntryAndLocksTheProfile`. |
-| Disconnect this computer without removing server data | Advanced → Disconnect This PC | `SettingsWindowTests.DisconnectingAsksFirstAndForgetsTheServer`; `ConnectionFlowTests.PairsOpensTheOwnerProfileAndDisconnects`. |
-| Let a remote server rest when unused, wake on input | `Flow/AppSession.Rest`, main window idle policy | `SettingsWindowTests.TheServerRestsWhenUnusedAndAnyInputContinues`, `RestFollowsTheMacRules`. |
+| Switch profile and change its own PIN | Settings → Profiles and Devices | `SettingsViewTests.ChangingTheOwnPinChecksTheEntryAndLocksTheProfile`. |
+| Disconnect this computer without removing server data | Advanced → Disconnect This PC | `SettingsViewTests.DisconnectingAsksFirstAndForgetsTheServer`; `ConnectionFlowTests.PairsOpensTheOwnerProfileAndDisconnects`. |
+| Let a remote server rest when unused, wake on input | `Flow/AppSession.Rest`, main window idle policy | `SettingsViewTests.TheServerRestsWhenUnusedAndAnyInputContinues`, `RestFollowsTheMacRules`. |
 
 ## Library and activity
 
@@ -110,12 +110,12 @@ source and coverage map; private test receipts record which tests actually ran f
 
 | Mac capability | Linux counterpart | Coverage and limits |
 | --- | --- | --- |
-| Separate searchable settings window | `Settings/SettingsWindow`, Ctrl+, | `SettingsWindowTests.ListsTheCategoriesAndSearchesThem`. |
-| General defaults, poster size, watched rows and rest interval | General settings | `SettingsWindowTests.GeneralSettingsAreSavedAtOnce`, `RestFollowsTheMacRules`. |
-| All playback defaults, forget track choices and restore defaults | Playback settings | `SettingsWindowTests.PlaybackSettingsUseTheMacChoices`; `PlaybackControllerTests.PlaybackPreferencesKeepToTheAllowedValues`. |
-| Sidebar customization and Activity in settings | Sidebar and Activity categories | `SettingsWindowTests.TheSidebarPagesCanBeHiddenAndMovedButOneStays`; Activity embeds the same pages. |
-| Own profile, PIN protection and profile switch | Profiles and Devices category | `SettingsWindowTests.ChangingTheOwnPinChecksTheEntryAndLocksTheProfile`. |
-| Server address, fingerprint and disconnect/switch | Advanced settings, local-host mode switch | `SettingsWindowTests.DisconnectingAsksFirstAndForgetsTheServer`; local switch handler is source reviewed. |
+| Searchable settings inside the main window | `Settings/SettingsView`, Ctrl+, | `SettingsViewTests.ListsTheCategoriesAndSearchesThem`. |
+| General defaults, poster size, watched rows and rest interval | General settings | `SettingsViewTests.GeneralSettingsAreSavedAtOnce`, `RestFollowsTheMacRules`. |
+| All playback defaults, forget track choices and restore defaults | Playback settings | `SettingsViewTests.PlaybackSettingsUseTheMacChoices`; `PlaybackControllerTests.PlaybackPreferencesKeepToTheAllowedValues`. |
+| Sidebar customization and Activity in settings | Sidebar and Activity categories | `SettingsViewTests.TheSidebarPagesCanBeHiddenAndMovedButOneStays`; Activity embeds the same pages. |
+| Own profile, PIN protection and profile switch | Profiles and Devices category | `SettingsViewTests.ChangingTheOwnPinChecksTheEntryAndLocksTheProfile`. |
+| Server address, fingerprint and disconnect/switch | Advanced settings, local-host mode switch | `SettingsViewTests.DisconnectingAsksFirstAndForgetsTheServer`; local switch handler is source reviewed. |
 | Automatic and manual release checks | `Core/Updates/AppUpdater`, Updates settings | `AppUpdateTests.AutomaticChecksRespectThePreferenceAndDailyInterval`, `SelectsOnlyACompleteNewerLinuxReleaseForTheInstalledPackage`. |
 | Private repository credential in secure OS storage | Update-token Secret Service entry | `AppUpdateTests.TheGitHubTokenIsRemovedFromAssetRedirects`; `KeyringTests.UpdateTokensStaySeparateFromThePairedServer` uses isolated real-keyring entries on Linux. |
 | Verify package before installing | Exact release asset + SHA-256 manifest | `AppUpdateTests.ChecksumMustIdentifyTheExactPackageOnce`, `NeverStopsTheHostOrInstallsADamagedDownload`. |
@@ -161,7 +161,7 @@ source and coverage map; private test receipts record which tests actually ran f
 | Forgot owner PIN with Server Password | Local profile-picker recovery | `HostingScreenTests.ForgotPinChecksConfirmationAndPasswordBeforeReturningToThePicker`; real reset in `HostingFlowTests.SetsUpAndReopensThisComputersServer`. |
 | Detect occupied port/missing server and offer a useful recovery | Local host state and setup screens | `HostingScreenTests.AServerAlreadyOnThePortOffersTheExistingServer`, `AMissingServerExplainsTheFailureAndRetries`; process tests cover both conditions. |
 | Background hosting, tray where supported, start at sign-in and keep awake | `HostingSettings`, tray, native/portal adapters | `HostingScreenTests.LocalHostingSettingsKeepLoginAndBackgroundChoicesConsistent`; real permission, tray and login behavior needs desktop verification. |
-| Firewall instructions without silently changing firewall rules | `Settings/SettingsWindow` hosting section | `HostingScreenTests.FirewallHintsUseTheConfiguredPortWithoutChangingTheSystem`. |
+| Firewall instructions without silently changing firewall rules | `Settings/SettingsView` hosting section | `HostingScreenTests.FirewallHintsUseTheConfiguredPortWithoutChangingTheSystem`. |
 | Preserve server/library/settings data across app package upgrades | XDG directories outside installed package | Source and package layout review; package-upgrade tests must verify files survive. |
 | Linux installation formats | deb, rpm, Arch package and Flatpak | `scripts/package-linux-app.sh`; Ubuntu/Fedora/Arch container installation tests and Flatpak checks are release gates. |
 | Decoder distribution | System libVLC for native packages, bundled VLC for Flatpak | Package manifest and third-party-notice review; actual codec playback remains the owner's check. |

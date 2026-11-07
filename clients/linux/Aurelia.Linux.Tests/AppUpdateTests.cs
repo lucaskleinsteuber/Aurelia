@@ -125,6 +125,7 @@ public sealed class AppUpdateTests
         var services = AppServices.ForTests() with { Updater = updater };
         var window = TestWindows.Show(services);
         var settings = window.OpenSettings(SettingsCategory.Updates);
+        FakeLibrary.Pump(() => settings.GetVisualDescendants().OfType<Button>().Any(), rounds: 20);
         var quit = false;
         settings.QuitAfterUpdate = () => quit = true;
         settings.InstallUpdate = () => updater.InstallAsync(() => { installer.Prepared = true; return Task.CompletedTask; });

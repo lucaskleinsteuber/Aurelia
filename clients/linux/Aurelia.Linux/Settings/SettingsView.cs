@@ -40,11 +40,12 @@ public enum SettingsCategory
 }
 
 /// <summary>
-/// Aurelia's settings, as the Mac app's Settings window: a list of categories with a search field
-/// and the chosen category beside it. Library and Metadata appear for owners and administrators,
+/// Aurelia's settings, shown inside the main window over the library (not in a window of its
+/// own): a list of categories with a search field and the chosen category beside it. Done, Esc or
+/// Ctrl+W return to the library. Library and Metadata appear for owners and administrators,
 /// Server only for the owner, whose requests alone the server accepts there.
 /// </summary>
-public sealed class SettingsWindow : Window
+public sealed class SettingsView : UserControl
 {
     private static readonly Dictionary<SettingsCategory, string[]> Keywords = new()
     {
@@ -74,30 +75,21 @@ public sealed class SettingsWindow : Window
 
     private readonly TextBox search = new TextBox { PlaceholderText = "Search settings…", Margin = new Thickness(12, 0, 12, 10) }.WithGlass();
 
-    public SettingsWindow(AppSession session, LibraryShell? shell, AppServices services, SettingsCategory category = SettingsCategory.General)
+    public SettingsView(AppSession session, LibraryShell? shell, AppServices services, SettingsCategory category = SettingsCategory.General)
     {
         this.session = session;
         this.shell = shell;
         this.services = services;
-        Closed += (_, _) => detachUpdater?.Invoke();
-        Title = "Aurelia Settings";
-        Width = 920;
-        Height = 680;
-        MinWidth = 840;
-        MinHeight = 620;
         Background = Application.Current?.FindResource("AureliaCanvasBrush") as IBrush;
-        if (OperatingSystem.IsLinux())
-        {
-            ExtendClientAreaToDecorationsHint = true;
-            WindowDecorations = WindowDecorations.BorderOnly;
-        }
-        var chrome = new WindowChrome();
-        chrome.Attach(this, services.ButtonLayout);
-        AppWindowBehavior.Attach(this);
+        Focusable = true;
         AutomationProperties.SetName(search, "Search Settings");
         search.TextChanged += (_, _) => FillCategories();
         categories.SelectionChanged += (_, _) => ShowSelected();
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.W, KeyModifiers.Control), Command = new RelayCommand(Close) });
+        var done = new Button { Content = "Done", Classes = { "chip" }, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 14, 12, 0) };
+        AutomationProperties.SetName(done, "Done");
+        ToolTip.SetTip(done, "Back to the library (Esc)");
+        done.Click += (_, _) => Close();
         KeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape && !sheets.IsShowing) Close();
@@ -117,6 +109,7 @@ public sealed class SettingsWindow : Window
                         categories,
                     },
                 },
+                done,
             },
         };
         Content = new Panel
@@ -124,12 +117,25 @@ public sealed class SettingsWindow : Window
             Children =
             {
                 new DockPanel { Children = { navigation.Also(n => DockPanel.SetDock(n, Dock.Left)), content } },
-                chrome,
                 sheets,
             },
         };
         FillCategories();
         Category = category;
+    }
+
+    /// <summary>Raised when Settings closes and the library shows again.</summary>
+    public event EventHandler? Closed;
+
+    private bool closed;
+
+    /// <summary>Returns to the library.</summary>
+    public void Close()
+    {
+        if (closed) return;
+        closed = true;
+        detachUpdater?.Invoke();
+        Closed?.Invoke(this, EventArgs.Empty);
     }
 
     public SettingsCategory Category
@@ -696,13 +702,9 @@ public sealed class SettingsWindow : Window
             beta.IsEnabled = !betaUpdater.IsBusy && !betaUpdater.RestartRequired;
             page.Children.Add(Section("Beta", beta));
         }
-        if (services.Updater is { } feedUpdater)
-        {
-            var source = Toggle("Public Update Test", "Use Aurelia’s temporary public test feed.",
-                feedUpdater.PublicUpdateTestEnabled, value => { feedUpdater.SetPublicUpdateTest(value); ShowSelected(); });
-            source.IsEnabled = !feedUpdater.IsBusy && !feedUpdater.RestartRequired;
-            page.Children.Add(Section("Advanced", source));
-        }
+        // The public repository is the only update source now; the temporary test feed is gone.
+        if (services.Updater is { PublicUpdateTestEnabled: true } feedUpdater && !feedUpdater.IsBusy && !feedUpdater.RestartRequired)
+            feedUpdater.SetPublicUpdateTest(false);
     }
 
     private void Advanced(StackPanel page)

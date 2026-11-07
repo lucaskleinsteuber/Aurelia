@@ -217,6 +217,9 @@ public sealed class MetadataEditorSheet : UserControl
     private EditorArtwork? poster;
     private EditorArtwork? backdrop;
     private string? relativeSource;
+    /// <summary>Only the first people get their fields at once; long casts made the editor slow to open.</summary>
+    private const int CreditsShownFirst = 10;
+    private bool showAllCredits;
     private readonly TextBox title = new() { PlaceholderText = "Title" };
     private readonly TextBox year = new() { PlaceholderText = "Year", Width = 100 };
     private readonly TextBox overview = new() { PlaceholderText = "Overview", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 130, VerticalContentAlignment = VerticalAlignment.Top };
@@ -441,7 +444,8 @@ public sealed class MetadataEditorSheet : UserControl
     {
         var panel = Group("Cast and Crew", "IconPerson", Note("Changes apply to this title only."));
         if (credits.Count == 0) panel.Children.Add(Note("No cast or crew. Add a person to begin."));
-        for (var index = 0; index < credits.Count; index++)
+        var shown = showAllCredits ? credits.Count : Math.Min(credits.Count, CreditsShownFirst);
+        for (var index = 0; index < shown; index++)
         {
             var position = index;
             var credit = credits[index];
@@ -501,9 +505,20 @@ public sealed class MetadataEditorSheet : UserControl
                 },
             });
         }
+        if (shown < credits.Count)
+        {
+            var hidden = credits.Count - shown;
+            panel.Children.Add(Button(hidden == 1 ? "Show 1 More Person" : $"Show {hidden} More People", () =>
+            {
+                showAllCredits = true;
+                Build();
+                return Task.CompletedTask;
+            }));
+        }
         panel.Children.Add(Buttons(Button("Add Person", () =>
         {
             credits.Add(new EditorCredit(Guid.NewGuid(), "", "Acting", null, null, null));
+            showAllCredits = true;
             Build();
             return Task.CompletedTask;
         }), Automatic("credits")));

@@ -1,6 +1,7 @@
 using Aurelia.Linux.Core.Platform;
 using Aurelia.Linux.Core.Settings;
 using Aurelia.Linux.Views;
+using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 
@@ -9,6 +10,15 @@ namespace Aurelia.Linux.Tests;
 /// <summary>Opens the real main window with in-memory settings, so tests never touch the person's files.</summary>
 internal static class TestWindows
 {
+    static TestWindows()
+    {
+        // Screens are checked and drawn in their finished state.
+        Aurelia.Linux.Controls.Motion.Enabled = false;
+    }
+
+    /// <summary>The window a control is shown in, such as the main window around Settings.</summary>
+    public static Window HostOf(Control control) => control as Window ?? (Window)TopLevel.GetTopLevel(control)!;
+
     public static MainWindow Show(WindowButtonLayout? layout = null, ISettingsStore? settings = null) => Show(AppServices.ForTests(settings, layout));
 
     public static MainWindow Show(AppServices services)

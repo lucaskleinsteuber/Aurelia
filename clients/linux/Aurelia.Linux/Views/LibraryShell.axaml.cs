@@ -58,6 +58,13 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
                 open.Store.Preferences.SaveLastDestination(open.Store.Client.Server.ServerId, open.Store.Client.Profile.User.Id, Destination);
             if (Destination == LibraryDestination.Home && context is { } current) _ = current.Store.RefreshHomeAsync();
         };
+        // Choosing the page already selected (Home while a title is open) returns to it.
+        SidebarList.Tapped += (_, _) =>
+        {
+            if (details.Count == 0) return;
+            details.Clear();
+            ShowCurrentPage();
+        };
         SidebarToggle.Click += (_, _) => SidebarVisible = !SidebarVisible;
         SettingsButton.Click += (_, _) => SettingsRequested?.Invoke();
         ProfileButton.Click += async (_, _) =>
@@ -420,7 +427,9 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         }
         var page = details.Count > 0 ? details[^1] : PageFor(Destination);
         page.SidebarOverlap = sidebarVisible ? sidebarWidth : 0;
+        if (ReferenceEquals(PageHost.Content, page)) return;
         PageHost.Content = page;
+        Motion.Appear(page, rise: 8);
     }
 
     private LibraryPageBase PageFor(LibraryDestination destination)

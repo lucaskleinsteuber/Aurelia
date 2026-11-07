@@ -53,6 +53,7 @@ public sealed class SheetHost : Panel
         open.Push((frame, result));
         Children.Add(frame);
         IsVisible = true;
+        Aurelia.Linux.Controls.Motion.Appear(frame, rise: 12, fromScale: 0.98);
         Avalonia.Threading.Dispatcher.UIThread.Post(() => sheet.GetVisualDescendantsOfType<TextBox>().FirstOrDefault()?.Focus());
         return result.Task;
     }

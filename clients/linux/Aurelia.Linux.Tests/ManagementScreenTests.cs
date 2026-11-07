@@ -13,6 +13,8 @@ using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
 using Xunit;
 
+using static Aurelia.Linux.Tests.TestWindows;
+
 namespace Aurelia.Linux.Tests;
 
 /// <summary>The owner's management screens with a scripted server and invented data.</summary>
@@ -81,7 +83,7 @@ public sealed class ManagementScreenTests
             .Answer("GET", "/api/v1/library/health/duplicates", "[]");
     }
 
-    private static (Views.MainWindow Window, SettingsWindow Settings, FakeServer Server) Open(SettingsCategory category, FakeServer? server = null)
+    private static (Views.MainWindow Window, SettingsView Settings, FakeServer Server) Open(SettingsCategory category, FakeServer? server = null)
     {
         server ??= Server();
         var window = FakeLibrary.ShowLibrary(server);
@@ -146,13 +148,13 @@ public sealed class ManagementScreenTests
         Snapshot(window, "metadata-editor-subtitles");
     }
 
-    private static void Snapshot(Window window, string name)
+    private static void Snapshot(Control shown, string name)
     {
-        using var frame = window.CaptureRenderedFrame()!;
+        using var frame = HostOf(shown).CaptureRenderedFrame()!;
         TestWindows.SaveSnapshot(frame, name);
     }
 
-    private static Control? Sheet(SettingsWindow settings) => (settings.Sheets.Current as Border)?.Child;
+    private static Control? Sheet(SettingsView settings) => (settings.Sheets.Current as Border)?.Child;
 
     private static IEnumerable<T> All<T>(Control root) where T : Control => root.GetVisualDescendants().OfType<T>().Where(c => c.IsEffectivelyVisible);
 
@@ -175,14 +177,14 @@ public sealed class ManagementScreenTests
         var admin = new UserSummary(Guid.NewGuid(), "Admin", UserRole.Admin, now, ProfileAccessMode.EntireLibrary);
         var limited = admin with { AccessMode = ProfileAccessMode.SelectedTitles };
         var viewer = new UserSummary(Guid.NewGuid(), "Viewer", UserRole.User, now);
-        Assert.True(SettingsWindow.IsAvailable(SettingsCategory.Server, owner));
-        Assert.False(SettingsWindow.IsAvailable(SettingsCategory.Server, admin));
-        Assert.True(SettingsWindow.IsAvailable(SettingsCategory.Library, admin));
-        Assert.False(SettingsWindow.IsAvailable(SettingsCategory.Library, limited));
-        Assert.True(SettingsWindow.IsAvailable(SettingsCategory.Metadata, limited));
-        Assert.False(SettingsWindow.IsAvailable(SettingsCategory.Metadata, viewer));
-        Assert.True(SettingsWindow.IsAvailable(SettingsCategory.Playback, viewer));
-        Assert.False(SettingsWindow.IsAvailable(SettingsCategory.Library, null));
+        Assert.True(SettingsView.IsAvailable(SettingsCategory.Server, owner));
+        Assert.False(SettingsView.IsAvailable(SettingsCategory.Server, admin));
+        Assert.True(SettingsView.IsAvailable(SettingsCategory.Library, admin));
+        Assert.False(SettingsView.IsAvailable(SettingsCategory.Library, limited));
+        Assert.True(SettingsView.IsAvailable(SettingsCategory.Metadata, limited));
+        Assert.False(SettingsView.IsAvailable(SettingsCategory.Metadata, viewer));
+        Assert.True(SettingsView.IsAvailable(SettingsCategory.Playback, viewer));
+        Assert.False(SettingsView.IsAvailable(SettingsCategory.Library, null));
     }
 
     [AvaloniaFact]

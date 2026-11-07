@@ -4,19 +4,48 @@
   <Style Selector="PopupRoot, OverlayPopupHost">
     <Setter Property="FontFamily" Value="{StaticResource AureliaFontFamily}" />
   </Style>
+  <!-- Menus are dark rounded glass with a soft shadow, like the Mac app's menus. -->
   <Style Selector="MenuFlyoutPresenter, ContextMenu">
-    <Setter Property="Padding" Value="5" />
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="Background" Value="#F01B1E22" />
+    <Setter Property="BorderBrush" Value="#26FFFFFF" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="MinWidth" Value="200" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="MinWidth" Value="220" />
+    <Setter Property="MaxWidth" Value="360" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter /template/ Border, ContextMenu /template/ Border">
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="BoxShadow" Value="0 14 36 0 #8C000000" />
   </Style>
   <Style Selector="MenuItem">
-    <Setter Property="CornerRadius" Value="6" />
-    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="MinHeight" Value="32" />
     <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="Foreground" Value="#F2FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem /template/ Border#PART_LayoutRoot">
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot, MenuItem:selected /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="#24FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem PathIcon">
+    <Setter Property="Width" Value="15" />
+    <Setter Property="Height" Value="15" />
+    <Setter Property="Foreground" Value="#B3FFFFFF" />
+  </Style>
+  <Style Selector="MenuItem.destructive">
+    <Setter Property="Foreground" Value="#FF6B6B" />
+  </Style>
+  <Style Selector="MenuItem.destructive PathIcon">
+    <Setter Property="Foreground" Value="#FF6B6B" />
   </Style>
   <Style Selector="MenuFlyoutPresenter Separator, ContextMenu Separator">
-    <Setter Property="Margin" Value="8,4" />
-    <Setter Property="Background" Value="#1FFFFFFF" />
+    <Setter Property="Margin" Value="10,5" />
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="#1AFFFFFF" />
   </Style>
   <Style Selector="ComboBox">
     <Setter Property="MinHeight" Value="40" />
