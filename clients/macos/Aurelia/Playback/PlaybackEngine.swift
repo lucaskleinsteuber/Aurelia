@@ -42,6 +42,8 @@ protocol PlaybackEngine: AnyObject {
   func selectSubtitleTrack(id: Int32?)
   func addSubtitleSlave(url: URL)
   func selectChapter(index: Int32)
+  /// Fills `size` with the picture, cutting off what does not fit, instead of black bars.
+  func setVideoFill(_ fills: Bool, size: CGSize)
 }
 
 extension PlaybackEngine {
@@ -49,6 +51,7 @@ extension PlaybackEngine {
   var isSeekable: Bool { false }
   func load(url: URL, startAt milliseconds: Int64) { load(url: url) }
   func addSubtitleSlave(url: URL) {}
+  func setVideoFill(_ fills: Bool, size: CGSize) {}
   var opensAtStartPosition: Bool { false }
 
   var trackScope: UUID? {
@@ -109,6 +112,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
   private var player: VLCMediaPlayer
   private let playerFactory: @MainActor () -> VLCMediaPlayer
   private weak var attachedVideoView: NSView?
+  private var videoFillGeometry: String?
   private var timeObserver: NSObjectProtocol?
   private var stateObserver: NSObjectProtocol?
   private var appliedTrackPreferences = false
@@ -297,6 +301,7 @@ final class VLCPlaybackEngine: PlaybackEngine {
       return
     }
     player.drawable = attachedVideoView
+    applyVideoFill()
     appliedTrackPreferences = false
     deliveredTerminalEvent = false
     lastKnownTimeMilliseconds = 0
@@ -316,6 +321,22 @@ final class VLCPlaybackEngine: PlaybackEngine {
     volume = requestedVolume
     isMuted = requestedMuted
     playbackRate = requestedRate
+  }
+
+  func setVideoFill(_ fills: Bool, size: CGSize) {
+    let geometry = VideoFill.cropGeometry(fills: fills, size: size)
+    guard geometry != videoFillGeometry else { return }
+    videoFillGeometry = geometry
+    applyVideoFill()
+  }
+
+  /// VLC crops the picture to the window's shape, so it fills the window when drawn.
+  private func applyVideoFill() {
+    guard let geometry = videoFillGeometry else {
+      player.videoCropGeometry = nil
+      return
+    }
+    geometry.withCString { player.videoCropGeometry = UnsafeMutablePointer(mutating: $0) }
   }
 
   func play() {

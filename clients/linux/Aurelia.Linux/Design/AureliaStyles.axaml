@@ -327,37 +327,94 @@
     <Setter Property="BoxShadow" Value="0 10 30 0 #66000000" />
   </Style>
 
-  <!-- Player controls over the picture. -->
+  <!-- Player controls over the picture, drawn like the Mac's: glass capsules with plain symbols. -->
+  <Style Selector="Border.playerMaterial">
+    <Setter Property="Background" Value="#B3202124" />
+    <Setter Property="BorderBrush" Value="#1FFFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BoxShadow" Value="0 6 24 0 #40000000" />
+  </Style>
+  <Style Selector="Border.playerCapsule">
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+  <Style Selector="Border.playerPill">
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="14,8" />
+  </Style>
+  <Style Selector="Border.playerPanel">
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Padding" Value="24,20" />
+  </Style>
   <Style Selector="Button.playerControl">
-    <Setter Property="Width" Value="40" />
-    <Setter Property="Height" Value="40" />
+    <Setter Property="Width" Value="38" />
+    <Setter Property="Height" Value="38" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="CornerRadius" Value="19" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="#F2FFFFFF" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="Button.playerControl:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="#33FFFFFF" />
+    <Setter Property="Background" Value="#1FFFFFFF" />
     <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.playerControl:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#14FFFFFF" />
+    <Setter Property="Foreground" Value="#D1FFFFFF" />
+  </Style>
+  <Style Selector="Button.playerControl:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#4DFFFFFF" />
   </Style>
   <Style Selector="Button.playerControl.active">
     <Setter Property="Foreground" Value="{StaticResource AureliaAccentBrush}" />
   </Style>
+  <!-- The Back button stands alone in its own glass circle. -->
+  <Style Selector="Button.playerControl.playerMaterial">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="Background" Value="#B3202124" />
+    <Setter Property="BorderBrush" Value="#1FFFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Button.playerControl.playerMaterial:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#CC2C2D31" />
+  </Style>
   <Style Selector="Button.playerPrimary">
-    <Setter Property="Width" Value="62" />
-    <Setter Property="Height" Value="62" />
+    <Setter Property="Width" Value="50" />
+    <Setter Property="Height" Value="50" />
+    <Setter Property="Margin" Value="4,0" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="CornerRadius" Value="31" />
-    <Setter Property="Background" Value="#26FFFFFF" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="CornerRadius" Value="25" />
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <Style Selector="Button.playerPrimary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="#40FFFFFF" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Background" Value="#F2FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+  </Style>
+  <Style Selector="Button.playerPrimary:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#D1FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+  </Style>
+  <!-- The timeline and volume: a thin white line on a faint track, as on the Mac. -->
+  <Style Selector="Slider.timeline, Slider.volume">
+    <Style.Resources>
+      <SolidColorBrush x:Key="SliderTrackFill" Color="#40FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#59FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#59FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackValueFill" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#E6FFFFFF" />
+    </Style.Resources>
   </Style>
   <Style Selector="TextBlock.playerTime">
     <Setter Property="Foreground" Value="#D9FFFFFF" />

@@ -653,6 +653,16 @@ struct AppSettingsView: View {
         .accessibilityIdentifier("playback-prevent-sleep")
 
         VStack(alignment: .leading, spacing: 2) {
+          Toggle(
+            "Fill the Screen, Without Black Bars",
+            isOn: $playbackPreferences.preferences.fillsScreen
+          )
+          .accessibilityIdentifier("playback-fill-screen")
+          Text("Cuts off the edges of pictures that are wider or narrower than the window. Z switches it in the player.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+
+        VStack(alignment: .leading, spacing: 2) {
           Picker("Dialogue Boost", selection: $playbackPreferences.preferences.dialogueBoost) {
             ForEach(DialogueBoost.allCases, id: \.self) { Text($0.title).tag($0) }
           }.accessibilityIdentifier("playback-dialogue-boost")

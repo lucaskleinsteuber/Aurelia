@@ -693,6 +693,10 @@ final class PlaybackController: ObservableObject {
     if volume > 0 { isMuted = false }
   }
 
+  func setVideoFill(_ fills: Bool, size: CGSize) {
+    engine.setVideoFill(fills, size: size)
+  }
+
   func toggleMute() {
     isMuted.toggle()
     engine.isMuted = isMuted

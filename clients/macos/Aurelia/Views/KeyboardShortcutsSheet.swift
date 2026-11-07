@@ -16,6 +16,7 @@ struct KeyboardShortcutsSheet: View {
             shortcutRow("Next Episode", keys: ["N", "⇧⌘→"])
             shortcutRow("Mute or Unmute", keys: ["M"])
             shortcutRow("Toggle Full Screen", keys: ["F"])
+            shortcutRow("Fill Screen or Show Whole Picture", keys: ["Z"])
             shortcutRow("Exit Full Screen or Close", keys: ["Esc"])
           }
 

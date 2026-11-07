@@ -102,6 +102,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var defaultAudioLanguage: String
   /// Used until subtitles are chosen for a series ("off" keeps the file's own default).
   var defaultSubtitleLanguage: String
+  /// The picture fills the window, cutting off its edges, instead of showing black bars.
+  var fillsScreen = false
 
   init(
     automaticResume: Bool,
@@ -116,7 +118,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     resumeThresholdSeconds: Int = 0,
     defaultAudioLanguage: String = "original",
     defaultSubtitleLanguage: String = "off",
-    dialogueBoost: DialogueBoost = .off, volumeLeveling: VolumeLeveling? = nil
+    dialogueBoost: DialogueBoost = .off, volumeLeveling: VolumeLeveling? = nil,
+    fillsScreen: Bool = false
   ) {
     self.automaticResume = automaticResume
     self.defaultPlaybackRate = defaultPlaybackRate
@@ -131,6 +134,7 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     self.resumeThresholdSeconds = resumeThresholdSeconds
     self.defaultAudioLanguage = defaultAudioLanguage
     self.defaultSubtitleLanguage = defaultSubtitleLanguage
+    self.fillsScreen = fillsScreen
   }
 
   var normalized: PlaybackPreferences {
@@ -159,6 +163,7 @@ extension PlaybackPreferences {
     case seekInterval, preventSleepDuringPlayback, automaticallyPlayNextEpisode, nightMode
     case upNextCountdownSeconds, resumeThresholdSeconds
     case defaultAudioLanguage, defaultSubtitleLanguage, dialogueBoost, volumeLeveling
+    case fillsScreen
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -185,7 +190,8 @@ extension PlaybackPreferences {
         String.self, forKey: .defaultSubtitleLanguage) ?? "off",
       dialogueBoost: try container.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost)
         ?? .off,
-      volumeLeveling: try container.decodeIfPresent(VolumeLeveling.self, forKey: .volumeLeveling))
+      volumeLeveling: try container.decodeIfPresent(VolumeLeveling.self, forKey: .volumeLeveling),
+      fillsScreen: try container.decodeIfPresent(Bool.self, forKey: .fillsScreen) ?? false)
   }
   func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -203,6 +209,17 @@ extension PlaybackPreferences {
     try values.encode(defaultSubtitleLanguage, forKey: .defaultSubtitleLanguage)
     try values.encode(dialogueBoost, forKey: .dialogueBoost)
     try values.encode(volumeLeveling, forKey: .volumeLeveling)
+    try values.encode(fillsScreen, forKey: .fillsScreen)
   }
 
+}
+
+/// How the picture fills the player when black bars are not wanted.
+enum VideoFill {
+  /// The crop VLC applies: the window's own shape, so the picture covers it exactly. Nil shows
+  /// the whole picture with bars.
+  static func cropGeometry(fills: Bool, size: CGSize) -> String? {
+    guard fills, size.width >= 1, size.height >= 1 else { return nil }
+    return "\(Int(size.width.rounded())):\(Int(size.height.rounded()))"
+  }
 }

@@ -374,6 +374,15 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     public Task SetNightModeAsync(bool on) => SetVolumeLevelingAsync(on ? VolumeLeveling.Standard : VolumeLeveling.Off);
 
+    /// <summary>The picture fills the window, cutting off its edges, instead of black bars. Remembered.</summary>
+    public void SetFillsScreen(bool fills)
+    {
+        if (Preferences.FillsScreen == fills) return;
+        Preferences = Preferences with { FillsScreen = fills };
+        Preferences.Save(settings);
+        OnPropertyChanged(nameof(Preferences));
+    }
+
     public void SetDialogueBoost(DialogueBoost mode)
     {
         if (Preferences.DialogueBoost == mode) return;

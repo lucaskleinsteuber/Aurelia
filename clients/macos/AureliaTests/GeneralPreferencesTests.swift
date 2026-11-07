@@ -5,6 +5,17 @@ import Testing
 
 @MainActor
 struct GeneralPreferencesTests {
+  @Test func fillingTheScreenCropsThePictureToTheWindowShape() throws {
+    #expect(VideoFill.cropGeometry(fills: false, size: CGSize(width: 1470, height: 956)) == nil)
+    #expect(VideoFill.cropGeometry(fills: true, size: CGSize(width: 1469.6, height: 956.2)) == "1470:956")
+    #expect(VideoFill.cropGeometry(fills: true, size: .zero) == nil)
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.fillsScreen = true
+    let decoded = try JSONDecoder().decode(
+      PlaybackPreferences.self, from: JSONEncoder().encode(preferences))
+    #expect(decoded.fillsScreen)
+  }
+
   @Test func settingsSavedBeforeExtendedOptionsKeepTheirDefaults() throws {
     let saved = Data(
       """
@@ -18,6 +29,7 @@ struct GeneralPreferencesTests {
     #expect(value.upNextCountdownSeconds == 20)
     #expect(value.resumeThresholdSeconds == 0)
     #expect(value.defaultAudioLanguage == "original")
+    #expect(!value.fillsScreen)
     #expect(value.defaultSubtitleLanguage == "off")
 
     var modified = value

@@ -479,7 +479,9 @@ public sealed class SettingsWindow : Window
             Toggle("Automatically Play Next Episode", null, current.AutoplayNextEpisode, value => Save(PlaybackPreferences.Load(Prefs.Store) with { AutoplayNextEpisode = value })),
             Choice("Up Next Countdown", null, [.. PlaybackPreferences.Countdowns.Select(s => (s, $"{s} Seconds"))],
                 current.UpNextCountdownSeconds, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextCountdownSeconds = value })),
-            Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value }))));
+            Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value })),
+            Toggle("Fill the Screen, Without Black Bars", "Cuts off the edges of pictures that are wider or narrower than the window. Z switches it in the player.",
+                current.FillsScreen, value => Save(PlaybackPreferences.Load(Prefs.Store) with { FillsScreen = value }))));
         var volume = new Slider { Minimum = 0, Maximum = 1, Value = current.DefaultVolume, Width = 200 };
         volume.PropertyChanged += (_, e) =>
         {

@@ -45,13 +45,32 @@ public sealed class PlayerViewTests
         Assert.Contains("Sleep Timer", names);
         Assert.Contains("Scene Notes", names);
         Assert.Contains("Full Screen (F)", names);
+        Assert.Contains("Fill Screen (Z)", names);
+        Assert.Contains("Previous Episode (P)", names);
         var texts = view.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
         Assert.Contains("Quiet Orbit", texts);
         Assert.Contains("20:00", texts);
-        Assert.Contains("-40:00", texts);
+        Assert.Contains("1:00:00", texts);
+        Assert.Contains("1×", texts);
         using var frame = window.CaptureRenderedFrame()!;
         TestWindows.SaveSnapshot(frame, "player");
     }
+
+    [Fact]
+    public void FillingTheScreenCutsOffTheEdgesInsteadOfBlackBars()
+    {
+        var window = new Avalonia.Size(1280, 800);
+        var scope = new Avalonia.Size(2390, 1000);
+        // Whole picture: full width, bars above and below.
+        Assert.Equal(new Avalonia.Rect(0, 132.22, 1280, 535.56), Round(Aurelia.Linux.Controls.VideoSurface.PictureRect(window, scope, fills: false)));
+        // Filled: full height, the sides reach past the window.
+        var filled = Aurelia.Linux.Controls.VideoSurface.PictureRect(window, scope, fills: true);
+        Assert.Equal(800, filled.Height, 3);
+        Assert.True(filled.X < 0 && filled.Right > 1280);
+        Assert.Equal(640, filled.Center.X, 3);
+    }
+
+    private static Avalonia.Rect Round(Avalonia.Rect rect) => new(Math.Round(rect.X, 2), Math.Round(rect.Y, 2), Math.Round(rect.Width, 2), Math.Round(rect.Height, 2));
 
     [AvaloniaFact]
     public void KeysControlPlaybackLikeOnTheMac()
@@ -75,6 +94,16 @@ public sealed class PlayerViewTests
         window.KeyPressQwerty(PhysicalKey.M, RawInputModifiers.None);
         Dispatcher.UIThread.RunJobs();
         Assert.True(engines.Last.Muted);
+
+        // Z fills the window without black bars, and the choice is remembered for the next title.
+        Assert.False(view.FillsScreen);
+        window.KeyPressQwerty(PhysicalKey.Z, RawInputModifiers.None);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(view.FillsScreen);
+        Assert.True(window.Player!.Preferences.FillsScreen);
+        window.KeyPressQwerty(PhysicalKey.Z, RawInputModifiers.None);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(view.FillsScreen);
 
         window.KeyPressQwerty(PhysicalKey.F, RawInputModifiers.None);
         Dispatcher.UIThread.RunJobs();

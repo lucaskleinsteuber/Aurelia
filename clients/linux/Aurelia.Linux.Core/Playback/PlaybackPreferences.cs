@@ -19,7 +19,8 @@ public sealed record PlaybackPreferences(
     string DefaultAudioLanguage = "original",
     string DefaultSubtitleLanguage = "off",
     DialogueBoost DialogueBoost = DialogueBoost.Off,
-    VolumeLeveling? VolumeLeveling = null)
+    VolumeLeveling? VolumeLeveling = null,
+    bool FillsScreen = false)
 {
     [JsonIgnore]
     public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);

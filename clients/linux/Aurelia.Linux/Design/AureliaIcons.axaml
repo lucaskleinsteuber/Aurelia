@@ -43,6 +43,9 @@
   <StreamGeometry x:Key="IconVolume">F0 M3 9 H7 L12 4.5 V19.5 L7 15 H3 Z M14.5 8.5 A5 5 0 0 1 14.5 15.5 L15.9 16.9 A7 7 0 0 0 15.9 7.1 Z</StreamGeometry>
   <StreamGeometry x:Key="IconMuted">F0 M3 9 H7 L12 4.5 V19.5 L7 15 H3 Z M15 9.4 L16.4 8 L18.5 10.1 L20.6 8 L22 9.4 L19.9 11.5 L22 13.6 L20.6 15 L18.5 12.9 L16.4 15 L15 13.6 L17.1 11.5 Z</StreamGeometry>
   <StreamGeometry x:Key="IconFullScreen">F0 M3 3 H10 V5 H5 V10 H3 Z M14 3 H21 V10 H19 V5 H14 Z M3 14 H5 V19 H10 V21 H3 Z M19 14 H21 V21 H14 V19 H19 Z</StreamGeometry>
+  <!-- A frame with arrows pushing outwards (fill the screen), and one with the whole picture between bars. -->
+  <StreamGeometry x:Key="IconFillScreen">F0 M3.5 4 H20.5 A1.5 1.5 0 0 1 22 5.5 V18.5 A1.5 1.5 0 0 1 20.5 20 H3.5 A1.5 1.5 0 0 1 2 18.5 V5.5 A1.5 1.5 0 0 1 3.5 4 Z M3.8 5.8 V18.2 H20.2 V5.8 Z M5.2 12 L9 8.6 V11.1 H15 V8.6 L18.8 12 L15 15.4 V12.9 H9 V15.4 Z</StreamGeometry>
+  <StreamGeometry x:Key="IconFitScreen">F0 M3.5 4 H20.5 A1.5 1.5 0 0 1 22 5.5 V18.5 A1.5 1.5 0 0 1 20.5 20 H3.5 A1.5 1.5 0 0 1 2 18.5 V5.5 A1.5 1.5 0 0 1 3.5 4 Z M3.8 5.8 V18.2 H20.2 V5.8 Z M5.4 9 H18.6 V15 H5.4 Z</StreamGeometry>
   <StreamGeometry x:Key="IconNote">F0 M5 3 H15 L20 8 V21 H5 Z M7 5 V19 H18 V9 H14 V5 Z M9 12 H16 V13.6 H9 Z M9 15.5 H16 V17.1 H9 Z</StreamGeometry>
   <StreamGeometry x:Key="IconChapters">F0 M3 4 H21 V20 H3 Z M5 6 V18 H19 V6 Z M7 8 H9 V10 H7 Z M11 8 H17 V10 H11 Z M7 12 H9 V14 H7 Z M11 12 H17 V14 H11 Z</StreamGeometry>
   <StreamGeometry x:Key="IconSubtitles">F0 M3 5 H21 A1.5 1.5 0 0 1 22.5 6.5 V17.5 A1.5 1.5 0 0 1 21 19 H3 A1.5 1.5 0 0 1 1.5 17.5 V6.5 A1.5 1.5 0 0 1 3 5 Z M3.5 7 V17 H20.5 V7 Z M5.5 12.5 H11 V14.3 H5.5 Z M12.5 12.5 H18.5 V14.3 H12.5 Z M5.5 9.5 H15 V11.2 H5.5 Z</StreamGeometry>

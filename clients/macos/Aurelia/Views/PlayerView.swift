@@ -28,6 +28,7 @@ struct PlayerView: View {
   @FocusState private var focusedControl: String?
   @StateObject private var cursor = PlayerCursorCoordinator()
   @State private var confirmProgressReplacement = false
+  @State private var videoSize: CGSize = .zero
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
@@ -64,6 +65,13 @@ struct PlayerView: View {
           onKeyDown: handleKey
         )
         .frame(width: viewport.width, height: viewport.height)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+          videoSize = size
+          controller.setVideoFill(preferencesStore.preferences.fillsScreen, size: size)
+        }
+        .onChange(of: preferencesStore.preferences.fillsScreen) { _, fills in
+          controller.setVideoFill(fills, size: videoSize)
+        }
 
         if startScreenVisible {
           PlayerStartScreen(reduceMotion: reduceMotion)
@@ -655,6 +663,23 @@ struct PlayerView: View {
       }
 
       Button {
+        toggleVideoFill()
+      } label: {
+        Image(systemName: preferencesStore.preferences.fillsScreen ? "aspectratio.fill" : "aspectratio")
+          .frame(width: 42, height: 42)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(
+        preferencesStore.preferences.fillsScreen ? "Show Whole Picture" : "Fill Screen"
+      )
+      .help(
+        preferencesStore.preferences.fillsScreen
+          ? "Show Whole Picture (Z)" : "Fill Screen, Without Black Bars (Z)"
+      )
+      .accessibilityIdentifier("player-video-fill")
+      .focused($focusedControl, equals: "fill")
+
+      Button {
         toggleFullScreen()
       } label: {
         Image(
@@ -894,6 +919,10 @@ struct PlayerView: View {
       }
       return true
     }
+    if event.charactersIgnoringModifiers?.lowercased() == "z", !event.isARepeat {
+      toggleVideoFill()
+      return true
+    }
     if event.charactersIgnoringModifiers == "?" {
       model.isKeyboardShortcutsPresented = true
       return true
@@ -920,6 +949,11 @@ struct PlayerView: View {
     }
     revealControls()
     return true
+  }
+
+  private func toggleVideoFill() {
+    preferencesStore.preferences.fillsScreen.toggle()
+    revealControls()
   }
 
   private func toggleFullScreen() {

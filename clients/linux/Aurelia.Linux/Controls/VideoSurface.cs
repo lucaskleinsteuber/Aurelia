@@ -9,14 +9,41 @@ using Avalonia.Threading;
 namespace Aurelia.Linux.Controls;
 
 /// <summary>
-/// Shows the decoder's newest frame, letterboxed on black. Because the picture is drawn like any
-/// other control, the player's controls sit on top of it on Wayland and X11 alike.
+/// Shows the decoder's newest frame, letterboxed on black, or filling the control with its edges
+/// cut off (<see cref="Fills"/>). Because the picture is drawn like any other control, the
+/// player's controls sit on top of it on Wayland and X11 alike.
 /// </summary>
 public sealed class VideoSurface : Control, IDisposable
 {
     private VideoFrames? frames;
     private WriteableBitmap? bitmap;
     private int pending;
+    private bool fills;
+
+    public VideoSurface() => ClipToBounds = true;
+
+    /// <summary>Covers the whole control instead of showing black bars.</summary>
+    public bool Fills
+    {
+        get => fills;
+        set
+        {
+            if (fills == value) return;
+            fills = value;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>Where the picture is drawn in a control of <paramref name="bounds"/>; it may reach past the edges when filling.</summary>
+    public static Rect PictureRect(Size bounds, Size source, bool fills)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0 || source.Width <= 0 || source.Height <= 0) return default;
+        var scale = fills
+            ? Math.Max(bounds.Width / source.Width, bounds.Height / source.Height)
+            : Math.Min(bounds.Width / source.Width, bounds.Height / source.Height);
+        var size = new Size(source.Width * scale, source.Height * scale);
+        return new Rect((bounds.Width - size.Width) / 2, (bounds.Height - size.Height) / 2, size.Width, size.Height);
+    }
 
     public VideoFrames? Frames
     {
@@ -39,9 +66,8 @@ public sealed class VideoSurface : Control, IDisposable
         context.FillRectangle(Brushes.Black, bounds);
         if (bitmap is null || bounds.Width <= 0 || bounds.Height <= 0) return;
         var source = bitmap.Size;
-        var scale = Math.Min(bounds.Width / source.Width, bounds.Height / source.Height);
-        var size = new Size(source.Width * scale, source.Height * scale);
-        context.DrawImage(bitmap, new Rect(source), new Rect((bounds.Width - size.Width) / 2, (bounds.Height - size.Height) / 2, size.Width, size.Height));
+        using (context.PushClip(bounds))
+            context.DrawImage(bitmap, new Rect(source), PictureRect(bounds.Size, source, fills));
     }
 
     public void Dispose()
