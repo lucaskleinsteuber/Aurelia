@@ -12,6 +12,30 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac 1.30.0 (142) Beta - 07.11.2026
+
+### Added
+
+- Fill Screen in the player: the picture fills the window without black bars, cutting off its edges. Switch it with the new button next to Full Screen or the Z key; Settings › Playback remembers it.
+
+### Changed
+
+- The detail page shows the FSK rating next to the year and runtime.
+
+### Fixed
+
+- The number of titles next to Movies, TV Shows and Library no longer blinks for several seconds after opening Aurelia.
+
+## Server 1.30.0 (138) Beta - 07.11.2026
+
+### Changed
+
+- Age ratings come from TMDB's German FSK rating ("FSK 12") where there is one; the US rating only where TMDB has no FSK. Find Missing Info or a full refresh updates titles matched earlier.
+
+### Fixed
+
+- Power saving: a server with "sleeps when unused" stayed awake for hours while an Aurelia app was merely open, because the app's library sync counted as use. Now only browsing, playing, saving progress and settings count, so it sleeps 15 minutes after the last real use.
+
 ## [Mac 1.29.0 (141) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/1.29.0-141) - 06.11.2026
 
 ### Changed
@@ -48,10 +72,16 @@ versioned commit, so their skipped numbers are preserved.
 
 - Browser player: keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
 
-## Linux Desktop 1.3.0 (11) - 06.11.2026
+## Linux Desktop 1.3.0 (11) - 07.11.2026
+
+### Added
+
+- Fill Screen in the player: the picture fills the window without black bars (button next to Full Screen, the Z key, or Settings › Playback).
 
 ### Changed
 
+- The player looks like the Mac's: Back and the rate, audio, subtitle, sleep timer and scene note menus at the top, the play controls in a capsule in the middle, the title, volume and full screen above the timeline at the bottom.
+- The detail page shows the FSK rating next to the year and runtime.
 - Settings › Sidebar: drag a page by its handle (≡) to reorder the sidebar; with the keyboard, Alt+Up and Alt+Down move it.
 
 ### Removed
