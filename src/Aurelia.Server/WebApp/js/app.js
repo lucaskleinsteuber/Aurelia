@@ -78,6 +78,8 @@ function showServerOff() {
     h("p", {}, `“${name}” isn’t answering. The computer may be asleep or turned off. You can wake it with Aurelia on your Mac if Wake-on-LAN is set up, or check that the computer is turned on.`),
     h("p", { class: "muted" }, "This page connects by itself as soon as the server is on."),
     h("div", { class: "button-row" }, h("button", { class: "primary-button", onclick: () => start() }, "Try Again")))));
+  // Several requests can fail at once; only one retry may be waiting.
+  clearTimeout(state.retryTimer);
   state.retryTimer = setTimeout(() => start(), 20_000);
 }
 
