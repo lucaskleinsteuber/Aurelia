@@ -450,6 +450,8 @@ export class Player {
     on(video, "leavepictureinpicture", () => this.updatePictureInPicture());
     on(document, "visibilitychange", () => {
       if (document.visibilityState === "hidden") this.saveNow({ keepalive: true });
+      // The browser releases the screen wake lock while the tab is hidden; take it again.
+      else if (!video.paused && !video.ended) this.keepAwake(true);
     });
     on(window, "pagehide", () => this.saveNow({ keepalive: true }));
     this.every(() => {

@@ -152,3 +152,21 @@ test("the player ends the session for a revoked profile like the rest of the app
   locked.fail(new ApiError(403, "full_library_access_required", "Needs full access."));
   assert.equal(locked.closed, false); assert.deepEqual(notices, ["Needs full access."]);
 });
+
+test("returning to the tab takes the screen wake lock again while a title plays", (t) => {
+  const priorDocument = globalThis.document, priorWindow = globalThis.window;
+  const doc = Object.assign(new EventTarget(), { visibilityState: "hidden" });
+  globalThis.document = doc; globalThis.window = new EventTarget();
+  t.after(() => { globalThis.document = priorDocument; globalThis.window = priorWindow; });
+  const video = Object.assign(new EventTarget(), { paused: false, ended: false });
+  const awake = []; const saves = [];
+  const p = player({ video, timeline: new EventTarget(), volume: new EventTarget(), element: new EventTarget(), listeners: [],
+    every() {}, keepAwake: (playing) => awake.push(playing), saveNow: (options) => saves.push(options) });
+  p.bind();
+  doc.dispatchEvent(new Event("visibilitychange"));
+  assert.deepEqual(awake, []); assert.equal(saves.length, 1);
+  doc.visibilityState = "visible"; doc.dispatchEvent(new Event("visibilitychange"));
+  assert.deepEqual(awake, [true]);
+  video.paused = true; doc.dispatchEvent(new Event("visibilitychange"));
+  assert.deepEqual(awake, [true]);
+});
