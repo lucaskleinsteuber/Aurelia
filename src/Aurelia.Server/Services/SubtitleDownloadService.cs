@@ -131,9 +131,11 @@ public sealed partial class SubtitleDownloadService(
             .ToListAsync(token);
         store.Prune(await database.MediaItems.AsNoTracking().Select(item => item.Id).ToHashSetAsync(token));
         var downloaded = 0;
+        var searches = 0;
         foreach (var candidate in titles)
         {
-            if (downloaded >= limit || quota.Exhausted) break;
+            // Searches are bounded too, so a large library without matches is spread over many passes.
+            if (downloaded >= limit || searches >= limit * SearchesPerDownload || quota.Exhausted) break;
             var fileKey = string.Create(CultureInfo.InvariantCulture, $"{candidate.FileSize}:{candidate.FileModifiedAt?.UtcTicks}");
             var now = clock.GetUtcNow();
             var due = configuration.Languages.Where(language => store.LastChecked(candidate.Id, fileKey, language) is not { } at || now - at >= RecheckAfter).ToList();
@@ -145,6 +147,7 @@ public sealed partial class SubtitleDownloadService(
             foreach (var language in due.Except(missing)) store.MarkChecked(candidate.Id, fileKey, language, now);
             if (missing.Count == 0) continue;
             IReadOnlyList<SubtitleCandidate> found;
+            searches++;
             try
             {
                 found = await provider.SearchAsync(configuration.ApiKey, await SearchForAsync(title, missing, token), token);
@@ -190,6 +193,9 @@ public sealed partial class SubtitleDownloadService(
             IsDefault: false, subtitle.Forced, Supported: true, IsSidecar: true, IsSdh: subtitle.HearingImpaired));
 
     public const int DownloadedTrackBase = 2000;
+
+    /// <summary>An automatic pass searches at most this many titles per allowed download.</summary>
+    public const int SearchesPerDownload = 4;
 
     private async Task<StoredSubtitle> FetchAsync(SubtitleProviderConfiguration configuration, Guid mediaId, string fileId, string language,
         string? release, bool hearingImpaired, bool forced, bool automatic, CancellationToken token)

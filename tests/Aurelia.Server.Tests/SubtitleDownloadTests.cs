@@ -233,6 +233,41 @@ public sealed class SubtitleDownloadTests
         }
     }
 
+    [Fact]
+    public async Task AnAutomaticPassSearchesOnlyAFewTitlesPerAllowedDownload()
+    {
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Invented Search Limit");
+        Directory.CreateDirectory(root);
+        var provider = new Provider { FindsNothing = true };
+        try
+        {
+            using var factory = Factory(provider);
+            using var client = factory.CreateClient();
+            await ApiTestClient.SetupOwnerAsync(client);
+            for (var index = 0; index < 7; index++)
+            {
+                var path = Path.Combine(root, $"Invented {index}.mkv");
+                await File.WriteAllBytesAsync(path, new byte[1_000 + index]);
+                await AddMovieAsync(factory, root, path, (100 + index).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            factory.Services.GetRequiredService<SubtitleProviderSettingsStore>().Save(
+                new UpdateSubtitleProviderRequest(true, ["de"], true, "InventedApiKey0123456789"));
+
+            await using (var scope = factory.Services.CreateAsyncScope())
+                Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<SubtitleDownloadService>().AutomaticRunAsync(1, default));
+            Assert.Equal(SubtitleDownloadService.SearchesPerDownload, provider.Searches.Count);
+
+            // The next pass goes on with the titles not searched yet.
+            await using (var scope = factory.Services.CreateAsyncScope())
+                await scope.ServiceProvider.GetRequiredService<SubtitleDownloadService>().AutomaticRunAsync(1, default);
+            Assert.Equal(7, provider.Searches.Select(search => search.TmdbId).Distinct().Count());
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
     private static AureliaServerFactory Factory(Provider provider) => new(configureServices: services =>
     {
         services.RemoveAll<IOpenSubtitlesClient>();
@@ -304,11 +339,13 @@ public sealed class SubtitleDownloadTests
         public System.Collections.Concurrent.ConcurrentQueue<SubtitleSearch> Searches { get; } = [];
         public (string?, string?)? Account { get; private set; }
         public bool QuotaReached { get; set; }
+        public bool FindsNothing { get; set; }
 
         public Task<IReadOnlyList<SubtitleCandidate>> SearchAsync(string apiKey, SubtitleSearch search, CancellationToken cancellationToken)
         {
             Assert.Equal("InventedApiKey0123456789", apiKey);
             Searches.Enqueue(search);
+            if (FindsNothing) return Task.FromResult<IReadOnlyList<SubtitleCandidate>>([]);
             return Task.FromResult<IReadOnlyList<SubtitleCandidate>>(
             [
                 new SubtitleCandidate("101", search.Languages[0], "Invented.Release", true, false, false, false, 10, true),
