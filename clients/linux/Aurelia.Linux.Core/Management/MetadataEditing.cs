@@ -5,6 +5,24 @@ namespace Aurelia.Linux.Core.Management;
 /// <summary>The rules of the metadata editor, as the Mac app's MetadataEditorView checks them before saving.</summary>
 public static class MetadataEditing
 {
+    /// <summary>What a finished job did, in one line, as on the Mac: "Done · 23 matched, 2 need review". Null while it runs.</summary>
+    public static string? FinishedSummary(Aurelia.Contracts.MetadataJobSummary job)
+    {
+        if (job.State is Aurelia.Contracts.MetadataJobState.Queued or Aurelia.Contracts.MetadataJobState.Running) return null;
+        var parts = new List<string>();
+        if (job.ItemsMatched > 0) parts.Add($"{job.ItemsMatched} matched");
+        if (job.ItemsNeedingReview > 0) parts.Add($"{job.ItemsNeedingReview} need{(job.ItemsNeedingReview == 1 ? "s" : "")} review");
+        if (job.ItemsSkipped > 0) parts.Add($"{job.ItemsSkipped} skipped");
+        if (job.ItemsFailed > 0) parts.Add($"{job.ItemsFailed} failed");
+        var detail = parts.Count == 0 ? $"{job.ItemsTotal} {(job.ItemsTotal == 1 ? "title" : "titles")} checked" : string.Join(", ", parts);
+        return job.State switch
+        {
+            Aurelia.Contracts.MetadataJobState.Completed => "Done · " + detail,
+            Aurelia.Contracts.MetadataJobState.Cancelled => "Stopped · " + detail,
+            _ => "Did not finish · " + (job.Error ?? detail),
+        };
+    }
+
     public static readonly int[] FskAges = [0, 6, 12, 16, 18];
 
     /// <summary>Why the values cannot be saved, or null when they can.</summary>

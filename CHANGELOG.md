@@ -12,6 +12,18 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac 1.30.1 (143) Beta - 07.11.2026
+
+### Fixed
+
+- Settings › Metadata: a finished Enrich Library job now shows a green "Done" with what it matched, instead of a full progress bar that stayed on screen.
+
+## Linux Desktop 1.3.1 (12) Beta - 07.11.2026
+
+### Fixed
+
+- Settings › Metadata: Enrich Library shows its progress live and a green "Done" with what it matched when it finishes.
+
 ## [Server 1.30.1 (139) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/server-1.30.1-139) - 07.11.2026
 
 ### Fixed
@@ -78,7 +90,7 @@ versioned commit, so their skipped numbers are preserved.
 
 - Browser player: keep saving the playback position after a save meets an outdated revision. The later position now wins: the one of the device someone is watching on, or a position another device saved afterwards. Before, the player stopped saving for the rest of the title, so up to a whole episode was lost, and the Mac asked to "Use Current Position".
 
-## Linux Desktop 1.3.0 (11) - 07.11.2026
+## [Linux Desktop 1.3.0 (11) Beta](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/linux-app-1.3.0-11) - 07.11.2026
 
 ### Added
 

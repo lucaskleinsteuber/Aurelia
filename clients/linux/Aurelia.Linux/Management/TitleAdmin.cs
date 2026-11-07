@@ -1176,21 +1176,99 @@ public sealed class MetadataPage : StackPanel
 
     private async Task EnrichAsync()
     {
-        if (await scope.RunAsync(() => scope.Client.StartMetadataJobAsync(new StartMetadataJobRequest()), message)) await ReloadAsync();
+        MetadataJobSummary? started = null;
+        if (await scope.RunAsync(async () => started = await scope.Client.StartMetadataJobAsync(new StartMetadataJobRequest()), message))
+        {
+            followedJob = started?.Id;
+            await ReloadAsync();
+        }
     }
 
+    private readonly StackPanel jobPanel = new() { Spacing = 4 };
+    private Guid? followedJob;
+    private bool polling;
+
+    /// <summary>The running job with live progress; once a job started here ends, a plain "Done" line.</summary>
     private async Task<Control> JobAsync()
+    {
+        await RefreshJobAsync();
+        return jobPanel;
+    }
+
+    private async Task RefreshJobAsync()
     {
         IReadOnlyList<MetadataJobSummary> jobs = [];
         await scope.RunAsync(async () => jobs = await scope.Client.MetadataJobsAsync(activeOnly: true));
-        if (jobs.Count == 0) return new Panel();
-        var job = jobs[0];
-        var panel = new StackPanel { Spacing = 4 };
-        panel.Children.Add(new TextBlock { Text = $"Metadata: {job.ItemsProcessed} of {job.ItemsTotal}" });
-        panel.Children.Add(new ProgressBar { Minimum = 0, Maximum = Math.Max(1, job.ItemsTotal), Value = job.ItemsProcessed, Height = 4 });
-        if (WaitingStatus(job) is { } waiting) panel.Children.Add(Note(waiting));
-        if (job.ItemsSkipped > 0) panel.Children.Add(Note($"{job.ItemsSkipped} skipped"));
-        return panel;
+        var job = jobs.Count > 0 ? jobs[0] : null;
+        if (job is null && followedJob is { } id)
+        {
+            IReadOnlyList<MetadataJobSummary> recent = [];
+            await scope.RunAsync(async () => recent = await scope.Client.MetadataJobsAsync(activeOnly: false));
+            job = recent.FirstOrDefault(candidate => candidate.Id == id);
+        }
+        ShowJob(job);
+        if (job is { State: MetadataJobState.Queued or MetadataJobState.Running } && !polling) _ = PollJobAsync();
+    }
+
+    private async Task PollJobAsync()
+    {
+        polling = true;
+        try
+        {
+            // Polls while the page is shown; a page that never appears or is closed stops it.
+            for (var hidden = 0; hidden < 5;)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1));
+                if (TopLevel.GetTopLevel(jobPanel) is null)
+                {
+                    hidden++;
+                    continue;
+                }
+                hidden = 0;
+                IReadOnlyList<MetadataJobSummary> jobs = [];
+                if (!await scope.RunAsync(async () => jobs = await scope.Client.MetadataJobsAsync(activeOnly: true))) return;
+                if (jobs.Count > 0 && jobs[0] is { } running)
+                {
+                    followedJob = running.Id;
+                    ShowJob(running);
+                    continue;
+                }
+                await RefreshJobAsync();
+                return;
+            }
+        }
+        finally
+        {
+            polling = false;
+        }
+    }
+
+    private void ShowJob(MetadataJobSummary? job)
+    {
+        jobPanel.Children.Clear();
+        if (job is null) return;
+        if (MetadataEditing.FinishedSummary(job) is { } summary)
+        {
+            var done = job.State == MetadataJobState.Completed;
+            var color = new SolidColorBrush(Color.Parse(done ? "#30D158" : "#FF9F0A"));
+            jobPanel.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Children =
+                {
+                    new PathIcon { Data = Application.Current?.FindResource(done ? "IconCheck" : "IconOffline") as Geometry, Width = 14, Height = 14, Foreground = color, VerticalAlignment = VerticalAlignment.Center },
+                    new TextBlock { Text = summary, Foreground = color, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center },
+                },
+            });
+            AutomationProperties.SetName(jobPanel, summary);
+            return;
+        }
+        followedJob = job.Id;
+        jobPanel.Children.Add(new TextBlock { Text = $"Finding metadata: {job.ItemsProcessed} of {job.ItemsTotal}" });
+        jobPanel.Children.Add(new ProgressBar { Minimum = 0, Maximum = Math.Max(1, job.ItemsTotal), Value = job.ItemsProcessed, Height = 4 });
+        if (WaitingStatus(job) is { } waiting) jobPanel.Children.Add(Note(waiting));
+        if (job.ItemsSkipped > 0) jobPanel.Children.Add(Note($"{job.ItemsSkipped} skipped"));
     }
 
     internal static string? WaitingStatus(MetadataJobSummary job)

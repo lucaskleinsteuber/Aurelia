@@ -959,9 +959,18 @@ struct AppSettingsView: View {
             }
             .accessibilityIdentifier("metadata-remove-token")
           }
-          if let job = model.metadataJob {
+          if let job = model.metadataJob, let summary = job.finishedSummary {
+            // A finished job says so plainly instead of leaving a full progress bar behind.
+            Label(
+              summary,
+              systemImage: job.state == .completed
+                ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(job.state == .completed ? Color.green : Color.orange)
+            .accessibilityIdentifier("metadata-job-finished")
+          } else if let job = model.metadataJob {
             ProgressView(value: Double(job.itemsProcessed), total: Double(max(job.itemsTotal, 1))) {
-              Text("Metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
+              Text("Finding metadata: \(job.itemsProcessed) of \(job.itemsTotal)")
             }
             if let status = job.waitingStatus() {
               Text(status)

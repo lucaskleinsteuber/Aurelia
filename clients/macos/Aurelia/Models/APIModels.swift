@@ -1082,6 +1082,26 @@ struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
   var waitReason: String? = nil
   var itemsSkipped: Int? = nil
 
+  var isFinished: Bool { state != .queued && state != .running }
+
+  /// What a finished job did, in one line: "Done · 23 matched, 2 need review".
+  var finishedSummary: String? {
+    guard isFinished else { return nil }
+    var parts: [String] = []
+    if itemsMatched > 0 { parts.append("\(itemsMatched) matched") }
+    if itemsNeedingReview > 0 {
+      parts.append("\(itemsNeedingReview) need\(itemsNeedingReview == 1 ? "s" : "") review")
+    }
+    if let skipped = itemsSkipped, skipped > 0 { parts.append("\(skipped) skipped") }
+    if itemsFailed > 0 { parts.append("\(itemsFailed) failed") }
+    let detail = parts.isEmpty ? "\(itemsTotal) \(itemsTotal == 1 ? "title" : "titles") checked" : parts.joined(separator: ", ")
+    switch state {
+    case .completed: return "Done · " + detail
+    case .cancelled: return "Stopped · " + detail
+    default: return "Did not finish · " + (error ?? detail)
+    }
+  }
+
   func waitingStatus(locale: Locale = .current, timeZone: TimeZone = .current) -> String? {
     guard state == .queued || state == .running,
       waitReason != nil || nextAttemptAt != nil
