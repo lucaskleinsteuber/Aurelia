@@ -167,7 +167,9 @@ struct ProfilePickerLifecycleTests {
     #expect(model.profile?.isViewingSession == true)
     #expect(model.profile?.sessionId == response.sessionId)
     #expect(model.profileSelectionError == nil)
-    #expect(model.visibleErrorMessage == failure.localizedDescription)
+    // A server that does not answer is described plainly, not with the system's error text.
+    #expect(model.visibleErrorMessage?.contains("isn’t answering") == true)
+    #expect(model.serverUnreachable)
     #expect(await probe.count == 0)
     await model.refreshFromUI()
     #expect(snapshots == 2)

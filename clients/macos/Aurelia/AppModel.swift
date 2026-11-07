@@ -152,6 +152,9 @@ final class AppModel: ObservableObject {
   }
   private var restWatchTask: Task<Void, Never>?
   private var serverWakeTask: Task<Bool, Never>?
+  /// When Aurelia last had to wake the server and it answered. Right after waking, the first
+  /// library requests can still fail while its network settles, so they are tried again.
+  private var serverWokeAt: Date?
   @Published private(set) var isWorking = false
   @Published private(set) var isRecoveringLocalHost = false
   @Published var errorMessage: String?
@@ -271,7 +274,7 @@ final class AppModel: ObservableObject {
       clearAdministrationState()
       administrationErrorMessage = nil
     } else if error as? APIClientError == .serverIdentityMismatch {
-      errorMessage = error.localizedDescription
+      errorMessage = failureMessage(error)
     } else {
       administrationErrorMessage = error.localizedDescription
     }
@@ -631,13 +634,13 @@ final class AppModel: ObservableObject {
         await startNativeHost()
       } else if let profile {
         await wakeServerIfAsleep(profile)
-        try await refresh(requireCompleteSnapshot: true)
+        try await refreshSettlingAfterWake()
         startSync()
       }
     } catch {
       if !handleSessionFailure(error) {
         serverUnreachable = ServerReconnectPolicy.isConnectivityFailure(error)
-        errorMessage = error.localizedDescription
+        errorMessage = failureMessage(error)
         beginReconnectIfNeeded(after: error)
       }
     }
@@ -707,7 +710,40 @@ final class AppModel: ObservableObject {
     serverWakeTask = attempt
     let answers = await attempt.value
     serverWakeTask = nil
+    noteWake(answers: answers)
     connectionStatus = answers ? .loading : nil
+  }
+
+  /// After a wake, connections opened before the server slept are dead; new ones are made.
+  private func noteWake(answers: Bool) {
+    guard answers, case .waking = connectionStatus else { return }
+    serverWokeAt = Date()
+    PinnedSessionPool.shared.removeAll()
+  }
+
+  /// Loads the library. When the server was just woken, a connection failure is tried again a
+  /// few times on new connections, so a server that is awake never shows "Could not connect".
+  private func refreshSettlingAfterWake() async throws {
+    let generation = connectionGeneration
+    do {
+      try await refresh(requireCompleteSnapshot: true)
+    } catch where failedWhileServerSettles(error) {
+      for attempt in 1...3 {
+        try await Task.sleep(for: .seconds(2))
+        guard isCurrent(generation) else { throw CancellationError() }
+        PinnedSessionPool.shared.removeAll()
+        do {
+          try await refresh(requireCompleteSnapshot: true)
+          return
+        } catch where attempt < 3 && failedWhileServerSettles(error) {}
+      }
+    }
+  }
+
+  /// True for a connection failure within a minute after the server was woken.
+  private func failedWhileServerSettles(_ error: Error) -> Bool {
+    guard let woke = serverWokeAt, Date().timeIntervalSince(woke) < 60 else { return false }
+    return ServerReconnectPolicy.isConnectivityFailure(error)
   }
 
   /// Before a request someone is waiting for, such as opening a profile: a quick check whether
@@ -726,6 +762,7 @@ final class AppModel: ObservableObject {
     serverWakeTask = attempt
     let answers = await attempt.value
     serverWakeTask = nil
+    noteWake(answers: answers)
     connectionStatus = nil
     if answers { serverUnreachable = false }
     return answers
@@ -847,7 +884,7 @@ final class AppModel: ObservableObject {
       needsInitialLibrarySetup = true
       return true
     } catch {
-      errorMessage = error.localizedDescription
+      errorMessage = failureMessage(error)
       return false
     }
   }
@@ -868,7 +905,7 @@ final class AppModel: ObservableObject {
         authentication, lanPort: port, restart: false, expectedGeneration: generation)
       return true
     } catch {
-      errorMessage = error.localizedDescription
+      errorMessage = failureMessage(error)
       return false
     }
   }
@@ -905,7 +942,7 @@ final class AppModel: ObservableObject {
           hostSnapshot = NativeHostSnapshot(
             state: .restarting, message: nil, bootstrapToken: nil, serverInfo: nil)
           startHostPolling()
-        } catch { errorMessage = error.localizedDescription }
+        } catch { errorMessage = failureMessage(error) }
         return
       }
       _ = await startNativeHost()
@@ -917,7 +954,7 @@ final class AppModel: ObservableObject {
       } else {
         try await serverHost.restart()
       }
-    } catch { errorMessage = error.localizedDescription }
+    } catch { errorMessage = failureMessage(error) }
   }
 
   func completeInitialLibrarySetup() {
@@ -1439,7 +1476,7 @@ final class AppModel: ObservableObject {
       inspectedServer = inspected
     } catch {
       if inspectionGeneration == generation, !Task.isCancelled {
-        errorMessage = error.localizedDescription
+        errorMessage = failureMessage(error)
       }
     }
   }
@@ -1489,7 +1526,7 @@ final class AppModel: ObservableObject {
       return true
     } catch {
       if connectionGeneration == generation, !Task.isCancelled {
-        errorMessage = error.localizedDescription
+        errorMessage = failureMessage(error)
       }
       return false
     }
@@ -1610,7 +1647,7 @@ final class AppModel: ObservableObject {
       scheduleHomeRefresh()
     } catch {
       if isCurrent(generation), !(error is CancellationError) {
-        homeErrorMessage = error.localizedDescription
+        homeErrorMessage = failureMessage(error)
       }
     }
   }
@@ -1894,7 +1931,7 @@ final class AppModel: ObservableObject {
       libraryImportReviews.removeAll { $0.id == review.id }
       startScanPolling()
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation) { errorMessage = failureMessage(error) }
     }
   }
 
@@ -2008,7 +2045,7 @@ final class AppModel: ObservableObject {
       try await refresh()
       return isCurrent(generation)
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation) { errorMessage = failureMessage(error) }
       return false
     }
   }
@@ -2042,7 +2079,7 @@ final class AppModel: ObservableObject {
       await refreshWatchlist()
       return isCurrent(generation)
     } catch {
-      if isCurrent(generation) { errorMessage = error.localizedDescription }
+      if isCurrent(generation) { errorMessage = failureMessage(error) }
       return false
     }
   }
@@ -2218,7 +2255,8 @@ final class AppModel: ObservableObject {
     }
     errorMessage = nil
     do {
-      try await refresh(requireCompleteSnapshot: true)
+      try await refreshSettlingAfterWake()
+      serverUnreachable = false
       guard isCurrent(generation), selection == profileSelectionGeneration,
         viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
       else { return }
@@ -2229,7 +2267,7 @@ final class AppModel: ObservableObject {
         viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
       else { return }
       if !handleSessionFailure(error) {
-        errorMessage = error.localizedDescription
+        errorMessage = failureMessage(error)
         beginReconnectIfNeeded(after: error)
       }
     }
@@ -2258,7 +2296,7 @@ final class AppModel: ObservableObject {
       active, profile: canObserve ? profile : nil, runID: generation,
       onFailure: { [weak self] error in
         guard let self, self.isCurrent(generation) else { return }
-        self.synchronizationErrorMessage = error.localizedDescription
+        self.synchronizationErrorMessage = self.failureMessage(error)
         _ = self.handleSessionFailure(error)
       },
       onSuccess: { [weak self] in
@@ -2396,7 +2434,7 @@ final class AppModel: ObservableObject {
           if !Task.isCancelled, self.playbackPlanningGeneration == request,
             !(error is CancellationError)
           {
-            self.errorMessage = error.localizedDescription
+            self.errorMessage = self.failureMessage(error)
           }
         }
       }
@@ -2610,7 +2648,7 @@ final class AppModel: ObservableObject {
         guard ProfilePickerProtocol.isSameSession(profile, as: acceptedProfile) else {
           return false
         }
-        errorMessage = error.localizedDescription
+        errorMessage = failureMessage(error)
         beginReconnectIfNeeded(after: error)
       } else if profile == device {
         profileSelectionError =
@@ -3134,6 +3172,20 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// What a failed request shows. A server that does not answer is usually asleep or switched
+  /// off, so the banner says that plainly and Try Again wakes it, instead of the system's
+  /// "Could not connect to the server."
+  func failureMessage(_ error: Error) -> String {
+    guard ServerReconnectPolicy.isConnectivityFailure(error), operatingMode != .host else {
+      return error.localizedDescription
+    }
+    serverUnreachable = true
+    let name = (deviceConnection ?? profile)?.name ?? "The server"
+    return canWakeCurrentServer
+      ? "\(name) isn’t answering. It may be asleep. Try Again wakes it."
+      : "\(name) isn’t answering. Check that it is switched on, then try again."
+  }
+
   private func beginReconnectIfNeeded(after error: Error) {
     guard operatingMode != .host, !hasPendingNetworkConfirmation, !isResting,
       ServerReconnectPolicy.isConnectivityFailure(error),
@@ -3143,6 +3195,12 @@ final class AppModel: ObservableObject {
     reconnectTask = Task { [weak self] in
       guard let self else { return }
       do {
+        // A server that went to sleep while Aurelia was open is woken first, with the progress
+        // shown, instead of only looking for it at its address.
+        if self.canWakeCurrentServer {
+          _ = await self.ensureServerAwake(self.deviceConnection ?? current)
+          guard self.isCurrent(generation), !Task.isCancelled else { return }
+        }
         let inspected = try await self.reconnectCoordinator.reconnect(current)
         guard self.isCurrent(generation) else { return }
         let device = self.deviceConnection ?? current
@@ -3172,14 +3230,14 @@ final class AppModel: ObservableObject {
           }
         } catch {
           guard self.isCurrent(resumedGeneration) else { return }
-          self.errorMessage = error.localizedDescription
+          self.errorMessage = self.failureMessage(error)
           self.beginReconnectIfNeeded(after: error)
         }
       } catch is CancellationError {
       } catch {
         guard self.isCurrent(generation) else { return }
         self.reconnectTask = nil
-        self.errorMessage = error.localizedDescription
+        self.errorMessage = self.failureMessage(error)
       }
     }
   }
@@ -3229,7 +3287,7 @@ final class AppModel: ObservableObject {
         profile: profile, runID: generation,
         onFailure: { [weak self] error in
           guard let self, self.isCurrent(generation) else { return }
-          self.synchronizationErrorMessage = error.localizedDescription
+          self.synchronizationErrorMessage = self.failureMessage(error)
           _ = self.handleSessionFailure(error)
         },
         onSuccess: { [weak self] in
@@ -3334,7 +3392,7 @@ final class AppModel: ObservableObject {
       if isCurrent(generation), !(error is CancellationError),
         error as? APIClientError != .supersededSnapshot
       {
-        synchronizationErrorMessage = error.localizedDescription
+        synchronizationErrorMessage = failureMessage(error)
       }
       throw error
     }
@@ -3722,7 +3780,7 @@ final class AppModel: ObservableObject {
       } catch {
         await MainActor.run {
           self.stopRemotePlayback()
-          self.errorMessage = error.localizedDescription
+          self.errorMessage = self.failureMessage(error)
         }
       }
     }

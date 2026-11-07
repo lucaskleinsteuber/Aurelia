@@ -119,6 +119,9 @@ struct LibraryShellView: View {
               Task {
                 if model.canRestoreLocalHosting {
                   await model.restoreLocalHosting()
+                } else if model.serverUnreachable {
+                  // Wakes a sleeping server, then loads what was showing.
+                  await model.retryConnection()
                 } else {
                   await model.refreshFromUI()
                 }
