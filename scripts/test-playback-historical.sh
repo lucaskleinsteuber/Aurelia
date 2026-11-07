@@ -14,7 +14,8 @@ reference_140=793715aa6fd979551eecf2db913fbb0f830d75d1
 reference_141=9bdbbaaa867f433f8af5fefc0278a352af305b84
 architecture=$(uname -m)
 runtime='osx-arm64'
-[[ "$architecture" == arm64 ]] || { evidence_fail unsupported_local_architecture; exit 2; }
+[[ "$(uname -m)" == x86_64 ]] && runtime='osx-x64'
+[[ "$architecture" == arm64 || "$architecture" == x86_64 ]] || { evidence_fail unsupported_local_architecture; exit 2; }
 
 # Each version uses a new shell, so set -e failures are captured independently
 # and cannot suppress the other requested historical comparison.

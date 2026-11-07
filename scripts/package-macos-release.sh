@@ -27,7 +27,7 @@ build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info")
 [[ "$version" == <->.<-> || "$version" == <->.<->.<-> ]] && [[ "$build" == <-> ]] || {
   echo "Invalid release version or build number." >&2; exit 1
 }
-name="Aurelia-$version-build-$build-macOS-arm64"
+name="Aurelia-$version-build-$build-macOS-universal"
 output="$other_root/Releases/$name"
 [[ ! -e "$output" ]] || { echo "Release output already exists; refusing to overwrite it." >&2; exit 1; }
 mkdir -p "$other_root/Releases"
@@ -41,8 +41,9 @@ for executable in Aurelia Helpers; do
     binary="$stage/Aurelia.app/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
   fi
   /usr/bin/lipo "$binary" -verify_arch arm64
+  /usr/bin/lipo "$binary" -verify_arch x86_64
 done
-for runtime in osx-arm64; do
+for runtime in osx-arm64 osx-x64; do
   [[ -x "$stage/Aurelia.app/Contents/Resources/Server/$runtime/Aurelia.Server" ]] || {
     echo "Missing server payload: $runtime" >&2; exit 1
   }

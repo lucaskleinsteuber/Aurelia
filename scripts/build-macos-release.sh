@@ -166,7 +166,7 @@ mkdir -p "$publish_root"
 "$repository_root/scripts/prepare-vlckit.sh"
 "$repository_root/scripts/verify-build-number.sh"
 
-for runtime in osx-arm64; do
+for runtime in osx-arm64 osx-x64; do
   "$dotnet_bin" restore "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
     --runtime "$runtime"
   "$dotnet_bin" publish "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
@@ -183,7 +183,7 @@ DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   -configuration Release \
   -destination 'generic/platform=macOS' \
   -derivedDataPath "$derived_data" \
-  ARCHS=arm64 \
+  ARCHS='arm64 x86_64' \
   ONLY_ACTIVE_ARCH=NO \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
   CODE_SIGNING_ALLOWED=NO \
@@ -212,7 +212,7 @@ fi
 mkdir -p "$candidate/Contents/Resources/Server"
 mkdir -p "$candidate/Contents/Resources/ThirdPartyNotices"
 cp "$repository_root/LICENSE" "$candidate/Contents/Resources/LICENSE"
-for runtime in osx-arm64; do
+for runtime in osx-arm64 osx-x64; do
   /usr/bin/ditto "$publish_root/$runtime" "$candidate/Contents/Resources/Server/$runtime"
   assets_path=$("$dotnet_bin" msbuild "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
     -getProperty:ProjectAssetsFile)
@@ -220,21 +220,11 @@ for runtime in osx-arm64; do
     "$publish_root/$runtime/Aurelia.Server.deps.json" "$assets_path" \
     "$candidate/Contents/Resources/ThirdPartyNotices/$runtime"
 done
-# Live conversion for web browsers uses the app's own LGPL ffmpeg beside the server runtime;
+# Live conversion for web browsers uses the app's own LGPL ffmpeg beside both server runtimes;
 # the loop below signs it with the hardened runtime like every other server binary.
 ffmpeg_root=$("$repository_root/scripts/build-ffmpeg-macos.sh" | tail -n 1)
 [[ -x "$ffmpeg_root/ffmpeg" && -x "$ffmpeg_root/ffprobe" ]] || { echo "The Mac ffmpeg build failed." >&2; exit 1; }
 /usr/bin/ditto "$ffmpeg_root" "$candidate/Contents/Resources/Server/ffmpeg"
-# The Mac app is for Apple silicon only. VLCKit and some NuGet native libraries (SkiaSharp) ship
-# universal, so drop their Intel slices before everything is signed again below.
-while IFS= read -r -d '' binary; do
-  if file "$binary" | grep -q 'Mach-O universal' \
-    && [[ " $(/usr/bin/lipo -archs "$binary") " == *" x86_64 "* ]] \
-    && [[ " $(/usr/bin/lipo -archs "$binary") " == *" arm64 "* ]]; then
-    /usr/bin/lipo "$binary" -remove x86_64 -output "$binary"
-  fi
-done < <(find "$candidate" -type f -print0)
-
 while IFS= read -r -d '' binary; do
   if file "$binary" | grep -q 'Mach-O'; then
     if [[ "${binary:t}" == 'Aurelia.Server' ]]; then
@@ -281,12 +271,15 @@ codesign --force --sign "$signing_identity" --options runtime "$timestamp_option
   --entitlements "$release_entitlements" \
   "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"
-while IFS= read -r -d '' binary; do
-  if file "$binary" | grep -q 'Mach-O' && /usr/bin/lipo "$binary" -verify_arch x86_64 2>/dev/null; then
-    echo "An Intel slice is left in ${binary#$candidate/}; the Mac app is arm64 only." >&2
-    exit 1
-  fi
-done < <(find "$candidate" -type f -print0)
+# The app, its helper, VLCKit and ffmpeg are universal; each server runtime has its own slice.
+for binary in "$candidate/Contents/MacOS/Aurelia" \
+  "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost" \
+  "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit" \
+  "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe"; do
+  /usr/bin/lipo "$binary" -verify_arch arm64 x86_64 || { echo "${binary#$candidate/} is not universal." >&2; exit 1; }
+done
+/usr/bin/lipo "$candidate/Contents/Resources/Server/osx-arm64/Aurelia.Server" -verify_arch arm64
+/usr/bin/lipo "$candidate/Contents/Resources/Server/osx-x64/Aurelia.Server" -verify_arch x86_64
 if [[ "$distribution" == profileless-development ]]; then
   if find "$candidate" -name embedded.provisionprofile -print -quit | grep -q .; then
     echo "The signed profileless candidate unexpectedly contains a provisioning profile." >&2

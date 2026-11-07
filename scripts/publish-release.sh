@@ -55,21 +55,24 @@ else
   [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$version" ] \
     && [ "$(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")" = "$build" ] \
     || { echo "$app is not Aurelia $version ($build)." >&2; exit 1; }
-  [ "$(lipo -archs "$app/Contents/MacOS/Aurelia")" = arm64 ] \
-    || { echo "The Mac app must be built for Apple silicon only." >&2; exit 1; }
+  lipo "$app/Contents/MacOS/Aurelia" -verify_arch arm64 x86_64 \
+    || { echo "The Mac app must be universal." >&2; exit 1; }
   codesign --verify --deep --strict "$app"
   mkdir -p "$output"
-  dmg="$output/Aurelia-$tag-macOS-arm64.dmg"
+  dmg="$output/Aurelia-$tag-macOS-universal.dmg"
+  # The updater of Mac apps up to 1.33 asks for this name; it is the same disk image.
+  older_dmg="$output/Aurelia-$tag-macOS-arm64.dmg"
   stage=$(mktemp -d)
   trap 'rm -rf "$stage"' EXIT
   ditto "$app" "$stage/Aurelia.app"
   ln -s /Applications "$stage/Applications"
   hdiutil create -quiet -ov -fs HFS+ -format UDZO -volname "Aurelia $version" -srcfolder "$stage" "$dmg"
   hdiutil verify -quiet "$dmg"
-  (cd "$output" && shasum -a 256 "./${dmg##*/}" > SHA256SUMS)
-  files=("$dmg" "$output/SHA256SUMS")
+  cp -c "$dmg" "$older_dmg"
+  (cd "$output" && shasum -a 256 "./${dmg##*/}" "./${older_dmg##*/}" > SHA256SUMS)
+  files=("$dmg" "$older_dmg" "$output/SHA256SUMS")
   title="Aurelia for Mac $version ($build)"
-  downloads="- **Mac:** Download ${dmg##*/} for Apple silicon. Open it and drag Aurelia to Applications. This development-signed build runs on Macs registered for its developer account."
+  downloads="- **Mac:** Download ${dmg##*/}. Open it and drag Aurelia to Applications. This development-signed build runs on Macs registered for its developer account. ${older_dmg##*/} is the same image for the updater of older app versions."
 fi
 
 head=$(git -C "$repository_root" rev-parse HEAD)

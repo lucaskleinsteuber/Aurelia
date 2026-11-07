@@ -94,7 +94,7 @@ import Foundation
     let updates = root.appendingPathComponent("Shared/Updates")
     let directory = updates.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-    let image = directory.appendingPathComponent("Aurelia-0.1.1-101-macOS-arm64.dmg")
+    let image = directory.appendingPathComponent("Aurelia-0.1.1-101-macOS-universal.dmg")
     try FileManager.default.copyItem(at: root.appendingPathComponent("template.dmg"), to: image)
     let request = try MacUpdateInstallRequest.prepare(image: image, build: 101, appPID: getpid(), root: updates)
     try request.save(in: updates)

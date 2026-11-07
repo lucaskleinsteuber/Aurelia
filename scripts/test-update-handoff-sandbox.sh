@@ -24,7 +24,7 @@ import Foundation
     let root = URL(fileURLWithPath: ROOT)
     let directory = root.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-    let image = directory.appendingPathComponent("Aurelia-1.27.2-126-macOS-arm64.dmg")
+    let image = directory.appendingPathComponent("Aurelia-1.27.2-126-macOS-universal.dmg")
     try Data("invented data; never mounted".utf8).write(to: image)
     let request = try MacUpdateInstallRequest.prepare(image: image, build: 126, appPID: getpid(), root: root)
     try request.save(in: root)

@@ -47,7 +47,7 @@ struct MacUpdateInstallRequest: Codable, Equatable, Sendable {
       now.timeIntervalSince(createdAt) < 120, imageName.utf8.count <= 160,
       imageName.range(
         of:
-          "\\AAurelia-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-\(build)-macOS-arm64\\.dmg\\z",
+          "\\AAurelia-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-\(build)-macOS-(universal|arm64)\\.dmg\\z",
         options: .regularExpression) != nil
     else { throw Failure.invalidRequest }
     let directory = root.appendingPathComponent(directory.uuidString, isDirectory: true)
