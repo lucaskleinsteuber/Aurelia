@@ -1,5 +1,5 @@
 // The iOS client has its own release lifecycle, independent of Mac/server and tvOS.
-MARKETING_VERSION = 1.2.0
-CURRENT_PROJECT_VERSION = 7
+MARKETING_VERSION = 1.2.1
+CURRENT_PROJECT_VERSION = 8
 IPHONEOS_DEPLOYMENT_TARGET = 26.0
 MOBILEVLCKIT_ROOT = $(SRCROOT)/Dependencies

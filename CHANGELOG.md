@@ -12,6 +12,37 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac 1.33.1 (147) Beta - 07.11.2026
+
+### Fixed
+
+- The Downloads page names each title while it downloads, not only its progress.
+
+## Server 1.32.1 (142) Beta - 07.11.2026
+
+### Fixed
+
+- Automatic subtitle downloads search only a few titles per pass, so a large library without matches no longer sends many searches to OpenSubtitles at once.
+
+## Linux Desktop 1.5.1 (15) Beta - 07.11.2026
+
+### Fixed
+
+- Downloads check the free space of the drive that holds them, such as a separate home partition, not only the system drive.
+- The Downloads page names each title while it downloads.
+
+## iOS 1.2.1 (8) - 07.11.2026
+
+### Fixed
+
+- Joining a Watch Together party that has just ended no longer leaves a half-joined party behind; the list of parties refreshes instead.
+
+## Apple TV 1.6.1 (30) - 07.11.2026
+
+### Fixed
+
+- Joining a Watch Together party that has just ended no longer leaves a half-joined party behind; the list of parties refreshes instead.
+
 ## Mac 1.33.0 (146) Beta - 07.11.2026
 
 ### Added
