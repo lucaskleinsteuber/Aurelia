@@ -257,6 +257,12 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     public Task JoinWatchTogetherAsync(WatchPartySummary party) => Together?.JoinWatchTogetherAsync(party) ?? Task.CompletedTask;
 
+    public Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => Together?.Downloads;
+
+    public void Download(CatalogItemSummary item) => Together?.Download(item);
+
+    public void PlayOffline(Aurelia.Linux.Core.Playback.OfflineTitle title) => Together?.PlayOffline(title);
+
     public void EditCollection(CollectionSummary? collection, CatalogItemSummary? preselected)
     {
         if (context is null) return;
@@ -430,6 +436,7 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
             LibraryDestination.Collections => new CollectionsPage(context!),
             LibraryDestination.Watchlist => new WatchlistPage(context!),
             LibraryDestination.History => new HistoryPage(context!),
+            LibraryDestination.Downloads => new DownloadsPage(context!),
             _ => new StatisticsPage(context!),
         };
         page.Rebuild();

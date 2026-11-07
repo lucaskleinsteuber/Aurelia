@@ -65,6 +65,7 @@ subtitle choices per profile and series, subtitle files next to the video, subti
 OpenSubtitles (by hand or automatically, with your own free key), timeline previews,
 a sleep timer, Dialogue Boost, Volume Leveling and Up Next for series. *Play On* sends a title to
 another screen at home, and *Watch Together* keeps several screens on the same moment.
+On the Mac and Linux you can **download** a movie or episode to watch without the server.
 
 **Everyone has their own profile.** Progress, favorites, Watchlist, collections, scene notes and
 viewing history are separate per person. Profiles can be limited to chosen libraries or titles

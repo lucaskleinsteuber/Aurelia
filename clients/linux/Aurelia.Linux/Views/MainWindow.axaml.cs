@@ -249,6 +249,9 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         if (Remote is not null) created.AttachRemote(Remote);
         created.PlayRequested += (item, resume) => _ = PlayAsync(item, resume);
         created.Together = this;
+        // Progress watched offline goes back to the server once a profile is open again.
+        if (services.Downloads is { } offline && Session.Library is { } opened)
+            _ = Task.Run(() => offline.SyncProgressAsync(new PlaybackClient(Session.Api, opened.Client)));
         created.SettingsRequested += () => OpenSettings();
         return created;
     }
@@ -393,6 +396,47 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         {
             library.Report(failure);
         }
+    }
+
+    // MARK: Offline downloads
+
+    /// <summary>Downloads on this computer.</summary>
+    public OfflineDownloads? Downloads => services.Downloads;
+
+    /// <summary>Downloads a movie or episode to watch without the server.</summary>
+    public void Download(Aurelia.Contracts.CatalogItemSummary item)
+    {
+        if (services.Downloads is not { } downloads || Session.Library is not { } library) return;
+        var subtitle = item.Kind == Aurelia.Contracts.MediaKind.Episode
+            ? string.Join(" · ", new[] { item.ParentTitle, item.SeasonNumber is { } season ? $"S{season} E{item.EpisodeNumber}" : null }.Where(part => part is not null))
+            : item.Year?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _ = Task.Run(() => downloads.DownloadAsync(new PlaybackClient(Session.Api, library.Client), item, subtitle));
+    }
+
+    /// <summary>Plays a download; it works while the server is asleep or out of reach.</summary>
+    public void PlayOffline(OfflineTitle title) => _ = PlayOfflineAsync(title);
+
+    private async Task PlayOfflineAsync(OfflineTitle title)
+    {
+        if (services.Downloads is not { } downloads || Session.Library is not { } library || services.Engines is null) return;
+        if (Player is { } running) await running.CloseAsync();
+        var outbox = new ProgressOutbox(null);
+        var player = new PlaybackController(new PlaybackClient(Session.Api, library.Client), services.Engines, services.Settings, outbox,
+            services.Time, action => Dispatcher.UIThread.Post(action), services.PlaybackSystem);
+        Player = player;
+        var view = new PlayerView(player, this);
+        player.Closed += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (Player != player) return;
+            Player = null;
+            PlayerHost.Content = null;
+            PlayerHost.IsVisible = false;
+            view.Dispose();
+            if (WindowState == WindowState.FullScreen) WindowState = WindowState.Normal;
+        });
+        PlayerHost.Content = view;
+        PlayerHost.IsVisible = true;
+        await player.StartOfflineAsync(title, downloads);
     }
 
     /// <summary>This computer's Watch Together party, if any.</summary>

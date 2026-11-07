@@ -74,6 +74,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private IVideoEngine? engine;
     private LoopbackStreamRelay? relay;
     private PlaybackSourceResponse? ticket;
+    /// <summary>Set while a download plays from this computer instead of the server.</summary>
+    private (OfflineTitle Title, OfflineDownloads Store)? offline;
     private CatalogItemSummary? item;
     private Guid? seriesId;
     private long revision;
@@ -295,6 +297,18 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     public IVideoEngine? Engine => engine;
 
     /// <summary>Starts a title: a series plays its next episode, an episode continues with the ones after it.</summary>
+    /// <summary>Plays a download from this computer; it works while the server is out of reach.</summary>
+    public async Task StartOfflineAsync(OfflineTitle title, OfflineDownloads store)
+    {
+        Record(PlaybackDiagnosticKind.Started);
+        offline = (title, store);
+        queue.Clear();
+        previous.Clear();
+        await LoadAsync(title.Item(), null);
+    }
+
+    public bool IsOffline => offline is not null;
+
     public async Task StartAsync(CatalogItemSummary title, bool resume, long? startAt = null)
     {
         Record(PlaybackDiagnosticKind.Started);
@@ -522,15 +536,32 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         await ReleaseAsync(revoke: !keepTicket);
         try
         {
-            if (!keepTicket || ticket is null) ticket = await client.StartAsync(title.Id, CancellationToken.None);
-            revision = ticket.Progress.Revision;
-            var progress = ticket.Progress;
+            PlaybackProgressResponse progress;
+            if (offline is { } download)
+            {
+                var stored = download.Store.Find(download.Title.Id) ?? download.Title;
+                progress = new PlaybackProgressResponse(stored.Id, stored.PositionMilliseconds, stored.DurationMilliseconds, stored.IsCompleted, null, null);
+            }
+            else
+            {
+                if (!keepTicket || ticket is null) ticket = await client.StartAsync(title.Id, CancellationToken.None);
+                revision = ticket.Progress.Revision;
+                progress = ticket.Progress;
+            }
             var resumeAt = start ?? (Preferences.AutomaticResume && !progress.IsCompleted && progress.PositionMilliseconds >= Preferences.ResumeThresholdSeconds * 1000L
                 ? progress.PositionMilliseconds
                 : 0);
-            relay = new LoopbackStreamRelay(client.StreamConnection, client.StreamToken, client.StreamUri(ticket));
-            relay.Failed += status => post(() => _ = RecoverAsync($"The stream stopped ({status})."));
-            var url = relay.Start();
+            Uri url;
+            if (offline is { } file)
+            {
+                url = new Uri(file.Store.FileOf(file.Title));
+            }
+            else
+            {
+                relay = new LoopbackStreamRelay(client.StreamConnection, client.StreamToken, client.StreamUri(ticket!));
+                relay.Failed += status => post(() => _ = RecoverAsync($"The stream stopped ({status})."));
+                url = relay.Start();
+            }
             engine = engines.Create(Preferences.AudioProcessing);
             OnPropertyChanged(nameof(Engine));
             engine.Changed += OnEngineChanged;
@@ -545,7 +576,15 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             lastMovement = openedAt;
             lastClock = -1;
             lastSave = openedAt;
-            _ = AddSidecarSubtitlesAsync(ticket, relay);
+            if (offline is { } withSubtitles)
+            {
+                foreach (var subtitle in withSubtitles.Title.Subtitles)
+                    engine.AddSubtitle(new Uri(Path.Combine(withSubtitles.Store.Folder(withSubtitles.Title.Id), subtitle.FileName)));
+            }
+            else
+            {
+                _ = AddSidecarSubtitlesAsync(ticket!, relay!);
+            }
             StartClock();
         }
         catch (InvalidOperationException failure) { Fail(failure.Message); }
@@ -766,6 +805,11 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     {
         if (Item is not { } current || Duration <= 0 || (!observedPlayback && !finished)) return;
         lastSave = time.GetUtcNow();
+        if (offline is { } download)
+        {
+            download.Store.SaveProgress(current.Id, finished ? Duration : Position, Duration, finished);
+            return;
+        }
         var pending = new PendingProgress(client.Library.Server.ServerId, client.Library.Profile.User.Id, current.Id,
             finished ? Duration : Position, Duration, finished, revision, Guid.NewGuid(), time.GetUtcNow());
         var (result, saved) = await outbox.SaveAsync(client, pending, CancellationToken.None);

@@ -12,6 +12,7 @@ public enum LibraryDestination
     Movies,
     History,
     Statistics,
+    Downloads,
 }
 
 public static class LibraryDestinations
@@ -27,6 +28,7 @@ public static class LibraryDestinations
         LibraryDestination.Movies => "Movies",
         LibraryDestination.History => "History",
         LibraryDestination.Statistics => "Statistics",
+        LibraryDestination.Downloads => "Downloads",
         _ => throw new ArgumentOutOfRangeException(nameof(destination), destination, null),
     };
 
@@ -42,6 +44,7 @@ public static class LibraryDestinations
         LibraryDestination.Movies => "movies",
         LibraryDestination.History => "history",
         LibraryDestination.Statistics => "statistics",
+        LibraryDestination.Downloads => "downloads",
         _ => throw new ArgumentOutOfRangeException(nameof(destination), destination, null),
     };
 

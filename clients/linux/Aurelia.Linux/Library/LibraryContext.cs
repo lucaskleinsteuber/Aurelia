@@ -36,6 +36,13 @@ public interface ILibraryNavigator
     Task<IReadOnlyList<WatchPartySummary>> WatchPartiesAsync() => Task.FromResult<IReadOnlyList<WatchPartySummary>>([]);
 
     Task JoinWatchTogetherAsync(WatchPartySummary party) => Task.CompletedTask;
+
+    /// <summary>Downloads on this computer, or null where downloads are not offered.</summary>
+    Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => null;
+
+    void Download(CatalogItemSummary item) { }
+
+    void PlayOffline(Aurelia.Linux.Core.Playback.OfflineTitle title) { }
 }
 
 public enum TitleAction

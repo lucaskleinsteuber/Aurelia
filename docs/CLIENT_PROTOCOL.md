@@ -261,6 +261,17 @@ The Mac, Linux, Apple TV, iPhone, iPad and browser players follow the party: the
 than 1.5 seconds apart (0.5 seconds while paused), and send their own play, pause, seek and
 title changes as commands. Answers that arrive out of order never undo a newer revision.
 
+## Offline downloads
+
+A person may download a movie or episode to their own Mac or Linux computer. The app streams
+the original file once through a normal playback ticket and the loopback relay (so the pinned
+certificate and sign-in apply) and keeps it, with the stream's subtitle files as WebVTT, in its
+own data folder: the sandboxed Application Support on the Mac, `$XDG_DATA_HOME/aurelia-desktop`
+on Linux. Nothing is written on the server or next to the media. A download plays through the
+normal player without the server; progress watched offline is saved on the computer and sent
+with the expected revision once the server answers and the profile is open, unless the server
+already has a newer position.
+
 ## Collections and smart lists
 
 The server reports capability `collections-v2`.

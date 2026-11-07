@@ -71,6 +71,16 @@ internal static class MediaMenu
             items.Add(Item(item.ContinueWatchingHidden ? "Show in Continue Watching" : "Remove from Continue Watching",
                 () => _ = store.SetContinueWatchingHiddenAsync(item.Id, !item.ContinueWatchingHidden)));
         }
+        if (context.Navigator.Downloads is { } downloads && item.Kind is MediaKind.Movie or MediaKind.Episode)
+        {
+            items.Add(new Separator());
+            if (downloads.Active.TryGetValue(item.Id, out var share))
+                items.Add(Item($"Cancel Download ({(int)(share * 100)} %)", () => downloads.Cancel(item.Id)));
+            else if (downloads.Find(item.Id) is not null)
+                items.Add(Item("Remove Download", () => downloads.Remove(item.Id)));
+            else if (LibraryPresentation.IsPlayable(item))
+                items.Add(Item("Download", () => context.Navigator.Download(item)));
+        }
         // Owners and administrators edit and remove titles; media files are never changed.
         if (store.CanManageMedia && item.Kind is MediaKind.Movie or MediaKind.Series or MediaKind.Episode)
         {

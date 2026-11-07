@@ -25,7 +25,7 @@ public sealed class ShellTests
     {
         var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
         Assert.Equal(
-            ["Home", "Library", "Collections", "Watchlist", "Recently Added", "TV Shows", "Movies"],
+            ["Home", "Library", "Collections", "Watchlist", "Recently Added", "TV Shows", "Movies", "Downloads"],
             window.Shell!.SidebarItems.Select(item => item.Title));
         Assert.All(window.Shell.SidebarItems, item => Assert.NotNull(item.Icon));
     }

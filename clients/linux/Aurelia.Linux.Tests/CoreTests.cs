@@ -20,7 +20,7 @@ public sealed class CoreTests
     public void IdentifiersMatchTheMacApp()
     {
         Assert.Equal(
-            ["home", "library", "collections", "watchlist", "recentlyAdded", "tvShows", "movies", "history", "statistics"],
+            ["home", "library", "collections", "watchlist", "recentlyAdded", "tvShows", "movies", "history", "statistics", "downloads"],
             SidebarLayout.DefaultOrder.Select(d => d.Identifier()));
         foreach (var destination in Enum.GetValues<LibraryDestination>())
         {
