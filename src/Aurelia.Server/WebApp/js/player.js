@@ -276,7 +276,18 @@ export class Player {
    * or converts; a codec string the browser refuses after all is left out and planned again.
    */
   async startLive(at) {
-    if (this.live || this.closed) return;
+    // The picture check, the sound check and a video error can each ask for live playback
+    // while the plan is still loading; only the first one starts it.
+    if (this.live || this.liveStarting || this.closed) return;
+    this.liveStarting = true;
+    try {
+      await this.openLive(at);
+    } finally {
+      this.liveStarting = false;
+    }
+  }
+
+  async openLive(at) {
     this.startScreen.hidden = false;
     this.video.removeAttribute("src");
     this.video.load();
@@ -319,7 +330,13 @@ export class Player {
       audio: track?.index ?? null,
       onFailure: (status, code) => this.liveFailed(status, code),
     });
-    await this.live.open(at);
+    try {
+      await this.live.open(at);
+    } catch {
+      // The browser refused the stream after all (for example addSourceBuffer threw).
+      if (!this.closed) this.showNotice(UNPLAYABLE, true);
+      return;
+    }
     if (this.closed) return;
     this.restoreTrackChoices();
     await this.play();
@@ -337,6 +354,7 @@ export class Player {
 
   /** A file the browser opened but cannot show or hear plays live converted from where it is. */
   switchToLive() {
+    if (this.liveStarting && !this.closed) return true;
     if (!this.canConvert || this.live || this.closed) return false;
     const at = Math.max(this.resumeAt, this.video.currentTime || 0);
     this.resumeAt = 0;
