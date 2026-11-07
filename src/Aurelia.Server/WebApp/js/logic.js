@@ -342,7 +342,13 @@ function filterQuery(filters = {}) {
 /** The screen an address shows. Unknown addresses go Home. */
 export function parseRoute(pathname = "/", search = "") {
   const query = new URLSearchParams(search);
-  const parts = String(pathname).split("/").filter(Boolean).map(decodeURIComponent);
+  let parts;
+  try {
+    parts = String(pathname).split("/").filter(Boolean).map(decodeURIComponent);
+  } catch {
+    // A cut-off or mistyped link ("/title/%E0%A4%A") opens Home instead of a blank page.
+    return { name: "home" };
+  }
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (parts.length === 0) return { name: "home" };
   if (parts.length === 1 && BROWSE_SECTIONS.includes(parts[0])) return { name: parts[0], filters: parseFilters(query) };

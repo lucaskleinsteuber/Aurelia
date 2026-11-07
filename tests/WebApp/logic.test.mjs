@@ -343,3 +343,8 @@ test("smart list rules travel in the protocol's names and old lists still open",
   assert.equal(mac.matchAny, false);
   assert.equal(logic.readSmartRules("not json").kind, "");
 });
+
+test("a malformed percent escape in the address opens Home instead of throwing", () => {
+  assert.deepEqual(logic.parseRoute("/title/%E0%A4%A"), { name: "home" });
+  assert.deepEqual(logic.parseRoute("/%"), { name: "home" });
+});
