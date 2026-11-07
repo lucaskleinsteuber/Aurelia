@@ -55,7 +55,7 @@ else
   [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$version" ] \
     && [ "$(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")" = "$build" ] \
     || { echo "$app is not Aurelia $version ($build)." >&2; exit 1; }
-  lipo "$app/Contents/MacOS/Aurelia" -verify_arch arm64 x86_64 \
+  { lipo "$app/Contents/MacOS/Aurelia" -verify_arch arm64 && lipo "$app/Contents/MacOS/Aurelia" -verify_arch x86_64; } \
     || { echo "The Mac app must be universal." >&2; exit 1; }
   codesign --verify --deep --strict "$app"
   mkdir -p "$output"

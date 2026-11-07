@@ -276,7 +276,8 @@ for binary in "$candidate/Contents/MacOS/Aurelia" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit" \
   "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe"; do
-  /usr/bin/lipo "$binary" -verify_arch arm64 x86_64 || { echo "${binary#$candidate/} is not universal." >&2; exit 1; }
+  { /usr/bin/lipo "$binary" -verify_arch arm64 && /usr/bin/lipo "$binary" -verify_arch x86_64; } \
+    || { echo "${binary#$candidate/} is not universal." >&2; exit 1; }
 done
 /usr/bin/lipo "$candidate/Contents/Resources/Server/osx-arm64/Aurelia.Server" -verify_arch arm64
 /usr/bin/lipo "$candidate/Contents/Resources/Server/osx-x64/Aurelia.Server" -verify_arch x86_64
