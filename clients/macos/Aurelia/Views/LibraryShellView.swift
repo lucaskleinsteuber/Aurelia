@@ -809,7 +809,9 @@ private struct LibraryPage: View {
           .font(AureliaDesign.pageTitle)
           .tracking(-0.35)
           .accessibilityIdentifier("library-title")
-        if completedRequestKey == requestKey, !browser.isLoading {
+        // A list shown for this page keeps its count while a newer one loads quietly beneath it,
+        // so catching up after a start does not make the count blink.
+        if hasResultForContext, !(browser.isLoading && browser.items.isEmpty) {
           Text(String(browser.items.count))
             .font(.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
