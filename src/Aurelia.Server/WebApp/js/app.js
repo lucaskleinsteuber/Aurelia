@@ -419,7 +419,7 @@ async function sessionEnded() {
 }
 
 function handleError(error) {
-  if (error instanceof ApiError && (error.status === 401 || (error.status === 403 && /session|profile|device/.test(error.code)))) {
+  if (error instanceof ApiError && logic.sessionRefused(error.status, error.code)) {
     sessionEnded();
     return true;
   }

@@ -360,3 +360,12 @@ test("the change feed reports a server that stays offline and ends refused sessi
   assert.equal(logic.syncFailure(null, 9, 0).delay, 30_000);
   assert.equal(logic.syncFailure(null, 1, 0).delay, 4_000);
 });
+
+test("a refused profile or device is recognised the same way everywhere", () => {
+  assert.equal(logic.sessionRefused(401, "invalid_profile_session"), true);
+  assert.equal(logic.sessionRefused(403, "profile_session_revoked"), true);
+  assert.equal(logic.sessionRefused(403, "device_session_revoked"), true);
+  assert.equal(logic.sessionRefused(403, "management_locked"), false);
+  assert.equal(logic.sessionRefused(403, undefined), false);
+  assert.equal(logic.sessionRefused(500, "profile_session_revoked"), false);
+});

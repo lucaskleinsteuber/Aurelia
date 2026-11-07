@@ -1,6 +1,7 @@
 // Private scene-note editing, tied to one Player lifetime. Reload changes the list while keeping
 // the draft and its revision; conflicts require an explicit new edit, never a silent overwrite.
 import { h, icon } from "./dom.js";
+import { sessionRefused } from "./logic.js";
 
 export function formatNoteTime(milliseconds) {
   const value = Number.isSafeInteger(milliseconds) && milliseconds > 0 ? milliseconds : 0;
@@ -49,7 +50,7 @@ export function createSceneNotes({ api, mediaId, position, seek, show, isOpen, o
   const redraw = () => { if (alive() && isOpen()) open(); };
   function problem(value) {
     if (!alive() || value?.name === "AbortError") return;
-    if (value?.status === 401 || (value?.status === 403 && /session|profile|device/.test(value.code))) { onSessionEnded?.(value); return; }
+    if (sessionRefused(value?.status, value?.code)) { onSessionEnded?.(value); return; }
     error = value.message || "Scene notes could not be loaded. Try again.";
   }
   async function reload() {

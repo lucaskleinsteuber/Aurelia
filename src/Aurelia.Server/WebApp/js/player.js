@@ -10,7 +10,7 @@ import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
-  playerSubtitle, rateLabel, playbackStartSeconds, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
+  playerSubtitle, rateLabel, playbackStartSeconds, sessionRefused, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
   timelineValueText, trackForLanguage, volumeValueText,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
@@ -344,7 +344,7 @@ export class Player {
 
   liveFailed(status, code) {
     if (this.closed) return;
-    if (status === 401) {
+    if (sessionRefused(status, code)) {
       this.close();
       this.onSessionEnded?.(new ApiError(status, code, "The profile session ended."));
       return;
@@ -1119,7 +1119,7 @@ export class Player {
   }
 
   fail(error) {
-    if (error instanceof ApiError && error.status === 401) {
+    if (error instanceof ApiError && sessionRefused(error.status, error.code)) {
       this.close();
       this.onSessionEnded?.(error);
       return;
@@ -1173,7 +1173,7 @@ export class Player {
         // The old ticket still plays for a few minutes: a dropped answer or a busy server is
         // tried again until shortly before it ends. A refused profile ends the session at once.
         const left = expires - Date.now();
-        const sessionEnded = error instanceof ApiError && (error.status === 401 || error.status === 403);
+        const sessionEnded = error instanceof ApiError && sessionRefused(error.status, error.code);
         if (!sessionEnded && left > RENEW_RETRY_MS * 2) this.scheduleRenewal(RENEW_RETRY_MS);
         else this.fail(error);
       }

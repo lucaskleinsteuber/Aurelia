@@ -138,3 +138,17 @@ test("a refused or late ticket renewal ends playback with the error", async () =
     assert.equal(failures.length, 1); assert.equal(scheduled.length, 0);
   }
 });
+
+test("the player ends the session for a revoked profile like the rest of the app", async () => {
+  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  const ended = []; const notices = [];
+  const live = player({ onSessionEnded: (error) => ended.push(error.code), showNotice: (text) => notices.push(text) });
+  live.liveFailed(403, "profile_session_revoked");
+  assert.equal(live.closed, true); assert.deepEqual(ended, ["profile_session_revoked"]);
+  const opened = player({ onSessionEnded: (error) => ended.push(error.code), showNotice: (text) => notices.push(text) });
+  opened.fail(new ApiError(403, "device_session_revoked", "No"));
+  assert.equal(opened.closed, true); assert.deepEqual(ended, ["profile_session_revoked", "device_session_revoked"]);
+  const locked = player({ onSessionEnded: () => ended.push("wrong"), showNotice: (text) => notices.push(text) });
+  locked.fail(new ApiError(403, "full_library_access_required", "Needs full access."));
+  assert.equal(locked.closed, false); assert.deepEqual(notices, ["Needs full access."]);
+});

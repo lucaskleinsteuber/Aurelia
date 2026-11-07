@@ -995,3 +995,11 @@ export function syncFailure(error, failures, offlineInRow) {
   const delay = Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4));
   return { action: error?.offline && offlineInRow >= SYNC_OFFLINE_LIMIT ? "offline" : "wait", delay };
 }
+
+/**
+ * Whether the server refused the browser's profile or device: 401, or 403 with a session,
+ * profile or device code (such as profile_session_revoked). Every screen and the player use it.
+ */
+export function sessionRefused(status, code) {
+  return status === 401 || (status === 403 && /session|profile|device/.test(String(code ?? "")));
+}
