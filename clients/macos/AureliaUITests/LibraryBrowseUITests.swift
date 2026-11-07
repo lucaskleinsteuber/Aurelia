@@ -133,6 +133,28 @@ final class LibraryBrowseUITests: XCTestCase {
     ).click()
   }
 
+  @MainActor func testDownloadsPageAndTheDownloadMenuEntry() throws {
+    let app = launch()
+    defer { app.terminate() }
+    let sidebar = app.descendants(matching: .any)["sidebar-downloads"]
+    XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+    sidebar.click()
+    XCTAssertTrue(app.descendants(matching: .any)["downloads-page"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts["Downloads"].exists)
+    screenshot(app, "Downloads Page")
+
+    // Movies and episodes offer Download in their menu; nothing is downloaded here.
+    app.descendants(matching: .any)["sidebar-movies"].click()
+    let movie = app.buttons["media-10000000-0000-0000-0000-000000000001"]
+    XCTAssertTrue(movie.waitForExistence(timeout: 5))
+    movie.rightClick()
+    let download = app.menuItems["Download"]
+    let remove = app.menuItems["Remove Download"]
+    XCTAssertTrue(download.waitForExistence(timeout: 5) || remove.exists, app.debugDescription)
+    screenshot(app, "Download Menu Entry")
+    app.typeKey(.escape, modifierFlags: [])
+  }
+
   @MainActor private func launch(preferenceSuite: String? = nil) -> XCUIApplication {
     continueAfterFailure = false
     let app = XCUIApplication()

@@ -39,6 +39,8 @@ final class OfflineDownloads: ObservableObject {
   @Published private(set) var titles: [OfflineTitle] = []
   /// Titles downloading now, with their share done (0…1).
   @Published private(set) var active: [UUID: Double] = [:]
+  /// The names of the titles downloading now, for the Downloads page.
+  @Published private(set) var activeNames: [UUID: String] = [:]
   @Published var errorMessage: String?
 
   let root: URL
@@ -78,6 +80,7 @@ final class OfflineDownloads: ObservableObject {
   func download(_ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile) {
     guard let userId = profile.user?.id, tasks[item.id] == nil, title(item.id) == nil else { return }
     active[item.id] = 0
+    activeNames[item.id] = subtitle.map { "\(item.title) · \($0)" } ?? item.title
     errorMessage = nil
     tasks[item.id] = Task { [weak self] in
       guard let self else { return }
@@ -91,6 +94,7 @@ final class OfflineDownloads: ObservableObject {
         self.errorMessage = "\(item.title) could not be downloaded. \(error.localizedDescription)"
       }
       self.active[item.id] = nil
+      self.activeNames[item.id] = nil
       self.tasks[item.id] = nil
     }
   }
@@ -99,6 +103,7 @@ final class OfflineDownloads: ObservableObject {
     tasks[id]?.cancel()
     tasks[id] = nil
     active[id] = nil
+    activeNames[id] = nil
     try? FileManager.default.removeItem(at: folder(for: id))
   }
 

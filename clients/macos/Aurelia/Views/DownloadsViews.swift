@@ -29,6 +29,8 @@ struct DownloadsPage: View {
             Text("Downloading").font(.headline)
             ForEach(downloads.active.keys.sorted(), id: \.self) { id in
               HStack {
+                Text(downloads.activeNames[id] ?? "Title").lineLimit(1)
+                  .frame(maxWidth: 260, alignment: .leading)
                 ProgressView(value: downloads.active[id] ?? 0)
                   .frame(maxWidth: 320)
                 Text("\(Int((downloads.active[id] ?? 0) * 100)) %").monospacedDigit()

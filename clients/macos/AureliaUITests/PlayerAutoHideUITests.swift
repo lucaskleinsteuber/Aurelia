@@ -58,6 +58,20 @@ final class PlayerAutoHideUITests: XCTestCase {
   }
 
   @MainActor
+  func testWatchTogetherButtonOffersToStartAParty() {
+    let app = launchPlayer()
+    defer { app.terminate() }
+    let button = app.buttons["player-watch-together"]
+    XCTAssertTrue(button.waitForExistence(timeout: 5))
+    button.click()
+    // Only the offer is checked; no party is started against the synthetic server.
+    XCTAssertTrue(app.buttons["watch-together-start"].waitForExistence(timeout: 5), app.debugDescription)
+    shot(app, "Player - Watch Together")
+    app.typeKey(.escape, modifierFlags: [])
+    XCTAssertTrue(app.buttons["watch-together-start"].waitForNonExistence(timeout: 5))
+  }
+
+  @MainActor
   private func launchPlayer() -> XCUIApplication {
     continueAfterFailure = false
     let app = XCUIApplication()
