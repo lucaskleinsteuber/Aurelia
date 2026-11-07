@@ -86,8 +86,19 @@ struct AppSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AureliaDesign.canvas)
     }
-    .frame(minWidth: 840, idealWidth: 880, minHeight: 620, idealHeight: 680)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(AureliaBackdrop())
+    .overlay(alignment: .topLeading) {
+      // Settings cover the library inside the window; Done or Esc returns to it.
+      Button("Done") { model.isSettingsPresented = false }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .keyboardShortcut(.cancelAction)
+        .help("Back to the library (Esc)")
+        .accessibilityIdentifier("settings-done")
+        .padding(.top, 12)
+        .padding(.leading, 220 - 76)
+    }
     .task(id: selectedCategory) {
       guard needsServerAdministration, !model.requiresProfileSelection, !model.isStarting else {
         isLoadingAdministration = false
@@ -172,7 +183,8 @@ struct AppSettingsView: View {
     VStack(spacing: 12) {
       AureliaSearchField(prompt: "Search settings…", text: $searchText)
         .padding(.horizontal, 12)
-        .padding(.top, 14)
+        // Below the window buttons and Done.
+        .padding(.top, 52)
         .accessibilityIdentifier("settings-search-field")
 
       ScrollView {

@@ -232,32 +232,49 @@ struct LibraryShellView: View {
       }
       .listStyle(.sidebar)
       .scrollContentBackground(.hidden)
-      // The profile sits at the foot of the sidebar, like the account in the Apple TV app.
-      if model.profile?.isViewingSession == true {
-        Button {
-          Task { await model.switchWatchingProfile() }
-        } label: {
-          HStack(spacing: 10) {
-            AureliaProfileAvatar(
-              id: model.profile?.user?.id, name: model.profile?.user?.username ?? "?", size: 30)
-            Text(model.profile?.user?.username ?? "Switch Profile")
-              .font(.body.weight(.semibold))
-              .lineLimit(1)
-            Spacer(minLength: 0)
+      // The profile sits at the foot of the sidebar, like the account in the Apple TV app, with
+      // Settings beside it.
+      HStack(spacing: 6) {
+        if model.profile?.isViewingSession == true {
+          Button {
+            Task { await model.switchWatchingProfile() }
+          } label: {
+            HStack(spacing: 10) {
+              AureliaProfileAvatar(
+                id: model.profile?.user?.id, name: model.profile?.user?.username ?? "?", size: 30)
+              Text(model.profile?.user?.username ?? "Switch Profile")
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+              Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 46)
+            .contentShape(Rectangle())
           }
-          .padding(.horizontal, 10)
-          .frame(height: 46)
-          .contentShape(Rectangle())
+          .buttonStyle(SidebarFooterButtonStyle())
+          .disabled(model.isSelectingProfile)
+          .help("Switch Profile")
+          .accessibilityLabel("Switch Profile, \(model.profile?.user?.username ?? "")")
+          .accessibilityIdentifier("switch-watching-profile")
+        } else {
+          Spacer(minLength: 0)
+        }
+        Button {
+          model.isSettingsPresented = true
+        } label: {
+          Image(systemName: "gearshape")
+            .font(.system(size: 16, weight: .medium))
+            .frame(width: 38, height: 46)
+            .contentShape(Rectangle())
         }
         .buttonStyle(SidebarFooterButtonStyle())
-        // Clears the window's rounded bottom corner.
-        .padding(.horizontal, 12)
-        .padding(.bottom, 16)
-        .disabled(model.isSelectingProfile)
-        .help("Switch Profile")
-        .accessibilityLabel("Switch Profile, \(model.profile?.user?.username ?? "")")
-        .accessibilityIdentifier("switch-watching-profile")
+        .help("Settings (⌘,)")
+        .accessibilityLabel("Settings")
+        .accessibilityIdentifier("sidebar-settings")
       }
+      // Clears the window's rounded bottom corner.
+      .padding(.horizontal, 12)
+      .padding(.bottom, 16)
     }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("primary-sidebar")

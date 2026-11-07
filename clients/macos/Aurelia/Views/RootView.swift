@@ -46,7 +46,15 @@ struct RootView: View {
           LibraryShellView()
         }
       }
-      .accessibilityHidden(model.playback != nil)
+      .accessibilityHidden(model.playback != nil || model.isSettingsPresented)
+
+      if model.isSettingsPresented {
+        AppSettingsView()
+          .transition(
+            reduceMotion
+              ? .opacity : .opacity.combined(with: .scale(scale: 0.985, anchor: .center)))
+          .zIndex(5)
+      }
 
       if let profile = model.profile, let playback = model.playback {
         PlayerView(profile: profile, presentation: playback)
@@ -66,6 +74,7 @@ struct RootView: View {
     .aureliaFullWindowCanvas()
     .aureliaRemoveEmptyWindowToolbar()
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.playback)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.isSettingsPresented)
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: model.isResting)
     .preferredColorScheme(.dark)
     // While playing, the window may shrink to a 16:9 picture-in-picture size; a library minimum
@@ -73,6 +82,11 @@ struct RootView: View {
     .frame(
       minWidth: model.playback == nil ? 760 : 320, minHeight: model.playback == nil ? 560 : 180
     )
+    // Switching profile or server from Settings shows that screen instead.
+    .onChange(of: model.requiresProfileSelection) { _, selecting in
+      if selecting { model.isSettingsPresented = false }
+    }
+    .onChange(of: model.profile?.serverId) { _, _ in model.isSettingsPresented = false }
     .sheet(isPresented: $model.isMediaManagerPresented) {
       MediaManagerView().environmentObject(model)
     }

@@ -598,7 +598,7 @@ struct AuthenticatedArtwork: View {
             width: model.libraryCapabilities.contains("artwork-variants-v1") ? width : nil)
           try Task.checkCancellation()
           // Newly loaded artwork fades in; artwork already in memory is drawn at once.
-          withAnimation(reduceMotion ? nil : .easeOut(duration: 0.28)) { image = loaded }
+          withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { image = loaded }
         } catch is CancellationError {
           return
         } catch {

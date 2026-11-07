@@ -34,6 +34,10 @@ struct AureliaApp: App {
     .defaultSize(width: 1_470, height: 956)
     .windowStyle(.hiddenTitleBar)
     .commands {
+      CommandGroup(replacing: .appSettings) {
+        Button("Settings…") { model.isSettingsPresented = true }
+          .keyboardShortcut(",", modifiers: .command)
+      }
       CommandGroup(after: .appInfo) {
         Button("Check for Updates…") {
           Task { await AppUpdater.shared.check(userInitiated: true) }
@@ -64,11 +68,6 @@ struct AureliaApp: App {
         }
         .keyboardShortcut("/", modifiers: .command)
       }
-    }
-
-    Settings {
-      AppSettingsView()
-        .environmentObject(model)
     }
   }
 }

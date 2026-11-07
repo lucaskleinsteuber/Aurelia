@@ -167,6 +167,8 @@ final class AppModel: ObservableObject {
   }
   @Published var isMediaManagerPresented = false
   @Published var isKeyboardShortcutsPresented = false
+  /// Settings show inside the window, over the library, rather than in a window of their own.
+  @Published var isSettingsPresented = false
   @Published var importPreviewLibrary: LibrarySummary?
 
   let artworkLoader = ArtworkLoader()
@@ -1605,6 +1607,7 @@ final class AppModel: ObservableObject {
     libraryCapabilities = Set(info.capabilities ?? [])
     collections = newCollections
     home = newHome
+    prefetchArtwork()
     if (info.capabilities ?? []).contains("watchlist-people-v1"),
       let loadedWatchlist = try? await client.watchlist(), isCurrent(generation)
     {
@@ -2503,6 +2506,39 @@ final class AppModel: ObservableObject {
   private func syncOfflineProgress() {
     guard let profile, profile.user != nil, !requiresProfileSelection else { return }
     Task { await OfflineDownloads.shared.syncProgress(profile: profile) }
+  }
+
+  // MARK: Artwork ahead of scrolling
+
+  private var artworkPrefetch: [Task<Void, Never>] = []
+
+  /// Loads the posters of Home and the library in the background, a few at a time, so cards
+  /// that scroll into view draw them in their first frame instead of fading them in.
+  private func prefetchArtwork() {
+    guard let profile, !CinemaUITestFixture.playsSimulatedTitles else { return }
+    let variants = libraryCapabilities.contains("artwork-variants-v1")
+    var seen = Set<UUID>()
+    var posters: [ArtworkSummary] = []
+    let rails = (home.map { $0.continueWatching + $0.recentlyAdded + $0.favorites } ?? [])
+    for item in rails + catalogItems {
+      guard let poster = item.poster, seen.insert(poster.id).inserted else { continue }
+      posters.append(poster)
+      if posters.count >= 150 { break }
+    }
+    let loader = artworkLoader
+    // Cards ask for 320 or 640 pixels; a 640 picture serves both.
+    let width = variants ? 640 : nil
+    artworkPrefetch.forEach { $0.cancel() }
+    // Four quiet workers, each loading every fourth poster.
+    artworkPrefetch = (0..<4).map { lane in
+      Task(priority: .utility) { @MainActor in
+        for poster in stride(from: lane, to: posters.count, by: 4).map({ posters[$0] }) {
+          if Task.isCancelled { return }
+          if loader.cachedImage(for: poster, profile: profile, width: width) != nil { continue }
+          _ = try? await loader.image(for: poster, profile: profile, width: width)
+        }
+      }
+    }
   }
 
   // MARK: Watch Together

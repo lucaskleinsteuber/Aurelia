@@ -425,7 +425,7 @@ final class AureliaUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["1 skipped"].exists)
     XCTAssertTrue(app.buttons["Cancel"].exists)
     XCTAssertFalse(app.staticTexts["The server returned an invalid response."].exists)
-    let settingsWindow = app.windows["com_apple_SwiftUI_Settings_window"]
+    let settingsWindow = app.windows.firstMatch
     for _ in 0..<12 {
       if status.isHittable { break }
       settingsWindow.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.7))

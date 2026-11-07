@@ -618,6 +618,11 @@ struct MediaDetailView: View {
           Text(overview).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
       }
+      // Only what is known is listed, like the Linux app; unknown fields are left out.
+      let fields = MediaInformationPresentation.fields(for: detail).filter {
+        $0.value?.isEmpty == false
+      }
+      if !fields.isEmpty {
       Text("Information").font(AureliaDesign.sectionTitle)
       LazyVGrid(
         columns: detail.item.kind == .series
@@ -626,9 +631,10 @@ struct MediaDetailView: View {
         alignment: .leading,
         spacing: 22
       ) {
-        ForEach(MediaInformationPresentation.fields(for: detail)) { field in
+        ForEach(fields) { field in
           InfoValue(title: field.title, value: field.value)
         }
+      }
       }
     }
     .padding(.horizontal, AureliaDesign.pagePadding)
