@@ -378,9 +378,15 @@ struct IOSAPIClient: Sendable {
   func pollPlayerCommands(deviceId: String, waitMs: Int = 0) async throws
     -> [IOSRemotePlaybackCommand]
   {
-    let encoded =
-      deviceId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? deviceId
-    return try await get("/api/v1/devices/player/commands?deviceId=\(encoded)&waitMs=\(waitMs)")
+    // The query goes in query items: a path with "?" is refused before any request is sent.
+    try Self.decode(
+      [IOSRemotePlaybackCommand].self,
+      data: await send(
+        "/api/v1/devices/player/commands",
+        query: [
+          URLQueryItem(name: "deviceId", value: deviceId),
+          URLQueryItem(name: "waitMs", value: String(waitMs)),
+        ]))
   }
   func progress(mediaID: UUID) async throws -> IOSPlaybackProgress {
     let value: IOSPlaybackProgress = try await get("/api/v1/media/\(mediaID.uuidString)/progress")
@@ -457,6 +463,24 @@ struct IOSAPIClient: Sendable {
       throw IOSCoreError.invalidResponse
     }
     return response.body
+  }
+
+  // Watch Together requests (see IOSWatchTogether.swift).
+  func getWatchTogether<Value: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws
+    -> Value
+  {
+    try Self.decode(Value.self, data: await send(path, query: query))
+  }
+
+  func postWatchTogether<Value: Decodable>(_ path: String, _ payload: some Encodable) async throws
+    -> Value
+  {
+    try Self.decode(
+      Value.self, data: await send(path, method: "POST", body: try JSONEncoder().encode(payload)))
+  }
+
+  func deleteWatchTogether(_ path: String) async throws {
+    _ = try await send(path, method: "DELETE")
   }
 
   private enum Authentication { case none, device, profile }

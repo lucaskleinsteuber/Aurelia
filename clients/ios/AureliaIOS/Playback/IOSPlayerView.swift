@@ -8,6 +8,7 @@ import UIKit
 struct IOSPlayerView: View {
   @StateObject private var controller: IOSPlaybackController
   @StateObject private var previews = IOSScrubPreviews()
+  @EnvironmentObject private var model: IOSAppModel
   @Environment(\.scenePhase) private var scenePhase
   @FocusState private var keyboard: Bool
   /// Brief indicator for skips made while the controls are hidden.
@@ -57,6 +58,7 @@ struct IOSPlayerView: View {
       if let upNext = controller.upNext, !controller.controlsVisible, controller.trackMenu == nil {
         upNextCard(upNext)
       }
+      if let party = model.watchParty { IOSWatchTogetherNotice(session: party) }
     }
     .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
     .persistentSystemOverlays(controller.controlsVisible ? .automatic : .hidden)
@@ -64,11 +66,14 @@ struct IOSPlayerView: View {
     .sheet(item: $controller.trackMenu) { menu in menuSheet(menu) }
     .onAppear {
       keyboard = true
+      // A party this device is in follows into the player before it starts.
+      model.attachWatchParty(to: controller)
       controller.start()
       configurePreviews()
     }
     .onDisappear {
       previews.reset()
+      model.playerClosed(controller)
       controller.close()
     }
     .onChange(of: controller.previewSourceURL) { _, _ in configurePreviews() }
@@ -132,6 +137,20 @@ struct IOSPlayerView: View {
             "Sleep Timer", symbol: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill",
             id: "sleep"
           ) { open(.sleep) }
+          // Watch Together: start a party for this title, or leave the one this device is in.
+          glassButton(
+            model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
+            symbol: model.watchParty?.state != nil ? "person.2.fill" : "person.2",
+            id: "watch-together"
+          ) {
+            Task {
+              if model.watchParty?.state != nil {
+                await model.leaveWatchTogether()
+              } else {
+                await model.startWatchTogether(with: controller)
+              }
+            }
+          }
         }
       }
     }
@@ -648,5 +667,29 @@ private struct IOSStartRing: View {
           .rotationEffect(.degrees(rotation - 90))
       }
     }
+  }
+}
+
+/// A short notice at the top of the picture when someone in the party acts, such as "Mia paused".
+private struct IOSWatchTogetherNotice: View {
+  @ObservedObject var session: IOSWatchTogetherSession
+
+  var body: some View {
+    let text =
+      session.notice ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
+    VStack {
+      if let text {
+        Label(text, systemImage: "person.2.fill")
+          .font(.subheadline.weight(.semibold))
+          .padding(.horizontal, 16).padding(.vertical, 9)
+          .glassEffect(.regular, in: Capsule())
+          .transition(.opacity)
+          .accessibilityIdentifier("watch-together-notice")
+      }
+      Spacer()
+    }
+    .padding(.top, 64)
+    .animation(.easeInOut(duration: 0.3), value: text)
+    .allowsHitTesting(false)
   }
 }

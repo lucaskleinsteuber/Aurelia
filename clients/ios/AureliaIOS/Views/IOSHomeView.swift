@@ -12,6 +12,22 @@ struct IOSHomeView: View {
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
+  /// Parties others started at home, to join with one tap.
+  private var watchTogether: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Watch Together").font(.title2.bold())
+      ForEach(model.watchParties) { party in
+        Button {
+          Task { await model.joinWatchTogether(party) }
+        } label: {
+          Label("Join \(party.hostName) · \(party.title)", systemImage: "person.2.fill")
+        }
+        .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+        .accessibilityIdentifier("home-watch-together")
+      }
+    }.padding(.horizontal, IOSDesign.margin)
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
@@ -22,6 +38,7 @@ struct IOSHomeView: View {
             Text("Home").font(.largeTitle.bold())
               .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
           }
+          if !model.watchParties.isEmpty { watchTogether }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
           if model.supportsWatchlist && !model.watchlistItems.isEmpty {
@@ -56,6 +73,13 @@ struct IOSHomeView: View {
     .ignoresSafeArea(edges: .top)
     .toolbar(.hidden, for: .navigationBar)
     .background(IOSDesign.canvas.ignoresSafeArea())
+    .task(id: model.session?.sessionId) {
+      // Parties others start appear on Home within a few seconds.
+      while !Task.isCancelled {
+        await model.refreshWatchParties()
+        try? await Task.sleep(for: .seconds(15))
+      }
+    }
     .task(id: model.libraryRefresh) {
       await model.loadHome()
       await model.preloadLibrary()

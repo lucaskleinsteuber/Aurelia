@@ -20,6 +20,10 @@ struct IOSDetailView: View {
   @State private var showingAbout = false
   private var item: IOSCatalogItem { model.overlay(detail?.item ?? initial) }
   private var seasons: [IOSSeason] { detail?.seasons ?? [] }
+  private var joinableParties: [IOSWatchPartySummary] {
+    let ids = Set([item.id] + seasons.flatMap { $0.episodes.map(\.item.id) })
+    return model.watchParties.filter { ids.contains($0.mediaId) }
+  }
   private var season: IOSSeason? { seasons.first { $0.number == selectedSeason } }
 
   var body: some View {
@@ -189,6 +193,16 @@ struct IOSDetailView: View {
           }
           .tint(.white)
           .accessibilityIdentifier("detail-more").accessibilityLabel("More")
+        }
+        // Parties others started for this title or one of its episodes.
+        ForEach(joinableParties) { party in
+          Button {
+            Task { await model.joinWatchTogether(party) }
+          } label: {
+            Label("Watch Together with \(party.hostName)", systemImage: "person.2.fill")
+          }
+          .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+          .accessibilityIdentifier("detail-watch-together")
         }
         if let target = plan?.target, let fraction = target.progressFraction {
           HStack(spacing: 10) {

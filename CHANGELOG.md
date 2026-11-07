@@ -12,6 +12,16 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## iOS 1.2.0 (7) - 07.11.2026
+
+### Added
+
+- Watch Together: join a party from Home or a title's page, or start one from the player; play, pause, jumps and the next episode follow the others.
+
+### Fixed
+
+- Play On from another Aurelia app reaches the iPhone or iPad: its command check was refused before it was sent.
+
 ## Apple TV 1.6.0 (29) - 07.11.2026
 
 ### Added

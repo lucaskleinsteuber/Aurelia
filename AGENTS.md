@@ -20,9 +20,14 @@ These rules apply to every task in this repository.
 - Keep all user-facing text in English until localization is an explicit task.
 - Preserve the native macOS design direction, but keep infrastructure
   milestones focused and functional.
-- Media files are only ever read: never modify, move, rename, delete or copy
-  them. Media remains at its original user-selected path; scans read only
-  filesystem metadata and directory structure.
+- Media files are only ever read: never modify, move, rename or delete them.
+  Media remains at its original user-selected path; scans read only
+  filesystem metadata and directory structure. The one allowed copy is an
+  **offline download** (owner's decision, 07.11.2026): a person explicitly
+  downloads a title to their own device to watch without the server. It is the
+  original file streamed through the normal playback ticket, kept in that app's
+  own data folder with a visible size, removable at any time, and never written
+  next to the media or on the server.
 - Converting video live is allowed: decoding, remuxing or transcoding while a
   title plays (for example for a browser or a device that cannot play the
   original), and scrub previews decoded ahead in the background. Converted
@@ -109,7 +114,7 @@ These rules apply to every task in this repository.
   client is named Aurelia, requires tvOS 26, and is at 1.6.0 (29).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
-- The iPhone and iPad client (`clients/ios`, preview, 1.1.1 (6)) follows the same
+- The iPhone and iPad client (`clients/ios`, preview, 1.2.0 (7)) follows the same
   rules as tvOS: its own Xcode project and version counter, code copied from the
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,

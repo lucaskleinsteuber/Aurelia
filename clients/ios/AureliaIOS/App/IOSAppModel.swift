@@ -40,6 +40,10 @@ final class IOSAppModel: ObservableObject {
   @Published private(set) var acknowledgedProgress: [UUID: IOSPlaybackProgress] = [:]
   @Published private var mutationSummaries: [UUID: IOSCatalogItem] = [:]
   @Published var remotePlaybackItem: IOSCatalogItem?
+  /// The Watch Together party this device is in, if any.
+  @Published private(set) var watchParty: IOSWatchTogetherSession?
+  /// Parties others started on the server, offered on Home and title pages.
+  @Published private(set) var watchParties: [IOSWatchPartySummary] = []
   private var syncTask: Task<Void, Never>?
   private var progressObserver: Task<Void, Never>?
   private var refreshTask: Task<Void, Never>?
@@ -580,7 +584,82 @@ final class IOSAppModel: ObservableObject {
     task = nil
     isBusy = false
   }
+  // MARK: Watch Together
+
+  private func watchClient() -> IOSAPIClient? {
+    guard let connection, let session else { return nil }
+    return makeClient(connection: connection, session: session)
+  }
+
+  /// Refreshes the parties others started, for Home and title pages.
+  func refreshWatchParties() async {
+    guard let api = watchClient() else {
+      watchParties = []
+      return
+    }
+    let all = (try? await api.watchParties()) ?? []
+    watchParties = all.filter { $0.id != watchParty?.partyID }
+  }
+
+  /// Joins a party and opens its title; the player then follows the others.
+  func joinWatchTogether(_ party: IOSWatchPartySummary) async {
+    await leaveWatchTogether()
+    guard let api = watchClient() else { return }
+    let joined = IOSWatchTogetherSession(api: api, deviceName: UIDevice.current.name)
+    watchParty = joined
+    guard await joined.join(party), let state = joined.state,
+      let item = try? await api.summary(id: state.mediaId)
+    else { return }
+    remotePlaybackItem = item
+  }
+
+  /// Starts a party for the title the player shows.
+  func startWatchTogether(with controller: IOSPlaybackController) async {
+    await leaveWatchTogether()
+    guard let api = watchClient() else { return }
+    let started = IOSWatchTogetherSession(api: api, deviceName: UIDevice.current.name)
+    watchParty = started
+    if await started.start(
+      mediaID: controller.currentMediaID, position: controller.position, playing: controller.isPlaying)
+    {
+      attachWatchParty(to: controller)
+    }
+  }
+
+  /// A player opened: a party this device is in follows it.
+  func attachWatchParty(to controller: IOSPlaybackController) {
+    guard let party = watchParty, let api = watchClient() else { return }
+    party.openTitle = { [weak controller] mediaID in
+      Task {
+        guard let item = try? await api.summary(id: mediaID) else { return }
+        controller?.switchTitle(to: item)
+      }
+    }
+    controller.userActionObserver = { [weak party] action in party?.userAction(action) }
+    controller.watchStateObserver = { [weak party] in party?.playerChanged() }
+    party.attach(controller)
+  }
+
+  /// The player closed: closing it leaves the party.
+  func playerClosed(_ controller: IOSPlaybackController) {
+    controller.userActionObserver = nil
+    controller.watchStateObserver = nil
+    guard let party = watchParty, party.isFollowing(controller) else { return }
+    Task { await leaveWatchTogether() }
+  }
+
+  func leaveWatchTogether() async {
+    guard let party = watchParty else { return }
+    watchParty = nil
+    await party.leave()
+  }
+
   private func clearPersonalState() {
+    if let party = watchParty {
+      watchParty = nil
+      Task { await party.leave() }
+    }
+    watchParties = []
     expiry?.cancel()
     expiry = nil
     session = nil

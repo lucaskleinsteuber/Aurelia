@@ -18,7 +18,13 @@ final class IOSPlaybackController: ObservableObject {
   @Published private(set) var isClosing = false
   @Published private(set) var canRetry = true
   @Published private(set) var isPlaying = false
-  @Published private(set) var isLoading = true
+  @Published private(set) var isLoading = true {
+    didSet { if isLoading != oldValue { watchStateObserver?() } }
+  }
+  /// Watch Together listens here for play, pause and seek done on this device.
+  var userActionObserver: (@MainActor (IOSPlaybackUserAction) -> Void)?
+  /// Watch Together listens here when the title opens, loads again or moves on.
+  var watchStateObserver: (@MainActor () -> Void)?
   @Published private(set) var position: Int64 = 0
   @Published private(set) var duration: Int64 = 0
   @Published private(set) var canSeek = false
@@ -39,7 +45,9 @@ final class IOSPlaybackController: ObservableObject {
   @Published private(set) var previewSourceURL: URL?
   @Published private(set) var previewsParallel = false
   @Published private(set) var supportsServerScrubPreviews = false
-  @Published private(set) var currentMediaID: UUID
+  @Published private(set) var currentMediaID: UUID {
+    didSet { if currentMediaID != oldValue { watchStateObserver?() } }
+  }
   @Published var trackMenu: TrackMenu? {
     didSet { userInteracted() }
   }
@@ -166,6 +174,7 @@ final class IOSPlaybackController: ObservableObject {
     wantsPlayback.toggle()
     if !wantsPlayback { isStarting = false }
     if wantsPlayback { engine.play() } else { engine.pause() }
+    userActionObserver?(wantsPlayback ? .play(position) : .pause(position))
     if !wantsPlayback { Task { await saveProgress(finished: false) } }
     userInteracted()
   }
@@ -177,16 +186,18 @@ final class IOSPlaybackController: ObservableObject {
     watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
     // Set before seeking: the engine reports the seek synchronously.
     if !revealControls { quietSkipUntil = ProcessInfo.processInfo.systemUptime + 2.5 }
-    engine.seek(
-      to: IOSPlayerPolicy.seekPosition(current: position, offset: offset, duration: duration))
+    let target = IOSPlayerPolicy.seekPosition(current: position, offset: offset, duration: duration)
+    engine.seek(to: target)
+    userActionObserver?(.seek(target))
     if revealControls { userInteracted() }
   }
 
   func seek(to milliseconds: Int64) {
     guard canSeek, !closed else { return }
     watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
-    engine.seek(
-      to: IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration))
+    let target = IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration)
+    engine.seek(to: target)
+    userActionObserver?(.seek(target))
     userInteracted()
   }
 
@@ -817,9 +828,14 @@ final class IOSPlaybackController: ObservableObject {
     if value != updated { value = updated }
   }
 
-  private func advance(to next: IOSCatalogItem) async {
+  /// Watch Together moved to another title: it opens in this player; this title is not marked watched.
+  func switchTitle(to item: IOSCatalogItem) {
+    Task { [weak self] in await self?.advance(to: item, markFinished: false) }
+  }
+
+  private func advance(to next: IOSCatalogItem, markFinished: Bool = true) async {
     guard !closed else { return }
-    await saveProgress(finished: true)
+    await saveProgress(finished: markFinished)
     guard !closed, !Task.isCancelled else { return }
     _ = await outbox.flush(scope: scope, mediaID: mediaID, timeout: .seconds(2))
     guard !closed, !Task.isCancelled else { return }
@@ -837,7 +853,7 @@ final class IOSPlaybackController: ObservableObject {
     stopPreviewRelay()
     if let id = ticket?.id { Task { [api] in try? await api.revokeTicket(id: id) } }
     ticket = nil
-    queue.removeFirst()
+    if queue.first?.id == next.id { queue.removeFirst() }
     mediaID = next.id
     currentMediaID = next.id
     isStarting = true
@@ -960,4 +976,31 @@ final class IOSPlaybackController: ObservableObject {
 struct IOSUpNext: Equatable {
   let title: String
   let seconds: Int
+}
+
+/// Watch Together drives the player through these, without showing the controls.
+extension IOSPlaybackController: IOSWatchTogetherPlayer {
+  var watchMediaID: UUID { currentMediaID }
+  var watchPosition: Int64 { position }
+  var watchIsPlaying: Bool { isPlaying }
+  var watchIsReady: Bool { !isLoading && canSeek && errorMessage == nil && !closed }
+
+  func watchPlay() {
+    guard !closed, errorMessage == nil, !wantsPlayback else { return }
+    wantsPlayback = true
+    engine.play()
+  }
+
+  func watchPause() {
+    guard !closed, wantsPlayback else { return }
+    wantsPlayback = false
+    isStarting = false
+    engine.pause()
+  }
+
+  func watchSeek(to milliseconds: Int64) {
+    guard canSeek, !closed else { return }
+    watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
+    engine.seek(to: IOSPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration))
+  }
 }
