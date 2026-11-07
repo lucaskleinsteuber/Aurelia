@@ -35,6 +35,15 @@ public sealed class OfflineDownloadTests : IDisposable
     }
 
     [Fact]
+    public void FreeSpaceIsReadFromTheDriveThatHoldsTheFolder()
+    {
+        var free = OfflineDownloads.FreeSpace(Path.GetTempPath());
+        Assert.True(free > 0);
+        // Other tests write meanwhile, so the same drive only has to answer about the same.
+        Assert.InRange(OfflineDownloads.FreeSpace(Path.Combine(Path.GetTempPath(), "not-yet-created", "deeper")), free - 1_000_000_000, free + 1_000_000_000);
+    }
+
+    [Fact]
     public void DownloadsAreKeptPerProfileAndForgottenWhenTheirFileIsGone()
     {
         var title = Invented();

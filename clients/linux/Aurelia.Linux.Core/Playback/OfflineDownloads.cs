@@ -43,6 +43,7 @@ public sealed class OfflineDownloads
     private readonly Dictionary<Guid, CancellationTokenSource> running = [];
     private List<OfflineTitle> titles = [];
     private readonly Dictionary<Guid, double> active = [];
+    private readonly Dictionary<Guid, string> activeNames = [];
 
     public OfflineDownloads(string root)
     {
@@ -60,6 +61,9 @@ public sealed class OfflineDownloads
     public IReadOnlyList<OfflineTitle> Titles { get { lock (gate) return [.. titles]; } }
 
     public IReadOnlyDictionary<Guid, double> Active { get { lock (gate) return new Dictionary<Guid, double>(active); } }
+
+    /// <summary>The name of a title downloading now, for the Downloads page.</summary>
+    public string? ActiveName(Guid id) { lock (gate) return activeNames.GetValueOrDefault(id); }
 
     public long TotalBytes => Titles.Sum(title => title.Bytes);
 
@@ -85,6 +89,7 @@ public sealed class OfflineDownloads
                 return;
             }
             active[item.Id] = 0;
+            activeNames[item.Id] = subtitle is null ? item.Title : $"{item.Title} · {subtitle}";
             Error = null;
         }
         Changed?.Invoke();
@@ -94,8 +99,7 @@ public sealed class OfflineDownloads
             var ticket = await client.StartAsync(item.Id, cancel.Token);
             try
             {
-                var free = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(Root)) ?? "/").AvailableFreeSpace;
-                if (ticket.ContentLength > 0 && ticket.ContentLength + 1_000_000_000 > free)
+                if (ticket.ContentLength > 0 && ticket.ContentLength + 1_000_000_000 > FreeSpace(Root))
                     throw new IOException("There isn't enough free space on this computer.");
                 Directory.CreateDirectory(folder);
                 var fileName = "title." + Extension(ticket.ContentType);
@@ -163,6 +167,7 @@ public sealed class OfflineDownloads
             lock (gate)
             {
                 active.Remove(item.Id);
+                activeNames.Remove(item.Id);
                 running.Remove(item.Id);
             }
             cancel.Dispose();
@@ -233,6 +238,27 @@ public sealed class OfflineDownloads
         }
         Save();
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Free space where <paramref name="path"/> is stored: the drive mounted deepest above it, so a
+    /// separate /home partition counts rather than the root partition.
+    /// </summary>
+    public static long FreeSpace(string path)
+    {
+        try
+        {
+            var full = Path.GetFullPath(path).TrimEnd('/') + "/";
+            var drive = DriveInfo.GetDrives()
+                .Where(each => each.IsReady && full.StartsWith(each.RootDirectory.FullName.TrimEnd('/') + "/", StringComparison.Ordinal))
+                .OrderByDescending(each => each.RootDirectory.FullName.Length)
+                .FirstOrDefault();
+            return drive?.AvailableFreeSpace ?? long.MaxValue;
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            return long.MaxValue;
+        }
     }
 
     public static string Extension(string contentType) => contentType.ToLowerInvariant() switch
