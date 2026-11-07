@@ -1176,6 +1176,8 @@ struct PlaybackPresentation: Identifiable, Equatable, Sendable {
   /// The series whose episodes share audio and subtitle choices; nil for a movie.
   let trackScope: UUID?
   let artwork: ArtworkSummary?
+  /// Set when the title plays from a download on this Mac instead of the server.
+  var offlineID: UUID? = nil
 
   init(
     mediaId: UUID,

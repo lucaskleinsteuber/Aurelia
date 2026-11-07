@@ -2259,6 +2259,7 @@ final class AppModel: ObservableObject {
     do {
       try await refreshSettlingAfterWake()
       serverUnreachable = false
+      syncOfflineProgress()
       guard isCurrent(generation), selection == profileSelectionGeneration,
         viewingSession.map({ ProfilePickerProtocol.isSameSession(profile, as: $0) }) ?? true
       else { return }
@@ -2464,6 +2465,44 @@ final class AppModel: ObservableObject {
     beginPlaybackIntent()
     playback = nil
     await refreshHome()
+  }
+
+  // MARK: Offline downloads
+
+  /// Downloads a movie or episode to this Mac to watch without the server.
+  func download(_ item: CatalogItemSummary) {
+    guard let profile, item.kind == .movie || item.kind == .episode, item.isPlayable else { return }
+    let subtitle =
+      item.kind == .episode
+      ? [
+        item.parentTitle,
+        item.seasonNumber.map { season in "S\(season) E\(item.episodeNumber ?? 0)" },
+      ].compactMap { $0 }.joined(separator: " · ") : item.year.map(String.init)
+    OfflineDownloads.shared.download(item, subtitle: subtitle, profile: profile)
+  }
+
+  /// Plays a download from this Mac; it works while the server is asleep or out of reach.
+  func playOffline(_ title: OfflineTitle) {
+    guard profile != nil else { return }
+    beginPlaybackIntent()
+    var presentation = PlaybackPresentation(
+      mediaId: title.id, title: title.title, subtitle: title.subtitle, startIntent: .resume)
+    presentation.offlineID = title.id
+    playback = presentation
+  }
+
+  /// Downloads for the open profile, or for the whole server while no profile is open.
+  var offlineTitles: [OfflineTitle] {
+    guard let device = deviceConnection ?? profile else { return [] }
+    if let user = profile?.user?.id, profile?.isViewingSession == true || !usesProfileSelection {
+      return OfflineDownloads.shared.titles(serverId: device.serverId, userId: user)
+    }
+    return OfflineDownloads.shared.titles.filter { $0.serverId == device.serverId }
+  }
+
+  private func syncOfflineProgress() {
+    guard let profile, profile.user != nil, !requiresProfileSelection else { return }
+    Task { await OfflineDownloads.shared.syncProgress(profile: profile) }
   }
 
   // MARK: Watch Together

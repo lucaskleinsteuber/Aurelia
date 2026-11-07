@@ -159,6 +159,7 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
   case movies
   case history
   case statistics
+  case downloads
 
   var id: String { rawValue }
 
@@ -173,6 +174,7 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
     case .movies: "Movies"
     case .history: "History"
     case .statistics: "Statistics"
+    case .downloads: "Downloads"
     }
   }
 
@@ -187,6 +189,7 @@ enum LibraryDestination: String, CaseIterable, Identifiable, Sendable {
     case .movies: "film.stack"
     case .history: "clock.arrow.circlepath"
     case .statistics: "chart.bar.xaxis"
+    case .downloads: "arrow.down.circle"
     }
   }
 }

@@ -180,6 +180,7 @@ struct MediaContextMenuItems: View {
       }
     }
     MediaContinueWatchingMenuItem(item: item, controller: controller)
+    DownloadMenuItems(item: item)
     if model.canEditMetadata, let onEdit {
       Divider()
       Button("Edit Metadata…", systemImage: "pencil", action: onEdit)

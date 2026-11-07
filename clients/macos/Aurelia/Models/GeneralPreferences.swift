@@ -65,6 +65,7 @@ enum SidebarPreferences {
     .movies,
     .history,
     .statistics,
+    .downloads,
   ]
 
   static func loadOrder() -> [LibraryDestination] {

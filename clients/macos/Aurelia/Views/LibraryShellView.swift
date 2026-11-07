@@ -397,6 +397,8 @@ struct LibraryShellView: View {
       HistoryPage(onSelect: { selection = .media($0) })
     case .statistics:
       StatisticsPage()
+    case .downloads:
+      DownloadsPage()
     }
   }
 }

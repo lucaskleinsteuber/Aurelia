@@ -97,6 +97,12 @@ final class APIPlaybackClient: PlaybackClientProtocol {
   func streamURL(path: String) throws -> URL {
     try api.streamURL(path: path)
   }
+
+  /// Subtitle files beside the video and downloaded subtitles; without this the player never
+  /// added them.
+  func streamSubtitles(ticket: UUID) async throws -> [LiveSubtitleTrack] {
+    try await api.streamSubtitles(ticket: ticket)
+  }
 }
 
 @MainActor

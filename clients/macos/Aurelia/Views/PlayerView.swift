@@ -44,6 +44,18 @@ struct PlayerView: View {
         return
       }
     #endif
+    if let id = presentation.offlineID, let title = OfflineDownloads.shared.title(id) {
+      // A download plays through the same player, with the file and progress on this Mac.
+      let engine = VLCPlaybackEngine()
+      engine.profileScope = profile.user?.id ?? profile.serverId
+      _controller = StateObject(
+        wrappedValue: PlaybackController(
+          client: OfflinePlaybackClient(profile: profile, title: title),
+          presentation: presentation, engine: engine,
+          preferences: PlaybackPreferencesStore.shared.preferences,
+          relayFactory: { _, _ in OfflineFileRelay(title: title) }))
+      return
+    }
     _controller = StateObject(
       wrappedValue: PlaybackController(profile: profile, presentation: presentation))
   }

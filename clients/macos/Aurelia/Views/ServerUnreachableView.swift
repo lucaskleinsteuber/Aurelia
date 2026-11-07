@@ -54,6 +54,16 @@ struct ServerUnreachableView: View {
               .accessibilityIdentifier("server-retry")
           }
         }
+        // Downloads play without the server.
+        if !model.offlineTitles.isEmpty {
+          VStack(alignment: .leading, spacing: 10) {
+            Text("Watch a Download").font(.headline)
+            ScrollView { OfflineTitleList() }.frame(maxHeight: 260)
+          }
+          .frame(maxWidth: 620)
+          .padding(.top, 12)
+          .accessibilityIdentifier("server-unreachable-downloads")
+        }
       }
     }
     .accessibilityIdentifier("server-unreachable")
