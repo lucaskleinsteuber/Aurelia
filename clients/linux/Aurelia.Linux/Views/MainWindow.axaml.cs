@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             WindowDecorations = WindowDecorations.BorderOnly;
         }
         Chrome.Attach(this, services.ButtonLayout);
+        Controls.Motion.ReduceMotion = () => Session?.Preferences.ReduceMotion == true;
         AppWindowBehavior.Attach(this);
         Flow = new AppFlow(services.Settings);
         var discovery = new DiscoveryCache(services.CreateDiscovery());

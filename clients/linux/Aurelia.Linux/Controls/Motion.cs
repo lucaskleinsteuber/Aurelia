@@ -20,11 +20,16 @@ public static class Motion
     /// <summary>Set by tests and screenshots so every frame shows the finished state.</summary>
     public static bool Enabled { get; set; } = true;
 
+    /// <summary>The Reduce Motion setting; things then appear at once without moving.</summary>
+    public static Func<bool>? ReduceMotion { get; set; }
+
     /// <summary>Fades <paramref name="control"/> in and lets it settle upward by <paramref name="rise"/> points.</summary>
     public static void Appear(Control control, double rise = 10, double fromScale = 1)
     {
-        if (!Enabled)
+        if (!Enabled || ReduceMotion?.Invoke() == true)
         {
+            control.Transitions = null;
+            control.RenderTransform = null;
             control.Opacity = 1;
             return;
         }
