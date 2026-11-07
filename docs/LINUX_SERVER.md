@@ -153,7 +153,9 @@ sudo aurelia sleep status
   when you open it (Wake-on-LAN), and a router such as a Fritzbox can wake it too. An Apple TV
   cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH keeps
   the computer awake.
-- Either happens after `--idle` minutes (15 by default) without a connected device, and five
+- Either happens after `--idle` minutes (15 by default) in which nobody used Aurelia (browsing,
+  playing, saving progress or changing settings on any device; an app that is merely open does
+  not count), and five
   minutes after a player's sleep timer ends on a Mac or Apple TV if nothing played since on any
   device, at any time of day and even if the app is still open.
 - Optional awake hours, for example `--awake 17:00-23:30`, keep it running during those hours; a

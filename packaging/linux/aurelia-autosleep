@@ -7,6 +7,7 @@
 #   leaves its sleep-ready file then), at any time of day;
 # - otherwise after IDLE_MINUTES without a connected device, outside AWAKE_FROM-AWAKE_UNTIL when
 #   those hours are set. With awake hours a sleeping computer also wakes itself at AWAKE_FROM.
+#   An app left open with nobody using it does not count as a connected device.
 # Settings: sleep-settings in the server's data folder, changed in the app's server settings or
 # with `sudo aurelia sleep`. Run every five minutes by aurelia-autosleep.timer; it does nothing
 # while MODE is off. `sudo aurelia sleep status` shows the current decision.
@@ -92,9 +93,19 @@ if [ -f "$ready" ]; then
   [ "$dry_run" = 1 ] || rm -f "$ready"
 fi
 
-# In use: a device connected to Aurelia, or the computer is working (a scan, an update).
+# In use: someone used Aurelia on a device, or the computer is working (a scan, an update).
+# Aurelia Server notes in last-use when someone last browsed, played or saved progress; an app
+# that is merely open keeps its sync and Play On connections without counting. A server without
+# that file (an older one still running) counts every connected device instead.
 busy=false
-if ss -Htn state established '( sport = :43111 )' | grep -q .; then busy=true; fi
+used=""
+[ -f "$data/last-use" ] && used=$(head -c 20 "$data/last-use" 2>/dev/null || true)
+if [[ "$used" =~ ^[0-9]+$ ]]; then
+  (( used > now )) && used=$now
+  (( used > $(cat "$state/last-active") )) && echo "$used" > "$state/last-active"
+elif ss -Htn state established '( sport = :43111 )' | grep -q .; then
+  busy=true
+fi
 if awk '{ exit !($1 > 0.5) }' /proc/loadavg; then busy=true; fi
 if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then busy=true; fi
 if $busy; then

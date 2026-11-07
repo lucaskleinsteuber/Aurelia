@@ -142,6 +142,7 @@ builder.Services.AddSingleton<LiveConversionService>();
 builder.Services.AddSingleton<ScrubPreviewService>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ScrubPreviewService>());
 builder.Services.AddSingleton<ServerSleepSignal>();
+builder.Services.AddSingleton<ServerUseClock>();
 builder.Services.AddSingleton(services => new ServerPowerSettingsStore(services.GetRequiredService<ServerRuntimeOptions>()));
 builder.Services.AddSingleton(services => new ServerUpdateStore(services.GetRequiredService<ServerRuntimeOptions>(), services.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<LinuxServiceRestart>();
@@ -321,6 +322,7 @@ app.UseAuthorization();
 app.UseWhen(CatalogCompression.Applies, branch => branch.UseResponseCompression());
 app.Use(async (context, next) =>
 {
+    if (ServerUseClock.CountsAsUse(context)) context.RequestServices.GetRequiredService<ServerUseClock>().Record();
     context.RequestServices.GetRequiredService<LibraryAccessService>().Bind(context);
     try
     {

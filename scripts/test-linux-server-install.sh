@@ -145,6 +145,15 @@ if [ -z "${SSH_CONNECTION:-}" ]; then
   date +%s > /var/lib/aurelia/sleep-ready
   dry | has 'sleep until a Wake-on-LAN call' || fail "an ended sleep timer did not lead to sleep"
   rm -f /var/lib/aurelia/sleep-ready
+  # An app left open keeps its sync connection, but only real use keeps the computer awake.
+  if awk '{ exit !($1 <= 0.5) }' /proc/loadavg; then
+    echo $(( $(date +%s) - 600 )) > "$media/sleep-state/last-active"
+    echo $(( $(date +%s) - 600 )) > /var/lib/aurelia/last-use
+    dry | has 'sleep until a Wake-on-LAN call' || fail "an app nobody uses must not keep the computer awake"
+    date +%s > /var/lib/aurelia/last-use
+    dry | has 'awake: used 0 minutes ago' || fail "using Aurelia must keep the computer awake"
+  fi
+  rm -f /var/lib/aurelia/last-use
 fi
 # A line the server's user could write must never run as root.
 printf 'MODE=sleep\nIDLE_MINUTES=$(touch /tmp/aurelia-injected)\n' > "$settings"
