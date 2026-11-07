@@ -12,6 +12,39 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac 1.34.0 (148) Beta - 07.11.2026
+
+### Changed
+
+- Settings open inside the window, over the library, with Done or Esc to return; a gear next to the profile at the foot of the sidebar opens them.
+- Posters of Home and the library load in the background ahead of scrolling, so cards no longer show them appearing.
+- A title's Information lists only what is known instead of dashes for missing details.
+
+## Linux Desktop 1.6.0 (16) Beta - 07.11.2026
+
+### Changed
+
+- Pages, sheets, Settings and menus appear with short, quiet motion (off with Reduce Motion); covers load ahead of scrolling and appear at once when shown again.
+- Settings open inside the window instead of a window of their own; the temporary Public Update Test switch is gone.
+- Menus are rounded dark glass with icons; the metadata editor opens faster by showing the first ten people of long casts.
+
+### Fixed
+
+- Choosing Home in the sidebar while a title is open returns to Home.
+- The foot of the sidebar no longer lets the page show through, and the PIN field lost the gray box inside it.
+
+## Server 1.32.2 (143) Beta - 07.11.2026
+
+### Changed
+
+- The browser app's title Information lists only what is known instead of dashes for missing details.
+
+## iOS 1.2.2 (9) - 07.11.2026
+
+### Changed
+
+- A title without known details no longer shows an empty Information heading.
+
 ## Mac 1.33.1 (147) Beta - 07.11.2026
 
 ### Fixed

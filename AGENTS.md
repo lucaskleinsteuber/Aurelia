@@ -110,16 +110,16 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.33.1 (147); the independent tvOS
+  one per build. The current Mac release is 1.34.0 (148); the independent tvOS
   client is named Aurelia, requires tvOS 26, and is at 1.6.1 (30).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
-- The iPhone and iPad client (`clients/ios`, preview, 1.2.1 (8)) follows the same
+- The iPhone and iPad client (`clients/ios`, preview, 1.2.2 (9)) follows the same
   rules as tvOS: its own Xcode project and version counter, code copied from the
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
   no real playback in tests, and it is not published.
-- Aurelia for Linux (`clients/linux`, 1.5.1 (15)) is the native Linux desktop
+- Aurelia for Linux (`clients/linux`, 1.6.0 (16)) is the native Linux desktop
   app, with library browsing, playback, settings, server administration and optional hosting
   on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
   its own version counter (`Version` and `AureliaLinuxBuildNumber` in
