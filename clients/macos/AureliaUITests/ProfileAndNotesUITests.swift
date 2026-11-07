@@ -123,6 +123,14 @@ final class ProfileAndNotesUITests: XCTestCase {
       shot(app, "Profiles - \(fixture.capitalized) - Centered Rows")
       if fixture == "many" {
         let window = app.windows.firstMatch
+        // The app remembers its window size; an earlier run may have left it small.
+        let start = window.coordinate(withNormalizedOffset: .zero)
+        if window.frame.width <= 1_000 || window.frame.height < 700 {
+          start.withOffset(CGVector(dx: window.frame.width - 2, dy: window.frame.height - 2))
+            .click(
+              forDuration: 0.2,
+              thenDragTo: start.withOffset(CGVector(dx: 1_200, dy: 760)))
+        }
         let original = window.frame
         XCTAssertGreaterThan(original.width, 1_000)
         let origin = window.coordinate(withNormalizedOffset: .zero)
@@ -137,12 +145,17 @@ final class ProfileAndNotesUITests: XCTestCase {
         // The window stops at its minimum width, a little above 820 points.
         XCTAssertLessThanOrEqual(window.frame.width, 850)
         XCTAssertLessThan(window.frame.width, original.width - 200)
-        let bottomEdge = origin.withOffset(
-          CGVector(dx: window.frame.width / 2, dy: original.height - 2))
-        bottomEdge.click(
-          forDuration: 0.2,
-          thenDragTo: origin.withOffset(CGVector(dx: window.frame.width / 2, dy: 598)))
-        XCTAssertEqual(window.frame.height, 600, accuracy: 8)
+        // The same for the bottom edge.
+        for _ in 0..<3 where window.frame.height > 606 {
+          origin.withOffset(CGVector(dx: window.frame.width / 2, dy: window.frame.height - 2))
+            .click(
+              forDuration: 0.2,
+              thenDragTo: origin.withOffset(CGVector(dx: window.frame.width / 2, dy: 598)))
+        }
+        // A long name wraps to two lines at this width, so the content may need a little more
+        // than 600 points; the window still shrinks to its content's minimum.
+        XCTAssertLessThanOrEqual(window.frame.height, 625)
+        XCTAssertLessThan(window.frame.height, original.height - 100)
         assertCenteredProfileRows(app)
         shot(app, "Profiles - Long Names - Smaller Window")
       }

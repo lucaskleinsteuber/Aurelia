@@ -61,8 +61,11 @@ final class PlayerAutoHideUITests: XCTestCase {
   func testWatchTogetherButtonOffersToStartAParty() {
     let app = launchPlayer()
     defer { app.terminate() }
+    // Controls hide quickly in this mode; a pointer movement shows them again.
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.4)).hover()
     let button = app.buttons["player-watch-together"]
-    XCTAssertTrue(button.waitForExistence(timeout: 5))
+    XCTAssertTrue(button.waitForExistence(timeout: 5), app.debugDescription)
+    button.hover()
     button.click()
     // Only the offer is checked; no party is started against the synthetic server.
     XCTAssertTrue(app.buttons["watch-together-start"].waitForExistence(timeout: 5), app.debugDescription)
