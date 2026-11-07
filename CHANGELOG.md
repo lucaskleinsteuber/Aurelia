@@ -12,6 +12,28 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac 1.33.0 (146) Beta - 07.11.2026
+
+### Added
+
+- Offline downloads: choose Download in a movie's or episode's menu to keep it on this Mac. The new Downloads page and the server-unreachable screen play it without the server, with its subtitle files; progress watched offline goes back to the server later.
+
+### Fixed
+
+- Subtitle files beside a video, and subtitles downloaded from OpenSubtitles, now appear in the player; they were never added before.
+
+## Linux Desktop 1.5.0 (14) Beta - 07.11.2026
+
+### Added
+
+- Offline downloads: choose Download in a movie's or episode's menu; the new Downloads page plays it without the server and offline progress goes back to the server later.
+
+## Server 1.32.0 (141) Beta - 07.11.2026
+
+### Added
+
+- Watch Together in the browser app: start a party from the player's menu or join one from a title's page.
+
 ## iOS 1.2.0 (7) - 07.11.2026
 
 ### Added
