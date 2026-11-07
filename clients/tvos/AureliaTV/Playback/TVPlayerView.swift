@@ -5,6 +5,7 @@ import UIKit
 struct TVPlayerView: View {
   @StateObject private var controller: TVPlaybackController
   @StateObject private var previews = TVScrubPreviews()
+  @EnvironmentObject private var model: TVAppModel
   @Environment(\.scenePhase) private var scenePhase
   @FocusState private var focus: Control?
   @State private var lastTransport: Control = .play
@@ -12,7 +13,8 @@ struct TVPlayerView: View {
   @State private var skip: TVSkipIndicator?
 
   private enum Control: Hashable {
-    case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, retry,
+    case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, together,
+      retry,
       closeMenu, upNextPlay, upNextCancel
     case dialogueBoost(DialogueBoost)
     case volumeLeveling(VolumeLeveling)
@@ -64,15 +66,19 @@ struct TVPlayerView: View {
         upNextCard(upNext)
       }
       if let menu = controller.trackMenu { menuView(menu) }
+      if let party = model.watchParty { TVWatchTogetherNotice(session: party) }
     }
     .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
     .preferredColorScheme(.dark)
     .onAppear {
+      // A party this Apple TV is in follows into the player before it starts.
+      model.attachWatchParty(to: controller)
       controller.start()
       configurePreviews()
     }
     .onDisappear {
       previews.reset()
+      model.playerClosed(controller)
       controller.close()
     }
     .onChange(of: controller.previewSourceURL) { _, _ in configurePreviews() }
@@ -165,6 +171,19 @@ struct TVPlayerView: View {
             "Sleep Timer", symbol: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill",
             id: .sleep
           ) { controller.trackMenu = .sleep }
+          // Watch Together: start a party for this title, or leave the one this Apple TV is in.
+          icon(
+            model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
+            symbol: model.watchParty?.state != nil ? "person.2.fill" : "person.2", id: .together
+          ) {
+            Task {
+              if model.watchParty?.state != nil {
+                await model.leaveWatchTogether()
+              } else {
+                await model.startWatchTogether(with: controller)
+              }
+            }
+          }
         }.focusSection().onMoveCommand { if $0 == .down { focus = .play } }
         Spacer()
         HStack(spacing: 22) {
@@ -594,5 +613,29 @@ private struct TVStartRing: View {
           .rotationEffect(.degrees(rotation - 90))
       }
     }
+  }
+}
+
+/// A short notice at the top of the picture when someone in the party acts, such as "Mia paused".
+private struct TVWatchTogetherNotice: View {
+  @ObservedObject var session: TVWatchTogetherSession
+
+  var body: some View {
+    let text =
+      session.notice ?? (session.state?.isWaiting == true ? "Waiting until everyone is ready…" : nil)
+    VStack {
+      if let text {
+        Label(text, systemImage: "person.2.fill")
+          .font(.system(size: 26, weight: .semibold))
+          .padding(.horizontal, 28).padding(.vertical, 14)
+          .background(.ultraThinMaterial, in: Capsule())
+          .transition(.opacity)
+          .accessibilityIdentifier("watch-together-notice")
+      }
+      Spacer()
+    }
+    .padding(.top, 60)
+    .animation(.easeInOut(duration: 0.3), value: text)
+    .allowsHitTesting(false)
   }
 }

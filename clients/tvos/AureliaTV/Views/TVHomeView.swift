@@ -12,6 +12,23 @@ struct TVHomeView: View {
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
+  /// Parties others started at home, to join with one press.
+  private var watchTogether: some View {
+    VStack(alignment: .leading, spacing: 20) {
+      Text("Watch Together").font(.system(size: 34, weight: .bold))
+      HStack(spacing: 26) {
+        ForEach(model.watchParties) { party in
+          Button {
+            Task { await model.joinWatchTogether(party) }
+          } label: {
+            Label("Join \(party.hostName) · \(party.title)", systemImage: "person.2.fill")
+          }.buttonStyle(TVButtonStyle())
+            .accessibilityIdentifier("home-watch-together")
+        }
+      }.focusSection()
+    }.padding(.horizontal, TVDesign.pagePadding)
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 54) {
@@ -22,6 +39,7 @@ struct TVHomeView: View {
             Text("Home").font(.system(size: 52, weight: .bold))
               .padding(.horizontal, TVDesign.pagePadding).padding(.top, 170)
           }
+          if !model.watchParties.isEmpty { watchTogether }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
           if model.supportsWatchlist && !model.watchlistItems.isEmpty {
@@ -51,6 +69,13 @@ struct TVHomeView: View {
     // The hero artwork reaches the top edge beneath the native tab bar.
     .ignoresSafeArea(edges: .top)
     .background(TVDesign.canvas.ignoresSafeArea())
+    .task(id: model.session?.sessionId) {
+      // Parties others start appear on Home within a few seconds.
+      while !Task.isCancelled {
+        await model.refreshWatchParties()
+        try? await Task.sleep(for: .seconds(15))
+      }
+    }
     .task(id: model.libraryRefresh) {
       await model.loadHome()
       await model.preloadLibrary()

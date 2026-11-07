@@ -106,7 +106,7 @@ These rules apply to every task in this repository.
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
   one per build. The current Mac release is 1.32.0 (145); the independent tvOS
-  client is named Aurelia, requires tvOS 26, and is at 1.5.1 (28).
+  client is named Aurelia, requires tvOS 26, and is at 1.6.0 (29).
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
 - The iPhone and iPad client (`clients/ios`, preview, 1.1.1 (6)) follows the same

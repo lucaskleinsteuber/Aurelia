@@ -12,6 +12,16 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Apple TV 1.6.0 (29) - 07.11.2026
+
+### Added
+
+- Watch Together: join a party from Home or a title's page, or start one with the new button in the player. Play, pause, jumps and the next episode follow the others, and short notices say who did what.
+
+### Fixed
+
+- Play On from the Mac or Linux app reaches the Apple TV again: its command check was refused before it was sent.
+
 ## Mac 1.32.0 (145) Beta - 07.11.2026
 
 ### Added
