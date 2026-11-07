@@ -1235,11 +1235,13 @@ async function statisticsScreen() {
 function aboutSection(detail) {
   const metadata = detail.metadata ?? {};
   const overview = metadata.overview ?? detail.item.overview;
+  // Only what is known is listed; unknown fields are left out.
+  const fields = logic.informationFields(detail).filter((field) => field.value);
   return h("section", { class: "detail-section about" },
     overview ? h("div", { class: "about-text" }, h("h2", {}, `About ${metadata.title ?? detail.item.title}`), h("p", {}, overview)) : null,
-    h("h2", {}, "Information"),
-    h("div", { class: `info-grid ${detail.item.kind === "series" ? "series" : ""}` }, logic.informationFields(detail).map((field) =>
-      h("div", { class: "info-value" }, h("div", { class: "info-title" }, field.title), h("div", {}, field.value ?? "—")))));
+    fields.length ? h("h2", {}, "Information") : null,
+    fields.length ? h("div", { class: `info-grid ${detail.item.kind === "series" ? "series" : ""}` }, fields.map((field) =>
+      h("div", { class: "info-value" }, h("div", { class: "info-title" }, field.title), h("div", {}, field.value)))) : null);
 }
 
 let activeMiniRemote = null;

@@ -359,7 +359,7 @@ struct IOSDetailView: View {
   private func about(_ detail: IOSCatalogDetail) -> some View {
     let fields = IOSDetailPresentation.information(detail)
     return VStack(alignment: .leading, spacing: 12) {
-      IOSSectionHeader(title: "Information")
+      if !fields.isEmpty { IOSSectionHeader(title: "Information") }
       LazyVGrid(
         columns: [
           GridItem(.flexible(), alignment: .topLeading),
