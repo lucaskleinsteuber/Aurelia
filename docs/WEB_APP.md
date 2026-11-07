@@ -268,3 +268,11 @@ A title's page has **Play on…**, which lists the profile's other open Aurelia 
 Apple TV, iPhone or another browser) and starts the title there. While the browser plays, it
 reports itself as a player too, so the others can start, pause, seek or stop it. Safari shows an AirPlay button where the video can be
 sent to an Apple TV or AirPlay receiver; other browsers do not offer it.
+
+## Watch Together
+
+The player's **Watch Together** menu starts a party for the title; a title's page shows **Join …**
+for parties others started for it or one of its episodes. Play, pause, jumps and the next title
+then apply to everyone, a short notice says who did what, and closing the player leaves the
+party. The rules live in `js/watch-together.js` and are tested in
+`tests/WebApp/watch-together.test.mjs`; see [Watch Together](CLIENT_PROTOCOL.md#watch-together).

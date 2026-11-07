@@ -257,7 +257,7 @@ offset between its clock and the server's.
   party at the same picture until they report `ready`, for at most 30 seconds.
 - `DELETE …/{id}/members/me` leaves; the last member ends the party.
 
-The Mac, Linux, Apple TV, iPhone and iPad players follow the party: they jump to the shared moment when they are more
+The Mac, Linux, Apple TV, iPhone, iPad and browser players follow the party: they jump to the shared moment when they are more
 than 1.5 seconds apart (0.5 seconds while paused), and send their own play, pause, seek and
 title changes as commands. Answers that arrive out of order never undo a newer revision.
 

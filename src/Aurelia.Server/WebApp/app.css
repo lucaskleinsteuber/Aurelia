@@ -994,6 +994,11 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 }
 .player:not(.failed) .player-notice { top: max(80px, env(safe-area-inset-top)); transform: translateX(-50%); flex-direction: row; padding: 12px 18px; border-radius: 999px; }
 .player-notice .icon { color: var(--warning); flex: none; }
+.together-notice { position: absolute; left: 50%; top: max(84px, env(safe-area-inset-top)); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px; font-size: 14px; pointer-events: none; z-index: 5; }
+.together-panel { display: flex; flex-direction: column; gap: 10px; padding: 14px; width: min(300px, calc(100vw - 48px)); }
+.together-panel .popover-title { font-weight: 600; font-size: 15px; }
+.together-member .muted, .together-panel .muted { font-size: 12px; }
+.together-hint { margin: 0; line-height: 1.4; }
 
 .player-round:focus-visible,
 .menu-control:focus-visible,

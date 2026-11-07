@@ -107,6 +107,13 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     playerStatus: (deviceId) => request(`/api/v1/devices/players/${id(deviceId)}/status`),
     sendPlayerCommand: (deviceId, body) => request(`/api/v1/devices/players/${id(deviceId)}/commands`, { method: "POST", body }),
     playerCommands: (deviceId, waitMs = 0) => request(`/api/v1/devices/player/commands?deviceId=${encodeURIComponent(deviceId)}&waitMs=${waitMs}`),
+    watchParties: (mediaId) => request(`/api/v1/watch-together${mediaId ? `?mediaId=${id(mediaId)}` : ""}`),
+    createWatchParty: (body) => request("/api/v1/watch-together", { method: "POST", body }),
+    joinWatchParty: (partyId, body) => request(`/api/v1/watch-together/${id(partyId)}/join`, { method: "POST", body }),
+    watchParty: (partyId, after, waitMs, options = {}) =>
+      request(`/api/v1/watch-together/${id(partyId)}${after == null ? "" : `?after=${encodeURIComponent(after)}&waitMs=${encodeURIComponent(waitMs)}`}`, options),
+    watchPartyCommand: (partyId, body) => request(`/api/v1/watch-together/${id(partyId)}/commands`, { method: "POST", body }),
+    leaveWatchParty: (partyId) => request(`/api/v1/watch-together/${id(partyId)}/members/me`, { method: "DELETE" }),
     playerHeartbeat: (body) => request("/api/v1/devices/player/heartbeat", { method: "POST", body }),
     watchlist: (options = {}) => request("/api/v1/watchlist", options),
     setWatchlist: (mediaId, isWatchlisted, options = {}) =>

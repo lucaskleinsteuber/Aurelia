@@ -5,6 +5,7 @@ import { h, icon, clear } from "./dom.js";
 import { createApi, ApiError } from "./api.js";
 import { createCatalogView } from "./catalog-view.js";
 import * as logic from "./logic.js";
+import { createWatchTogether } from "./watch-together.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { createSettings } from "./settings.js";
@@ -772,6 +773,13 @@ async function titleScreen(id) {
     });
   }
 
+  // Parties others started for this title or one of its episodes, to join with one click.
+  const partyIds = new Set([item.id, ...seasons.flatMap((season) => (season.episodes ?? []).map((episode) => episode.item.id))]);
+  const parties = (await api.watchParties().catch(() => [])) ?? [];
+  const joinButtons = parties.filter((party) => partyIds.has(party.mediaId) && party.id !== state.watchParty?.state?.id).map((party) =>
+    h("button", { class: "secondary-button large", title: `Watch ${party.title} together with ${party.hostName}`, onclick: () => joinWatchTogether(party) },
+      icon("people", { size: 17 }), `Join ${party.hostName}`));
+
   let isFavorite = item.isFavorite;
   const favoriteButton = h("button", { class: "secondary-button large favorite-button" });
   const showFavorite = () => favoriteButton.replaceChildren(icon(isFavorite ? "starFill" : "star", { size: 17 }), isFavorite ? "Remove from Favorites" : "Add to Favorites");
@@ -832,7 +840,7 @@ async function titleScreen(id) {
       h("h1", { class: "hero-title rise", style: { "--rise": 1 } }, metadata.title ?? item.title),
       (metadata.genres ?? item.genres ?? []).length ? h("div", { class: "hero-genres rise", style: { "--rise": 2 } }, (metadata.genres ?? item.genres).slice(0, 3).join("  ·  ")) : null,
       metadata.overview ?? item.overview ? h("p", { class: "hero-overview rise", style: { "--rise": 3 } }, metadata.overview ?? item.overview) : null,
-      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, playOnButton, favoriteButton, watchlistButton,
+      h("div", { class: "button-row rise", style: { "--rise": 4 } }, playButton, ...joinButtons, playOnButton, favoriteButton, watchlistButton,
         logic.isTitleOffline(item, target) ? h("span", { class: "detail-offline-notice" }, icon("warning", { size: 14 }), logic.OFFLINE_FILE_NOTICE) : null,
         item.watchState === "completed" ? h("span", { class: "watched-label" }, icon("checkCircle", { size: 15 }), "Watched") : null),
       target ? progressLine(target) : null),
@@ -1398,9 +1406,72 @@ async function playTitle(item, seasons, { intent = "play" } = {}) {
     })),
     canConvert: Boolean(state.server?.capabilities?.includes(LIVE_FEATURE)),
     canScrubPreview: Boolean(state.server?.capabilities?.includes("scrub-previews-v1") || state.server?.capabilities?.includes(LIVE_FEATURE)),
+    together: { session: () => state.watchParty, start: (current) => startWatchTogether(current), leave: () => leaveWatchTogether() },
   });
+  const close = player.onClose;
+  player.onClose = () => {
+    const party = state.watchParty;
+    if (party?.isFollowing(player.partyPlayer)) {
+      // Closing the player leaves the party; opening its next title does not.
+      if (party.isChangingTitle) party.detach();
+      else leaveWatchTogether();
+    }
+    close();
+  };
   state.player = player;
   player.open(document.body);
+  // A party this browser is in follows into the new player.
+  state.watchParty?.attach(player.partyPlayer);
+}
+
+// MARK: Watch Together
+
+function newWatchParty() {
+  return createWatchTogether({
+    api,
+    deviceName: logic.deviceName(navigator.userAgent, navigator.maxTouchPoints),
+    onChange: (session) => {
+      if (state.watchParty === session) state.player?.showPartyNotice(session);
+    },
+    openTitle: async (mediaId) => {
+      try {
+        const detail = await api.detail(mediaId);
+        playTitle(detail.item, detail.seasons?.length ? detail.seasons : undefined);
+      } catch (error) {
+        if (!handleError(error)) toast(error.message);
+      }
+    },
+  });
+}
+
+async function startWatchTogether(player) {
+  await leaveWatchTogether();
+  const session = newWatchParty();
+  state.watchParty = session;
+  const video = player.video;
+  if (await session.start(player.item.id, Math.round(video.currentTime * 1000), !video.paused)) session.attach(player.partyPlayer);
+  else toast(session.error ?? "Watch Together isn’t available right now.");
+}
+
+async function joinWatchTogether(party) {
+  await leaveWatchTogether();
+  const session = newWatchParty();
+  state.watchParty = session;
+  if (!(await session.join(party.id)) || !session.state) return toast(session.error ?? "Watch Together isn’t available right now.");
+  try {
+    const detail = await api.detail(session.state.mediaId);
+    playTitle(detail.item, detail.seasons?.length ? detail.seasons : undefined);
+  } catch (error) {
+    if (!handleError(error)) toast(error.message);
+  }
+}
+
+async function leaveWatchTogether() {
+  const session = state.watchParty;
+  if (!session) return;
+  state.watchParty = null;
+  state.player?.showPartyNotice(null);
+  await session.leave();
 }
 
 function closePlayer() {
