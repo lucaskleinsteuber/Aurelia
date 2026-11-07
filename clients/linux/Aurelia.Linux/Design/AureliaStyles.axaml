@@ -1,5 +1,34 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Menus, dropdowns and tooltips open in their own popup windows; they use Aurelia's font too. -->
+  <Style Selector="PopupRoot, OverlayPopupHost">
+    <Setter Property="FontFamily" Value="{StaticResource AureliaFontFamily}" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter, ContextMenu">
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="MinWidth" Value="200" />
+  </Style>
+  <Style Selector="MenuItem">
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="FontSize" Value="13.5" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter Separator, ContextMenu Separator">
+    <Setter Property="Margin" Value="8,4" />
+    <Setter Property="Background" Value="#1FFFFFFF" />
+  </Style>
+  <Style Selector="ComboBox">
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="Padding" Value="12,6,8,6" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="ComboBoxItem">
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Margin" Value="4,1" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+
   <Style Selector="Window">
     <Setter Property="FontFamily" Value="{StaticResource AureliaFontFamily}" />
     <Setter Property="FontSize" Value="{StaticResource AureliaBodyFontSize}" />
@@ -36,6 +65,7 @@
   </Style>
   <Style Selector="ListBox.sidebar ListBoxItem">
     <Setter Property="Padding" Value="10,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Margin" Value="0,1" />
     <Setter Property="MinHeight" Value="38" />
     <Setter Property="CornerRadius" Value="10" />
@@ -188,6 +218,108 @@
     <Setter Property="Background" Value="Transparent" />
   </Style>
 
+  <!-- The PIN as on the Mac's login window: a rounded glass field with an arrow that turns white. -->
+  <Style Selector="Border.pinCapsule">
+    <Setter Property="CornerRadius" Value="26" />
+    <Setter Property="Background" Value="#59101214" />
+    <Setter Property="BorderBrush" Value="#29FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Border.pinCapsule.focused">
+    <Setter Property="BorderBrush" Value="{StaticResource AureliaAccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="TextBox.pinField">
+    <Style.Resources>
+      <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+    </Style.Resources>
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="TextBox.pinField:pointerover /template/ Border#PART_BorderElement, TextBox.pinField:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.pinArrow">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="18" />
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.pinArrow:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#E6FFFFFF" />
+    <Setter Property="Foreground" Value="#000000" />
+  </Style>
+  <Style Selector="Button.pinArrow:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#1FFFFFFF" />
+    <Setter Property="Foreground" Value="#80FFFFFF" />
+  </Style>
+  <Style Selector="Button.profileAvatar">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="48" />
+  </Style>
+  <Style Selector="Button.profileAvatar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Opacity" Value="0.85" />
+  </Style>
+
+  <!-- The season's name as a menu, like the Mac's borderless season menu. -->
+  <Style Selector="Button.seasonMenu">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.seasonMenu:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaHoverBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.seasonMenu:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaSelectionBrush}" />
+  </Style>
+
+  <!-- A card inside a card (one person in the metadata editor), and small symbol buttons on it. -->
+  <Style Selector="Border.nestedCard">
+    <Setter Property="Background" Value="#0DFFFFFF" />
+    <Setter Property="BorderBrush" Value="#14FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="Button.iconSmall">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="14" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#CCFFFFFF" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.iconSmall:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource AureliaHoverBrush}" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+  </Style>
+  <Style Selector="Button.iconSmall:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="#40FFFFFF" />
+  </Style>
+
   <Style Selector="Button.sidebarFooter">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -202,11 +334,16 @@
 
   <!-- Text fields on the Aurelia surface, also while focused. -->
   <Style Selector="TextBox">
+    <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Background" Value="{StaticResource AureliaSurfaceBrush}" />
     <Setter Property="BorderBrush" Value="#33FFFFFF" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Padding" Value="12,8" />
     <Setter Property="MinHeight" Value="40" />
+  </Style>
+  <!-- Text that spans several lines starts at the top. -->
+  <Style Selector="TextBox[AcceptsReturn=True]">
+    <Setter Property="VerticalContentAlignment" Value="Top" />
   </Style>
   <Style Selector="TextBox:pointerover /template/ Border#PART_BorderElement">
     <Setter Property="Background" Value="#2E3236" />

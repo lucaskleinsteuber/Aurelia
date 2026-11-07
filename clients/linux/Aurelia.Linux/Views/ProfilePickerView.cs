@@ -14,17 +14,23 @@ using Avalonia.Styling;
 
 namespace Aurelia.Linux.Views;
 
-/// <summary>"Who's watching?": the server's profiles, the PIN field and the first-time profile setup.</summary>
+/// <summary>
+/// "Who's watching?" as on the Mac: the profiles on a slowly drifting wash of color, the PIN in a
+/// rounded field with an arrow, and the first-time profile setup. Choosing the picture again in
+/// the PIN step (or Esc) returns to all profiles.
+/// </summary>
 public sealed class ProfilePickerView : UserControl
 {
     private readonly ProfilePickerModel model;
     private readonly AppSession session;
-    private readonly WrapPanel grid = new() { HorizontalAlignment = HorizontalAlignment.Center, ItemSpacing = 28, LineSpacing = 28 };
+    private readonly WrapPanel grid = new() { HorizontalAlignment = HorizontalAlignment.Center, ItemSpacing = 18, LineSpacing = 18 };
     private readonly StackPanel picker;
-    private readonly StackPanel pinEntry = new() { Spacing = 16, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly StackPanel pinEntry = new() { Spacing = 22, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly StackPanel setup;
-    private readonly TextBox pin = new() { PasswordChar = '•', MaxLength = 8, Width = 200, FontSize = 22, HorizontalContentAlignment = HorizontalAlignment.Center };
-    private readonly TextBlock error = new() { Foreground = new SolidColorBrush(Color.Parse("#FF6B6B")), HorizontalAlignment = HorizontalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBox pin = new() { PasswordChar = '•', MaxLength = 8, FontSize = 20, Classes = { "pinField" }, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+    private readonly Button unlock = new() { Classes = { "pinArrow" } };
+    private readonly Border pinCapsule = new() { Classes = { "pinCapsule" }, Width = 280, Height = 52, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly TextBlock error = new() { Foreground = new SolidColorBrush(Color.Parse("#FFA94D")), HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 420 };
     private readonly ProgressBar loading = new() { IsIndeterminate = true, Width = 120, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly Action? forgotOwnerPin;
     private int shownFailures;
@@ -39,6 +45,22 @@ public sealed class ProfilePickerView : UserControl
         DataContext = model;
         AutomationProperties.SetName(pin, "PIN");
         pin[!TextBox.TextProperty] = new Binding(nameof(ProfilePickerModel.Pin)) { Mode = BindingMode.TwoWay };
+        AutomationProperties.SetName(unlock, "Open Profile");
+        ToolTip.SetTip(unlock, "Open Profile");
+        unlock.Content = new PathIcon { Data = Application.Current?.FindResource("IconArrowRight") as Geometry, Width = 15, Height = 15 };
+        unlock.Click += async (_, _) => await model.SubmitPinAsync();
+        pin.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == TextBox.TextProperty) unlock.IsEnabled = !string.IsNullOrEmpty(pin.Text);
+        };
+        unlock.IsEnabled = false;
+        pinCapsule.Child = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("44,*,44"),
+            Children = { pin.Also(p => Grid.SetColumn(p, 1)), unlock.Also(u => Grid.SetColumn(u, 2)) },
+        };
+        pin.GotFocus += (_, _) => pinCapsule.Classes.Set("focused", true);
+        pin.LostFocus += (_, _) => pinCapsule.Classes.Set("focused", false);
         pin.KeyDown += async (_, e) =>
         {
             if (e.Key == Avalonia.Input.Key.Enter) await model.SubmitPinAsync();
@@ -62,7 +84,7 @@ public sealed class ProfilePickerView : UserControl
             Spacing = 34,
             Children =
             {
-                new StackPanel { Spacing = 8, Children = { ScreenParts.Title("Who's watching?"), ScreenParts.Detail(model.ServerName) } },
+                new StackPanel { Spacing = 8, Children = { new TextBlock { Text = "Who's watching?", FontSize = 40, FontWeight = FontWeight.Bold, LetterSpacing = -0.5, HorizontalAlignment = HorizontalAlignment.Center }, ScreenParts.Detail(model.ServerName) } },
                 loading,
                 grid,
                 otherServer,
@@ -70,7 +92,12 @@ public sealed class ProfilePickerView : UserControl
             },
         };
         setup = SetupForm();
-        Content = ScreenParts.Backdrop(new ScrollViewer
+        Content = new Panel
+        {
+            Children =
+            {
+                new AmbientBackground(animate: !session.Preferences.ReduceMotion),
+                new ScrollViewer
         {
             Content = new StackPanel
             {
@@ -79,7 +106,9 @@ public sealed class ProfilePickerView : UserControl
                 VerticalAlignment = VerticalAlignment.Center,
                 Children = { picker, pinEntry, setup, error },
             },
-        });
+                },
+            },
+        };
         model.PropertyChanged += OnModelChanged;
         model.Profiles.CollectionChanged += OnProfilesChanged;
         DetachedFromVisualTree += (_, _) =>
@@ -145,30 +174,23 @@ public sealed class ProfilePickerView : UserControl
         grid.Children.Clear();
         foreach (var profile in model.Profiles)
         {
+            var locked = ProfilePickerModel.NeedsPin(profile) || !ProfilePickerModel.CanChoose(profile);
+            var name = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 5,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Children = { new TextBlock { Text = profile.Name, FontSize = 16, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 130, TextAlignment = TextAlignment.Center } },
+            };
+            if (locked) name.Children.Add(ScreenParts.Symbol("IconLock", 11, new SolidColorBrush(Color.FromArgb(0xA6, 0xFF, 0xFF, 0xFF))).Also(l => l.VerticalAlignment = VerticalAlignment.Center));
+            var tile = new StackPanel { Spacing = 12, Children = { new ProfileAvatar(profile.Id, profile.Name, 96).Also(a => a.HorizontalAlignment = HorizontalAlignment.Center), name } };
+            if (!ProfilePickerModel.CanChoose(profile)) tile.Children.Add(new TextBlock { Text = "Set up PIN", Classes = { "subdued" }, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center });
             var button = new Button
             {
                 Classes = { "profile" },
                 IsEnabled = ProfilePickerModel.CanChoose(profile),
-                Content = new StackPanel
-                {
-                    Spacing = 12,
-                    Children =
-                    {
-                        new ProfileAvatar(profile.Id, profile.Name, 96),
-                        new TextBlock { Text = profile.Name, FontSize = 16, FontWeight = FontWeight.SemiBold, HorizontalAlignment = HorizontalAlignment.Center },
-                        new TextBlock
-                        {
-                            Text = !ProfilePickerModel.CanChoose(profile) ? "Needs a PIN" : profile.Role switch
-                            {
-                                UserRole.Owner => "Owner",
-                                UserRole.Admin => "Administrator",
-                                _ => ProfilePickerModel.NeedsPin(profile) ? "PIN" : " ",
-                            },
-                            Classes = { "subdued" },
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                        },
-                    },
-                },
+                VerticalAlignment = VerticalAlignment.Top,
+                Content = tile,
             };
             AutomationProperties.SetName(button, profile.Name);
             button.Click += async (_, _) => await model.ChooseAsync(profile);
@@ -179,16 +201,23 @@ public sealed class ProfilePickerView : UserControl
     private void BuildPinEntry(WatchingProfile profile)
     {
         pinEntry.Tag = profile.Id;
-        var submit = new Button { Content = "Open Profile", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Center };
-        submit.Click += async (_, _) => await model.SubmitPinAsync();
-        var cancel = new Button { Content = "Back", Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Center };
-        cancel.Click += (_, _) => model.CancelPin();
+        var back = new Button { Classes = { "profileAvatar" }, HorizontalAlignment = HorizontalAlignment.Center, Content = new ProfileAvatar(profile.Id, profile.Name, 96) };
+        AutomationProperties.SetName(back, "Choose Another Profile");
+        ToolTip.SetTip(back, "Choose another profile (Esc)");
+        back.Click += (_, _) => model.CancelPin();
         pinEntry.Children.Clear();
-        pinEntry.Children.Add(new ProfileAvatar(profile.Id, profile.Name, 110).Also(a => a.HorizontalAlignment = HorizontalAlignment.Center));
-        pinEntry.Children.Add(ScreenParts.Title(profile.Name));
-        pinEntry.Children.Add(ScreenParts.Detail("Enter your PIN."));
-        pinEntry.Children.Add(pin);
-        pinEntry.Children.Add(submit);
+        pinEntry.Children.Add(back);
+        pinEntry.Children.Add(new StackPanel
+        {
+            Spacing = 6,
+            Children =
+            {
+                new TextBlock { Text = profile.Name, FontSize = 22, FontWeight = FontWeight.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 360 },
+                new TextBlock { Text = "Enter your PIN", Classes = { "subdued" }, FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center },
+            },
+        });
+        pin.Text = "";
+        pinEntry.Children.Add(pinCapsule);
         if (forgotOwnerPin is not null && profile.Role == Aurelia.Contracts.UserRole.Owner)
         {
             var forgot = new Button { Content = "Forgot PIN?", Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Center };
@@ -199,7 +228,6 @@ public sealed class ProfilePickerView : UserControl
             };
             pinEntry.Children.Add(forgot);
         }
-        pinEntry.Children.Add(cancel);
         Avalonia.Threading.Dispatcher.UIThread.Post(() => pin.Focus());
     }
 
@@ -219,8 +247,8 @@ public sealed class ProfilePickerView : UserControl
                 new KeyFrame { Cue = new Cue(1), Setters = { new Setter(TranslateTransform.XProperty, 0d) } },
             },
         };
-        pin.RenderTransform ??= new TranslateTransform();
-        await animation.RunAsync(pin);
+        pinCapsule.RenderTransform ??= new TranslateTransform();
+        await animation.RunAsync(pinCapsule);
         pin.Focus();
     }
 }

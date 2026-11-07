@@ -11,19 +11,49 @@ internal static class SettingsRows
 {
     public static TextBlock PageTitle(string text) => new() { Text = text, FontSize = 26, FontWeight = FontWeight.Bold, Margin = new Thickness(0, 0, 0, 6) };
 
+    /// <summary>A group of rows in one card, its title with a symbol at the top inside it, as the Mac's settings sections.</summary>
     public static StackPanel Section(string? title, params Control[] rows)
     {
         var card = new StackPanel { Spacing = 0 };
+        if (title is not null)
+        {
+            var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(16, 12, 16, 4) };
+            if (SectionIcon(title) is { } icon)
+                heading.Children.Add(new PathIcon { Data = Application.Current?.FindResource(icon) as Geometry, Width = 15, Height = 15, Foreground = new SolidColorBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF)), VerticalAlignment = VerticalAlignment.Center });
+            heading.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            card.Children.Add(heading);
+        }
         for (var index = 0; index < rows.Length; index++)
         {
             if (index > 0) card.Children.Add(new Border { Height = 1, Background = Application.Current?.FindResource("AureliaHairlineBrush") as IBrush, Margin = new Thickness(16, 0) });
             card.Children.Add(rows[index]);
         }
-        var section = new StackPanel { Spacing = 8 };
-        if (title is not null) section.Children.Add(new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, Classes = { "subdued" }, Margin = new Thickness(4, 0) });
-        section.Children.Add(new Border { Classes = { "card" }, Padding = new Thickness(0, 4), Child = card });
-        return section;
+        return new StackPanel { Spacing = 8, Children = { new Border { Classes = { "card" }, Padding = new Thickness(0, 4, 0, 6), Child = card } } };
     }
+
+    /// <summary>A symbol for a section, where one fits; others show their title alone.</summary>
+    internal static string? SectionIcon(string title) => title switch
+    {
+        "Playing" => "IconPlay",
+        "Sound and Controls" => "IconVolume",
+        "Languages" => "IconSubtitles",
+        "Motion and Appearance" => "IconSparkle",
+        "Library" or "Storage Locations" or "Library Maintenance" or "Library Health & Maintenance" or "Catalog Visibility" => "IconLibrary",
+        "Server" or "Server Details" or "Server Connection" or "Hosting" or "When the Server Runs" => "IconServer",
+        "Server Updates" or "Beta" => "IconDownload",
+        "Network" or "Sign-In & Streaming Limits" => "IconNetwork",
+        "Power Saving" => "IconSleep",
+        "Profile" or "Profiles" or "Current Profile" or "PIN" or "PIN Protection" or "Content Access" => "IconPerson",
+        "Devices" or "Devices & Backups" or "Backup Details" => "IconComputer",
+        "Movie & TV Information" or "Trailer Reviews" => "IconSparkle",
+        "Scrub Previews" => "IconMovies",
+        "Diagnostics" or "Scan Activity" => "IconStatistics",
+        "Continue Watching" or "Recently Added" => "IconRecentlyAdded",
+        "Favorites" => "IconFavorite",
+        "Collections" or "Franchises in Library" => "IconCollections",
+        "Advanced" => "IconSliders",
+        _ => null,
+    };
 
     public static DockPanel Row(string label, string? detail, Control control)
     {

@@ -88,6 +88,26 @@ public sealed class ManagementScreenTests
         return (window, settings, server);
     }
 
+    [AvaloniaFact]
+    public void TheMetadataEditorShowsItsSectionsAsCards()
+    {
+        var credits = new[] { new EditorCredit(Guid.NewGuid(), "Diane Mercer", "Acting", null, "Commander Vale", null), new EditorCredit(Guid.NewGuid(), "Owen Hart", "Directing", "Director", null, null) };
+        var values = new MediaEditorValues("Quiet Orbit", 2024, "An invented story about a quiet orbit.", 112, 12, ["Science Fiction", "Drama"], ["Invented Pictures"], "Germany", credits, null, null);
+        var server = Server().Answer("GET", $"/api/v1/media/{FakeLibrary.MovieA}/editor",
+            Json(new MediaEditorDocument(FakeLibrary.MovieA, LibraryId, MediaKind.Movie, 3, values, ["title"], "/srv/media/Films/Quiet Orbit (2024).mkv", "Quiet Orbit (2024).mkv", values)));
+        var window = FakeLibrary.ShowLibrary(server);
+        var movie = window.Session.Library!.Catalog.Single(item => item.Id == FakeLibrary.MovieA);
+        _ = window.Shell!.ManageTitleAsync(movie, TitleAction.EditMetadata);
+        FakeLibrary.Pump(() => window.Shell.SheetHost.Current is not null && All<TextBox>(window.Shell.SheetHost).Any(t => t.Text == "Quiet Orbit"), rounds: 200);
+        var texts = All<TextBlock>(window.Shell.SheetHost).Select(t => t.Text).ToList();
+        Assert.Contains("Title and Year", texts);
+        Assert.Contains("Cast and Crew", texts);
+        Assert.Contains("Release Year", texts);
+        Assert.Contains(All<Button>(window.Shell.SheetHost), b => AutomationProperties.GetName(b) == "Use Automatic Value title");
+        Assert.Contains(All<Button>(window.Shell.SheetHost), b => AutomationProperties.GetName(b) == "Move Diane Mercer Down");
+        Snapshot(window, "metadata-editor");
+    }
+
     private static void Snapshot(Window window, string name)
     {
         using var frame = window.CaptureRenderedFrame()!;

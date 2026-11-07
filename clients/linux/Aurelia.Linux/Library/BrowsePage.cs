@@ -1,3 +1,4 @@
+using Aurelia.Linux.Controls;
 using System.ComponentModel;
 using Aurelia.Contracts;
 using Aurelia.Linux.Core.Library;
@@ -17,7 +18,7 @@ namespace Aurelia.Linux.Library;
 /// </summary>
 public sealed class BrowsePage : LibraryPageBase
 {
-    private readonly TextBox search = new() { PlaceholderText = "Search", Width = 260 };
+    private readonly TextBox search = new TextBox { PlaceholderText = "Search", Width = 260 }.WithGlass();
     private readonly string title;
 
     public BrowsePage(LibraryContext context, BrowseSection section) : base(context)

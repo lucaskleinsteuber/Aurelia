@@ -205,6 +205,8 @@ public sealed class LocalServerHost : ILocalServerHost
         if (name.Length is 0 or > 128) throw new AureliaApiException(400, "invalid_server_name", "Enter a server name of up to 128 characters.");
         if (httpsPort is < 1024 or > 65535 || httpsPort == options.HttpPort)
             throw new AureliaApiException(400, "invalid_port", "Choose an HTTPS port from 1024 to 65535 other than " + options.HttpPort.ToString(CultureInfo.InvariantCulture) + ".");
+        // Another program may hold the usual port; then the next free one serves, without asking.
+        httpsPort = FreePort(httpsPort, options.HttpPort);
         // The name and port are the host's to set before the first owner exists, as on the Mac.
         UpdateSettings(settings =>
         {
@@ -223,6 +225,30 @@ public sealed class LocalServerHost : ILocalServerHost
         await RestartAsync();
         await WaitUntilRunningAsync(cancellation);
         return owner;
+    }
+
+    /// <summary>The wanted port when nothing listens on it, else the next free one among the following twenty.</summary>
+    internal static int FreePort(int wanted, int reserved, Func<int, bool>? isFree = null)
+    {
+        isFree ??= IsFree;
+        for (var port = wanted; port < wanted + 20 && port <= 65535; port++)
+            if (port != reserved && isFree(port)) return port;
+        return wanted;
+    }
+
+    private static bool IsFree(int port)
+    {
+        try
+        {
+            var probe = new System.Net.Sockets.TcpListener(IPAddress.Any, port);
+            probe.Start();
+            probe.Stop();
+            return true;
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            return false;
+        }
     }
 
     public async Task<AuthenticationResponse> SignInAsync(string ownerName, string password, string deviceName, CancellationToken cancellation)

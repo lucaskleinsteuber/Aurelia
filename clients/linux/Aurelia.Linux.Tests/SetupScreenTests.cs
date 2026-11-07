@@ -73,12 +73,12 @@ public sealed class SetupScreenTests
         Click(Visible<Button>(window, b => AutomationProperties.GetName(b) == "Lucas"));
         Assert.True(picker.Model.IsEnteringPin);
         Visible<TextBox>(window, t => AutomationProperties.GetName(t) == "PIN").Text = "1111";
-        Click(Visible<Button>(window, b => b.Content as string == "Open Profile"));
+        Click(Visible<Button>(window, b => AutomationProperties.GetName(b) == "Open Profile"));
         Assert.Equal("PIN is incorrect.", picker.Model.Error);
         Snapshot(window, "profile-pin-wrong");
 
         Visible<TextBox>(window, t => AutomationProperties.GetName(t) == "PIN").Text = "4321";
-        Click(Visible<Button>(window, b => b.Content as string == "Open Profile"));
+        Click(Visible<Button>(window, b => AutomationProperties.GetName(b) == "Open Profile"));
         Assert.Equal(AppScreen.Library, window.Flow.Screen);
         Assert.Equal("Lucas", window.Session.Profile?.User.Username);
         Assert.Contains(window.Shell!.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Lucas");

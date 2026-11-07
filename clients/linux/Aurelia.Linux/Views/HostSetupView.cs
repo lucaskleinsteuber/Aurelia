@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
 using Aurelia.Linux.Core.Hosting;
 using Avalonia;
 using Avalonia.Automation;
@@ -11,7 +10,8 @@ namespace Aurelia.Linux.Views;
 
 /// <summary>
 /// The Mac app's NativeHostSetupView for this computer's server: starting, "Set Up This PC" with the
-/// Server Password (name, owner and port under Advanced), "Welcome Back", the owner's PIN reset, help
+/// Server Password, the owner's name and the server's name (both already filled in from this
+/// computer; the port is chosen by itself), "Welcome Back", the owner's PIN reset, help
 /// when the server cannot start, and another Aurelia Server already running here.
 /// </summary>
 public sealed class HostSetupView : UserControl
@@ -109,24 +109,18 @@ public sealed class HostSetupView : UserControl
         show.IsCheckedChanged += (_, _) => password.PasswordChar = show.IsChecked == true ? '\0' : '•';
         var hint = new TextBlock { Text = "Use at least 12 characters.", Foreground = new SolidColorBrush(Color.Parse("#FFB36B")), FontSize = 12, IsVisible = false };
         var name = Field(model.ServerName, "Server name", "Server Name");
-        var owner = Field(model.OwnerName, "Owner", "Owner Name");
-        var port = Field(model.HttpsPort.ToString(CultureInfo.InvariantCulture), "43111", "HTTPS Port");
+        var owner = Field(model.OwnerName, "Your name", "Owner Name");
         name.TextChanged += (_, _) => model.ServerName = name.Text ?? "";
         owner.TextChanged += (_, _) => model.OwnerName = owner.Text ?? "";
-        var cont = new Button { Content = "Continue", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Center, IsDefault = true, IsEnabled = false };
+        var cont = new Button { Content = "Continue", Classes = { "primary" }, HorizontalAlignment = HorizontalAlignment.Center, IsDefault = true, IsEnabled = false, Margin = new Thickness(0, 6, 0, 0) };
         AutomationProperties.SetName(cont, "Continue");
         void Check()
         {
             var length = password.Text?.Length ?? 0;
             hint.IsVisible = length is > 0 and < HostSetupModel.MinimumPasswordLength;
-            cont.IsEnabled = length >= HostSetupModel.MinimumPasswordLength && model.HttpsPort is >= 1024 and <= 65535 && !model.IsBusy;
+            cont.IsEnabled = length >= HostSetupModel.MinimumPasswordLength && !model.IsBusy;
         }
         password.TextChanged += (_, _) => Check();
-        port.TextChanged += (_, _) =>
-        {
-            model.HttpsPort = int.TryParse(port.Text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 0;
-            Check();
-        };
         cont.Click += async (_, _) =>
         {
             cont.IsEnabled = false;
@@ -135,29 +129,19 @@ public sealed class HostSetupView : UserControl
         };
         body.Children.Add(ScreenParts.Symbol("IconServer", 50));
         body.Children.Add(ScreenParts.Title("Set Up This PC"));
-        body.Children.Add(ScreenParts.Detail("Choose a Server Password. Aurelia takes care of the server details."));
-        body.Children.Add(password);
-        body.Children.Add(show);
-        body.Children.Add(hint);
-        body.Children.Add(new Expander
-        {
-            Header = "Advanced",
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Content = new Grid
-            {
-                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
-                RowDefinitions = new RowDefinitions("Auto,Auto,Auto"),
-                RowSpacing = 10,
-                ColumnSpacing = 12,
-                Children =
-                {
-                    Label("Server Name", 0), name.Also(c => { Grid.SetColumn(c, 1); Grid.SetRow(c, 0); }),
-                    Label("Owner Name", 1), owner.Also(c => { Grid.SetColumn(c, 1); Grid.SetRow(c, 1); }),
-                    Label("HTTPS Port", 2), port.Also(c => { Grid.SetColumn(c, 1); Grid.SetRow(c, 2); }),
-                },
-            },
-        });
+        body.Children.Add(ScreenParts.Detail("Choose a Server Password. It protects the server's settings; everyone who watches gets a profile with a PIN later."));
+        body.Children.Add(Labeled("Server Password", new StackPanel { Spacing = 8, Children = { password, show, hint } }));
+        body.Children.Add(Labeled("Your Name", owner, "You sign in with it as the server's owner."));
+        body.Children.Add(Labeled("Server Name", name, "How your devices show this server."));
         body.Children.Add(cont);
+    }
+
+    /// <summary>A field with its name above and an optional hint below, as in the Mac's setup sheets.</summary>
+    private static StackPanel Labeled(string label, Control field, string? hint = null)
+    {
+        var panel = new StackPanel { Spacing = 6, Children = { new TextBlock { Text = label, FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = new SolidColorBrush(Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF)) }, field } };
+        if (hint is not null) panel.Children.Add(new TextBlock { Text = hint, Classes = { "subdued" }, FontSize = 12, TextWrapping = TextWrapping.Wrap });
+        return panel;
     }
 
     private void SignIn()
@@ -221,9 +205,6 @@ public sealed class HostSetupView : UserControl
         AutomationProperties.SetName(box, name);
         return box;
     }
-
-    private static TextBlock Label(string text, int row) =>
-        new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center }.Also(t => Grid.SetRow(t, row));
 
     private static Button Primary(string label, Func<Task> action)
     {

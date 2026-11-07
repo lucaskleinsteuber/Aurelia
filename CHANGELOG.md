@@ -87,6 +87,14 @@ versioned commit, so their skipped numbers are preserved.
 ### Changed
 
 - The player looks like the Mac's: Back and the rate, audio, subtitle, sleep timer and scene note menus at the top, the play controls in a capsule in the middle, the title, volume and full screen above the timeline at the bottom.
+- "Who's watching?" and the PIN look like the Mac's: a slowly drifting wash of color behind round profile pictures, and the PIN in a rounded field with an arrow.
+- Setting up this PC shows your name and the server's name right away, already filled in, instead of hiding them under Advanced; a busy port is replaced by a free one by itself.
+- Dropdowns and menus are dark and rounded with a blue highlight, the season is chosen from its name like on the Mac, the metadata editor shows its sections as cards, and Settings show symbols and section cards. Menus and fields use Aurelia's font, and search fields have a magnifying glass.
+- Cast and crew without a photo show a person symbol instead of colorful initials, which stay reserved for profiles.
+
+### Fixed
+
+- Play On did nothing: it now appears only while another Aurelia player is open and lists it. The More menu on a detail page no longer repeats the buttons beside it.
 - The detail page shows the FSK rating next to the year and runtime.
 - Settings › Sidebar: drag a page by its handle (≡) to reorder the sidebar; with the keyboard, Alt+Up and Alt+Down move it.
 

@@ -139,7 +139,7 @@ public sealed class PersonPage : LibraryPageBase
     {
         var photo = person?.Profile is { } profile
             ? new Border { Width = 84, Height = 84, CornerRadius = new CornerRadius(42), ClipToBounds = true, Child = new ArtworkImage(Context.Store, profile, 84) }
-            : (Control)new ProfileAvatar(null, name, 84);
+            : (Control)new PersonPlaceholder(84);
         var count = person?.Items.Count ?? 0;
         var page = new StackPanel { Spacing = 24, Margin = new Thickness(0, 64, 0, 48) };
         page.Children.Add(DetailChrome.BackButton(Context, Inset()));

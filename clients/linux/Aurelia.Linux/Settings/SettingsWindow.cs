@@ -72,7 +72,7 @@ public sealed class SettingsWindow : Window
 
     public System.Action? QuitAfterUpdate { get; set; }
 
-    private readonly TextBox search = new() { PlaceholderText = "Search settings…", Margin = new Thickness(12, 0, 12, 10) };
+    private readonly TextBox search = new TextBox { PlaceholderText = "Search settings…", Margin = new Thickness(12, 0, 12, 10) }.WithGlass();
 
     public SettingsWindow(AppSession session, LibraryShell? shell, AppServices services, SettingsCategory category = SettingsCategory.General)
     {
@@ -150,6 +150,21 @@ public sealed class SettingsWindow : Window
         _ => category.ToString(),
     };
 
+    /// <summary>The Mac's symbols for the categories, drawn with Aurelia's own icons.</summary>
+    public static string CategoryIcon(SettingsCategory category) => category switch
+    {
+        SettingsCategory.General => "IconSettings",
+        SettingsCategory.Sidebar => "IconSidebar",
+        SettingsCategory.Activity => "IconStatistics",
+        SettingsCategory.Playback => "IconPlay",
+        SettingsCategory.Library => "IconLibrary",
+        SettingsCategory.Metadata => "IconSparkle",
+        SettingsCategory.ProfilesAndDevices => "IconPerson",
+        SettingsCategory.Server => "IconServer",
+        SettingsCategory.Updates => "IconDownload",
+        _ => "IconSliders",
+    };
+
     /// <summary>The categories whose name or keywords contain the search text.</summary>
     public static IReadOnlyList<SettingsCategory> Matching(string? text)
     {
@@ -165,7 +180,22 @@ public sealed class SettingsWindow : Window
         categories.Items.Clear();
         foreach (var category in Matching(search.Text).Where(IsAvailable))
         {
-            categories.Items.Add(new ListBoxItem { Content = CategoryName(category), Tag = category });
+            var item = new ListBoxItem
+            {
+                Tag = category,
+                Content = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 11,
+                    Children =
+                    {
+                        new PathIcon { Data = Application.Current?.FindResource(CategoryIcon(category)) as Geometry, Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center },
+                        new TextBlock { Text = CategoryName(category), VerticalAlignment = VerticalAlignment.Center },
+                    },
+                },
+            };
+            AutomationProperties.SetName(item, CategoryName(category));
+            categories.Items.Add(item);
         }
         Category = selected;
         if (categories.SelectedItem is null && categories.Items.Count > 0) categories.SelectedIndex = 0;

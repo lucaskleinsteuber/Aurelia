@@ -133,7 +133,7 @@ internal static class MediaCards
             ClipToBounds = true,
             Child = credit.Profile is not null
                 ? new ArtworkImage(context.Store, credit.Profile, 112)
-                : new ProfileAvatar(null, credit.Name, 112),
+                : new PersonPlaceholder(112),
         };
         var card = Card(new StackPanel
         {

@@ -83,18 +83,11 @@ public sealed class HostingScreenTests
         Assert.False(next.IsEnabled);
         Assert.True(Shows(window, "Use at least 12 characters."));
         Field(window, "Server Password").Text = Password;
-        var advanced = Visible<Expander>(window).Single();
-        advanced.IsExpanded = true;
-        FakeLibrary.Pump(() => false, rounds: 5);
+        // The names are filled in and visible at once; there is nothing hidden under "Advanced".
+        Assert.Empty(Visible<Expander>(window));
+        Assert.False(string.IsNullOrWhiteSpace(Field(window, "Owner Name").Text));
         Field(window, "Server Name").Text = "Synthetic Studio";
         Field(window, "Owner Name").Text = "Lucas";
-        Field(window, "HTTPS Port").Text = "invalid";
-        FakeLibrary.Pump(() => false, rounds: 3);
-        Assert.False(next.IsEnabled);
-        Field(window, "HTTPS Port").Text = "70000";
-        FakeLibrary.Pump(() => false, rounds: 3);
-        Assert.False(next.IsEnabled);
-        Field(window, "HTTPS Port").Text = "43111";
         FakeLibrary.Pump(() => false, rounds: 3);
         Assert.True(next.IsEnabled);
         Snapshot(window, "host-owner-setup");

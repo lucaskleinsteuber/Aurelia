@@ -24,7 +24,9 @@ internal static class MediaMenu
     {
         var store = context.Store;
         var items = new List<Control>();
-        if (LibraryPresentation.IsPlayable(item))
+        // On a detail page Play, Favorites, Watchlist and the season choices are buttons beside
+        // the menu already, so it keeps only what has no button there.
+        if (LibraryPresentation.IsPlayable(item) && !onDetail)
         {
             items.Add(Item("Play", () => context.Play(item, resume: false)));
             if (item.Progress is { IsCompleted: false, PositionMilliseconds: > 0 }) items.Add(Item("Resume", () => context.Play(item, resume: true)));
@@ -42,6 +44,7 @@ internal static class MediaMenu
         items.Add(Item(watched ? "Mark as Unwatched" : "Mark as Watched", () => _ = MarkAsync(context, item.Id, WatchStateScope.Title, !watched)));
         // Season and series changes are made on the series itself, also from one of its episodes.
         var series = item.Kind == MediaKind.Series ? item.Id : item.Kind == MediaKind.Episode ? item.ParentId : null;
+        if (onDetail && item.Kind == MediaKind.Series) series = null;
         if (item.Kind == MediaKind.Episode && item.SeasonNumber is { } season && series is { } parent)
         {
             items.Add(Item("Mark Season as Watched", () => _ = MarkAsync(context, parent, WatchStateScope.Season, true, season)));
@@ -53,11 +56,11 @@ internal static class MediaMenu
             items.Add(Item("Mark Series as Unwatched", () => _ = MarkAsync(context, seriesToMark, WatchStateScope.Series, false)));
         }
         items.Add(new Separator());
-        if (item.Kind is MediaKind.Movie or MediaKind.Series)
+        if (item.Kind is MediaKind.Movie or MediaKind.Series && !onDetail)
         {
             items.Add(Item(item.IsFavorite ? "Remove from Favorites" : "Add to Favorites", () => _ = store.SetFavoriteAsync(item, !item.IsFavorite)));
         }
-        if (store.Client.SupportsWatchlist && item.Kind is MediaKind.Movie or MediaKind.Series)
+        if (store.Client.SupportsWatchlist && item.Kind is MediaKind.Movie or MediaKind.Series && !onDetail)
         {
             var listed = store.IsWatchlisted(item.Id);
             items.Add(Item(listed ? "Remove from Watchlist" : "Add to Watchlist", () => _ = store.SetWatchlistAsync(item.Id, !listed)));
@@ -76,7 +79,20 @@ internal static class MediaMenu
             if (onDetail) items.Add(Item("Find Metadata Match…", () => _ = context.Navigator.ManageTitleAsync(item, TitleAction.FindMatch)));
             items.Add(Item("Remove from Library…", () => _ = context.Navigator.ManageTitleAsync(item, TitleAction.Remove)));
         }
-        return items;
+        return Tidy(items);
+    }
+
+    /// <summary>No separator at the start, at the end or twice in a row.</summary>
+    private static List<Control> Tidy(List<Control> items)
+    {
+        var tidy = new List<Control>();
+        foreach (var item in items)
+        {
+            if (item is Separator && (tidy.Count == 0 || tidy[^1] is Separator)) continue;
+            tidy.Add(item);
+        }
+        while (tidy.Count > 0 && tidy[^1] is Separator) tidy.RemoveAt(tidy.Count - 1);
+        return tidy;
     }
 
     /// <summary>Season and series changes say how many episodes they touch and ask first, as on the Mac.</summary>

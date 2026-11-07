@@ -3,6 +3,7 @@ using Aurelia.Contracts;
 using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Playback;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -210,17 +211,11 @@ public sealed class DetailPage : LibraryPageBase
         }
         if (Context.Navigator.Remote is { } remote && target is not null && LibraryPresentation.IsPlayable(target))
         {
+            // Play On appears only while another Aurelia player is open to receive the title.
             var playOn = RoundAction("IconNetwork", "Play On…", () => { });
-            var flyout = new MenuFlyout();
-            flyout.Opening += async (_, _) =>
-            {
-                var players = await remote.PlayersAsync();
-                flyout.ItemsSource = players.Count == 0
-                    ? new List<Control> { new MenuItem { Header = "No other players are open", IsEnabled = false } }
-                    : players.Select(device => MenuItem("Play on " + device.DeviceName, () => _ = remote.PlayAsync(device, target))).Cast<Control>().ToList();
-            };
-            playOn.Flyout = flyout;
+            playOn.IsVisible = false;
             actions.Children.Add(playOn);
+            _ = OfferPlayOnAsync(playOn, remote, target);
         }
         var more = RoundAction("IconMore", "More Actions", () => { });
         more.Flyout = new MenuFlyout { ItemsSource = MediaMenu.Items(Context, item, onDetail: true) };
@@ -230,49 +225,73 @@ public sealed class DetailPage : LibraryPageBase
         return actions;
     }
 
+    private static async Task OfferPlayOnAsync(Button playOn, RemotePlayback remote, CatalogItemSummary target)
+    {
+        IReadOnlyList<RemotePlayerDevice> players;
+        try
+        {
+            players = await remote.PlayersAsync();
+        }
+        catch (Exception failure) when (failure is HttpRequestException or TaskCanceledException)
+        {
+            return;
+        }
+        playOn.IsVisible = players.Count > 0;
+        playOn.Flyout = new MenuFlyout
+        {
+            ItemsSource = players.Select(device => MenuItem("Play on " + device.DeviceName, () => _ = remote.PlayAsync(device, target))).Cast<Control>().ToList(),
+        };
+    }
+
     private StackPanel Seasons()
     {
         var seasons = detail!.Seasons;
         var current = seasons.FirstOrDefault(s => s.Number == season) ?? seasons[0];
-        var picker = new ComboBox
+        var watched = current.Episodes.Count > 0 && current.Episodes.All(e => e.Item.WatchState == CatalogWatchState.Completed);
+        // As on the Mac: the season's name is the menu, with the seasons and the watch choices in it.
+        var menuItems = new List<Control>();
+        foreach (var choice in seasons)
         {
-            ItemsSource = seasons.Select(SeasonName).ToList(),
-            SelectedIndex = seasons.ToList().IndexOf(current),
-            Margin = Inset(),
-            MinWidth = 160,
+            var entry = new MenuItem { Header = SeasonName(choice), ToggleType = MenuItemToggleType.Radio, IsChecked = choice.Number == current.Number };
+            entry.Click += (_, _) =>
+            {
+                if (choice.Number == season) return;
+                season = choice.Number;
+                Rebuild();
+            };
+            menuItems.Add(entry);
+        }
+        if (current.Episodes.Count > 0)
+        {
+            menuItems.Add(new Separator());
+            menuItems.Add(MenuItem(watched ? "Mark Season as Unwatched" : "Mark Season as Watched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Season, !watched, current.Number)));
+            menuItems.Add(MenuItem("Mark Series as Watched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, true)));
+            menuItems.Add(MenuItem("Mark Series as Unwatched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, false)));
+        }
+        var picker = new Button
+        {
+            Classes = { "seasonMenu" },
+            Margin = new Thickness(Math.Max(0, Inset().Left - 8), 0, 0, 0),
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Children =
+                {
+                    new TextBlock { Text = SeasonName(current), Classes = { "sectionTitle" }, VerticalAlignment = VerticalAlignment.Center },
+                    new PathIcon { Data = Application.Current?.FindResource("IconChevronDown") as Geometry, Width = 11, Height = 11, VerticalAlignment = VerticalAlignment.Center },
+                },
+            },
+            Flyout = new MenuFlyout { ItemsSource = menuItems, Placement = Avalonia.Controls.PlacementMode.BottomEdgeAlignedLeft },
         };
         AutomationProperties.SetName(picker, "Season");
-        picker.SelectionChanged += (_, _) =>
-        {
-            if (picker.SelectedIndex >= 0 && seasons[picker.SelectedIndex].Number != season)
-            {
-                season = seasons[picker.SelectedIndex].Number;
-                Rebuild();
-            }
-        };
-        var watched = current.Episodes.Count > 0 && current.Episodes.All(e => e.Item.WatchState == CatalogWatchState.Completed);
-        var seasonActions = new Button { Content = "Mark Season…", Classes = { "chip" } };
-        seasonActions.Flyout = new MenuFlyout
-        {
-            ItemsSource = current.Episodes.Count == 0 ? [] : new List<Control>
-            {
-                MenuItem(watched ? "Mark Season as Unwatched" : "Mark Season as Watched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Season, !watched, current.Number)),
-                MenuItem("Mark Series as Watched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, true)),
-                MenuItem("Mark Series as Unwatched", () => _ = MediaMenu.MarkAsync(Context, Item.Id, WatchStateScope.Series, false)),
-            },
-        };
-        var header = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 12,
-            Children =
-            {
-                picker,
-                new TextBlock { Text = current.Episodes.Count == 1 ? "1 episode" : $"{current.Episodes.Count} episodes", Classes = { "subdued" }, VerticalAlignment = VerticalAlignment.Center },
-                seasonActions,
-            },
-        };
-        if (watched) header.Children.Add(new TextBlock { Text = "Watched", Classes = { "subdued" }, VerticalAlignment = VerticalAlignment.Center });
+        ToolTip.SetTip(picker, "Choose a season");
+        var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, Inset().Left, 0) };
+        header.Children.Add(picker.Also(p => DockPanel.SetDock(p, Dock.Left)));
+        var count = new TextBlock { Text = current.Episodes.Count == 1 ? "1 episode" : $"{current.Episodes.Count} episodes", Classes = { "subdued" }, VerticalAlignment = VerticalAlignment.Center };
+        header.Children.Add(count.Also(c => DockPanel.SetDock(c, Dock.Right)));
+        if (watched)
+            header.Children.Add(new TextBlock { Text = "Watched", Classes = { "subdued" }, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) }.Also(w => DockPanel.SetDock(w, Dock.Right)));
         var section = new StackPanel { Spacing = 12, Children = { header } };
         section.Children.Add(Shelf(SeasonName(current), current.Episodes.Select(e => MediaCards.Landscape(Context, e.Item, 420, $"EPISODE {e.EpisodeNumber}", plays: true))));
         if (current.Supplements.Count > 0)

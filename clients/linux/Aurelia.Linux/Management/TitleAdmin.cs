@@ -209,7 +209,7 @@ public sealed class MetadataEditorSheet : UserControl
 
     private readonly AdminScope scope;
     private readonly Guid mediaId;
-    private readonly StackPanel body = new() { Spacing = 18 };
+    private readonly StackPanel body = new() { Spacing = 18, Margin = new Thickness(0, 0, 16, 0) };
     private readonly TextBlock problem = Message();
     private readonly HashSet<string> reset = [];
     private MediaEditorDocument? document;
@@ -219,7 +219,7 @@ public sealed class MetadataEditorSheet : UserControl
     private string? relativeSource;
     private readonly TextBox title = new() { PlaceholderText = "Title" };
     private readonly TextBox year = new() { PlaceholderText = "Year", Width = 100 };
-    private readonly TextBox overview = new() { PlaceholderText = "Overview", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 110 };
+    private readonly TextBox overview = new() { PlaceholderText = "Overview", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 130, VerticalContentAlignment = VerticalAlignment.Top };
     private readonly TextBox runtime = new() { PlaceholderText = "Runtime in Minutes", Width = 160 };
     private readonly ComboBox fsk = new() { MinWidth = 160 };
     private readonly TextBox genres = new() { PlaceholderText = "Genres, separated by commas" };
@@ -316,27 +316,35 @@ public sealed class MetadataEditorSheet : UserControl
     {
         body.Children.Clear();
         if (document is null) return;
-        body.Children.Add(Group("Title and Year", title, Labeled("Year", year, "releaseYear")));
-        body.Children.Add(Group("Overview", overview, Automatic("overview")));
-        body.Children.Add(Group("Genres", genres, Note("Separate genres with commas."), Automatic("genres")));
-        body.Children.Add(Group("Production and Release",
-            Labeled("Runtime in Minutes", runtime, "runtimeMinutes"),
-            Labeled("FSK", fsk, "fsk"),
-            studios, Automatic("studios"),
-            Labeled("Country of Origin", country, "country"),
-            Note("Choose one country. Foreign content ratings are not automatically converted to FSK.")));
-        body.Children.Add(CastAndCrew());
-        body.Children.Add(Group("Artwork",
+        title.MinWidth = 0;
+        year.Width = 120;
+        runtime.Width = 150;
+        body.Children.Add(Card(Group("Title and Year", "IconNote",
+            Field("Title", title, "title"),
+            new WrapPanel
+            {
+                ItemSpacing = 24,
+                LineSpacing = 14,
+                Children = { Field("Release Year", year, "releaseYear"), Field("FSK", fsk, "fsk"), Field("Runtime in Minutes", runtime, "runtimeMinutes") },
+            })));
+        body.Children.Add(Card(Group("Overview", "IconLibrary", Field("Overview", overview, "overview"))));
+        body.Children.Add(Card(Group("Genres", "IconSparkle", Field("Genres", genres, "genres"), Note("Separate genres with commas."))));
+        body.Children.Add(Card(Group("Production and Release", "IconMovies",
+            Field("Studios", studios, "studios"),
+            Field("Country of Origin", country, "country"),
+            Note("Choose one country. Foreign content ratings are not automatically converted to FSK."))));
+        body.Children.Add(Card(CastAndCrew()));
+        body.Children.Add(Card(Group("Artwork", "IconCollections",
             ArtworkRow("Poster", poster, 2.0 / 3, value => poster = value, "poster"),
-            ArtworkRow("Backdrop", backdrop, 16.0 / 9, value => backdrop = value, "backdrop")));
-        body.Children.Add(Group("Match with TMDB",
+            ArtworkRow("Backdrop", backdrop, 16.0 / 9, value => backdrop = value, "backdrop"))));
+        body.Children.Add(Card(Group("Match with TMDB", "IconSearch",
             Note("Find the correct movie or series. Saved manual changes stay in place."),
             Button("Find Metadata Match…", async () =>
             {
                 if (IsDirty && !await scope.Sheets.ConfirmAsync("Discard this draft to find a match?",
                     "Saved manual changes stay in place. Unsaved changes in this form will be discarded.", "Discard Draft and Find Match", destructive: true)) return;
                 if (await scope.Sheets.ShowAsync(new MetadataMatchSheet(scope, mediaId, document.Values.Title))) await LoadAsync();
-            })));
+            }))));
         var source = new List<Control>
         {
             new TextBlock { Text = document.Kind == MediaKind.Series ? "Series Folder" : "Video File", FontWeight = FontWeight.SemiBold },
@@ -351,21 +359,52 @@ public sealed class MetadataEditorSheet : UserControl
         {
             source.Add(Note("Edit an individual episode to change its video file."));
         }
-        body.Children.Add(Group("Source", [.. source]));
+        body.Children.Add(Card(Group("Source", "IconServer", [.. source])));
     }
 
-    private static StackPanel Group(string heading, params Control[] children)
+    /// <summary>A section of the editor as on the Mac: a card with a symbol and a title.</summary>
+    private static StackPanel Group(string heading, string icon, params Control[] children)
     {
-        var panel = new StackPanel { Spacing = 8, Children = { new TextBlock { Text = heading, FontWeight = FontWeight.SemiBold, Classes = { "subdued" } } } };
+        var panel = new StackPanel
+        {
+            Spacing = 14,
+            Children =
+            {
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 10,
+                    Children =
+                    {
+                        new PathIcon { Data = Application.Current?.FindResource(icon) as Geometry, Width = 16, Height = 16, Foreground = new SolidColorBrush(Color.FromArgb(0xA6, 0xFF, 0xFF, 0xFF)), VerticalAlignment = VerticalAlignment.Center },
+                        new TextBlock { Text = heading, FontSize = 17, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center },
+                    },
+                },
+            },
+        };
         foreach (var child in children) panel.Children.Add(child);
         return panel;
     }
 
-    private StackPanel Labeled(string label, Control field, string override_) => new()
+    private static Border Card(Control content) => new() { Classes = { "card" }, Padding = new Thickness(20, 18), Child = content };
+
+    /// <summary>A field with its name above it and, once changed by hand, "Use Automatic Value" beside the name.</summary>
+    private StackPanel Field(string label, Control field, string override_) => new()
     {
-        Orientation = Orientation.Horizontal,
-        Spacing = 10,
-        Children = { new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Width = 150 }, field, Automatic(override_) },
+        Spacing = 6,
+        Children =
+        {
+            new DockPanel
+            {
+                LastChildFill = false,
+                Children =
+                {
+                    new TextBlock { Text = label, FontSize = 12.5, FontWeight = FontWeight.SemiBold, Classes = { "subdued" }, VerticalAlignment = VerticalAlignment.Center },
+                    Automatic(override_).Also(b => { DockPanel.SetDock(b, Dock.Right); b.Margin = new Thickness(12, 0, 0, 0); b.FontSize = 12; }),
+                },
+            },
+            field,
+        },
     };
 
     /// <summary>"Use Automatic Value": drops the manual change of one field when saving.</summary>
@@ -398,7 +437,7 @@ public sealed class MetadataEditorSheet : UserControl
 
     private StackPanel CastAndCrew()
     {
-        var panel = Group("Cast and Crew", Note("Changes apply to this title only."));
+        var panel = Group("Cast and Crew", "IconPerson", Note("Changes apply to this title only."));
         if (credits.Count == 0) panel.Children.Add(Note("No cast or crew. Add a person to begin."));
         for (var index = 0; index < credits.Count; index++)
         {
@@ -421,9 +460,9 @@ public sealed class MetadataEditorSheet : UserControl
             job.TextChanged += (_, _) => Update();
             character.TextChanged += (_, _) => Update();
             department.SelectionChanged += (_, _) => Update();
-            var up = new Button { Content = "▲", Classes = { "link" }, IsEnabled = index > 0 };
-            var down = new Button { Content = "▼", Classes = { "link" }, IsEnabled = index < credits.Count - 1 };
-            var remove = new Button { Content = "✕", Classes = { "link" } };
+            var up = IconButton("IconChevronUp", index > 0);
+            var down = IconButton("IconChevronDown", index < credits.Count - 1);
+            var remove = IconButton("IconWindowClose", true);
             AutomationProperties.SetName(up, $"Move {credit.Name} Up");
             AutomationProperties.SetName(down, $"Move {credit.Name} Down");
             AutomationProperties.SetName(remove, $"Remove {credit.Name}");
@@ -440,13 +479,13 @@ public sealed class MetadataEditorSheet : UserControl
             });
             panel.Children.Add(new Border
             {
-                Classes = { "card" },
-                Padding = new Thickness(10),
+                Classes = { "nestedCard" },
+                Padding = new Thickness(12),
                 Child = new DockPanel
                 {
                     Children =
                     {
-                        new StackPanel { Spacing = 2, Children = { up, down, remove } }.Also(p => DockPanel.SetDock(p, Dock.Right)),
+                        new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, VerticalAlignment = VerticalAlignment.Top, Children = { up, down, remove } }.Also(p => DockPanel.SetDock(p, Dock.Right)),
                         new StackPanel
                         {
                             Spacing = 6,
@@ -468,6 +507,13 @@ public sealed class MetadataEditorSheet : UserControl
         }), Automatic("credits")));
         return panel;
     }
+
+    private static Button IconButton(string icon, bool enabled) => new()
+    {
+        Classes = { "iconSmall" },
+        IsEnabled = enabled,
+        Content = new PathIcon { Data = Application.Current?.FindResource(icon) as Geometry, Width = 12, Height = 12 },
+    };
 
     private StackPanel ArtworkRow(string label, EditorArtwork? current, double aspect, Action<EditorArtwork?> set, string field)
     {

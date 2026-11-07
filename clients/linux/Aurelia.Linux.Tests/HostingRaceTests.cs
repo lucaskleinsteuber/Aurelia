@@ -67,4 +67,13 @@ public sealed class HostingRaceTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void ABusyPortGivesWayToTheNextFreeOne()
+    {
+        Assert.Equal(43111, Aurelia.Linux.Core.Hosting.LocalServerHost.FreePort(43111, 43110, _ => true));
+        Assert.Equal(43113, Aurelia.Linux.Core.Hosting.LocalServerHost.FreePort(43111, 43112, port => port != 43111));
+        // Nothing free nearby: the wanted port stays, and the server reports the problem itself.
+        Assert.Equal(43111, Aurelia.Linux.Core.Hosting.LocalServerHost.FreePort(43111, 43110, _ => false));
+    }
 }

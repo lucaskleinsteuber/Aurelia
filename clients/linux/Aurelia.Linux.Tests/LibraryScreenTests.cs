@@ -43,6 +43,8 @@ public sealed class LibraryScreenTests
         Assert.Contains("Resume S01 E01", buttons);
         Assert.Contains("Add to Favorites", buttons);
         Assert.Contains("Add to Watchlist", buttons);
+        // No other player is open, so there is nothing to Play On.
+        Assert.DoesNotContain(detail.GetVisualDescendants().OfType<Button>(), b => AutomationProperties.GetName(b) == "Play On…" && b.IsVisible);
         var texts = detail.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
         Assert.Contains("Cast & Crew", texts);
         Assert.Contains("Captain Rhea, Writer", texts);
@@ -54,6 +56,31 @@ public sealed class LibraryScreenTests
         window.Shell.Back();
         Assert.IsType<HomePage>(window.Shell.CurrentPage);
         Assert.Equal(0, window.Shell.DetailDepth);
+    }
+
+    [AvaloniaFact]
+    public void PlayOnAppearsOnlyWhileAnotherPlayerIsOpen()
+    {
+        var server = FakeLibrary.Create();
+        var tv = new RemotePlayerDevice("synthetic-tv", "Living Room TV", "tvos", false, null, null, null, null, false, DateTimeOffset.UtcNow);
+        server.Answer("GET", "/api/v1/devices/players", System.Text.Json.JsonSerializer.Serialize(new[] { tv }, Aurelia.Linux.Core.Api.AureliaJson.Options));
+        var window = FakeLibrary.ShowLibrary(server);
+        var movie = window.Session.Library!.Catalog.First(item => item.Kind == MediaKind.Movie);
+        window.Shell!.OpenDetail(movie);
+        FakeLibrary.Pump(() => (window.Shell.CurrentPage as DetailPage)?.GetVisualDescendants().OfType<Button>()
+            .Any(b => AutomationProperties.GetName(b) == "Play On…" && b.IsVisible) == true);
+        var detail = Assert.IsType<DetailPage>(window.Shell.CurrentPage);
+        var playOn = detail.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Play On…");
+        var flyout = Assert.IsType<MenuFlyout>(playOn.Flyout);
+        Assert.Equal(["Play on Living Room TV"], flyout.ItemsSource!.OfType<MenuItem>().Select(m => m.Header as string));
+
+        // The menu beside the buttons repeats none of them.
+        var more = detail.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "More Actions");
+        var headers = Assert.IsType<MenuFlyout>(more.Flyout).ItemsSource!.OfType<MenuItem>().Select(m => m.Header as string).ToList();
+        Assert.DoesNotContain("Play", headers);
+        Assert.DoesNotContain("Add to Favorites", headers);
+        Assert.DoesNotContain("Add to Watchlist", headers);
+        Assert.IsNotType<Separator>(Assert.IsType<MenuFlyout>(more.Flyout).ItemsSource!.OfType<Control>().First());
     }
 
     [AvaloniaFact]
