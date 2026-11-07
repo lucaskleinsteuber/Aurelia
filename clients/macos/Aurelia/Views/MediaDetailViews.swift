@@ -914,6 +914,7 @@ private struct DetailHero: View {
     if detail.item.kind == .movie, let runtime = detail.metadata.runtimeMinutes {
       values.append("\(runtime) MIN")
     }
+    if let fsk = detail.metadata.fskAge { values.append("FSK \(fsk)") }
     return values.joined(separator: "  ·  ")
   }
 }

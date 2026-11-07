@@ -119,6 +119,7 @@ public sealed class DetailPage : LibraryPageBase
         var line = new List<string> { item.Kind == MediaKind.Series ? "TV SHOW" : item.Kind.ToString().ToUpperInvariant() };
         if (item.Year is { } year) line.Add(year.ToString(CultureInfo.InvariantCulture));
         if (metadata?.RuntimeMinutes is { } minutes && item.Kind != MediaKind.Series) line.Add($"{minutes} MIN");
+        if (metadata?.FskAge is { } fsk) line.Add($"FSK {fsk}");
         var text = new StackPanel
         {
             Spacing = 12,

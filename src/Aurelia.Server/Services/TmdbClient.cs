@@ -376,6 +376,9 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
         return MetadataCreditDeduplicator.Deduplicate(result);
     }
 
+    // German FSK ratings first, as the apps show them; the US rating only where TMDB has no FSK.
+    private static readonly string[] CertificationCountries = ["DE", "US"];
+
     private static string? GetMovieCertification(JsonElement root)
     {
         if (!root.TryGetProperty("release_dates", out var releaseDates)
@@ -384,10 +387,10 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             return null;
         }
 
-        var country = results.EnumerateArray().FirstOrDefault(value => GetString(value, "iso_3166_1") == "US");
-        return country.ValueKind == JsonValueKind.Object && country.TryGetProperty("release_dates", out var dates)
-            ? dates.EnumerateArray().Select(value => GetString(value, "certification")).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
-            : null;
+        return FirstCertification(results, country =>
+            country.TryGetProperty("release_dates", out var dates) && dates.ValueKind == JsonValueKind.Array
+                ? dates.EnumerateArray().Select(value => GetString(value, "certification"))
+                : []);
     }
 
     private static string? GetTvCertification(JsonElement root)
@@ -398,7 +401,33 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             return null;
         }
 
-        return results.EnumerateArray().Where(value => GetString(value, "iso_3166_1") == "US").Select(value => GetString(value, "rating")).FirstOrDefault();
+        return FirstCertification(results, country => [GetString(country, "rating")]);
+    }
+
+    private static string? FirstCertification(JsonElement results, Func<JsonElement, IEnumerable<string?>> ratings)
+    {
+        if (results.ValueKind != JsonValueKind.Array) return null;
+        foreach (var code in CertificationCountries)
+        {
+            var country = results.EnumerateArray().FirstOrDefault(value => GetString(value, "iso_3166_1") == code);
+            if (country.ValueKind != JsonValueKind.Object) continue;
+            foreach (var rating in ratings(country))
+            {
+                var value = rating?.Trim();
+                if (string.IsNullOrEmpty(value)) continue;
+                if (code != "DE") return value;
+                if (Fsk(value) is { } fsk) return fsk;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>TMDB writes the German rating as the bare age ("12"), sometimes as "FSK 12".</summary>
+    internal static string? Fsk(string value)
+    {
+        var age = value.StartsWith("FSK", StringComparison.OrdinalIgnoreCase) ? value[3..].Trim() : value;
+        return age is "0" or "6" or "12" or "16" or "18" ? $"FSK {age}" : null;
     }
 }
 
