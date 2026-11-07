@@ -107,3 +107,34 @@ test("scrub preview hover debounces rapid timeline movement and reuses the bucke
   p.hideScrubPreview();
   assert.equal(preview.hidden, true);
 });
+
+test("a failed ticket renewal is tried again while the old ticket still plays", async () => {
+  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  const scheduled = []; const failures = []; let calls = 0;
+  const p = player({
+    item: { id: "film" }, source: { id: "old", streamPath: "/api/v1/streams/old", expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() },
+    after: (work, delay) => scheduled.push({ work, delay }), fail: (error) => failures.push(error),
+    video: { currentTime: 42, paused: true, play: async () => {} },
+    api: { createPlayback: async () => { calls++; if (calls === 1) throw new ApiError(0, "offline", "Offline"); return { id: "new", streamPath: "/api/v1/streams/new", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }; },
+      revokePlayback: async () => {} },
+  });
+  p.scheduleRenewal();
+  await scheduled.shift().work();
+  assert.equal(failures.length, 0); assert.equal(scheduled.length, 1); assert.equal(scheduled[0].delay, 20_000);
+  await scheduled.shift().work();
+  assert.equal(p.source.id, "new"); assert.equal(p.video.src, "/api/v1/streams/new"); assert.equal(failures.length, 0);
+});
+
+test("a refused or late ticket renewal ends playback with the error", async () => {
+  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  for (const [status, minutesLeft] of [[401, 10], [0, 0.5]]) {
+    const scheduled = []; const failures = [];
+    const p = player({
+      item: { id: "film" }, source: { id: "old", expiresAt: new Date(Date.now() + minutesLeft * 60_000).toISOString() },
+      after: (work, delay) => scheduled.push({ work, delay }), fail: (error) => failures.push(error),
+      api: { createPlayback: async () => { throw new ApiError(status, "x", "No"); } },
+    });
+    p.scheduleRenewal(); await scheduled.shift().work();
+    assert.equal(failures.length, 1); assert.equal(scheduled.length, 0);
+  }
+});

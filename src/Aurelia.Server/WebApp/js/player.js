@@ -20,6 +20,7 @@ import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtit
 
 const SAVE_INTERVAL = 10_000;
 const RENEW_BEFORE = 5 * 60_000;
+const RENEW_RETRY_MS = 20_000;
 const PREFERENCES_KEY = "aurelia.playback";
 
 export const UNPLAYABLE =
@@ -1120,8 +1121,9 @@ export class Player {
   }
 
   /** Tickets last hours; a very long session gets a fresh one before the old one ends. */
-  scheduleRenewal() {
-    const due = new Date(this.source.expiresAt).getTime() - Date.now() - RENEW_BEFORE;
+  scheduleRenewal(retryIn = null) {
+    const expires = new Date(this.source.expiresAt).getTime();
+    const due = retryIn ?? expires - Date.now() - RENEW_BEFORE;
     if (!Number.isFinite(due)) return;
     this.after(async () => {
       if (this.closed) return;
@@ -1149,7 +1151,13 @@ export class Player {
         this.api.revokePlayback(old.id).catch(() => {});
         this.scheduleRenewal();
       } catch (error) {
-        this.fail(error);
+        if (this.closed) return;
+        // The old ticket still plays for a few minutes: a dropped answer or a busy server is
+        // tried again until shortly before it ends. A refused profile ends the session at once.
+        const left = expires - Date.now();
+        const sessionEnded = error instanceof ApiError && (error.status === 401 || error.status === 403);
+        if (!sessionEnded && left > RENEW_RETRY_MS * 2) this.scheduleRenewal(RENEW_RETRY_MS);
+        else this.fail(error);
       }
     }, Math.max(0, due));
   }
