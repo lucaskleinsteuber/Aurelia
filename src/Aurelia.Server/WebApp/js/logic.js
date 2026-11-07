@@ -469,6 +469,13 @@ export class ProgressSaver {
       isFinished: Boolean(isFinished),
     };
     const recordedAt = this.now();
+    if (this.inFlight && options.keepalive) {
+      // The page is closing: a queued save would never be sent, so the last position goes out
+      // now on its own keepalive request instead of waiting for the running one.
+      this.next = null;
+      const body = { ...values, clientMutationId: this.newId(), enforceRevision: true, expectedRevision: this.revision };
+      return Promise.resolve(this.send(this.mediaId, body, options)).then(() => true, () => false);
+    }
     if (this.inFlight) {
       this.next = { values, options, recordedAt };
       return this.inFlight;
@@ -524,7 +531,7 @@ export class ProgressSaver {
     if (saved && this.next && !this.stopped) {
       const queued = this.next;
       this.next = null;
-      return this.#run(queued.values, queued.options);
+      return this.#run(queued.values, queued.options, queued.recordedAt);
     }
     return saved;
   }

@@ -369,3 +369,36 @@ test("a refused profile or device is recognised the same way everywhere", () => 
   assert.equal(logic.sessionRefused(403, undefined), false);
   assert.equal(logic.sessionRefused(500, "profile_session_revoked"), false);
 });
+
+test("a queued position keeps its time, so a conflict on it still lets the later position win", async () => {
+  let release; const gate = new Promise((resolve) => (release = resolve));
+  const sent = []; let calls = 0;
+  const send = async (_id, body) => {
+    sent.push(body); calls += 1;
+    if (calls === 1) { await gate; return { revision: 4 }; }
+    if (calls === 2) throw Object.assign(new Error("conflict"), { status: 409, code: "playback_progress_conflict" });
+    return { revision: 10 };
+  };
+  let ids = 0;
+  const saver = new logic.ProgressSaver({ mediaId: "m", revision: 3, send, newId: () => `id-${++ids}`, now: () => Date.parse("2026-11-06T20:00:00Z"),
+    read: async () => ({ revision: 9, updatedAt: "2026-11-06T19:59:58Z" }) });
+  const first = saver.save(1000, 60_000);
+  saver.save(2000, 60_000);
+  release();
+  assert.equal(await first, true);
+  assert.equal(saver.stopped, false);
+  assert.deepEqual(sent.map((body) => [body.expectedRevision, body.positionMilliseconds]), [[3, 1000], [4, 2000], [9, 2000]]);
+});
+
+test("closing the page sends the last position at once with keepalive while a save runs", async () => {
+  let release; const gate = new Promise((resolve) => (release = resolve));
+  const sent = [];
+  const send = async (_id, body, options) => { sent.push({ ...body, keepalive: Boolean(options?.keepalive) }); if (sent.length === 1) await gate; return { revision: 5 }; };
+  let ids = 0;
+  const saver = new logic.ProgressSaver({ mediaId: "m", revision: 3, send, newId: () => `id-${++ids}` });
+  const first = saver.save(1000, 60_000);
+  await saver.save(9000, 60_000, false, { keepalive: true });
+  assert.deepEqual(sent.map((body) => [body.positionMilliseconds, body.keepalive]), [[1000, false], [9000, true]]);
+  release(); await first;
+  assert.equal(sent.length, 2, "the closing position is not sent a second time");
+});
