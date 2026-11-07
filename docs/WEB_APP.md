@@ -40,6 +40,11 @@ The browser never holds a token that scripts can read:
   `SameSite=Strict` cookies.
 - The profile cookie ends when the browser closes. As in the apps, a profile session also
   ends after twelve hours and when the server restarts.
+- Browsers keep cookies per address, not per port. Another web service on the same computer
+  and address (for example `https://192.168.1.50:8443`) therefore receives these cookies with
+  its own requests. Scripts there still cannot read them, but that service's server can. Run
+  only services you trust next to Aurelia on the same address, or give the server its own
+  host name.
 - See [the client protocol](CLIENT_PROTOCOL.md#web-browser-sign-in) for the details.
 
 ## Watching
