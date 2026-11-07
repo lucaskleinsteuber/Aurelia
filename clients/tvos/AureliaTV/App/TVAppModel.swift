@@ -650,7 +650,12 @@ final class TVAppModel: ObservableObject {
     watchParty = joined
     guard await joined.join(party), let state = joined.state,
       let item = try? await api.summary(id: state.mediaId)
-    else { return }
+    else {
+      // Usually the party ended meanwhile: drop it and show the parties that are left.
+      if watchParty === joined { await leaveWatchTogether() }
+      await refreshWatchParties()
+      return
+    }
     remotePlaybackItem = item
   }
 
