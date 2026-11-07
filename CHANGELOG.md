@@ -12,6 +12,27 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac 1.31.0 (144) Beta - 07.11.2026
+
+### Added
+
+- Subtitle downloads: Settings › Metadata sets up OpenSubtitles.com with your own free API key, up to five languages, an optional account and automatic downloads. Edit Metadata › Subtitles searches and downloads subtitles for a movie or episode, or removes them.
+
+### Fixed
+
+- A server that went to sleep while Aurelia was open no longer shows "Could not connect to the server". The banner says the server isn't answering, Try Again and the automatic reconnect wake it first, and right after waking the library loads again on new connections.
+
+## Server 1.31.0 (140) Beta - 07.11.2026
+
+### Added
+
+- Subtitle downloads from OpenSubtitles.com: search and download by hand, or automatically every six hours for matched titles without a subtitle in a chosen language. Subtitles are kept in the server's data folder, never next to the media, and every app plays them like subtitle files beside the video.
+- Watch Together for upcoming app versions: devices at home can follow one shared title, play state and position, and a joining or buffering device holds the others at the same picture.
+
+### Fixed
+
+- Subtitle files beside a video are listed even when the server can't read the video's header.
+
 ## Mac 1.30.1 (143) Beta - 07.11.2026
 
 ### Fixed
