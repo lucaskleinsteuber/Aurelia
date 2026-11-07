@@ -12,6 +12,23 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## Mac 1.32.0 (145) Beta - 07.11.2026
+
+### Added
+
+- Watch Together: start a party from the player's new button, and others join from the title's page. Play, pause, jumps and the next episode apply to everyone, a loading device holds the others for a moment, and short notices say who did what. Needs Aurelia Server 1.31.0.
+
+### Fixed
+
+- Opening another title while the player is showing now always starts a fresh player for it.
+
+## Linux Desktop 1.4.0 (13) Beta - 07.11.2026
+
+### Added
+
+- Watch Together, as on the Mac: start a party from the player, join from the title's page, and play, pause, jumps and the next episode apply to everyone.
+- Subtitle downloads: Settings › Metadata sets up OpenSubtitles.com with your own free API key, and Edit Metadata › Subtitles searches, downloads and removes subtitles for a movie or episode.
+
 ## Mac 1.31.0 (144) Beta - 07.11.2026
 
 ### Added
