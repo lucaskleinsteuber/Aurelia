@@ -35,6 +35,9 @@ public sealed class ServerUseClock(ServerRuntimeOptions runtime, TimeProvider cl
         var path = context.Request.Path;
         foreach (var background in Background)
             if (path.Equals(background, StringComparison.OrdinalIgnoreCase)) return false;
+        // A Watch Together player asks for the party while it waits; playing itself counts.
+        if (HttpMethods.IsGet(context.Request.Method) && path.StartsWithSegments("/api/v1/watch-together")
+            && context.Request.Query.ContainsKey("after")) return false;
         if (context.User.Identity?.IsAuthenticated == true) return true;
         return HttpMethods.IsPost(context.Request.Method)
             && (path.StartsWithSegments("/api/v1/auth") || path.StartsWithSegments("/api/v1/setup"));

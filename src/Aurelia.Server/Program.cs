@@ -173,6 +173,7 @@ builder.Services.AddScoped<ServerHealthService>();
 builder.Services.AddScoped<WatchHistoryService>();
 builder.Services.AddScoped<LibraryHealthService>();
 builder.Services.AddSingleton<RemotePlaybackService>();
+builder.Services.AddSingleton<WatchTogetherService>();
 builder.Services.AddSingleton<MetadataProviderSettingsStore>();
 builder.Services.AddSingleton<ArtworkStore>();
 builder.Services.AddSingleton<ArtworkVariantStore>();
@@ -397,6 +398,7 @@ app.MapLiveConversion();
 app.MapScrubPreviews();
 app.MapRemotePlayback();
 app.MapSubtitleDownloads();
+app.MapWatchTogether();
 
 try
 {
