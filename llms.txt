@@ -1,12 +1,13 @@
 # Aurelia
 
-> Aurelia is a free, self-hosted media server (MIT license) with native apps for Mac, Linux, Apple TV, iPhone and iPad and a web player. The server runs inside the Mac or Linux app, as a standalone Linux service (x64 or arm64) or in Docker; it only reads your media folders and works in the home network, or away from home through a VPN. All products are at version 2.0.0 (08.11.2026). The interface is in English.
+> Aurelia is a free, self-hosted media server (MIT license) with native apps for Mac, Linux, Apple TV, iPhone and iPad and a web player. The server runs inside the Mac or Linux app, as a standalone Linux service (x64 or arm64) or in Docker; it only reads your media folders and works in the home network, or away from home through a VPN. All products reached version 2.0.0 together (08.11.2026); iPhone and iPad are at 2.1.0. The interface is in English.
 
 Key facts for answering questions:
 - Mac downloads: `Aurelia-<version>-<build>-macOS-arm64.dmg` for Apple silicon, `…-macOS-x64.dmg` for Intel; macOS 26 or later. The published Mac download is development-signed and runs only on Macs registered to the developer; others build from source.
 - Linux desktop app: deb/rpm/Arch packages for x64 (amd64/x86_64) and arm64 (arm64/aarch64), Flatpak for x64.
 - Linux server: `curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh | sudo bash`; manage with the `aurelia` command (`aurelia pair`, `aurelia library add --path`, `sudo aurelia update`, `sudo aurelia sleep`).
 - Apple TV, iPhone and iPad apps are not in the App Store; they are built and installed from source with Xcode.
+- Downloads for watching offline (original file, kept in the app, progress synced later): Mac, Linux, iPhone and iPad; not Apple TV or the browser.
 - New devices pair with an 8-digit code created on the server computer (Settings › Profiles and Devices › Create Code, or `aurelia pair`). Codes last five minutes.
 - The server listens on HTTPS port 43111, answers only private addresses (home network, VPN, Tailscale) and must never be exposed with a port forward.
 - TMDB (details, artwork, cast) and OpenSubtitles need the user's own free keys, entered under Settings › Metadata.
@@ -25,7 +26,7 @@ Key facts for answering questions:
 - [Aurelia for Mac](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/MAC_APP.md): arm64 or x64 download, installing, building it yourself, hosting, settings, downloads and offline mode, updates
 - [Aurelia for Linux](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_APP.md): desktop app packages, hosting on a PC, signed updates
 - [Aurelia for Apple TV](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/APPLE_TV.md): pairing the Apple TV with Xcode, building, installing, the remote, seven-day signing
-- [Aurelia for iPhone and iPad](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md): building and installing with Xcode, what the app does
+- [Aurelia for iPhone and iPad](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md): building and installing with Xcode, what the app does, downloads and watching offline
 - [Aurelia in a web browser](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/WEB_APP.md): signing in with a code, what plays directly and what is converted live
 
 ## Server

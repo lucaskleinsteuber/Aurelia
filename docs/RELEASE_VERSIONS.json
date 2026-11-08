@@ -25,8 +25,8 @@
   },
   {
     "product": "iPhone & iPad",
-    "version": "2.0.0",
-    "build": 16,
+    "version": "2.1.0",
+    "build": 17,
     "guide": "docs/IOS_APP.md"
   }
 ]

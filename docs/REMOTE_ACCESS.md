@@ -108,8 +108,8 @@ the same with its *VPN On Demand* setting on Apple devices.
 - **Picture quality depends on your home upload.** The apps play the original files. A home line
   with 40 Mbit/s upload plays most movies smoothly; a large 4K remux may need more than that and
   then pauses to load. On mobile data, a two-hour 1080p movie can use several gigabytes.
-- **Downloads are often better for travel.** On the Mac and Linux apps, download a title at home
-  and watch it offline on the way, without any VPN.
+- **Downloads are often better for travel.** On the Mac, Linux, iPhone and iPad apps, download
+  a title at home and watch it offline on the way, without any VPN.
 - **A sleeping server.** A VPN does not carry Wake-on-LAN from away. If the server sleeps to save
   power, wake it with your router (FRITZ!Box: MyFRITZ!App › *Home Network › device › Start
   computer*), keep it awake during set hours (`sudo aurelia sleep server --awake 17:00-23:30`),

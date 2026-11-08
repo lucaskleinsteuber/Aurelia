@@ -58,7 +58,9 @@ struct IOSPlayerView: View {
       if let upNext = controller.upNext, !controller.controlsVisible, controller.trackMenu == nil {
         upNextCard(upNext)
       }
-      if let party = model.watchParty { IOSWatchTogetherNotice(session: party) }
+      if !controller.isOffline, let party = model.watchParty {
+        IOSWatchTogetherNotice(session: party)
+      }
     }
     .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
     .persistentSystemOverlays(controller.controlsVisible ? .automatic : .hidden)
@@ -69,7 +71,7 @@ struct IOSPlayerView: View {
     .onAppear {
       keyboard = true
       // A party this device is in follows into the player before it starts.
-      model.attachWatchParty(to: controller)
+      if !controller.isOffline { model.attachWatchParty(to: controller) }
       controller.start()
       configurePreviews()
     }
@@ -140,19 +142,25 @@ struct IOSPlayerView: View {
             id: "sleep"
           ) { open(.sleep) }
           // Watch Together: start a party for this title, or leave the one this device is in.
-          glassButton(
-            model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
-            symbol: model.watchParty?.state != nil ? "person.2.fill" : "person.2",
-            id: "watch-together"
-          ) {
-            Task {
-              if model.watchParty?.state != nil {
-                await model.leaveWatchTogether()
-              } else {
-                await model.startWatchTogether(with: controller)
-              }
-            }
+          if !controller.isOffline {
+            watchTogetherButton
           }
+        }
+      }
+    }
+  }
+
+  private var watchTogetherButton: some View {
+    glassButton(
+      model.watchParty?.state != nil ? "Leave Watch Together" : "Start Watch Together",
+      symbol: model.watchParty?.state != nil ? "person.2.fill" : "person.2",
+      id: "watch-together"
+    ) {
+      Task {
+        if model.watchParty?.state != nil {
+          await model.leaveWatchTogether()
+        } else {
+          await model.startWatchTogether(with: controller)
         }
       }
     }

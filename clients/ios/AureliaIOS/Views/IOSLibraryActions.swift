@@ -172,5 +172,6 @@ struct IOSMediaContextActions: View {
         Task { await actions.continuation(item, hidden: !hidden, model: model) }
       }.disabled(actions.busy)
     }
+    IOSDownloadMenuItems(item: item, store: model.offline)
   }
 }

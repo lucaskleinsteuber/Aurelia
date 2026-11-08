@@ -13,6 +13,14 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## iPhone & iPad 2.1.0 (17) - 08.11.2026
+
+### Added
+
+- Downloads: Download in a movie's or episode's menu, or Download Season on a series, keeps the title on this iPhone or iPad with its subtitle files, poster and description. The file keeps loading while the app is in the background or the screen is locked, one title after another, and Settings › Downloads shows progress, used and free space.
+- Watch Downloads: when the server is off or out of reach, the downloads open in a small library of their own, each profile with its PIN. Up Next plays the next downloaded episode.
+- Progress watched offline goes to the server when the profile opens there again; the later of the two positions wins, as on the Mac.
+
 ## Mac 2.0.0 (153) - 08.11.2026
 
 Aurelia 2.0 is the first release with every app at the same version and is a stable release.

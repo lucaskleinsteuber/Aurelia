@@ -8,6 +8,8 @@ final class IOSPlaybackController: ObservableObject {
   enum TrackMenu: Equatable { case audio, rate, sleep }
 
   let engine: any IOSPlaybackEngine
+  /// Plays a download from this device with no server; Watch Together and Play On are off.
+  let isOffline: Bool
   private let runtime: IOSPlaybackRuntime
   @Published private(set) var isScrubbing = false
   @Published private(set) var title: String
@@ -107,8 +109,10 @@ final class IOSPlaybackController: ObservableObject {
     preferencesStore: IOSPlaybackPreferencesStore? = nil,
     onClose: @escaping @MainActor () -> Void,
     onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in },
-    startOver: Bool = false
+    startOver: Bool = false,
+    isOffline: Bool = false
   ) {
+    self.isOffline = isOffline
     self.connection = connection
     self.session = session
     self.mediaID = mediaID

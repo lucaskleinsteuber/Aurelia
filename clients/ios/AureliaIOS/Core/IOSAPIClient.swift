@@ -401,6 +401,11 @@ struct IOSAPIClient: Sendable {
     let data = try await send("/api/v1/streams/\(ticketID.uuidString)/subtitles", method: "GET")
     return try Self.decode([IOSLiveSubtitleTrack].self, data: data)
   }
+  /// A subtitle file next to the video, as WebVTT text, through the ticket's stream address.
+  func streamSubtitleFile(streamPath: String, index: Int) async throws -> Data {
+    _ = try validatedStreamURL(path: streamPath)
+    return try await send("\(streamPath)/subtitles/\(max(0, index))", method: "GET")
+  }
   /// A player's sleep timer ended: a server in sleep mode may sleep if nothing else plays.
   func sleepTimerEnded() async throws {
     _ = try await send("/api/v1/playback/sleep-timer-ended", method: "POST")

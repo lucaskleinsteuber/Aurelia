@@ -2,7 +2,7 @@
 
 `clients/ios` holds the iPhone and iPad client. It plays your library on iPhone and iPad with
 touch controls, and is installed from source with Xcode like the Apple TV app; it is not in the
-App Store. Version 2.0.0 is used every day on a real iPhone and iPad.
+App Store. Version 2.1.0 adds downloads for watching without the server.
 
 ## How it is built
 
@@ -20,7 +20,8 @@ its screens are its own:
 - **Profiles** open with their PIN; Home, Movies, TV Shows, Search, title pages, the Watchlist
   and people pages work like on the Apple TV.
 - **Playback** runs through MobileVLCKit and a small relay on `127.0.0.1` that adds the
-  sign-in to each request and streams the bytes through; nothing is stored. Progress, sound
+  sign-in to each request and streams the bytes through; nothing is stored unless you download
+  the title (see below). Progress, sound
   tracks, subtitles (including subtitle files next to the video), scrub previews, Up Next and
   the sleep timer behave as on the Apple TV.
 - **Screens** are built for iPhone and iPad rather than taken from the TV: a tab bar with Home,
@@ -34,6 +35,38 @@ its screens are its own:
   year in review, Playback, the profile's own PIN (set, change, or turn off for ordinary
   profiles), the size of the stored artwork with a button to clear it, and the server's name,
   address and version.
+
+## Downloads and watching offline
+
+For a train ride or a holiday, keep titles on the iPhone or iPad and watch them without the
+server and without a VPN.
+
+1. At home, open a movie and choose **⋯ › Download**, or press and hold an episode and choose
+   **Download**. On a series, **⋯ › Download Season N** loads every episode of that season.
+2. The download keeps going while Aurelia is in the background or the screen is locked. Titles
+   load one after another, so a season never takes all of a profile's streams and the TV keeps
+   playing meanwhile. **Settings › Downloads** shows the progress, the space used and the space
+   left; a stopped download continues with **Try Again**.
+3. Away from home, open Aurelia. When the server doesn't answer, **Watch Downloads** opens the
+   downloads in a small library: Continue Watching, movies, and series with their episodes.
+   Each profile sees only its own downloads and opens with its PIN, which the device checks
+   against a salted value it saved when the profile last opened at home.
+4. Back at home, the progress watched offline goes to the server by itself when the profile
+   opens. If the title was watched on another device meanwhile, the later position wins.
+
+Good to know:
+
+- A download is the original file, with the subtitle files next to it, its poster and its
+  description. It plays with the normal player: sound tracks, subtitles, speed, Dialogue Boost,
+  scrub previews, the sleep timer and Up Next for the next downloaded episode. Watch Together
+  needs the server and is off for downloads.
+- Downloads live in Aurelia's own storage on the device, are left out of iCloud backups and
+  are never written next to your media or on the server. Swipe a download in Settings ›
+  Downloads to remove it; deleting the app removes all of them.
+- One copy per title and device: a title another profile downloaded on the same device shows
+  as already downloaded.
+- Aurelia keeps 1 GB free and refuses a download that would leave less.
+- Disconnecting the device from its server removes that server's downloads too.
 
 ## Building and testing
 

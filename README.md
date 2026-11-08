@@ -58,8 +58,8 @@ home network; details and artwork from [TMDB](https://www.themoviedb.org) are op
   time a title ends.
 - *Play On* sends a title to another screen at home; *Watch Together* keeps several screens on
   the same moment.
-- Downloads on Mac and Linux for watching without the server, with an offline mode when the
-  server is out of reach.
+- Downloads on Mac, Linux, iPhone and iPad for watching without the server, with an offline
+  mode when the server is out of reach.
 
 **For everyone at home**
 - A profile per person with their own progress, favorites, Watchlist, collections, scene notes,

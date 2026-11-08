@@ -19,6 +19,8 @@ struct IOSRootView: View {
     Group {
       if introductionReplay {
         IOSSetupIntroductionView(guide: guide, replay: true) { introductionReplay = false }
+      } else if model.offlineMode != nil {
+        IOSOfflineModeView(store: model.offline)
       } else if model.phase == .connection, model.connection == nil, !guide.introSeen {
         IOSSetupIntroductionView(guide: guide)
       } else if model.phase == .library, guide.isGuiding {
@@ -243,6 +245,15 @@ struct IOSSavedServerView: View {
           .multilineTextAlignment(.center)
       }
       Spacer()
+      if model.canWatchOffline {
+        Button {
+          model.enterOfflineMode()
+        } label: {
+          Label("Watch Downloads", systemImage: "arrow.down.circle")
+        }
+        .buttonStyle(IOSButtonStyle(kind: .secondary))
+        .accessibilityIdentifier("server-watch-downloads")
+      }
       Button("Connect to Another Server", action: chooseOtherServer)
         .font(.subheadline.weight(.semibold)).tint(.white.opacity(0.75))
         .accessibilityIdentifier("tv-other-server")
@@ -394,6 +405,13 @@ struct IOSConnectionMenu: View {
           Label("Switch Profile", systemImage: "person.2")
         }
       }
+      Section {
+        NavigationLink {
+          IOSDownloadsView(store: model.offline)
+        } label: {
+          Label("Downloads", systemImage: "arrow.down.circle")
+        }.accessibilityIdentifier("settings-downloads")
+      }
       Section("Activity") {
         NavigationLink {
           IOSWatchHistoryView()
@@ -443,7 +461,7 @@ struct IOSConnectionMenu: View {
         Text("Storage")
       } footer: {
         Text(
-          "Posters and backdrops are kept on this device so they appear at once. Videos are never stored."
+          "Posters and backdrops are kept on this device so they appear at once. Videos are stored only when you download them."
         )
       }
       if IOSTestEdition.isActive {
@@ -485,6 +503,10 @@ struct IOSConnectionMenu: View {
     ) {
       Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }
       Button("Cancel", role: .cancel) {}
+    } message: {
+      if model.canWatchOffline {
+        Text("Downloads from this server are removed from this \(IOSDesign.deviceName) too.")
+      }
     }
   }
 }

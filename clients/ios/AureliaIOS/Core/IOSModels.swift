@@ -91,6 +91,8 @@ enum IOSServerDate {
   static func parse(_ value: String) -> Date? {
     Parsers.shared.fractional.date(from: value) ?? Parsers.shared.whole.date(from: value)
   }
+
+  static func string(_ date: Date) -> String { Parsers.shared.whole.string(from: date) }
 }
 
 /// A saved server that answers not at all, as when its computer sleeps, unlike one that answers with

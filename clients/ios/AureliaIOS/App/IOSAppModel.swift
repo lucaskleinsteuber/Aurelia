@@ -48,6 +48,14 @@ final class IOSAppModel: ObservableObject {
   @Published private(set) var watchParty: IOSWatchTogetherSession?
   /// Parties others started on the server, offered on Home and title pages.
   @Published private(set) var watchParties: [IOSWatchPartySummary] = []
+  /// Downloads on this device; the synthetic UI fixtures get an empty store of their own.
+  let offline: IOSOfflineStore
+  enum OfflineMode: Equatable {
+    case choosing
+    case open(IOSOfflineSession)
+  }
+  /// Aurelia without the server, showing only this device's downloads.
+  @Published private(set) var offlineMode: OfflineMode?
   private var syncTask: Task<Void, Never>?
   private var progressObserver: Task<Void, Never>?
   private var refreshTask: Task<Void, Never>?
@@ -103,6 +111,7 @@ final class IOSAppModel: ObservableObject {
       let fixture = false
       let assistantFixture = false
     #endif
+    offline = Self.offlineStore(fixture: fixture)
     if !fixture { IOSTestEdition.forgetLeftoversAfterReinstall() }
     let alreadyConnected = !fixture && (try? IOSCredentialStore().load()) != nil
     setupGuide = IOSSetupGuide(
@@ -118,6 +127,15 @@ final class IOSAppModel: ObservableObject {
       return try await self.makeClient(connection: connection).profilePhoto(
         id: id, revision: revision)
     }
+  }
+
+  /// The synthetic UI fixtures never see or start real downloads.
+  private static func offlineStore(fixture: Bool) -> IOSOfflineStore {
+    guard fixture else { return .shared }
+    return IOSOfflineStore(
+      root: FileManager.default.temporaryDirectory.appendingPathComponent(
+        "AureliaIOSFixtureDownloads-\(UUID().uuidString)", isDirectory: true),
+      transfers: false)
   }
 
   var supportsProfilePersonalization: Bool {
@@ -364,6 +382,7 @@ final class IOSAppModel: ObservableObject {
         else { throw IOSCoreError.invalidResponse }
         session = opened
         selectedProfile = nil
+        rememberForOffline(profile, pin: pin, serverID: connection.serverID)
         phase = .library
         browser.stop()
         activateProgress(connection: connection, session: opened)
@@ -421,6 +440,7 @@ final class IOSAppModel: ObservableObject {
     await artwork.removeStored()
     guard let stored else { return }
     IOSWakeOnLan.forget(serverID: stored.serverID)
+    offline.forget(serverID: stored.serverID)
     do {
       try await makeClient(connection: stored).disconnectDevice()
     } catch let failure as IOSCoreError where failure.isAuthenticationFailure {
@@ -997,6 +1017,111 @@ final class IOSAppModel: ObservableObject {
         onAuthenticationFailure: { [weak self] failure in
           await self?.handleProgressFailure(failure, sessionID: session.sessionId)
         })
+      // Progress watched offline goes to the server, and downloads take over the server's.
+      await offline.syncProgress(api: makeClient(connection: connection, session: session))
+    }
+  }
+
+  // MARK: Downloads
+
+  /// The open profile, as the offline mode would show it.
+  var currentOfflineSession: IOSOfflineSession? {
+    guard let connection, let session else { return nil }
+    return IOSOfflineSession(
+      serverID: connection.serverID, profileID: session.user.id, name: session.user.shownName,
+      pictureKey: session.user.pictureKey, pictureRevision: session.user.pictureRevision ?? 0)
+  }
+
+  /// Downloads a movie or episode for the open profile.
+  func download(_ item: IOSCatalogItem) {
+    guard let client, IOSOfflineRules.canDownload(item) else { return }
+    Task {
+      let series: IOSCatalogItem? =
+        if item.kind == .episode, let parent = item.parentId {
+          try? await client.summary(id: parent)
+        } else { nil }
+      await offline.download(item, series: series, api: client)
+    }
+  }
+
+  /// Downloads every episode of a season that isn't on this device yet, one after another.
+  func download(episodes: [IOSCatalogItem]) {
+    guard let client else { return }
+    let wanted = episodes.filter {
+      IOSOfflineRules.canDownload($0) && offline.title($0.id) == nil && offline.pending($0.id) == nil
+    }
+    guard let first = wanted.first else { return }
+    Task {
+      let series: IOSCatalogItem? =
+        if let parent = first.parentId { try? await client.summary(id: parent) } else { nil }
+      for episode in wanted {
+        guard self.session?.sessionId == client.session?.sessionId else { return }
+        await offline.download(episode, series: series, api: client)
+      }
+    }
+  }
+
+  func retryDownload(_ id: UUID) {
+    Task { await offline.retry(id, api: client) }
+  }
+
+  /// Whether the offline mode has anything to show for the saved server.
+  var canWatchOffline: Bool {
+    connection.map { offline.hasDownloads(serverID: $0.serverID) } ?? false
+  }
+
+  func enterOfflineMode() {
+    guard let connection, canWatchOffline else { return }
+    let cards = offline.offlineProfiles(serverID: connection.serverID)
+    if cards.count == 1, let only = cards.first, !only.pinProtected {
+      _ = openOffline(only, pin: "")
+    } else {
+      offlineMode = .choosing
+    }
+  }
+
+  /// Opens a profile's downloads offline; false when its PIN is wrong.
+  func openOffline(_ card: IOSOfflineProfileCard, pin: String) -> Bool {
+    guard card.serverID == connection?.serverID, card.accepts(pin) else { return false }
+    offlineMode = .open(
+      IOSOfflineSession(
+        serverID: card.serverID, profileID: card.profileID, name: card.name,
+        pictureKey: card.pictureKey, pictureRevision: card.pictureRevision))
+    return true
+  }
+
+  func chooseOfflineProfile() { offlineMode = .choosing }
+
+  func leaveOfflineMode() {
+    offlineMode = nil
+    Task { await reconnect(userInitiated: true) }
+  }
+
+  func offlinePlayback(
+    title: IOSOfflineTitle, profile: IOSOfflineSession, connection: IOSStoredConnection
+  ) -> IOSOfflinePlayback {
+    IOSOfflinePlayback(
+      title: title, profile: profile, connection: connection, store: offline,
+      base: environment.makePlaybackRuntime())
+  }
+
+  /// A download played while the server answers: its progress goes there right away.
+  func offlinePlayerClosed() {
+    guard let client else { return }
+    Task {
+      await offline.syncProgress(api: client)
+      scheduleLibraryRefresh()
+    }
+  }
+
+  /// Remembers a profile that opened while the server answered, for the offline mode.
+  private func rememberForOffline(_ profile: IOSWatchingProfile, pin: String?, serverID: UUID) {
+    let store = offline
+    // Deriving the PIN check takes a moment; keep it off the main actor.
+    Task.detached(priority: .utility) {
+      guard let card = IOSOfflineProfileCard.make(serverID: serverID, profile: profile, pin: pin)
+      else { return }
+      await store.remember(card)
     }
   }
 

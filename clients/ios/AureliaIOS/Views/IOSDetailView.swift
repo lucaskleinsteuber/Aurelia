@@ -185,6 +185,14 @@ struct IOSDetailView: View {
               Button("Mark \(name) as Unwatched", systemImage: "circle", role: .destructive) {
                 seasonWatch(false)
               }
+              if let episodes = season?.episodes.map({ model.overlay($0.item) }),
+                episodes.contains(where: IOSOfflineRules.canDownload)
+              {
+                Button("Download \(name)", systemImage: "arrow.down.circle") {
+                  model.download(episodes: episodes)
+                }
+                .accessibilityIdentifier("detail-download-season")
+              }
             }
           } label: {
             Image(systemName: "ellipsis").font(.body.weight(.semibold))

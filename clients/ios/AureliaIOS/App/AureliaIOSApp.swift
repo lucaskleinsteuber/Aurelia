@@ -1,7 +1,24 @@
 import SwiftUI
+import UIKit
+
+/// Downloads go on in the background; the system wakes Aurelia when a file is complete.
+final class IOSAppDelegate: NSObject, UIApplicationDelegate {
+  func application(
+    _ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+    completionHandler: @escaping () -> Void
+  ) {
+    guard identifier == IOSOfflineDownloader.identifier else {
+      completionHandler()
+      return
+    }
+    // Touching the store reconnects to the transfers, whose events then arrive.
+    IOSOfflineStore.shared.backgroundCompletion = completionHandler
+  }
+}
 
 @main
 struct AureliaIOSApp: App {
+  @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var appDelegate
   @StateObject private var model = IOSAppModel()
   @Environment(\.scenePhase) private var scenePhase
 
