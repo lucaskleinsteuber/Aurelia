@@ -155,6 +155,33 @@ enum SpeechLanguages {
   }
 }
 
+/// Where words really start. The recognizer counts the silence before a word as part of it, so
+/// after a pause a word seems to start when the previous one ended. The loudness of the sound,
+/// measured every 20 ms while it is read, shows where speaking starts again.
+enum SpeechTiming {
+  static let frame = 0.02
+
+  /// Moves the start of each word that begins with a quiet stretch to where it gets loud.
+  static func trimmingSilence(_ words: [SpeechWord], levels: [Float]) -> [SpeechWord] {
+    guard levels.count > 50 else { return words }
+    let sorted = levels.sorted()
+    // The quiet parts of the title: its tenth-quietest frames.
+    let floor = sorted[sorted.count / 10]
+    let loud = sorted[sorted.count * 9 / 10]
+    let threshold = max(floor * 4, floor + (loud - floor) * 0.12, 1e-4)
+    return words.map { word in
+      guard word.end - word.start > 0.3 else { return word }
+      let first = max(0, Int(word.start / frame))
+      let last = min(levels.count, Int(word.end / frame))
+      guard first < last, levels[first] < threshold,
+        let loudFrame = (first..<last).first(where: { levels[$0] >= threshold })
+      else { return word }
+      let start = min(Double(loudFrame) * frame, word.end - 0.1)
+      return start > word.start ? SpeechWord(text: word.text, start: start, end: word.end) : word
+    }
+  }
+}
+
 /// Writes subtitles from 16 kHz mono speech with the Mac's own speech recognition. Everything
 /// happens on this Mac; the sound is never stored.
 enum SpeechRecognizer {
@@ -201,6 +228,7 @@ enum SpeechRecognizer {
       try await analyzer.start(inputSequence: input)
       var carry = Data()
       var samples: Int64 = 0
+      var meter = LoudnessMeter()
       for try await chunk in audio {
         try Task.checkCancellation()
         consumed(chunk.count)
@@ -210,6 +238,7 @@ enum SpeechRecognizer {
         let bytes = carry.prefix(usable)
         carry.removeFirst(usable)
         guard let buffer = pcmBuffer(bytes, format: source) else { continue }
+        meter.add(buffer)
         samples += Int64(buffer.frameLength)
         feed.yield(AnalyzerInput(buffer: try convert(buffer, with: converter, to: target)))
         listened(Double(samples) / 16_000)
@@ -218,13 +247,34 @@ enum SpeechRecognizer {
       // With no sound at all there is nothing to finish; the analyzer would wait for it.
       guard samples > 0 else { throw SpeechSubtitleError.nothingHeard }
       try await analyzer.finalizeAndFinishThroughEndOfInput()
+      return SpeechTiming.trimmingSilence(try await collector.value, levels: meter.levels)
     } catch {
       feed.finish()
       await analyzer.cancelAndFinishNow()
       collector.cancel()
       throw error
     }
-    return try await collector.value
+  }
+
+  /// The loudness of every 20 ms of sound (root mean square, 0…1).
+  private struct LoudnessMeter {
+    private(set) var levels: [Float] = []
+    private var sum: Float = 0
+    private var count = 0
+
+    mutating func add(_ buffer: AVAudioPCMBuffer) {
+      guard let channel = buffer.int16ChannelData?[0] else { return }
+      for index in 0..<Int(buffer.frameLength) {
+        let value = Float(channel[index]) / 32_768
+        sum += value * value
+        count += 1
+        if count == 320 {
+          levels.append((sum / 320).squareRoot())
+          sum = 0
+          count = 0
+        }
+      }
+    }
   }
 
   private static func pcmBuffer(_ bytes: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {
@@ -270,6 +320,8 @@ enum SpeechSubtitleError: LocalizedError, Equatable {
   case languageUnavailable(String)
   case audioUnreadable
   case nothingHeard
+  case tooFewSubtitles
+  case noMatch
 
   var errorDescription: String? {
     switch self {
@@ -278,6 +330,9 @@ enum SpeechSubtitleError: LocalizedError, Equatable {
       "This Mac can’t recognize \(SubtitleLanguages.name(code))."
     case .audioUnreadable: "The sound track couldn’t be read."
     case .nothingHeard: "No speech was found in this sound track."
+    case .tooFewSubtitles: "These subtitles have too few lines to sync."
+    case .noMatch:
+      "These subtitles don’t fit this sound track at any offset. They may be for another version of the film, or the spoken language is set wrong. Nothing was changed."
     }
   }
 }

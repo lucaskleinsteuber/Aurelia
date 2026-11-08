@@ -72,6 +72,21 @@ struct SpeechSubtitleTests {
     #expect(SpeechLanguages.choices(supported) == ["en", "fr", "de"])
   }
 
+  @Test func wordsStartWhereItGetsLoudAfterAPause() {
+    // One second of quiet, then speech; the recognizer counts the quiet as part of "Wir".
+    let levels = [Float](repeating: 0.001, count: 150) + [Float](repeating: 0.2, count: 100)
+      + [Float](repeating: 0.001, count: 50)
+    let words = [
+      SpeechWord(text: "Tag.", start: 1.6, end: 2.0), SpeechWord(text: "Wir", start: 2.0, end: 3.4),
+      SpeechWord(text: "sind", start: 3.4, end: 3.6),
+    ]
+    let trimmed = SpeechTiming.trimmingSilence(words, levels: levels)
+    #expect(trimmed[1] == SpeechWord(text: "Wir", start: 3.0, end: 3.4))
+    // A word that starts loud, or is short, stays as it is.
+    #expect(trimmed[0] == words[0] && trimmed[2] == words[2])
+    #expect(SpeechTiming.trimmingSilence(words, levels: []) == words)
+  }
+
   @Test func soundTracksDescribeThemselves() {
     let track = SpeechAudioTrack(
       index: 2, codec: "eac3", channels: 6, language: "ger", title: "Kommentar", isDefault: false)

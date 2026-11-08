@@ -260,6 +260,11 @@ does no recognition itself.
   speech subtitles in that language and is listed with the downloaded subtitles as
   "German · From Speech"; players find it in the stream's subtitle list. No OpenSubtitles setup
   is needed.
+- With `subtitle-sync-v1` (server 2.2.0), `POST /api/v1/media/{id}/subtitles/synced?language=de`
+  takes a copy of one of the title's subtitles that the device moved to fit the speech. It is
+  listed as "German · Synced", replaces an earlier synced copy in that language, and leaves the
+  original (embedded, beside the video or downloaded) as it is. The device reads the original
+  as WebVTT through `GET {streamPath}/subtitles/{index}`.
 
 ## Watch Together
 

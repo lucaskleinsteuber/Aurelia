@@ -213,6 +213,10 @@ struct SubtitleDownloadPanel: View {
   @State private var speechTrack = 0
   @State private var speechLanguage = "en"
   @State private var speechLanguages: [String] = []
+  @State private var syncTracks: [LiveSubtitleTrack] = []
+  @State private var syncTrack = -1
+
+  private var syncPossible: Bool { model.libraryCapabilities.contains("subtitle-sync-v1") }
 
   private var speechPossible: Bool {
     model.libraryCapabilities.contains("speech-subtitles-v1") && SpeechRecognizer.isAvailable
@@ -295,9 +299,11 @@ struct SubtitleDownloadPanel: View {
   /// Subtitles written by this Mac from what is said in a sound track.
   private var speechSection: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("Create from Speech").font(.headline)
+      Text("Subtitles from Speech").font(.headline)
       Text(
-        "This Mac listens to a sound track and writes subtitles from what is said. The sound is read from the server and never stored; the subtitles are kept on the server for every device."
+        syncPossible
+          ? "This Mac listens to a sound track and writes subtitles from what is said, or moves existing subtitles so they fit the speech. The sound is read from the server and never stored; the results are kept on the server for every device, and the original subtitles stay as they are."
+          : "This Mac listens to a sound track and writes subtitles from what is said. The sound is read from the server and never stored; the subtitles are kept on the server for every device."
       )
       .font(.caption).foregroundStyle(.secondary)
       if let job = speech.job(mediaId) {
@@ -326,11 +332,31 @@ struct SubtitleDownloadPanel: View {
             }
             .fixedSize()
           }
-          Button("Create Subtitles") { startSpeech() }
-            .accessibilityIdentifier("subtitle-speech-start")
+          HStack {
+            Button("Create Subtitles") { startSpeech() }
+              .accessibilityIdentifier("subtitle-speech-start")
+            Button("Cancel") { speechTracks = nil }
+          }
+          if syncPossible, !syncTracks.isEmpty {
+            HStack {
+              Picker("Subtitles", selection: $syncTrack) {
+                ForEach(syncTracks) { track in Text(track.title).tag(track.index) }
+              }
+              .fixedSize()
+              Button("Sync to Speech") { startSync() }
+                .disabled(!syncTracks.contains { $0.index == syncTrack })
+                .accessibilityIdentifier("subtitle-sync-start")
+            }
+            Text(
+              "Syncing moves the chosen subtitles so they appear when the words are said, also when they were made for another frame rate or cut. The result is saved as a synced copy."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          }
         }
       } else {
-        Button("Create Subtitles from Speech…") { Task { await loadSpeechTracks() } }
+        Button(
+          syncPossible ? "Create or Sync Subtitles from Speech…" : "Create Subtitles from Speech…"
+        ) { Task { await loadSpeechTracks() } }
           .disabled(working != nil)
           .accessibilityIdentifier("subtitle-speech")
       }
@@ -340,6 +366,9 @@ struct SubtitleDownloadPanel: View {
   @ViewBuilder
   private func speechJob(_ job: SpeechSubtitleJobs.Job) -> some View {
     let language = SubtitleLanguages.name(job.language)
+    if case .sync(let name) = job.kind {
+      Text("Syncing “\(name)”").font(.callout.weight(.semibold))
+    }
     switch job.phase {
     case .preparing:
       HStack {
@@ -378,10 +407,25 @@ struct SubtitleDownloadPanel: View {
           .foregroundStyle(.green)
         Button("Done") { speech.dismiss(mediaId) }
       }
+      if let summary = job.summary {
+        Text(summary).font(.caption).foregroundStyle(.secondary)
+      }
+    case .alreadyInSync:
+      HStack {
+        Label(
+          "These subtitles already fit the speech; nothing was changed.",
+          systemImage: "checkmark.circle")
+        Button("Done") { speech.dismiss(mediaId) }
+      }
     case .unsaved(let message):
       Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
       HStack {
-        Button("Save Subtitles") { speech.saveAgain(mediaId, save: saver(language: job.language)) }
+        Button("Save Subtitles") {
+          speech.saveAgain(
+            mediaId,
+            save: job.kind == .create
+              ? saver(language: job.language) : syncSaver(language: job.language))
+        }
         Button("Discard", role: .destructive) { speech.cancel(mediaId) }
       }
     case .failed(let message):
@@ -396,6 +440,11 @@ struct SubtitleDownloadPanel: View {
       let ticket = try await client.createPlayback(mediaId: mediaId)
       defer { Task { try? await client.revokePlayback(id: ticket.id) } }
       let tracks = try await client.speechAudioTracks(streamPath: ticket.streamPath).tracks
+      if syncPossible {
+        syncTracks = ((try? await client.streamSubtitles(ticket: ticket.id)) ?? [])
+          .filter(\.supported)
+        syncTrack = syncTracks.first?.index ?? -1
+      }
       speechLanguages = SpeechLanguages.choices(await SpeechRecognizer.supportedLocales())
       let chosen = tracks.first(where: \.isDefault) ?? tracks.first
       speechTrack = chosen?.index ?? 0
@@ -413,6 +462,28 @@ struct SubtitleDownloadPanel: View {
       mediaId: mediaId, track: speechTrack, language: speechLanguage, profile: profile,
       save: saver(language: speechLanguage))
     speechTracks = nil
+  }
+
+  private func startSync() {
+    guard let profile = model.profile, let track = syncTracks.first(where: { $0.index == syncTrack })
+    else { return }
+    // Saved in the subtitles' own language; when they don't say, in the spoken one.
+    let language = SpeechLanguages.code(forTrack: track.language) ?? speechLanguage
+    speech.sync(
+      mediaId: mediaId, subtitles: track, language: language, track: speechTrack,
+      spoken: speechLanguage, profile: profile, save: syncSaver(language: language))
+    speechTracks = nil
+  }
+
+  private func syncSaver(language: String) -> @MainActor (String) async throws -> DownloadedSubtitle {
+    let mediaId = mediaId
+    return { [model] subRip in
+      guard let profile = model.profile else { throw CancellationError() }
+      let client = APIClient(profile: profile)
+      return try await model.currentAdministration {
+        try await client.saveSyncedSubtitles(mediaId: mediaId, language: language, subRip: subRip)
+      }
+    }
   }
 
   private func saver(language: String) -> @MainActor (String) async throws -> DownloadedSubtitle {

@@ -94,10 +94,30 @@ For a title without fitting subtitles, the Mac can write them itself from what i
    chose) and appear in the subtitle menu on every device. Doing it again replaces them;
    **Remove** deletes them.
 
+### Syncing subtitles that are off
+
+Subtitles that appear too early or too late, from OpenSubtitles, beside the video or inside it,
+can be moved to fit the speech. In the same place, choose **Create or Sync Subtitles from
+Speech…**, pick the subtitles under **Subtitles** and choose **Sync to Speech**. The Mac listens to
+the sound track and compares when people speak with when the subtitles show:
+
+- It finds an offset of up to ten minutes, earlier or later, to a few hundredths of a second.
+- It also corrects subtitles made for another frame rate (23.976, 24 or 25 frames per second),
+  which drift further off as the film goes on.
+- For subtitles made for another cut of the film, for example with a scene more or less, it
+  moves each part on its own.
+- It saves the result as a copy, such as "German · Synced", and keeps the original. It says
+  what it changed, for example "Moved 2.4 s later. Fits 88 % of the speech (was 31 %)".
+- Subtitles that already fit stay as they are, and subtitles that fit at no offset (another
+  film, or the wrong spoken language chosen) are refused without saving anything.
+
+The sound track is listened to once per title while Aurelia is open, so syncing a second set of
+subtitles is quick.
+
 The recognition is macOS's own speech recognition and runs on this Mac only: the sound goes from
 your server to your Mac and nowhere else, and is never stored. The first time for a language,
 macOS loads its speech model from Apple once. It needs macOS 26 on a Mac that supports it, a
-server 2.1.0 or newer, and an administrator profile. Clear dialogue works best; songs, heavy
+server 2.1.0 or newer (2.2.0 for syncing), and an administrator profile. Clear dialogue works best; songs, heavy
 accents and people talking over each other come out less well.
 
 ## Updates

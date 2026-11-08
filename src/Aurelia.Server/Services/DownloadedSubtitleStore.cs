@@ -158,7 +158,12 @@ public sealed class DownloadedSubtitleStore(ServerRuntimeOptions runtime)
         catch (CultureNotFoundException) { name = subtitle.Language; }
         if (subtitle.Forced) name += " (Forced)";
         if (subtitle.HearingImpaired) name += " (SDH)";
-        return name + (subtitle.Provider == SubtitleDownloadService.SpeechProviderName ? " · From Speech" : " · Downloaded");
+        return name + subtitle.Provider switch
+        {
+            SubtitleDownloadService.SpeechProviderName => " · From Speech",
+            SubtitleDownloadService.SyncedProviderName => " · Synced",
+            _ => " · Downloaded",
+        };
     }
 
     private List<StoredSubtitle> ReadIndex(Guid mediaId)

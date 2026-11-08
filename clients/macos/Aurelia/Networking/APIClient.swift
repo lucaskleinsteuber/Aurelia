@@ -1351,6 +1351,24 @@ struct APIClient: Sendable {
     return try Self.decode(DownloadedSubtitle.self, from: data)
   }
 
+  /// One of the title's subtitle tracks as WebVTT text, through its playback ticket.
+  func streamSubtitleText(streamPath: String, index: Int) async throws -> String {
+    _ = try streamURL(path: streamPath)
+    let data = try await perform(path: "\(streamPath)/subtitles/\(max(0, index))", timeout: 60)
+    return String(decoding: data, as: UTF8.self)
+  }
+
+  /// Keeps a copy of subtitles moved to fit the speech, in place of an earlier synced copy.
+  func saveSyncedSubtitles(mediaId: UUID, language: String, subRip: String) async throws
+    -> DownloadedSubtitle
+  {
+    let code = language.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/subtitles/synced?language=\(code)",
+      method: "POST", body: Data(subRip.utf8), timeout: 60)
+    return try Self.decode(DownloadedSubtitle.self, from: data)
+  }
+
   func revokePlayback(id: UUID) async throws {
     _ = try await perform(
       path: "/api/v1/playback/\(id.uuidString.lowercased())",
@@ -1913,7 +1931,8 @@ struct APIClient: Sendable {
       request.setValue(
         path.hasSuffix("/editor/uploads")
           ? "image/png" : path.hasSuffix("/picture/photo") ? "image/jpeg"
-          : path.contains("/subtitles/speech") ? "text/plain; charset=utf-8" : "application/json",
+          : path.contains("/subtitles/speech") || path.contains("/subtitles/synced")
+            ? "text/plain; charset=utf-8" : "application/json",
         forHTTPHeaderField: "Content-Type")
     }
 

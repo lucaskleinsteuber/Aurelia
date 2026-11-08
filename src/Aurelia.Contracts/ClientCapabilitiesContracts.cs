@@ -66,11 +66,17 @@ public static class ServerFeatures
     /// </summary>
     public const string SpeechSubtitles = "speech-subtitles-v1";
 
+    /// <summary>
+    /// Subtitles a device moved to fit the speech can be saved as a "Synced" copy
+    /// (docs/CLIENT_PROTOCOL.md). Reported together with <see cref="SpeechSubtitles"/>.
+    /// </summary>
+    public const string SubtitleSync = "subtitle-sync-v1";
+
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
     public static IReadOnlyList<string> Reported(bool liveConversion, bool speechAudio = false) =>
         liveConversion
             ? Array.AsReadOnly<string>(speechAudio
-                ? [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews, SpeechSubtitles]
+                ? [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews, SpeechSubtitles, SubtitleSync]
                 : [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews])
             : Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback]);
 }

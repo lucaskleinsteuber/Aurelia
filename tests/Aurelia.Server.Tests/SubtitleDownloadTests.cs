@@ -213,6 +213,26 @@ public sealed class SubtitleDownloadTests
             using (var response = await ApiTestClient.SendAsync(client, request))
                 Assert.Equal([second.Id], (await ApiTestClient.ReadAsync<List<DownloadedSubtitle>>(response)).Select(entry => entry.Id));
 
+            // A synced copy is kept beside them, also once per language.
+            using (var synced = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/media/{mediaId}/subtitles/synced?language=de", owner.Token))
+            {
+                synced.Content = new StringContent(Srt, Encoding.UTF8, "text/plain");
+                using var response = await ApiTestClient.SendAsync(client, synced);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal("German · Synced", (await ApiTestClient.ReadAsync<DownloadedSubtitle>(response)).Title);
+            }
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/media/{mediaId}/subtitles", owner.Token))
+            using (var response = await ApiTestClient.SendAsync(client, request))
+                Assert.Equal(2, (await ApiTestClient.ReadAsync<List<DownloadedSubtitle>>(response)).Count);
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/media/{mediaId}/subtitles", owner.Token))
+            using (var response = await ApiTestClient.SendAsync(client, request))
+            {
+                var synced = (await ApiTestClient.ReadAsync<List<DownloadedSubtitle>>(response)).Single(entry => entry.Provider == SubtitleDownloadService.SyncedProviderName);
+                using var remove = ApiTestClient.Authorized(HttpMethod.Delete, $"/api/v1/media/{mediaId}/subtitles/{synced.Id}", owner.Token);
+                using var removed = await ApiTestClient.SendAsync(client, remove);
+                Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+            }
+
             using (var response = await UploadAsync("de", "not a subtitle"))
                 Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
             using (var response = await UploadAsync("klingonisch", Srt))

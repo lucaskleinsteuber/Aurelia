@@ -54,6 +54,8 @@ public sealed partial class SubtitleDownloadService(
     public const string ProviderName = "OpenSubtitles";
     /// <summary>Subtitles a device wrote from the title's speech.</summary>
     public const string SpeechProviderName = "Speech";
+    /// <summary>A copy of one of the title's subtitles that a device moved to fit its speech.</summary>
+    public const string SyncedProviderName = "Synced";
     public const string Attribution = "Subtitles from OpenSubtitles.com";
     public static readonly TimeSpan RecheckAfter = TimeSpan.FromDays(7);
 
@@ -112,15 +114,24 @@ public sealed partial class SubtitleDownloadService(
     /// Keeps subtitles that a device wrote from the title's speech, as SubRip text. They replace
     /// earlier ones in the same language and need no OpenSubtitles setup.
     /// </summary>
-    public async Task<DownloadedSubtitle> AddFromSpeechAsync(Guid mediaId, string language, string text, CancellationToken token)
+    public Task<DownloadedSubtitle> AddFromSpeechAsync(Guid mediaId, string language, string text, CancellationToken token) =>
+        AddWrittenAsync(mediaId, language, text, SpeechProviderName, token);
+
+    /// <summary>
+    /// Keeps subtitles written by a device: from speech, or a copy synced to the speech. They
+    /// replace earlier ones of the same kind in the same language; the original stays as it is.
+    /// </summary>
+    public async Task<DownloadedSubtitle> AddWrittenAsync(Guid mediaId, string language, string text, string provider, CancellationToken token)
     {
+        if (provider is not (SpeechProviderName or SyncedProviderName))
+            throw new ArgumentOutOfRangeException(nameof(provider));
         await RequireTitleAsync(mediaId, token);
         if (!SidecarSubtitles.TryParseLanguage(language.Trim(), out var code))
             throw new MetadataException("invalid_subtitle_language", "Choose the language the subtitles are in.", StatusCodes.Status400BadRequest);
         var clean = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
         if (clean.Length == 0 || !clean.Contains("-->", StringComparison.Ordinal) || clean.Contains('\0', StringComparison.Ordinal))
             throw new MetadataException("subtitle_unreadable", "The subtitles are not SubRip text.", StatusCodes.Status422UnprocessableEntity);
-        var subtitle = new StoredSubtitle(Guid.NewGuid(), code, HearingImpaired: false, Forced: false, SpeechProviderName,
+        var subtitle = new StoredSubtitle(Guid.NewGuid(), code, HearingImpaired: false, Forced: false, provider,
             ProviderFileId: code, Release: null, clock.GetUtcNow(), Automatic: false);
         return store.Replace(mediaId, subtitle, System.Text.Encoding.UTF8.GetBytes(clean + "\n")).Describe();
     }

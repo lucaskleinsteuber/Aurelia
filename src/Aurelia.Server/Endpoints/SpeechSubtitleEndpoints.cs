@@ -11,25 +11,35 @@ namespace Aurelia.Server.Endpoints;
 /// Subtitles written from speech: a device with a speech recognizer (the Mac app) reads one sound
 /// track as plain PCM through a playback ticket, writes the subtitles itself and hands them back
 /// as SubRip text. The server only decodes sound live and keeps the finished text in its data
-/// folder beside downloaded subtitles; nothing converted is stored.
+/// folder beside downloaded subtitles; nothing converted is stored. A device that moved one of the
+/// title's subtitles to fit its speech saves that copy the same way, as "Synced".
 /// </summary>
 public static class SpeechSubtitleEndpoints
 {
     /// <summary>A long film's subtitles are about 150 KB; this leaves room for any title.</summary>
     public const int MaximumSubtitleBytes = 2 * 1024 * 1024;
     public const string UploadSuffix = "/subtitles/speech";
+    public const string SyncedSuffix = "/subtitles/synced";
 
     public static void MapSpeechSubtitles(this WebApplication app)
     {
         app.MapGet("/api/v1/streams/{ticket}/speech-audio/tracks", TracksAsync).RequireAuthorization();
         app.MapGet("/api/v1/streams/{ticket}/speech-audio", StreamAsync).RequireAuthorization();
-        app.MapPost("/api/v1/media/{mediaId:guid}" + UploadSuffix, SaveAsync).RequireAuthorization("Administrator");
+        app.MapPost("/api/v1/media/{mediaId:guid}" + UploadSuffix,
+            (HttpContext context, Guid mediaId, string? language, SubtitleDownloadService subtitles, CancellationToken token) =>
+                SaveAsync(context, mediaId, language, SubtitleDownloadService.SpeechProviderName, subtitles, token))
+            .RequireAuthorization("Administrator");
+        app.MapPost("/api/v1/media/{mediaId:guid}" + SyncedSuffix,
+            (HttpContext context, Guid mediaId, string? language, SubtitleDownloadService subtitles, CancellationToken token) =>
+                SaveAsync(context, mediaId, language, SubtitleDownloadService.SyncedProviderName, subtitles, token))
+            .RequireAuthorization("Administrator");
     }
 
     /// <summary>Whether a request uploads speech subtitles, which may be larger than JSON.</summary>
     public static bool IsUpload(HttpRequest request) =>
         HttpMethods.IsPost(request.Method)
-        && (request.Path.Value ?? "").EndsWith(UploadSuffix, StringComparison.OrdinalIgnoreCase);
+        && ((request.Path.Value ?? "").EndsWith(UploadSuffix, StringComparison.OrdinalIgnoreCase)
+            || (request.Path.Value ?? "").EndsWith(SyncedSuffix, StringComparison.OrdinalIgnoreCase));
 
     private static async Task<IResult> TracksAsync(
         HttpContext context, string ticket, PlaybackService playback, LiveConversionService live,
@@ -129,7 +139,7 @@ public static class SpeechSubtitleEndpoints
     }
 
     private static async Task<IResult> SaveAsync(
-        HttpContext context, Guid mediaId, string? language, SubtitleDownloadService subtitles,
+        HttpContext context, Guid mediaId, string? language, string provider, SubtitleDownloadService subtitles,
         CancellationToken cancellationToken)
     {
         byte[] bytes;
@@ -144,7 +154,7 @@ public static class SpeechSubtitleEndpoints
         try
         {
             var text = Encoding.UTF8.GetString(bytes);
-            return Results.Ok(await subtitles.AddFromSpeechAsync(mediaId, language ?? "", text, cancellationToken));
+            return Results.Ok(await subtitles.AddWrittenAsync(mediaId, language ?? "", text, provider, cancellationToken));
         }
         catch (MetadataException exception)
         {

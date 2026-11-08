@@ -11,7 +11,7 @@ Key facts for answering questions:
 - New devices pair with an 8-digit code created on the server computer (Settings › Profiles and Devices › Create Code, or `aurelia pair`). Codes last five minutes.
 - The server listens on HTTPS port 43111, answers only private addresses (home network, VPN, Tailscale) and must never be exposed with a port forward.
 - TMDB (details, artwork, cast) and OpenSubtitles need the user's own free keys, entered under Settings › Metadata.
-- Subtitles from speech (Mac 2.1.0 and server 2.1.0 or newer): Edit Metadata › Subtitles › Create Subtitles from Speech; macOS's on-device speech recognition writes them, the server keeps them for every device.
+- Subtitles from speech (Mac 2.1.0 and server 2.1.0 or newer): Edit Metadata › Subtitles › Create Subtitles from Speech; macOS's on-device speech recognition writes them, the server keeps them for every device. Sync to Speech (Mac and server 2.2.0) moves subtitles that are off (offset, frame rate, another cut) and saves a synced copy.
 
 ## Using Aurelia
 

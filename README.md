@@ -54,7 +54,7 @@ home network; details and artwork from [TMDB](https://www.themoviedb.org) are op
 **Made for watching**
 - Plays the original files with every audio and subtitle track, subtitle files next to the
   video, subtitles from OpenSubtitles (with your own free key), and subtitles the Mac writes
-  from a title's speech when none fit.
+  from a title's speech when none fit, or moves to fit the speech when they are off.
 - Timeline previews, Up Next for series, a sleep timer, Dialogue Boost, Volume Leveling and the
   time a title ends.
 - *Play On* sends a title to another screen at home; *Watch Together* keeps several screens on
