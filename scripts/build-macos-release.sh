@@ -263,6 +263,10 @@ done
 ffmpeg_root=$("$repository_root/scripts/build-ffmpeg-macos.sh" | tail -n 1)
 [[ -x "$ffmpeg_root/ffmpeg" && -x "$ffmpeg_root/ffprobe" ]] || { echo "The Mac ffmpeg build failed." >&2; exit 1; }
 /usr/bin/ditto "$ffmpeg_root" "$candidate/Contents/Resources/Server/ffmpeg"
+# The audio filters are checked by loading VLCKit here, which needs this Mac's own slice, so the
+# check runs before the framework is thinned to the build's architecture.
+python3 "$repository_root/scripts/verify-vlc-audio-filters.py" \
+  "$candidate/Contents/Frameworks/VLCKit.framework/VLCKit"
 # ffmpeg and VLCKit come universal; only this build's architecture stays in the app.
 for binary in "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit"; do
@@ -285,8 +289,6 @@ done < <(find "$candidate/Contents/Resources/Server" -type f -print0)
 
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   "$candidate/Contents/Frameworks/VLCKit.framework"
-python3 "$repository_root/scripts/verify-vlc-audio-filters.py" \
-  "$candidate/Contents/Frameworks/VLCKit.framework/VLCKit"
 helper_entitlements="$stage_root/AureliaServerHost-release.entitlements"
 cp "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" "$helper_entitlements"
 cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release_entitlements"
