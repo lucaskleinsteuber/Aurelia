@@ -241,7 +241,8 @@ These rules apply to every task in this repository.
 - Use a short English description of the completed change as the commit subject,
   without a version/build number. Add `[skip ci]` as requested by the owner to avoid
   starting GitHub server test runs; perform the relevant verification locally. Commit on
-  `main`; push to GitHub and publish releases only when the owner asks for it.
+  `main` and push verified commits to GitHub (owner's decision, 08.11.2026); publish releases
+  only when the owner asks for it.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
 - Keep one concise English `CHANGELOG.md` in the repository root, following
