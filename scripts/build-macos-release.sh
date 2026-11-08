@@ -263,10 +263,15 @@ done
 ffmpeg_root=$("$repository_root/scripts/build-ffmpeg-macos.sh" | tail -n 1)
 [[ -x "$ffmpeg_root/ffmpeg" && -x "$ffmpeg_root/ffprobe" ]] || { echo "The Mac ffmpeg build failed." >&2; exit 1; }
 /usr/bin/ditto "$ffmpeg_root" "$candidate/Contents/Resources/Server/ffmpeg"
-# The audio filters are checked by loading VLCKit here, which needs this Mac's own slice, so the
-# check runs before the framework is thinned to the build's architecture.
-python3 "$repository_root/scripts/verify-vlc-audio-filters.py" \
-  "$candidate/Contents/Frameworks/VLCKit.framework/VLCKit"
+# The audio filters are checked by loading VLCKit here, which needs this Mac's own slice and a
+# signature, so the check loads an ad-hoc signed copy of the universal framework before the app's
+# copy is thinned to the build's architecture.
+vlc_check="$stage_root/VLCKitCheck"
+mkdir -p "$vlc_check"
+/usr/bin/ditto "$candidate/Contents/Frameworks/VLCKit.framework" "$vlc_check/VLCKit.framework"
+codesign --force --sign - "$vlc_check/VLCKit.framework"
+python3 "$repository_root/scripts/verify-vlc-audio-filters.py" "$vlc_check/VLCKit.framework/VLCKit"
+rm -rf "$vlc_check"
 # ffmpeg and VLCKit come universal; only this build's architecture stays in the app.
 for binary in "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit"; do
