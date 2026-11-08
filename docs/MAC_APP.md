@@ -65,7 +65,7 @@ devices and backups, scrub previews, Server Health and the server's own updates.
 | Activity | Your watch history and statistics |
 | Playback | Audio and subtitles, Automatic Resume, Dialogue Boost, Volume Leveling |
 | Library | Storage folders, scans, Library Health, import previews |
-| Metadata | TMDB token, Review Matches, OpenSubtitles key |
+| Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
 | Profiles and Devices | Profiles, PINs, age limits, devices, **Create Code** for a new device, the browser address |
 | Server | Network, power, backups, scrub previews, Server Health (only on the host) |
 | Updates | App and server updates, Beta updates |
@@ -80,6 +80,25 @@ shown and **Remove Download** deletes it. Downloads belong to the profile that m
 When the server is out of reach, for example on a train, Aurelia offers **Watch Downloads Offline**.
 It shows your downloads with Continue Watching, movies and series. Your profile opens with its PIN,
 and the progress you make is sent to the server the next time it answers.
+
+## Subtitles from speech
+
+For a title without fitting subtitles, the Mac can write them itself from what is said.
+
+1. Open the movie or episode, choose **Edit Metadata** and scroll to **Subtitles**.
+2. Choose **Create Subtitles from Speech…**, pick the sound track and the language spoken in it
+   (Aurelia suggests both), then **Create Subtitles**.
+3. The Mac listens to the track and shows how far it got. A two-hour film usually takes a few
+   minutes, mostly for reading the sound from the server. You can close the editor meanwhile.
+4. The finished subtitles are saved on the server as "German · From Speech" (or the language you
+   chose) and appear in the subtitle menu on every device. Doing it again replaces them;
+   **Remove** deletes them.
+
+The recognition is macOS's own speech recognition and runs on this Mac only: the sound goes from
+your server to your Mac and nowhere else, and is never stored. The first time for a language,
+macOS loads its speech model from Apple once. It needs macOS 26 on a Mac that supports it, a
+server 2.1.0 or newer, and an administrator profile. Clear dialogue works best; songs, heavy
+accents and people talking over each other come out less well.
 
 ## Updates
 

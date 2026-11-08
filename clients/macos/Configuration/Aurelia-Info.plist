@@ -31,6 +31,8 @@
 	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Lucas Kleinsteuber.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Aurelia writes subtitles from a title's speech on this Mac when you ask it to. The sound never leaves your home.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Aurelia discovers and connects to your private media server on the local network.</string>
 	<key>NSPrincipalClass</key>

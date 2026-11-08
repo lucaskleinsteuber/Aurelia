@@ -52,6 +52,8 @@ public sealed partial class SubtitleDownloadService(
     ILogger<SubtitleDownloadService> logger)
 {
     public const string ProviderName = "OpenSubtitles";
+    /// <summary>Subtitles a device wrote from the title's speech.</summary>
+    public const string SpeechProviderName = "Speech";
     public const string Attribution = "Subtitles from OpenSubtitles.com";
     public static readonly TimeSpan RecheckAfter = TimeSpan.FromDays(7);
 
@@ -104,6 +106,23 @@ public sealed partial class SubtitleDownloadService(
         var language = SubtitleProviderSettingsStore.NormalizeLanguages([request.Language])[0];
         var stored = await FetchAsync(configuration, mediaId, request.FileId, language, request.Release, request.HearingImpaired, request.ForeignPartsOnly, automatic: false, token);
         return stored.Describe();
+    }
+
+    /// <summary>
+    /// Keeps subtitles that a device wrote from the title's speech, as SubRip text. They replace
+    /// earlier ones in the same language and need no OpenSubtitles setup.
+    /// </summary>
+    public async Task<DownloadedSubtitle> AddFromSpeechAsync(Guid mediaId, string language, string text, CancellationToken token)
+    {
+        await RequireTitleAsync(mediaId, token);
+        if (!SidecarSubtitles.TryParseLanguage(language.Trim(), out var code))
+            throw new MetadataException("invalid_subtitle_language", "Choose the language the subtitles are in.", StatusCodes.Status400BadRequest);
+        var clean = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        if (clean.Length == 0 || !clean.Contains("-->", StringComparison.Ordinal) || clean.Contains('\0', StringComparison.Ordinal))
+            throw new MetadataException("subtitle_unreadable", "The subtitles are not SubRip text.", StatusCodes.Status422UnprocessableEntity);
+        var subtitle = new StoredSubtitle(Guid.NewGuid(), code, HearingImpaired: false, Forced: false, SpeechProviderName,
+            ProviderFileId: code, Release: null, clock.GetUtcNow(), Automatic: false);
+        return store.Replace(mediaId, subtitle, System.Text.Encoding.UTF8.GetBytes(clean + "\n")).Describe();
     }
 
     public async Task RemoveAsync(Guid mediaId, Guid subtitleId, CancellationToken token)

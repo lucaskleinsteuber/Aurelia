@@ -2,7 +2,8 @@
 # Builds the Mac server's own ffmpeg and ffprobe for live conversion in web browsers
 # (docs/WEB_APP.md): LGPL only, with no GPL parts, universal (arm64 and x86_64) and with only
 # what live conversion needs: the MKV, MP4, AVI and MPEG-TS readers, the decoders, the AAC
-# encoder, Apple's VideoToolbox H.264 encoder, the MP4 writer and text subtitles as WebVTT.
+# encoder, Apple's VideoToolbox H.264 encoder, the MP4 writer, text subtitles as WebVTT and
+# plain 16-bit PCM with the pan filter for subtitles from speech.
 #
 # The official source from ffmpeg.org is checked against a fixed SHA-256 and kept in
 # Local/Package Cache/ffmpeg. The result lands in Local/Package Cache/ffmpeg/<version>/universal:
@@ -53,15 +54,15 @@ configure_options=(
   --enable-pthreads --enable-zlib --enable-videotoolbox
   --enable-protocol=file,pipe
   --enable-demuxer=matroska,mov,avi,mpegts
-  --enable-muxer=mp4,mov,webvtt,image2,image2pipe
-  --enable-encoder=aac,h264_videotoolbox,webvtt,mjpeg
+  --enable-muxer=mp4,mov,webvtt,image2,image2pipe,pcm_s16le
+  --enable-encoder=aac,h264_videotoolbox,webvtt,mjpeg,pcm_s16le
   --enable-decoder=h264,hevc,mpeg4,msmpeg4v1,msmpeg4v2,msmpeg4v3,mpeg1video,mpeg2video,vc1,wmv1,wmv2,wmv3,vp8,vp9,av1,mjpeg,h263,theora
   --enable-decoder=aac,aac_latm,ac3,eac3,dca,truehd,mlp,mp1,mp2,mp3,opus,vorbis,flac,alac,wmav1,wmav2,wmapro
   --enable-decoder=pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_f32le,pcm_u8,pcm_bluray,pcm_dvd
   --enable-decoder=srt,subrip,ass,ssa,movtext,webvtt,text
   --enable-parser=h264,hevc,mpeg4video,mpegvideo,vc1,vp8,vp9,av1,aac,aac_latm,ac3,dca,mlp,mpegaudio,opus,vorbis,flac
   --enable-bsfs
-  --enable-filter=scale,format,aformat,aresample,anull,null,trim,atrim,setpts,asetpts,crop,transpose,hflip,vflip
+  --enable-filter=scale,format,aformat,aresample,anull,null,trim,atrim,setpts,asetpts,crop,transpose,hflip,vflip,pan
 )
 
 for arch in arm64 x86_64; do

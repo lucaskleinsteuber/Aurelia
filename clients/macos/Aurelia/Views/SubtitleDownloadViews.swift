@@ -208,6 +208,15 @@ struct SubtitleDownloadPanel: View {
   @State private var results: [SubtitleCandidate]?
   @State private var working: String?
   @State private var errorText: String?
+  @ObservedObject private var speech = SpeechSubtitleJobs.shared
+  @State private var speechTracks: [SpeechAudioTrack]?
+  @State private var speechTrack = 0
+  @State private var speechLanguage = "en"
+  @State private var speechLanguages: [String] = []
+
+  private var speechPossible: Bool {
+    model.libraryCapabilities.contains("speech-subtitles-v1") && SpeechRecognizer.isAvailable
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -267,6 +276,10 @@ struct SubtitleDownloadPanel: View {
         Text("Set up subtitle downloads in Settings › Metadata to search for subtitles.")
           .font(.caption).foregroundStyle(.secondary)
       }
+      if speechPossible {
+        Divider()
+        speechSection
+      }
       if let errorText {
         Label(errorText, systemImage: "exclamationmark.triangle.fill")
           .foregroundStyle(.orange).font(.callout)
@@ -274,6 +287,143 @@ struct SubtitleDownloadPanel: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .task(id: mediaId) { await load() }
+    .onChange(of: speech.job(mediaId)?.phase) { _, phase in
+      if case .saved = phase { Task { await load() } }
+    }
+  }
+
+  /// Subtitles written by this Mac from what is said in a sound track.
+  private var speechSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Create from Speech").font(.headline)
+      Text(
+        "This Mac listens to a sound track and writes subtitles from what is said. The sound is read from the server and never stored; the subtitles are kept on the server for every device."
+      )
+      .font(.caption).foregroundStyle(.secondary)
+      if let job = speech.job(mediaId) {
+        speechJob(job)
+      } else if let tracks = speechTracks {
+        if tracks.isEmpty {
+          Text("This title has no sound track.").font(.callout).foregroundStyle(.secondary)
+        } else {
+          HStack {
+            Picker("Sound Track", selection: $speechTrack) {
+              ForEach(tracks) { track in Text(track.label).tag(track.index) }
+            }
+            .fixedSize()
+            .onChange(of: speechTrack) { _, index in
+              if let code = SpeechLanguages.code(
+                forTrack: tracks.first { $0.index == index }?.language),
+                speechLanguages.contains(code)
+              {
+                speechLanguage = code
+              }
+            }
+            Picker("Spoken Language", selection: $speechLanguage) {
+              ForEach(speechLanguages, id: \.self) { code in
+                Text(SubtitleLanguages.name(code)).tag(code)
+              }
+            }
+            .fixedSize()
+          }
+          Button("Create Subtitles") { startSpeech() }
+            .accessibilityIdentifier("subtitle-speech-start")
+        }
+      } else {
+        Button("Create Subtitles from Speech…") { Task { await loadSpeechTracks() } }
+          .disabled(working != nil)
+          .accessibilityIdentifier("subtitle-speech")
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func speechJob(_ job: SpeechSubtitleJobs.Job) -> some View {
+    let language = SubtitleLanguages.name(job.language)
+    switch job.phase {
+    case .preparing:
+      HStack {
+        ProgressView().controlSize(.small)
+        Text("Getting ready…").foregroundStyle(.secondary)
+        Button("Cancel") { speech.cancel(mediaId) }
+      }
+    case .loadingModel:
+      HStack {
+        ProgressView().controlSize(.small)
+        Text("Loading the speech model for \(language). This happens once.")
+          .foregroundStyle(.secondary)
+        Button("Cancel") { speech.cancel(mediaId) }
+      }
+    case .listening(let share):
+      HStack {
+        if share > 0 {
+          ProgressView(value: share).frame(maxWidth: 260)
+          Text("Listening… \(Int(share * 100)) %").monospacedDigit().foregroundStyle(.secondary)
+        } else {
+          ProgressView().controlSize(.small)
+          Text("Listening…").foregroundStyle(.secondary)
+        }
+        Button("Cancel") { speech.cancel(mediaId) }
+      }
+      Text("You can close this window; the subtitles are saved when they are done.")
+        .font(.caption).foregroundStyle(.secondary)
+    case .saving:
+      HStack {
+        ProgressView().controlSize(.small)
+        Text("Saving…").foregroundStyle(.secondary)
+      }
+    case .saved(let subtitle):
+      HStack {
+        Label("\(subtitle.title) is ready on every device.", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+        Button("Done") { speech.dismiss(mediaId) }
+      }
+    case .unsaved(let message):
+      Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+      HStack {
+        Button("Save Subtitles") { speech.saveAgain(mediaId, save: saver(language: job.language)) }
+        Button("Discard", role: .destructive) { speech.cancel(mediaId) }
+      }
+    case .failed(let message):
+      Label(message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+      Button("OK") { speech.dismiss(mediaId) }
+    }
+  }
+
+  private func loadSpeechTracks() async {
+    guard let client else { return }
+    await perform("speech") {
+      let ticket = try await client.createPlayback(mediaId: mediaId)
+      defer { Task { try? await client.revokePlayback(id: ticket.id) } }
+      let tracks = try await client.speechAudioTracks(streamPath: ticket.streamPath).tracks
+      speechLanguages = SpeechLanguages.choices(await SpeechRecognizer.supportedLocales())
+      let chosen = tracks.first(where: \.isDefault) ?? tracks.first
+      speechTrack = chosen?.index ?? 0
+      let preferred = SpeechLanguages.code(forTrack: chosen?.language)
+        ?? Locale.current.language.languageCode?.identifier ?? "en"
+      speechLanguage =
+        speechLanguages.contains(preferred) ? preferred : speechLanguages.first ?? "en"
+      speechTracks = tracks
+    }
+  }
+
+  private func startSpeech() {
+    guard let profile = model.profile else { return }
+    speech.start(
+      mediaId: mediaId, track: speechTrack, language: speechLanguage, profile: profile,
+      save: saver(language: speechLanguage))
+    speechTracks = nil
+  }
+
+  private func saver(language: String) -> @MainActor (String) async throws -> DownloadedSubtitle {
+    let mediaId = mediaId
+    return { [model] subRip in
+      guard let profile = model.profile else { throw CancellationError() }
+      let client = APIClient(profile: profile)
+      return try await model.currentAdministration {
+        try await client.saveSpeechSubtitles(mediaId: mediaId, language: language, subRip: subRip)
+      }
+    }
   }
 
   private func languages(_ status: SubtitleProviderStatus) -> [String] {

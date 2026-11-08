@@ -241,6 +241,26 @@ downloads the best human-made match, at most 25 per pass, each title and languag
 a week. Downloaded subtitles are not part of encrypted server backups; they can be downloaded
 again.
 
+## Subtitles from speech
+
+When the server found a working ffmpeg it reports `speech-subtitles-v1`. A device with a speech
+recognizer (the Mac app) then writes subtitles from what is said in a sound track; the server
+does no recognition itself.
+
+- `GET {streamPath}/speech-audio/tracks` lists the title's sound tracks
+  (`{durationSeconds, tracks: [{index, codec, channels, language, title, isDefault}]}`) through a
+  normal playback ticket.
+- `GET {streamPath}/speech-audio?audio={index}` streams that track (the default one without
+  `audio`) as raw 16-bit little-endian PCM, 16 kHz, one channel
+  (`audio/L16;rate=16000;channels=1`, `X-Aurelia-Duration` in seconds). Surround tracks lean on
+  their center channel, where dialogue sits. ffmpeg decodes it live with low priority and writes
+  only to the response; nothing is stored, and it counts as one of the server's conversions.
+- `POST /api/v1/media/{id}/subtitles/speech?language=de` (administrators, like subtitle
+  downloads) takes the finished SubRip text as `text/plain`, at most 2 MB. It replaces earlier
+  speech subtitles in that language and is listed with the downloaded subtitles as
+  "German · From Speech"; players find it in the stream's subtitle list. No OpenSubtitles setup
+  is needed.
+
 ## Watch Together
 
 Several devices at home play one title in step. The server keeps each party in memory: the

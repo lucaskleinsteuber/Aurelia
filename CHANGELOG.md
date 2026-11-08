@@ -13,6 +13,11 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+### Added
+
+- Mac 2.1.0 (154): Create Subtitles from Speech in Edit Metadata › Subtitles. The Mac listens to a sound track with macOS's own on-device speech recognition and writes subtitles that read like written ones: two lines at most, a new subtitle after each sentence or pause. They are saved on the server and play on every device; nothing of the sound is stored.
+- Server 2.1.0 (149): a title's sound track can be read as plain 16 kHz mono sound for writing subtitles from speech, decoded live with low priority and never stored, and subtitles written from speech are kept per language beside downloaded ones, without OpenSubtitles.
+
 ## iPhone & iPad 2.1.0 (17) - 08.11.2026
 
 ### Added

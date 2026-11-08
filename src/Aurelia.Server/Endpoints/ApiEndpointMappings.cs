@@ -220,7 +220,7 @@ public static class ApiEndpointMappings
             runtime.LanAccessEnabled ? runtime.LanHttpsPort : null,
             runtime.LanAccessEnabled ? tlsIdentity.PublicKeyFingerprint : null,
             runtime.LanAccessEnabled ? tlsIdentity.DisplayFingerprint : null,
-            ServerFeatures.Reported(await live.IsAvailableAsync()),
+            ServerFeatures.Reported(await live.IsAvailableAsync(), await live.SpeechAudioAvailableAsync()),
             runtime.LanAccessEnabled ? WakeOnLan.LocalAddresses() : null));
     }
 

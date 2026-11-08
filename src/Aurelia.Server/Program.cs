@@ -319,6 +319,7 @@ app.Use(async (context, next) =>
     var photoUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").EndsWith("/picture/photo", StringComparison.OrdinalIgnoreCase);
     var maximumBytes = backupUpload ? EncryptedBackupContainer.MaximumBytes : imageUpload ? EditorArtworkStore.MaximumUploadBytes
         : photoUpload ? ProfilePictures.MaximumUploadBytes
+        : SpeechSubtitleEndpoints.IsUpload(context.Request) ? SpeechSubtitleEndpoints.MaximumSubtitleBytes
         : editorPath ? 1024 * 1024 : ServerRequestGuard.MaximumJsonBytes;
     if (context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
         feature.MaxRequestBodySize = maximumBytes;
@@ -423,6 +424,7 @@ app.MapLiveConversion();
 app.MapScrubPreviews();
 app.MapRemotePlayback();
 app.MapSubtitleDownloads();
+app.MapSpeechSubtitles();
 app.MapWatchTogether();
 
 try

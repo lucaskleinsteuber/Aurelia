@@ -7,10 +7,10 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
     <Copyright>Copyright (c) 2026 Lucas Kleinsteuber</Copyright>
-    <AureliaBuildNumber>148</AureliaBuildNumber>
-    <Version>2.0.0</Version>
-    <FileVersion>2.0.0.$(AureliaBuildNumber)</FileVersion>
-    <InformationalVersion>2.0.0+build.$(AureliaBuildNumber)</InformationalVersion>
+    <AureliaBuildNumber>149</AureliaBuildNumber>
+    <Version>2.1.0</Version>
+    <FileVersion>2.1.0.$(AureliaBuildNumber)</FileVersion>
+    <InformationalVersion>2.1.0+build.$(AureliaBuildNumber)</InformationalVersion>
     <!-- Generated output goes to the git-ignored Local folder unless AURELIA_OTHER_ROOT is set. -->
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' == ''">$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'Local'))</AureliaOtherRoot>
     <AureliaOtherRoot Condition="'$(AURELIA_OTHER_ROOT)' != ''">$(AURELIA_OTHER_ROOT)</AureliaOtherRoot>

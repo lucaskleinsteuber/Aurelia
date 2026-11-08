@@ -265,6 +265,73 @@ public sealed partial class LiveConversionTests
         Assert.Equal(256, Assert.Single(MediaProbe.Parse(oversizedMetadata).Subtitles!).Title!.Length);
     }
 
+    [Fact]
+    public async Task SpeechAudioStreamsOneTrackAsMonoPcmWithoutWritingFiles()
+    {
+        if (Installed() is not { } maker) return;
+        var ffmpeg = Tools() ?? maker;
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Invented Speech Library");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Invented Speech.mkv");
+        try
+        {
+            var start = new ProcessStartInfo(maker) { RedirectStandardError = true, UseShellExecute = false };
+            foreach (var argument in new[]
+            {
+                "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=10",
+                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "3", "-map", "0:v", "-map", "1:a", "-map", "1:a",
+                "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-ac:a:1", "6",
+                "-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=ger", path,
+            }) start.ArgumentList.Add(argument);
+            using (var process = Process.Start(start)!)
+            {
+                var errors = await process.StandardError.ReadToEndAsync();
+                await process.WaitForExitAsync();
+                Assert.True(process.ExitCode == 0, errors);
+            }
+            var before = (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length);
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMediaAsync(factory, root, path);
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            SpeechAudioTracksResponse tracks;
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/speech-audio/tracks", owner.Token))
+            using (var response = await client.SendAsync(request))
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                tracks = await ApiTestClient.ReadAsync<SpeechAudioTracksResponse>(response);
+            }
+            Assert.Equal(2, tracks.Tracks.Count);
+            Assert.InRange(tracks.DurationSeconds ?? 0, 2.5, 3.5);
+            var german = tracks.Tracks.Single(track => track.Language == "ger");
+            Assert.Equal(6, german.Channels);
+            var dataFiles = Files(factory.DataDirectory);
+            var temporaryFiles = TemporaryVideoFiles();
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/speech-audio?audio={german.Index}", owner.Token))
+            using (var response = await client.SendAsync(request))
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal("audio/L16", response.Content.Headers.ContentType?.MediaType);
+                Assert.Contains("no-store", response.Headers.CacheControl?.ToString(), StringComparison.Ordinal);
+                var pcm = await response.Content.ReadAsByteArrayAsync();
+                // Three seconds of 16-bit samples at 16 kHz.
+                Assert.InRange(pcm.Length, 86_000, 106_000);
+                Assert.Contains(pcm, value => value != 0);
+            }
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/speech-audio?audio=99", owner.Token))
+            using (var response = await client.SendAsync(request)) Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using (var anonymous = await client.GetAsync($"{playback.StreamPath}/speech-audio"))
+                Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+            Assert.DoesNotContain(Files(factory.DataDirectory).Except(dataFiles), file => !ServerBookkeeping(factory.DataDirectory, file));
+            Assert.Empty(TemporaryVideoFiles().Except(temporaryFiles));
+            Assert.Equal([path], Directory.GetFiles(root));
+            Assert.Equal(before, (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length));
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+    }
+
     [Theory]
     [InlineData("srt", ".mkv", "subrip")]
     [InlineData("ass", ".mkv", "ass")]

@@ -1432,6 +1432,35 @@ struct DownloadedSubtitle: Codable, Identifiable, Equatable, Sendable {
   let automatic: Bool
 }
 
+/// A sound track that can be turned into subtitles from speech.
+struct SpeechAudioTrack: Codable, Identifiable, Equatable, Sendable {
+  let index: Int
+  let codec: String
+  let channels: Int
+  let language: String?
+  let title: String?
+  let isDefault: Bool
+  var id: Int { index }
+
+  /// "German · 5.1 · Commentary" for the track picker.
+  var label: String {
+    var parts: [String] = []
+    if let code = SpeechLanguages.code(forTrack: language) {
+      parts.append(SubtitleLanguages.name(code))
+    } else {
+      parts.append("Sound Track \(index)")
+    }
+    parts.append(channels >= 6 ? "5.1" : channels == 2 ? "Stereo" : channels == 1 ? "Mono" : "\(channels) ch")
+    if let title, !title.isEmpty { parts.append(title) }
+    return parts.joined(separator: " · ")
+  }
+}
+
+struct SpeechAudioTracksResponse: Codable, Equatable, Sendable {
+  let durationSeconds: Double?
+  let tracks: [SpeechAudioTrack]
+}
+
 enum SubtitleLanguages {
   /// The languages offered in Settings, by their English names.
   static let choices = [

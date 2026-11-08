@@ -60,10 +60,18 @@ public static class ServerFeatures
     /// </summary>
     public const string ScrubPreviews = "scrub-previews-v1";
 
+    /// <summary>
+    /// A sound track can be read as 16 kHz mono PCM and subtitles written from it saved
+    /// (docs/CLIENT_PROTOCOL.md). Reported when the server's ffmpeg can write plain PCM.
+    /// </summary>
+    public const string SpeechSubtitles = "speech-subtitles-v1";
+
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
-    public static IReadOnlyList<string> Reported(bool liveConversion) =>
+    public static IReadOnlyList<string> Reported(bool liveConversion, bool speechAudio = false) =>
         liveConversion
-            ? Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews])
+            ? Array.AsReadOnly<string>(speechAudio
+                ? [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews, SpeechSubtitles]
+                : [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews])
             : Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback]);
 }
 

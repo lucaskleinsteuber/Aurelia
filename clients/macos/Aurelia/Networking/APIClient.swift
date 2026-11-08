@@ -1318,6 +1318,39 @@ struct APIClient: Sendable {
     return try Self.decode(PlaybackProgressResponse.self, from: data)
   }
 
+  /// A title's sound tracks, through its playback ticket, for writing subtitles from speech.
+  func speechAudioTracks(streamPath: String) async throws -> SpeechAudioTracksResponse {
+    _ = try streamURL(path: streamPath)
+    return try await get("\(streamPath)/speech-audio/tracks")
+  }
+
+  /// Reads one sound track as 16 kHz mono PCM, in chunks.
+  func speechAudio(streamPath: String, track: Int) throws -> SpeechAudioReader {
+    let base = try streamURL(path: streamPath)
+    guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+      throw APIClientError.invalidResponse
+    }
+    components.path += "/speech-audio"
+    components.queryItems = [URLQueryItem(name: "audio", value: String(track))]
+    guard let url = components.url else { throw APIClientError.invalidResponse }
+    var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    request.setValue("Bearer \(profile.token)", forHTTPHeaderField: "Authorization")
+    request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+    return SpeechAudioReader(request: request, fingerprint: profile.publicKeyFingerprint)
+  }
+
+  /// Keeps subtitles written from speech on the server, in place of earlier ones in that language.
+  func saveSpeechSubtitles(mediaId: UUID, language: String, subRip: String) async throws
+    -> DownloadedSubtitle
+  {
+    let code = language.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/subtitles/speech?language=\(code)",
+      method: "POST", body: Data(subRip.utf8), timeout: 60)
+    return try Self.decode(DownloadedSubtitle.self, from: data)
+  }
+
   func revokePlayback(id: UUID) async throws {
     _ = try await perform(
       path: "/api/v1/playback/\(id.uuidString.lowercased())",
@@ -1879,7 +1912,8 @@ struct APIClient: Sendable {
       request.httpBody = body
       request.setValue(
         path.hasSuffix("/editor/uploads")
-          ? "image/png" : path.hasSuffix("/picture/photo") ? "image/jpeg" : "application/json",
+          ? "image/png" : path.hasSuffix("/picture/photo") ? "image/jpeg"
+          : path.contains("/subtitles/speech") ? "text/plain; charset=utf-8" : "application/json",
         forHTTPHeaderField: "Content-Type")
     }
 

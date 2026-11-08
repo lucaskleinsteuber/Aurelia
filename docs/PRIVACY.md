@@ -35,6 +35,9 @@ or signing out removes them.
 - **OpenSubtitles.** Only if the server's owner sets it up, the server searches OpenSubtitles for
   subtitles of a title and downloads them. OpenSubtitles' privacy policy applies:
   https://www.opensubtitles.com/en/privacy
+- **Speech recognition.** If you ask the Mac app to write subtitles from a title's speech, it
+  uses macOS's on-device speech recognition. The sound is read from your server and processed on
+  your Mac only; macOS may load the language's speech model from Apple once.
 - **Updates.** The Mac app, the Linux app and the Linux server look for new versions on GitHub
   without signing in. GitHub sees the request like any web visit. You can turn automatic checks
   off in Settings.

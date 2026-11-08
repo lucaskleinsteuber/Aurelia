@@ -10,6 +10,9 @@ namespace Aurelia.Server.Services;
 /// <param name="Encoder">The H.264 encoder for pictures a player cannot decode, or null.</param>
 public sealed record FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder)
 {
+    /// <summary>Whether this ffmpeg can hand out a sound track as plain PCM for speech subtitles.</summary>
+    public SpeechAudioSupport Speech { get; init; }
+
     private readonly Lazy<HdrToneMapping> toneMapping = new(() => HdrToneMapping.Unavailable);
     public HdrToneMapping ToneMapping => toneMapping.Value;
 
@@ -22,6 +25,14 @@ public sealed record FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder
         ArgumentNullException.ThrowIfNull(discoverToneMapping);
         toneMapping = new(discoverToneMapping, LazyThreadSafetyMode.ExecutionAndPublication);
     }
+}
+
+/// <summary>What an ffmpeg offers for reading speech: nothing, a plain mono mix, or a mix leaning on the center channel.</summary>
+public enum SpeechAudioSupport
+{
+    None,
+    Plain,
+    CenterMix,
 }
 
 /// <summary>
@@ -64,6 +75,9 @@ public sealed partial class LiveConversionService : IDisposable
 
     public async Task<bool> IsAvailableAsync() => await tools is not null;
 
+    /// <summary>Whether sound tracks can be read for subtitles from speech.</summary>
+    public async Task<bool> SpeechAudioAvailableAsync() => (await tools)?.Speech is SpeechAudioSupport.Plain or SpeechAudioSupport.CenterMix;
+
     /// <summary>The ffmpeg to use: the configured one, the Mac app's own, then the system's on Linux.</summary>
     public static IEnumerable<string> Candidates(string? configured)
     {
@@ -96,9 +110,16 @@ public sealed partial class LiveConversionService : IDisposable
                     ? LiveVideoEncoder.VideoToolbox
                     : HasEncoder(encoders, "libx264") ? LiveVideoEncoder.Libx264 : null;
                 LogFound(logger, ffmpeg, encoder is { } found ? found.ToString() : "none");
+                var speech = SpeechAudioSupport.None;
+                if (HasEncoder(encoders, "pcm_s16le")
+                    && RunForOutput(ffmpeg, ["-hide_banner", "-muxers"], TimeSpan.FromSeconds(10)) is { } muxers && HasEncoder(muxers, "s16le"))
+                {
+                    var filters = RunForOutput(ffmpeg, ["-hide_banner", "-filters"], TimeSpan.FromSeconds(10));
+                    speech = filters is not null && HasEncoder(filters, "pan") ? SpeechAudioSupport.CenterMix : SpeechAudioSupport.Plain;
+                }
                 // Mapper discovery starts only when HDR picture encoding actually needs it.
                 // Startup, direct delivery, repackaging and SDR conversion pay no extra process cost.
-                return new FfmpegTools(ffmpeg, ffprobe, encoder, () => DiscoverToneMapping(ffmpeg));
+                return new FfmpegTools(ffmpeg, ffprobe, encoder, () => DiscoverToneMapping(ffmpeg)) { Speech = speech };
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
                                                   or InvalidOperationException or System.ComponentModel.Win32Exception)

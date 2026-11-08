@@ -175,6 +175,89 @@ public sealed class SubtitleDownloadTests
     }
 
     [Fact]
+    public async Task SubtitlesWrittenFromSpeechAreKeptPerLanguageWithoutOpenSubtitles()
+    {
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Invented Speech Subtitles");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Invented Talk (2002).mkv");
+        await File.WriteAllBytesAsync(path, Enumerable.Range(0, 300_000).Select(index => (byte)(index % 251)).ToArray());
+        var before = (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length, Directory.GetFileSystemEntries(root).Length);
+        try
+        {
+            using var factory = Factory(new Provider());
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var mediaId = await AddMovieAsync(factory, root, path, null);
+
+            async Task<HttpResponseMessage> UploadAsync(string language, string text)
+            {
+                var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/media/{mediaId}/subtitles/speech?language={language}", owner.Token);
+                request.Content = new StringContent(text, Encoding.UTF8, "text/plain");
+                return await ApiTestClient.SendAsync(client, request);
+            }
+
+            DownloadedSubtitle first;
+            using (var response = await UploadAsync("de", Srt))
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                first = await ApiTestClient.ReadAsync<DownloadedSubtitle>(response);
+            }
+            Assert.Equal("German · From Speech", first.Title);
+            Assert.Equal(SubtitleDownloadService.SpeechProviderName, first.Provider);
+
+            // Writing them again replaces the earlier ones in that language.
+            DownloadedSubtitle second;
+            using (var response = await UploadAsync("ger", Srt.Replace("Invented line", "Invented again", StringComparison.Ordinal)))
+                second = await ApiTestClient.ReadAsync<DownloadedSubtitle>(response);
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/media/{mediaId}/subtitles", owner.Token))
+            using (var response = await ApiTestClient.SendAsync(client, request))
+                Assert.Equal([second.Id], (await ApiTestClient.ReadAsync<List<DownloadedSubtitle>>(response)).Select(entry => entry.Id));
+
+            using (var response = await UploadAsync("de", "not a subtitle"))
+                Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+            using (var response = await UploadAsync("klingonisch", Srt))
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using (var response = await UploadAsync("de", new string('x', Aurelia.Server.Endpoints.SpeechSubtitleEndpoints.MaximumSubtitleBytes + 10)))
+                Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+
+            var playback = await CreatePlaybackAsync(client, owner.Token, mediaId);
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles", owner.Token))
+            using (var response = await client.SendAsync(request))
+            {
+                var track = Assert.Single(await ApiTestClient.ReadAsync<List<LiveSubtitleTrack>>(response));
+                Assert.Equal("de", track.Language);
+                using var file = ApiTestClient.Authorized(HttpMethod.Get, $"{playback.StreamPath}/subtitles/{track.Index}", owner.Token);
+                using var vtt = await client.SendAsync(file);
+                Assert.Contains("Invented again", await vtt.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            }
+            Assert.Equal(before, (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length, Directory.GetFileSystemEntries(root).Length));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SpeechAudioIsPlainMonoPcmOnStandardOutput()
+    {
+        var surround = new ProbedAudio(2, "eac3", null, 6, "de", null, IsDefault: false);
+        var stereo = new ProbedAudio(1, "aac", null, 2, "en", null, IsDefault: true);
+        var arguments = LiveSpeechAudio.Arguments("/invented/input.mkv", surround);
+        Assert.Equal("pipe:1", arguments[^1]);
+        Assert.Contains("0:2", arguments);
+        Assert.Contains("pcm_s16le", arguments);
+        Assert.Contains("file", arguments);
+        Assert.StartsWith("pan=mono|c0=0.7*FC", arguments[arguments.ToList().IndexOf("-af") + 1], StringComparison.Ordinal);
+        Assert.DoesNotContain(LiveSpeechAudio.Arguments("/invented/input.mkv", stereo), argument => argument.StartsWith("pan=", StringComparison.Ordinal));
+        // An ffmpeg without the pan filter mixes surround down plainly.
+        Assert.DoesNotContain(LiveSpeechAudio.Arguments("/invented/input.mkv", surround, centerMix: false), argument => argument.StartsWith("pan=", StringComparison.Ordinal));
+        Assert.Equal(stereo, LiveSpeechAudio.Choose([surround, stereo], null));
+        Assert.Equal(surround, LiveSpeechAudio.Choose([surround, stereo], 2));
+        Assert.Null(LiveSpeechAudio.Choose([surround], 7));
+    }
+
+    [Fact]
     public async Task ProfilesThatCannotManageTheServerCannotDownloadSubtitles()
     {
         var provider = new Provider();

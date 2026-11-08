@@ -47,3 +47,17 @@ public sealed record LiveSubtitleTrack(
     bool Supported,
     bool IsSidecar = false,
     bool IsSdh = false);
+
+/// <summary>A sound track a device may turn into subtitles from speech.</summary>
+public sealed record SpeechAudioTrack(
+    int Index,
+    string Codec,
+    int Channels,
+    string? Language,
+    string? Title,
+    bool IsDefault);
+
+/// <summary>The title's sound tracks and its length, for the progress of writing subtitles.</summary>
+public sealed record SpeechAudioTracksResponse(
+    double? DurationSeconds,
+    IReadOnlyList<SpeechAudioTrack> Tracks);

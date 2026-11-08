@@ -72,6 +72,17 @@ public sealed class DownloadedSubtitleStore(ServerRuntimeOptions runtime)
         }
     }
 
+    /// <summary>Puts subtitles written from speech in place of earlier ones in the same language.</summary>
+    public StoredSubtitle Replace(Guid mediaId, StoredSubtitle subtitle, byte[] content)
+    {
+        lock (gate)
+        {
+            foreach (var old in ReadIndex(mediaId).Where(entry => entry.Provider == subtitle.Provider && entry.Language == subtitle.Language))
+                Remove(mediaId, old.Id);
+            return Add(mediaId, subtitle, content);
+        }
+    }
+
     public bool Remove(Guid mediaId, Guid id)
     {
         lock (gate)
@@ -147,7 +158,7 @@ public sealed class DownloadedSubtitleStore(ServerRuntimeOptions runtime)
         catch (CultureNotFoundException) { name = subtitle.Language; }
         if (subtitle.Forced) name += " (Forced)";
         if (subtitle.HearingImpaired) name += " (SDH)";
-        return name + " · Downloaded";
+        return name + (subtitle.Provider == SubtitleDownloadService.SpeechProviderName ? " · From Speech" : " · Downloaded");
     }
 
     private List<StoredSubtitle> ReadIndex(Guid mediaId)
