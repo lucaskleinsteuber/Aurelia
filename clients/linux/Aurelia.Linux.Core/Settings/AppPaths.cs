@@ -8,7 +8,8 @@ namespace Aurelia.Linux.Core.Settings;
 /// </summary>
 public sealed record AppPaths(string ConfigDirectory, string CacheDirectory, string StateDirectory, string? DataDirectory = null)
 {
-    public const string FolderName = "aurelia-desktop";
+    /// <summary>"aurelia-desktop", or "aurelia-desktop-test" for the test edition, which never shares files with the real app.</summary>
+    public static string FolderName { get; } = AppInfo.IsTestEdition ? "aurelia-desktop-test" : "aurelia-desktop";
 
     public static AppPaths FromEnvironment(Func<string, string?>? environment = null)
     {

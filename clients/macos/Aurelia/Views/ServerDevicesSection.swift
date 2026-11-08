@@ -4,25 +4,24 @@ import SwiftUI
 /// Pairing new devices and the sessions of this server's devices.
 struct ServerDevicesSection: View {
   @EnvironmentObject private var model: AppModel
-  @State private var showingDeviceApproval = false
 
   var body: some View {
     AureliaSettingsSection(
       "Devices",
       symbol: "laptopcomputer.and.iphone",
       description:
-        "Connect a Mac, Apple TV or web browser to this server, and sign out devices you no longer use."
+        "Let a new device use this server, and sign out devices you no longer use. Every new device asks once for an 8-digit code that this Mac shows."
     ) {
       VStack(alignment: .leading, spacing: 18) {
-        appleTVPairing
+        macPairing
         Divider()
         browserAccess
-        Divider()
-        macPairing
         let sessions = model.sessions.filter(\.isActive)
         if !sessions.isEmpty {
           Divider()
           Text("Signed-In Devices").font(.headline)
+          Text("Devices that can use this server now. Sign Out ends a device’s access; it then needs a new code.")
+            .font(.caption).foregroundStyle(.secondary)
           ForEach(sessions) { session in
             HStack {
               VStack(alignment: .leading) {
@@ -31,7 +30,7 @@ struct ServerDevicesSection: View {
               }
               Spacer()
               if !session.isCurrent && session.revokedAt == nil {
-                Button("Revoke", role: .destructive) {
+                Button("Sign Out", role: .destructive) {
                   Task { await model.revokeSession(id: session.id) }
                 }
               }
@@ -40,31 +39,6 @@ struct ServerDevicesSection: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-    }
-    .sheet(isPresented: $showingDeviceApproval) { DeviceApprovalView() }
-  }
-
-  /// The Apple TV and a web browser show a code themselves; the owner confirms it here.
-  private var appleTVPairing: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Label("Apple TV", systemImage: "appletv").font(.headline)
-      Text(
-        "Open Aurelia on the Apple TV and choose this server. The TV shows an 8-digit code; enter it here to let the TV in."
-      )
-      .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-      if model.profile?.user?.role == .owner {
-        Button("Enter Code from Apple TV or Browser…") { showingDeviceApproval = true }
-          .disabled(!model.libraryCapabilities.contains("device-authorization-v1"))
-          .help(
-            model.libraryCapabilities.contains("device-authorization-v1")
-              ? "Enter the code shown on the Apple TV or in the browser."
-              : "Requires Aurelia Server 1.5.5."
-          )
-          .accessibilityIdentifier("approve-device")
-      } else {
-        Text("Only the owner can approve an Apple TV or a browser.").font(.caption)
-          .foregroundStyle(.secondary)
-      }
     }
   }
 
@@ -76,12 +50,17 @@ struct ServerDevicesSection: View {
         Text("Using Aurelia in a web browser requires Aurelia Server 1.10.0.")
           .font(.callout).foregroundStyle(.secondary)
       } else if let address = browserAddress {
-        Text(
-          address.thisMacOnly
-            ? "Open this address in a browser on this Mac. To use Aurelia in browsers on other devices, turn on home network access for this server."
-            : "Open this address in a browser on any device at home. The browser shows an 8-digit code; enter it with “Enter Code from Apple TV or Browser…”."
-        )
-        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if address.thisMacOnly {
+          Text(
+            "Open this address in a browser on this Mac. To use Aurelia in browsers on other devices, turn on home network access for this server."
+          )
+          .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else {
+          Text(
+            "Open this address in a browser on any device at home. The browser asks for a code; create one above."
+          )
+          .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
         HStack {
           Text(address.url.absoluteString).font(.system(.body, design: .monospaced))
             .textSelection(.enabled)
@@ -108,6 +87,8 @@ struct ServerDevicesSection: View {
     }
   }
 
+  private var serverName: String { model.profile?.name ?? "this server" }
+
   private var browserAddress: BrowserAddress? {
     guard let serverURL = model.profile?.baseURL else { return nil }
     let local = model.isLocalHost ? model.hostSnapshot.serverInfo : nil
@@ -115,24 +96,33 @@ struct ServerDevicesSection: View {
       serverURL: serverURL, lanAccessEnabled: local?.lanAccessEnabled, lanPort: local?.lanHttpsPort)
   }
 
-  /// Another Mac cannot show a code before it is paired, so this Mac makes one for it.
+  /// Every new device asks for a code when it connects, so this Mac makes one: another Mac, a
+  /// Linux computer, an iPhone, iPad, Apple TV or a browser.
   private var macPairing: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Label("Another Mac", systemImage: "laptopcomputer").font(.headline)
-      Text(
-        "Create a code here, then type it into Aurelia on the other Mac when it connects to this server. A code works once and for five minutes."
-      )
-      .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    VStack(alignment: .leading, spacing: 10) {
+      Label("Add a Device", systemImage: "plus.circle").font(.headline)
+      PairingDirection(
+        from: ("laptopcomputer", "This Mac shows the code"),
+        to: ("appletv", "You type it on the new device"))
+      PairingSteps(steps: [
+        "Click Create Code below.",
+        "Open Aurelia on the new device (Mac, Linux computer, iPhone, iPad, Apple TV or browser) and choose \(serverName).",
+        "Type the code there. A code works once and for five minutes.",
+      ])
       if let code = model.pairingCode {
         TimelineView(.periodic(from: .now, by: 1)) { context in
           pairingCode(code, now: context.date)
         }
       }
-      Button(model.pairingCode == nil ? "Pair a Mac" : "Create a New Code") {
-        Task { await model.generatePairingCode() }
+      if model.profile?.user?.role == .owner {
+        Button(model.pairingCode == nil ? "Create Code" : "Create a New Code") {
+          Task { await model.generatePairingCode() }
+        }
+        .buttonStyle(AureliaPrimaryActionButtonStyle())
+        .accessibilityIdentifier("pair-mac")
+      } else {
+        Text("Only the owner can add a device.").font(.caption).foregroundStyle(.secondary)
       }
-      .buttonStyle(AureliaPrimaryActionButtonStyle())
-      .accessibilityIdentifier("pair-mac")
     }
   }
 
@@ -173,5 +163,44 @@ struct ServerDevicesSection: View {
     if session.isCurrent { return Text("This device") }
     guard let date = session.lastSeenDate else { return Text("Last used \(session.lastSeenAt)") }
     return Text("Last used \(date, format: .relative(presentation: .named))")
+  }
+}
+
+/// Which side shows the pairing code and which side it is typed on, so nobody has to guess.
+private struct PairingDirection: View {
+  let from: (symbol: String, text: String)
+  let to: (symbol: String, text: String)
+
+  var body: some View {
+    HStack(spacing: 10) {
+      side(from)
+      Image(systemName: "arrow.right").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+      side(to)
+    }
+    .padding(.vertical, 6)
+    .padding(.horizontal, 10)
+    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    .accessibilityElement(children: .combine)
+  }
+
+  private func side(_ entry: (symbol: String, text: String)) -> some View {
+    Label(entry.text, systemImage: entry.symbol).font(.callout.weight(.medium))
+  }
+}
+
+/// Numbered steps for pairing one kind of device.
+private struct PairingSteps: View {
+  let steps: [String]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text("\(index + 1).").monospacedDigit().foregroundStyle(.secondary)
+          Text(step).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.callout)
+      }
+    }
   }
 }

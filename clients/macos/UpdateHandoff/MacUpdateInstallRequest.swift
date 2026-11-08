@@ -3,7 +3,7 @@ import Foundation
 /// Launch Services discards arguments from sandboxed callers. The app and its
 /// same-team helper exchange a bounded, one-use request in their existing App Group.
 struct MacUpdateInstallRequest: Codable, Equatable, Sendable {
-  static let appGroup = "B5N7JVK37J.com.lucas.aurelia.media.host"
+  static let appGroup = AppEdition.appGroup
   static let pendingName = "PendingInstall.json"
   static let statusName = "InstallStatus.json"
   let id: UUID
@@ -47,7 +47,7 @@ struct MacUpdateInstallRequest: Codable, Equatable, Sendable {
       now.timeIntervalSince(createdAt) < 120, imageName.utf8.count <= 160,
       imageName.range(
         of:
-          "\\AAurelia-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-\(build)-macOS-(universal|arm64)\\.dmg\\z",
+          "\\AAurelia-(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-\(build)-macOS-(universal|arm64|x64)\\.dmg\\z",
         options: .regularExpression) != nil
     else { throw Failure.invalidRequest }
     let directory = root.appendingPathComponent(directory.uuidString, isDirectory: true)

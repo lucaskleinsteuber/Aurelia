@@ -180,3 +180,81 @@ public sealed class ProfileVisualsTests
         Assert.Equal("?", ProfileVisuals.Initial(" "));
     }
 }
+
+public sealed class FirstContactFingerprintTests
+{
+    [Fact]
+    public async Task RejectsAServerWhoseShownFingerprintBelongsToAnotherKey()
+    {
+        // A server in the middle presents its own key but reports the real server's display text.
+        var server = FakeServer.WithServerInfo().Replace("GET", "/api/v1/server/info", $$"""
+            {"serverId":"{{FakeServer.ServerId}}","name":"Living Room Server","version":"1.26.3","isSetup":true,"lanAccessEnabled":true,
+             "lanHttpsPort":43111,"publicKeyFingerprint":"{{FakeServer.Fingerprint}}","displayFingerprint":"FFFF-EEEE-DDDD-CCCC-BBBB-AAAA",
+             "capabilities":["library-state-v1"]}
+            """);
+        using var api = new AureliaApi(server);
+        var failure = await Assert.ThrowsAsync<AureliaApiException>(() =>
+            api.InspectAsync(new Uri("https://192.168.1.20:43111"), TestContext.Current.CancellationToken));
+        Assert.Equal("identity_mismatch", failure.Code);
+    }
+
+    [Fact]
+    public async Task ShowsTheFingerprintOfThePresentedKey()
+    {
+        using var api = new AureliaApi(FakeServer.WithServerInfo());
+        var inspected = await api.InspectAsync(new Uri("https://192.168.1.20:43111"), TestContext.Current.CancellationToken);
+        Assert.Equal(ServerIdentity.Display(FakeServer.Fingerprint), ServerIdentity.Display(inspected.Fingerprint));
+        Assert.True(AureliaApi.ShowsIdentity(inspected.Info, FakeServer.Fingerprint));
+        Assert.False(AureliaApi.ShowsIdentity(inspected.Info with { DisplayFingerprint = "FFFF-EEEE-DDDD-CCCC-BBBB-AAAA" }, FakeServer.Fingerprint));
+    }
+}
+
+public sealed class SecureConnectionFailureTests
+{
+    private sealed class FailingTransport(Exception inner) : IServerTransport
+    {
+        public HttpClient CreateClient(Uri address, string? expectedFingerprint, CapturedFingerprint? captured, TimeSpan timeout) =>
+            new(new Failing(inner)) { BaseAddress = address, Timeout = timeout };
+
+        private sealed class Failing(Exception inner) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+                throw new HttpRequestException(HttpRequestError.SecureConnectionError, "TLS failed", inner);
+        }
+    }
+
+    private static readonly StoredServer Server = new(Guid.NewGuid(), "Living Room Server", new Uri("https://192.168.1.20:43111"),
+        FakeServer.Fingerprint, "synthetic-device-token", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30));
+
+    [Fact]
+    public async Task ARejectedKeyIsAnIdentityMismatch()
+    {
+        using var api = new AureliaApi(new FailingTransport(new System.Security.Authentication.AuthenticationException("rejected")));
+        var failure = await Assert.ThrowsAsync<AureliaApiException>(() => api.ServerInfoAsync(Server, TestContext.Current.CancellationToken));
+        Assert.Equal("identity_mismatch", failure.Code);
+    }
+
+    [Fact]
+    public async Task AHandshakeCutShortIsNotReportedAsAnotherServer()
+    {
+        using var api = new AureliaApi(new FailingTransport(new IOException("connection reset")));
+        var failure = await Assert.ThrowsAsync<AureliaApiException>(() => api.ServerInfoAsync(Server, TestContext.Current.CancellationToken));
+        Assert.NotEqual("identity_mismatch", failure.Code);
+        Assert.Equal(AureliaApiException.Unreachable().Code, failure.Code);
+    }
+}
+
+public sealed class KeyringFailureMessageTests
+{
+    [Fact]
+    public void OnlyAMissingSecretServiceAsksToInstallAKeyring()
+    {
+        var missing = Aurelia.Linux.Core.Platform.SecretServiceCredentialStore.Unavailable(
+            new InvalidOperationException("org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.secrets was not provided"));
+        Assert.Contains("Install and start", missing.Message, StringComparison.Ordinal);
+        var refused = Aurelia.Linux.Core.Platform.SecretServiceCredentialStore.Unavailable(
+            new InvalidOperationException("org.freedesktop.DBus.Error.NoReply: Did not receive a reply"));
+        Assert.DoesNotContain("Install", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("keyring", refused.Message, StringComparison.Ordinal);
+    }
+}

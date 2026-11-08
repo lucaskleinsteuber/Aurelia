@@ -55,15 +55,15 @@ struct TVLibraryLogicTests {
 
   @Test func invalidYearRangeAndUnsupportedKindsNeverSendRequests() throws {
     var query = TVBrowseQuery(kind: .episode)
-    #expect(throws: TVCoreError.invalidResponse) { try query.queryItems(search: "") }
+    #expect(throws: TVCoreError.invalidRequest) { try query.queryItems(search: "") }
     query.kind = nil
     query.yearFrom = 2026
     query.yearTo = 2000
-    #expect(throws: TVCoreError.invalidResponse) { try query.queryItems(search: "") }
+    #expect(throws: TVCoreError.invalidRequest) { try query.queryItems(search: "") }
     query.yearFrom = -1
     query.yearTo = nil
-    #expect(throws: TVCoreError.invalidResponse) { try query.queryItems(search: "") }
-    #expect(throws: TVCoreError.invalidResponse) {
+    #expect(throws: TVCoreError.invalidRequest) { try query.queryItems(search: "") }
+    #expect(throws: TVCoreError.invalidRequest) {
       try TVBrowseQuery().queryItems(search: String(repeating: "a", count: 201))
     }
   }

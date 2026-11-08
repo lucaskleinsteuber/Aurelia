@@ -27,8 +27,7 @@ Each command asks for the owner's name and Server Password; the first one also s
 viewing PIN.
 
 ```sh
-docker compose exec aurelia aurelia pair                 # code to enter on a Mac or Linux PC
-docker compose exec aurelia aurelia approve 12345678     # allow an Apple TV or browser that shows a code
+docker compose exec aurelia aurelia pair                 # a code to type on a new device (any app or browser)
 docker compose exec aurelia aurelia library add --kind automatic --path /media
 docker compose exec aurelia aurelia library scan --all
 ```

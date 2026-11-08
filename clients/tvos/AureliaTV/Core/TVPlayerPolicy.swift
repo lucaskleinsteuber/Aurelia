@@ -1,14 +1,56 @@
 import Foundation
 
+/// What the player does after its stream relay reports a failure.
+enum TVStreamFailureResponse: Equatable {
+  case endSession(TVCoreError)
+  case fail(String, canRetry: Bool)
+  case reconnect
+}
+
 enum TVPlayerPolicy {
   static let progressInterval: TimeInterval = 15
+  static let notAllowedMessage = "This title isn’t available for this profile."
+  static let unavailableMessage =
+    "Media file unavailable. Its drive may be disconnected, or the file was moved."
+
+  /// The server's codes for a title whose file or drive cannot be read right now.
+  static let unavailableCodes: Set<String> = [
+    "media_not_found", "media_file_unavailable", "media_unavailable",
+  ]
+
+  static func unavailability(_ error: TVCoreError) -> String? {
+    guard unavailableCodes.contains(error.code ?? "") else { return nil }
+    return error.serverMessage ?? unavailableMessage
+  }
+
+  /// A request the server refused without ending the session: the player says why and stays put.
+  static func refusal(_ error: TVCoreError) -> String? {
+    guard error.statusCode == 403, !error.endsSession else { return nil }
+    return error.serverMessage ?? notAllowedMessage
+  }
+
+  static func response(to failure: TVStreamFailure) -> TVStreamFailureResponse {
+    switch failure {
+    case .untrustedServer:
+      return .endSession(.identityMismatch)
+    case .server(let status, let code) where status == 401 || status == 403:
+      let error = TVCoreError.server(status: status, code: code, message: nil, retryAfter: nil)
+      return error.endsSession ? .endSession(error) : .fail(notAllowedMessage, canRetry: false)
+    case .server(let status, let code)
+    where status == 404 || status == 410 || unavailableCodes.contains(code ?? ""):
+      // A missing or offline file does not come back by reconnecting.
+      return .fail(unavailableMessage, canRetry: true)
+    case .server(429, _):
+      return .fail("The server is busy. Try again in a moment.", canRetry: true)
+    case .invalidResponse:
+      return .fail("The server returned an invalid media stream.", canRetry: true)
+    case .interrupted, .server:
+      return .reconnect
+    }
+  }
   static let controlsDelay: TimeInterval = 4
 
-  static func expiry(_ value: String) -> Date? {
-    let fractional = ISO8601DateFormatter()
-    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-  }
+  static func expiry(_ value: String) -> Date? { TVServerDate.parse(value) }
 
   static func renewalDelay(expiresAt: Date, now: Date) -> TimeInterval {
     max(1, expiresAt.timeIntervalSince(now) - 60)

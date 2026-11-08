@@ -18,6 +18,27 @@ public static class ProfileVisuals
     /// <summary>The sum of the id's sixteen bytes picks the palette, so every client shows the same color.</summary>
     public static int PaletteIndex(Guid? id) => id is { } value ? value.ToByteArray().Sum(b => b) % Palettes.Length : 0;
 
+    /// <summary>The named palettes of built-in pictures (<see cref="Aurelia.Contracts.ProfilePictures.Palettes"/>), the seven above plus red.</summary>
+    public static (string Top, string Bottom) NamedPalette(string name) => name switch
+    {
+        "blue" => Palettes[0],
+        "purple" => Palettes[1],
+        "pink" => Palettes[2],
+        "orange" => Palettes[3],
+        "teal" => Palettes[4],
+        "green" => Palettes[5],
+        "indigo" => Palettes[6],
+        "red" => ("#FF7A6B", "#C9302C"),
+        _ => Palettes[0],
+    };
+
+    /// <summary>The symbol and palette of a built-in picture key, or null for a photo or no picture.</summary>
+    public static (string Symbol, string Palette)? Builtin(string? key) =>
+        Aurelia.Contracts.ProfilePictures.IsBuiltin(key) && key!.Split(':') is [var symbol, var palette] ? (symbol, palette) : null;
+
+    /// <summary>The name a profile shows: its display name, or its sign-in name before one was chosen.</summary>
+    public static string ShownName(Aurelia.Contracts.UserSummary user) => user.DisplayName ?? user.Username;
+
     public static string Initial(string? name) =>
         name?.Trim() is { Length: > 0 } trimmed ? char.ToUpperInvariant(trimmed[0]).ToString() : "?";
 }

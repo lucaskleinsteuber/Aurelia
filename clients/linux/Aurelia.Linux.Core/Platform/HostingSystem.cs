@@ -103,9 +103,9 @@ public sealed class LinuxHostingSystem : IHostingSystem
         $"""
         [Desktop Entry]
         Type=Application
-        Name=Aurelia
+        Name={AppInfo.DisplayName}
         Comment=Keeps this computer's Aurelia Server running
-        Exec={(executable.Contains(' ', StringComparison.Ordinal) ? "\"" + executable + "\"" : executable)} --background
+        Exec={(AppInfo.IsTestEdition ? "env AURELIA_EDITION=test " : "")}{(executable.Contains(' ', StringComparison.Ordinal) ? "\"" + executable + "\"" : executable)} --background
         Icon={AppInfo.ApplicationId}
         Terminal=false
         NoDisplay=true

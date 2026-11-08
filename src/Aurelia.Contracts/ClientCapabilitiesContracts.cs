@@ -8,8 +8,21 @@ public static class ServerFeatures
     public static IReadOnlyList<string> All { get; } = Array.AsReadOnly(new[]
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
-        "catalog-pages-500-v1", PreviewStreams, WebApp,
+        "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
+        WebPairingCode,
     });
+
+    /// <summary>
+    /// The browser app signs in with the pairing code from the main device, like every other
+    /// client ("web-pairing-code-v1").
+    /// </summary>
+    public const string WebPairingCode = "web-pairing-code-v1";
+
+    /// <summary>Display names and profile pictures ("profile-personalization-v1").</summary>
+    public const string ProfilePersonalization = "profile-personalization-v1";
+
+    /// <summary>Children's profiles limited by FSK age, with per-title exceptions ("age-limits-v1").</summary>
+    public const string AgeLimits = "age-limits-v1";
 
     /// <summary>
     /// User-created collections, smart lists, franchises, and collection management ("collections-v2").

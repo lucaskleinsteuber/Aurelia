@@ -130,6 +130,7 @@ public sealed class MetadataJobStore(
         database.AccessUserId = user.Id;
         database.AccessIsOwner = user.Role == UserRole.Owner;
         database.AccessMode = user.AccessMode;
+        database.AccessAgeLimit = user.Role == UserRole.User ? user.AgeLimit : null;
         return true;
     }
 }

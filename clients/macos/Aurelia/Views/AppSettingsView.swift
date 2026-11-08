@@ -12,6 +12,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
   case server = "Server"
   case updates = "Updates"
   case advanced = "Advanced"
+  case about = "About"
 
   var id: String { rawValue }
 
@@ -27,6 +28,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
     case .server: "server.rack"
     case .updates: "arrow.down.circle.fill"
     case .advanced: "slider.horizontal.3"
+    case .about: "info.circle.fill"
     }
   }
 }
@@ -59,8 +61,9 @@ struct AppSettingsView: View {
   @AppStorage(AppUpdatePreferences.betaUpdatesKey) private var betaUpdates = false
 
   // Navigation & Search State
-  @State private var selectedCategory: SettingsCategory = .general
+  @State private var selectedCategory: SettingsCategory
   @State private var searchText = ""
+  @State private var hasSettled = false
 
   // Dialog & Sheet States
   @State private var libraryToRemove: LibrarySummary?
@@ -73,6 +76,12 @@ struct AppSettingsView: View {
   @State private var showingMediaManager = false
   @State private var showingResetSheet = false
   @State private var showingLibraryHealth = false
+
+  /// The category asked for (such as Updates from the menu) is shown from the first frame, so the
+  /// page does not switch while it fades in.
+  init(initialCategory: SettingsCategory? = nil) {
+    _selectedCategory = State(initialValue: initialCategory ?? .general)
+  }
 
   var body: some View {
     HStack(spacing: 0) {
@@ -99,10 +108,18 @@ struct AppSettingsView: View {
         .padding(.top, 12)
         .padding(.leading, 220 - 76)
     }
+    .onAppear { takeRequestedCategory() }
+    .onChange(of: model.requestedSettingsCategory) { _, _ in takeRequestedCategory() }
     .task(id: selectedCategory) {
       guard needsServerAdministration, !model.requiresProfileSelection, !model.isStarting else {
         isLoadingAdministration = false
         return
+      }
+      // Loading changes the whole model; waiting until Settings has faded in keeps that smooth.
+      if !hasSettled {
+        try? await Task.sleep(for: .milliseconds(240))
+        hasSettled = true
+        if Task.isCancelled { return }
       }
       isLoadingAdministration = true
       await model.reloadAdministration()
@@ -177,6 +194,13 @@ struct AppSettingsView: View {
     }
   }
 
+  private func takeRequestedCategory() {
+    guard let requested = model.requestedSettingsCategory else { return }
+    selectedCategory = requested
+    searchText = ""
+    model.requestedSettingsCategory = nil
+  }
+
   // MARK: - Sidebar
 
   private var sidebar: some View {
@@ -237,7 +261,8 @@ struct AppSettingsView: View {
 
   private func shouldShowCategory(_ category: SettingsCategory) -> Bool {
     switch category {
-    case .general, .sidebar, .activity, .playback, .profilesAndDevices, .updates, .advanced:
+    case .general, .sidebar, .activity, .playback, .profilesAndDevices, .updates, .advanced,
+      .about:
       return true
     case .library:
       return model.canManageStorage
@@ -331,6 +356,8 @@ struct AppSettingsView: View {
       updatesSections
     case .advanced:
       advancedSections
+    case .about:
+      AboutAureliaSections()
     }
   }
 
@@ -405,7 +432,7 @@ struct AppSettingsView: View {
         metadataSections
         let _ = { foundAny = true }()
       }
-      if queryMatches(query, "profile pin password account avatar current") {
+      if queryMatches(query, "profile pin password account avatar current name picture photo") {
         currentProfileSection
         let _ = { foundAny = true }()
       }
@@ -436,6 +463,12 @@ struct AppSettingsView: View {
       }
       if queryMatches(query, "connection address fingerprint disconnect restart host") {
         serverConnectionSection
+        let _ = { foundAny = true }()
+      }
+      if queryMatches(
+        query, "about version build introduction tour getting started github source legal license"
+      ) {
+        AboutAureliaSections()
         let _ = { foundAny = true }()
       }
       if model.canManageMedia && queryMatches(query, "danger reset library factory wipe delete") {
@@ -670,8 +703,10 @@ struct AppSettingsView: View {
             isOn: $playbackPreferences.preferences.fillsScreen
           )
           .accessibilityIdentifier("playback-fill-screen")
-          Text("Cuts off the edges of pictures that are wider or narrower than the window. Z switches it in the player.")
-            .font(.caption).foregroundStyle(.secondary)
+          Text(
+            "Cuts off the edges of pictures that are wider or narrower than the window. Z switches it in the player."
+          )
+          .font(.caption).foregroundStyle(.secondary)
         }
 
         VStack(alignment: .leading, spacing: 2) {
@@ -1027,14 +1062,14 @@ struct AppSettingsView: View {
     AureliaSettingsSection(
       "Current Profile",
       symbol: "person.crop.circle",
-      description: "Manage your signed-in profile and update your PIN."
+      description: "Change your name, picture and PIN."
     ) {
       VStack(alignment: .leading, spacing: 14) {
         if let user = model.profile?.user {
           HStack(spacing: 14) {
-            AureliaProfileAvatar(id: user.id, name: user.username, size: 44)
+            AureliaProfileAvatar(user: user, size: 44)
             VStack(alignment: .leading, spacing: 2) {
-              Text(user.username).font(.headline)
+              Text(user.shownName).font(.headline)
               Text("Role: \(user.role.rawValue.capitalized)").font(.caption).foregroundStyle(
                 .secondary)
             }
@@ -1044,6 +1079,11 @@ struct AppSettingsView: View {
             }
           }
           Divider()
+          if model.supportsProfilePersonalization, model.profile?.isViewingSession == true {
+            OwnProfileEditor(user: user).id(
+              "\(user.id)-\(user.profileRevision)-\(user.pictureRevision)")
+            Divider()
+          }
         }
 
         if model.profile?.isViewingSession == true {
@@ -1092,7 +1132,7 @@ struct AppSettingsView: View {
           "Get test versions before everyone else. They may have bugs. Turn this off to stay on the stable version from the next stable release on."
         )
         .font(.callout).foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+        .fixedSize(horizontal: false, vertical: true)
 
         Button("Check for Updates…") {
           Task { await updater.check(userInitiated: true) }
@@ -1288,7 +1328,6 @@ struct SidebarCustomizerView: View {
 
               Spacer()
 
-
               Toggle(
                 "",
                 isOn: Binding(
@@ -1312,7 +1351,8 @@ struct SidebarCustomizerView: View {
             .onDrop(
               of: [.text],
               delegate: SidebarReorderDropDelegate(
-                target: item, items: $items, dragged: $dragged, commit: saveOrder))
+                target: item, items: $items, dragged: $dragged, commit: saveOrder)
+            )
             // Keyboard and VoiceOver users move items without dragging.
             .accessibilityElement(children: .contain)
             .accessibilityAction(named: "Move Up") { moveItem(from: index, to: index - 1) }
@@ -1399,7 +1439,8 @@ struct SidebarReorderDropDelegate: DropDelegate {
 enum SidebarReorder {
   /// The list with `item` moved to `index`, keeping every other item in order.
   static func moving<Item: Equatable>(_ item: Item, to index: Int, in items: [Item]) -> [Item] {
-    guard let from = items.firstIndex(of: item), index >= 0, index < items.count, from != index else {
+    guard let from = items.firstIndex(of: item), index >= 0, index < items.count, from != index
+    else {
       return items
     }
     var result = items

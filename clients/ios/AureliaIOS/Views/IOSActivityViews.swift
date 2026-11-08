@@ -22,6 +22,8 @@ struct IOSWatchHistoryView: View {
                 Button("Remove", systemImage: "trash", role: .destructive) {
                   Task { await remove(item) }
                 }
+                // The app tints everything white; without its own color the button showed white on white.
+                .tint(.red)
               }
           }
         }
@@ -217,6 +219,12 @@ struct IOSStatisticsView: View {
     .accessibilityElement(children: .combine)
   }
 
+  static func chartWeeks(now: Date = Date(), calendar: Calendar = .current) -> ClosedRange<Date> {
+    let end = calendar.date(byAdding: .day, value: 7, to: calendar.startOfDay(for: now)) ?? now
+    let start = calendar.date(byAdding: .weekOfYear, value: -12, to: end) ?? now
+    return start...end
+  }
+
   @ViewBuilder
   private func weeks(_ periods: [IOSPeriodHours]) -> some View {
     let points = periods.suffix(12).compactMap { period in
@@ -246,6 +254,8 @@ struct IOSStatisticsView: View {
             AxisValueLabel(format: .dateTime.day().month(.abbreviated))
           }
         }
+        // Always the last twelve weeks, also when only a few of them had watching.
+        .chartXScale(domain: Self.chartWeeks())
         .frame(height: 170)
         .padding(.horizontal, IOSDesign.margin)
         .accessibilityLabel("Watch time in the last weeks")
@@ -377,14 +387,14 @@ struct IOSProfilePINView: View {
       if hasPIN == true {
         Section("Current PIN") {
           SecureField("Current PIN", text: $current).keyboardType(.numberPad)
-            .textContentType(.password).accessibilityIdentifier("pin-current")
+            .accessibilityIdentifier("pin-current")
         }
       }
       Section {
         SecureField("New PIN", text: $new).keyboardType(.numberPad)
-          .textContentType(.newPassword).accessibilityIdentifier("pin-new")
+          .accessibilityIdentifier("pin-new")
         SecureField("Confirm New PIN", text: $confirm).keyboardType(.numberPad)
-          .textContentType(.newPassword).accessibilityIdentifier("pin-confirm")
+          .accessibilityIdentifier("pin-confirm")
       } header: {
         Text(hasPIN == true ? "New PIN" : "PIN")
       } footer: {

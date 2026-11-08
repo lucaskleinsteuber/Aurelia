@@ -1,45 +1,6 @@
 import XCTest
 
 final class ServerFoundationUITests: XCTestCase {
-  @MainActor func testDeviceApprovalReviewsDeviceAndConfirms() throws {
-    let app = launch()
-    defer { app.terminate() }
-    let button = app.buttons["approve-device"]
-    XCTAssertTrue(button.waitForExistence(timeout: 8))
-    XCTAssertTrue(button.isEnabled)
-    button.click()
-    let field = app.textFields["device-approval-code"]
-    XCTAssertTrue(field.waitForExistence(timeout: 5))
-    field.click()
-    field.typeText("12345678")
-    app.buttons["device-approval-lookup"].click()
-    XCTAssertTrue(app.staticTexts["Living Room Apple TV"].waitForExistence(timeout: 5))
-    XCTAssertTrue(app.staticTexts["Synthetic UI Server"].exists)
-    XCTAssertTrue(app.staticTexts["12345678"].exists)
-    screenshot(app, "Device approval review")
-    app.buttons["device-approval-confirm"].click()
-    XCTAssertTrue(app.buttons["approve-device"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.textFields["device-approval-code"].exists)
-    XCTAssertFalse(app.staticTexts["The server returned an invalid response."].exists)
-  }
-
-  @MainActor func testInvalidDeviceCodeStaysInFormAndEscapeClosesIt() throws {
-    let app = launch()
-    defer { app.terminate() }
-    let button = app.buttons["approve-device"]
-    XCTAssertTrue(button.waitForExistence(timeout: 8))
-    button.click()
-    let field = app.textFields["device-approval-code"]
-    XCTAssertTrue(field.waitForExistence(timeout: 5))
-    field.click()
-    field.typeText("87654321")
-    app.buttons["device-approval-lookup"].click()
-    XCTAssertTrue(app.staticTexts["device-approval-error"].waitForExistence(timeout: 5))
-    XCTAssertFalse(app.buttons["device-approval-confirm"].exists)
-    app.typeKey(.escape, modifierFlags: [])
-    XCTAssertFalse(app.textFields["device-approval-code"].exists)
-  }
-
   @MainActor func testServerOverviewExplainsReadiness() throws {
     let app = launch()
     defer { app.terminate() }

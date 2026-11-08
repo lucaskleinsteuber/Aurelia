@@ -26,7 +26,7 @@ public sealed class HostingScreenTests
 {
     private const string Password = "synthetic server password";
 
-    private static StoredServer Saved() => new(FakeServer.ServerId, "This PC's Server", new Uri("https://127.0.0.1:43111"),
+    internal static StoredServer Saved() => new(FakeServer.ServerId, "This PC's Server", new Uri("https://127.0.0.1:43111"),
         FakeServer.Fingerprint, "synthetic-device-token-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30), LocallyManaged: true);
 
     private static string Json<T>(T value) => JsonSerializer.Serialize(value, AureliaJson.Options);
@@ -359,7 +359,7 @@ public sealed class HostingScreenTests
         public Task<IDisposable?> KeepAwakeAsync(string reason) => Task.FromResult<IDisposable?>(null);
     }
 
-    private sealed class ScriptedHost(LocalServerState afterStart) : ILocalServerHost
+    internal sealed class ScriptedHost(LocalServerState afterStart) : ILocalServerHost
     {
         public event Action? Changed;
         public LocalServerState State { get; private set; }
@@ -368,7 +368,8 @@ public sealed class HostingScreenTests
         public LocalServerSettings Settings => new("This PC's Server", true, 43111);
         public Uri SecureAddress => new("https://127.0.0.1:43111");
         public ServerInfoResponse? Info => new(FakeServer.ServerId, Settings.ServerName, "1.26.3", State == LocalServerState.Running,
-            true, 43111, FakeServer.Fingerprint, ServerIdentity.Display(FakeServer.Fingerprint), ["library-state-v1"]);
+            true, 43111, FakeServer.Fingerprint, ServerIdentity.Display(FakeServer.Fingerprint), Capabilities);
+        public IReadOnlyList<string> Capabilities { get; init; } = ["library-state-v1"];
         public ServerInfoResponse? OtherServer => State == LocalServerState.PortInUse ? Info : null;
         public int Starts { get; private set; }
         public int Restarts { get; private set; }

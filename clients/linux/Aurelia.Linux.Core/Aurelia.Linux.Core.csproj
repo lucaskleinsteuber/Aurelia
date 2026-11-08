@@ -6,10 +6,15 @@
   <ItemGroup>
     <PackageReference Include="Haukcode.Mdns" />
     <PackageReference Include="Tmds.DBus.Protocol" />
+    <PackageReference Include="BouncyCastle.Cryptography" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Aurelia.Linux.Tests" />
     <InternalsVisibleTo Include="Aurelia.Linux.IntegrationTests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Settings › About shows what changed in this version. -->
+    <EmbeddedResource Include="../../../CHANGELOG.md" LogicalName="CHANGELOG.md" Visible="false" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/Aurelia.Contracts/Aurelia.Contracts.csproj" />

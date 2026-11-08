@@ -47,6 +47,9 @@ public static class Program
         return builder
             .UseSkia()
             .UseHarfBuzz()
+            // On X11, menus are drawn inside the window: no separate popup windows whose square
+            // corners show around the rounded menus.
+            .With(new X11PlatformOptions { OverlayPopups = true })
             .With(new WaylandPlatformOptions { AppId = AppInfo.ApplicationId });
     }
 

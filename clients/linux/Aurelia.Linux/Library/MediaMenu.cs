@@ -15,13 +15,19 @@ namespace Aurelia.Linux.Library;
 /// </summary>
 internal static class MediaMenu
 {
-    public static ContextMenu For(LibraryContext context, CatalogItemSummary item)
+    /// <summary>
+    /// Gives a card its menu. The entries are built when the menu is asked for (right click or the
+    /// menu key), not with every card: a page of hundreds of cards built hundreds of menus.
+    /// </summary>
+    public static void Attach(Control card, LibraryContext context, CatalogItemSummary item)
     {
         var menu = new ContextMenu();
-        menu.Opening += (_, _) => menu.ItemsSource = Items(context, item);
         menu.Opened += (_, _) => Motion.Appear(menu, rise: 4, fromScale: 0.97);
-        menu.ItemsSource = Items(context, item);
-        return menu;
+        // A menu without entries does not open, so the title stands in until it is asked for.
+        menu.ItemsSource = new[] { new MenuItem { Header = item.Title, IsEnabled = false } };
+        // Tunneling runs before the menu's own handler opens it, so it opens with current entries.
+        card.AddHandler(Control.ContextRequestedEvent, (_, _) => menu.ItemsSource = Items(context, item), Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        card.ContextMenu = menu;
     }
 
     internal static List<Control> Items(LibraryContext context, CatalogItemSummary item, bool onDetail = false)

@@ -12,17 +12,23 @@ public sealed class StartingView : UserControl
     private readonly AppSession? session;
     private readonly TextBlock status = new() { Classes = { "subdued" }, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly Button stopWaiting = new() { Content = "Stop Waiting", Classes = { "link" }, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly Button watchOffline = new() { Content = "Watch Downloads Offline", Classes = { "chip" }, HorizontalAlignment = HorizontalAlignment.Center, IsVisible = false };
+    private readonly Func<bool>? canWatchOffline;
 
-    public StartingView(AppSession? session = null)
+    /// <param name="offline">Opens the offline mode; offered while the server is looked for or woken, as on the Mac.</param>
+    /// <param name="canWatchOffline">Asked at each status change: when Aurelia opens, the saved server is only known once it is being reached.</param>
+    public StartingView(AppSession? session = null, Action? offline = null, Func<bool>? canWatchOffline = null)
     {
         this.session = session;
+        this.canWatchOffline = offline is null ? null : canWatchOffline ?? (() => true);
         stopWaiting.Click += (_, _) => session?.StopWaiting();
+        watchOffline.Click += (_, _) => offline?.Invoke();
         Content = ScreenParts.Backdrop(new StackPanel
         {
             Spacing = 22,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { ScreenParts.Symbol("IconAurelia", 46), status, new ProgressBar { IsIndeterminate = true, Width = 120 }, stopWaiting },
+            Children = { ScreenParts.Symbol("IconAurelia", 46), status, new Aurelia.Linux.Controls.Spinner { HorizontalAlignment = HorizontalAlignment.Center }, watchOffline, stopWaiting },
         });
         Update();
         if (session is not null)
@@ -47,5 +53,6 @@ public sealed class StartingView : UserControl
             _ => "Starting Aurelia…",
         };
         stopWaiting.IsVisible = session?.Status == ConnectionStatus.Waking;
+        watchOffline.IsVisible = canWatchOffline?.Invoke() == true && session?.Status is ConnectionStatus.Connecting or ConnectionStatus.Waking;
     }
 }

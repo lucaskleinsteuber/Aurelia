@@ -151,7 +151,7 @@ public sealed class ConnectionView : UserControl
                             new TextBlock { Text = "2. Enter the pairing code", FontWeight = FontWeight.SemiBold },
                             new TextBlock
                             {
-                                Text = "Create a code on the server: in Aurelia on the Mac under Settings › Profiles and Devices › Pair a Mac, or with “sudo aurelia pair” on a Linux server.",
+                                Text = "The main computer shows the code, you type it here: in Aurelia on the Mac or Linux computer under Settings › Profiles and Devices › Create Code, or with “sudo aurelia pair” on a Linux server.",
                                 Classes = { "subdued" },
                                 TextWrapping = TextWrapping.Wrap,
                             },

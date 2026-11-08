@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleDisplayName</key><string>Aurelia</string>
+    <key>CFBundleDisplayName</key><string>$(AURELIA_DISPLAY_NAME)</string>
     <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -19,5 +19,7 @@
     <key>UIApplicationSupportsIndirectInputEvents</key><true/>
     <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
     <key>UIUserInterfaceStyle</key><string>Dark</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
 </dict>
 </plist>

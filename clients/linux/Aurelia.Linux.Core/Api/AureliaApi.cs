@@ -33,7 +33,8 @@ public sealed partial class AureliaApi : IDisposable
         using var client = transport.CreateClient(address, expectedFingerprint: null, captured, timeout ?? DefaultTimeout);
         var info = await SendAsync<ServerInfoResponse>(client, HttpMethod.Get, "/api/v1/server/info", null, null, inspecting: true, cancellation);
         var fingerprint = captured.Value;
-        if (!ServerIdentity.IsValidFingerprint(fingerprint) || !ReportsIdentity(info, fingerprint!, address))
+        if (!ServerIdentity.IsValidFingerprint(fingerprint) || !ReportsIdentity(info, fingerprint!, address)
+            || !ShowsIdentity(info, fingerprint!))
             throw AureliaApiException.IdentityMismatch();
         if (!info.LanAccessEnabled && !ServerAddress.IsLoopback(address))
             throw new AureliaApiException(0, "network_access_off",
@@ -118,6 +119,31 @@ public sealed partial class AureliaApi : IDisposable
             session.Token, request, inspecting: false, cancellation);
     }
 
+    /// <summary>GET /api/v1/profiles/{id}/picture: a profile's own photo, shown in "Who's watching?".</summary>
+    public Task<byte[]> ProfilePhotoAsync(StoredServer server, Guid profileId, long revision, CancellationToken cancellation) =>
+        SendAsync<byte[]>(Pinned(server.Address, server.Fingerprint), HttpMethod.Get, $"/api/v1/profiles/{profileId}/picture?rev={revision}",
+            server.DeviceToken, null, inspecting: false, cancellation);
+
+    /// <summary>PUT /api/v1/profile/name: the open profile's shown name. The owner keeps signing in with the old name.</summary>
+    public Task<UserSummary> RenameOwnProfileAsync(StoredServer server, ProfileSession session, string name, CancellationToken cancellation) =>
+        SendAsync<UserSummary>(Pinned(server.Address, server.Fingerprint), HttpMethod.Put, "/api/v1/profile/name",
+            session.Token, new UpdateProfileNameRequest(name), inspecting: false, cancellation);
+
+    /// <summary>PUT /api/v1/profile/picture: a built-in picture for the open profile, or null for its initial.</summary>
+    public Task<UserSummary> SetOwnPictureAsync(StoredServer server, ProfileSession session, string? builtin, CancellationToken cancellation) =>
+        SendAsync<UserSummary>(Pinned(server.Address, server.Fingerprint), HttpMethod.Put, "/api/v1/profile/picture",
+            session.Token, new UpdateProfilePictureRequest(builtin), inspecting: false, cancellation);
+
+    /// <summary>PUT /api/v1/profile/picture/photo: an own photo; the server crops and shrinks it.</summary>
+    public async Task<UserSummary> UploadOwnPhotoAsync(StoredServer server, ProfileSession session, byte[] image, CancellationToken cancellation)
+    {
+        if (image.Length > ProfilePictures.MaximumUploadBytes) throw new AureliaApiException(413, "profile_photo_too_large", "Choose a photo no larger than 8 MB.");
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/api/v1/profile/picture/photo") { Content = new ByteArrayContent(image) };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session.Token);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        return await SendRequestAsync<UserSummary>(Pinned(server.Address, server.Fingerprint), request, inspecting: false, cancellation);
+    }
+
     /// <summary>Closes idle connections, so a resting server is not kept awake.</summary>
     public void DropConnections()
     {
@@ -178,8 +204,11 @@ public sealed partial class AureliaApi : IDisposable
         {
             response = await client.SendAsync(request, cancellation);
         }
-        catch (HttpRequestException error) when (error.HttpRequestError == HttpRequestError.SecureConnectionError)
+        catch (HttpRequestException error) when (error.HttpRequestError == HttpRequestError.SecureConnectionError
+            && (inspecting || error.InnerException is System.Security.Authentication.AuthenticationException))
         {
+            // Only a certificate the key check rejected is an identity problem; a handshake cut
+            // short by a restarting server or the network is reported as unreachable below.
             throw inspecting
                 ? new AureliaApiException(0, "not_aurelia", "This address does not answer like an Aurelia server.")
                 : AureliaApiException.IdentityMismatch();
@@ -246,6 +275,11 @@ public sealed partial class AureliaApi : IDisposable
         info.PublicKeyFingerprint is null
             ? ServerAddress.IsLoopback(address)
             : ServerIdentity.Matches(info.PublicKeyFingerprint, presented);
+
+    /// <summary>A display fingerprint the server reports must belong to the key it presented.</summary>
+    internal static bool ShowsIdentity(ServerInfoResponse info, string presented) =>
+        info.DisplayFingerprint is not { Length: > 0 } shown
+        || string.Equals(shown.Trim(), ServerIdentity.Display(presented), StringComparison.OrdinalIgnoreCase);
 
     private static bool IsValidSecret(string? value) => value is { Length: >= 32 and <= 512 } && !value.Any(char.IsWhiteSpace);
 

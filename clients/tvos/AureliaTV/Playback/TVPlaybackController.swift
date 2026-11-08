@@ -568,9 +568,15 @@ final class TVPlaybackController: ObservableObject {
       userInteracted()
     } catch {
       guard !closed, operation == generation, !Task.isCancelled else { return }
-      if let core = error as? TVCoreError, core.isAuthenticationFailure || core == .identityMismatch
-      {
+      if let core = error as? TVCoreError, core.endsSession {
         sessionFailed(core)
+      } else if let core = error as? TVCoreError, let refusal = TVPlayerPolicy.refusal(core) {
+        fail(refusal, canRetry: false)
+      } else if let core = error as? TVCoreError,
+        let missing = TVPlayerPolicy.unavailability(core)
+      {
+        // An offline drive answers 503, which would otherwise reconnect again and again.
+        fail(missing, canRetry: true)
       } else if (error as? TVCoreError)?.isTransient == true || error is URLError {
         recover(message: "Reconnecting…")
       } else {
@@ -685,18 +691,12 @@ final class TVPlaybackController: ObservableObject {
 
   private func handleRelayFailure(_ failure: TVStreamFailure) {
     transportFailed = true
-    switch failure {
-    case .untrustedServer:
-      sessionFailed(TVCoreError.identityMismatch)
-    case .server(let status, let code) where status == 401 || status == 403:
-      sessionFailed(TVCoreError.server(status: status, code: code, message: nil, retryAfter: nil))
-    case .authorizationDenied:
-      sessionFailed(TVCoreError.profileRequired)
-    case .unavailable:
-      fail("Media file unavailable.")
-    case .invalidResponse:
-      fail("The server returned an invalid media stream.")
-    default:
+    switch TVPlayerPolicy.response(to: failure) {
+    case .endSession(let error):
+      sessionFailed(error)
+    case .fail(let message, let canRetry):
+      fail(message, canRetry: canRetry)
+    case .reconnect:
       recover(message: "The stream was interrupted. Reconnecting…")
     }
   }
@@ -784,10 +784,12 @@ final class TVPlaybackController: ObservableObject {
         scheduleRenewal(renewed, operation: operation)
       } catch {
         guard !closed, operation == generation, !Task.isCancelled else { return }
-        if let apiError = error as? TVCoreError,
-          apiError.isAuthenticationFailure || apiError == .identityMismatch
-        {
+        if let apiError = error as? TVCoreError, apiError.endsSession {
           sessionFailed(apiError)
+        } else if let apiError = error as? TVCoreError,
+          let refusal = TVPlayerPolicy.refusal(apiError)
+        {
+          fail(refusal, canRetry: false)
         } else {
           recover(message: "Refreshing playback access…")
         }

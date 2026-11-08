@@ -14,6 +14,7 @@ using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 
 namespace Aurelia.Linux.Views;
 
@@ -310,6 +311,37 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     }
 
     /// <summary>Ctrl+F: from Home or a detail page it opens Library; otherwise it focuses the page's search.</summary>
+    /// <summary>The tour shown over the library, if one runs.</summary>
+    internal SpotlightTour? Tour { get; private set; }
+
+    /// <summary>The short library tour after setup, or from Settings › About › Show Tour.</summary>
+    public SpotlightTour StartTour(Action finished)
+    {
+        if (Tour is { } running) return running;
+        var stops = new TourStop[]
+        {
+            new(FirstTitle, "Open a Title", "Click a poster to see its details. Play starts it, and the ••• button has everything else."),
+            new(() => SidebarList, "Your Library", "Home, Movies, TV Shows, Collections and your Watchlist. Click any page to open it."),
+            new(() => ProfileButton, "Switch Profiles", "Everyone has a profile with their own progress, favorites and watchlist."),
+            new(() => SettingsButton, "Settings", "Playback, your profile, the server and About Aurelia are here."),
+            new(() => null, "Enjoy Watching", "Search anytime with Ctrl+F, and press F11 for full screen. Have fun!"),
+        };
+        var tour = new SpotlightTour(stops, () =>
+        {
+            Tour = null;
+            finished();
+        });
+        Tour = tour;
+        ((Panel)Content!).Children.Add(tour);
+        return tour;
+    }
+
+    /// <summary>The first title card that is on screen, for the tour.</summary>
+    private Button? FirstTitle() => PageHost.GetVisualDescendants().OfType<Button>()
+        .FirstOrDefault(button => button.Classes.Contains("card") && button.IsEffectivelyVisible
+            && button.TranslatePoint(new Point(0, 0), PageHost) is { } at && at.X >= 0 && at.Y >= 0
+            && at.X + button.Bounds.Width <= PageHost.Bounds.Width && at.Y + button.Bounds.Height <= PageHost.Bounds.Height);
+
     public void FindInLibrary()
     {
         if (context is null) return;
@@ -458,9 +490,9 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
         ProfileFooter.Children.Clear();
         if (session?.Profile is { } profile)
         {
-            ProfileFooter.Children.Add(new ProfileAvatar(profile.User.Id, profile.User.Username, 30));
-            ProfileFooter.Children.Add(new TextBlock { Text = profile.User.Username, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-            AutomationProperties.SetName(ProfileButton, $"Switch Profile, {profile.User.Username}");
+            ProfileFooter.Children.Add(new ProfileAvatar(profile.User, 30));
+            ProfileFooter.Children.Add(new TextBlock { Text = ProfileVisuals.ShownName(profile.User), FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            AutomationProperties.SetName(ProfileButton, $"Switch Profile, {ProfileVisuals.ShownName(profile.User)}");
         }
         else
         {

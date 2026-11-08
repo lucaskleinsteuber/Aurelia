@@ -47,11 +47,11 @@ public sealed class CollectionsPage : LibraryPageBase
         });
         page.Children.Add(collections.Count == 0
             ? EmptyState("No Collections Yet", "Group titles into a collection, or make a smart list that fills itself by rules.")
-            : Grid(collections.Select(c => MediaCards.Collection(Context, c))));
+            : Grid(collections, c => MediaCards.Collection(Context, c)));
         var unsaved = franchises.Where(f => !collections.Any(c => c.Name == f.Name)).ToList();
         if (unsaved.Count > 0)
         {
-            page.Children.Add(Section("Franchises in Library", Grid(unsaved.Select(Franchise)), unsaved.Count));
+            page.Children.Add(Section("Franchises in Library", Grid(unsaved, Franchise), unsaved.Count));
         }
         return page;
     }
@@ -100,7 +100,7 @@ public sealed class WatchlistPage : LibraryPageBase
         if (!loaded) return page;
         page.Children.Add(items.Count == 0
             ? EmptyState("Your Watchlist Is Empty", "Add movies and shows you want to watch later from their page or with a right click.")
-            : Grid(items.Select(item => MediaCards.Poster(Context, item, Context.Store.Preferences.PosterWidth))));
+            : Grid(items, item => MediaCards.Poster(Context, item, Context.Store.Preferences.PosterWidth)));
         return page;
     }
 }
@@ -165,7 +165,7 @@ public sealed class PersonPage : LibraryPageBase
             },
         });
         if (error is not null) page.Children.Add(EmptyState("Not Found", error));
-        else if (person is not null) page.Children.Add(Grid(person.Items.Select(item => MediaCards.Poster(Context, item, Context.Store.Preferences.PosterWidth))));
+        else if (person is not null) page.Children.Add(Grid(person.Items, item => MediaCards.Poster(Context, item, Context.Store.Preferences.PosterWidth)));
         return page;
     }
 }
@@ -214,7 +214,7 @@ public sealed class CollectionDetailPage(LibraryContext context, CollectionSumma
         };
         var page = new StackPanel { Spacing = 24, Margin = new Thickness(0, 0, 0, 48) };
         page.Children.Add(hero);
-        page.Children.Add(Section("Titles", Grid(current.Items.Select(item => MediaCards.Poster(Context, item, store.Preferences.PosterWidth))), count));
+        page.Children.Add(Section("Titles", Grid(current.Items, item => MediaCards.Poster(Context, item, store.Preferences.PosterWidth)), count));
         return page;
     }
 }

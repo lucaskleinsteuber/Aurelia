@@ -17,6 +17,9 @@ struct LibraryShellView: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var destination: LibraryDestination = .home
   @State private var selection: MediaSelection?
+  /// The detail pages opened from other detail pages (a series, then an actor, then a film), so
+  /// Back returns to the page before instead of to the library.
+  @State private var backStack: [MediaSelection] = []
   @State private var sidebarVisible = true
   @State private var sidebarWidth = AureliaDesign.sidebarWidth
   @State private var resizeStartWidth: CGFloat?
@@ -139,6 +142,9 @@ struct LibraryShellView: View {
       reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.42, dampingFraction: 0.82),
       value: model.visibleErrorMessage
     )
+    .overlayPreferenceValue(TourAnchorKey.self) { anchors in
+      LibraryTourHost(guide: model.setupGuide, anchors: anchors)
+    }
     .sheet(isPresented: $model.showingCollectionEditor) {
       CollectionEditorSheet(collection: nil).environmentObject(model)
     }
@@ -147,12 +153,12 @@ struct LibraryShellView: View {
     }
     .onChange(of: model.requestedMediaDetail) { _, id in
       guard let id else { return }
-      selection = .media(id)
+      open(.media(id))
       model.requestedMediaDetail = nil
     }
     .onChange(of: model.requestedPersonDetail) { _, person in
       guard let person else { return }
-      selection = .person(person)
+      open(.person(person))
       model.requestedPersonDetail = nil
     }
     .onChange(of: model.catalogVisibilityRevision) {
@@ -232,6 +238,7 @@ struct LibraryShellView: View {
       }
       .listStyle(.sidebar)
       .scrollContentBackground(.hidden)
+      .aureliaTourTarget(.sidebar)
       // The profile sits at the foot of the sidebar, like the account in the Apple TV app, with
       // Settings beside it.
       HStack(spacing: 6) {
@@ -240,9 +247,12 @@ struct LibraryShellView: View {
             Task { await model.switchWatchingProfile() }
           } label: {
             HStack(spacing: 10) {
-              AureliaProfileAvatar(
-                id: model.profile?.user?.id, name: model.profile?.user?.username ?? "?", size: 30)
-              Text(model.profile?.user?.username ?? "Switch Profile")
+              if let user = model.profile?.user {
+                AureliaProfileAvatar(user: user, size: 30)
+              } else {
+                AureliaProfileAvatar(id: nil, name: "?", size: 30)
+              }
+              Text(model.profile?.user?.shownName ?? "Switch Profile")
                 .font(.body.weight(.semibold))
                 .lineLimit(1)
               Spacer(minLength: 0)
@@ -254,8 +264,9 @@ struct LibraryShellView: View {
           .buttonStyle(SidebarFooterButtonStyle())
           .disabled(model.isSelectingProfile)
           .help("Switch Profile")
-          .accessibilityLabel("Switch Profile, \(model.profile?.user?.username ?? "")")
+          .accessibilityLabel("Switch Profile, \(model.profile?.user?.shownName ?? "")")
           .accessibilityIdentifier("switch-watching-profile")
+          .aureliaTourTarget(.profile)
         } else {
           Spacer(minLength: 0)
         }
@@ -271,6 +282,7 @@ struct LibraryShellView: View {
         .help("Settings (⌘,)")
         .accessibilityLabel("Settings")
         .accessibilityIdentifier("sidebar-settings")
+        .aureliaTourTarget(.settings)
       }
       // Clears the window's rounded bottom corner.
       .padding(.horizontal, 12)
@@ -349,10 +361,22 @@ struct LibraryShellView: View {
     )
     .animation(.easeInOut(duration: reduceMotion ? 0.12 : 0.22), value: destination)
     .onChange(of: selection) { _, value in
+      if value == nil { backStack.removeAll() }
       if value == nil, destination == .home { Task { await model.refreshHome() } }
       // Typing must never reach a search field hidden underneath the detail page.
       if value != nil { NSApp.keyWindow?.makeFirstResponder(nil) }
     }
+  }
+
+  /// Opens a detail page; one opened from another detail page remembers it for Back.
+  private func open(_ next: MediaSelection) {
+    if let current = selection, current != next { backStack.append(current) }
+    selection = next
+  }
+
+  /// Back to the detail page this one was opened from, or to the library.
+  private func goBack() {
+    selection = backStack.popLast()
   }
 
   @ViewBuilder
@@ -361,19 +385,19 @@ struct LibraryShellView: View {
     case .media(let id):
       MediaDetailView(
         mediaId: id,
-        onBack: { selection = nil })
+        onBack: { goBack() })
     case .collection(let id):
       if let collection = model.collections.first(where: { $0.id == id }) {
         CollectionDetailView(
           collection: collection,
-          onBack: { selection = nil },
-          onSelect: { selection = .media($0) })
+          onBack: { goBack() },
+          onSelect: { open(.media($0)) })
       }
     case .person(let person):
       PersonDetailView(
         person: person,
-        onBack: { selection = nil },
-        onSelect: { selection = .media($0) })
+        onBack: { goBack() },
+        onSelect: { open(.media($0)) })
     }
   }
 
@@ -382,36 +406,36 @@ struct LibraryShellView: View {
     switch destination {
     case .home:
       HomePage(
-        onSelect: { selection = .media($0) },
-        onSelectCollection: { selection = .collection($0) }
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) }
       )
       .task { await model.refreshHome() }
     case .library:
       LibraryPage(
         section: .library, findRequest: findRequest,
-        onSelect: { selection = .media($0) },
-        onSelectCollection: { selection = .collection($0) })
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
     case .watchlist:
-      WatchlistPage(onSelect: { selection = .media($0) })
+      WatchlistPage(onSelect: { open(.media($0)) })
     case .recentlyAdded:
       LibraryPage(
         section: .recentlyAdded, findRequest: findRequest,
-        onSelect: { selection = .media($0) },
-        onSelectCollection: { selection = .collection($0) })
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
     case .tvShows:
       LibraryPage(
         section: .tvShows, findRequest: findRequest,
-        onSelect: { selection = .media($0) },
-        onSelectCollection: { selection = .collection($0) })
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
     case .movies:
       LibraryPage(
         section: .movies, findRequest: findRequest,
-        onSelect: { selection = .media($0) },
-        onSelectCollection: { selection = .collection($0) })
+        onSelect: { open(.media($0)) },
+        onSelectCollection: { open(.collection($0)) })
     case .collections:
-      CollectionsPage(onSelectCollection: { selection = .collection($0) })
+      CollectionsPage(onSelectCollection: { open(.collection($0)) })
     case .history:
-      HistoryPage(onSelect: { selection = .media($0) })
+      HistoryPage(onSelect: { open(.media($0)) })
     case .statistics:
       StatisticsPage()
     case .downloads:
@@ -465,7 +489,7 @@ private struct HomePage: View {
             items: model.home?.continueWatching ?? [],
             eyebrow: "Continue Watching")
           ForEach(genreRows) { row in
-            posterRow(row.title, items: row.items)
+            posterRow(row.title, items: row.items, tourTarget: row.id == genreRows.first?.id)
           }
           posterRow("Favorites", items: model.home?.favorites ?? [])
           collectionRow(model.home?.collections ?? [])
@@ -531,7 +555,9 @@ private struct HomePage: View {
   }
 
   @ViewBuilder
-  private func posterRow(_ title: String, items allItems: [CatalogItemSummary]) -> some View {
+  private func posterRow(
+    _ title: String, items allItems: [CatalogItemSummary], tourTarget: Bool = false
+  ) -> some View {
     let items = LibraryDisplayPreferences.visible(allItems, keepWatched: false)
     if !items.isEmpty {
       VStack(alignment: .leading, spacing: 14) {
@@ -548,6 +574,8 @@ private struct HomePage: View {
             }
             .buttonStyle(AureliaCardButtonStyle())
             .accessibilityIdentifier("media-\(item.id.uuidString)")
+            // The library tour lights up the first poster on Home.
+            .aureliaTourTarget(.firstTitle, isEnabled: tourTarget && item.id == items.first?.id)
           }
         }
       }

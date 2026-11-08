@@ -110,6 +110,20 @@ public sealed partial class ManagementClient
     public Task<ProfileEditorResponse> SaveProfileAsync(Guid id, UpdateProfileRequest request) =>
         SendAsync<ProfileEditorResponse>(HttpMethod.Put, $"/api/v1/users/{id}/profile", request);
 
+    public Task<UserSummary> RenameProfileAsync(Guid id, string name) =>
+        SendAsync<UserSummary>(HttpMethod.Put, $"/api/v1/users/{id}/name", new UpdateProfileNameRequest(name));
+
+    public Task<UserSummary> SetProfilePictureAsync(Guid id, string? builtin) =>
+        SendAsync<UserSummary>(HttpMethod.Put, $"/api/v1/users/{id}/picture", new UpdateProfilePictureRequest(builtin));
+
+    public Task<UserSummary> UploadProfilePhotoAsync(Guid id, byte[] image) =>
+        SendBytesAsync<UserSummary>(HttpMethod.Put, $"/api/v1/users/{id}/picture/photo", image, "application/octet-stream");
+
+    public Task<ProfileAgeLimitResponse> AgeLimitAsync(Guid id) => GetAsync<ProfileAgeLimitResponse>($"/api/v1/users/{id}/age-limit");
+
+    public Task<ProfileAgeLimitResponse> SaveAgeLimitAsync(Guid id, UpdateProfileAgeLimitRequest request) =>
+        SendAsync<ProfileAgeLimitResponse>(HttpMethod.Put, $"/api/v1/users/{id}/age-limit", request);
+
     public Task<UserSummary> CreateProfileAsync(CreateUserRequest request) => SendAsync<UserSummary>(HttpMethod.Post, "/api/v1/users", request);
 
     public Task ResetPinAsync(Guid id, string pin) => SendAsync<JsonNode>(HttpMethod.Put, $"/api/v1/users/{id}/pin", new ResetProfilePinRequest(pin));

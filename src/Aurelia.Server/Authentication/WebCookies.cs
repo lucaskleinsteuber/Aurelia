@@ -5,7 +5,7 @@ namespace Aurelia.Server.Authentication;
 /// cookie only counts when the request says which one it means with the X-Aurelia-Web header.
 /// Another site cannot send that header without a CORS preflight the server never answers, and
 /// SameSite=Strict keeps the cookies off requests started from other sites. Video and image
-/// elements cannot set headers, so a plain GET or HEAD of a stream or artwork uses the profile.
+/// elements cannot set headers, so a plain GET or HEAD of a stream or picture uses the profile.
 /// </summary>
 public static class WebCookies
 {
@@ -22,10 +22,16 @@ public static class WebCookies
         if (purpose == "profile") return request.Cookies[Profile];
         if (purpose.Length == 0 && (HttpMethods.IsGet(request.Method) || HttpMethods.IsHead(request.Method))
             && (request.Path.StartsWithSegments("/api/v1/streams") || request.Path.StartsWithSegments("/api/v1/artwork")
-                || (request.Path.StartsWithSegments("/api/v1/media") && (request.Path.Value ?? string.Empty).Contains("/scrub-previews/", StringComparison.Ordinal))))
+                || (request.Path.StartsWithSegments("/api/v1/media") && IsMediaImage(request.Path.Value ?? string.Empty))))
             return request.Cookies[Profile];
         return null;
     }
+
+    // Scrub previews and the media editor's artwork and image drafts are shown in <img> elements.
+    private static bool IsMediaImage(string path) =>
+        path.Contains("/scrub-previews/", StringComparison.Ordinal)
+        || path.Contains("/editor/artwork/", StringComparison.Ordinal)
+        || path.Contains("/editor/uploads/", StringComparison.Ordinal);
 
     /// <param name="expires">Null keeps the cookie only until the browser closes.</param>
     public static void Set(HttpContext context, string name, string value, DateTimeOffset? expires, string path = "/") =>

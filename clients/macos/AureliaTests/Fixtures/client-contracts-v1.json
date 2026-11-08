@@ -69,7 +69,10 @@
       "artwork-variants-v1",
       "catalog-pages-500-v1",
       "preview-streams-v1",
-      "web-app-v1"
+      "web-app-v1",
+      "profile-personalization-v1",
+      "age-limits-v1",
+      "web-pairing-code-v1"
     ]
   },
   "problem": {

@@ -54,11 +54,19 @@ struct UserSummary: Codable, Equatable, Sendable {
   let pinProtectionEnabled: Bool
   let needsPinSetup: Bool
   let profileRevision: Int64
+  /// The name everyone sees; nil shows the sign-in name. An owner keeps signing in with `username`.
+  let displayName: String?
+  /// A built-in picture (`symbol:palette`), `photo`, or nil for the initial.
+  let pictureKey: String?
+  let pictureRevision: Int64
+  /// A children's profile's highest FSK age (0, 6, 12 or 16), nil for none.
+  let ageLimit: Int?
 
   init(
     id: UUID, username: String, role: UserRole, createdAt: String,
     accessMode: ProfileAccessMode? = nil, pinProtectionEnabled: Bool = true,
-    needsPinSetup: Bool = false, profileRevision: Int64 = 0
+    needsPinSetup: Bool = false, profileRevision: Int64 = 0, displayName: String? = nil,
+    pictureKey: String? = nil, pictureRevision: Int64 = 0, ageLimit: Int? = nil
   ) {
     self.id = id
     self.username = username
@@ -68,11 +76,23 @@ struct UserSummary: Codable, Equatable, Sendable {
     self.pinProtectionEnabled = pinProtectionEnabled
     self.needsPinSetup = needsPinSetup
     self.profileRevision = profileRevision
+    self.displayName = displayName
+    self.pictureKey = pictureKey
+    self.pictureRevision = pictureRevision
+    self.ageLimit = ageLimit
+  }
+
+  /// The name to show: the chosen display name, else the sign-in name.
+  var shownName: String {
+    if let displayName, !displayName.trimmingCharacters(in: .whitespaces).isEmpty {
+      return displayName
+    }
+    return username
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, username, role, createdAt, accessMode, pinProtectionEnabled, needsPinSetup,
-      profileRevision
+      profileRevision, displayName, pictureKey, pictureRevision, ageLimit
   }
 
   init(from decoder: Decoder) throws {
@@ -86,6 +106,10 @@ struct UserSummary: Codable, Equatable, Sendable {
       try values.decodeIfPresent(Bool.self, forKey: .pinProtectionEnabled) ?? true
     needsPinSetup = try values.decodeIfPresent(Bool.self, forKey: .needsPinSetup) ?? false
     profileRevision = try values.decodeIfPresent(Int64.self, forKey: .profileRevision) ?? 0
+    displayName = try values.decodeIfPresent(String.self, forKey: .displayName)
+    pictureKey = try values.decodeIfPresent(String.self, forKey: .pictureKey)
+    pictureRevision = try values.decodeIfPresent(Int64.self, forKey: .pictureRevision) ?? 0
+    ageLimit = try values.decodeIfPresent(Int.self, forKey: .ageLimit)
   }
 }
 
@@ -1094,7 +1118,10 @@ struct MetadataJobSummary: Codable, Identifiable, Equatable, Sendable {
     }
     if let skipped = itemsSkipped, skipped > 0 { parts.append("\(skipped) skipped") }
     if itemsFailed > 0 { parts.append("\(itemsFailed) failed") }
-    let detail = parts.isEmpty ? "\(itemsTotal) \(itemsTotal == 1 ? "title" : "titles") checked" : parts.joined(separator: ", ")
+    let detail =
+      parts.isEmpty
+      ? "\(itemsTotal) \(itemsTotal == 1 ? "title" : "titles") checked"
+      : parts.joined(separator: ", ")
     switch state {
     case .completed: return "Done · " + detail
     case .cancelled: return "Stopped · " + detail
@@ -1246,6 +1273,15 @@ struct StoredServerProfile: Codable, Equatable, Sendable {
       serverId: serverId, name: name, baseURL: baseURL,
       publicKeyFingerprint: publicKeyFingerprint, token: token,
       sessionId: sessionId, expiresAt: expiresAt, user: user, locallyManaged: true,
+      viewingSession: viewingSession)
+  }
+
+  /// The same sign-in with the profile's new name or picture.
+  func changingUser(_ user: UserSummary) -> StoredServerProfile {
+    StoredServerProfile(
+      serverId: serverId, name: name, baseURL: baseURL,
+      publicKeyFingerprint: publicKeyFingerprint, token: token, sessionId: sessionId,
+      expiresAt: expiresAt, user: user, locallyManaged: locallyManaged,
       viewingSession: viewingSession)
   }
 

@@ -22,6 +22,8 @@ public sealed class WindowTests
     public void OpensOnTheWelcomeChoice()
     {
         var window = TestWindows.Show();
+        var introduction = Assert.IsType<IntroductionView>(window.CurrentScreen);
+        Click(introduction.GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == "I Know Aurelia"));
         Assert.IsType<WelcomeView>(window.CurrentScreen);
         var choices = window.CurrentScreen!.GetVisualDescendants().OfType<Button>().Select(AutomationProperties.GetName).ToList();
         Assert.Contains("Set Up This PC", choices);
@@ -34,6 +36,9 @@ public sealed class WindowTests
     public void ChoosingAModeOpensItsScreenAndBackReturns()
     {
         var window = TestWindows.Show();
+        window.Flow.SkipIntroduction();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
         Click(window.CurrentScreen!.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Connect to an Existing Server"));
         Assert.Equal(AppScreen.Connection, window.Flow.Screen);
         Assert.IsType<ConnectionView>(window.CurrentScreen);

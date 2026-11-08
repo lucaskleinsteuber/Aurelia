@@ -110,20 +110,22 @@ These rules apply to every task in this repository.
   PATCH for fixes only. Choose the next version independently by these rules and
   state the version and reason before building. Do not ask the owner to choose or
   confirm a version; the build number rises by exactly
-  one per build. The current Mac release is 1.34.0 (148); the independent tvOS
-  client is named Aurelia, requires tvOS 26, and is at 1.6.1 (30).
+  one per build. Every product reached 2.0.0 together (08.11.2026): Mac 2.0.0 (153), server
+  2.0.0 (148), Linux app 2.0.0 (25), Apple TV 2.0.0 (35), iPhone and iPad 2.0.0 (16); from there
+  each counts on independently. The tvOS client is named Aurelia and requires tvOS 26.
 - Keep tvOS in its own Xcode project with no Mac source references or shared
   Aurelia product library. A third-party playback engine is allowed.
-- The iPhone and iPad client (`clients/ios`, preview, 1.2.2 (9)) follows the same
+- The iPhone and iPad client (`clients/ios`) follows the same
   rules as tvOS: its own Xcode project and version counter, code copied from the
   Apple TV app rather than linked, logic tests with `scripts/test-ios-logic.sh`, a
   warning-free simulator build with `scripts/build-ios.sh`, synthetic data only,
-  no real playback in tests, and it is not published.
-- Aurelia for Linux (`clients/linux`, 1.6.0 (16)) is the native Linux desktop
+  no real playback in tests, and it is not published as a download (built from source, see
+  `docs/IOS_APP.md`).
+- Aurelia for Linux (`clients/linux`) is the native Linux desktop
   app, with library browsing, playback, settings, server administration and optional hosting
   on this PC. It is meant to become the full Mac app on Linux. It is a separate product with
   its own version counter (`Version` and `AureliaLinuxBuildNumber` in
-  `clients/linux/Directory.Build.props`), written in C# with Avalonia, Linux x64 only,
+  `clients/linux/Directory.Build.props`), written in C# with Avalonia, for Linux x64 and arm64 (one build each),
   with platform specifics behind small adapters. It shares only `src/Aurelia.Contracts`
   with the server and copies no Mac code. Verify it with `scripts/test-linux-app.sh`
   (formatting, warning-free build, headless Avalonia tests, which need no screen and no
@@ -179,14 +181,19 @@ These rules apply to every task in this repository.
 - Treat warnings as errors, including third-party dependencies built for a package. Fix their
   sources or build configuration; do not suppress diagnostics or waive warnings for foreign code.
   Do not publish or install a failing candidate.
-- The Mac app is universal (arm64 and x86_64) with its own ffmpeg universal and
-  both bundled server runtimes (`osx-arm64`, `osx-x64`); its disk image is named
-  `Aurelia-<version>-<build>-macOS-universal.dmg`, with the same image also under
-  the `-macOS-arm64.dmg` name that the updater of 1.26–1.33 asks for. By the
-  owner's wish (07.11.2026) the architecture change is not announced in release
-  notes, the changelog or the README. The Linux server keeps both x64 and arm64
-  packages; verify all architectures, and state clearly when one could only be
-  built, not executed locally.
+- One build per architecture (owner's decision, 08.11.2026, from 2.0.0 on): every Mac and Linux
+  release has a separate Apple Silicon/arm64 and Intel/x64 build, each with only its own server
+  runtime and ffmpeg, so a download carries one server instead of two. No universal Mac build.
+  Name every download so its system and architecture are clear at a glance:
+  `Aurelia-<version>-<build>-macOS-arm64.dmg` (Apple Silicon, M1 and newer) and
+  `Aurelia-<version>-<build>-macOS-x64.dmg` (Intel); Linux app and server packages carry
+  `linux-arm64` or `linux-x64` (and their format: deb, rpm, Arch, Flatpak) in the name. Release
+  notes list the downloads grouped by system with a plain label ("Mac with Apple Silicon",
+  "Mac with Intel", "Linux x64", "Linux arm64 (e.g. Raspberry Pi)"). The updaters pick the
+  download for the architecture they run on. The `-macOS-arm64.dmg` name is also the one the
+  updaters of 1.26–1.33 ask for; the 1.34 updater asks for `-macOS-universal.dmg`, so the first
+  release after it also carries that name once (the arm64 image), until 1.34 has updated. Verify
+  every architecture, and state clearly when one could only be built, not executed locally.
 - A successful build, signature check, or API call is evidence only for the
   path actually exercised; never claim broader UI, codec, device, or library
   coverage.
@@ -216,10 +223,10 @@ These rules apply to every task in this repository.
   in `/Applications`. After an update, only the intended current
   `/Applications/Aurelia.app` may remain.
 - Local builds use free 7-day development profiles. The per-user job from
-  `scripts/refresh-signing.sh` re-signs the installed Mac, Apple TV and iPhone
+  `scripts/refresh-signing.sh` re-signs the installed Mac, Apple TV, iPhone and iPad
   apps before their profiles expire, keeping their versions. After installing an
   Apple TV build, run `zsh scripts/refresh-signing.sh --adopt-tv`, and after an
-  iPhone build `--adopt-iphone`, so the job re-signs that build; after changing
+  iPhone build `--adopt-iphone` (iPad: `--adopt-ipad`, built into `Local/Build/iPad`), so the job re-signs that build; after changing
   the script, run `--install` again.
 - Do not create local app-bundle backups in `/Applications` or elsewhere as part
   of the release workflow. Git/GitHub history, tags, commits, and published
@@ -233,8 +240,8 @@ These rules apply to every task in this repository.
   results.
 - Use a short English description of the completed change as the commit subject,
   without a version/build number. Add `[skip ci]` as requested by the owner to avoid
-  starting GitHub server test runs; perform the relevant verification locally. Push to `origin/main`
-  and verify the remote hash after each independent completed change.
+  starting GitHub server test runs; perform the relevant verification locally. Commit on
+  `main`; push to GitHub and publish releases only when the owner asks for it.
 - Never force-push, rewrite published history, or batch unrelated completed
   product changes.
 - Keep one concise English `CHANGELOG.md` in the repository root, following
@@ -253,7 +260,8 @@ These rules apply to every task in this repository.
 
 ## Public distribution
 
-- Release channels: publish every new Mac, Server and Linux Desktop test build as a beta
+- Release channels: 2.0.0 of every product was published directly as a stable release by the
+  owner's decision. After that, publish every new Mac, Server and Linux Desktop test build as a beta
   (`scripts/publish-release.sh --beta`, with `--server` or `--linux-app`), a GitHub pre-release
   that only apps with **Beta updates** turned on offer (servers: `sudo aurelia update --beta on`);
   the owner's apps and server have it on. Make a
@@ -313,7 +321,7 @@ These rules apply to every task in this repository.
   without explicit user authorization.
 - Publish verified Mac builds with `scripts/publish-release.sh` and server builds
   with `scripts/publish-release.sh --server`. Push the source first. The Mac release
-  contains the universal DMG. The server release has a
+  contains the arm64 and x64 DMGs. The server release has a
   `server-<version>-<build>` tag with Linux x64 and arm64 packages. Verify all
   release downloads. After a server release, update the owner's Linux server with
   `sudo aurelia update --yes`. For the first standalone server release, follow the

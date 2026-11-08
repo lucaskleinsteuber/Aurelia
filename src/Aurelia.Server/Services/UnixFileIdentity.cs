@@ -7,13 +7,15 @@ internal static partial class UnixFileIdentity
 {
     // The pinned .NET runtime's PAL supplies one portable FileStatus ABI instead
     // of guessing libc stat layouts separately on macOS, Linux, arm64 and x64.
+    // Its fields: Flags, Mode, Uid, Gid, Size, ATime, ATimeNsec, MTime, MTimeNsec,
+    // CTime, CTimeNsec, BirthTime, BirthTimeNsec, Dev (88), RDev, Ino (104).
     [StructLayout(LayoutKind.Explicit, Size = 256)]
     private struct FileStatus
     {
         [FieldOffset(4)] public int Mode;
         [FieldOffset(8)] public uint Uid;
-        [FieldOffset(56)] public ulong Dev;
-        [FieldOffset(64)] public ulong Ino;
+        [FieldOffset(88)] public ulong Dev;
+        [FieldOffset(104)] public ulong Ino;
     }
     public static bool IsRegular(SafeFileHandle handle) =>
         FStat(handle.DangerousGetHandle(), out var status) == 0 && (status.Mode & 0xF000) == 0x8000;

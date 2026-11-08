@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an idea or improvement for Aurelia.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe what you are trying to achieve, not only the solution you have in mind.
+    validations:
+      required: true
+  - type: dropdown
+    id: product
+    attributes:
+      label: Which apps would it affect?
+      multiple: true
+      options:
+        - Aurelia for Mac
+        - Aurelia for Linux (desktop app)
+        - The server (Linux, Docker or inside an app)
+        - Aurelia for Apple TV
+        - Aurelia for iPhone or iPad
+        - Aurelia in a web browser
+        - Documentation
+  - type: textarea
+    id: idea
+    attributes:
+      label: How should it work?
+      description: A concrete example, a sketch or how another app does it.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Is there a workaround today?

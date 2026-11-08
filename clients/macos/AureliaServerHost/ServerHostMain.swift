@@ -256,7 +256,7 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
     var foundTrustedParent = false
     for application in NSRunningApplication.runningApplications(
-      withBundleIdentifier: "com.lucas.aurelia.media")
+      withBundleIdentifier: AppEdition.bundleIdentifier)
     {
       guard
         HostLaunchSecurity.acceptsApplication(

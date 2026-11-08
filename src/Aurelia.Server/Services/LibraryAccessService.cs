@@ -16,6 +16,8 @@ public sealed class LibraryAccessService(AureliaDbContext database)
         database.AccessIsOwner = context.User.IsInRole(UserRole.Owner.ToString());
         database.AccessMode = Enum.TryParse<ProfileAccessMode>(context.User.FindFirst("aurelia_access_mode")?.Value, out var mode)
             ? mode : ProfileAccessMode.LegacyLibraries;
+        database.AccessAgeLimit = int.TryParse(context.User.FindFirst("aurelia_age_limit")?.Value, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var age) && AgeRatings.IsLimit(age) ? age : null;
     }
 
     public async Task RequireMediaAsync(Guid id, CancellationToken cancellationToken)

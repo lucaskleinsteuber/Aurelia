@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Aurelia.Linux.Controls;
+using Aurelia.Linux.Core;
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Connection;
 using Aurelia.Linux.Core.Flow;
@@ -20,6 +21,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
 {
     private readonly AppServices services;
     private LibraryShell? shell;
+    private readonly OfflineProfileStore offlineCards;
 
     public MainWindow() : this(AppServices.CreateDefault())
     {
@@ -36,6 +38,7 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             ExtendClientAreaToDecorationsHint = true;
             WindowDecorations = WindowDecorations.BorderOnly;
         }
+        Title = AppInfo.DisplayName;
         Chrome.Attach(this, services.ButtonLayout);
         Controls.Motion.ReduceMotion = () => Session?.Preferences.ReduceMotion == true;
         AppWindowBehavior.Attach(this);
@@ -46,10 +49,27 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             new ServerWakeUp(api, services.WakeOnLan, () => discovery.Latest, services.Time), services.DeviceName, services.Time,
             new GeneralPreferences(services.Settings), new ArtworkCache(services.ArtworkDirectory));
         Flow.PropertyChanged += OnFlowChanged;
+        Flow.Guide.PropertyChanged += OnGuideChanged;
+        // Profile photos come from the connected server, with this computer's device credential,
+        // and are kept beside the artwork cache so a known photo shows in the first frame.
+        if (services.ArtworkDirectory is { } artwork) ProfileAvatar.PhotoFolder = Path.Combine(Path.GetDirectoryName(artwork) ?? artwork, "profile-photos");
+        ProfileAvatar.PhotoSource = (id, revision, cancellation) => Session.Server is { } server
+            ? Session.Api.ProfilePhotoAsync(server, id, revision, cancellation)
+            : Task.FromException<byte[]>(new InvalidOperationException("No server is connected."));
         Session.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(AppSession.Library)) StartPlayOn();
         };
+        // The offline mode remembers each profile that opens with the server (with only a PIN check
+        // value), and forgets a server's profiles when this computer leaves it.
+        offlineCards = new OfflineProfileStore(services.Downloads is { } kept ? Path.Combine(kept.Root, "offline-profiles.json") : null);
+        Session.ProfileUnlocked += (profile, pin) =>
+        {
+            if (services.Downloads is null || Session.Server is not { } server) return;
+            var now = services.Time.GetUtcNow();
+            _ = Task.Run(() => offlineCards.Remember(OfflineProfileCard.Make(server.ServerId, profile, pin, now)));
+        };
+        Session.ServerForgotten += serverId => offlineCards.Forget(serverId);
         KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.Q, KeyModifiers.Control), Command = new RelayCommand(Quit) });
         Closing += (_, e) =>
         {
@@ -72,6 +92,9 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             if (services.Updater is { } updater) _ = updater.CheckAsync(userInitiated: false);
         };
         restCheck.Start();
+        // Video frames are decoded at most at the largest screen's size; a 4K title on a smaller
+        // screen would otherwise be converted and copied at full size only to be scaled down.
+        Opened += (_, _) => VideoFrames.ScreenLimit = LargestScreenSide();
         ShowScreen();
         if (startSession) Opened += async (_, _) =>
         {
@@ -114,21 +137,82 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         }
     }
 
+    /// <summary>"Skip Assistant" removes the step bar at once; the end of setup swaps the last page for the library.</summary>
+    private void OnGuideChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SetupGuide.IsGuiding) && !Flow.Guide.IsGuiding)
+        {
+            if (ScreenHost.Content is Panel { Tag: "guided" } guided && guided.Children.Count > 1) guided.Children.RemoveAt(1);
+            if (Flow.Screen == AppScreen.Library && ScreenHost.Content is SetupFinishView) ShowScreen();
+        }
+        if (e.PropertyName == nameof(SetupGuide.TourPending) && Flow.Guide.TourPending) StartTourIfReady();
+    }
+
+    /// <summary>The step of the guided setup a screen belongs to, or null for screens outside it.</summary>
+    internal SetupStep? StepFor(AppScreen screen) => screen switch
+    {
+        AppScreen.Welcome => SetupStep.Choose,
+        AppScreen.HostSetup => SetupStep.Secure,
+        AppScreen.Connection => SetupStep.Connect,
+        AppScreen.ProfilePicker => Flow.Mode == OperatingMode.Host ? SetupStep.Pin : SetupStep.Profile,
+        AppScreen.InitialLibrarySetup => SetupStep.Media,
+        _ => null,
+    };
+
+    /// <summary>The last page's "Start Watching": the library opens and the tour starts.</summary>
+    private void FinishSetup(bool openDevices)
+    {
+        Flow.Guide.Finish();
+        if (ScreenHost.Content is SetupFinishView) ShowScreen();
+        if (openDevices) OpenSettings(Settings.SettingsCategory.ProfilesAndDevices);
+    }
+
+    private void StartTourIfReady()
+    {
+        if (!Flow.Guide.TourPending || shell is null || Flow.Screen != AppScreen.Library || ScreenHost.Content != shell) return;
+        // After the window settles, so the tour finds the posters on the page.
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (shell is null || !Flow.Guide.TourPending) return;
+            Flow.Guide.TourShown();
+            shell.StartTour(() => shell?.Focus());
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>Settings › About › Show Introduction: the explanation again, over the window.</summary>
+    public void ShowIntroduction()
+    {
+        IntroHost.Content = new IntroductionView(Flow, replay: true, closed: () =>
+        {
+            IntroHost.Content = null;
+            IntroHost.IsVisible = false;
+        });
+        IntroHost.IsVisible = true;
+    }
+
     private void ShowScreen()
     {
         if (Flow.Screen != AppScreen.Library) shell = null;
+        var guiding = Flow.Guide.IsGuiding;
         Control screen = Flow.Screen switch
         {
-            AppScreen.Starting => new StartingView(Session),
+            AppScreen.Starting => new StartingView(Session, Session.EnterOffline, () => CanOfferOffline),
+            AppScreen.Introduction => new IntroductionView(Flow),
             AppScreen.Welcome => new WelcomeView(Flow),
             AppScreen.HostSetup => HostSetup(),
             AppScreen.Connection => Connection(),
             AppScreen.InitialLibrarySetup => new InitialLibrarySetupView(Session),
-            AppScreen.ServerUnreachable => new ServerUnreachableView(Session),
+            AppScreen.ServerUnreachable => new ServerUnreachableView(Session, Session.OfflineTitlesForOpenProfile(services.Downloads), PlayOffline,
+                CanOfferOffline ? Session.EnterOffline : null),
+            AppScreen.Offline => OfflineScreen(),
             AppScreen.ProfilePicker => ProfilePicker(),
+            _ when guiding => new SetupFinishView(Session, Flow, FinishSetup),
             _ => shell ??= NewShell(),
         };
-        ScreenHost.Content = screen;
+        ScreenHost.Content = guiding && StepFor(Flow.Screen) is { } step
+            ? new Panel { Tag = "guided", Children = { screen, new SetupStepBar(Flow, step) } }
+            : screen;
+        StartTourIfReady();
     }
 
     private HostSetupModel? hosting;
@@ -283,6 +367,9 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
             SettingsHost.IsVisible = false;
             shell?.Focus();
         };
+        created.IntroductionRequested += ShowIntroduction;
+        created.TourRequested += Flow.Guide.RequestTour;
+        created.ResetRequested += () => _ = ResetTestEditionAsync();
         created.HostingChanged += () =>
         {
             _ = UpdateKeepAwakeAsync();
@@ -424,18 +511,84 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         var subtitle = item.Kind == Aurelia.Contracts.MediaKind.Episode
             ? string.Join(" · ", new[] { item.ParentTitle, item.SeasonNumber is { } season ? $"S{season} E{item.EpisodeNumber}" : null }.Where(part => part is not null))
             : item.Year?.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        _ = Task.Run(() => downloads.DownloadAsync(new PlaybackClient(Session.Api, library.Client), item, subtitle));
+        // The series poster goes along, so an episode looks like its series on the Downloads page.
+        var series = item.ParentId is { } parent ? library.Catalog.FirstOrDefault(each => each.Id == parent) : null;
+        _ = Task.Run(() => downloads.DownloadAsync(new PlaybackClient(Session.Api, library.Client), item, subtitle, series));
     }
 
     /// <summary>Plays a download; it works while the server is asleep or out of reach.</summary>
-    public void PlayOffline(OfflineTitle title) => _ = PlayOfflineAsync(title);
-
-    private async Task PlayOfflineAsync(OfflineTitle title)
+    /// <summary>
+    /// Aurelia Test's Reset App Data: stops its own test server, erases the test edition's folders and keyring
+    /// entry, and starts Aurelia Test again from the beginning.
+    /// </summary>
+    private async Task ResetTestEditionAsync()
     {
-        if (services.Downloads is not { } downloads || Session.Library is not { } library || services.Engines is null) return;
+        var paths = AppPaths.FromEnvironment();
+        if (!TestEdition.MayErase(paths, AppInfo.IsTestEdition)) return;
+        if (hosting is not null) await hosting.Host.StopAsync();
+        await TestEdition.EraseAsync(paths, services.Credentials, AppInfo.IsTestEdition, CancellationToken.None);
+        if (Environment.ProcessPath is { } program)
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(program) { UseShellExecute = false };
+            start.Environment["AURELIA_EDITION"] = "test";
+            System.Diagnostics.Process.Start(start)?.Dispose();
+        }
+        Quit();
+    }
+
+    /// <summary>The longest side of the largest connected screen in device pixels; 0 when unknown.</summary>
+    private int LargestScreenSide()
+    {
+        try
+        {
+            return Screens.All.Count == 0 ? 0 : Screens.All.Max(screen => Math.Max(screen.Bounds.Width, screen.Bounds.Height));
+        }
+        catch (Exception error) when (error is InvalidOperationException or NotSupportedException)
+        {
+            return 0;
+        }
+    }
+
+    public void PlayOffline(OfflineTitle title) => _ = PlayOfflineAsync(title, null);
+
+    /// <summary>The offline mode is offered for a server on another computer when downloads of it are here.</summary>
+    private bool CanOfferOffline => Flow.Mode == OperatingMode.Client && OfflineModeModel.CanOffer(services.Downloads, Session.Server?.ServerId);
+
+    private Control OfflineScreen()
+    {
+        if (services.Downloads is not { } downloads || Session.Server is not { } server)
+            return new ServerUnreachableView(Session);
+        // A profile open already keeps going; otherwise its card opens it.
+        var mine = Session.OfflineTitlesForOpenProfile(downloads);
+        var open = mine.Count > 0 && Session.Profile is { } profile
+            ? new OfflineSession(server.ServerId, profile.User.Id, Core.ProfileVisuals.ShownName(profile.User), profile.User.PictureKey, profile.User.PictureRevision)
+            : null;
+        var model = new OfflineModeModel(downloads, offlineCards, server.ServerId, server.Name, services.Time, open);
+        return new OfflineModeView(model, downloads, (title, session) =>
+        {
+            var client = Session.OfflineClient() is { } own && own.Profile.User.Id == session.UserId
+                ? own
+                : OfflineClientFor(server, session);
+            _ = PlayOfflineAsync(title, client);
+        }, Session.LeaveOfflineAsync);
+    }
+
+    /// <summary>A client for a profile opened offline: it has no session on the server, so nothing it asks there succeeds.</summary>
+    private LibraryClient OfflineClientFor(StoredServer server, OfflineSession session)
+    {
+        var now = services.Time.GetUtcNow();
+        var user = new Aurelia.Contracts.UserSummary(session.UserId, session.Name, Aurelia.Contracts.UserRole.User, now);
+        return new LibraryClient(Session.Api, server, new ProfileSession(user, Guid.Empty, "offline", now), Session.Capabilities);
+    }
+
+    private async Task PlayOfflineAsync(OfflineTitle title, LibraryClient? offlineClient)
+    {
+        // The open profile's own downloads also play while the server does not answer.
+        if (services.Downloads is not { } downloads || (offlineClient ?? Session.OfflineClient()) is not { } client || services.Engines is null) return;
+        if (client.Profile.User.Id != title.UserId || client.Server.ServerId != title.ServerId) return;
         if (Player is { } running) await running.CloseAsync();
         var outbox = new ProgressOutbox(null);
-        var player = new PlaybackController(new PlaybackClient(Session.Api, library.Client), services.Engines, services.Settings, outbox,
+        var player = new PlaybackController(new PlaybackClient(Session.Api, client), services.Engines, services.Settings, outbox,
             services.Time, action => Dispatcher.UIThread.Post(action), services.PlaybackSystem);
         Player = player;
         var view = new PlayerView(player, this);

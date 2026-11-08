@@ -37,6 +37,7 @@ public enum SettingsCategory
     Server,
     Updates,
     Advanced,
+    About,
 }
 
 /// <summary>
@@ -59,6 +60,7 @@ public sealed class SettingsView : UserControl
         [SettingsCategory.Server] = ["server", "health", "backup", "restore", "power", "update", "restart", "diagnostics", "network", "limits", "scrub", "preview", "maintenance"],
         [SettingsCategory.Updates] = ["update", "version", "release"],
         [SettingsCategory.Advanced] = ["server", "address", "fingerprint", "connection", "disconnect", "pair"],
+        [SettingsCategory.About] = ["about", "version", "build", "license", "legal", "copyright", "github", "what's new", "changes", "introduction", "tour", "assistant", "getting started"],
     };
 
     private readonly AppSession session;
@@ -127,6 +129,15 @@ public sealed class SettingsView : UserControl
     /// <summary>Raised when Settings closes and the library shows again.</summary>
     public event EventHandler? Closed;
 
+    /// <summary>Settings › About › Show Introduction.</summary>
+    public event Action? IntroductionRequested;
+
+    /// <summary>Settings › About › Show Tour.</summary>
+    public event Action? TourRequested;
+
+    /// <summary>Aurelia Test only: Settings › About › Reset App Data, after the person confirmed it.</summary>
+    public event Action? ResetRequested;
+
     private bool closed;
 
     /// <summary>Returns to the library.</summary>
@@ -168,6 +179,7 @@ public sealed class SettingsView : UserControl
         SettingsCategory.ProfilesAndDevices => "IconPerson",
         SettingsCategory.Server => "IconServer",
         SettingsCategory.Updates => "IconDownload",
+        SettingsCategory.About => "IconAurelia",
         _ => "IconSliders",
     };
 
@@ -225,6 +237,7 @@ public sealed class SettingsView : UserControl
             case SettingsCategory.ProfilesAndDevices: Profiles(page); break;
             case SettingsCategory.Server: page.Children.Add(new ServerPage(Admin(), session.Server is { LocallyManaged: true } ? LocalHosting() : null)); break;
             case SettingsCategory.Updates: Updates(page); break;
+            case SettingsCategory.About: About(page); break;
             default: Advanced(page); break;
         }
         content.Content = page;
@@ -500,7 +513,9 @@ public sealed class SettingsView : UserControl
         var context = new LibraryContext(library, new SettingsNavigator(sheets));
         LibraryPageBase activity = prefs.ActivityPage == "history" ? new HistoryPage(context, showsTitle: false) : new StatisticsPage(context, showsTitle: false);
         activity.SidebarOverlap = -32;
-        activity.Margin = new Thickness(-36, -16, -36, 0);
+        // The activity pages start at the settings page's own edge, like every other section, and
+        // only reach further out on the right.
+        activity.Margin = new Thickness(0, -16, -36, 0);
         page.Children.Add(activity);
     }
 
@@ -515,9 +530,7 @@ public sealed class SettingsView : UserControl
             Toggle("Automatically Play Next Episode", null, current.AutoplayNextEpisode, value => Save(PlaybackPreferences.Load(Prefs.Store) with { AutoplayNextEpisode = value })),
             Choice("Up Next Countdown", null, [.. PlaybackPreferences.Countdowns.Select(s => (s, $"{s} Seconds"))],
                 current.UpNextCountdownSeconds, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextCountdownSeconds = value })),
-            Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value })),
-            Toggle("Fill the Screen, Without Black Bars", "Cuts off the edges of pictures that are wider or narrower than the window. Z switches it in the player.",
-                current.FillsScreen, value => Save(PlaybackPreferences.Load(Prefs.Store) with { FillsScreen = value }))));
+            Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value }))));
         var volume = new Slider { Minimum = 0, Maximum = 1, Value = current.DefaultVolume, Width = 200 };
         volume.PropertyChanged += (_, e) =>
         {
@@ -561,6 +574,70 @@ public sealed class SettingsView : UserControl
         });
     }
 
+    /// <summary>The open profile's own name and picture; any profile may change them.</summary>
+    private StackPanel OwnProfileEditor(ProfileSession profile, StoredServer server)
+    {
+        var name = new TextBox { Text = ProfileVisuals.ShownName(profile.User), Width = 260, MaxLength = 40, HorizontalAlignment = HorizontalAlignment.Left };
+        AutomationProperties.SetName(name, "Your Name");
+        var picture = new ProfilePicturePicker(profile.User.Id, () => string.IsNullOrWhiteSpace(name.Text) ? "?" : name.Text, profile.User.PictureKey, profile.User.PictureRevision);
+        name.TextChanged += (_, _) => picture.Refresh();
+        var problem = new TextBlock { Foreground = new SolidColorBrush(Color.Parse("#FF8A8A")), IsVisible = false, TextWrapping = TextWrapping.Wrap };
+        var saved = new TextBlock { Text = "Saved", Classes = { "subdued" }, IsVisible = false, VerticalAlignment = VerticalAlignment.Center };
+        var save = new Button { Content = "Save", Classes = { "primary" } };
+        AutomationProperties.SetName(save, "Save Name and Picture");
+        save.Click += async (_, _) =>
+        {
+            problem.IsVisible = saved.IsVisible = false;
+            var wanted = (name.Text ?? "").Trim();
+            if (wanted.Length == 0)
+            {
+                problem.Text = "Enter a name.";
+                problem.IsVisible = true;
+                return;
+            }
+            save.IsEnabled = false;
+            try
+            {
+                var user = session.Profile?.User ?? profile.User;
+                if (wanted != ProfileVisuals.ShownName(user)) user = await session.Api.RenameOwnProfileAsync(server, profile, wanted, CancellationToken.None);
+                if (picture.Photo is { } photo) user = await session.Api.UploadOwnPhotoAsync(server, profile, photo, CancellationToken.None);
+                else if (picture.Changed) user = await session.Api.SetOwnPictureAsync(server, profile, ProfilePictures.IsBuiltin(picture.Key) ? picture.Key : null, CancellationToken.None);
+                session.UpdateProfileUser(user);
+                saved.IsVisible = true;
+            }
+            catch (AureliaApiException failure)
+            {
+                problem.Text = failure.Code == "username_in_use" ? "Another profile already uses this name." : failure.Message;
+                problem.IsVisible = true;
+            }
+            finally
+            {
+                save.IsEnabled = true;
+            }
+        };
+        var supported = session.Capabilities.Contains(ServerFeatures.ProfilePersonalization);
+        name.IsEnabled = picture.IsEnabled = save.IsEnabled = supported;
+        return new StackPanel
+        {
+            Spacing = 12,
+            Margin = new Thickness(16, 12),
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = supported ? "Everyone sees this name and picture in “Who's watching?” on all devices."
+                        : "Update the server to change names and pictures.",
+                    Classes = { "subdued" },
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                name,
+                picture,
+                problem,
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { save, saved } },
+            },
+        };
+    }
+
     private void Profiles(StackPanel page)
     {
         if (session.Profile is not { } profile || session.Server is not { } server)
@@ -581,12 +658,13 @@ public sealed class SettingsView : UserControl
                     Spacing = 12,
                     Children =
                     {
-                        new ProfileAvatar(profile.User.Id, profile.User.Username, 44),
-                        new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = profile.User.Username, FontWeight = FontWeight.SemiBold }, new TextBlock { Text = role, Classes = { "subdued" } } } },
+                        new ProfileAvatar(profile.User, 44),
+                        new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = ProfileVisuals.ShownName(profile.User), FontWeight = FontWeight.SemiBold }, new TextBlock { Text = role, Classes = { "subdued" } } } },
                     },
                 },
             },
         }));
+        page.Children.Add(Section("Name and Picture", OwnProfileEditor(profile, server)));
         var mandatory = profile.User.Role is UserRole.Owner or UserRole.Admin;
         var protectedNow = mandatory || profile.User.PinProtectionEnabled;
         var currentPin = new TextBox { PasswordChar = '•', PlaceholderText = "Current PIN", MaxLength = 8, Width = 220, IsVisible = protectedNow };
@@ -707,6 +785,95 @@ public sealed class SettingsView : UserControl
             feedUpdater.SetPublicUpdateTest(false);
     }
 
+    /// <summary>Version, what changed, where the source lives, the license and the open-source parts.</summary>
+    private void About(StackPanel page)
+    {
+        page.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 16,
+            Children =
+            {
+                new PathIcon { Data = Application.Current?.FindResource("IconAurelia") as Geometry, Width = 48, Height = 48 },
+                new StackPanel
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = "Aurelia for Linux", FontSize = 18, FontWeight = FontWeight.SemiBold },
+                        new TextBlock { Text = $"Version {AppInfo.CurrentVersion.ToString(3)} (Build {AppInfo.Build})", Classes = { "subdued" } },
+                    },
+                },
+            },
+        });
+        var changes = new StackPanel { Spacing = 8 };
+        if (AppInfo.WhatsNew.Count == 0) changes.Children.Add(new TextBlock { Text = "No notes for this version.", Classes = { "subdued" } });
+        foreach (var change in AppInfo.WhatsNew)
+            changes.Children.Add(new DockPanel
+            {
+                Children =
+                {
+                    new TextBlock { Text = "•", Margin = new Thickness(0, 0, 8, 0), Classes = { "subdued" } }.Also(t => DockPanel.SetDock(t, Dock.Left)),
+                    new TextBlock { Text = change, TextWrapping = TextWrapping.Wrap },
+                },
+            });
+        page.Children.Add(Section("What's New in This Version", Padded(changes)));
+        // Seeing the introduction and tour again is for trying them out in the test edition; the
+        // real app shows them once, at setup (as on the Mac, iPhone, iPad and Apple TV).
+        if (AppInfo.IsTestEdition)
+        {
+            var introduction = CardButton("Show Introduction");
+            introduction.Click += (_, _) =>
+            {
+                Close();
+                IntroductionRequested?.Invoke();
+            };
+            var tour = CardButton("Show Tour");
+            tour.Click += (_, _) =>
+            {
+                Close();
+                TourRequested?.Invoke();
+            };
+            page.Children.Add(Section("Getting Started", Padded(
+                Subdued("See again how Aurelia works, or take the short tour of the library."),
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { introduction, tour } })));
+            var reset = CardButton("Reset App Data");
+            reset.Click += async (_, _) =>
+            {
+                if (!await sheets.ConfirmAsync("Erase Aurelia Test's data?",
+                    "Aurelia Test forgets its server, profile and settings, stops and erases its own test server, and starts again at the beginning. The real Aurelia app and your media stay untouched.",
+                    "Reset App Data", destructive: true)) return;
+                Close();
+                ResetRequested?.Invoke();
+            };
+            page.Children.Add(Section("Test Tools", Padded(
+                Subdued("Only in Aurelia Test. Run the setup again and again without touching the real app."),
+                reset)));
+        }
+        var github = CardButton("Open on GitHub");
+        github.Click += async (_, _) =>
+        {
+            if (TopLevel.GetTopLevel(this)?.Launcher is { } launcher) await launcher.LaunchUriAsync(new Uri(AppInfo.RepositoryUrl));
+        };
+        page.Children.Add(Section("Source Code", Padded(
+            Subdued("Aurelia is open source. Its code, releases and full change history are on GitHub."),
+            new SelectableTextBlock { Text = AppInfo.RepositoryUrl, FontSize = 12 },
+            github)));
+        var privacy = CardButton("Privacy Policy");
+        privacy.Click += async (_, _) =>
+        {
+            if (TopLevel.GetTopLevel(this)?.Launcher is { } launcher) await launcher.LaunchUriAsync(new Uri(AppInfo.PrivacyPolicyUrl));
+        };
+        page.Children.Add(Section("Legal", Padded(
+            new TextBlock { Text = AppInfo.Copyright + ". Released under the MIT License.", TextWrapping = TextWrapping.Wrap },
+            privacy,
+            Subdued("Built with .NET (MIT), Avalonia (MIT), LibVLCSharp and VLC (LGPL 2.1 or later), Tmds.DBus (MIT) and Haukcode.Mdns. The installed package carries their license texts."),
+            Subdued("Movie and series details and pictures can come from TMDB when the server's owner turns it on; subtitles can come from OpenSubtitles. This product uses the TMDB API but is not endorsed or certified by TMDB, and Aurelia is not endorsed by OpenSubtitles."))));
+    }
+
+    private static TextBlock Subdued(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Classes = { "subdued" } };
+
     private void Advanced(StackPanel page)
     {
         if (session.Server is not { } server)
@@ -718,7 +885,7 @@ public sealed class SettingsView : UserControl
             Value("Server", server.Name),
             Value("Address", server.Address.Authority),
             Value("Fingerprint", ServerIdentity.Display(server.Fingerprint)),
-            Value("Signed In", session.Profile?.User.Username ?? "Paired Device")));
+            Value("Signed In", session.Profile is { } signedIn ? ProfileVisuals.ShownName(signedIn.User) : "Paired Device")));
         var disconnect = new Button { Content = "Disconnect This PC…", Classes = { "destructive" } };
         disconnect.Click += async (_, _) =>
         {

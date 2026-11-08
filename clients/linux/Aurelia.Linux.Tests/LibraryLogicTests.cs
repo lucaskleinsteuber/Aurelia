@@ -92,6 +92,19 @@ public sealed class LibraryLogicTests
     }
 
     [Fact]
+    public void TheWeekChartShowsTwelveWeeksWithEmptyOnes()
+    {
+        var weeks = ActivityFormat.LastWeeks([new PeriodHours("2026-W44", 2), new PeriodHours("2026-W45", 5)], new DateTime(2026, 11, 8));
+        Assert.Equal(12, weeks.Count);
+        Assert.Equal("2026-W34", weeks[0].Period);
+        Assert.Equal(["2026-W44", "2026-W45"], weeks[^2..].Select(week => week.Period));
+        Assert.Equal(5, weeks[^1].Hours);
+        Assert.Equal(0, weeks[0].Hours);
+        Assert.Equal("Nov 2", ActivityFormat.WeekStart("2026-W45"));
+        Assert.Equal("November 1, 2026", ActivityFormat.LongDay("2026-11-01"));
+    }
+
+    [Fact]
     public void SmartListRulesUseTheServersCanonicalSpelling()
     {
         var model = new CollectionEditorModel([Item("Orbit", genres: ["Science Fiction"], year: 2024), Item("Harbor", genres: ["Drama"], year: 2019, favorite: true)], null, null, canShare: false)

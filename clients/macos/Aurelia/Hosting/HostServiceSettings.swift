@@ -80,6 +80,6 @@ struct HostServiceSettings: Codable, Equatable, Sendable {
   }
   static var backgroundRendezvousName: String { "background-rendezvous.json" }
   var agentName: String {
-    startAtLogin ? "com.lucas.aurelia.media.host.login" : "com.lucas.aurelia.media.host.background"
+    AppEdition.agentName(startAtLogin: startAtLogin)
   }
 }

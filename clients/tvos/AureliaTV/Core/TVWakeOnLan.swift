@@ -35,6 +35,13 @@ enum TVWakeOnLan {
     if let data = try? JSONEncoder().encode(all) { defaults.set(data, forKey: defaultsKey) }
   }
 
+  /// Forgets a server this device no longer connects to.
+  static func forget(serverID: UUID, defaults: UserDefaults = .standard) {
+    var all = load(defaults)
+    guard all.removeValue(forKey: serverID.uuidString) != nil else { return }
+    if let data = try? JSONEncoder().encode(all) { defaults.set(data, forKey: defaultsKey) }
+  }
+
   static func target(for serverID: UUID, defaults: UserDefaults = .standard) -> Target? {
     load(defaults)[serverID.uuidString]
   }

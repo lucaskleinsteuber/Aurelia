@@ -346,7 +346,7 @@ private struct ProfileAvatar: View {
   let profile: WatchingProfile
 
   var body: some View {
-    AureliaProfileAvatar(id: profile.id, name: profile.name, size: 112)
+    AureliaProfileAvatar(profile: profile, size: 112)
       .shadow(color: .black.opacity(0.3), radius: 16, y: 8)
       .accessibilityHidden(true)
   }

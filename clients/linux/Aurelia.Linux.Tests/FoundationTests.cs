@@ -44,6 +44,19 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void AnUnwritableFolderKeepsTheValueInsteadOfEndingTheApp()
+    {
+        Directory.CreateDirectory(folder);
+        // A file where the settings folder should be makes every write fail.
+        var blocker = Path.Combine(folder, "blocked");
+        File.WriteAllText(blocker, "");
+        var store = new JsonFileSettingsStore(Path.Combine(blocker, "settings.json"));
+        store.Write("operatingMode", "client");
+        Assert.True(store.LastSaveFailed);
+        Assert.Equal("client", store.Read<string>("operatingMode"));
+    }
+
+    [Fact]
     public void ADamagedFileIsSetAsideAndDefaultsApply()
     {
         Directory.CreateDirectory(folder);
@@ -141,10 +154,18 @@ public sealed class AppFlowTests
     [Fact]
     public void StartsThenAsksWhereTheServerRuns()
     {
-        var flow = new AppFlow(new MemorySettingsStore());
+        var settings = new MemorySettingsStore();
+        var flow = new AppFlow(settings);
         Assert.Equal(AppScreen.Starting, flow.Screen);
         flow.FinishStarting();
+        // A computer that was never set up starts with the assistant's introduction.
+        Assert.Equal(AppScreen.Introduction, flow.Screen);
+        flow.SkipIntroduction();
         Assert.Equal(AppScreen.Welcome, flow.Screen);
+        Assert.False(flow.Guide.IsGuiding);
+        var restarted = new AppFlow(settings);
+        restarted.FinishStarting();
+        Assert.Equal(AppScreen.Welcome, restarted.Screen);
     }
 
     [Fact]

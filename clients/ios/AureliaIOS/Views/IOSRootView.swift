@@ -5,14 +5,61 @@ private enum IOSLibraryTab: Hashable { case home, movies, shows, search, profile
 struct IOSRootView: View {
   @EnvironmentObject private var model: IOSAppModel
   @State private var tab: IOSLibraryTab = .home
+  @State private var introductionReplay = false
+
+  private var guide: IOSSetupGuide { model.setupGuide }
+  private var tabIndex: Binding<Int> {
+    let order: [IOSLibraryTab] = [.home, .movies, .shows, .search, .profile]
+    return Binding(
+      get: { order.firstIndex(of: tab) ?? 0 },
+      set: { tab = order[min(max($0, 0), order.count - 1)] })
+  }
 
   var body: some View {
     Group {
+      if introductionReplay {
+        IOSSetupIntroductionView(guide: guide, replay: true) { introductionReplay = false }
+      } else if model.phase == .connection, model.connection == nil, !guide.introSeen {
+        IOSSetupIntroductionView(guide: guide)
+      } else if model.phase == .library, guide.isGuiding {
+        IOSSetupDoneView(guide: guide).overlay(alignment: .top) { stepBar(.done) }
+      } else {
+        phaseView
+      }
+    }
+    .background(IOSDesign.canvas.ignoresSafeArea())
+    .onReceive(NotificationCenter.default.publisher(for: .iosShowIntroduction)) { _ in
+      introductionReplay = true
+    }
+    .onChange(of: model.session?.sessionId) { _, _ in tab = .home }
+    .alert(
+      "Playback Progress",
+      isPresented: Binding(
+        get: { model.progressWarning != nil }, set: { if !$0 { model.progressWarning = nil } }
+      )
+    ) {
+      Button("OK") { model.progressWarning = nil }
+    } message: {
+      Text(model.progressWarning ?? "")
+    }
+  }
+
+  @ViewBuilder
+  private func stepBar(_ step: IOSSetupStep) -> some View {
+    if guide.isGuiding {
+      IOSSetupStepBar(current: step).padding(.top, 4)
+    }
+  }
+
+  @ViewBuilder
+  private var phaseView: some View {
+    Group {
       switch model.phase {
-      case .connection: IOSConnectionView(browser: model.browser)
-      case .trust: IOSServerTrustView()
-      case .pairing: IOSPairingView()
-      case .profiles: IOSProfilesView()
+      case .connection:
+        IOSConnectionView(browser: model.browser).overlay(alignment: .top) { stepBar(.connect) }
+      case .trust: IOSServerTrustView().overlay(alignment: .top) { stepBar(.approve) }
+      case .pairing: IOSPairingView().overlay(alignment: .top) { stepBar(.approve) }
+      case .profiles: IOSProfilesView().overlay(alignment: .top) { stepBar(.profile) }
       case .library:
         TabView(selection: $tab) {
           NavigationStack { IOSHomeView() }.tabItem { Label("Home", systemImage: "house.fill") }
@@ -30,6 +77,11 @@ struct IOSRootView: View {
             .tag(IOSLibraryTab.profile)
         }
         .tint(.white)
+        .overlay {
+          if guide.tourPending, !guide.isGuiding {
+            IOSLibraryTour(tab: tabIndex) { guide.tourShown() }.transition(.opacity)
+          }
+        }
         #if DEBUG
           .onAppear {
             switch IOSShowcasePage.current {
@@ -40,18 +92,6 @@ struct IOSRootView: View {
           }
         #endif
       }
-    }
-    .background(IOSDesign.canvas.ignoresSafeArea())
-    .onChange(of: model.session?.sessionId) { _, _ in tab = .home }
-    .alert(
-      "Playback Progress",
-      isPresented: Binding(
-        get: { model.progressWarning != nil }, set: { if !$0 { model.progressWarning = nil } }
-      )
-    ) {
-      Button("OK") { model.progressWarning = nil }
-    } message: {
-      Text(model.progressWarning ?? "")
     }
   }
 }
@@ -234,7 +274,7 @@ struct IOSServerTrustView: View {
         Text(model.inspected?.baseURL.host ?? "").font(.subheadline).foregroundStyle(.secondary)
       }
       VStack(spacing: 10) {
-        Text("Check that Aurelia on your Mac shows the same fingerprint.")
+        Text("Check that Aurelia on your Mac or Linux computer shows the same fingerprint.")
           .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
         Text(IOSServerIdentity.display(model.inspected?.fingerprint ?? ""))
           .font(.system(.footnote, design: .monospaced, weight: .medium))
@@ -258,59 +298,70 @@ struct IOSServerTrustView: View {
 
 struct IOSPairingView: View {
   @EnvironmentObject private var model: IOSAppModel
+  @State private var code = ""
+  @FocusState private var focused: Bool
 
   var body: some View {
     VStack(spacing: 22) {
       Spacer()
-      Image(systemName: "iphone.badge.checkmark").font(.system(size: 44))
-        .foregroundStyle(.secondary)
+      Image(systemName: IOSDesign.isPad ? "ipad.badge.checkmark" : "iphone.badge.checkmark")
+        .font(.system(size: 44)).foregroundStyle(.secondary)
       VStack(spacing: 6) {
-        Text("Approve This iPhone").font(.title.bold()).multilineTextAlignment(.center)
-        Text("On your Mac, choose Enter Code from Apple TV or Browser… and type this code.")
+        Text("Enter the Code").font(.title.bold())
+          .multilineTextAlignment(.center)
+        Text("Your Mac or Linux computer shows the code; you type it here.")
           .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
       }
-      if let pairing = model.pairing {
-        Text(pairing.code)
-          .font(.system(size: 44, weight: .semibold, design: .monospaced)).tracking(6)
-          .padding(.vertical, 14).frame(maxWidth: .infinity)
-          .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-          .textSelection(.enabled)
-          .accessibilityLabel(pairing.code.map(String.init).joined(separator: " "))
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-          let remaining = max(
-            0,
-            Int(
-              (IOSServerDate.parse(pairing.expiresAt) ?? context.date).timeIntervalSince(
-                context.date)))
-          Text(
-            remaining > 0
-              ? "Expires in \(remaining / 60):\(String(format: "%02d", remaining % 60))"
-              : "Code expired"
-          )
-          .font(.footnote).monospacedDigit().foregroundStyle(.secondary)
-        }
+      VStack(alignment: .leading, spacing: 6) {
+        IOSPairingStep(number: 1, text: "On the computer that runs Aurelia, open Settings › Profiles and Devices.")
+        IOSPairingStep(number: 2, text: "Click Create Code. On a Linux server without screen, run aurelia pair.")
+        IOSPairingStep(number: 3, text: "Type the 8 digits below. A code works once and for five minutes.")
       }
-      if let error = model.error {
-        IOSErrorText(message: error)
-        if model.connection?.pendingAcknowledgement != nil {
-          Button("Finish Pairing") { Task { await model.reconnect() } }
-            .buttonStyle(IOSButtonStyle(kind: .primary)).disabled(model.isBusy)
-        } else {
-          Button("New Code") { model.beginPairing() }
-            .buttonStyle(IOSButtonStyle(kind: .primary)).disabled(model.isBusy)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      TextField("8-digit code", text: $code)
+        .keyboardType(.numberPad).textContentType(.oneTimeCode)
+        .font(.system(size: 34, weight: .semibold, design: .monospaced))
+        .multilineTextAlignment(.center)
+        .padding(.vertical, 12).frame(maxWidth: .infinity)
+        .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .focused($focused)
+        .onChange(of: code) { _, value in
+          let digits = String(value.filter(\.isNumber).prefix(8))
+          if digits != value { code = digits }
         }
-      } else {
-        HStack(spacing: 8) {
-          ProgressView()
-          Text("Waiting for approval…").foregroundStyle(.secondary)
-        }.font(.subheadline)
-      }
+        .onSubmit { model.pair(code: code) }
+        .accessibilityLabel("Pairing code")
+        .accessibilityIdentifier("pairing-code")
+      if let error = model.error { IOSErrorText(message: error) }
       Spacer()
-      Button("Cancel") { model.cancelPairing() }
-        .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+      VStack(spacing: 10) {
+        Button {
+          model.pair(code: code)
+        } label: {
+          if model.isBusy { ProgressView() } else { Text("Pair This \(IOSDesign.deviceName)") }
+        }
+        .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+        .disabled(code.count != 8 || model.isBusy)
+        Button("Cancel") { model.cancelPairing() }
+          .buttonStyle(IOSButtonStyle(kind: .secondary, fullWidth: true))
+      }
     }
     .padding(IOSDesign.margin).frame(maxWidth: 520).frame(maxWidth: .infinity)
+    .onAppear { focused = true }
     .iosBackCommand { model.cancelPairing() }
+  }
+}
+
+private struct IOSPairingStep: View {
+  let number: Int
+  let text: String
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text("\(number).").monospacedDigit().foregroundStyle(.secondary)
+      Text(text).fixedSize(horizontal: false, vertical: true)
+    }
+    .font(.subheadline)
   }
 }
 
@@ -327,9 +378,11 @@ struct IOSConnectionMenu: View {
       Section {
         HStack(spacing: 14) {
           IOSProfilePicture(
-            id: model.session?.user.id, name: model.session?.user.username ?? "Profile", size: 56)
+            id: model.session?.user.id, name: model.session?.user.shownName ?? "Profile",
+            size: 56, pictureKey: model.session?.user.pictureKey,
+            pictureRevision: model.session?.user.pictureRevision ?? 0)
           VStack(alignment: .leading, spacing: 2) {
-            Text(model.session?.user.username ?? "Profile").font(.headline)
+            Text(model.session?.user.shownName ?? "Profile").font(.headline)
             Text(model.connection?.name ?? "Aurelia Server").font(.subheadline)
               .foregroundStyle(.secondary)
           }
@@ -354,6 +407,13 @@ struct IOSConnectionMenu: View {
         }.accessibilityIdentifier("settings-statistics")
       }
       Section("Profile") {
+        if model.supportsProfilePersonalization {
+          NavigationLink {
+            IOSNameAndPictureView()
+          } label: {
+            Label("Name and Picture", systemImage: "person.crop.circle")
+          }.accessibilityIdentifier("settings-name-picture")
+        }
         NavigationLink {
           IOSPlaybackSettingsView()
         } label: {
@@ -386,16 +446,25 @@ struct IOSConnectionMenu: View {
           "Posters and backdrops are kept on this device so they appear at once. Videos are never stored."
         )
       }
+      if IOSTestEdition.isActive {
+        IOSTestToolsSection()
+      }
+      Section {
+        NavigationLink {
+          IOSAboutView()
+        } label: {
+          Label("About Aurelia", systemImage: "info.circle")
+        }.accessibilityIdentifier("settings-about")
+      }
       Section("Server") {
         LabeledContent("Name", value: model.connection?.name ?? "Aurelia Server")
-        LabeledContent("Address", value: model.connection?.baseURL.host() ?? "—")
         LabeledContent("Version", value: serverVersion ?? "…")
       }
       Section {
         Button(role: .destructive) {
           confirmingDisconnect = true
         } label: {
-          Label("Disconnect This iPhone", systemImage: "xmark.circle")
+          Label("Disconnect This \(IOSDesign.deviceName)", systemImage: "xmark.circle")
         }
       } footer: {
         Text(

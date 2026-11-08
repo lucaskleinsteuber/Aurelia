@@ -2,24 +2,32 @@ import Foundation
 
 struct WatchingProfile: Decodable, Identifiable, Equatable, Sendable {
   let id: UUID
+  /// The shown name (the server sends the display name here, else the sign-in name).
   let name: String
   let role: UserRole
   let needsPinSetup: Bool
   let pinProtectionEnabled: Bool
+  let pictureKey: String?
+  let pictureRevision: Int64
+  let ageLimit: Int?
 
   init(
     id: UUID, name: String, role: UserRole, needsPinSetup: Bool,
-    pinProtectionEnabled: Bool = true
+    pinProtectionEnabled: Bool = true, pictureKey: String? = nil, pictureRevision: Int64 = 0,
+    ageLimit: Int? = nil
   ) {
     self.id = id
     self.name = name
     self.role = role
     self.needsPinSetup = needsPinSetup
     self.pinProtectionEnabled = pinProtectionEnabled
+    self.pictureKey = pictureKey
+    self.pictureRevision = pictureRevision
+    self.ageLimit = ageLimit
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, name, role, needsPinSetup, pinProtectionEnabled
+    case id, name, role, needsPinSetup, pinProtectionEnabled, pictureKey, pictureRevision, ageLimit
   }
 
   init(from decoder: Decoder) throws {
@@ -30,6 +38,9 @@ struct WatchingProfile: Decodable, Identifiable, Equatable, Sendable {
     needsPinSetup = try values.decode(Bool.self, forKey: .needsPinSetup)
     pinProtectionEnabled =
       try values.decodeIfPresent(Bool.self, forKey: .pinProtectionEnabled) ?? true
+    pictureKey = try values.decodeIfPresent(String.self, forKey: .pictureKey)
+    pictureRevision = try values.decodeIfPresent(Int64.self, forKey: .pictureRevision) ?? 0
+    ageLimit = try values.decodeIfPresent(Int.self, forKey: .ageLimit)
   }
 }
 
@@ -72,6 +83,26 @@ struct ProfileCreateRequest: Codable, Sendable {
   let pin: String?
   let accessMode: ProfileAccessMode?
   let titleIds: [UUID]?
+  var displayName: String? = nil
+  var pictureKey: String? = nil
+  var ageLimit: Int? = nil
+}
+
+struct ProfileNameRequest: Codable, Sendable {
+  let name: String
+}
+
+struct ProfilePictureRequest: Codable, Sendable {
+  /// A built-in picture (`symbol:palette`), or nil for the initial.
+  let builtin: String?
+}
+
+/// A children's profile: the highest FSK age it may watch (nil: none) and its exceptions.
+struct ProfileAgeLimit: Codable, Equatable, Sendable {
+  var ageLimit: Int?
+  var allowedTitleIds: [UUID]
+  var hiddenTitleIds: [UUID]
+  var revision: Int64
 }
 
 struct ProfileUpdateRequest: Codable, Sendable {

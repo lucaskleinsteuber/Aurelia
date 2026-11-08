@@ -41,9 +41,12 @@ struct DownloadsPage: View {
           }
         }
         if model.offlineTitles.isEmpty && downloads.active.isEmpty {
+          // Centered in the page, not at the leading edge of the text column above it.
           ContentUnavailableView(
             "No Downloads", systemImage: "arrow.down.circle",
             description: Text("Choose Download in a movie’s or episode’s menu to keep it on this Mac."))
+            .frame(maxWidth: .infinity, minHeight: 360)
+            .accessibilityIdentifier("downloads-empty")
         } else {
           OfflineTitleList()
         }
@@ -65,8 +68,18 @@ struct OfflineTitleList: View {
     VStack(alignment: .leading, spacing: 8) {
       ForEach(model.offlineTitles) { title in
         HStack(spacing: 14) {
-          Image(systemName: title.kind == "episode" ? "tv" : "film")
-            .font(.title2).foregroundStyle(.secondary).frame(width: 32)
+          Group {
+            if let poster = downloads.artwork(title)
+              ?? downloads.artwork(title, series: true)
+            {
+              Image(nsImage: poster).resizable().scaledToFill()
+            } else {
+              MediaArtworkPlaceholder(symbol: title.isEpisode ? "tv" : "film", symbolSize: 18)
+            }
+          }
+          .frame(width: 40, height: 60)
+          .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+          .accessibilityHidden(true)
           VStack(alignment: .leading, spacing: 2) {
             Text(title.title).font(.headline)
             Text(details(title)).font(.caption).foregroundStyle(.secondary)

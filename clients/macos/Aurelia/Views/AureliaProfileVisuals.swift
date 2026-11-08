@@ -1,11 +1,39 @@
+import AppKit
 import SwiftUI
 
-/// A round profile picture with the profile's initial on a gradient, like account pictures in
-/// Apple's apps. The color is stable for a profile because it derives from its identifier.
+/// A round profile picture: the profile's photo, a built-in picture (a symbol on a gradient), or
+/// the profile's initial on a gradient whose color derives from its identifier, like account
+/// pictures in Apple's apps.
 struct AureliaProfileAvatar: View {
   let id: UUID?
   let name: String
   var size: CGFloat = 96
+  var pictureKey: String? = nil
+  var pictureRevision: Int64 = 0
+  @ObservedObject private var photos = ProfilePhotoCache.shared
+
+  init(
+    id: UUID?, name: String, size: CGFloat = 96, pictureKey: String? = nil,
+    pictureRevision: Int64 = 0
+  ) {
+    self.id = id
+    self.name = name
+    self.size = size
+    self.pictureKey = pictureKey
+    self.pictureRevision = pictureRevision
+  }
+
+  init(user: UserSummary, size: CGFloat = 96) {
+    self.init(
+      id: user.id, name: user.shownName, size: size, pictureKey: user.pictureKey,
+      pictureRevision: user.pictureRevision)
+  }
+
+  init(profile: WatchingProfile, size: CGFloat = 96) {
+    self.init(
+      id: profile.id, name: profile.name, size: size, pictureKey: profile.pictureKey,
+      pictureRevision: profile.pictureRevision)
+  }
 
   static let palettes: [(Color, Color)] = [
     (Color(red: 0.36, green: 0.62, blue: 1.0), Color(red: 0.13, green: 0.36, blue: 0.86)),
@@ -16,6 +44,13 @@ struct AureliaProfileAvatar: View {
     (Color(red: 0.5, green: 0.86, blue: 0.48), Color(red: 0.18, green: 0.56, blue: 0.3)),
     (Color(red: 0.55, green: 0.6, blue: 1.0), Color(red: 0.28, green: 0.3, blue: 0.8)),
   ]
+
+  /// Built-in pictures' colors: the seven gradients above plus red.
+  static func namedPalette(_ name: String) -> (Color, Color) {
+    let index = ProfilePictureCatalog.paletteIndex(named: name)
+    if index < palettes.count { return palettes[index] }
+    return (Color(red: 1.0, green: 0.48, blue: 0.42), Color(red: 0.79, green: 0.19, blue: 0.17))
+  }
 
   static func paletteIndex(for id: UUID?) -> Int {
     guard let id else { return 0 }
@@ -29,18 +64,176 @@ struct AureliaProfileAvatar: View {
   }
 
   var body: some View {
-    let colors = Self.palettes[Self.paletteIndex(for: id)]
+    let builtin = ProfilePictureCatalog.parse(pictureKey)
+    let colors =
+      builtin.map { Self.namedPalette($0.palette) } ?? Self.palettes[Self.paletteIndex(for: id)]
+    let photo =
+      pictureKey == ProfilePictureCatalog.photoKey
+      ? id.flatMap { photos.image(id: $0, revision: pictureRevision) } : nil
+    let waitsForPhoto = pictureKey == ProfilePictureCatalog.photoKey && id != nil
     Circle()
-      .fill(LinearGradient(colors: [colors.0, colors.1], startPoint: .top, endPoint: .bottom))
+      // A photo covers the whole circle; the gradient beneath it would show as a colored rim
+      // along the photo's edge.
+      .fill(
+        photo == nil
+          ? AnyShapeStyle(
+            LinearGradient(colors: [colors.0, colors.1], startPoint: .top, endPoint: .bottom))
+          : AnyShapeStyle(Color.clear)
+      )
       .overlay {
-        Text(Self.initial(of: name))
-          .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white)
-          .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        if let photo {
+          Image(nsImage: photo).resizable().scaledToFill().clipShape(Circle())
+            .transition(.opacity)
+        } else if waitsForPhoto {
+          // While the photo loads, only the plain gradient: no initial or earlier picture that
+          // the photo would then replace before everyone's eyes.
+          EmptyView()
+        } else if let builtin {
+          ProfileSymbolView(symbol: builtin.symbol, size: size)
+        } else {
+          Text(Self.initial(of: name))
+            .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        }
       }
       .overlay { Circle().strokeBorder(.white.opacity(0.14), lineWidth: 1) }
       .frame(width: size, height: size)
+      .animation(.easeOut(duration: 0.2), value: photo != nil)
       .accessibilityHidden(true)
+      .task(id: "\(id?.uuidString ?? "")-\(pictureKey ?? "")-\(pictureRevision)") {
+        if pictureKey == ProfilePictureCatalog.photoKey, let id {
+          photos.load(id: id, revision: pictureRevision)
+        }
+      }
+  }
+}
+
+/// A built-in picture's symbol in white, sized for its circle.
+struct ProfileSymbolView: View {
+  let symbol: String
+  let size: CGFloat
+
+  var body: some View {
+    Group {
+      if symbol == "rocket" {
+        // SF Symbols has no rocket; this one matches the other clients' drawing.
+        RocketSymbolShape()
+          .fill(.white, style: FillStyle(eoFill: true))
+          .frame(width: size * 0.5, height: size * 0.5)
+      } else {
+        Image(systemName: ProfilePictureCatalog.systemImage(for: symbol))
+          .font(.system(size: size * 0.42, weight: .semibold))
+          .foregroundStyle(.white)
+      }
+    }
+    .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+  }
+}
+
+/// The rocket of the built-in pictures, drawn on a 24-point grid like the Linux and web clients.
+struct RocketSymbolShape: Shape {
+  func path(in rect: CGRect) -> Path {
+    let scale = min(rect.width, rect.height) / 24
+    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+      CGPoint(x: rect.minX + x * scale, y: rect.minY + y * scale)
+    }
+    var path = Path()
+    path.move(to: point(12, 2))
+    path.addCurve(to: point(16.5, 13), control1: point(15.5, 4.5), control2: point(17, 8.5))
+    path.addLine(to: point(18.5, 16))
+    path.addLine(to: point(16.5, 19))
+    path.addLine(to: point(15, 16.5))
+    path.addLine(to: point(9, 16.5))
+    path.addLine(to: point(7.5, 19))
+    path.addLine(to: point(5.5, 16))
+    path.addLine(to: point(7.5, 13))
+    path.addCurve(to: point(12, 2), control1: point(7, 8.5), control2: point(8.5, 4.5))
+    path.closeSubpath()
+    path.addEllipse(
+      in: CGRect(origin: point(10.2, 7.2), size: CGSize(width: 3.6 * scale, height: 3.6 * scale)))
+    path.move(to: point(10, 17.6))
+    path.addLine(to: point(14, 17.6))
+    path.addLine(to: point(12, 22))
+    path.closeSubpath()
+    return path
+  }
+}
+
+/// Profile photos, loaded once per picture revision with the paired device's credential (the
+/// picker shows them before any profile is unlocked). A new revision loads the new photo.
+/// Each photo is also kept in this app's caches folder, so the picker draws it in its first frame
+/// after the next launch, and the offline mode shows it without the server.
+@MainActor
+final class ProfilePhotoCache: ObservableObject {
+  static let shared = ProfilePhotoCache()
+
+  @Published private var images: [String: NSImage] = [:]
+  private var loading: Set<String> = []
+  private let folder: URL?
+  /// Set by the app model: fetches a profile's photo (JPEG) from the connected server.
+  var loader: (@MainActor (UUID, Int64) async throws -> Data)?
+
+  init(folder: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+    .appendingPathComponent("Aurelia Profile Photos", isDirectory: true))
+  {
+    self.folder = folder
+  }
+
+  func image(id: UUID, revision: Int64) -> NSImage? {
+    let key = Self.key(id, revision)
+    if let image = images[key] { return image }
+    // Read from disk at once, so a saved photo never appears a moment after its circle.
+    guard let file = file(key), let data = try? Data(contentsOf: file),
+      let image = NSImage(data: data)
+    else { return nil }
+    Task { @MainActor in self.images[key] = image }
+    return image
+  }
+
+  func load(id: UUID, revision: Int64) {
+    let key = Self.key(id, revision)
+    guard image(id: id, revision: revision) == nil, !loading.contains(key), let loader else {
+      return
+    }
+    loading.insert(key)
+    Task {
+      defer { loading.remove(key) }
+      guard let data = try? await loader(id, revision), let image = NSImage(data: data) else {
+        return
+      }
+      images[key] = image
+      keep(data, id: id, revision: revision)
+    }
+  }
+
+  /// Keeps a just-uploaded photo, so it shows at once without loading it back.
+  func store(_ image: NSImage, data: Data? = nil, id: UUID, revision: Int64) {
+    images[Self.key(id, revision)] = image
+    if let data { keep(data, id: id, revision: revision) }
+  }
+
+  func removeAll() {
+    images.removeAll()
+  }
+
+  /// Writes the photo of one revision and removes the profile's earlier ones.
+  private func keep(_ data: Data, id: UUID, revision: Int64) {
+    guard let folder, let file = file(Self.key(id, revision)) else { return }
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try? data.write(to: file, options: .atomic)
+    let earlier = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+    for name in earlier where name.hasPrefix(id.uuidString + "-") && name != file.lastPathComponent {
+      try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+    }
+  }
+
+  private func file(_ key: String) -> URL? {
+    folder?.appendingPathComponent(key + ".jpg")
+  }
+
+  private static func key(_ id: UUID, _ revision: Int64) -> String {
+    "\(id.uuidString)-\(revision)"
   }
 }
 

@@ -50,29 +50,43 @@ else
   build=$(sed -n 's/^CURRENT_PROJECT_VERSION = //p' "$config")
   tag="$version-$build"
   output="$other_root/Build/MacRelease/$tag"
-  app="$other_root/Build/Build $build/Aurelia.app"
-  [ -d "$app" ] || { echo "Missing $app; run scripts/build-macos-release.sh first." >&2; exit 1; }
-  [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$version" ] \
-    && [ "$(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")" = "$build" ] \
-    || { echo "$app is not Aurelia $version ($build)." >&2; exit 1; }
-  { lipo "$app/Contents/MacOS/Aurelia" -verify_arch arm64 && lipo "$app/Contents/MacOS/Aurelia" -verify_arch x86_64; } \
-    || { echo "The Mac app must be universal." >&2; exit 1; }
-  codesign --verify --deep --strict "$app"
   mkdir -p "$output"
-  dmg="$output/Aurelia-$tag-macOS-universal.dmg"
-  # The updater of Mac apps up to 1.33 asks for this name; it is the same disk image.
-  older_dmg="$output/Aurelia-$tag-macOS-arm64.dmg"
   stage=$(mktemp -d)
   trap 'rm -rf "$stage"' EXIT
-  ditto "$app" "$stage/Aurelia.app"
-  ln -s /Applications "$stage/Applications"
-  hdiutil create -quiet -ov -fs HFS+ -format UDZO -volname "Aurelia $version" -srcfolder "$stage" "$dmg"
-  hdiutil verify -quiet "$dmg"
-  cp -c "$dmg" "$older_dmg"
-  (cd "$output" && shasum -a 256 "./${dmg##*/}" "./${older_dmg##*/}" > SHA256SUMS)
-  files=("$dmg" "$older_dmg" "$output/SHA256SUMS")
+  files=()
+  # One disk image per architecture: arm64 for Apple silicon, x64 for Intel Macs.
+  for arch in arm64 x64; do
+    folder="$other_root/Build/Build $build"
+    expected=arm64
+    if [ "$arch" = x64 ]; then folder="$folder x64"; expected=x86_64; fi
+    app="$folder/Aurelia.app"
+    [ -d "$app" ] || { echo "Missing $app; run AURELIA_MAC_ARCH=$arch scripts/build-macos-release.sh first." >&2; exit 1; }
+    [ "$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")" = "$version" ] \
+      && [ "$(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")" = "$build" ] \
+      || { echo "$app is not Aurelia $version ($build)." >&2; exit 1; }
+    [ "$(lipo -archs "$app/Contents/MacOS/Aurelia")" = "$expected" ] \
+      || { echo "$app is not built for $expected only." >&2; exit 1; }
+    codesign --verify --deep --strict "$app"
+    dmg="$output/Aurelia-$tag-macOS-$arch.dmg"
+    rm -rf "$stage/image" && mkdir "$stage/image"
+    ditto "$app" "$stage/image/Aurelia.app"
+    ln -s /Applications "$stage/image/Applications"
+    hdiutil create -quiet -ov -fs HFS+ -format UDZO -volname "Aurelia $version" -srcfolder "$stage/image" "$dmg"
+    hdiutil verify -quiet "$dmg"
+    files+=("$dmg")
+  done
+  # The updater of 1.34 asks for the universal name; it gets the Apple silicon image, the only
+  # Macs that ran 1.34. Updaters from 2.0 on ask for their own architecture.
+  transition="$output/Aurelia-$tag-macOS-universal.dmg"
+  cp -c "$output/Aurelia-$tag-macOS-arm64.dmg" "$transition"
+  files+=("$transition")
+  (cd "$output" && shasum -a 256 $(for file in "${files[@]}"; do printf './%s ' "${file##*/}"; done) > SHA256SUMS)
+  files+=("$output/SHA256SUMS")
   title="Aurelia for Mac $version ($build)"
-  downloads="- **Mac:** Download ${dmg##*/}. Open it and drag Aurelia to Applications. This development-signed build runs on Macs registered for its developer account. ${older_dmg##*/} is the same image for the updater of older app versions."
+  downloads="- **Mac with Apple silicon (M1 and newer):** Aurelia-$tag-macOS-arm64.dmg
+- **Mac with Intel processor:** Aurelia-$tag-macOS-x64.dmg
+
+Open the disk image and drag Aurelia to Applications. This development-signed build runs on Macs registered for its developer account. Aurelia-$tag-macOS-universal.dmg is the Apple silicon image under the name the updater of version 1.34 asks for."
 fi
 
 head=$(git -C "$repository_root" rev-parse HEAD)
@@ -148,6 +162,6 @@ gh release edit "$tag" --notes-file "$notes_output" --draft=false --latest="$lat
 echo "Published $title as $tag."
 
 if [ "${AURELIA_KEEP_LOCAL_BUILDS:-0}" != 1 ]; then
-  if [ "$product" = Mac ]; then rm -rf -- "$other_root/Build/Build $build"; fi
+  if [ "$product" = Mac ]; then rm -rf -- "$other_root/Build/Build $build" "$other_root/Build/Build $build x64"; fi
   rm -rf -- "$output"
 fi

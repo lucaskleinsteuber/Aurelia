@@ -107,3 +107,66 @@ test("scrub preview hover debounces rapid timeline movement and reuses the bucke
   p.hideScrubPreview();
   assert.equal(preview.hidden, true);
 });
+
+test("a failed ticket renewal is tried again while the old ticket still plays", async () => {
+  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  const scheduled = []; const failures = []; let calls = 0;
+  const p = player({
+    item: { id: "film" }, source: { id: "old", streamPath: "/api/v1/streams/old", expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() },
+    after: (work, delay) => scheduled.push({ work, delay }), fail: (error) => failures.push(error),
+    video: { currentTime: 42, paused: true, play: async () => {} },
+    api: { createPlayback: async () => { calls++; if (calls === 1) throw new ApiError(0, "offline", "Offline"); return { id: "new", streamPath: "/api/v1/streams/new", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }; },
+      revokePlayback: async () => {} },
+  });
+  p.scheduleRenewal();
+  await scheduled.shift().work();
+  assert.equal(failures.length, 0); assert.equal(scheduled.length, 1); assert.equal(scheduled[0].delay, 20_000);
+  await scheduled.shift().work();
+  assert.equal(p.source.id, "new"); assert.equal(p.video.src, "/api/v1/streams/new"); assert.equal(failures.length, 0);
+});
+
+test("a refused or late ticket renewal ends playback with the error", async () => {
+  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  for (const [status, minutesLeft] of [[401, 10], [0, 0.5]]) {
+    const scheduled = []; const failures = [];
+    const p = player({
+      item: { id: "film" }, source: { id: "old", expiresAt: new Date(Date.now() + minutesLeft * 60_000).toISOString() },
+      after: (work, delay) => scheduled.push({ work, delay }), fail: (error) => failures.push(error),
+      api: { createPlayback: async () => { throw new ApiError(status, "x", "No"); } },
+    });
+    p.scheduleRenewal(); await scheduled.shift().work();
+    assert.equal(failures.length, 1); assert.equal(scheduled.length, 0);
+  }
+});
+
+test("the player ends the session for a revoked profile like the rest of the app", async () => {
+  const { ApiError } = await import("../../src/Aurelia.Server/WebApp/js/api.js");
+  const ended = []; const notices = [];
+  const live = player({ onSessionEnded: (error) => ended.push(error.code), showNotice: (text) => notices.push(text) });
+  live.liveFailed(403, "profile_session_revoked");
+  assert.equal(live.closed, true); assert.deepEqual(ended, ["profile_session_revoked"]);
+  const opened = player({ onSessionEnded: (error) => ended.push(error.code), showNotice: (text) => notices.push(text) });
+  opened.fail(new ApiError(403, "device_session_revoked", "No"));
+  assert.equal(opened.closed, true); assert.deepEqual(ended, ["profile_session_revoked", "device_session_revoked"]);
+  const locked = player({ onSessionEnded: () => ended.push("wrong"), showNotice: (text) => notices.push(text) });
+  locked.fail(new ApiError(403, "full_library_access_required", "Needs full access."));
+  assert.equal(locked.closed, false); assert.deepEqual(notices, ["Needs full access."]);
+});
+
+test("returning to the tab takes the screen wake lock again while a title plays", (t) => {
+  const priorDocument = globalThis.document, priorWindow = globalThis.window;
+  const doc = Object.assign(new EventTarget(), { visibilityState: "hidden" });
+  globalThis.document = doc; globalThis.window = new EventTarget();
+  t.after(() => { globalThis.document = priorDocument; globalThis.window = priorWindow; });
+  const video = Object.assign(new EventTarget(), { paused: false, ended: false });
+  const awake = []; const saves = [];
+  const p = player({ video, timeline: new EventTarget(), volume: new EventTarget(), element: new EventTarget(), listeners: [],
+    every() {}, keepAwake: (playing) => awake.push(playing), saveNow: (options) => saves.push(options) });
+  p.bind();
+  doc.dispatchEvent(new Event("visibilitychange"));
+  assert.deepEqual(awake, []); assert.equal(saves.length, 1);
+  doc.visibilityState = "visible"; doc.dispatchEvent(new Event("visibilitychange"));
+  assert.deepEqual(awake, [true]);
+  video.paused = true; doc.dispatchEvent(new Event("visibilitychange"));
+  assert.deepEqual(awake, [true]);
+});

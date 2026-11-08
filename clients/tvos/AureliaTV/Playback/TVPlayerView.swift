@@ -109,6 +109,7 @@ struct TVPlayerView: View {
       else { return }
       focus = visible ? .play : .surface
     }
+    // Buffering never moves focus: only when it was lost does it come back to Play.
     .task(id: "\(controller.isLoading)-\(controller.isStarting)") {
       guard !controller.isLoading, controller.controlsVisible, !controller.isStarting,
         controller.trackMenu == nil
@@ -116,7 +117,7 @@ struct TVPlayerView: View {
         return
       }
       await Task.yield()
-      if !Task.isCancelled { focus = .play }
+      if !Task.isCancelled, focus == nil { focus = .play }
     }
     .onChange(of: controller.errorMessage) { _, message in
       if message != nil { focus = controller.canRetry ? .retry : .close }
@@ -184,7 +185,9 @@ struct TVPlayerView: View {
               }
             }
           }
-        }.focusSection().onMoveCommand { if $0 == .down { focus = .play } }
+        }
+        // Up from the transport row always lands on the speed, the first of the track controls.
+        .defaultFocus($focus, .rate, priority: .userInitiated).focusSection()
         Spacer()
         HStack(spacing: 22) {
           icon(
@@ -202,17 +205,18 @@ struct TVPlayerView: View {
               }
             }.frame(width: 78, height: 78)
           }.buttonStyle(TVPlayerPrimaryStyle()).focusEffectDisabled().focused($focus, equals: .play)
-            .disabled(controller.isLoading).accessibilityIdentifier("player-play")
+            // Stays focusable while loading: disabling it threw focus to another control after
+            // every skip, and back again once the picture moved.
+            .accessibilityIdentifier("player-play")
             .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
           icon(
             "Forward \(controller.seekInterval / 1_000) Seconds", symbol: "goforward", id: .forward
           ) { controller.seek(by: controller.seekInterval) }.disabled(!controller.canSeek)
         }.padding(.horizontal, 24).padding(.vertical, 16)
           .background(.ultraThinMaterial, in: Capsule())
-          .focusSection().onMoveCommand { direction in
-            if direction == .up { focus = .rate }
-            if direction == .down { focus = .timeline }
-          }
+          // The focus sections lead up and down; moving focus here as well made it jump twice.
+          // Coming back to this row returns to the button used last.
+          .defaultFocus($focus, lastTransport, priority: .userInitiated).focusSection()
         Spacer()
         VStack(alignment: .leading, spacing: 18) {
           Text(controller.title).font(.system(size: 30, weight: .semibold)).lineLimit(2)

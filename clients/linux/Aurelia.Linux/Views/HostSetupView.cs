@@ -63,7 +63,7 @@ public sealed class HostSetupView : UserControl
         {
             case HostPhase.Starting:
                 body.Children.Add(ScreenParts.Symbol("IconServer", 50));
-                body.Children.Add(new ProgressBar { IsIndeterminate = true, Width = 140, HorizontalAlignment = HorizontalAlignment.Center });
+                body.Children.Add(new Aurelia.Linux.Controls.Spinner { HorizontalAlignment = HorizontalAlignment.Center });
                 body.Children.Add(ScreenParts.Title(model.StatusTitle));
                 if (model.StatusMessage is { } detail) body.Children.Add(ScreenParts.Detail(detail));
                 return;

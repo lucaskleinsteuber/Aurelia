@@ -61,8 +61,11 @@ private struct TVProfileEntry: View {
 
   var body: some View {
     VStack(spacing: 24) {
-      TVProfilePicture(id: profile.id, name: profile.name, size: Self.avatarSize)
-        .shadow(color: .black.opacity(0.3), radius: 22, y: 12)
+      TVProfilePicture(
+        id: profile.id, name: profile.name, size: Self.avatarSize, pictureKey: profile.pictureKey,
+        pictureRevision: profile.pictureRevision
+      )
+      .shadow(color: .black.opacity(0.3), radius: 22, y: 12)
       HStack(spacing: 10) {
         Text(profile.name).font(.system(size: 30, weight: .semibold)).lineLimit(2)
           .multilineTextAlignment(.center)
@@ -72,19 +75,33 @@ private struct TVProfileEntry: View {
         }
       }
       if profile.needsPinSetup {
-        Text("Set up a PIN on the Mac").font(.system(size: 20)).foregroundStyle(.secondary)
+        Text("Set up a PIN on the server computer").font(.system(size: 20)).foregroundStyle(.secondary)
       }
     }
     .frame(width: 260)
   }
 }
 
-/// A round profile picture with the profile's initial on a gradient, in the same color the Mac
-/// app gives that profile.
+/// A round profile picture: the profile's photo, a built-in picture (a symbol on a gradient), or
+/// the initial on a gradient in the same color the Mac app gives that profile.
 struct TVProfilePicture: View {
   let id: UUID?
   let name: String
   var size: CGFloat = 200
+  var pictureKey: String? = nil
+  var pictureRevision: Int64 = 0
+  @ObservedObject private var photos = TVProfilePhotoCache.shared
+
+  init(
+    id: UUID?, name: String, size: CGFloat = 200, pictureKey: String? = nil,
+    pictureRevision: Int64 = 0
+  ) {
+    self.id = id
+    self.name = name
+    self.size = size
+    self.pictureKey = pictureKey
+    self.pictureRevision = pictureRevision
+  }
 
   static let palettes: [(Color, Color)] = [
     (Color(red: 0.36, green: 0.62, blue: 1.0), Color(red: 0.13, green: 0.36, blue: 0.86)),
@@ -96,19 +113,43 @@ struct TVProfilePicture: View {
     (Color(red: 0.55, green: 0.6, blue: 1.0), Color(red: 0.28, green: 0.3, blue: 0.8)),
   ]
 
+  /// Built-in pictures' colors: the seven gradients above plus red.
+  static func namedPalette(_ name: String) -> (Color, Color) {
+    let index = TVProfilePictures.paletteIndex(named: name)
+    if index < palettes.count { return palettes[index] }
+    return (Color(red: 1.0, green: 0.48, blue: 0.42), Color(red: 0.79, green: 0.19, blue: 0.17))
+  }
+
   var body: some View {
-    let colors = Self.palettes[TVProfileColor.index(for: id) % Self.palettes.count]
+    let builtin = TVProfilePictures.parse(pictureKey)
+    let colors =
+      builtin.map { Self.namedPalette($0.palette) }
+      ?? Self.palettes[TVProfileColor.index(for: id) % Self.palettes.count]
+    let photo =
+      pictureKey == TVProfilePictures.photoKey
+      ? id.flatMap { photos.image(id: $0, revision: pictureRevision) } : nil
     Circle()
       .fill(LinearGradient(colors: [colors.0, colors.1], startPoint: .top, endPoint: .bottom))
       .overlay {
-        Text(TVProfileColor.initial(of: name))
-          .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white)
-          .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        if let photo {
+          Image(uiImage: photo).resizable().scaledToFill().clipShape(Circle())
+        } else if let builtin {
+          TVProfileSymbol(symbol: builtin.symbol, size: size)
+        } else {
+          Text(TVProfileColor.initial(of: name))
+            .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        }
       }
       .overlay { Circle().strokeBorder(.white.opacity(0.14), lineWidth: 1.5) }
       .frame(width: size, height: size)
       .accessibilityHidden(true)
+      .task(id: "\(id?.uuidString ?? "")-\(pictureKey ?? "")-\(pictureRevision)") {
+        if pictureKey == TVProfilePictures.photoKey, let id {
+          photos.load(id: id, revision: pictureRevision)
+        }
+      }
   }
 }
 
@@ -256,8 +297,11 @@ struct TVPINView: View {
         Button {
           model.cancelProfileSelection()
         } label: {
-          TVProfilePicture(id: profile.id, name: profile.name, size: 170)
-            .shadow(color: .black.opacity(0.3), radius: 22, y: 12)
+          TVProfilePicture(
+            id: profile.id, name: profile.name, size: 170, pictureKey: profile.pictureKey,
+            pictureRevision: profile.pictureRevision
+          )
+          .shadow(color: .black.opacity(0.3), radius: 22, y: 12)
         }
         .buttonStyle(TVAvatarButtonStyle(ringDiameter: 190))
         .accessibilityLabel("Choose another profile")

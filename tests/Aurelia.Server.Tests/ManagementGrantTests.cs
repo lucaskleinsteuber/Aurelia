@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
@@ -33,6 +34,51 @@ public sealed class ManagementGrantTests
         var approval = await ApiTestClient.ReadAsync<AdministrationApprovalResponse>(response);
         Assert.True(approval.ExpiresAt > DateTimeOffset.UtcNow);
         Assert.True(approval.ExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(2));
+    }
+
+    [Fact]
+    public async Task WrongSignInsFromTheNetworkDoNotLockPairedDevicesOutOfManagement()
+    {
+        using var factory = new AureliaServerFactory(configureServices: services =>
+            services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, InventedAddressFilter>());
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        // Devices anywhere on the network can send wrong passwords for the owner's name.
+        for (var attempt = 0; attempt < 10; attempt++)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await SignInAsync(attempt, "invented wrong password")).StatusCode);
+        // New sign-ins stay locked for a while, so guessing remains limited...
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await SignInAsync(10, "correct horse battery staple")).StatusCode);
+        // ...but the owner's paired device still unlocks server management.
+        using var unlock = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/management/unlock", owner.Token,
+            new UnlockManagementRequest("correct horse battery staple"));
+        using var unlocked = await client.SendAsync(unlock);
+        Assert.Equal(HttpStatusCode.OK, unlocked.StatusCode);
+
+        async Task<HttpResponseMessage> SignInAsync(int device, string password)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/login")
+            {
+                Content = JsonContent.Create(new LoginRequest("lucas", password, "Invented Stranger"), options: ApiTestClient.JsonOptions),
+            };
+            request.Headers.Add(InventedAddressFilter.Header, $"192.168.77.{device + 1}");
+            return await client.SendAsync(request);
+        }
+    }
+
+    /// <summary>Gives each test request the network address it names, like separate devices on the network.</summary>
+    private sealed class InventedAddressFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public const string Header = "X-Invented-Address";
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+        {
+            Microsoft.AspNetCore.Builder.UseExtensions.Use(app, (context, following) =>
+            {
+                if (System.Net.IPAddress.TryParse(context.Request.Headers[Header].ToString(), out var address))
+                    context.Connection.RemoteIpAddress = address;
+                return following(context);
+            });
+            next(app);
+        };
     }
 
     [Fact]

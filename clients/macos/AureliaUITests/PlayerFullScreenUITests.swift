@@ -91,12 +91,16 @@ final class PlayerFullScreenUITests: XCTestCase {
     app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(subtitle.waitForNonExistence(timeout: 5))
 
+    // Settings open inside the window, over the player; F does not switch to full screen there,
+    // and Esc returns to the player.
     app.typeKey(",", modifierFlags: .command)
-    let settingsTab = app.buttons["General"]
+    let settingsTab = app.buttons["settings-tab-general"]
     XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
+    XCTAssertTrue(settingsTab.isHittable, "Settings must cover the player, not open behind it.")
     app.typeKey("f", modifierFlags: [])
-    XCTAssertEqual(playerWindow.frame, originalFrame)
-    app.typeKey("w", modifierFlags: .command)
+    XCTAssertEqual(playerWindow.frame.origin, originalFrame.origin)
+    XCTAssertLessThan(abs(playerWindow.frame.height - originalFrame.height), 12)
+    app.typeKey(.escape, modifierFlags: [])
     XCTAssertTrue(settingsTab.waitForNonExistence(timeout: 5))
     playerWindow.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.35)).click()
     app.typeKey("f", modifierFlags: [])

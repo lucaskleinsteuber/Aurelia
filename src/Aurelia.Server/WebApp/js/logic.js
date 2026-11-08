@@ -173,6 +173,88 @@ export function profileColorIndex(id, count = 7) {
   return sum % count;
 }
 
+/** The built-in profile pictures: a symbol on one of the palettes, stored as "symbol:palette". */
+export const PICTURE_SYMBOLS = Object.freeze([
+  "star", "rocket", "cat", "dog", "heart", "bolt", "leaf", "moon", "music", "gamecontroller", "film", "crown",
+]);
+/** In the order of the existing profile gradients (palette-0 … palette-6), plus red. */
+export const PICTURE_PALETTES = Object.freeze(["blue", "purple", "pink", "orange", "teal", "green", "indigo", "red"]);
+export const PHOTO_PICTURE = "photo";
+export const MAXIMUM_PHOTO_BYTES = 8 * 1024 * 1024;
+
+/** The symbol and palette of a built-in picture key; null for a photo, no picture or an unknown key. */
+export function parsePicture(key) {
+  const parts = String(key ?? "").split(":");
+  if (parts.length !== 2) return null;
+  const [symbol, palette] = parts;
+  if (!PICTURE_SYMBOLS.includes(symbol) || !PICTURE_PALETTES.includes(palette)) return null;
+  return { symbol, palette, paletteIndex: PICTURE_PALETTES.indexOf(palette) };
+}
+
+/** The name a profile shows: its chosen name, else its sign-in name (the picker sends it as `name`). */
+export function shownName(user) {
+  const chosen = String(user?.displayName ?? "").trim();
+  return chosen || user?.username || user?.name || "";
+}
+
+/** "Children's profile · up to FSK 6" for a profile with an age limit, null otherwise. */
+export function ageLimitSummary(limit) {
+  if (limit === null || limit === undefined) return null;
+  return limit === 0 ? "Children's profile · FSK 0" : `Children's profile · up to FSK ${limit}`;
+}
+
+export const TOUR_SEEN_KEY = "aurelia.tourSeen";
+
+/** The short tour of the browser app on the first sign-in: the place to light up and one sentence. */
+export const TOUR_STOPS = Object.freeze([
+  { target: ".page .poster-card, .page .continue-card", title: "Open a Title", text: "Click a poster to see its details. Play starts it, and its menu has everything else." },
+  { target: ".top-bar .tabs", title: "Your Library", text: "Home, Movies, TV Shows, Collections and your Watchlist." },
+  { target: ".top-actions a[href='/search']", title: "Search", text: "Find titles, people and genres. Press / anywhere to start." },
+  { target: ".avatar-button", title: "Your Profile", text: "Settings, your name and picture, watch history and switching profiles." },
+]);
+
+/** Whether this browser still owes its person the tour. Storage may be missing or refuse access. */
+export function tourPending(storage) {
+  try {
+    return storage?.getItem(TOUR_SEEN_KEY) !== "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markTourSeen(storage) {
+  try {
+    storage?.setItem(TOUR_SEEN_KEY, "1");
+  } catch {
+    // Without storage the tour may come again; nothing else depends on it.
+  }
+}
+
+/**
+ * Where the tour's note goes beside the lit place: right of it, else below, else left, always
+ * inside the window. Without a place it is centered.
+ */
+export function tourBubblePosition(hole, viewport, bubble = { width: 320, height: 170 }, margin = 16) {
+  if (!hole) {
+    return { x: Math.max(margin, (viewport.width - bubble.width) / 2), y: Math.max(margin, (viewport.height - bubble.height) / 2) };
+  }
+  let x;
+  let y;
+  if (hole.right + margin + bubble.width <= viewport.width) {
+    x = hole.right + margin;
+    y = hole.top;
+  } else if (hole.bottom + margin + bubble.height <= viewport.height) {
+    x = hole.left;
+    y = hole.bottom + margin;
+  } else {
+    x = hole.left - margin - bubble.width;
+    y = hole.top;
+  }
+  x = Math.min(Math.max(x, margin), Math.max(margin, viewport.width - bubble.width - margin));
+  y = Math.min(Math.max(y, margin), Math.max(margin, viewport.height - bubble.height - margin));
+  return { x, y };
+}
+
 export function initial(name) {
   const first = String(name ?? "").trim()[0];
   return first ? first.toUpperCase() : "?";
@@ -213,6 +295,29 @@ export function watchTime(seconds) {
 }
 
 /** watchTime for the hours the statistics report. */
+/** ISO 8601 week of a date, as the server writes it: "2026-W45". */
+export function isoWeek(date) {
+  const day = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const weekday = day.getUTCDay() || 7;
+  day.setUTCDate(day.getUTCDate() + 4 - weekday);
+  const yearStart = new Date(Date.UTC(day.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((day - yearStart) / 86400000 + 1) / 7);
+  return `${day.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+/** The last weeks up to this one, oldest first; weeks without watching have no hours (the server lists only weeks with watching). */
+export function lastWeeks(periods, now = new Date(), count = 12) {
+  const hours = new Map();
+  for (const period of periods ?? []) hours.set(period.period, (hours.get(period.period) ?? 0) + period.hours);
+  const weeks = [];
+  for (let back = count - 1; back >= 0; back--) {
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7 * back);
+    const period = isoWeek(day);
+    weeks.push({ period, hours: hours.get(period) ?? 0 });
+  }
+  return weeks;
+}
+
 export function watchHours(hours) {
   return watchTime(Number.isFinite(hours) ? hours * 3600 : 0);
 }
@@ -342,7 +447,13 @@ function filterQuery(filters = {}) {
 /** The screen an address shows. Unknown addresses go Home. */
 export function parseRoute(pathname = "/", search = "") {
   const query = new URLSearchParams(search);
-  const parts = String(pathname).split("/").filter(Boolean).map(decodeURIComponent);
+  let parts;
+  try {
+    parts = String(pathname).split("/").filter(Boolean).map(decodeURIComponent);
+  } catch {
+    // A cut-off or mistyped link ("/title/%E0%A4%A") opens Home instead of a blank page.
+    return { name: "home" };
+  }
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (parts.length === 0) return { name: "home" };
   if (parts.length === 1 && BROWSE_SECTIONS.includes(parts[0])) return { name: parts[0], filters: parseFilters(query) };
@@ -410,6 +521,11 @@ export function routePath(route) {
 }
 
 /** "1234 5678": the code is easier to read and type in two halves. */
+/** The digits of a typed pairing code, at most eight; spaces and other characters drop out. */
+export function pairingDigits(value) {
+  return String(value ?? "").replace(/[^0-9]/g, "").slice(0, 8);
+}
+
 export function formatCode(code) {
   const digits = String(code ?? "");
   return digits.length === 8 ? `${digits.slice(0, 4)} ${digits.slice(4)}` : digits;
@@ -463,6 +579,13 @@ export class ProgressSaver {
       isFinished: Boolean(isFinished),
     };
     const recordedAt = this.now();
+    if (this.inFlight && options.keepalive) {
+      // The page is closing: a queued save would never be sent, so the last position goes out
+      // now on its own keepalive request instead of waiting for the running one.
+      this.next = null;
+      const body = { ...values, clientMutationId: this.newId(), enforceRevision: true, expectedRevision: this.revision };
+      return Promise.resolve(this.send(this.mediaId, body, options)).then(() => true, () => false);
+    }
     if (this.inFlight) {
       this.next = { values, options, recordedAt };
       return this.inFlight;
@@ -518,7 +641,7 @@ export class ProgressSaver {
     if (saved && this.next && !this.stopped) {
       const queued = this.next;
       this.next = null;
-      return this.#run(queued.values, queued.options);
+      return this.#run(queued.values, queued.options, queued.recordedAt);
     }
     return saved;
   }
@@ -975,4 +1098,25 @@ export function smartRulesJson(form) {
     combination: form.matchAny ? "or" : "and",
   };
   return JSON.stringify(Object.fromEntries(Object.entries(rules).filter(([, value]) => value !== null)));
+}
+
+/** Offline answers in a row after which the change feed reports the server as off. */
+export const SYNC_OFFLINE_LIMIT = 3;
+
+/**
+ * What the change feed does after a failed request: end the session when it was refused,
+ * report the server as off after a few offline answers in a row, else wait and try again.
+ */
+export function syncFailure(error, failures, offlineInRow) {
+  if (error?.status === 401 || error?.status === 403) return { action: "sessionEnded" };
+  const delay = Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4));
+  return { action: error?.offline && offlineInRow >= SYNC_OFFLINE_LIMIT ? "offline" : "wait", delay };
+}
+
+/**
+ * Whether the server refused the browser's profile or device: 401, or 403 with a session,
+ * profile or device code (such as profile_session_revoked). Every screen and the player use it.
+ */
+export function sessionRefused(status, code) {
+  return status === 401 || (status === 403 && /session|profile|device/.test(String(code ?? "")));
 }

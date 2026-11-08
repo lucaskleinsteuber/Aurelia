@@ -101,7 +101,8 @@ public sealed class VideoSurface : Control, IDisposable
         }
         using (var buffer = bitmap.Lock())
         {
-            if (!current.Copy(buffer.Address, buffer.RowBytes)) return;
+            // False when no frame is ready or the size changed meanwhile; the next frame resizes the bitmap.
+            if (!current.Copy(buffer.Address, buffer.RowBytes, bitmap.PixelSize.Width, bitmap.PixelSize.Height)) return;
         }
         InvalidateVisual();
     }

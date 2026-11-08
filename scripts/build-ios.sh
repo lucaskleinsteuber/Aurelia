@@ -19,7 +19,12 @@ source "$repository_root/scripts/workspace-paths.sh"
 
 version=$(awk '/^MARKETING_VERSION = / {print $3}' "$repository_root/clients/ios/Configuration/BuildNumber.xcconfig")
 build_number=$(awk '/^CURRENT_PROJECT_VERSION = / {print $3}' "$repository_root/clients/ios/Configuration/BuildNumber.xcconfig")
-build_root=${AURELIA_IOS_BUILD_ROOT:-"$other_root/Build/iOS/$version-$build_number"}
+# AURELIA_TEST_EDITION=1 builds "Aurelia Test": its own app identity and data beside the real
+# app, with Reset App Data in its settings. The real app's identity and data stay untouched.
+test_edition=${AURELIA_TEST_EDITION:-0}
+edition_folder=$version-$build_number
+(( test_edition )) && edition_folder=Test-$version-$build_number
+build_root=${AURELIA_IOS_BUILD_ROOT:-"$other_root/Build/iOS/$edition_folder"}
 mkdir -p "$build_root" "$other_root/Logs"
 build_root=${build_root:A}
 
@@ -39,6 +44,10 @@ arguments=(
   "MOBILEVLCKIT_ROOT=$dependency_root"
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES GCC_TREAT_WARNINGS_AS_ERRORS=YES
 )
+if (( test_edition )); then
+  arguments+=(PRODUCT_BUNDLE_IDENTIFIER=com.lucas.aurelia.ios.test "AURELIA_DISPLAY_NAME=Aurelia Test"
+    "SWIFT_ACTIVE_COMPILATION_CONDITIONS=AURELIA_TEST_EDITION")
+fi
 if [[ -n "$device" ]]; then
   # A free development profile for this device, requested from Apple through Xcode's account.
   arguments+=(-sdk iphoneos -destination "id=$device"

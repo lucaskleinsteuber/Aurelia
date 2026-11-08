@@ -181,6 +181,98 @@ public sealed class PlaybackPreviewTests
     }
 
     [Fact]
+    public void TheScreenGetsTheNewestFinishedFrameNeverOneTheDecoderIsWriting()
+    {
+        using var frames = new VideoFrames(maximumWidth: 0);
+        var chroma = Marshal.AllocHGlobal(4);
+        var planes = Marshal.AllocHGlobal(IntPtr.Size);
+        const int width = 8, height = 4, size = width * height * 4;
+        var destination = Marshal.AllocHGlobal(size);
+        try
+        {
+            var opaque = IntPtr.Zero;
+            uint w = width, h = height, pitch = 0, lines = 0;
+            frames.Format(ref opaque, chroma, ref w, ref h, ref pitch, ref lines);
+            void Write(byte value)
+            {
+                frames.LockFrame(opaque, planes);
+                Marshal.Copy(Enumerable.Repeat(value, size).ToArray(), 0, Marshal.ReadIntPtr(planes), size);
+            }
+            byte[] Shown()
+            {
+                Assert.True(frames.Copy(destination, width * 4, width, height));
+                var pixels = new byte[size];
+                Marshal.Copy(destination, pixels, 0, size);
+                return pixels;
+            }
+            Write(1);
+            frames.Display(opaque, IntPtr.Zero);
+            Assert.All(Shown(), value => Assert.Equal(1, value));
+            Write(2);
+            frames.Display(opaque, IntPtr.Zero);
+            // The decoder already writes the next frame while the screen copies.
+            Write(3);
+            Assert.All(Shown(), value => Assert.Equal(2, value));
+            Assert.All(Shown(), value => Assert.Equal(2, value));
+            frames.Display(opaque, IntPtr.Zero);
+            Assert.All(Shown(), value => Assert.Equal(3, value));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(chroma);
+            Marshal.FreeHGlobal(planes);
+            Marshal.FreeHGlobal(destination);
+        }
+    }
+
+    [Fact]
+    public void FramesAreDecodedNoLargerThanTheScreen()
+    {
+        using var frames = new VideoFrames(maximumWidth: 1920);
+        var chroma = Marshal.AllocHGlobal(4);
+        try
+        {
+            var opaque = IntPtr.Zero;
+            uint width = 3840, height = 2160, pitch = 0, lines = 0;
+            frames.Format(ref opaque, chroma, ref width, ref height, ref pitch, ref lines);
+            Assert.Equal((1920u, 1080u), (width, height));
+            Assert.Equal(1920u * 4, pitch);
+        }
+        finally { Marshal.FreeHGlobal(chroma); }
+    }
+
+    [Fact]
+    public void AFrameOfANewSizeIsNeverCopiedIntoTheOldBitmap()
+    {
+        using var frames = new VideoFrames(maximumWidth: 0);
+        var chroma = Marshal.AllocHGlobal(4);
+        var planes = Marshal.AllocHGlobal(IntPtr.Size);
+        var destination = Marshal.AllocHGlobal(32 * 18 * 4);
+        try
+        {
+            void Frame(uint wide, uint high)
+            {
+                var opaque = IntPtr.Zero;
+                uint width = wide, height = high, pitch = 0, lines = 0;
+                frames.Format(ref opaque, chroma, ref width, ref height, ref pitch, ref lines);
+                frames.LockFrame(opaque, planes);
+                frames.Display(opaque, IntPtr.Zero);
+            }
+            Frame(32, 18);
+            Assert.True(frames.Copy(destination, 32 * 4, 32, 18));
+            // The video grows between the size check and the copy: the small bitmap is left alone.
+            Frame(64, 36);
+            Assert.False(frames.Copy(destination, 32 * 4, 32, 18));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(chroma);
+            Marshal.FreeHGlobal(planes);
+            Marshal.FreeHGlobal(destination);
+        }
+    }
+
+    [Fact]
     public void DiagnosticsAreBoundedAndExcludeUnrecognizedErrorText()
     {
         var diagnostics = new PlaybackDiagnostics(TimeProvider.System);

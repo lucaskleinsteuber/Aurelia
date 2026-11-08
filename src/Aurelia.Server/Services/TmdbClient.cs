@@ -122,7 +122,8 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             throw new MetadataException("invalid_metadata_match", "The metadata match is invalid.", StatusCodes.Status400BadRequest);
         }
 
-        var additions = mediaType == "movie" ? "credits,release_dates" : "credits,content_ratings";
+        // A series' aggregate credits hold everyone from every season; its plain credits only the latest.
+        var additions = mediaType == "movie" ? "credits,release_dates,keywords" : "aggregate_credits,content_ratings,keywords";
         using var response = await SendAsync(
             token,
             $"{mediaType}/{providerId}?language={language}&append_to_response={additions}",
@@ -138,7 +139,10 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
         var certification = mediaType == "movie"
             ? GetMovieCertification(root)
             : GetTvCertification(root);
-        var credits = ParseCredits(root.GetProperty("credits"));
+        var credits = root.TryGetProperty(mediaType == "movie" ? "credits" : "aggregate_credits", out var creditsElement)
+            && creditsElement.ValueKind == JsonValueKind.Object
+            ? ParseCredits(creditsElement)
+            : [];
         var collection = root.TryGetProperty("belongs_to_collection", out var collectionElement)
             && collectionElement.ValueKind == JsonValueKind.Object
             ? new TmdbCollectionInfo(
@@ -162,8 +166,17 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             GetString(root, "poster_path"),
             GetString(root, "backdrop_path"),
             credits,
-            collection);
+            collection,
+            GetKeywords(root));
     }
+
+    // A movie's keywords are under "keywords", a series' under "results".
+    private static List<string> GetKeywords(JsonElement root) =>
+        root.TryGetProperty("keywords", out var keywords) && keywords.ValueKind == JsonValueKind.Object
+        && (keywords.TryGetProperty("keywords", out var list) || keywords.TryGetProperty("results", out list))
+        && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Select(value => GetString(value, "name")).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToList()
+            : [];
 
     public async Task<IReadOnlyList<TmdbEpisodeMetadata>> GetEpisodesAsync(
         string token,
@@ -343,38 +356,68 @@ public sealed class TmdbClient(HttpClient client, TimeProvider? clock = null) : 
             ? values.EnumerateArray().Select(value => GetString(value, "iso_3166_1") ?? GetString(value, "name")).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToList()
             : [];
 
-    private static IReadOnlyList<TmdbCredit> ParseCredits(JsonElement credits)
+    // Everyone TMDB lists. The bounds only guard against a malformed answer; the most important
+    // crew (directing, writing, creating, music, camera, editing, producing) comes first.
+    internal const int MaxCast = 500;
+    internal const int MaxCrew = 500;
+
+    private static readonly string[] KeyJobs =
+    [
+        "Director", "Creator", "Screenplay", "Writer", "Story", "Novel", "Characters", "Teleplay",
+        "Original Music Composer", "Director of Photography", "Editor", "Producer", "Executive Producer", "Casting",
+    ];
+
+    internal static IReadOnlyList<TmdbCredit> ParseCredits(JsonElement credits)
     {
         var result = new List<TmdbCredit>();
-        if (credits.TryGetProperty("cast", out var cast))
+        if (credits.TryGetProperty("cast", out var cast) && cast.ValueKind == JsonValueKind.Array)
         {
-            result.AddRange(cast.EnumerateArray().Take(40).Select((person, index) => new TmdbCredit(
-                person.GetProperty("id").GetInt32().ToString(CultureInfo.InvariantCulture),
-                GetString(person, "name") ?? "Unknown",
-                "Acting",
-                null,
-                GetString(person, "character"),
-                index,
-                GetString(person, "profile_path"))));
+            var index = 0;
+            foreach (var person in cast.EnumerateArray())
+            {
+                if (index >= MaxCast) break;
+                if (PersonId(person) is not { } id) continue;
+                // A series' aggregate credits name each role a person played; a movie's credits one.
+                var characters = person.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array
+                    ? string.Join(" / ", roles.EnumerateArray().Select(role => GetString(role, "character")).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct())
+                    : GetString(person, "character");
+                result.Add(new TmdbCredit(id, GetString(person, "name") ?? "Unknown", "Acting", null,
+                    string.IsNullOrWhiteSpace(characters) ? null : characters, index++, GetString(person, "profile_path")));
+            }
         }
 
-        if (credits.TryGetProperty("crew", out var crew))
+        if (credits.TryGetProperty("crew", out var crew) && crew.ValueKind == JsonValueKind.Array)
         {
-            result.AddRange(crew.EnumerateArray()
-                .Where(person => GetString(person, "job") is "Director" or "Writer" or "Screenplay" or "Creator" or "Producer")
-                .Take(40)
-                .Select((person, index) => new TmdbCredit(
-                    person.GetProperty("id").GetInt32().ToString(CultureInfo.InvariantCulture),
-                    GetString(person, "name") ?? "Unknown",
-                    GetString(person, "department") ?? "Crew",
-                    GetString(person, "job"),
-                    null,
-                    100 + index,
-                    GetString(person, "profile_path"))));
+            var entries = new List<(string Id, string Name, string Department, string? Job, string? Profile, int Rank, int Position)>();
+            var position = 0;
+            foreach (var person in crew.EnumerateArray())
+            {
+                if (PersonId(person) is not { } id) continue;
+                var jobs = person.TryGetProperty("jobs", out var jobList) && jobList.ValueKind == JsonValueKind.Array
+                    ? jobList.EnumerateArray().Select(job => GetString(job, "job")).ToList()
+                    : [GetString(person, "job")];
+                foreach (var job in jobs)
+                {
+                    var rank = job is null ? -1 : Array.IndexOf(KeyJobs, job);
+                    entries.Add((id, GetString(person, "name") ?? "Unknown", GetString(person, "department") ?? "Crew", job,
+                        GetString(person, "profile_path"), rank < 0 ? KeyJobs.Length : rank, position++));
+                }
+            }
+
+            result.AddRange(entries
+                .OrderBy(entry => entry.Rank)
+                .ThenBy(entry => entry.Position)
+                .Take(MaxCrew)
+                .Select((entry, index) => new TmdbCredit(entry.Id, entry.Name, entry.Department, entry.Job, null, 100_000 + index, entry.Profile)));
         }
 
         return MetadataCreditDeduplicator.Deduplicate(result);
     }
+
+    private static string? PersonId(JsonElement person) =>
+        person.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var value)
+            ? value.ToString(CultureInfo.InvariantCulture)
+            : null;
 
     // German FSK ratings first, as the apps show them; the US rating only where TMDB has no FSK.
     private static readonly string[] CertificationCountries = ["DE", "US"];
@@ -766,7 +809,8 @@ public sealed record TmdbMetadata(
     string? PosterPath,
     string? BackdropPath,
     IReadOnlyList<TmdbCredit> Credits,
-    TmdbCollectionInfo? Collection);
+    TmdbCollectionInfo? Collection,
+    IReadOnlyList<string>? Keywords = null);
 
 public sealed record TmdbCredit(string ProviderId, string Name, string Department, string? Job, string? Character, int Order, string? ProfilePath);
 public sealed record TmdbCollectionInfo(string ProviderId, string Name, string? PosterPath);

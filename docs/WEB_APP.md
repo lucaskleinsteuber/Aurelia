@@ -24,9 +24,13 @@ Web Browser*.
 
 ## Signing in
 
-1. The browser shows an 8-digit code, valid for five minutes.
-2. In Aurelia on the Mac, the owner chooses *Enter Code from Apple TV or Browser…* and enters
-   it. The Mac shows the browser's name, such as "Safari on iPhone", before approving.
+1. On the main device, the owner creates an 8-digit code: *Settings › Profiles and Devices ›
+   Create Code* in Aurelia on a Mac or Linux computer, or `aurelia pair` on a Linux server. A
+   code works once and for five minutes.
+2. The browser asks for the code (`POST /api/v1/web/pair`); the server keeps the browser's
+   credential in an HttpOnly cookie. It appears on the main device under its name, such as
+   "Safari on iPhone". Servers before `web-pairing-code-v1` still have the browser show a
+   code that the owner enters with *Enter Code from Device…*.
 3. The browser then shows the profiles. Profiles with a PIN ask for it in a PIN field: a
    computer types it on its keyboard, a phone or tablet shows its own number keyboard. The
    field shows only the digits typed, never how long the PIN is.
@@ -40,6 +44,11 @@ The browser never holds a token that scripts can read:
   `SameSite=Strict` cookies.
 - The profile cookie ends when the browser closes. As in the apps, a profile session also
   ends after twelve hours and when the server restarts.
+- Browsers keep cookies per address, not per port. Another web service on the same computer
+  and address (for example `https://192.168.1.50:8443`) therefore receives these cookies with
+  its own requests. Scripts there still cannot read them, but that service's server can. Run
+  only services you trust next to Aurelia on the same address, or give the server its own
+  host name.
 - See [the client protocol](CLIENT_PROTOCOL.md#web-browser-sign-in) for the details.
 
 ## Watching

@@ -62,7 +62,7 @@ struct IOSBrowseQuery: Codable, Equatable, Sendable {
       yearTo.map({ (1800...3000).contains($0) }) ?? true,
       (genre?.count ?? 0) <= 100,
       yearFrom == nil || yearTo == nil || yearFrom! <= yearTo!
-    else { throw IOSCoreError.invalidResponse }
+    else { throw IOSCoreError.invalidRequest }
     var values: [URLQueryItem] = []
     if !term.isEmpty { values.append(URLQueryItem(name: "query", value: term)) }
     if let kind { values.append(URLQueryItem(name: "kind", value: kind.rawValue)) }

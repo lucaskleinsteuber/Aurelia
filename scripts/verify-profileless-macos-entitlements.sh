@@ -14,8 +14,11 @@ for entitlements in "$application_entitlements" "$helper_entitlements"; do
         com.apple.security.network.client com.apple.security.network.server]
       value = JSON.parse(STDIN.read)
       abort "Unsupported entitlement in the profileless local mode." unless (value.keys - allowed).empty?
+      expected = ENV.fetch("AURELIA_EXPECTED_APP_GROUP", "B5N7JVK37J.com.lucas.aurelia.media.host")
+      abort "Unexpected App Group." unless
+        ["B5N7JVK37J.com.lucas.aurelia.media.host", "B5N7JVK37J.com.lucas.aurelia.media.test.host"].include?(expected)
       abort "The existing team-prefixed App Group must be retained." unless
-        value["com.apple.security.application-groups"] == ["B5N7JVK37J.com.lucas.aurelia.media.host"]
+        value["com.apple.security.application-groups"] == [expected]
     '; then
     exit 1
   fi

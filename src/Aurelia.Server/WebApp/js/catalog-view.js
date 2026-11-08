@@ -34,15 +34,20 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     let revision;
     let total = 0;
     let seen = new Set();
+    let hidden = 0;
     let busy = false;
     let generation = 0;
     let request;
     let query = parameters;
-    const reset = () => { offset = 0; revision = undefined; total = 0; seen = new Set(); clear(grid); };
+    const reset = () => { offset = 0; revision = undefined; total = 0; seen = new Set(); hidden = 0; clear(grid); };
+    // Titles hidden by this browser's settings can fill whole pages; a few such pages load on
+    // their own so the grid does not look empty while matching titles follow.
+    const AUTO_PAGES = 5;
     const abort = () => request?.abort();
     signal.addEventListener("abort", abort, { once: true });
-    async function load(restart = false, nextParameters = query) {
+    async function load(restart = false, nextParameters = query, autoPages = 0) {
       if (signal.aborted || (busy && !restart)) return;
+      let again = false;
       if (restart) { request?.abort(); query = nextParameters; reset(); }
       const mine = ++generation;
       request = new AbortController();
@@ -71,8 +76,10 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
         if (!collection && revision && page.revision !== revision) throw new Error("The library changed. Reload this page before loading more.");
         revision = collection ? undefined : page.revision;
         const batchOffset = offset;
+        const before = seen.size;
         for (const item of items) {
-          if (!item?.id || seen.has(item.id) || (!collection && !showsTitle(item))) continue;
+          if (!item?.id || seen.has(item.id)) continue;
+          if (!collection && !showsTitle(item)) { hidden += 1; continue; }
           seen.add(item.id);
           grid.append(collection ? collectionCard(item, batchOffset) : posterCard(item, seen.size - 1));
         }
@@ -80,8 +87,12 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
         total = collection ? offset : page.total;
         const complete = items.length === 0 || (collection ? items.length < PAGE_SIZE : offset >= total);
         more.hidden = complete;
-        message.textContent = collection ? `${seen.size} collections${complete ? "" : " loaded"}` : `${seen.size} of ${total} titles`;
-        if (!seen.size) message.textContent = collection ? "No collections available." : "No title matches these filters.";
+        message.textContent = collection ? `${seen.size} collections${complete ? "" : " loaded"}`
+          : hidden ? `${seen.size} shown · ${hidden} hidden by this browser’s settings${complete ? "" : ` · ${offset} of ${total} checked`}`
+            : `${seen.size} of ${total} titles`;
+        if (!seen.size && complete) message.textContent = collection ? "No collections available."
+          : hidden ? `No title to show: ${hidden} hidden by this browser’s settings.` : "No title matches these filters.";
+        again = !collection && !complete && seen.size === before && autoPages < AUTO_PAGES;
         more.textContent = "Load More";
         count(collection ? seen.size : total, items);
       } catch (error) {
@@ -93,6 +104,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       } finally {
         if (mine === generation) { busy = false; more.disabled = false; }
       }
+      if (again && mine === generation && !signal.aborted) await load(false, query, autoPages + 1);
     }
     function invalidate() { request?.abort(); generation++; busy = false; more.disabled = true; }
     return { element, load, invalidate };

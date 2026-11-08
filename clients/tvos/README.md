@@ -1,7 +1,7 @@
 # Aurelia for Apple TV
 
 A native tvOS 26 client for an Aurelia server on your local network, designed
-like the Aurelia Mac app. Version 1.1.1 includes:
+like the Aurelia Mac app. Version 2.0.0 includes (installation for everyone: [docs/APPLE_TV.md](../../docs/APPLE_TV.md)):
 
 - Home with a hero, Continue Watching that resumes directly, genre shelves,
   Favorites, Collections and Recently Added
@@ -11,24 +11,27 @@ like the Aurelia Mac app. Version 1.1.1 includes:
 - Fullscreen playback with saved progress, audio and subtitle selection,
   playback speed, a sleep timer that also lets a server in sleep mode go to sleep,
   automatic next episodes and left/right skipping while the controls are hidden
-- Audio and subtitle choices remembered for each series, Night Mode for calmer
-  loud scenes and clearer dialogue, and the time the title ends
+- Audio and subtitle choices remembered for each series, Dialogue Boost and Volume
+  Leveling for clearer dialogue and calmer loud scenes, and the time the title ends
 - Scrubbing on the timeline with preview frames, prepared in memory only while
   a title plays; resuming starts directly at the saved position, and an Up Next
   card counts down to the next episode
-- Profiles in the Mac style with colored avatars, and a digits-only PIN keypad
-  that never hints at how long a PIN is
+- Profiles in the Mac style with photos or colored avatars, and a digits-only PIN
+  keypad that never hints at how long a PIN is
+- Pairing with the 8-digit code that the Mac or Linux app creates (Create Code)
+  or `aurelia pair` on a Linux server
+- Settings › About with the license texts of Aurelia and TVVLCKit and the privacy
+  policy
 - A clear "The Server Is Off" screen when the saved server does not answer: turn
   it on or open Aurelia on a Mac, and the Apple TV connects again by itself. The
   Apple TV also tries to wake the server with a Wake-on-LAN packet sent straight
-  to its last address. With a FRITZ!Box, enter a FRITZ!Box user once (on that
-  screen or in the profile menu) and the router wakes the server reliably
+  to its last address
 - Artwork kept on the Apple TV for each profile, so posters appear at once
   after the app restarts
 
 Open `AureliaTV.xcodeproj` and select the **AureliaTV** scheme. The TV client has
 its own project, bundle identifier and version; it does not share an application
-library with the Mac client. Server and user administration remain on the Mac.
+library with the Mac client. Server and user administration remain on the Mac and Linux apps.
 
 From the repository root:
 

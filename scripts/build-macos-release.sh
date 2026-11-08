@@ -10,6 +10,26 @@ provisioning_profile=${AURELIA_PROVISIONING_PROFILE:-}
 bundle_identifier=com.lucas.aurelia.media
 team_identifier=B5N7JVK37J
 distribution=${AURELIA_DISTRIBUTION:-development}
+# AURELIA_TEST_EDITION=1 builds "Aurelia Test": its own bundle identifier, App Group, Keychain entry and
+# launch agents beside the real app, no self-updates, and Reset App Data in Settings. It is signed
+# without a provisioning profile and never replaces or reads the real app's data.
+test_edition=${AURELIA_TEST_EDITION:-0}
+# One build per architecture (AURELIA_MAC_ARCH=arm64 for Apple silicon, the default, or x64 for
+# Intel Macs); each carries only its own server runtime, VLCKit and ffmpeg slice.
+mac_arch=${AURELIA_MAC_ARCH:-arm64}
+case "$mac_arch" in
+  arm64) xcode_arch=arm64; server_runtime=osx-arm64 ;;
+  x64) xcode_arch=x86_64; server_runtime=osx-x64 ;;
+  *) echo "AURELIA_MAC_ARCH must be arm64 or x64." >&2; exit 1 ;;
+esac
+app_group=$team_identifier.com.lucas.aurelia.media.host
+app_name=Aurelia
+if (( test_edition )); then
+  bundle_identifier=com.lucas.aurelia.media.test
+  app_group=$team_identifier.com.lucas.aurelia.media.test.host
+  app_name="Aurelia Test"
+  distribution=profileless-development
+fi
 timestamp_option=--timestamp=none
 if [[ "$distribution" != development && "$distribution" != profileless-development && "$distribution" != developer-id ]]; then
   echo "AURELIA_DISTRIBUTION must be development, profileless-development, or developer-id." >&2
@@ -28,8 +48,11 @@ if [[ -z "$build_number" ]]; then
   echo "Unable to read the Aurelia build number." >&2
   exit 1
 fi
-final_root=${AURELIA_CANDIDATE_OUTPUT:-"$build_parent/Build $build_number"}
-if [[ "$final_root" != "$build_parent/Build $build_number" && "$final_root" != "$build_parent/Preflight-"* ]]; then
+numbered_root="$build_parent/Build $build_number"
+(( test_edition )) && numbered_root="$build_parent/Build $build_number Test"
+[[ "$mac_arch" == x64 ]] && numbered_root="$numbered_root x64"
+final_root=${AURELIA_CANDIDATE_OUTPUT:-"$numbered_root"}
+if [[ "$final_root" != "$numbered_root" && "$final_root" != "$build_parent/Preflight-"* ]]; then
   echo "Candidate output must be the numbered build or a fresh Preflight directory under $build_parent." >&2
   exit 1
 fi
@@ -166,7 +189,7 @@ mkdir -p "$publish_root"
 "$repository_root/scripts/prepare-vlckit.sh"
 "$repository_root/scripts/verify-build-number.sh"
 
-for runtime in osx-arm64 osx-x64; do
+for runtime in $server_runtime; do
   "$dotnet_bin" restore "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
     --runtime "$runtime"
   "$dotnet_bin" publish "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
@@ -177,20 +200,35 @@ for runtime in osx-arm64 osx-x64; do
     --output "$publish_root/$runtime"
 done
 
+edition_settings=()
+if (( test_edition )); then
+  edition_settings=(AURELIA_BUNDLE_ID_BASE=$bundle_identifier "AURELIA_DISPLAY_NAME=Aurelia Test"
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS=AURELIA_TEST_EDITION)
+fi
 DEVELOPER_DIR="$developer_dir" xcodebuild -quiet \
   -project "$repository_root/clients/macos/Aurelia.xcodeproj" \
   -scheme Aurelia \
   -configuration Release \
   -destination 'generic/platform=macOS' \
   -derivedDataPath "$derived_data" \
-  ARCHS='arm64 x86_64' \
+  ARCHS="$xcode_arch" \
   ONLY_ACTIVE_ARCH=NO \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
   CODE_SIGNING_ALLOWED=NO \
+  "${edition_settings[@]}" \
   build
 
 /usr/bin/ditto "$derived_data/Build/Products/Release/Aurelia.app" "$candidate"
-for agent in com.lucas.aurelia.media.host.background com.lucas.aurelia.media.host.login; do
+if (( test_edition )); then
+  # The test edition's launch agents carry its own labels, so they never replace the real app's.
+  for kind in background login; do
+    real="$candidate/Contents/Library/LaunchAgents/com.lucas.aurelia.media.host.$kind.plist"
+    test_agent="$candidate/Contents/Library/LaunchAgents/$bundle_identifier.host.$kind.plist"
+    /bin/mv "$real" "$test_agent"
+    /usr/libexec/PlistBuddy -c "Set :Label $bundle_identifier.host.$kind" "$test_agent"
+  done
+fi
+for agent in $bundle_identifier.host.background $bundle_identifier.host.login; do
   agent_plist="$candidate/Contents/Library/LaunchAgents/$agent.plist"
   /usr/bin/plutil -lint "$agent_plist"
   agent_program=$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$agent_plist")
@@ -212,7 +250,7 @@ fi
 mkdir -p "$candidate/Contents/Resources/Server"
 mkdir -p "$candidate/Contents/Resources/ThirdPartyNotices"
 cp "$repository_root/LICENSE" "$candidate/Contents/Resources/LICENSE"
-for runtime in osx-arm64 osx-x64; do
+for runtime in $server_runtime; do
   /usr/bin/ditto "$publish_root/$runtime" "$candidate/Contents/Resources/Server/$runtime"
   assets_path=$("$dotnet_bin" msbuild "$repository_root/src/Aurelia.Server/Aurelia.Server.csproj" \
     -getProperty:ProjectAssetsFile)
@@ -225,6 +263,14 @@ done
 ffmpeg_root=$("$repository_root/scripts/build-ffmpeg-macos.sh" | tail -n 1)
 [[ -x "$ffmpeg_root/ffmpeg" && -x "$ffmpeg_root/ffprobe" ]] || { echo "The Mac ffmpeg build failed." >&2; exit 1; }
 /usr/bin/ditto "$ffmpeg_root" "$candidate/Contents/Resources/Server/ffmpeg"
+# ffmpeg and VLCKit come universal; only this build's architecture stays in the app.
+for binary in "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
+  "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit"; do
+  if [[ "$(/usr/bin/lipo -archs "$binary")" == *" "* ]]; then
+    /usr/bin/lipo "$binary" -thin "$xcode_arch" -output "$binary.thin"
+    /bin/mv "$binary.thin" "$binary"
+  fi
+done
 while IFS= read -r -d '' binary; do
   if file "$binary" | grep -q 'Mach-O'; then
     if [[ "${binary:t}" == 'Aurelia.Server' ]]; then
@@ -241,17 +287,24 @@ codesign --force --sign "$signing_identity" --options runtime "$timestamp_option
   "$candidate/Contents/Frameworks/VLCKit.framework"
 python3 "$repository_root/scripts/verify-vlc-audio-filters.py" \
   "$candidate/Contents/Frameworks/VLCKit.framework/VLCKit"
-codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
-  --entitlements "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" \
-  "$candidate/Contents/Helpers/Aurelia Server Host.app"
+helper_entitlements="$stage_root/AureliaServerHost-release.entitlements"
+cp "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements" "$helper_entitlements"
 cp "$repository_root/clients/macos/Configuration/Aurelia.entitlements" "$release_entitlements"
+if (( test_edition )); then
+  for entitlements in "$helper_entitlements" "$release_entitlements"; do
+    /usr/libexec/PlistBuddy -c "Set :com.apple.security.application-groups:0 $app_group" "$entitlements"
+  done
+fi
+codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
+  --entitlements "$helper_entitlements" \
+  "$candidate/Contents/Helpers/Aurelia Server Host.app"
 if [[ "$distribution" == profileless-development ]]; then
   # Existing Mac queries target the ordinary file-based Keychain, not the
   # restricted Data Protection access groups. The sandbox, selected-file
   # permissions, network permissions and team-prefixed App Group stay intact.
   /usr/libexec/PlistBuddy -c 'Delete :keychain-access-groups' "$release_entitlements"
-  /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
-    "$release_entitlements" "$repository_root/clients/macos/Configuration/AureliaServerHost.entitlements"
+  AURELIA_EXPECTED_APP_GROUP=$app_group /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
+    "$release_entitlements" "$helper_entitlements"
 else
 /usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $team_identifier.$bundle_identifier" \
   "$release_entitlements"
@@ -264,23 +317,23 @@ update_repository=${origin#https://github.com/}
 update_repository=${update_repository#git@github.com:}
 update_repository=${update_repository#ssh://git@github.com/}
 update_repository=${update_repository%.git}
-if [[ "$update_repository" == */* && "$update_repository" != */*/* ]]; then
+# Aurelia Test never updates itself, so it gets no repository.
+if (( ! test_edition )) && [[ "$update_repository" == */* && "$update_repository" != */*/* ]]; then
   plutil -replace AureliaUpdateRepository -string "$update_repository" "$candidate/Contents/Info.plist"
 fi
 codesign --force --sign "$signing_identity" --options runtime "$timestamp_option" \
   --entitlements "$release_entitlements" \
   "$candidate"
 codesign --verify --deep --strict --verbose=2 "$candidate"
-# The app, its helper, VLCKit and ffmpeg are universal; each server runtime has its own slice.
+# The app, its helper, VLCKit, ffmpeg and the server are built for this architecture only.
 for binary in "$candidate/Contents/MacOS/Aurelia" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit" \
-  "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe"; do
-  { /usr/bin/lipo "$binary" -verify_arch arm64 && /usr/bin/lipo "$binary" -verify_arch x86_64; } \
-    || { echo "${binary#$candidate/} is not universal." >&2; exit 1; }
+  "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
+  "$candidate/Contents/Resources/Server/$server_runtime/Aurelia.Server"; do
+  [[ "$(/usr/bin/lipo -archs "$binary")" == "$xcode_arch" ]] \
+    || { echo "${binary#$candidate/} is not built for $xcode_arch only." >&2; exit 1; }
 done
-/usr/bin/lipo "$candidate/Contents/Resources/Server/osx-arm64/Aurelia.Server" -verify_arch arm64
-/usr/bin/lipo "$candidate/Contents/Resources/Server/osx-x64/Aurelia.Server" -verify_arch x86_64
 if [[ "$distribution" == profileless-development ]]; then
   if find "$candidate" -name embedded.provisionprofile -print -quit | grep -q .; then
     echo "The signed profileless candidate unexpectedly contains a provisioning profile." >&2
@@ -291,19 +344,19 @@ if [[ "$distribution" == profileless-development ]]; then
   /usr/bin/codesign --display --entitlements - --xml \
     "$candidate/Contents/Helpers/Aurelia Server Host.app" \
     >"$stage_root/SignedHelper.entitlements" 2>/dev/null
-  /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
+  AURELIA_EXPECTED_APP_GROUP=$app_group /bin/zsh "$repository_root/scripts/verify-profileless-macos-entitlements.sh" \
     "$stage_root/SignedApplication.entitlements" "$stage_root/SignedHelper.entitlements"
 fi
 
 if [[ -e "$final_root" ]]; then
-  if [[ "$final_root" != "$other_root/Build/Build $build_number" ]]; then
+  if [[ "$final_root" != "$numbered_root" ]]; then
     echo "Refusing to replace an unexpected build directory." >&2
     exit 1
   fi
   rm -rf -- "$final_root"
 fi
 mkdir -p "$final_root"
-/usr/bin/ditto "$candidate" "$final_root/Aurelia.app"
+/usr/bin/ditto "$candidate" "$final_root/$app_name.app"
 /usr/bin/ditto "$publish_root" "$final_root/Server"
 
-echo "Build $build_number release is available at $final_root"
+echo "Build $build_number release ($mac_arch) is available at $final_root"

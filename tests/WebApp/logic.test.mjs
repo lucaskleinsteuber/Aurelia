@@ -98,6 +98,13 @@ test("pairing codes are shown in two halves with a countdown", () => {
   assert.equal(logic.countdown("2026-10-24T12:00:00Z", now), "");
 });
 
+test("a typed pairing code keeps only its eight digits", () => {
+  assert.equal(logic.pairingDigits("1234 5678"), "12345678");
+  assert.equal(logic.pairingDigits(" 12-34 56 78 9"), "12345678");
+  assert.equal(logic.pairingDigits("abc"), "");
+  assert.equal(logic.pairingDigits(undefined), "");
+});
+
 test("playback resumes from the saved position, not from a finished or barely begun one", () => {
   assert.equal(logic.resumeSeconds(null), 0);
   assert.equal(logic.resumeSeconds({ positionMilliseconds: 600_000, durationMilliseconds: 3_600_000, isCompleted: false }), 600);
@@ -342,4 +349,73 @@ test("smart list rules travel in the protocol's names and old lists still open",
   assert.equal(mac.textContains, "Alien");
   assert.equal(mac.matchAny, false);
   assert.equal(logic.readSmartRules("not json").kind, "");
+});
+
+test("a malformed percent escape in the address opens Home instead of throwing", () => {
+  assert.deepEqual(logic.parseRoute("/title/%E0%A4%A"), { name: "home" });
+  assert.deepEqual(logic.parseRoute("/%"), { name: "home" });
+});
+
+test("the change feed reports a server that stays offline and ends refused sessions", () => {
+  const offline = { status: 0, offline: true };
+  assert.equal(logic.syncFailure({ status: 401 }, 1, 0).action, "sessionEnded");
+  assert.equal(logic.syncFailure({ status: 403 }, 1, 0).action, "sessionEnded");
+  assert.equal(logic.syncFailure(offline, 1, 1).action, "wait");
+  assert.equal(logic.syncFailure(offline, 2, 2).action, "wait");
+  assert.equal(logic.syncFailure(offline, 3, logic.SYNC_OFFLINE_LIMIT).action, "offline");
+  assert.equal(logic.syncFailure({ status: 500 }, 9, 0).action, "wait");
+  assert.equal(logic.syncFailure(null, 9, 0).delay, 30_000);
+  assert.equal(logic.syncFailure(null, 1, 0).delay, 4_000);
+});
+
+test("a refused profile or device is recognised the same way everywhere", () => {
+  assert.equal(logic.sessionRefused(401, "invalid_profile_session"), true);
+  assert.equal(logic.sessionRefused(403, "profile_session_revoked"), true);
+  assert.equal(logic.sessionRefused(403, "device_session_revoked"), true);
+  assert.equal(logic.sessionRefused(403, "management_locked"), false);
+  assert.equal(logic.sessionRefused(403, undefined), false);
+  assert.equal(logic.sessionRefused(500, "profile_session_revoked"), false);
+});
+
+test("a queued position keeps its time, so a conflict on it still lets the later position win", async () => {
+  let release; const gate = new Promise((resolve) => (release = resolve));
+  const sent = []; let calls = 0;
+  const send = async (_id, body) => {
+    sent.push(body); calls += 1;
+    if (calls === 1) { await gate; return { revision: 4 }; }
+    if (calls === 2) throw Object.assign(new Error("conflict"), { status: 409, code: "playback_progress_conflict" });
+    return { revision: 10 };
+  };
+  let ids = 0;
+  const saver = new logic.ProgressSaver({ mediaId: "m", revision: 3, send, newId: () => `id-${++ids}`, now: () => Date.parse("2026-11-06T20:00:00Z"),
+    read: async () => ({ revision: 9, updatedAt: "2026-11-06T19:59:58Z" }) });
+  const first = saver.save(1000, 60_000);
+  saver.save(2000, 60_000);
+  release();
+  assert.equal(await first, true);
+  assert.equal(saver.stopped, false);
+  assert.deepEqual(sent.map((body) => [body.expectedRevision, body.positionMilliseconds]), [[3, 1000], [4, 2000], [9, 2000]]);
+});
+
+test("closing the page sends the last position at once with keepalive while a save runs", async () => {
+  let release; const gate = new Promise((resolve) => (release = resolve));
+  const sent = [];
+  const send = async (_id, body, options) => { sent.push({ ...body, keepalive: Boolean(options?.keepalive) }); if (sent.length === 1) await gate; return { revision: 5 }; };
+  let ids = 0;
+  const saver = new logic.ProgressSaver({ mediaId: "m", revision: 3, send, newId: () => `id-${++ids}` });
+  const first = saver.save(1000, 60_000);
+  await saver.save(9000, 60_000, false, { keepalive: true });
+  assert.deepEqual(sent.map((body) => [body.positionMilliseconds, body.keepalive]), [[1000, false], [9000, true]]);
+  release(); await first;
+  assert.equal(sent.length, 2, "the closing position is not sent a second time");
+});
+
+test("the weekly chart shows twelve weeks with empty ones", () => {
+  const weeks = logic.lastWeeks([{ period: "2026-W44", hours: 2 }, { period: "2026-W45", hours: 5 }], new Date(2026, 10, 8));
+  assert.equal(weeks.length, 12);
+  assert.equal(weeks[0].period, "2026-W34");
+  assert.deepEqual(weeks.slice(-2), [{ period: "2026-W44", hours: 2 }, { period: "2026-W45", hours: 5 }]);
+  assert.equal(weeks[0].hours, 0);
+  assert.equal(logic.isoWeek(new Date(2027, 0, 1)), "2026-W53");
+  assert.equal(logic.isoWeek(new Date(2026, 0, 1)), "2026-W01");
 });

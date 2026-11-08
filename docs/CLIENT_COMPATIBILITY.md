@@ -41,8 +41,22 @@ read. `GET /api/v1/health/ready` reports a coarse cached state. Component detail
 and bounded recovery history require the Owner management endpoint
 `GET /api/v1/server/status`. Readiness degradation alone must not trigger restart.
 
-## Device authorization
+## Pairing a device
 
+Every current client pairs the same way: the owner creates an eight-digit code on the main
+device (`POST /api/v1/auth/pairings`, shown under *Settings › Profiles and Devices › Create
+Code* on a Mac or Linux computer, or `aurelia pair` on a Linux server), and the new device
+redeems it with `POST /api/v1/auth/pair` and `{ "code", "deviceName" }` after the user
+confirmed the server's fingerprint. A code works once and for five minutes. The browser app
+redeems it with `POST /api/v1/web/pair` (capability `web-pairing-code-v1`), which keeps the
+credential in an HttpOnly cookie.
+
+## Device authorization (older clients)
+
+Apple TV, iPhone, iPad and browser versions from before every client asked for a code still
+use this flow, so the server keeps supporting it (`aurelia approve CODE` on a Linux server); the
+2.0 apps no longer offer *Enter Code from Device…*, because every 2.0 app types the code that the
+main device creates.
 Start with `POST /api/v1/auth/device-pairings` and a `deviceName`. Display the
 returned eight-digit `code`; keep the returned `secret` private. The request expires
 after five minutes. Use POST `/{id}/status`, `/{id}/ack`, and `/{id}/cancel` with

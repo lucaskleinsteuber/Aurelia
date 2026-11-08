@@ -4,7 +4,13 @@ enum TVCoreError: LocalizedError, Equatable, Sendable {
   case invalidAddress
   case identityMismatch
   case invalidResponse
+  /// This app refused to send a request it built itself; the server was not asked.
+  case invalidRequest
   case unsupportedServer
+  /// The server speaks a newer protocol than this app: the app needs the update, not the server.
+  case outdatedClient
+  /// The server accepts connections only from its own computer.
+  case lanAccessDisabled
   case profileRequired
   case server(status: Int, code: String?, message: String?, retryAfter: TimeInterval?)
 
@@ -29,31 +35,67 @@ enum TVCoreError: LocalizedError, Equatable, Sendable {
   var retryDelay: TimeInterval? { retryAfter }
   var isConflict: Bool { statusCode == 409 }
   var isAuthenticationFailure: Bool { statusCode == 401 || statusCode == 403 }
+  /// Only these end the profile or device session. Any other 403 refuses a single request, such as
+  /// a title this profile may not watch, and is shown where it happened.
+  var endsSession: Bool {
+    self == .identityMismatch || statusCode == 401
+      || ["profile_session_expired", "profile_session_revoked", "device_session_revoked"].contains(
+        code ?? "")
+  }
+  /// The server's own explanation, when it sent one.
+  var serverMessage: String? {
+    if case .server(_, _, let message, _) = self { return message }
+    return nil
+  }
   var errorDescription: String? {
     switch self {
     case .invalidAddress: "Enter a valid HTTPS server address."
     case .identityMismatch:
       "The server identity has changed. Confirm the server on your Mac before reconnecting."
     case .invalidResponse: "The server returned an invalid response."
+    case .invalidRequest: "Aurelia could not send this request. Check what you entered and try again."
     case .unsupportedServer: "Update Aurelia Server to 1.5.5 or later to connect this Apple TV."
+    case .lanAccessDisabled:
+      "This server accepts connections only from its own computer. Allow devices on your home network in Aurelia on your Mac."
+    case .outdatedClient: "This server is newer than Aurelia on this Apple TV. Update the app to connect."
     case .profileRequired: "Choose a profile to continue."
     case .server(_, _, let message, _): message ?? "The server request could not be completed."
     }
   }
 }
 
+/// Since iOS and tvOS 16 the system name of a device is only its kind, such as "iPhone", unless
+/// the app has a special entitlement. A short tag that stays the same for this app tells several
+/// such devices apart when the Mac approves one or Watch Together lists them.
+enum TVDeviceName {
+  static func display(systemName: String, model: String, tag: UUID?) -> String {
+    let name = systemName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard name.isEmpty || name == model, let tag else { return name.isEmpty ? model : name }
+    return "\(model) \(tag.uuidString.prefix(4))"
+  }
+}
+
 enum TVServerDate {
+  /// Every request checks the profile's expiry, so the parsers are made once. A configured
+  /// ISO8601DateFormatter is safe to use from several threads.
+  private final class Parsers: @unchecked Sendable {
+    static let shared = Parsers()
+    let fractional = ISO8601DateFormatter()
+    let whole = ISO8601DateFormatter()
+    private init() {
+      fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      whole.formatOptions = [.withInternetDateTime]
+    }
+  }
+
   static func parse(_ value: String) -> Date? {
-    let parser = ISO8601DateFormatter()
-    parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = parser.date(from: value) { return date }
-    parser.formatOptions = [.withInternetDateTime]
-    return parser.date(from: value)
+    Parsers.shared.fractional.date(from: value) ?? Parsers.shared.whole.date(from: value)
   }
 }
 
 /// A saved server that answers not at all, as when its computer sleeps, unlike one that answers with
-/// an error. An Apple TV cannot wake a server; Aurelia on a Mac can.
+/// an error. The app then tries Wake-on-LAN. A failed TLS handshake counts too: a server that is
+/// still waking up can accept the connection and drop it; a wrong key is reported as identityMismatch.
 enum TVServerReachability {
   static func isUnreachable(_ error: Error) -> Bool {
     guard let error = error as? URLError else { return false }
@@ -136,11 +178,15 @@ struct TVCapabilities: Codable, Equatable, Sendable {
   func validate() throws {
     // Marketing versions belong to different products. TV 0.1 implements the
     // versioned protocol; it must not be compared with Mac minimumClientVersion.
-    guard (1...2).contains(formatVersion),
-      Set(capabilities ?? []).isSuperset(of: ["device-authorization-v1", "library-state-v1"])
+    try TVProtocolVersion.check(formatVersion)
+    guard Set(capabilities ?? []).isSuperset(of: ["device-authorization-v1", "library-state-v1"])
     else { throw TVCoreError.unsupportedServer }
   }
   var supportsArtworkVariants: Bool { capabilities?.contains("artwork-variants-v1") == true }
+  /// Names and pictures for profiles.
+  var supportsProfilePersonalization: Bool {
+    capabilities?.contains("profile-personalization-v1") == true
+  }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
 }
@@ -149,6 +195,20 @@ struct TVUser: Codable, Equatable, Sendable {
   let id: UUID
   let username: String
   let role: String
+  /// The name everyone sees; nil shows the sign-in name.
+  var displayName: String? = nil
+  /// A built-in picture (`symbol:palette`), `photo`, or nil for the initial.
+  var pictureKey: String? = nil
+  var pictureRevision: Int64? = nil
+  /// A children's profile's highest FSK age, nil for none.
+  var ageLimit: Int? = nil
+
+  var shownName: String {
+    if let displayName, !displayName.trimmingCharacters(in: .whitespaces).isEmpty {
+      return displayName
+    }
+    return username
+  }
 }
 
 struct TVAuthentication: Codable, Equatable, Sendable {
@@ -178,20 +238,27 @@ struct TVWatchingProfile: Codable, Identifiable, Equatable, Sendable {
   let role: String
   let needsPinSetup: Bool
   let pinProtectionEnabled: Bool
+  var pictureKey: String? = nil
+  var pictureRevision: Int64 = 0
+  var ageLimit: Int? = nil
 
   init(
     id: UUID, name: String, role: String, needsPinSetup: Bool,
-    pinProtectionEnabled: Bool = true
+    pinProtectionEnabled: Bool = true, pictureKey: String? = nil, pictureRevision: Int64 = 0,
+    ageLimit: Int? = nil
   ) {
     self.id = id
     self.name = name
     self.role = role
     self.needsPinSetup = needsPinSetup
     self.pinProtectionEnabled = pinProtectionEnabled
+    self.pictureKey = pictureKey
+    self.pictureRevision = pictureRevision
+    self.ageLimit = ageLimit
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, name, role, needsPinSetup, pinProtectionEnabled
+    case id, name, role, needsPinSetup, pinProtectionEnabled, pictureKey, pictureRevision, ageLimit
   }
   init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -201,6 +268,20 @@ struct TVWatchingProfile: Codable, Identifiable, Equatable, Sendable {
     needsPinSetup = try values.decode(Bool.self, forKey: .needsPinSetup)
     pinProtectionEnabled =
       try values.decodeIfPresent(Bool.self, forKey: .pinProtectionEnabled) ?? true
+    pictureKey = try values.decodeIfPresent(String.self, forKey: .pictureKey)
+    pictureRevision = try values.decodeIfPresent(Int64.self, forKey: .pictureRevision) ?? 0
+    ageLimit = try values.decodeIfPresent(Int.self, forKey: .ageLimit)
+  }
+}
+
+/// The server protocol versions this app understands. A newer server asks for an app update,
+/// an older one for a server update.
+enum TVProtocolVersion {
+  static let supported = 1...2
+
+  static func check(_ formatVersion: Int) throws {
+    if formatVersion > supported.upperBound { throw TVCoreError.outdatedClient }
+    if formatVersion < supported.lowerBound { throw TVCoreError.unsupportedServer }
   }
 }
 
@@ -211,8 +292,9 @@ struct TVProfilePicker: Codable, Equatable, Sendable {
   let profiles: [TVWatchingProfile]
 
   func validate() throws {
-    guard (1...2).contains(formatVersion), Set(profiles.map(\.id)).count == profiles.count else {
-      throw TVCoreError.unsupportedServer
+    try TVProtocolVersion.check(formatVersion)
+    guard Set(profiles.map(\.id)).count == profiles.count else {
+      throw TVCoreError.invalidResponse
     }
   }
 }

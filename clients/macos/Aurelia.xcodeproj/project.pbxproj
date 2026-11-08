@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D30000000000000000000F02 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000F02; };
 		F15500000000000000000001 /* HostWatchdogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15500000000000000000002 /* HostWatchdogPolicy.swift */; };
 		F80000000000000000000001 = {isa = PBXBuildFile; fileRef = F80000000000000000000011; };
 		F80000000000000000000002 = {isa = PBXBuildFile; fileRef = F80000000000000000000012; };
@@ -14,6 +15,7 @@
 		D50000000000000000000001 /* VLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; };
 		D50000000000000000000002 /* VLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D50000000000000000000010 /* VLCKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000011 /* VLCKit-COPYING.txt */; };
+		D50000000000000000000031 /* CHANGELOG.md in Resources */ = {isa = PBXBuildFile; fileRef = D50000000000000000000030 /* CHANGELOG.md */; };
 		E70000000000000000000001 /* Aurelia Server Host.app in Embed Server Host */ = {isa = PBXBuildFile; fileRef = E70000000000000000000002 /* Aurelia Server Host.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		E7000000000000000000000A /* HostLaunchSecurity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7000000000000000000000B /* HostLaunchSecurity.swift */; };
 		E7000000000000000000000C /* ServerDataMigrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7000000000000000000000D /* ServerDataMigrator.swift */; };
@@ -70,6 +72,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D20000000000000000000F02 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Configuration/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		F15500000000000000000002 /* HostWatchdogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aurelia/Hosting/HostWatchdogPolicy.swift; sourceTree = "<group>"; };
 		F80000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.lucas.aurelia.media.host.background.plist; sourceTree = "<group>"; };
 		F80000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.lucas.aurelia.media.host.login.plist; sourceTree = "<group>"; };
@@ -83,6 +86,7 @@
 		C40000000000000000000003 /* BuildNumber.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = BuildNumber.xcconfig; sourceTree = "<group>"; };
 		D50000000000000000000010 /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = VLCKit.xcframework; sourceTree = "<group>"; };
 		D50000000000000000000011 /* VLCKit-COPYING.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "VLCKit-COPYING.txt"; sourceTree = "<group>"; };
+		D50000000000000000000030 /* CHANGELOG.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = CHANGELOG.md; path = ../../CHANGELOG.md; sourceTree = SOURCE_ROOT; };
 		E70000000000000000000002 /* Aurelia Server Host.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Aurelia Server Host.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E70000000000000000000005 /* AureliaServerHost-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "AureliaServerHost-Info.plist"; sourceTree = "<group>"; };
 		E7000000000000000000000B /* HostLaunchSecurity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Aurelia/Hosting/HostLaunchSecurity.swift; sourceTree = "<group>"; };
@@ -153,6 +157,7 @@
 			children = (
 				D50000000000000000000010 /* VLCKit.xcframework */,
 				D50000000000000000000011 /* VLCKit-COPYING.txt */,
+				D50000000000000000000030 /* CHANGELOG.md */,
 			);
 			path = Dependencies;
 			sourceTree = "<group>";
@@ -268,7 +273,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A40000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
+		A40000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (D30000000000000000000F02 /* PrivacyInfo.xcprivacy in Resources */, D50000000000000000000003 /* VLCKit-COPYING.txt in Resources */, D50000000000000000000031 /* CHANGELOG.md in Resources */, ); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		B4000000000000000000000A /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		E70000000000000000000009 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
@@ -368,7 +373,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Configuration/Aurelia-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
-				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AURELIA_BUNDLE_ID_BASE)";
 				PRODUCT_MODULE_NAME = Aurelia;
 				PRODUCT_NAME = "Aurelia";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -391,7 +396,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Configuration/Aurelia-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/../Frameworks");
-				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AURELIA_BUNDLE_ID_BASE)";
 				PRODUCT_MODULE_NAME = Aurelia;
 				PRODUCT_NAME = "Aurelia";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -476,7 +481,7 @@
 				EXECUTABLE_NAME = AureliaServerHost;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Configuration/AureliaServerHost-Info.plist";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.server-host;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AURELIA_BUNDLE_ID_BASE).server-host";
 				PRODUCT_MODULE_NAME = AureliaServerHost;
 				PRODUCT_NAME = "Aurelia Server Host";
 				SKIP_INSTALL = YES;
@@ -498,7 +503,7 @@
 				EXECUTABLE_NAME = AureliaServerHost;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Configuration/AureliaServerHost-Info.plist";
-				PRODUCT_BUNDLE_IDENTIFIER = com.lucas.aurelia.media.server-host;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AURELIA_BUNDLE_ID_BASE).server-host";
 				PRODUCT_MODULE_NAME = AureliaServerHost;
 				PRODUCT_NAME = "Aurelia Server Host";
 				SKIP_INSTALL = YES;

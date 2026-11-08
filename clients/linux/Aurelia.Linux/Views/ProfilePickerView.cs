@@ -31,7 +31,7 @@ public sealed class ProfilePickerView : UserControl
     private readonly Button unlock = new() { Classes = { "pinArrow" } };
     private readonly Border pinCapsule = new() { Classes = { "pinCapsule" }, Width = 280, Height = 52, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock error = new() { Foreground = new SolidColorBrush(Color.Parse("#FFA94D")), HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 420 };
-    private readonly ProgressBar loading = new() { IsIndeterminate = true, Width = 120, HorizontalAlignment = HorizontalAlignment.Center };
+    private readonly Aurelia.Linux.Controls.Spinner loading = new() { HorizontalAlignment = HorizontalAlignment.Center };
     private readonly Action? forgotOwnerPin;
     private int shownFailures;
 
@@ -193,7 +193,7 @@ public sealed class ProfilePickerView : UserControl
                 Children = { new TextBlock { Text = profile.Name, FontSize = 16, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap, MaxWidth = 130, TextAlignment = TextAlignment.Center } },
             };
             if (locked) name.Children.Add(ScreenParts.Symbol("IconLock", 11, new SolidColorBrush(Color.FromArgb(0xA6, 0xFF, 0xFF, 0xFF))).Also(l => l.VerticalAlignment = VerticalAlignment.Center));
-            var tile = new StackPanel { Spacing = 12, Children = { new ProfileAvatar(profile.Id, profile.Name, 96).Also(a => a.HorizontalAlignment = HorizontalAlignment.Center), name } };
+            var tile = new StackPanel { Spacing = 12, Children = { new ProfileAvatar(profile, 96).Also(a => a.HorizontalAlignment = HorizontalAlignment.Center), name } };
             if (!ProfilePickerModel.CanChoose(profile)) tile.Children.Add(new TextBlock { Text = "Set up PIN", Classes = { "subdued" }, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center });
             var button = new Button
             {
@@ -211,7 +211,7 @@ public sealed class ProfilePickerView : UserControl
     private void BuildPinEntry(WatchingProfile profile)
     {
         pinEntry.Tag = profile.Id;
-        var back = new Button { Classes = { "profileAvatar" }, HorizontalAlignment = HorizontalAlignment.Center, Content = new ProfileAvatar(profile.Id, profile.Name, 96) };
+        var back = new Button { Classes = { "profileAvatar" }, HorizontalAlignment = HorizontalAlignment.Center, Content = new ProfileAvatar(profile, 96) };
         AutomationProperties.SetName(back, "Choose Another Profile");
         ToolTip.SetTip(back, "Choose another profile (Esc)");
         back.Click += (_, _) => model.CancelPin();

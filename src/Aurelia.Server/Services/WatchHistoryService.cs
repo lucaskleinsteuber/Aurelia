@@ -104,6 +104,13 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         }
     }
 
+    /// <summary>A title's genres; an episode has none of its own and counts with its series'.</summary>
+    internal static IReadOnlyList<string> Genres(MediaItem item)
+    {
+        var own = MetadataPresentation.ToSummary(item).Genres;
+        return own.Count > 0 || item.Parent is null ? own : MetadataPresentation.ToSummary(item.Parent).Genres;
+    }
+
     public async Task<UserStatistics> GetStatisticsAsync(
         Guid userId,
         CancellationToken cancellationToken)
@@ -181,8 +188,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         var genreCounts = new Dictionary<string, (int Count, long Seconds)>(StringComparer.OrdinalIgnoreCase);
         foreach (var ev in events)
         {
-            var summary = MetadataPresentation.ToSummary(ev.MediaItem);
-            foreach (var genre in summary.Genres)
+            foreach (var genre in Genres(ev.MediaItem))
             {
                 if (string.IsNullOrWhiteSpace(genre)) continue;
                 if (!genreCounts.TryGetValue(genre, out var current)) current = (0, 0);
@@ -290,8 +296,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         var genreCounts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         foreach (var ev in events)
         {
-            var summary = MetadataPresentation.ToSummary(ev.MediaItem);
-            foreach (var genre in summary.Genres)
+            foreach (var genre in Genres(ev.MediaItem))
             {
                 if (string.IsNullOrWhiteSpace(genre)) continue;
                 genreCounts[genre] = genreCounts.GetValueOrDefault(genre) + ev.SecondsWatched;

@@ -49,7 +49,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         }
         catch (DBusExceptionBase error)
         {
-            throw CredentialStoreUnavailableException.NoKeyring(error);
+            throw Unavailable(error);
         }
     }
 
@@ -75,7 +75,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         }
         catch (DBusExceptionBase error)
         {
-            throw CredentialStoreUnavailableException.NoKeyring(error);
+            throw Unavailable(error);
         }
     }
 
@@ -93,9 +93,25 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
         }
         catch (DBusExceptionBase error)
         {
-            throw CredentialStoreUnavailableException.NoKeyring(error);
+            throw Unavailable(error);
         }
     }
+
+    /// <summary>
+    /// "No keyring" only when no Secret Service answers on the bus; a keyring that is there but
+    /// refused, timed out or stayed locked gets its own message, so nobody installs one again.
+    /// </summary>
+    internal static CredentialStoreUnavailableException Unavailable(Exception error) =>
+        NoKeyringErrors.Any(name => error.Message.Contains(name, StringComparison.Ordinal))
+            ? CredentialStoreUnavailableException.NoKeyring(error)
+            : CredentialStoreUnavailableException.KeyringFailed(error);
+
+    private static readonly string[] NoKeyringErrors =
+    [
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+        "org.freedesktop.DBus.Error.Spawn",
+    ];
 
     private static DBusConnection Connection() =>
         DBusConnection.Session ?? throw CredentialStoreUnavailableException.NoKeyring();

@@ -35,6 +35,44 @@ public sealed class WebAppTests
     }
 
     [Fact]
+    public async Task BrowserSignsInWithTheMainDevicesCodeOnceAndNeverReceivesAToken()
+    {
+        var clock = new WebClock();
+        using var factory = Factory(clock);
+        using var owner = factory.CreateClient();
+        var session = await ApiTestClient.SetupOwnerAsync(owner);
+        using var codeRequest = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/auth/pairings", session.Token);
+        using var codeResponse = await ApiTestClient.SendAsync(owner, codeRequest);
+        codeResponse.EnsureSuccessStatusCode();
+        var code = await ApiTestClient.ReadAsync<PairingCodeResponse>(codeResponse);
+        using var browser = Browser(factory);
+        var cookies = new CookieJar();
+
+        // Only the app's own scripts may redeem a code.
+        using (var forged = await browser.PostAsJsonAsync("/api/v1/web/pair",
+            new RedeemPairingCodeRequest(code.Code, "Forged"), ApiTestClient.JsonOptions))
+            Assert.Equal(HttpStatusCode.Forbidden, forged.StatusCode);
+
+        using (var paired = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/pair", "device",
+            new RedeemPairingCodeRequest(code.Code, "Firefox on Linux"))))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, paired.StatusCode);
+            Assert.Empty(await paired.Content.ReadAsStringAsync());
+            AssertProtected(CookieJar.Header(paired, "aurelia_device"));
+        }
+        using (var picker = await cookies.SendAsync(browser, Web(HttpMethod.Get, "/api/v1/profiles", "device")))
+            Assert.Equal(HttpStatusCode.OK, picker.StatusCode);
+
+        var other = new CookieJar();
+        using (var replay = await other.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/pair", "device",
+            new RedeemPairingCodeRequest(code.Code, "Replay"))))
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, replay.StatusCode);
+            Assert.False(other.Has("aurelia_device"));
+        }
+    }
+
+    [Fact]
     public async Task BrowserSignsInWithAnApprovedCodeAndNeverReceivesAToken()
     {
         var clock = new WebClock();
@@ -213,6 +251,13 @@ public sealed class WebAppTests
             // An <img> element: an unknown picture is missing, not a sign-in failure.
             using (var image = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, $"/api/v1/artwork/{Guid.NewGuid()}")))
                 Assert.Equal(HttpStatusCode.NotFound, image.StatusCode);
+            // The media editor shows its artwork and image drafts in <img> elements as well.
+            using (var editorImage = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, $"/api/v1/media/{mediaId}/editor/artwork/{Guid.NewGuid()}")))
+                Assert.Equal(HttpStatusCode.NotFound, editorImage.StatusCode);
+            using (var draft = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Get, $"/api/v1/media/{mediaId}/editor/uploads/{Guid.NewGuid()}")))
+                Assert.NotEqual(HttpStatusCode.Unauthorized, draft.StatusCode);
+            using (var discard = await cookies.SendAsync(browser, new HttpRequestMessage(HttpMethod.Delete, $"/api/v1/media/{mediaId}/editor/uploads/{Guid.NewGuid()}")))
+                Assert.Equal(HttpStatusCode.Unauthorized, discard.StatusCode);
             // Changing data with only the cookie is refused.
             var save = new HttpRequestMessage(HttpMethod.Put, $"/api/v1/media/{mediaId}/progress")
             {

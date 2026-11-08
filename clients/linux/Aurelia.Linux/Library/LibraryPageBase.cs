@@ -111,15 +111,18 @@ public abstract class LibraryPageBase : UserControl
     }
 
     /// <summary>A wrapping grid of cards, as the Mac's adaptive poster grid.</summary>
-    protected WrapPanel Grid(IEnumerable<Control> cards) => new WrapPanel
-    {
-        Margin = Inset(),
-        ItemSpacing = 22,
-        LineSpacing = 26,
-    }.Also(panel =>
-    {
-        foreach (var card in cards) panel.Children.Add(card);
-    });
+    /// <summary>A wrapping grid of cards; a long one makes only the cards near the view (see <see cref="LazyCards"/>).</summary>
+    protected Panel Grid<T>(IReadOnlyList<T> items, Func<T, Control> card) => items.Count > LazyCards.Threshold
+        ? new LazyCards(items.Count, index => card(items[index]), wrap: true, spacing: 22, lineSpacing: 26) { Margin = Inset() }
+        : new WrapPanel
+        {
+            Margin = Inset(),
+            ItemSpacing = 22,
+            LineSpacing = 26,
+        }.Also(panel =>
+        {
+            foreach (var each in items) panel.Children.Add(card(each));
+        });
 
-    protected Rail Shelf(string title, IEnumerable<Control> cards) => new(title, cards, Leading);
+    protected Rail Shelf<T>(string title, IReadOnlyList<T> items, Func<T, Control> card) => new(title, items.Count, index => card(items[index]), Leading);
 }

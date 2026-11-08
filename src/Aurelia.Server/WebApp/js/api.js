@@ -69,13 +69,53 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     request,
     serverInfo: () => request("/api/v1/server/info", { as: "device" }),
 
-    startPairing: (deviceName) => request("/api/v1/web/pairing", { method: "POST", body: { deviceName }, as: "device" }),
-    pairingStatus: () => request("/api/v1/web/pairing/status", { method: "POST", as: "device" }),
-    cancelPairing: () => request("/api/v1/web/pairing/cancel", { method: "POST", as: "device" }),
+    /** Signs this browser in with the code from the main device; the credential stays in a cookie. */
+    redeemPairingCode: (code, deviceName) => request("/api/v1/web/pair", { method: "POST", body: { code, deviceName }, as: "device" }),
     profiles: () => request("/api/v1/profiles", { as: "device" }),
     unlockProfile: (profileId, pin) =>
       request(`/api/v1/web/profiles/${id(profileId)}/unlock`, { method: "POST", body: pin ? { pin } : {}, as: "device" }),
     endProfile: () => request("/api/v1/web/profile/end", { method: "POST", as: "profile" }),
+    /** A profile's photo as a Blob. Images cannot send the credential header, so it is fetched. */
+    profilePhoto: async (profileId, revision) => {
+      let response;
+      try {
+        response = await fetchImpl(`/api/v1/profiles/${id(profileId)}/picture?rev=${encodeURIComponent(revision ?? 0)}`, {
+          headers: { Accept: "image/jpeg", "X-Aurelia-Web": "device" },
+          credentials: "same-origin",
+        });
+      } catch {
+        throw new ApiError(0, "offline", "The server isn’t answering.");
+      }
+      if (!response.ok) throw new ApiError(response.status, `http_${response.status}`, defaultMessage(response.status));
+      return response.blob();
+    },
+    renameProfile: (name) => request("/api/v1/profile/name", { method: "PUT", body: { name } }),
+    setPicture: (builtin) => request("/api/v1/profile/picture", { method: "PUT", body: { builtin } }),
+    /** An own photo; the server keeps a small square copy. */
+    uploadPhoto: async (file) => {
+      let response;
+      let text;
+      try {
+        response = await fetchImpl("/api/v1/profile/picture/photo", {
+          method: "PUT",
+          headers: { Accept: "application/json", "X-Aurelia-Web": "profile", "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        text = await response.text();
+      } catch {
+        throw new ApiError(0, "offline", "The server isn’t answering.");
+      }
+      let value = null;
+      try {
+        value = text ? JSON.parse(text) : null;
+      } catch {
+        value = null;
+      }
+      if (!response.ok) throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
+      return value;
+    },
     signOut: () => request("/api/v1/web/sign-out", { method: "POST", as: "device" }),
 
     home: () => request("/api/v1/home"),

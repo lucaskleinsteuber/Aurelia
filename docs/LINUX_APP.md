@@ -8,29 +8,42 @@ its tests and the remaining platform differences.
 It is written in C# (.NET 10) with the Avalonia interface toolkit, the way the Mac app is written
 in Swift with SwiftUI. Its interface code is its own; it shares only `src/Aurelia.Contracts` with
 the server, so requests and responses always use the same field names and formats. It runs on
-Linux x64. Platform specifics stay behind small adapters so the code stays portable.
+64-bit Intel/AMD (x64) and 64-bit ARM (arm64) Linux, under Wayland or X11. Platform specifics
+stay behind small adapters so the code stays portable.
 
 ## Installation
 
 Download a package from an **Aurelia for Linux** release on [GitHub](https://github.com/lucaskleinsteuber/Aurelia/releases).
-These releases use `linux-app-<version>-<build>` tags and have an independent version from the
-Mac app and standalone Linux server. For example, install version 1.0.1 (7) with the command for
-your distribution:
+These releases use `linux-app-<version>-<build>` tags. Choose the package for your distribution
+**and processor** (`uname -m` prints `x86_64` for x64 or `aarch64` for arm64):
+
+| Distribution | x64 (Intel, AMD) | arm64 (64-bit ARM) |
+| --- | --- | --- |
+| Ubuntu, Debian, Linux Mint, Pop!_OS | `Aurelia-Desktop-<v>-<b>-amd64.deb` | `Aurelia-Desktop-<v>-<b>-arm64.deb` |
+| Fedora, openSUSE | `Aurelia-Desktop-<v>-<b>-x86_64.rpm` | `Aurelia-Desktop-<v>-<b>-aarch64.rpm` |
+| Arch, CachyOS, Manjaro, EndeavourOS | `Aurelia-Desktop-<v>-<b>-x86_64.pkg.tar.zst` | `Aurelia-Desktop-<v>-<b>-aarch64.pkg.tar.zst` |
+| Any distribution with Flatpak | `Aurelia-Desktop-<v>-<b>-x86_64.flatpak` | not available; use the native package |
+
+For example, version 2.0.0 (25) on x64:
 
 ```bash
 # Ubuntu / Debian
-sudo apt install ./Aurelia-Desktop-1.0.1-7-amd64.deb
+sudo apt install ./Aurelia-Desktop-2.0.0-25-amd64.deb
 # Fedora
-sudo dnf install ./Aurelia-Desktop-1.0.1-7-x86_64.rpm
+sudo dnf install ./Aurelia-Desktop-2.0.0-25-x86_64.rpm
 # Arch / CachyOS
-sudo pacman -U ./Aurelia-Desktop-1.0.1-7-x86_64.pkg.tar.zst
+sudo pacman -U ./Aurelia-Desktop-2.0.0-25-x86_64.pkg.tar.zst
 # Flatpak, per-user installation
-flatpak install --user ./Aurelia-Desktop-1.0.1-7-x86_64.flatpak
+flatpak install --user ./Aurelia-Desktop-2.0.0-25-x86_64.flatpak
 flatpak run io.github.lucasfd3.Aurelia
 ```
 
+The arm64 packages are built from the same source as the x64 ones, but only the x64 packages are
+run in the automated install checks.
+
 Open **Aurelia** from the application launcher. Choose **Set Up This PC** to host a library here,
-or **Connect to an Existing Server** and enter a pairing code from your host's device settings.
+or **Connect to an Existing Server** and type the code from *Create Code* on the server's computer
+(or `aurelia pair` on a Linux server).
 Native packages use the distribution's VLC libraries; installing `ffmpeg` is recommended when
 hosting here, for browser conversion and server-generated scrub previews.
 
@@ -167,14 +180,16 @@ keyboard shortcuts.
 Settings → Updates checks the stable Linux app releases on GitHub, independently of the Mac/server
 versions (`linux-app-<version>-<build>` tags). With **Beta updates** on, it also offers betas (GitHub
 pre-releases, published with `scripts/publish-release.sh --beta --linux-app`); turning it off keeps
-the installed beta until a newer stable release arrives. It chooses the package for the installed format,
+the installed beta until a newer stable release arrives. It chooses the package for the installed format
+and the computer's processor (x64 or arm64; Flatpak updates are x64 only),
 requires a higher build and a version that does not go backwards, and downloads only complete
 release assets from this repository. Daily checks can be turned off; Check for Updates always
 works manually. The release feed is public and read without any GitHub account or token; server
 credentials are never sent with update requests.
 
-Download & Install asks first, checks the package size and the exact SHA-256 from the release's
-`SHA256SUMS`, and only then stops playback and this PC's server. Native packages use `pkexec` with
+Download & Install asks first, checks the owner's minisign signature of the release's
+`SHA256SUMS` (see `LINUX_UPDATE_SIGNING.md`), then the package size and its exact SHA-256 from that
+list, and only then stops playback and this PC's server. Native packages use `pkexec` with
 `apt-get`, `dnf`/`zypper` or `pacman`; the desktop shows the administrator prompt. Flatpak uses the
 host's per-user Flatpak installation. A cancelled or failed install can be retried; a stopped
 host is started again on failure. After success, Quit Aurelia closes even a background host, so
@@ -347,10 +362,12 @@ restores, checks formatting, builds Release with warnings as errors and runs all
 scripts/build-linux-app.sh
 ```
 
-runs the tests, publishes the app self-contained for `linux-x64` and lays it out as installed:
+runs the tests, publishes the app self-contained for `linux-x64` and `linux-arm64`
+(`AURELIA_LINUX_ARCHES` may choose one) and lays each out as installed:
 `/usr/lib/aurelia-desktop`, the `aurelia-desktop` command (the server package owns `aurelia`),
 the desktop entry and AppStream metadata `io.github.lucasfd3.Aurelia`, the icon and the
-third-party notices. `scripts/package-linux-app.sh` then makes the packages on Linux:
+third-party notices. `scripts/package-linux-app.sh` then makes the packages on Linux, for arm64
+from the prebuilt arm64 tree on the same x64 computer (deb, rpm and Arch; no Flatpak):
 
 | File | Distributions |
 | --- | --- |

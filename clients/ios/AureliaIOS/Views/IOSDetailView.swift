@@ -72,6 +72,7 @@ struct IOSDetailView: View {
       )
     }
     .onChange(of: model.session?.sessionId) { _, _ in playing = nil }
+    .onChange(of: model.remoteStopRequests) { _, _ in playing = nil }
     .fullScreenCover(
       item: $playing, onDismiss: playerDismissed,
       content: { request in
@@ -244,7 +245,7 @@ struct IOSDetailView: View {
     return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min left" : "\(minutes) min left"
   }
 
-  /// The season picker above the season's episodes as a list, like the Apple TV app on iPhone.
+  /// The season picker above the season's episodes as a row of wide cards, as on the Mac.
   private var episodes: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack {
@@ -272,28 +273,28 @@ struct IOSDetailView: View {
         }
       }
       .padding(.horizontal, IOSDesign.margin)
-      LazyVStack(spacing: 0) {
+      IOSShelf {
         ForEach(season?.episodes ?? [], id: \.item.id) { value in
           let episode = model.overlay(value.item)
           Button {
             launchTask?.cancel()
             launchTask = Task { await openEpisode(episode) }
           } label: {
-            IOSEpisodeRow(item: episode, isNext: episode.id == plan?.target?.id)
+            IOSWideCard(
+              item: episode, eyebrow: episode.episodeNumber.map { "EPISODE \($0)" } ?? "EPISODE",
+              highlighted: episode.id == plan?.target?.id)
           }
           .buttonStyle(IOSContentButtonStyle())
           .contextMenu { IOSMediaContextActions(item: episode, actions: actions) }
           .disabled(launching)
           .accessibilityIdentifier("detail-episode-\(episode.id)")
-          if episode.id != season?.episodes.last?.item.id {
-            Divider().overlay(.white.opacity(0.08)).padding(.leading, IOSDesign.margin)
-          }
         }
       }
     }
   }
 
-  /// Trailers and Extras as wide shelves; each card plays its supplement.
+  /// Trailers and Extras as a row of wide cards like the episodes, as on the Mac; each one plays
+  /// its supplement.
   @ViewBuilder
   private func supplementRails(_ supplements: [IOSSupplement], prefix: String) -> some View {
     ForEach(IOSDetailPresentation.supplementGroups(supplements), id: \.title) { group in
@@ -305,7 +306,7 @@ struct IOSDetailView: View {
             Button {
               playSupplement(value)
             } label: {
-              IOSSupplementCard(item: value, category: supplement.category)
+              IOSWideCard(item: value, eyebrow: supplement.category.uppercased(), highlighted: false)
             }.buttonStyle(IOSContentButtonStyle()).disabled(launching)
               .accessibilityIdentifier("supplement-\(value.id)")
           }
@@ -522,63 +523,44 @@ struct IOSDetailView: View {
   }
 }
 
-/// One episode as a list row: its still with progress, number and title, and a short summary.
-private struct IOSEpisodeRow: View {
+/// A wide card with the title over its picture, as on the Mac: an episode with its number, title,
+/// description and year, or a trailer or extra with its kind.
+private struct IOSWideCard: View {
   let item: IOSCatalogItem
-  let isNext: Bool
+  let eyebrow: String
+  let highlighted: Bool
+  private var width: CGFloat { IOSDesign.isPad ? 420 : 300 }
+
   var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 320, symbol: "play.rectangle")
-        .frame(width: IOSDesign.isPad ? 200 : 136, height: (IOSDesign.isPad ? 200 : 136) * 9 / 16)
-        .overlay(alignment: .bottom) {
-          if let fraction = item.progressFraction {
-            IOSProgressBar(fraction: fraction).padding(.horizontal, 6).padding(.bottom, 6)
-          }
-        }
-        .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(4) }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    ZStack(alignment: .bottomLeading) {
+      IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 840, symbol: "play.rectangle")
+        .frame(width: width, height: width * 9 / 16)
+      LinearGradient(
+        colors: [.clear, .black.opacity(0.35), .black.opacity(0.85)], startPoint: .top,
+        endPoint: .bottom)
       VStack(alignment: .leading, spacing: 3) {
-        Text(item.episodeLabel ?? "Episode").font(.caption.weight(.semibold))
-          .foregroundStyle(isNext ? Color.accentColor : .secondary)
-        Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-          .multilineTextAlignment(.leading)
-        if let message = item.availabilityMessage {
-          Text(message).font(.caption.weight(.semibold)).foregroundStyle(.orange).lineLimit(2)
-        } else if let overview = item.overview {
-          Text(overview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        Text(item.availabilityMessage ?? eyebrow).font(.caption2.weight(.bold)).tracking(0.6)
+          .foregroundStyle(
+            item.availabilityMessage != nil ? Color.orange : highlighted ? Color.accentColor : .white.opacity(0.85)
+          )
+          .lineLimit(1)
+        Text(item.title).font(.subheadline.weight(.bold)).foregroundStyle(.white).lineLimit(1)
+        if let overview = item.overview, !overview.isEmpty {
+          Text(overview).font(.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(2)
             .multilineTextAlignment(.leading)
         }
+        if let year = item.year {
+          Text(String(year)).font(.caption2).foregroundStyle(.white.opacity(0.7))
+        }
+        if let fraction = item.progressFraction {
+          IOSProgressBar(fraction: fraction).padding(.top, 4)
+        }
       }
-      Spacer(minLength: 0)
+      .padding(12)
     }
-    .padding(.horizontal, IOSDesign.margin).padding(.vertical, 10)
-    .contentShape(Rectangle())
-    .opacity(item.isPlayable ? 1 : 0.55)
-  }
-}
-
-/// A wide card for trailers and extras with a play glyph over the artwork.
-private struct IOSSupplementCard: View {
-  let item: IOSCatalogItem
-  let category: String
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      ZStack {
-        IOSArtworkView(artwork: item.backdrop ?? item.poster, width: 640, symbol: "film.stack")
-        Image(systemName: "play.fill").font(.callout.weight(.bold))
-          .frame(width: 36, height: 36).background(.ultraThinMaterial, in: Circle())
-      }
-      .frame(
-        width: IOSDesign.landscapeWidth * 0.85, height: IOSDesign.landscapeWidth * 0.85 * 9 / 16
-      )
-      .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(5) }
-      .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
-      Text(item.title).font(.footnote.weight(.semibold)).lineLimit(1)
-      Text(item.availabilityMessage ?? category).font(.caption)
-        .foregroundStyle(item.availabilityMessage == nil ? Color.secondary : Color.orange)
-        .lineLimit(1)
-    }
-    .frame(width: IOSDesign.landscapeWidth * 0.85, alignment: .leading)
+    .frame(width: width, height: width * 9 / 16)
+    .overlay(alignment: .topTrailing) { IOSItemBadges(item: item).padding(6) }
+    .clipShape(RoundedRectangle(cornerRadius: IOSDesign.cardRadius, style: .continuous))
     .opacity(item.isPlayable ? 1 : 0.55)
   }
 }

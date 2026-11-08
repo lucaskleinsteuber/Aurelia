@@ -12,6 +12,8 @@ struct SyncTransportTests {
     #expect(rate.isRetryableTransient)
     let denied = APIClient.responseError(status: 401, retryAfter: nil, data: Data())
     #expect(denied.isAuthenticationFailure)
+    let forbidden = APIClient.responseError(status: 403, retryAfter: nil, data: Data())
+    #expect(forbidden.errorDescription?.contains("did not allow") == true)
     let conflict = APIClient.responseError(
       status: 409, retryAfter: nil,
       data: Data(#"{"code":"catalog_changed","message":"Reload the library."}"#.utf8))

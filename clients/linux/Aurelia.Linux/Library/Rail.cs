@@ -16,13 +16,22 @@ namespace Aurelia.Linux.Library;
 public sealed class Rail : Panel
 {
     private readonly ScrollViewer scroller;
-    private readonly StackPanel row = new() { Orientation = Orientation.Horizontal, Spacing = 20 };
+    private const double Spacing = 20;
+    private readonly Panel row;
     private readonly Button previous;
     private readonly Button next;
 
-    public Rail(string title, IEnumerable<Control> cards, double leadingInset)
+    /// <summary>A rail of <paramref name="count"/> cards; beyond <see cref="LazyCards.Threshold"/> only those near the view are made.</summary>
+    public Rail(string title, int count, Func<int, Control> card, double leadingInset)
     {
-        foreach (var card in cards) row.Children.Add(card);
+        if (count > LazyCards.Threshold) row = new LazyCards(count, card, wrap: false, Spacing);
+        else
+        {
+            var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Spacing };
+            for (var index = 0; index < count; index++) stack.Children.Add(card(index));
+            row = stack;
+        }
+        Count = count;
         row.Margin = new Thickness(leadingInset, 6, 32, 10);
         scroller = new ScrollViewer
         {
@@ -52,15 +61,16 @@ public sealed class Rail : Panel
         UpdateArrows(visible: false);
     }
 
-    public int Count => row.Children.Count;
+    public int Count { get; }
 
     public double Offset => scroller.Offset.X;
 
     /// <summary>Scrolls by the visible width, rounded down to whole cards.</summary>
     public void Page(bool forward)
     {
-        var card = row.Children.FirstOrDefault()?.Bounds.Width ?? 200;
-        var step = card + row.Spacing;
+        var card = row is LazyCards lazy ? lazy.ItemSize.Width : row.Children.FirstOrDefault()?.Bounds.Width ?? 200;
+        if (card <= 0) card = 200;
+        var step = card + Spacing;
         var visible = Math.Max(step, scroller.Viewport.Width - 64);
         var cards = Math.Max(1, Math.Floor(visible / step));
         var target = scroller.Offset.X + (forward ? cards * step : -cards * step);

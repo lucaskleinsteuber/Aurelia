@@ -21,10 +21,12 @@ if args.candidate:
         parser.error("Expected a published product for the candidate.")
     if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
         parser.error("Expected a MAJOR.MINOR.PATCH version.")
-    if not build.isdecimal() or int(build) <= row["build"]:
-        parser.error(f"{product} needs a build newer than {row['build']}.")
-    if tuple(map(int, version.split("."))) <= tuple(map(int, row["version"].split("."))):
-        parser.error(f"{product} needs a version newer than {row['version']}.")
+    # The release being published may already be recorded (it is stable from the start); it may
+    # never be older than the recorded one.
+    if not build.isdecimal() or int(build) < row["build"]:
+        parser.error(f"{product} needs at least build {row['build']}.")
+    if tuple(map(int, version.split("."))) < tuple(map(int, row["version"].split("."))):
+        parser.error(f"{product} needs at least version {row['version']}.")
     row.update(version=version, build=int(build), tag=tag)
 
 base = f"https://github.com/{args.repository}"

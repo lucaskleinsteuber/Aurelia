@@ -218,7 +218,7 @@ struct ConnectionView: View {
           .textFieldStyle(.roundedBorder)
           .accessibilityIdentifier("pairing-code")
         Text(
-          "Create one on the server: Aurelia Settings on a Mac server, or aurelia pair on a Linux server."
+          "The server shows it, you type it here. On the Mac that runs the server, open Settings › Profiles and Devices › Another Mac or Linux Computer and click Create Code; on a Linux server, run aurelia pair."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

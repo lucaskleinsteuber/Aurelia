@@ -13,10 +13,15 @@ ssh_options=(-o BatchMode=yes)
 [ -z "${AURELIA_LINUX_PACKAGE_SSH_CONFIG:-}" ] || ssh_options+=(-F "$AURELIA_LINUX_PACKAGE_SSH_CONFIG")
 
 manager=$(ssh "${ssh_options[@]}" "$host" 'bash -c "for m in pacman apt-get dnf zypper; do command -v \$m >/dev/null && { echo \$m; exit; }; done"')
+# The package for the remote computer's processor: x86_64/amd64 or aarch64/arm64.
+case "$(ssh "${ssh_options[@]}" "$host" uname -m)" in
+  aarch64 | arm64) arch=aarch64; deb_arch=arm64 ;;
+  *) arch=x86_64; deb_arch=amd64 ;;
+esac
 case "$manager" in
-  pacman) package=$(ls "$folder"/*.pkg.tar.zst) ;;
-  apt-get) package=$(ls "$folder"/*.deb) ;;
-  dnf | zypper) package=$(ls "$folder"/*.rpm) ;;
+  pacman) package=$(ls "$folder"/*-"$arch".pkg.tar.zst) ;;
+  apt-get) package=$(ls "$folder"/*-"$deb_arch".deb) ;;
+  dnf | zypper) package=$(ls "$folder"/*-"$arch".rpm) ;;
   *) echo "No supported package manager on $host." >&2; exit 1 ;;
 esac
 remote="/tmp/${package##*/}"

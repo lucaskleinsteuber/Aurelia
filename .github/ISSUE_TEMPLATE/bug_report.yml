@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in Aurelia does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please **do not** post security problems here; follow the [security policy](https://github.com/lucaskleinsteuber/Aurelia/security/policy) instead. Leave out passwords, pairing codes, tokens, personal media paths and other private information.
+  - type: dropdown
+    id: product
+    attributes:
+      label: Which app or part?
+      multiple: true
+      options:
+        - Aurelia for Mac
+        - Aurelia for Linux (desktop app)
+        - Aurelia Server on Linux
+        - Aurelia Server with Docker
+        - Aurelia for Apple TV
+        - Aurelia for iPhone or iPad
+        - Aurelia in a web browser
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings › About shows it, for example "2.0.0 (153)". On a Linux server, run `aurelia status`.
+      placeholder: "App 2.0.0 (153), server 2.0.0 (148)"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Operating system, its version and the processor.
+      placeholder: "macOS 26.1 on Apple silicon / Ubuntu 26.04 x64 / tvOS 26"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Choose …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+      description: A screenshot or a short log excerpt helps. Remove private information first.
+    validations:
+      required: true

@@ -228,7 +228,7 @@ public sealed class ManagementScreenTests
         Assert.True(Shows(page, "Living Room Apple TV"));
         Assert.Contains(All<Button>(page), b => AutomationProperties.GetName(b) == "Delete Profile Mia");
         Assert.DoesNotContain(All<Button>(page), b => AutomationProperties.GetName(b) == "Delete Profile Lucas");
-        Click(NamedButton(page, "Pair a Computer"));
+        Click(NamedButton(page, "Create Code"));
         Assert.True(Shows(page, "Valid for"));
         Assert.Contains(All<SelectableTextBlock>(page), t => t.Text == "48151623");
         Snapshot(settings, "settings-profiles-devices");
@@ -238,6 +238,60 @@ public sealed class ManagementScreenTests
         Assert.True(Shows(editor, "1 selected"));
         Snapshot(settings, "profile-editor");
         Assert.Contains("GET /api/v1/users/" + ProfileId + "/profile", server.Requests);
+    }
+
+    [AvaloniaFact]
+    public void ChildrensProfilesAreLimitedByAgeWithExceptions()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var info = $$"""
+            {"serverId":"{{FakeServer.ServerId}}","name":"Living Room Server","version":"1.32.2","isSetup":true,"lanAccessEnabled":true,"lanHttpsPort":43111,
+             "publicKeyFingerprint":"{{FakeServer.Fingerprint}}","displayFingerprint":"A1B2-C3D4-E5F6-0718-293A-4B5C",
+             "capabilities":["library-state-v1","profile-personalization-v1","age-limits-v1"],"wakeOnLanAddresses":[]}
+            """;
+        var created = new UserSummary(Guid.NewGuid(), "Ben", UserRole.User, now, ProfileAccessMode.EntireLibrary, false, false, 1, "Ben", "star:blue", 1, 0);
+        var server = Server()
+            .Replace("GET", "/api/v1/server/info", info)
+            .Answer("POST", "/api/v1/users", Json(created))
+            .Answer("GET", $"/api/v1/users/{ProfileId}/age-limit", Json(new ProfileAgeLimitResponse(12, [FakeLibrary.MovieA], [], 3)))
+            .Answer("PUT", $"/api/v1/users/{ProfileId}/profile", Json(new ProfileEditorResponse(new UserSummary(ProfileId, "Mia", UserRole.User, now), true,
+                new ProfileTitleAccessResponse(ProfileAccessMode.EntireLibrary, [], 4), 4)))
+            .Answer("PUT", $"/api/v1/users/{ProfileId}/name", Json(new UserSummary(ProfileId, "Mia", UserRole.User, now, DisplayName: "Mimi")))
+            .Answer("PUT", $"/api/v1/users/{ProfileId}/age-limit", Json(new ProfileAgeLimitResponse(16, [FakeLibrary.MovieA], [], 5)));
+        var (_, settings, _) = Open(SettingsCategory.ProfilesAndDevices, server);
+        var page = settings.Page!;
+        FakeLibrary.Pump(() => Shows(page, "Mia"), rounds: 40);
+
+        Click(NamedButton(page, "Create Profile…"));
+        var editor = Assert.IsType<ProfileEditorSheet>(Sheet(settings));
+        All<TextBox>(editor).Single(t => AutomationProperties.GetName(t) == "Name").Text = "Ben";
+        All<ToggleSwitch>(editor).Single(t => AutomationProperties.GetName(t) == "Children's Profile").IsChecked = true;
+        FakeLibrary.Pump(() => false, rounds: 5);
+        Assert.True(Shows(editor, "A children's profile can watch the whole library, limited by its age."));
+        All<ComboBox>(editor).First(c => AutomationProperties.GetName(c) == "Age").SelectedIndex = 0;
+        Click(All<Button>(editor).First(b => AutomationProperties.GetName(b) == "Picture star"));
+        Snapshot(settings, "profile-editor-child");
+        All<ToggleSwitch>(editor).Single(t => AutomationProperties.GetName(t) == "Require a Profile PIN").IsChecked = false;
+        Click(All<Button>(editor).Single(b => b.Content as string == "Create Profile"));
+        var body = server.Bodies["POST /api/v1/users"];
+        Assert.Contains("\"ageLimit\":0", body, StringComparison.Ordinal);
+        Assert.Contains("\"accessMode\":\"entireLibrary\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"pictureKey\":\"star:", body, StringComparison.Ordinal);
+        Assert.DoesNotContain($"PUT /api/v1/users/{created.Id}/age-limit", server.Requests);
+
+        Click(NamedButton(page, "Edit Profile Mia"));
+        editor = Assert.IsType<ProfileEditorSheet>(Sheet(settings));
+        Assert.Contains($"GET /api/v1/users/{ProfileId}/age-limit", server.Requests);
+        Assert.True(All<ToggleSwitch>(editor).Single(t => AutomationProperties.GetName(t) == "Children's Profile").IsChecked);
+        Assert.True(Shows(editor, "Quiet Orbit"));
+        All<ComboBox>(editor).First(c => AutomationProperties.GetName(c) == "Age").SelectedIndex = 3;
+        All<TextBox>(editor).Single(t => AutomationProperties.GetName(t) == "Name").Text = "Mimi";
+        Click(All<Button>(editor).Single(b => b.Content as string == "Save"));
+        Assert.Contains("Mimi", server.Bodies[$"PUT /api/v1/users/{ProfileId}/name"], StringComparison.Ordinal);
+        var limit = server.Bodies[$"PUT /api/v1/users/{ProfileId}/age-limit"];
+        Assert.Contains("\"ageLimit\":16", limit, StringComparison.Ordinal);
+        Assert.Contains(FakeLibrary.MovieA.ToString(), limit, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"accessMode\":\"selectedTitles\"", server.Bodies[$"PUT /api/v1/users/{ProfileId}/profile"], StringComparison.Ordinal);
     }
 
     [AvaloniaFact]

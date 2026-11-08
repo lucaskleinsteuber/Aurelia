@@ -133,6 +133,11 @@ actor TVArtworkPipeline {
     interest.removeAll()
     cache.removeAllObjects()
   }
+  /// Forgets all artwork, in memory and on disk.
+  func removeStored() {
+    clear()
+    diskCache?.removeAll()
+  }
   private func acquire() async {
     if active < 6 {
       active += 1

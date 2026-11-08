@@ -33,7 +33,7 @@ struct AppUpdateLogicTests {
 
   @Test func betaChannelPicksTheHighestMacBuildIncludingPreReleases() throws {
     func object(_ tag: String, prerelease: Bool, draft: Bool = false) throws -> Any {
-      let name = "Aurelia-\(tag)-macOS-universal.dmg"
+      let name = "Aurelia-\(tag)-macOS-arm64.dmg"
       var release = try #require(
         JSONSerialization.jsonObject(with: releaseData(tag: tag, imageName: name))
           as? [String: Any])
@@ -158,9 +158,9 @@ struct AppUpdateLogicTests {
     let hash = String(repeating: "ab", count: 32)
     let sums = """
       \(String(repeating: "0", count: 64))  ./Aurelia-Server-1.12.1-99-linux-x64.tar.gz
-      \(hash.uppercased())  ./Aurelia-1.12.1-99-macOS-universal.dmg
+      \(hash.uppercased())  ./Aurelia-1.12.1-99-macOS-arm64.dmg
       """
-    #expect(AppUpdateLogic.checksum(for: "Aurelia-1.12.1-99-macOS-universal.dmg", in: sums) == hash)
+    #expect(AppUpdateLogic.checksum(for: "Aurelia-1.12.1-99-macOS-arm64.dmg", in: sums) == hash)
     #expect(AppUpdateLogic.checksum(for: "Missing.dmg", in: sums) == nil)
   }
 
@@ -168,8 +168,8 @@ struct AppUpdateLogicTests {
   func assetsUseTheAPIAddressThatWorksForPrivateRepositoriesToo() throws {
     let both = """
       {"tag_name":"1.25.1-116","assets":[
-        {"name":"Aurelia-1.25.1-116-macOS-universal.dmg","url":"https://api.github.com/repos/owner/repo/releases/assets/7",
-         "browser_download_url":"https://github.com/owner/repo/releases/download/1.25.1-116/Aurelia-1.25.1-116-macOS-universal.dmg"},
+        {"name":"Aurelia-1.25.1-116-macOS-arm64.dmg","url":"https://api.github.com/repos/owner/repo/releases/assets/7",
+         "browser_download_url":"https://github.com/owner/repo/releases/download/1.25.1-116/Aurelia-1.25.1-116-macOS-arm64.dmg"},
         {"name":"SHA256SUMS","url":"https://api.github.com/repos/owner/repo/releases/assets/8",
          "browser_download_url":"https://github.com/owner/repo/releases/download/1.25.1-116/SHA256SUMS"}]}
       """
@@ -190,7 +190,7 @@ struct AppUpdateLogicTests {
     let release = """
       {"tag_name":"1.13.0-100","draft":false,"html_url":"https://github.com/owner/repo/releases/tag/1.13.0-100",
        "assets":[
-        {"name":"Aurelia-1.13.0-100-macOS-universal.dmg","url":"https://api.github.com/repos/owner/repo/releases/assets/1"},
+        {"name":"Aurelia-1.13.0-100-macOS-arm64.dmg","url":"https://api.github.com/repos/owner/repo/releases/assets/1"},
         {"name":"SHA256SUMS","url":"https://api.github.com/repos/owner/repo/releases/assets/2"}]}
       """
     let parsed = try #require(AppUpdateLogic.release(fromLatest: Data(release.utf8)))
@@ -198,7 +198,7 @@ struct AppUpdateLogicTests {
     #expect(parsed.build == 100)
     #expect(parsed.diskImageURL.absoluteString.hasSuffix("/assets/1"))
     #expect(parsed.checksumsURL.absoluteString.hasSuffix("/assets/2"))
-    let withoutImage = release.replacingOccurrences(of: "macOS-universal.dmg", with: "other.dmg")
+    let withoutImage = release.replacingOccurrences(of: "macOS-arm64.dmg", with: "other.dmg")
     #expect(AppUpdateLogic.release(fromLatest: Data(withoutImage.utf8)) == nil)
     #expect(AppUpdateLogic.isRepository("lucasfd3/Aurelia"))
     #expect(!AppUpdateLogic.isRepository("https://github.com/x/y"))
@@ -566,7 +566,7 @@ struct AppUpdateLogicTests {
   }
 
   private func releaseData(
-    tag: String = "1.13.0-100", imageName: String = "Aurelia-1.13.0-100-macOS-universal.dmg",
+    tag: String = "1.13.0-100", imageName: String = "Aurelia-1.13.0-100-macOS-arm64.dmg",
     checksumName: String = "SHA256SUMS",
     imageURL: String = "https://api.github.com/repos/owner/repo/releases/assets/1",
     notes: Any? = nil, imageSize: Any? = nil, repository: String = "owner/repo"
@@ -591,7 +591,7 @@ struct AppUpdateLogicTests {
 
   private func checksums() -> Data {
     Data(
-      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  Aurelia-1.13.0-100-macOS-universal.dmg\n"
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  Aurelia-1.13.0-100-macOS-arm64.dmg\n"
         .utf8)
   }
 
@@ -762,7 +762,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         "html_url": "https://github.com/owner/repo/releases/tag/1.19.0-109",
         "assets": [
           {
-            "name": "Aurelia-1.19.0-109-macOS-universal.dmg",
+            "name": "Aurelia-1.19.0-109-macOS-arm64.dmg",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/101",
             "size": \(syntheticDmgData.count)
           },
@@ -773,7 +773,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         ]
       }
       """
-    let sumsText = "\(syntheticDigest)  Aurelia-1.19.0-109-macOS-universal.dmg\n"
+    let sumsText = "\(syntheticDigest)  Aurelia-1.19.0-109-macOS-arm64.dmg\n"
 
     FakeGitHubURLProtocol.configure { req in
       let path = req.url?.path ?? ""
@@ -863,7 +863,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         "draft": false,
         "assets": [
           {
-            "name": "Aurelia-1.19.0-109-macOS-universal.dmg",
+            "name": "Aurelia-1.19.0-109-macOS-arm64.dmg",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/201"
           },
           {
@@ -873,7 +873,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         ]
       }
       """
-    let sumsText = "\(legitimateDigest)  Aurelia-1.19.0-109-macOS-universal.dmg\n"
+    let sumsText = "\(legitimateDigest)  Aurelia-1.19.0-109-macOS-arm64.dmg\n"
 
     FakeGitHubURLProtocol.configure { req in
       let path = req.url?.path ?? ""
@@ -930,7 +930,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         "draft": false,
         "assets": [
           {
-            "name": "Aurelia-1.19.0-109-macOS-universal.dmg",
+            "name": "Aurelia-1.19.0-109-macOS-arm64.dmg",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/301"
           },
           {
@@ -941,7 +941,7 @@ struct AppUpdateFakeGitHubHarnessTests {
       }
       """
     let sumsText =
-      "\(String(repeating: "a", count: 64))  Aurelia-1.19.0-109-macOS-universal.dmg\n"
+      "\(String(repeating: "a", count: 64))  Aurelia-1.19.0-109-macOS-arm64.dmg\n"
 
     FakeGitHubURLProtocol.configure { req in
       let path = req.url?.path ?? ""
@@ -1135,8 +1135,8 @@ struct AppUpdateFakeGitHubHarnessTests {
         "html_url": "https://github.com/owner/repo/releases/tag/1.20.0-110",
         "assets": [
           {
-            "name": "Aurelia-1.20.0-110-macOS-universal.dmg",
-            "browser_download_url": "https://github.com/owner/repo/releases/download/1.20.0-110/Aurelia-1.20.0-110-macOS-universal.dmg",
+            "name": "Aurelia-1.20.0-110-macOS-arm64.dmg",
+            "browser_download_url": "https://github.com/owner/repo/releases/download/1.20.0-110/Aurelia-1.20.0-110-macOS-arm64.dmg",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/501",
             "size": \(syntheticDmgData.count)
           },
@@ -1148,7 +1148,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         ]
       }
       """
-    let sumsText = "\(syntheticDigest)  Aurelia-1.20.0-110-macOS-universal.dmg\n"
+    let sumsText = "\(syntheticDigest)  Aurelia-1.20.0-110-macOS-arm64.dmg\n"
 
     FakeGitHubURLProtocol.configure { req in
       let path = req.url?.path ?? ""
@@ -1227,7 +1227,7 @@ struct AppUpdateFakeGitHubHarnessTests {
         "draft": false,
         "assets": [
           {
-            "name": "Aurelia-1.18.0-108-macOS-universal.dmg",
+            "name": "Aurelia-1.18.0-108-macOS-arm64.dmg",
             "url": "https://api.github.com/repos/owner/repo/releases/assets/501"
           },
           {

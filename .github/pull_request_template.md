@@ -1,13 +1,16 @@
-## What changed?
+## What changes
 
-<!-- Describe the problem, the resulting behavior, and the affected products. -->
+<!-- The problem, what this pull request does about it, and which apps are affected. -->
 
-## Verification
+## How it was checked
 
-<!-- List the checks you ran, the platforms tested, and any gaps. Use synthetic data. -->
+<!-- The checks you ran (see CONTRIBUTING.md), on which systems, and anything you could not test. Use invented test data only. -->
+
+- [ ] Builds without warnings for the parts I changed
+- [ ] The relevant tests pass
+- [ ] User-visible changes are in `CHANGELOG.md` under *Unreleased*
+- [ ] No personal media, logs, tokens, passwords or signing files are included
 
 ## Compatibility
 
-<!-- Note any API, configuration, or data migration impact, if applicable. -->
-
-Closes #
+<!-- Effects on the API, older apps, settings or stored data, if any. -->

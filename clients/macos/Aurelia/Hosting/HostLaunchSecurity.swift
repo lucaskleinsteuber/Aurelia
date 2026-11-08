@@ -124,7 +124,7 @@ enum HostPreflightBackgroundSecurity {
 }
 
 enum HostBootstrapLocation {
-  static let appGroupIdentifier = "B5N7JVK37J.com.lucas.aurelia.media.host"
+  static let appGroupIdentifier = AppEdition.appGroup
 
   static func directory(fileManager: FileManager = .default) throws -> URL {
     guard

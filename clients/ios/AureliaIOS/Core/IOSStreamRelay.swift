@@ -21,8 +21,6 @@ enum IOSStreamRelayError: LocalizedError, Equatable {
 
 enum IOSStreamFailure: Equatable, Sendable {
   case interrupted
-  case unavailable
-  case authorizationDenied
   case untrustedServer
   case invalidResponse
   case server(status: Int, code: String?)

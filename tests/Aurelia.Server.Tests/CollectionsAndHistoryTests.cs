@@ -265,6 +265,17 @@ public sealed class CollectionsAndHistoryTests
     }
 
     [Fact]
+    public void EpisodesCountWithTheirSeriesGenres()
+    {
+        var series = new MediaItem { Id = Guid.NewGuid(), Kind = MediaKind.Series, DetectedTitle = "Invented Harbor", Metadata = new MediaMetadata { ProviderGenresJson = "[\"Drama\",\"Crime\"]" } };
+        var episode = new MediaItem { Id = Guid.NewGuid(), Kind = MediaKind.Episode, DetectedTitle = "Pilot", Parent = series, ParentId = series.Id };
+        var movie = new MediaItem { Id = Guid.NewGuid(), Kind = MediaKind.Movie, DetectedTitle = "Invented Heist", Metadata = new MediaMetadata { ProviderGenresJson = "[\"Action\"]" } };
+
+        Assert.Equal(["Drama", "Crime"], WatchHistoryService.Genres(episode));
+        Assert.Equal(["Action"], WatchHistoryService.Genres(movie));
+    }
+
+    [Fact]
     public async Task WatchEventsAreRecordedAndHistoryIsStrictlyPrivate()
     {
         var mediaRoot = TestPaths.CreateDataDirectory();

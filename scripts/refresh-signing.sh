@@ -3,20 +3,22 @@
 #
 # A free Apple account issues development profiles that expire after 7 days; an app whose
 # profile expired no longer launches. This script asks Apple for fresh profiles and re-signs the
-# installed Mac app, the Apple TV app and the iPhone app with them. The app versions stay the same: the existing
+# installed Mac app, the Apple TV app and the iPhone and iPad apps with them. The app versions stay the same: the existing
 # bundles are re-signed, nothing is rebuilt from newer source.
 #
 #   zsh scripts/refresh-signing.sh --install      set up the state folder and the daily job
 #   zsh scripts/refresh-signing.sh --adopt-tv     hand the Apple TV build just installed to the job
 #                                                 (its build folder is deleted afterwards)
 #   zsh scripts/refresh-signing.sh --adopt-iphone the same for the iPhone build just installed
+#   zsh scripts/refresh-signing.sh --adopt-ipad   the same for the iPad build just installed; build it
+#                                                 with AURELIA_IOS_BUILD_ROOT=Local/Build/iPad/<v>-<b>
 #   zsh scripts/refresh-signing.sh [--force]      refresh what expires within 3 days (or all)
-#   zsh scripts/refresh-signing.sh --force iphone refresh one app now: mac, tv or iphone
+#   zsh scripts/refresh-signing.sh --force iphone refresh one app now: mac, tv, iphone or ipad
 #   zsh scripts/refresh-signing.sh --uninstall    remove the job (keeps the state folder)
 #
 # Background jobs may not read ~/Documents, so the job works from its own state folder in
 # ~/Library/Application Support with a copy of this script, a small checkout used only to
-# request profiles, and copies of the installed Apple TV and iPhone apps. Run --install and the
+# request profiles, and copies of the installed Apple TV, iPhone and iPad apps. Run --install and the
 # --adopt options interactively from the repository.
 set -euo pipefail
 
@@ -193,7 +195,8 @@ refresh_mac() {
   notify "Mac app re-signed, valid until $(date -r $expiry '+%d.%m.')."
 }
 
-# A paired device app: "tv" for the Apple TV, "iphone" for the iPhone. Sets the globals the
+# A paired device app: "tv" for the Apple TV, "iphone" for the iPhone, "ipad" for the iPad (the
+# same app as the iPhone's, kept in its own folder with its own device). Sets the globals the
 # functions below use.
 device_kind() {
   case $1 in
@@ -206,6 +209,11 @@ device_kind() {
       name=iPhone folder=iOS bundle=$iphone_bundle platform=iOS
       project=clients/ios/AureliaIOS.xcodeproj scheme=AureliaIOS products=Release-iphoneos
       device_match=iPhone device_variable=AURELIA_IPHONE_DEVICE adopt_option=--adopt-iphone
+      ;;
+    ipad)
+      name=iPad folder=iPad bundle=$iphone_bundle platform=iOS
+      project=clients/ios/AureliaIOS.xcodeproj scheme=AureliaIOS products=Release-iphoneos
+      device_match=iPad device_variable=AURELIA_IPAD_DEVICE adopt_option=--adopt-ipad
       ;;
   esac
 }
@@ -358,6 +366,7 @@ case "${1:-}" in
     update_checkout "$root"
     adopt_device "$root" tv || true
     adopt_device "$root" iphone || true
+    adopt_device "$root" ipad || true
     install_agent
     log "Installed: runs daily at 4:30 and 14:30, and at login."
     ;;
@@ -371,6 +380,11 @@ case "${1:-}" in
     update_checkout "$root"
     adopt_device "$root" iphone
     ;;
+  --adopt-ipad)
+    root=$(repository)
+    update_checkout "$root"
+    adopt_device "$root" ipad
+    ;;
   --uninstall)
     launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
     rm -f "$agent"
@@ -382,18 +396,19 @@ case "${1:-}" in
     trap 'rmdir "$state/.lock" 2>/dev/null || true' EXIT
     [[ -d "$state/Checkout" ]] || { log "Not set up; run --install."; exit 1; }
     only=${2:-}
-    [[ -z "$only" || "$only" == (mac|tv|iphone) ]] || { print -u2 "Unknown app: $only"; exit 2; }
+    [[ -z "$only" || "$only" == (mac|tv|iphone|ipad) ]] || { print -u2 "Unknown app: $only"; exit 2; }
     failed=0
     [[ -z "$only" || "$only" == mac ]] && { refresh_mac || failed=1; }
     [[ -z "$only" || "$only" == tv ]] && { refresh_device tv || failed=1; }
     [[ -z "$only" || "$only" == iphone ]] && { refresh_device iphone || failed=1; }
+    [[ -z "$only" || "$only" == ipad ]] && { refresh_device ipad || failed=1; }
     if (( failed )); then
       notify "Re-signing failed. See ~/Library/Logs/Aurelia Signing Refresh.log."
       exit 1
     fi
     ;;
   *)
-    print -u2 "Usage: refresh-signing.sh [--install | --adopt-tv | --adopt-iphone | --uninstall | --force [mac|tv|iphone]]"
+    print -u2 "Usage: refresh-signing.sh [--install | --adopt-tv | --adopt-iphone | --adopt-ipad | --uninstall | --force [mac|tv|iphone|ipad]]"
     exit 2
     ;;
 esac

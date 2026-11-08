@@ -48,9 +48,11 @@ public sealed class ConnectionModel : ObservableObject, IDisposable
 
     public bool IsVerifying => Inspected is not null;
 
-    public string DisplayFingerprint => Inspected is { } server
-        ? server.Info.DisplayFingerprint is { Length: > 0 } shown ? shown : ServerIdentity.Display(server.Fingerprint)
-        : "";
+    /// <summary>
+    /// Always computed from the key this computer saw in the TLS handshake, never the text the
+    /// server sends: a server in the middle could otherwise show the real server's fingerprint.
+    /// </summary>
+    public string DisplayFingerprint => Inspected is { } server ? ServerIdentity.Display(server.Fingerprint) : "";
 
     public string Address
     {

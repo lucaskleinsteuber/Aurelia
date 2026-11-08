@@ -94,7 +94,7 @@ public sealed class DetailPage : LibraryPageBase
         }
         if (detail is null)
         {
-            page.Children.Add(new ProgressBar { IsIndeterminate = true, Width = 160, Margin = Inset(), HorizontalAlignment = HorizontalAlignment.Left });
+            page.Children.Add(new Aurelia.Linux.Controls.Spinner { Margin = Inset(24), HorizontalAlignment = HorizontalAlignment.Center });
             return page;
         }
         if (detail.Seasons.Count > 0) page.Children.Add(Seasons());
@@ -103,12 +103,12 @@ public sealed class DetailPage : LibraryPageBase
         var trailers = detail.Supplements.Where(s => s.Item.Kind == MediaKind.Trailer).ToList();
         var extras = detail.Supplements.Where(s => s.Item.Kind != MediaKind.Trailer).ToList();
         if (trailers.Count > 0)
-            page.Children.Add(Section(prefix + "Trailers", Shelf(prefix + "Trailers", trailers.Select(s => MediaCards.Landscape(Context, s.Item, 360, s.Category.ToUpperInvariant(), plays: true))), trailers.Count));
+            page.Children.Add(Section(prefix + "Trailers", Shelf(prefix + "Trailers", trailers, s => MediaCards.Landscape(Context, s.Item, 360, s.Category.ToUpperInvariant(), plays: true)), trailers.Count));
         if (extras.Count > 0)
-            page.Children.Add(Section(prefix + "Extras", Shelf(prefix + "Extras", extras.Select(s => MediaCards.Landscape(Context, s.Item, 360, s.Category.ToUpperInvariant(), plays: true))), extras.Count));
+            page.Children.Add(Section(prefix + "Extras", Shelf(prefix + "Extras", extras, s => MediaCards.Landscape(Context, s.Item, 360, s.Category.ToUpperInvariant(), plays: true)), extras.Count));
         var people = CastAndCrew(detail.Metadata.Credits);
         if (people.Count > 0)
-            page.Children.Add(Section("Cast & Crew", Shelf("Cast & Crew", people.Select(p => MediaCards.Person(Context, p.Credit, p.Role))), people.Count));
+            page.Children.Add(Section("Cast & Crew", Shelf("Cast & Crew", people, p => MediaCards.Person(Context, p.Credit, p.Role)), people.Count));
         page.Children.Add(About());
         return page;
     }
@@ -306,16 +306,16 @@ public sealed class DetailPage : LibraryPageBase
         };
         AutomationProperties.SetName(picker, "Season");
         ToolTip.SetTip(picker, "Choose a season");
-        var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, Inset().Left, 0) };
+        var header = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 0, Inset().Right, 0) };
         header.Children.Add(picker.Also(p => DockPanel.SetDock(p, Dock.Left)));
         var count = new TextBlock { Text = current.Episodes.Count == 1 ? "1 episode" : $"{current.Episodes.Count} episodes", Classes = { "subdued" }, VerticalAlignment = VerticalAlignment.Center };
         header.Children.Add(count.Also(c => DockPanel.SetDock(c, Dock.Right)));
         if (watched)
             header.Children.Add(new TextBlock { Text = "Watched", Classes = { "subdued" }, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0) }.Also(w => DockPanel.SetDock(w, Dock.Right)));
         var section = new StackPanel { Spacing = 12, Children = { header } };
-        section.Children.Add(Shelf(SeasonName(current), current.Episodes.Select(e => MediaCards.Landscape(Context, e.Item, 420, $"EPISODE {e.EpisodeNumber}", plays: true))));
+        section.Children.Add(Shelf(SeasonName(current), current.Episodes, e => MediaCards.Landscape(Context, e.Item, 420, $"EPISODE {e.EpisodeNumber}", plays: true)));
         if (current.Supplements.Count > 0)
-            section.Children.Add(Shelf(SeasonName(current) + " Extras", current.Supplements.Select(s => MediaCards.Landscape(Context, s.Item, 360, s.Category.ToUpperInvariant(), plays: true))));
+            section.Children.Add(Shelf(SeasonName(current) + " Extras", current.Supplements, s => MediaCards.Landscape(Context, s.Item, 360, s.Category.ToUpperInvariant(), plays: true)));
         return section;
     }
 
@@ -328,7 +328,7 @@ public sealed class DetailPage : LibraryPageBase
             await Context.Store.SaveFranchiseAsync(franchise.Id);
         };
         var already = Context.Store.Collections.Any(c => c.Name == franchise.Name);
-        var section = Section($"Part of the {franchise.Name}", Shelf(franchise.Name, franchise.Items.Select(item => MediaCards.Poster(Context, item, 154))), franchise.Items.Count);
+        var section = Section($"Part of the {franchise.Name}", Shelf(franchise.Name, franchise.Items, item => MediaCards.Poster(Context, item, 154)), franchise.Items.Count);
         if (!already) section.Children.Insert(1, save);
         return section;
     }

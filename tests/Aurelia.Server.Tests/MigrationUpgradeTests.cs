@@ -70,7 +70,8 @@ public sealed class MigrationUpgradeTests
                 NormalizedSourcePath = "EXISTING-FILM",
             };
             media.Metadata = new MediaMetadata { MediaItemId = media.Id, ManualTitle = "Existing Manual Title" };
-            database.AddRange(owner, device, legacyPairing, library, media);
+            await SeedLegacyUserAsync(database, owner);
+            database.AddRange(device, legacyPairing, library, media);
             await database.SaveChangesAsync();
             var artworkId = Guid.NewGuid();
             await database.Database.ExecuteSqlInterpolatedAsync($"""
@@ -110,7 +111,8 @@ public sealed class MigrationUpgradeTests
             var series = new MediaItem { Id = Guid.NewGuid(), Kind = MediaKind.Series, DetectedTitle = "Old Series", LibraryRootId = library.Id, LibraryRoot = library, NormalizedSourcePath = "SERIES" };
             series.Metadata = new MediaMetadata { MediaItemId = series.Id, ManualTitle = "Renamed Galaxy" };
             var episode = new MediaItem { Id = Guid.NewGuid(), Kind = MediaKind.Episode, DetectedTitle = "Pilot", SeasonNumber = 1, EpisodeNumber = 1, Parent = series, LibraryRootId = library.Id, LibraryRoot = library, NormalizedSourcePath = "EPISODE" };
-            database.AddRange(owner, library, series, episode);
+            await SeedLegacyUserAsync(database, owner);
+            database.AddRange(library, series, episode);
             await database.SaveChangesAsync();
             await database.Database.ExecuteSqlRawAsync("DELETE FROM MediaSearchIndex; INSERT INTO MediaSearchIndex(MediaId,Title,OriginalTitle,Details) SELECT lower(replace(Id,'-','')),DetectedTitle,'','' FROM MediaItems;");
             var completed = Guid.NewGuid();
@@ -608,5 +610,21 @@ public sealed class MigrationUpgradeTests
                 Directory.Delete(dataDirectory, recursive: true);
             }
         }
+    }
+
+    /// <summary>
+    /// Writes a profile with only the columns an older schema has. The current model has newer columns
+    /// (display name, picture, age limit), so EF cannot insert it before the upgrade runs.
+    /// </summary>
+    private static async Task SeedLegacyUserAsync(AureliaDbContext database, ServerUser user)
+    {
+        var created = user.CreatedAt.ToUnixTimeMilliseconds();
+        var role = user.Role.ToString();
+        var mode = user.AccessMode.ToString();
+        await database.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO Users (Id, Username, NormalizedUsername, PasswordHash, Role, CreatedAt, IsEnabled, AccessMode, AccessRevision, PinHash, PinProtectionEnabled, ProfileRevision)
+            VALUES ({user.Id}, {user.Username}, {user.NormalizedUsername}, {user.PasswordHash}, {role}, {created}, 1, {mode}, 0, NULL, 1, 1);
+            """);
+        database.Attach(user);
     }
 }

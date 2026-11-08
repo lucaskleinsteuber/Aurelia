@@ -45,7 +45,7 @@ public sealed class PlayerViewTests
         Assert.Contains("Sleep Timer", names);
         Assert.Contains("Scene Notes", names);
         Assert.Contains("Full Screen (F)", names);
-        Assert.Contains("Fill Screen (Z)", names);
+        Assert.DoesNotContain("Fill Screen (Z)", names);
         Assert.Contains("Previous Episode (P)", names);
         var texts = view.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
         Assert.Contains("Quiet Orbit", texts);
@@ -95,15 +95,8 @@ public sealed class PlayerViewTests
         Dispatcher.UIThread.RunJobs();
         Assert.True(engines.Last.Muted);
 
-        // Z fills the window without black bars, and the choice is remembered for the next title.
-        Assert.False(view.FillsScreen);
-        window.KeyPressQwerty(PhysicalKey.Z, RawInputModifiers.None);
-        Dispatcher.UIThread.RunJobs();
+        // The picture always fills the window without black bars; there is no switch for it.
         Assert.True(view.FillsScreen);
-        Assert.True(window.Player!.Preferences.FillsScreen);
-        window.KeyPressQwerty(PhysicalKey.Z, RawInputModifiers.None);
-        Dispatcher.UIThread.RunJobs();
-        Assert.False(view.FillsScreen);
 
         window.KeyPressQwerty(PhysicalKey.F, RawInputModifiers.None);
         Dispatcher.UIThread.RunJobs();
@@ -122,9 +115,12 @@ public sealed class PlayerViewTests
     {
         var (window, _, view) = Play(FakeLibrary.MovieA);
         var audio = view.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Audio");
-        var flyout = Assert.IsType<MenuFlyout>(audio.Flyout);
+        var flyout = Assert.IsType<MenuFlyout>(audio.Tag);
         flyout.ShowAt(audio);
         Dispatcher.UIThread.RunJobs();
+        // An open menu keeps the controls: it lives outside the view, so the view counts it.
+        Assert.True(view.HasOpenMenu);
+        Assert.True(view.ControlsVisible);
         var headers = flyout.Items.OfType<MenuItem>().Select(m => m.Header as string).ToList();
         Assert.Contains("Track 1 - [English]", headers);
         Assert.Contains("Dialogue Boost", headers);
@@ -132,11 +128,16 @@ public sealed class PlayerViewTests
         Assert.Contains("Strong", headers);
         Assert.Contains("Sleep", headers);
         flyout.Hide();
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(view.HasOpenMenu);
         var speed = view.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Playback Rate");
-        var rates = Assert.IsType<MenuFlyout>(speed.Flyout);
+        var rates = Assert.IsType<MenuFlyout>(speed.Tag);
         rates.ShowAt(speed);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(["0.5×", "0.75×", "Standard", "1.25×", "1.5×", "2×"], rates.Items.OfType<MenuItem>().Select(m => m.Header as string));
+        // Only the current rate carries the checkmark; the others keep its room so the names line up.
+        Assert.Equal(["Standard"], rates.Items.OfType<MenuItem>().Where(m => m.Classes.Contains("chosen")).Select(m => m.Header as string));
+        Assert.All(rates.Items.OfType<MenuItem>(), m => Assert.IsType<PathIcon>(m.Icon));
         rates.Hide();
         _ = window;
     }
@@ -166,7 +167,7 @@ public sealed class PlayerViewTests
         FakeLibrary.Pump(() => window.Player!.Chapters.Count == 2);
         var button = view.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Chapters");
         Assert.True(button.IsEffectivelyVisible);
-        var flyout = Assert.IsType<MenuFlyout>(button.Flyout);
+        var flyout = Assert.IsType<MenuFlyout>(button.Tag);
         flyout.ShowAt(button);
         Dispatcher.UIThread.RunJobs();
         var entry = flyout.Items.OfType<MenuItem>().Single(item => item.Header as string == "The Signal  10:00");

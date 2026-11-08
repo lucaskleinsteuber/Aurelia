@@ -44,6 +44,7 @@ enum NativeServerHostError: LocalizedError, Equatable {
   case invalidResponse
   case rejected
   case alreadyStarting
+  case localServerNotReady
 
   var errorDescription: String? {
     switch self {
@@ -53,6 +54,8 @@ enum NativeServerHostError: LocalizedError, Equatable {
     case .invalidResponse: "Aurelia Server Host returned an invalid response."
     case .rejected: "Aurelia Server Host rejected the request."
     case .alreadyStarting: "Aurelia Server Host is already starting."
+    case .localServerNotReady:
+      "Aurelia Server on this Mac is not running yet, so your password was not sent. Try again in a moment."
     }
   }
 }

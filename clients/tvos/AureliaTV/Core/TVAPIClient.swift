@@ -40,9 +40,9 @@ struct TVAPIClient: Sendable {
     try requireSuccess(response)
     let info = try decode(TVServerInfo.self, data: response.body)
     guard let captured = response.fingerprint, TVServerIdentity.isValidFingerprint(captured),
-      captured.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame,
-      info.lanAccessEnabled
+      captured.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame
     else { throw TVCoreError.identityMismatch }
+    guard info.lanAccessEnabled else { throw TVCoreError.lanAccessDisabled }
     return TVInspectedServer(baseURL: baseURL, info: info, fingerprint: captured)
   }
 
@@ -61,13 +61,34 @@ struct TVAPIClient: Sendable {
   }
 
   func startPairing(deviceName: String) async throws -> TVPairingStart {
-    let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !name.isEmpty, name.count <= 128 else { throw TVCoreError.invalidResponse }
+    // A long device name is shortened rather than refused; the server allows 128 characters.
+    let name = String(deviceName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
+    guard !name.isEmpty else { throw TVCoreError.invalidRequest }
     struct Payload: Encodable { let deviceName: String }
     let value: TVPairingStart = try await post(
       "/api/v1/auth/device-pairings",
       payload: Payload(deviceName: name), authentication: .none)
     try value.validate()
+    return value
+  }
+
+  /// Redeems the 8-digit code that the main device (a Mac or Linux computer) created for this
+  /// Apple TV. The server answers with this device's own credential.
+  func redeemPairingCode(_ code: String, deviceName: String) async throws -> TVAuthentication {
+    let digits = code.filter(\.isNumber)
+    let name = String(deviceName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
+    guard digits.count == 8, !name.isEmpty else { throw TVCoreError.invalidRequest }
+    struct Payload: Encodable {
+      let code: String
+      let deviceName: String
+    }
+    let value: TVAuthentication = try await post(
+      "/api/v1/auth/pair", payload: Payload(code: digits, deviceName: name),
+      authentication: .none)
+    guard (32...256).contains(value.token.utf8.count),
+      !value.token.contains(where: \.isWhitespace),
+      let expiry = TVServerDate.parse(value.expiresAt), expiry > Date()
+    else { throw TVCoreError.invalidResponse }
     return value
   }
 
@@ -87,7 +108,7 @@ struct TVAPIClient: Sendable {
     -> TVPairingStatus
   {
     guard (32...256).contains(secret.utf8.count), !secret.contains(where: \.isWhitespace) else {
-      throw TVCoreError.invalidResponse
+      throw TVCoreError.invalidRequest
     }
     struct Payload: Encodable { let secret: String }
     let value: TVPairingStatus = try await post(
@@ -127,6 +148,29 @@ struct TVAPIClient: Sendable {
     return value
   }
 
+  /// A profile's photo (JPEG), read with the device credential so the picker can show it.
+  func profilePhoto(id: UUID, revision: Int64) async throws -> Data {
+    try await send(
+      "/api/v1/profiles/\(id.uuidString)/picture",
+      query: [URLQueryItem(name: "rev", value: String(revision))], authentication: .device)
+  }
+  /// Renames the signed-in profile. An owner keeps signing in with the original name.
+  func renameProfile(_ name: String) async throws -> TVUser {
+    struct Payload: Encodable { let name: String }
+    return try Self.decode(
+      TVUser.self,
+      data: await send(
+        "/api/v1/profile/name", method: "PUT", body: JSONEncoder().encode(Payload(name: name))))
+  }
+  /// A built-in picture (`symbol:palette`) for the signed-in profile, or nil for the initial.
+  func setPicture(builtin: String?) async throws -> TVUser {
+    struct Payload: Encodable { let builtin: String? }
+    return try Self.decode(
+      TVUser.self,
+      data: await send(
+        "/api/v1/profile/picture", method: "PUT",
+        body: JSONEncoder().encode(Payload(builtin: builtin))))
+  }
   func endProfile() async throws { _ = try await send("/api/v1/profile/end", method: "POST") }
   func disconnectDevice() async throws {
     _ = try await send("/api/v1/device", method: "DELETE", authentication: .device)
@@ -136,7 +180,7 @@ struct TVAPIClient: Sendable {
     async throws -> TVPage<TVCatalogItem>
   {
     guard [.movie, .series].contains(kind), offset >= 0, (1...200).contains(limit) else {
-      throw TVCoreError.invalidResponse
+      throw TVCoreError.invalidRequest
     }
     var query = [
       URLQueryItem(name: "kind", value: kind.rawValue),
@@ -156,7 +200,7 @@ struct TVAPIClient: Sendable {
     query: TVBrowseQuery, search: String = "", offset: Int = 0,
     limit: Int = 60, revision: String? = nil
   ) async throws -> TVPage<TVCatalogItem> {
-    guard offset >= 0, (1...200).contains(limit) else { throw TVCoreError.invalidResponse }
+    guard offset >= 0, (1...200).contains(limit) else { throw TVCoreError.invalidRequest }
     var values = try query.queryItems(search: search)
     values.append(URLQueryItem(name: "offset", value: String(offset)))
     values.append(URLQueryItem(name: "limit", value: String(limit)))
@@ -181,7 +225,7 @@ struct TVAPIClient: Sendable {
 
   func home() async throws -> TVHome { try await get("/api/v1/home") }
   func collections(offset: Int = 0, limit: Int = 60) async throws -> [TVCollection] {
-    guard offset >= 0, (1...200).contains(limit) else { throw TVCoreError.invalidResponse }
+    guard offset >= 0, (1...200).contains(limit) else { throw TVCoreError.invalidRequest }
     let data = try await send(
       "/api/v1/catalog/collections",
       query: [
@@ -359,7 +403,7 @@ struct TVAPIClient: Sendable {
     guard position >= 0, duration > 0, position <= duration, expectedRevision >= 0,
       mutationID != UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     else {
-      throw TVCoreError.invalidResponse
+      throw TVCoreError.invalidRequest
     }
     struct Payload: Encodable {
       let positionMilliseconds: Int64

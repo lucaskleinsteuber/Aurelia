@@ -16,6 +16,8 @@
     <ContentControl x:Name="PlayerHost" IsVisible="False" />
     <!-- Aurelia let go of its server so the server can sleep; any input continues. -->
     <ContentControl x:Name="RestHost" IsVisible="False" />
+    <!-- Settings › About › Show Introduction. -->
+    <ContentControl x:Name="IntroHost" IsVisible="False" />
     <controls:WindowChrome x:Name="Chrome" />
   </Panel>
 </Window>

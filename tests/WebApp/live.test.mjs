@@ -117,3 +117,21 @@ test("subtitle selection preserves absolute cue times before and after a resumed
   assert.equal(first.cues[0].startTime, 6);
   assert.deepEqual([first.mode, second.mode], ["showing", "disabled"]);
 });
+
+test("dragging across unbuffered time starts one new stream where the playhead comes to rest", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { LiveSource, SEEK_SETTLE_MS } = await import("../../src/Aurelia.Server/WebApp/js/live.js");
+  const source = Object.create(LiveSource.prototype);
+  const restarts = [];
+  Object.assign(source, { destroyed: false, streaming: true, streamStart: 0, waiters: new Set(),
+    buffer: { buffered: [[0, 30]] }, video: { currentTime: 0 }, restart: (at) => restarts.push(at) });
+  for (const time of [200, 400, 600, 800]) { source.video.currentTime = time; source.seeking(); t.mock.timers.tick(50); }
+  assert.deepEqual(restarts, []);
+  t.mock.timers.tick(SEEK_SETTLE_MS);
+  assert.deepEqual(restarts, [800]);
+  source.video.currentTime = 900; source.seeking(); source.video.currentTime = 10; source.seeking();
+  t.mock.timers.tick(SEEK_SETTLE_MS * 2);
+  assert.deepEqual(restarts, [800], "a seek back into what has arrived cancels the pending restart");
+  source.video.currentTime = 700; source.seeking(); source.destroyed = true; t.mock.timers.tick(SEEK_SETTLE_MS);
+  assert.deepEqual(restarts, [800]);
+});

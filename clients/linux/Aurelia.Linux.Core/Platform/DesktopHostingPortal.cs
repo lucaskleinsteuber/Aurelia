@@ -19,7 +19,9 @@ internal sealed class DesktopHostingPortal : IDesktopHostingPortal
     private const string Destination = "org.freedesktop.portal.Desktop";
     private const string PortalPath = "/org/freedesktop/portal/desktop";
     private const string RequestInterface = "org.freedesktop.portal.Request";
-    private static readonly string[] BackgroundCommand = ["aurelia-desktop", "--background"];
+    private static readonly string[] BackgroundCommand = AppInfo.IsTestEdition
+        ? ["env", "AURELIA_EDITION=test", "aurelia-desktop", "--background"]
+        : ["aurelia-desktop", "--background"];
 
     public async Task<(bool Background, bool Autostart)> RequestBackgroundAsync(bool autostart)
     {

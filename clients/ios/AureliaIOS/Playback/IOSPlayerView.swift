@@ -62,6 +62,8 @@ struct IOSPlayerView: View {
     }
     .animation(.easeInOut(duration: 0.45), value: controller.isStarting)
     .persistentSystemOverlays(controller.controlsVisible ? .automatic : .hidden)
+    // The iPad keeps the status bar in every orientation; time and date stay out of the picture.
+    .statusBarHidden(true)
     .preferredColorScheme(.dark)
     .sheet(item: $controller.trackMenu) { menu in menuSheet(menu) }
     .onAppear {

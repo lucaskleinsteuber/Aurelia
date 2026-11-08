@@ -1,7 +1,8 @@
 # Aurelia for iPhone and iPad
 
-`clients/ios` holds the iPhone and iPad client. It is a preview: it builds, its logic is
-tested and it installs on a real iPhone, but its playback has not been checked on one yet.
+`clients/ios` holds the iPhone and iPad client. It plays your library on iPhone and iPad with
+touch controls, and is installed from source with Xcode like the Apple TV app; it is not in the
+App Store. Version 2.0.0 is used every day on a real iPhone and iPad.
 
 ## How it is built
 
@@ -12,8 +13,9 @@ its screens are its own:
 `clients/macos`, as `AGENTS.md` requires.
 
 - **Connecting** works exactly like on the Apple TV: the app finds servers with Bonjour or
-  takes an address, shows the server's fingerprint to confirm, and shows a code that you enter
-  on the Mac under *Enter Code from Apple TV or Browser…*. The server's certificate is pinned
+  takes an address, shows the server's fingerprint to confirm, and asks for the 8-digit code
+  that the main device shows (*Settings › Profiles and Devices › Create Code* on a Mac or
+  Linux computer, or `aurelia pair` on a Linux server). The server's certificate is pinned
   to that fingerprint.
 - **Profiles** open with their PIN; Home, Movies, TV Shows, Search, title pages, the Watchlist
   and people pages work like on the Apple TV.
@@ -71,18 +73,19 @@ once. Reinstalling replaces only the app, so its server connection and settings 
 development profile expires after seven days. After installing, run
 `zsh scripts/refresh-signing.sh --adopt-iphone` so the signing refresh job re-signs and
 reinstalls that build before it expires (the iPhone has to be on the same network then); the
-build folder is removed because the job keeps its own copy.
+build folder is removed because the job keeps its own copy. An iPad gets its own build folder
+(`AURELIA_IOS_BUILD_ROOT=Local/Build/iPad/<version>-<build>`) and `--adopt-ipad`.
 
 The player works by touch: tap the picture to show or hide the controls, and drag along the
 timeline (or tap a place on it) to jump there. The buttons at the top choose the speed, the
-sound and subtitles (with Night Mode) and the sleep timer in a short sheet. A hardware keyboard
+sound and subtitles (with Dialogue Boost and Volume Leveling) and the sleep timer in a short sheet. A hardware keyboard
 adds the arrow keys, Space and Escape.
 
 ## Known limits
 
-- Installed on a real iPhone, but its playback and touch controls still need the owner's own
-  check; automated tests never play a real title.
+- Automated tests never play a real title; playback is checked by hand on real devices.
 - Waking a sleeping server sends a broadcast, which iOS may block for apps without Apple's
   multicast permission; the server then has to be woken another way.
 - No UI tests yet; the logic tests cover the shared core.
-- The app is not published on GitHub.
+- The app is not published as a download; build it from source as above. Away from home it works
+  through a VPN, see [Watching away from home](REMOTE_ACCESS.md).

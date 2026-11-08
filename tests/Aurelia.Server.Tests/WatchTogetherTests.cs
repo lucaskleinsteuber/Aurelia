@@ -188,6 +188,58 @@ public sealed class WatchTogetherTests
     }
 
     [Fact]
+    public async Task AMemberNeverLearnsATitleItsProfileCannotOpen()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var shared = await AddMovieAsync(factory);
+        var hidden = await AddMovieAsync(factory, "Invented Hidden Film");
+        using (var create = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/users", owner.Token,
+                   new CreateUserRequest("invented-child", "another correct horse password", UserRole.User, ApiTestClient.TestPin,
+                       AccessMode: ProfileAccessMode.SelectedTitles, TitleIds: [shared])))
+        using (var created = await ApiTestClient.SendAsync(client, create))
+            created.EnsureSuccessStatusCode();
+        using var login = await ApiTestClient.LoginAsync(client, new LoginRequest("invented-child", "another correct horse password", "Invented Tablet"));
+        var child = await ApiTestClient.ReadAsync<AuthenticationResponse>(login);
+
+        WatchPartyState party;
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/watch-together", owner.Token,
+                   new CreateWatchPartyRequest(shared, 0, true, "Invented Living Room")))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+            party = await ApiTestClient.ReadAsync<WatchPartyState>(response);
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/watch-together/{party.Id}/join", child.Token, new JoinWatchPartyRequest("Invented Tablet")))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // The owner moves the party to a title the child's profile may not open.
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/watch-together/{party.Id}/commands", owner.Token,
+                   new WatchPartyCommandRequest("change", 0, hidden)))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+            Assert.Equal("Invented Hidden Film", (await ApiTestClient.ReadAsync<WatchPartyState>(response)).Title);
+
+        using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/watch-together/{party.Id}", child.Token))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Contains("party_title_unavailable", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("Hidden", body, StringComparison.Ordinal);
+            Assert.DoesNotContain(hidden.ToString(), body, StringComparison.OrdinalIgnoreCase);
+        }
+        // The child left the party, so later commands see no membership and no title either.
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/watch-together/{party.Id}/commands", child.Token, new WatchPartyCommandRequest("ready")))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+        {
+            Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+            Assert.DoesNotContain("Hidden", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        using (var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/watch-together/{party.Id}", owner.Token))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+            Assert.Single((await ApiTestClient.ReadAsync<WatchPartyState>(response)).Members);
+    }
+
+    [Fact]
     public void WaitingForThePartyDoesNotKeepTheServerAwake()
     {
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
@@ -201,11 +253,11 @@ public sealed class WatchTogetherTests
         Assert.True(ServerUseClock.CountsAsUse(context));
     }
 
-    private static async Task<Guid> AddMovieAsync(AureliaServerFactory factory)
+    private static async Task<Guid> AddMovieAsync(AureliaServerFactory factory, string title = "Invented Film")
     {
         using var scope = factory.Services.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
-        var root = Path.Combine(factory.DataDirectory, "Invented Party Library");
+        var root = Path.Combine(factory.DataDirectory, "Invented Party Library " + title);
         var library = new LibraryRoot
         {
             Id = Guid.NewGuid(),
@@ -217,7 +269,7 @@ public sealed class WatchTogetherTests
             CreatedAt = DateTimeOffset.UtcNow,
             MonitoringEnabled = false,
         };
-        var path = Path.Combine(root, "Invented Film.mkv");
+        var path = Path.Combine(root, title + ".mkv");
         var media = new MediaItem
         {
             Id = Guid.NewGuid(),
@@ -226,7 +278,7 @@ public sealed class WatchTogetherTests
             Kind = MediaKind.Movie,
             SourcePath = path,
             NormalizedSourcePath = MediaPath.Normalize(path),
-            DetectedTitle = "Invented Film",
+            DetectedTitle = title,
             Category = string.Empty,
             Extension = ".mkv",
             FileSize = 1,

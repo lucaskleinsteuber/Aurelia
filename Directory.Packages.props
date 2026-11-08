@@ -17,6 +17,8 @@
     <PackageVersion Include="LibVLCSharp" Version="3.10.2" />
     <!-- The D-Bus library Avalonia itself uses, for the keyring (Secret Service) and media keys (MPRIS). -->
     <PackageVersion Include="Tmds.DBus.Protocol" Version="0.94.1" />
+    <!-- Ed25519 and BLAKE2b for checking the minisign signature of Linux app updates. -->
+    <PackageVersion Include="BouncyCastle.Cryptography" Version="2.5.0" />
     <!-- Avalonia's headless test runner is built on xUnit v3; the server tests stay on v2. -->
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="Haukcode.Mdns" Version="1.0.22" />

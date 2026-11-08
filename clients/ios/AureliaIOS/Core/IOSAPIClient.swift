@@ -40,9 +40,9 @@ struct IOSAPIClient: Sendable {
     try requireSuccess(response)
     let info = try decode(IOSServerInfo.self, data: response.body)
     guard let captured = response.fingerprint, IOSServerIdentity.isValidFingerprint(captured),
-      captured.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame,
-      info.lanAccessEnabled
+      captured.caseInsensitiveCompare(info.publicKeyFingerprint ?? "") == .orderedSame
     else { throw IOSCoreError.identityMismatch }
+    guard info.lanAccessEnabled else { throw IOSCoreError.lanAccessDisabled }
     return IOSInspectedServer(baseURL: baseURL, info: info, fingerprint: captured)
   }
 
@@ -61,13 +61,34 @@ struct IOSAPIClient: Sendable {
   }
 
   func startPairing(deviceName: String) async throws -> IOSPairingStart {
-    let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !name.isEmpty, name.count <= 128 else { throw IOSCoreError.invalidResponse }
+    // A long device name is shortened rather than refused; the server allows 128 characters.
+    let name = String(deviceName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
+    guard !name.isEmpty else { throw IOSCoreError.invalidRequest }
     struct Payload: Encodable { let deviceName: String }
     let value: IOSPairingStart = try await post(
       "/api/v1/auth/device-pairings",
       payload: Payload(deviceName: name), authentication: .none)
     try value.validate()
+    return value
+  }
+
+  /// Redeems the 8-digit code that the main device (a Mac or Linux computer) created for this
+  /// device. The server answers with this device's own credential.
+  func redeemPairingCode(_ code: String, deviceName: String) async throws -> IOSAuthentication {
+    let digits = code.filter(\.isNumber)
+    let name = String(deviceName.trimmingCharacters(in: .whitespacesAndNewlines).prefix(128))
+    guard digits.count == 8, !name.isEmpty else { throw IOSCoreError.invalidRequest }
+    struct Payload: Encodable {
+      let code: String
+      let deviceName: String
+    }
+    let value: IOSAuthentication = try await post(
+      "/api/v1/auth/pair", payload: Payload(code: digits, deviceName: name),
+      authentication: .none)
+    guard (32...256).contains(value.token.utf8.count),
+      !value.token.contains(where: \.isWhitespace),
+      let expiry = IOSServerDate.parse(value.expiresAt), expiry > Date()
+    else { throw IOSCoreError.invalidResponse }
     return value
   }
 
@@ -87,7 +108,7 @@ struct IOSAPIClient: Sendable {
     -> IOSPairingStatus
   {
     guard (32...256).contains(secret.utf8.count), !secret.contains(where: \.isWhitespace) else {
-      throw IOSCoreError.invalidResponse
+      throw IOSCoreError.invalidRequest
     }
     struct Payload: Encodable { let secret: String }
     let value: IOSPairingStatus = try await post(
@@ -128,6 +149,40 @@ struct IOSAPIClient: Sendable {
     return value
   }
 
+  /// A profile's photo (JPEG), read with the device credential so the picker can show it.
+  func profilePhoto(id: UUID, revision: Int64) async throws -> Data {
+    try await send(
+      "/api/v1/profiles/\(id.uuidString)/picture",
+      query: [URLQueryItem(name: "rev", value: String(revision))], authentication: .device)
+  }
+  /// Renames the signed-in profile. An owner keeps signing in with the original name.
+  func renameProfile(_ name: String) async throws -> IOSUser {
+    struct Payload: Encodable { let name: String }
+    return try Self.decode(
+      IOSUser.self,
+      data: await send(
+        "/api/v1/profile/name", method: "PUT", body: JSONEncoder().encode(Payload(name: name))))
+  }
+  /// A built-in picture (`symbol:palette`) for the signed-in profile, or nil for the initial.
+  func setPicture(builtin: String?) async throws -> IOSUser {
+    struct Payload: Encodable { let builtin: String? }
+    return try Self.decode(
+      IOSUser.self,
+      data: await send(
+        "/api/v1/profile/picture", method: "PUT",
+        body: JSONEncoder().encode(Payload(builtin: builtin))))
+  }
+  /// An own photo for the signed-in profile; the server keeps a small square copy.
+  func uploadPhoto(_ jpeg: Data) async throws -> IOSUser {
+    guard !jpeg.isEmpty, jpeg.count <= IOSProfilePictures.maximumUploadBytes else {
+      throw IOSCoreError.invalidResponse
+    }
+    var request = try request("/api/v1/profile/picture/photo", authentication: .profile)
+    request.httpMethod = "PUT"
+    request.httpBody = jpeg
+    request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+    return try Self.decode(IOSUser.self, data: await execute(request).body)
+  }
   func endProfile() async throws { _ = try await send("/api/v1/profile/end", method: "POST") }
   func disconnectDevice() async throws {
     _ = try await send("/api/v1/device", method: "DELETE", authentication: .device)
@@ -137,7 +192,7 @@ struct IOSAPIClient: Sendable {
     async throws -> IOSPage<IOSCatalogItem>
   {
     guard [.movie, .series].contains(kind), offset >= 0, (1...200).contains(limit) else {
-      throw IOSCoreError.invalidResponse
+      throw IOSCoreError.invalidRequest
     }
     var query = [
       URLQueryItem(name: "kind", value: kind.rawValue),
@@ -157,7 +212,7 @@ struct IOSAPIClient: Sendable {
     query: IOSBrowseQuery, search: String = "", offset: Int = 0,
     limit: Int = 60, revision: String? = nil
   ) async throws -> IOSPage<IOSCatalogItem> {
-    guard offset >= 0, (1...200).contains(limit) else { throw IOSCoreError.invalidResponse }
+    guard offset >= 0, (1...200).contains(limit) else { throw IOSCoreError.invalidRequest }
     var values = try query.queryItems(search: search)
     values.append(URLQueryItem(name: "offset", value: String(offset)))
     values.append(URLQueryItem(name: "limit", value: String(limit)))
@@ -222,7 +277,7 @@ struct IOSAPIClient: Sendable {
       body: JSONEncoder().encode(Payload(pinProtectionEnabled: false, currentPin: current)))
   }
   func collections(offset: Int = 0, limit: Int = 60) async throws -> [IOSCollection] {
-    guard offset >= 0, (1...200).contains(limit) else { throw IOSCoreError.invalidResponse }
+    guard offset >= 0, (1...200).contains(limit) else { throw IOSCoreError.invalidRequest }
     let data = try await send(
       "/api/v1/catalog/collections",
       query: [
@@ -400,7 +455,7 @@ struct IOSAPIClient: Sendable {
     guard position >= 0, duration > 0, position <= duration, expectedRevision >= 0,
       mutationID != UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
     else {
-      throw IOSCoreError.invalidResponse
+      throw IOSCoreError.invalidRequest
     }
     struct Payload: Encodable {
       let positionMilliseconds: Int64

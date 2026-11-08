@@ -11,9 +11,10 @@ endpoint or a client can be checked against it.
 - **Encrypted connections.** Clients connect over HTTPS with the server's own certificate and
   pin its fingerprint, which the owner confirms when pairing. Plain HTTP works only on the
   server computer's loopback address.
-- **Paired devices.** A Mac, Apple TV, iPhone or browser gets access only after the owner
-  approves its code in the Mac app or the browser's settings. Each device has its own token,
-  which the owner can revoke.
+- **Paired devices.** A Mac, Linux PC, Apple TV, iPhone, iPad or browser gets access only with
+  a one-time 8-digit code that the owner creates on the main device (*Create Code*, or
+  `aurelia pair` on a Linux server); a code works once and for five minutes. Each device has its
+  own token, which the owner can revoke under *Settings › Profiles and Devices*.
 - **Profiles.** On a paired device, each person chooses their profile. Owner and administrator
   profiles always need their PIN; other profiles can have one.
 - **Browsers** keep their credentials in `HttpOnly`, `SameSite=Strict` cookies that scripts

@@ -15,6 +15,7 @@ public interface IReleaseSource
 {
     Task<JsonArray> ReleasesAsync(CancellationToken cancellation);
     Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation);
+    Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation);
     Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation);
 }
 
@@ -37,6 +38,9 @@ public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
                 throw new IOException(repository == UpdateFeed.PublicTestRepository
                     ? "The public update test feed is unavailable. Turn off Public Update Test to use the normal release feed."
                     : "GitHub could not read the releases. Try again later.");
+            // Anonymous requests share a small hourly GitHub limit; that is not a connection problem.
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+                throw new IOException("GitHub is limiting update checks right now. Try again in about an hour.");
             response.EnsureSuccessStatusCode();
             await using var input = await response.Content.ReadAsStreamAsync(cancellation);
             using var output = new MemoryStream();
@@ -75,6 +79,18 @@ public sealed class GitHubReleaseSource(HttpMessageHandler? handler = null,
         await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
         using var output = new MemoryStream();
         await CopyBoundedAsync(stream, output, 1024 * 1024, cancellation);
+        return System.Text.Encoding.UTF8.GetString(output.ToArray());
+    }
+
+    public async Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation)
+    {
+        if (release.Signature is not { } address || release.SourceRepository != UpdateFeed.Repository(settings)
+            || !AppRelease.IsAssetUrl(address.AbsoluteUri, release.SourceRepository)) throw new IOException("The signature address is invalid.");
+        using var response = await GetAsync(address, true, cancellation);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
+        using var output = new MemoryStream();
+        await CopyBoundedAsync(stream, output, 16 * 1024, cancellation);
         return System.Text.Encoding.UTF8.GetString(output.ToArray());
     }
 
@@ -151,7 +167,13 @@ public interface IPackageInstaller
 /// <summary>The desktop asks for administrator authorization only after the person chose Install.</summary>
 public sealed class LinuxPackageInstaller : IPackageInstaller
 {
-    public LinuxPackageKind Kind { get; } = Detect();
+    private LinuxPackageKind? kind;
+
+    /// <summary>
+    /// Detected on first use, not at start: on a distribution without a supported package manager
+    /// only updating is unavailable, and the app itself still opens.
+    /// </summary>
+    public LinuxPackageKind Kind => kind ??= Detect();
 
     public static LinuxPackageKind Detect(Func<string, bool>? exists = null)
     {
@@ -187,8 +209,20 @@ public sealed class LinuxPackageInstaller : IPackageInstaller
 
 /// <summary>Checks daily, validates the exact download, and never installs without the caller's confirmation.</summary>
 public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installer, ISettingsStore settings, string cacheDirectory,
-    Version currentVersion, int currentBuild, TimeProvider? time = null) : INotifyPropertyChanged, IDisposable
+    Version currentVersion, int currentBuild, TimeProvider? time = null,
+    System.Runtime.InteropServices.Architecture? architecture = null, string? signingKey = null) : INotifyPropertyChanged, IDisposable
 {
+    private readonly string publicKey = signingKey ?? UpdateFeed.SigningPublicKey;
+
+    private readonly System.Runtime.InteropServices.Architecture processor =
+        architecture ?? System.Runtime.InteropServices.RuntimeInformation.OSArchitecture;
+
+    /// <summary>Packages are published for 64-bit Intel/AMD (x64) and 64-bit ARM (arm64, no Flatpak there).</summary>
+    private bool IsArm64 => processor == System.Runtime.InteropServices.Architecture.Arm64;
+
+    private bool supportedArchitecture => processor == System.Runtime.InteropServices.Architecture.X64
+        || (IsArm64 && installer.Kind != LinuxPackageKind.Flatpak);
+
     private readonly TimeProvider clock = time ?? TimeProvider.System;
     public event PropertyChangedEventHandler? PropertyChanged;
     public AppRelease? Available { get; private set; }
@@ -223,17 +257,31 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
     {
         if (IsBusy || RestartRequired || (!userInitiated && ((settings.Read<bool?>("automaticUpdateChecks") ?? true) == false
             || settings.Read<DateTimeOffset?>(CheckKey) is { } last && clock.GetUtcNow() - last < TimeSpan.FromDays(1)))) return;
+        if (!supportedArchitecture)
+        {
+            Available = null;
+            Status = IsArm64
+                ? "Flatpak updates are published for 64-bit Intel and AMD computers only. On this computer, install the arm64 package for its distribution."
+                : "Updates are published for 64-bit Intel, AMD and ARM computers only. Install new versions of Aurelia for this computer by hand.";
+            Notify();
+            return;
+        }
         IsBusy = true;
         Status = "Checking for updates…";
         Notify();
         try
         {
-            settings.Write(CheckKey, clock.GetUtcNow());
             Available = null;
-            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild, UpdateFeed.Repository(settings), BetaUpdatesEnabled);
+            Available = AppRelease.Newest(await source.ReleasesAsync(cancellation), installer.Kind, currentVersion, currentBuild, UpdateFeed.Repository(settings), BetaUpdatesEnabled, IsArm64);
+            // Only a completed check waits a day; a failed automatic one is tried again next time.
+            settings.Write(CheckKey, clock.GetUtcNow());
             Status = Available is { } release
                 ? $"Aurelia {release.Version} ({release.Build}){(release.IsBeta ? " Beta" : "")} is available."
                 : "Aurelia is up to date.";
+        }
+        catch (PlatformNotSupportedException error)
+        {
+            Status = error.Message;
         }
         catch (Exception error) when (error is HttpRequestException or IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException or CredentialStoreUnavailableException)
         {
@@ -259,7 +307,9 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
         {
             PrivateFiles.CreateDirectory(directory);
             var path = Path.Combine(directory, release.FileName);
-            var expected = AppRelease.Checksum(release.FileName, await source.ChecksumsAsync(release, cancellation))
+            var sums = await source.ChecksumsAsync(release, cancellation);
+            await VerifySignatureAsync(release, sums, cancellation);
+            var expected = AppRelease.Checksum(release.FileName, sums)
                 ?? throw new IOException("The release has no unambiguous checksum for this package.");
             await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             {
@@ -281,9 +331,9 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
             RestartRequired = true;
             return true;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or HttpRequestException or CredentialStoreUnavailableException or Win32Exception or AureliaApiException or InvalidOperationException or TimeoutException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or HttpRequestException or CredentialStoreUnavailableException or Win32Exception or AureliaApiException or InvalidOperationException or TimeoutException or PlatformNotSupportedException)
         {
-            Status = error is IOException ? error.Message : "The update could not be installed. Try again.";
+            Status = error is IOException or PlatformNotSupportedException ? error.Message : "The update could not be installed. Try again.";
             return false;
         }
         catch (OperationCanceledException)
@@ -305,6 +355,21 @@ public sealed class AppUpdater(IReleaseSource source, IPackageInstaller installe
             IsBusy = false;
             Notify();
         }
+    }
+
+    /// <summary>
+    /// The checksum list must carry the owner's signature: a release or token on GitHub alone can
+    /// replace a package and its checksum, but not this signature, so such a package is never installed.
+    /// </summary>
+    private async Task VerifySignatureAsync(AppRelease release, string sums, CancellationToken cancellation)
+    {
+        if (!MinisignSignature.TryReadPublicKey(publicKey, out _, out _))
+            throw new IOException("This version of Aurelia cannot check update signatures. Install the new version from the release page.");
+        if (release.Signature is null)
+            throw new IOException("This release is not signed, so it was not installed. Install it from the release page if you trust it.");
+        var signature = await source.SignatureAsync(release, cancellation);
+        if (!MinisignSignature.Verify(System.Text.Encoding.UTF8.GetBytes(sums), signature, publicKey))
+            throw new IOException("The release signature is not valid, so the update was not installed.");
     }
 
     private void Notify() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));

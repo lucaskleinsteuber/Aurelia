@@ -44,6 +44,36 @@ public sealed class OfflineDownloadTests : IDisposable
     }
 
     [Fact]
+    public void TheListOfDownloadsIsPrivateAndAFailedSaveIsReported()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix permissions only.");
+            return;
+        }
+        var title = Invented();
+        var downloads = new OfflineDownloads(root);
+        downloads.SaveProgress(title.Id, 120_000, 600_000, completed: false);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(root, "index.json")));
+        // A directory in place of the temporary file makes the next save fail without throwing.
+        Directory.CreateDirectory(Path.Combine(root, "index.json.tmp"));
+        downloads.SaveProgress(title.Id, 180_000, 600_000, completed: false);
+        Assert.NotNull(downloads.Error);
+    }
+
+    [Fact]
+    public void OfflineProgressWinsWhileTheServerKeptItsRevisionWhateverTheClock()
+    {
+        var title = Invented() with { ServerRevision = 7, ProgressSavedAt = DateTimeOffset.UtcNow.AddHours(-2), ProgressDirty = true };
+        // This computer's clock runs two hours behind: the server's time looks later.
+        var unchanged = new PlaybackProgressResponse(title.Id, 0, 600_000, false, null, DateTimeOffset.UtcNow, Revision: 7);
+        Assert.True(OfflineDownloads.OfflineIsNewer(title, unchanged));
+        var watchedElsewhere = unchanged with { Revision = 8 };
+        Assert.False(OfflineDownloads.OfflineIsNewer(title, watchedElsewhere));
+        Assert.True(OfflineDownloads.OfflineIsNewer(title, watchedElsewhere with { UpdatedAt = DateTimeOffset.UtcNow.AddHours(-3) }));
+    }
+
+    [Fact]
     public void DownloadsAreKeptPerProfileAndForgottenWhenTheirFileIsGone()
     {
         var title = Invented();
@@ -88,5 +118,37 @@ public sealed class OfflineDownloadTests : IDisposable
         await Task.Delay(50, TestContext.Current.CancellationToken);
         Assert.Equal(300_000, downloads.Find(title.Id)!.PositionMilliseconds);
         Assert.True(downloads.Find(title.Id)!.ProgressDirty);
+    }
+    [Fact]
+    public async Task AnEarlierDownloadGetsItsPosterAndDescriptionFromTheLibrary()
+    {
+        var title = Invented();
+        // The list as an earlier version wrote it, without any of the newer fields.
+        var stored = JsonSerializer.Deserialize<System.Text.Json.Nodes.JsonArray>(File.ReadAllText(Path.Combine(root, "index.json")))!;
+        foreach (var name in new[] { "overview", "year", "genres", "parentId", "parentTitle", "seasonNumber", "episodeNumber", "posterFile", "backdropFile", "seriesPosterFile" })
+            stored[0]!.AsObject().Remove(name);
+        File.WriteAllText(Path.Combine(root, "index.json"), stored.ToJsonString());
+        var downloads = new OfflineDownloads(root);
+        Assert.False(downloads.Find(title.Id)!.HasArtwork);
+
+        var poster = new ArtworkSummary(Guid.NewGuid(), ArtworkKind.Poster, "poster.jpg", "image/jpeg", 4);
+        var server = new FakeServer().Image($"/api/v1/artwork/{poster.Id}", [0x89, 0x50, 0x4E, 0x47]);
+        using var api = new AureliaApi(server);
+        var library = new LibraryClient(api, new StoredServer(FakeServer.ServerId, "Living Room Server", new Uri("https://192.168.1.20:43111"), FakeServer.Fingerprint,
+                "device-token-synthetic-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30)),
+            new ProfileSession(new UserSummary(FakeLibrary.OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow), Guid.NewGuid(),
+                "profile-token-synthetic-0000000000000000001", DateTimeOffset.UtcNow.AddHours(12)), ["library-state-v1"]);
+        var item = new CatalogItemSummary(title.Id, MediaKind.Movie, "Invented Film", null, 2024, "An invented story.", ["Drama"], poster, null,
+            MediaAvailability.Available, false, null, DateTimeOffset.UtcNow);
+
+        await downloads.CompleteDetailsAsync(library, [item]);
+
+        var completed = downloads.Find(title.Id)!;
+        Assert.Equal("poster.image", completed.PosterFile);
+        Assert.Equal("An invented story.", completed.Overview);
+        Assert.Equal(2024, completed.Year);
+        Assert.Equal(60_000, completed.PositionMilliseconds);
+        Assert.Equal([0x89, 0x50, 0x4E, 0x47], File.ReadAllBytes(Path.Combine(downloads.Folder(title.Id), "poster.image")));
+        Assert.Equal("poster.image", new OfflineDownloads(root).Find(title.Id)!.PosterFile);
     }
 }

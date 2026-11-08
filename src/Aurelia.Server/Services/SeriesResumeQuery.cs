@@ -14,7 +14,9 @@ public sealed class SeriesResumeQuery(AureliaDbContext database)
         new SqliteParameter("$user", userId.ToString().ToUpperInvariant()),
         new SqliteParameter("$accessUser", database.AccessUserId?.ToString().ToUpperInvariant() ?? string.Empty),
         new SqliteParameter("$unrestricted", database.AccessUserId == null || database.AccessWholeCatalog ? 1 : 0),
-        new SqliteParameter("$mode", database.AccessMode.ToString()));
+        new SqliteParameter("$mode", database.AccessMode.ToString()),
+        new SqliteParameter("$ageLimited", database.AccessAgeLimited ? 1 : 0),
+        new SqliteParameter("$ratings", System.Text.Json.JsonSerializer.Serialize(database.AccessAllowedRatings)));
 
     private const string Sql = """
         WITH eligible AS (
@@ -26,7 +28,14 @@ public sealed class SeriesResumeQuery(AureliaDbContext database)
             LEFT JOIN MediaItems grandparent ON grandparent.Id=parent.ParentId
             WHERE e.Kind='Episode' AND e.SeasonNumber>0 AND ($unrestricted=1
                 OR ($mode='LegacyLibraries' AND EXISTS (SELECT 1 FROM UserLibraryGrants g WHERE g.UserId=$accessUser AND g.LibraryRootId=e.LibraryRootId))
-                OR ($mode='SelectedTitles' AND EXISTS (SELECT 1 FROM UserTitleGrants g WHERE g.UserId=$accessUser AND g.MediaItemId IN (e.Id,e.ParentId,parent.ParentId,grandparent.ParentId))))
+                OR ($mode='SelectedTitles' AND EXISTS (SELECT 1 FROM UserTitleGrants g WHERE g.UserId=$accessUser AND g.MediaItemId IN (e.Id,e.ParentId,parent.ParentId,grandparent.ParentId)))
+                OR ($ageLimited=1 AND (
+                    EXISTS (SELECT 1 FROM UserTitleRules r WHERE r.UserId=$accessUser AND r.Allowed=1
+                        AND r.MediaItemId=CASE WHEN parent.ParentId IS NULL THEN parent.Id ELSE grandparent.Id END)
+                    OR (NOT EXISTS (SELECT 1 FROM UserTitleRules r WHERE r.UserId=$accessUser AND r.Allowed=0
+                            AND r.MediaItemId=CASE WHEN parent.ParentId IS NULL THEN parent.Id ELSE grandparent.Id END)
+                        AND EXISTS (SELECT 1 FROM MediaMetadata m WHERE m.MediaItemId=CASE WHEN parent.ParentId IS NULL THEN parent.Id ELSE grandparent.Id END
+                            AND coalesce(m.ManualContentRating,m.ProviderContentRating) IN (SELECT value FROM json_each($ratings)))))))
         ), played AS (
             SELECT *,row_number() OVER (PARTITION BY SeriesId ORDER BY LastPlayedAt DESC,Id) AS PlayedRank
             FROM eligible WHERE LastPlayedAt IS NOT NULL

@@ -585,10 +585,15 @@ final class IOSPlaybackController: ObservableObject {
       userInteracted()
     } catch {
       guard !closed, operation == generation, !Task.isCancelled else { return }
-      if let core = error as? IOSCoreError,
-        core.isAuthenticationFailure || core == .identityMismatch
-      {
+      if let core = error as? IOSCoreError, core.endsSession {
         sessionFailed(core)
+      } else if let core = error as? IOSCoreError, let refusal = IOSPlayerPolicy.refusal(core) {
+        fail(refusal, canRetry: false)
+      } else if let core = error as? IOSCoreError,
+        let missing = IOSPlayerPolicy.unavailability(core)
+      {
+        // An offline drive answers 503, which would otherwise reconnect again and again.
+        fail(missing, canRetry: true)
       } else if (error as? IOSCoreError)?.isTransient == true || error is URLError {
         recover(message: "Reconnecting…")
       } else {
@@ -703,18 +708,12 @@ final class IOSPlaybackController: ObservableObject {
 
   private func handleRelayFailure(_ failure: IOSStreamFailure) {
     transportFailed = true
-    switch failure {
-    case .untrustedServer:
-      sessionFailed(IOSCoreError.identityMismatch)
-    case .server(let status, let code) where status == 401 || status == 403:
-      sessionFailed(IOSCoreError.server(status: status, code: code, message: nil, retryAfter: nil))
-    case .authorizationDenied:
-      sessionFailed(IOSCoreError.profileRequired)
-    case .unavailable:
-      fail("Media file unavailable.")
-    case .invalidResponse:
-      fail("The server returned an invalid media stream.")
-    default:
+    switch IOSPlayerPolicy.response(to: failure) {
+    case .endSession(let error):
+      sessionFailed(error)
+    case .fail(let message, let canRetry):
+      fail(message, canRetry: canRetry)
+    case .reconnect:
       recover(message: "The stream was interrupted. Reconnecting…")
     }
   }
@@ -802,10 +801,12 @@ final class IOSPlaybackController: ObservableObject {
         scheduleRenewal(renewed, operation: operation)
       } catch {
         guard !closed, operation == generation, !Task.isCancelled else { return }
-        if let apiError = error as? IOSCoreError,
-          apiError.isAuthenticationFailure || apiError == .identityMismatch
-        {
+        if let apiError = error as? IOSCoreError, apiError.endsSession {
           sessionFailed(apiError)
+        } else if let apiError = error as? IOSCoreError,
+          let refusal = IOSPlayerPolicy.refusal(apiError)
+        {
+          fail(refusal, canRetry: false)
         } else {
           recover(message: "Refreshing playback access…")
         }

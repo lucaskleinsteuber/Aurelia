@@ -160,6 +160,50 @@ public sealed class MetadataMatcherTests
         Assert.Equal(2, result.Count(credit => credit.ProviderId.Length == 0));
     }
 
+    [Fact]
+    public void CreditsKeepTheWholeCastAndEveryCrewJobWithKeyJobsFirst()
+    {
+        var cast = string.Join(",", Enumerable.Range(0, 120).Select(i => $$"""{"id":{{i + 1}},"name":"Actor {{i}}","character":"Role {{i}}"}"""));
+        var crew = """
+            {"id":900,"name":"Grip","department":"Crew","job":"Key Grip"},
+            {"id":901,"name":"Composer","department":"Sound","job":"Original Music Composer"},
+            {"id":902,"name":"Boss","department":"Directing","job":"Director"}
+            """;
+        using var document = System.Text.Json.JsonDocument.Parse($$"""{"cast":[{{cast}}],"crew":[{{crew}}]}""");
+
+        var result = TmdbClient.ParseCredits(document.RootElement);
+
+        Assert.Equal(120, result.Count(credit => credit.Department == "Acting"));
+        var jobs = result.Where(credit => credit.Department != "Acting").OrderBy(credit => credit.Order).Select(credit => credit.Job).ToList();
+        Assert.Equal(["Director", "Original Music Composer", "Key Grip"], jobs);
+        Assert.True(result.Where(credit => credit.Department == "Acting").Max(credit => credit.Order)
+            < result.Where(credit => credit.Department != "Acting").Min(credit => credit.Order));
+    }
+
+    [Fact]
+    public void SeriesAggregateCreditsJoinRolesAndSplitJobs()
+    {
+        using var document = System.Text.Json.JsonDocument.Parse("""
+            {"cast":[{"id":1,"name":"Lead","roles":[{"character":"Young Ann"},{"character":"Ann"}]}],
+             "crew":[{"id":2,"name":"Maker","department":"Writing","jobs":[{"job":"Creator"},{"job":"Writer"}]},{"name":"No Id","job":"Director"}]}
+            """);
+
+        var result = TmdbClient.ParseCredits(document.RootElement);
+
+        Assert.Equal("Young Ann / Ann", Assert.Single(result, credit => credit.Department == "Acting").Character);
+        Assert.Equal(["Creator", "Writer"], result.Where(credit => credit.ProviderId == "2").Select(credit => credit.Job));
+        Assert.DoesNotContain(result, credit => credit.Name == "No Id");
+    }
+
+    [Fact]
+    public void UniversesComeOnlyFromKeywordsNamingTheWorldItself()
+    {
+        Assert.Equal([("marvel-cinematic-universe", "Marvel Cinematic Universe")],
+            MediaUniverses.Find(["superhero", "Marvel Cinematic Universe (MCU)", "marvel cinematic universe"]));
+        Assert.Empty(MediaUniverses.Find(["parallel universe", "multiverse", "based on comic"]));
+        Assert.Empty(MediaUniverses.Find(null));
+    }
+
     private static MetadataCandidateSummary Candidate(
         string id,
         string title,

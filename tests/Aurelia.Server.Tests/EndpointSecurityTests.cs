@@ -29,6 +29,7 @@ public sealed class EndpointSecurityTests
         // The browser app: its files, and the sign-in steps before a device credential exists.
         "GET,HEAD /web/{**file}",
         "GET,HEAD {**path}",
+        "POST /api/v1/web/pair",
         "POST /api/v1/web/pairing",
         "POST /api/v1/web/pairing/cancel",
         "POST /api/v1/web/pairing/status",

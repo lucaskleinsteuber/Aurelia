@@ -174,6 +174,9 @@ img { display: block; }
   -webkit-user-select: all;
 }
 .pairing-code.expired { text-decoration: line-through; color: var(--muted); }
+.pairing-input { width: min(100%, 360px); text-align: center; color: inherit; }
+.pairing-input::placeholder { color: var(--muted); opacity: 0.5; }
+.pairing-steps { text-align: left; margin: 0; padding-left: 1.4em; color: var(--muted); line-height: 1.5; }
 
 /* MARK: Profiles */
 
@@ -221,6 +224,29 @@ img { display: block; }
 .palette-4 { background: linear-gradient(#5cd6cc, #1a858f); }
 .palette-5 { background: linear-gradient(#80db7a, #2e8f4d); }
 .palette-6 { background: linear-gradient(#8c99ff, #474dcc); }
+.palette-7 { background: linear-gradient(#ff7a6b, #c9302c); }
+.profile-picture { position: relative; overflow: hidden; }
+.profile-picture .profile-symbol { width: 52%; height: 52%; fill: #fff; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18)); }
+.profile-picture .profile-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* Name and Picture in Settings. */
+.picture-editor { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.picture-symbols, .picture-palettes { display: flex; flex-wrap: wrap; gap: 8px; }
+.picture-choice, .palette-choice { border: 2px solid transparent; border-radius: 50%; padding: 2px; background: none; cursor: pointer; line-height: 0; }
+.picture-choice.selected, .palette-choice.selected { border-color: #fff; }
+.picture-choice:focus-visible, .palette-choice:focus-visible { outline: 2px solid var(--accent, #0a84ff); outline-offset: 2px; }
+.palette-choice { width: 28px; height: 28px; }
+
+/* The first-run tour. */
+.tour-layer { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+.tour-layer.dimmed { background: rgba(5, 6, 8, 0.72); }
+.tour-ring { position: fixed; border: 2px solid rgba(255, 255, 255, 0.9); border-radius: 12px; box-shadow: 0 0 0 9999px rgba(5, 6, 8, 0.72); transition: all 0.25s ease; }
+.tour-bubble { position: fixed; width: min(320px, calc(100vw - 32px)); box-sizing: border-box; padding: 16px 18px; border-radius: 14px; background: rgba(36, 39, 44, 0.97); border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); pointer-events: auto; }
+.tour-title { margin: 0 0 6px; font-size: 17px; }
+.tour-text { margin: 0 0 12px; color: rgba(255, 255, 255, 0.7); font-size: 14px; line-height: 1.4; }
+.tour-actions { display: flex; align-items: center; gap: 12px; }
+.tour-actions .muted { margin-right: auto; }
+@media (prefers-reduced-motion: reduce) { .tour-ring { transition: none; } }
 
 /* PIN */
 

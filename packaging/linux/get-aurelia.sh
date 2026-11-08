@@ -61,9 +61,17 @@ expected=$(awk -v file="$name" '{ sub(/^\*/, "", $2); sub(/^\.\//, "", $2) } $2 
 [ "$(sha256sum "$work/$name" | cut -d ' ' -f1)" = "$expected" ] \
   || fail "The download does not match its published checksum, so it was not installed."
 
-tar -xzf "$work/$name" -C "$work"
-package=$(find "$work" -mindepth 2 -maxdepth 2 -name install.sh -printf '%h\n' | head -n 1)
-[ -n "$package" ] || fail "The download contains no installer."
+# Like `aurelia update`: only the package's own folder is unpacked, owned by root, and it must be
+# the version and architecture that was chosen.
+folder="Aurelia-Server-$version-linux-$arch"
+tar -tzf "$work/$name" > "$work/contents"
+awk -v folder="$folder" 'index($0, folder "/") != 1 || /(^|\/)\.\.(\/|$)/ { bad = 1 } END { exit bad }' "$work/contents" \
+  || fail "The download is not an Aurelia Server package, so it was not installed."
+mkdir "$work/package"
+tar -xzf "$work/$name" --no-same-owner -C "$work/package"
+package="$work/package/$folder"
+[ "$(cat "$package/VERSION" 2>/dev/null)" = "$version ($build)" ] && [ "$(cat "$package/ARCHITECTURE" 2>/dev/null)" = "$arch" ] \
+  && [ -f "$package/install.sh" ] || fail "The download is not Aurelia Server $version ($build) for $arch, so it was not installed."
 was_set_up=false
 [ -e /var/lib/aurelia/aurelia.db ] && was_set_up=true
 (cd "$package" && ./install.sh)

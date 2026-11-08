@@ -12,6 +12,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Xunit;
 
@@ -36,6 +37,26 @@ public sealed class SettingsViewTests
         TestWindows.SaveSnapshot(frame, name);
     }
 
+    [Fact]
+    public void AboutReadsTheChangesOfThisVersionFromTheChangelog()
+    {
+        const string changelog = "# Changelog\n\n## Mac 9.9.9 (1) - 01.01.2026\n\n- Not this one.\n\n## Linux Desktop 2.1.0 (30) Beta - 01.01.2026\n\n### Fixed\n\n- **Home** returns from a title.\n- The `PIN` field is clean.\n\n## Linux Desktop 2.0.0 (29) - 01.01.2026\n\n- Older.\n";
+        Assert.Equal(["Home returns from a title.", "The PIN field is clean."], AppInfo.ChangesIn(changelog, "2.1.0"));
+        Assert.Empty(AppInfo.ChangesIn(changelog, "3.0.0"));
+        Assert.Empty(AppInfo.ChangesIn(null, "2.1.0"));
+    }
+
+    [AvaloniaFact]
+    public void TheAboutPageShowsVersionSourceAndLicense()
+    {
+        var (_, settings, _) = Open(SettingsCategory.About);
+        var texts = settings.Page!.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
+        Assert.Contains("Aurelia for Linux", texts);
+        Assert.Contains(AppInfo.RepositoryUrl, texts);
+        Assert.Contains(texts, text => text?.Contains("MIT License", StringComparison.Ordinal) == true);
+        Assert.Contains(texts, text => text?.StartsWith("Version ", StringComparison.Ordinal) == true);
+    }
+
     [AvaloniaFact]
     public void ListsTheCategoriesAndSearchesThem()
     {
@@ -43,12 +64,12 @@ public sealed class SettingsViewTests
         Assert.Equal(
             [SettingsCategory.General, SettingsCategory.Sidebar, SettingsCategory.Activity, SettingsCategory.Playback,
              SettingsCategory.Library, SettingsCategory.Metadata, SettingsCategory.ProfilesAndDevices, SettingsCategory.Server,
-             SettingsCategory.Updates, SettingsCategory.Advanced],
+             SettingsCategory.Updates, SettingsCategory.Advanced, SettingsCategory.About],
             settings.VisibleCategories);
         Snapshot(settings, "settings-general");
         Assert.Equal([SettingsCategory.Playback], SettingsView.Matching("subtitle"));
         Assert.Contains(SettingsCategory.Advanced, SettingsView.Matching("fingerprint"));
-        Assert.Equal(10, SettingsView.Matching(" ").Count);
+        Assert.Equal(11, SettingsView.Matching(" ").Count);
     }
 
     [AvaloniaFact]
@@ -62,6 +83,19 @@ public sealed class SettingsViewTests
         var rest = toggles.Single(t => AutomationProperties.GetName(t) == "Let the Server Rest When Unused");
         rest.IsChecked = false;
         Assert.False(window.Session.Preferences.RestsWhenUnused);
+    }
+
+    [AvaloniaFact]
+    public void ActivityStartsAtTheSettingsEdgeNotUnderTheSidebar()
+    {
+        var (_, settings, _) = Open(SettingsCategory.Activity);
+        Dispatcher.UIThread.RunJobs();
+        Snapshot(settings, "settings-activity");
+        var statistics = settings.GetVisualDescendants().OfType<Aurelia.Linux.Library.StatisticsPage>().Single();
+        var chip = settings.GetVisualDescendants().OfType<ToggleButton>().First(button => button.Content as string == "Statistics");
+        var pageLeft = statistics.TranslatePoint(new Point(0, 0), settings)!.Value.X;
+        var chipLeft = chip.TranslatePoint(new Point(0, 0), settings)!.Value.X;
+        Assert.Equal(chipLeft, pageLeft, 1);
     }
 
     [AvaloniaFact]

@@ -34,6 +34,13 @@ struct IOSCoreTests {
     #expect(pool.lease(host: "tv.local", fingerprint: "aa").session !== first.session)
   }
 
+  @Test func aGenericDeviceNameGetsAStableTag() {
+    let tag = UUID(uuidString: "AB12CD34-0000-4000-8000-000000000001")!
+    #expect(IOSDeviceName.display(systemName: "iPhone", model: "iPhone", tag: tag) == "iPhone AB12")
+    #expect(IOSDeviceName.display(systemName: "Lucas’s iPad", model: "iPad", tag: tag) == "Lucas’s iPad")
+    #expect(IOSDeviceName.display(systemName: "Apple TV", model: "Apple TV", tag: nil) == "Apple TV")
+  }
+
   @Test func onlyASilentServerCountsAsAsleep() {
     #expect(IOSServerReachability.isUnreachable(URLError(.cannotConnectToHost)))
     #expect(IOSServerReachability.isUnreachable(URLError(.timedOut)))
@@ -105,7 +112,10 @@ struct IOSCoreTests {
     #expect(throws: IOSCoreError.unsupportedServer) { try older.validate() }
     let future = IOSCapabilities(
       formatVersion: 99, minimumClientVersion: "1.5.1", capabilities: capabilities.capabilities)
-    #expect(throws: IOSCoreError.unsupportedServer) { try future.validate() }
+    #expect(throws: IOSCoreError.outdatedClient) { try future.validate() }
+    let ancient = IOSCapabilities(
+      formatVersion: 0, minimumClientVersion: "1.0", capabilities: capabilities.capabilities)
+    #expect(throws: IOSCoreError.unsupportedServer) { try ancient.validate() }
   }
 
   @Test func inspectDoesNotSendCredentialsAndChecksCapturedIdentity() async throws {
@@ -120,6 +130,14 @@ struct IOSCoreTests {
     ])
     await #expect(throws: IOSCoreError.identityMismatch) {
       try await IOSAPIClient.inspect(baseURL: Self.baseURL, transport: wrong)
+    }
+    // A server that is closed to the home network says so, not that its identity changed.
+    let closed = IOSCoreFakeTransport(responses: [
+      response(infoJSON.replacingOccurrences(
+        of: "\"lanAccessEnabled\":true", with: "\"lanAccessEnabled\":false"))
+    ])
+    await #expect(throws: IOSCoreError.lanAccessDisabled) {
+      try await IOSAPIClient.inspect(baseURL: Self.baseURL, transport: closed)
     }
   }
 

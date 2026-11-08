@@ -17,6 +17,14 @@ struct ServerProfileEditor: View {
   @State private var accessMode: ProfileAccessMode
   @State private var selectedTitles: Set<UUID> = []
   @State private var query = ""
+  @State private var pictureKey: String?
+  @State private var photo: Data?
+  @State private var ageSnapshot: ProfileAgeLimit?
+  @State private var isChild = false
+  @State private var ageLimit = 6
+  @State private var allowedTitles: Set<UUID> = []
+  @State private var hiddenTitles: Set<UUID> = []
+  @State private var exceptionQuery = ""
   @State private var working = false
   @State private var saveTask: Task<Void, Never>?
   @State private var error: String?
@@ -25,7 +33,10 @@ struct ServerProfileEditor: View {
     self.existing = existing
     self.client = client
     self.completed = completed
-    _name = State(initialValue: existing?.user.username ?? "")
+    _name = State(initialValue: existing?.user.shownName ?? "")
+    _pictureKey = State(initialValue: existing?.user.pictureKey)
+    _isChild = State(initialValue: existing?.user.ageLimit != nil)
+    _ageLimit = State(initialValue: existing?.user.ageLimit ?? 6)
     _role = State(initialValue: existing?.user.role ?? .user)
     _enabled = State(initialValue: existing?.isEnabled ?? true)
     _pinProtected = State(initialValue: existing?.user.pinProtectionEnabled ?? false)
@@ -45,7 +56,18 @@ struct ServerProfileEditor: View {
   }
   private var canSave: Bool {
     !working && (creating || snapshot != nil)
-      && name.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 && hasValidPIN
+      && (1...40).contains(name.trimmingCharacters(in: .whitespacesAndNewlines).count)
+      && hasValidPIN && (!creating || !childActive || model.supportsAgeLimits)
+  }
+  /// A children's profile: only for viewing profiles on servers that know age limits.
+  private var childActive: Bool { model.supportsAgeLimits && isChild && role == .user }
+  private var exceptionTitles: [CatalogItemSummary] {
+    model.catalogItems.filter {
+      ($0.kind == .movie || $0.kind == .series)
+        && (exceptionQuery.isEmpty
+          ? allowedTitles.contains($0.id) || hiddenTitles.contains($0.id)
+          : $0.title.localizedCaseInsensitiveContains(exceptionQuery))
+    }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
   }
   private var titles: [CatalogItemSummary] {
     model.catalogItems.filter {
@@ -73,8 +95,16 @@ struct ServerProfileEditor: View {
             ProgressView("Loading profile…")
           }
           profileSection.disabled(working || (!creating && snapshot == nil))
+          if model.supportsProfilePersonalization {
+            pictureSection.disabled(working || (!creating && snapshot == nil))
+          }
           protectionSection.disabled(working || (!creating && snapshot == nil))
-          contentSection.disabled(working || (!creating && snapshot == nil))
+          if model.supportsAgeLimits && role == .user {
+            childSection.disabled(working || (!creating && snapshot == nil))
+          }
+          if !childActive {
+            contentSection.disabled(working || (!creating && snapshot == nil))
+          }
           if let error {
             Text(error).foregroundStyle(.orange).textSelection(.enabled)
               .accessibilityIdentifier("profile-editor-error")
@@ -128,9 +158,13 @@ struct ServerProfileEditor: View {
   private var profileSection: some View {
     GroupBox("Profile") {
       VStack(alignment: .leading, spacing: 12) {
-        if creating {
+        if creating || model.supportsProfilePersonalization {
           TextField("Profile name", text: $name).textFieldStyle(.roundedBorder)
             .accessibilityIdentifier("profile-editor-name")
+          if !creating {
+            Text("The name everyone sees. An owner keeps signing in with the original name.")
+              .font(.caption).foregroundStyle(.secondary)
+          }
         } else {
           LabeledContent("Name", value: name)
         }
@@ -145,6 +179,94 @@ struct ServerProfileEditor: View {
           .font(.caption).foregroundStyle(.secondary)
       }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
     }
+  }
+
+  private var pictureSection: some View {
+    GroupBox("Picture") {
+      ProfilePicturePicker(
+        id: existing?.id, name: name, pictureRevision: snapshot?.user.pictureRevision ?? 0,
+        key: $pictureKey, photo: $photo
+      )
+      .frame(maxWidth: .infinity, alignment: .leading).padding(10)
+    }
+  }
+
+  private var childSection: some View {
+    GroupBox("Children's Profile") {
+      VStack(alignment: .leading, spacing: 12) {
+        Toggle("Children's Profile", isOn: $isChild)
+          .toggleStyle(.switch)
+          .accessibilityIdentifier("profile-editor-child")
+        if isChild {
+          Text("A children's profile can watch the whole library, limited by its age.")
+            .font(.caption).foregroundStyle(.secondary)
+          Picker("Age", selection: $ageLimit) {
+            ForEach(ProfileAgeSteps.all, id: \.value) { step in
+              Text(step.label).tag(step.value)
+            }
+          }
+          .accessibilityIdentifier("profile-editor-age")
+          Text("Titles above this age and titles without a rating are hidden.")
+            .font(.caption).foregroundStyle(.secondary)
+          Divider()
+          Text("Exceptions").font(.headline)
+          TextField("Search films and series", text: $exceptionQuery)
+            .textFieldStyle(.roundedBorder)
+            .accessibilityIdentifier("profile-editor-exception-search")
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+              ForEach(exceptionTitles) { item in
+                HStack(spacing: 8) {
+                  Image(systemName: item.kind == .series ? "tv" : "film")
+                    .foregroundStyle(.secondary).frame(width: 18)
+                  Text(item.title).lineLimit(1)
+                  if let year = item.year {
+                    Text(String(year)).foregroundStyle(.secondary)
+                  }
+                  Spacer()
+                  Picker("", selection: exceptionBinding(item.id)) {
+                    Text("By Age").tag(0)
+                    Text("Allow Anyway").tag(1)
+                    Text("Always Hide").tag(2)
+                  }
+                  .labelsHidden()
+                  .frame(width: 140)
+                  .accessibilityLabel("Exception \(item.title)")
+                  .accessibilityIdentifier("profile-editor-exception-\(item.id.uuidString)")
+                }
+              }
+              if exceptionTitles.isEmpty {
+                Text(
+                  exceptionQuery.isEmpty
+                    ? "No exceptions. Search a title to allow or hide it anyway."
+                    : "No matching titles."
+                )
+                .foregroundStyle(.secondary).padding(.vertical, 6)
+              }
+            }.padding(12)
+          }
+          .frame(minHeight: 80, maxHeight: 170)
+          .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+          .scrollIndicators(.hidden).aureliaOverlayScrollbars()
+        } else {
+          Text(
+            "Shows only titles approved for the child's age. Titles without a rating are hidden."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+        }
+      }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+    }
+  }
+
+  private func exceptionBinding(_ id: UUID) -> Binding<Int> {
+    Binding(
+      get: { allowedTitles.contains(id) ? 1 : hiddenTitles.contains(id) ? 2 : 0 },
+      set: { choice in
+        allowedTitles.remove(id)
+        hiddenTitles.remove(id)
+        if choice == 1 { allowedTitles.insert(id) }
+        if choice == 2 { hiddenTitles.insert(id) }
+      })
   }
 
   private var protectionSection: some View {
@@ -257,7 +379,23 @@ struct ServerProfileEditor: View {
         return try await client.profileEditor(id: existing.id)
       }
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+      let age: ProfileAgeLimit? =
+        model.supportsAgeLimits
+        ? try await model.currentAdministration {
+          guard model.isCurrentAdministration(generation) else { throw CancellationError() }
+          return try await client.ageLimit(user: existing.id)
+        } : nil
+      guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+      ageSnapshot = age
+      if let age {
+        isChild = age.ageLimit != nil
+        ageLimit = age.ageLimit ?? 6
+        allowedTitles = Set(age.allowedTitleIds)
+        hiddenTitles = Set(age.hiddenTitleIds)
+      }
       snapshot = loaded
+      name = loaded.user.shownName
+      pictureKey = loaded.user.pictureKey
       role = loaded.user.role
       enabled = loaded.isEnabled
       pinProtected = loaded.user.pinProtectionEnabled
@@ -276,11 +414,32 @@ struct ServerProfileEditor: View {
     guard canSave else { return }
     let generation = model.administrationGeneration
     let newPIN = pinProtected && !pin.isEmpty ? pin : nil
-    let titles = Array(selectedTitles).sorted { $0.uuidString < $1.uuidString }
+    let child = childActive
+    let mode: ProfileAccessMode = child ? .entireLibrary : accessMode
+    let titles = child ? [] : Array(selectedTitles).sorted { $0.uuidString < $1.uuidString }
     let changedAccess =
-      creating || accessMode != snapshot?.access.mode
-      || selectedTitles != Set(snapshot?.access.titleIds ?? [])
-    let effectiveMode: ProfileAccessMode? = changedAccess ? accessMode : nil
+      creating || mode != snapshot?.access.mode
+      || Set(titles) != Set(snapshot?.access.titleIds ?? [])
+    let effectiveMode: ProfileAccessMode? = changedAccess ? mode : nil
+    let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let renamed =
+      !creating && model.supportsProfilePersonalization
+      && trimmedName != snapshot?.user.shownName
+    let pictureChanged =
+      model.supportsProfilePersonalization
+      && (photo != nil || pictureKey != snapshot?.user.pictureKey)
+    let upload = pictureKey == ProfilePictureCatalog.photoKey ? photo : nil
+    let builtin = pictureKey == ProfilePictureCatalog.photoKey ? nil : pictureKey
+    let allowed = Array(allowedTitles).sorted { $0.uuidString < $1.uuidString }
+    let hidden = Array(hiddenTitles).sorted { $0.uuidString < $1.uuidString }
+    let wasChild = ageSnapshot?.ageLimit != nil
+    let ageChanged =
+      model.supportsAgeLimits
+      && (child != wasChild || (child && ageLimit != ageSnapshot?.ageLimit)
+        || (child
+          && (Set(allowed) != Set(ageSnapshot?.allowedTitleIds ?? [])
+            || Set(hidden) != Set(ageSnapshot?.hiddenTitleIds ?? []))))
+    let chosenAge = ageLimit
     working = true
     saveTask = Task {
       defer {
@@ -291,19 +450,51 @@ struct ServerProfileEditor: View {
         try await model.currentAdministration {
           guard model.isCurrentAdministration(generation) else { throw CancellationError() }
           if let existing, let snapshot {
+            // A children's profile ends before its role may change.
+            if ageChanged, !child, wasChild {
+              let current = try await client.ageLimit(user: existing.id)
+              _ = try await client.setAgeLimit(
+                user: existing.id,
+                ProfileAgeLimit(
+                  ageLimit: nil, allowedTitleIds: [], hiddenTitleIds: [],
+                  revision: current.revision))
+            }
             _ = try await client.updateProfile(
               id: existing.id,
               request: ProfileUpdateRequest(
                 revision: snapshot.revision, role: role, isEnabled: enabled,
                 pinProtectionEnabled: pinProtected, pin: newPIN, accessMode: effectiveMode,
                 titleIds: changedAccess ? titles : nil))
+            if ageChanged, child {
+              let current = try await client.ageLimit(user: existing.id)
+              _ = try await client.setAgeLimit(
+                user: existing.id,
+                ProfileAgeLimit(
+                  ageLimit: chosenAge, allowedTitleIds: allowed, hiddenTitleIds: hidden,
+                  revision: current.revision))
+            }
+            var user: UserSummary?
+            if renamed { user = try await client.renameProfile(id: existing.id, name: trimmedName) }
+            if pictureChanged {
+              if let upload {
+                user = try await client.uploadProfilePhoto(id: existing.id, image: upload)
+              } else {
+                user = try await client.setProfilePicture(id: existing.id, builtin: builtin)
+              }
+            }
+            if let user { model.updateProfileUser(user) }
           } else {
-            _ = try await client.createProfile(
+            let created = try await client.createProfile(
               request: ProfileCreateRequest(
-                username: name.trimmingCharacters(in: .whitespacesAndNewlines), role: role,
+                username: trimmedName, role: role,
                 isEnabled: enabled, pinProtectionEnabled: pinProtected, pin: newPIN,
-                accessMode: role == .owner ? .entireLibrary : accessMode,
-                titleIds: role == .owner ? [] : titles))
+                accessMode: role == .owner ? .entireLibrary : mode,
+                titleIds: role == .owner ? [] : titles,
+                pictureKey: model.supportsProfilePersonalization ? builtin : nil,
+                ageLimit: child ? chosenAge : nil))
+            if let upload, model.supportsProfilePersonalization {
+              _ = try await client.uploadProfilePhoto(id: created.id, image: upload)
+            }
           }
         }
         clearPIN()

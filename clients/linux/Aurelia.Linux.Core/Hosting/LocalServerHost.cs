@@ -42,6 +42,8 @@ public sealed record LocalServerOptions(
 {
     public const int StandardHttpPort = 43110;
     public const int StandardHttpsPort = 43111;
+    public const int TestHttpPort = 43120;
+    public const int TestHttpsPort = 43121;
 
     /// <summary>
     /// The server that comes with the package, in its data folder under <c>$XDG_DATA_HOME</c>. It uses
@@ -52,8 +54,10 @@ public sealed record LocalServerOptions(
         var executable = Environment.GetEnvironmentVariable("AURELIA_DESKTOP_SERVER") is { Length: > 0 } custom
             ? custom
             : Path.Combine(AppContext.BaseDirectory, "server", "Aurelia.Server");
-        var name = $"Aurelia on {Environment.MachineName}";
-        return new LocalServerOptions(executable, paths.ServerDirectory, paths.LogDirectory, StandardHttpPort, StandardHttpsPort,
+        // The test edition's server uses its own ports, so it never meets the real app's server.
+        var name = $"{AppInfo.DisplayName} on {Environment.MachineName}";
+        var (http, https) = AppInfo.IsTestEdition ? (TestHttpPort, TestHttpsPort) : (StandardHttpPort, StandardHttpsPort);
+        return new LocalServerOptions(executable, paths.ServerDirectory, paths.LogDirectory, http, https,
             DefaultLanAccess: true, name.Length <= 128 ? name : "Aurelia");
     }
 }
@@ -197,7 +201,7 @@ public sealed class LocalServerHost : ILocalServerHost
         string token;
         lock (gate)
         {
-            if (State != LocalServerState.SetupRequired || bootstrapToken is null)
+            if (State != LocalServerState.SetupRequired || bootstrapToken is null || !OwnsPort())
                 throw new AureliaApiException(409, "setup_unavailable", "This server is already set up or not ready. Try again in a moment.");
             token = bootstrapToken;
         }
@@ -253,11 +257,39 @@ public sealed class LocalServerHost : ILocalServerHost
 
     public async Task<AuthenticationResponse> SignInAsync(string ownerName, string password, string deviceName, CancellationToken cancellation)
     {
+        RequireOwnRunningServer();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/login")
         {
             Content = JsonContent.Create(new LoginRequest(ownerName.Trim(), password, deviceName), options: Json),
         };
         return await SendLocalAsync<AuthenticationResponse>(request, cancellation);
+    }
+
+    /// <summary>
+    /// The Server Password travels over plain HTTP on 127.0.0.1, so it is sent only while the
+    /// server this app started is running: then it holds the port, not another program that took
+    /// the port while the server was stopped, restarting or replaced by another Aurelia.
+    /// </summary>
+    private void RequireOwnRunningServer()
+    {
+        lock (gate)
+        {
+            if (State != LocalServerState.Running || !OwnsPort())
+                throw new AureliaApiException(503, "server_unavailable", "Aurelia Server on this computer is not running yet, so your password was not sent. Try again in a moment.");
+        }
+    }
+
+    /// <summary>Called under <see cref="gate"/>: a child this app started is alive and announced it is ready.</summary>
+    private bool OwnsPort()
+    {
+        try
+        {
+            return process is { HasExited: false } && ready is { Task.IsCompletedSuccessfully: true };
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>The other server found on this computer's port, when <see cref="State"/> is <see cref="LocalServerState.PortInUse"/>.</summary>
@@ -266,6 +298,7 @@ public sealed class LocalServerHost : ILocalServerHost
     /// <summary>A forgotten owner PIN, reset with the Server Password through the private host channel.</summary>
     public async Task ResetOwnerPinAsync(string password, string pin, CancellationToken cancellation)
     {
+        RequireOwnRunningServer();
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/local/owner-pin")
         {
             Content = JsonContent.Create(new InitializeProfilesRequest(password, pin), options: Json),

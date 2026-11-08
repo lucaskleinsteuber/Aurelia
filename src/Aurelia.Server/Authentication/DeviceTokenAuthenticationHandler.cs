@@ -82,6 +82,8 @@ public sealed class DeviceTokenAuthenticationHandler(
             claims.Add(new Claim(ClaimTypes.Role, user.Role.ToString()));
             claims.Add(new Claim(ProfileSessionIdClaim, viewing.Id.ToString()));
             claims.Add(new Claim("aurelia_access_mode", user.AccessMode.ToString()));
+            if (user.AgeLimit is { } ageLimit && user.Role == UserRole.User)
+                claims.Add(new Claim("aurelia_age_limit", ageLimit.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);

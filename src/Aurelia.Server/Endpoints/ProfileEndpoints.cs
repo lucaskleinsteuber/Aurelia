@@ -12,6 +12,13 @@ public static class ProfileEndpoints
         app.MapDelete("/api/v1/device", async (AccountService accounts, HttpContext context) =>
         { await accounts.RevokeOwnDeviceAsync(context.User.RequireSessionId(), context.RequestAborted); return Results.NoContent(); }).RequireAuthorization("TrustedDevice");
         devices.MapGet("", (ProfileService service, CancellationToken token) => service.PickerAsync(token));
+        // Pictures show in "Who's watching?" before a profile is open. A revision in the query lets clients cache them.
+        devices.MapGet("/{id:guid}/picture", async (Guid id, ProfileService service, HttpContext context) =>
+        {
+            if (await service.PhotoAsync(id, context.RequestAborted) is not { } jpeg) return Results.NotFound();
+            context.Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+            return Results.Bytes(jpeg, "image/jpeg");
+        });
         devices.MapPost("/initialize", async (HttpContext context, InitializeProfilesRequest request, ProfileService service) =>
         {
             RequirePrivateTransport(context);
@@ -39,13 +46,21 @@ public static class ProfileEndpoints
             return Results.NoContent();
         }).RequireAuthorization().RequireRateLimiting("authentication");
 
+        // Every profile may change its own name and picture.
+        app.MapPut("/api/v1/profile/name", (UpdateProfileNameRequest request, ProfileService service, HttpContext context) =>
+            service.RenameAsync(context.User.RequireUserId(), context.User.RequireUserId(), request.Name, context.RequestAborted)).RequireAuthorization();
+        app.MapPut("/api/v1/profile/picture", (UpdateProfilePictureRequest request, ProfileService service, HttpContext context) =>
+            service.SetPictureAsync(context.User.RequireUserId(), context.User.RequireUserId(), request.Builtin, context.RequestAborted)).RequireAuthorization();
+        app.MapPut("/api/v1/profile/picture/photo", (ProfileService service, HttpContext context) =>
+            service.SetPhotoAsync(context.User.RequireUserId(), context.User.RequireUserId(), context.Request.Body, context.RequestAborted)).RequireAuthorization();
+
         var management = app.MapGroup("/api/v1/management").RequireAuthorization("Administrator");
         management.MapPost("/unlock", async (UnlockManagementRequest request, ProfileService service, ProfileSessionStore sessions, HttpContext context) =>
         {
             RequirePrivateTransport(context);
             var profileId = context.User.RequireProfileSessionId();
             var epoch = sessions.ManagementEpoch(profileId);
-            await service.VerifyManagementAsync(context.User.RequireUserId(), request.Password, context.RequestAborted);
+            await service.VerifyManagementAsync(context.User.RequireUserId(), request.Password, context.RequestAborted, context.User.RequireSessionId());
             return new ManagementUnlockResponse(sessions.UnlockManagement(profileId, epoch));
         }).RequireRateLimiting("authentication");
         management.MapPost("/lock", (ProfileSessionStore sessions, HttpContext context) =>
@@ -69,6 +84,16 @@ public static class ProfileEndpoints
             RequirePrivateTransport(context);
             return service.UpdateAsync(context.User.RequireUserId(), id, request, context.RequestAborted);
         }).RequireAuthorization("Owner");
+        app.MapPut("/api/v1/users/{id:guid}/name", (Guid id, UpdateProfileNameRequest request, ProfileService service, HttpContext context) =>
+            service.RenameAsync(context.User.RequireUserId(), id, request.Name, context.RequestAborted)).RequireAuthorization("Owner");
+        app.MapPut("/api/v1/users/{id:guid}/picture", (Guid id, UpdateProfilePictureRequest request, ProfileService service, HttpContext context) =>
+            service.SetPictureAsync(context.User.RequireUserId(), id, request.Builtin, context.RequestAborted)).RequireAuthorization("Owner");
+        app.MapPut("/api/v1/users/{id:guid}/picture/photo", (Guid id, ProfileService service, HttpContext context) =>
+            service.SetPhotoAsync(context.User.RequireUserId(), id, context.Request.Body, context.RequestAborted)).RequireAuthorization("Owner");
+        app.MapGet("/api/v1/users/{id:guid}/age-limit", (Guid id, ProfileService service, CancellationToken token) =>
+            service.AgeLimitAsync(id, token)).RequireAuthorization("Owner");
+        app.MapPut("/api/v1/users/{id:guid}/age-limit", (Guid id, UpdateProfileAgeLimitRequest request, ProfileService service, HttpContext context) =>
+            service.UpdateAgeLimitAsync(context.User.RequireUserId(), id, request, context.RequestAborted)).RequireAuthorization("Owner");
         app.MapGet("/api/v1/users/{id:guid}/titles", (Guid id, ProfileService service, CancellationToken token) => service.AccessAsync(id, token)).RequireAuthorization("Owner");
         app.MapPut("/api/v1/users/{id:guid}/enabled", async (Guid id, SetProfileEnabledRequest request, ProfileService service, HttpContext context) =>
         { await service.SetEnabledAsync(context.User.RequireUserId(), id, request.IsEnabled, context.RequestAborted); return Results.NoContent(); }).RequireAuthorization("Owner");

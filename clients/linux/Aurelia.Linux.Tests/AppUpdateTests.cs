@@ -93,7 +93,7 @@ public sealed class AppUpdateTests
     {
         var settings = new MemorySettingsStore();
         settings.Write("unrelated", "preserved");
-        using var updater = new AppUpdater(new FakeSource(), new FakeInstaller(), settings, "unused", new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(new FakeSource(), new FakeInstaller(), settings, "unused", new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         await updater.CheckAsync(true, TestContext.Current.CancellationToken);
         Assert.NotNull(updater.Available);
         updater.SetPublicUpdateTest(true);
@@ -121,7 +121,7 @@ public sealed class AppUpdateTests
     {
         var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-ui-" + Guid.NewGuid().ToString("N"));
         var installer = new FakeInstaller();
-        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         var services = AppServices.ForTests() with { Updater = updater };
         var window = TestWindows.Show(services);
         var settings = window.OpenSettings(SettingsCategory.Updates);
@@ -234,7 +234,7 @@ public sealed class AppUpdateTests
         var source = new FakeSource { Sums = new string('0', 64) + "  " + FileName };
         var installer = new FakeInstaller();
         var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-" + Guid.NewGuid().ToString("N"));
-        using var updater = new AppUpdater(source, installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(source, installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         try
         {
             await updater.CheckAsync(true, TestContext.Current.CancellationToken);
@@ -254,7 +254,7 @@ public sealed class AppUpdateTests
         var source = new FakeSource();
         var installer = new FakeInstaller();
         var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-" + Guid.NewGuid().ToString("N"));
-        using var updater = new AppUpdater(source, installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(source, installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         try
         {
             await updater.CheckAsync(true, TestContext.Current.CancellationToken);
@@ -271,7 +271,7 @@ public sealed class AppUpdateTests
     {
         var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-preparation-" + Guid.NewGuid().ToString("N"));
         var installer = new FakeInstaller();
-        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         try
         {
             await updater.CheckAsync(true, TestContext.Current.CancellationToken);
@@ -290,7 +290,7 @@ public sealed class AppUpdateTests
         var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-cancel-" + Guid.NewGuid().ToString("N"));
         var installer = new FakeInstaller();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         try
         {
             await updater.CheckAsync(true, cancellation.Token);
@@ -315,7 +315,7 @@ public sealed class AppUpdateTests
         Directory.CreateDirectory(cache);
         File.SetUnixFileMode(cache, UnixFileMode.UserRead | UnixFileMode.UserExecute);
         var installer = new FakeInstaller();
-        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         try
         {
             await updater.CheckAsync(true, TestContext.Current.CancellationToken);
@@ -340,7 +340,7 @@ public sealed class AppUpdateTests
         }
         var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-cleanup-" + Guid.NewGuid().ToString("N"));
         var installer = new FakeInstaller { Prepared = true, DenyCleanup = true };
-        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         try
         {
             await updater.CheckAsync(true, TestContext.Current.CancellationToken);
@@ -363,7 +363,7 @@ public sealed class AppUpdateTests
     {
         var source = new FakeSource();
         var settings = new MemorySettingsStore();
-        using var updater = new AppUpdater(source, new FakeInstaller(), settings, "/unused", new Version(0, 3, 0), 4);
+        using var updater = new AppUpdater(source, new FakeInstaller(), settings, "/unused", new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
         settings.Write("automaticUpdateChecks", false);
         await updater.CheckAsync(false, TestContext.Current.CancellationToken);
         Assert.Equal(0, source.Checks);
@@ -408,8 +408,90 @@ public sealed class AppUpdateTests
         ["prerelease"] = false,
         ["assets"] = new JsonArray(
             new JsonObject { ["name"] = FileName, ["state"] = "uploaded", ["size"] = (long)Package.Length, ["url"] = "https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/10" },
-            new JsonObject { ["name"] = "SHA256SUMS", ["state"] = "uploaded", ["size"] = 100, ["url"] = "https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/11" }),
+            new JsonObject { ["name"] = "SHA256SUMS", ["state"] = "uploaded", ["size"] = 100, ["url"] = "https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/11" },
+            new JsonObject { ["name"] = AppRelease.SignatureFile, ["state"] = "uploaded", ["size"] = 300, ["url"] = "https://api.github.com/repos/lucaskleinsteuber/Aurelia/releases/assets/12" }),
     };
+
+    // Written by an independent minisign-format signer (Python "cryptography" and hashlib), so the
+    // check is compatible with real "minisign -S" output and not only with this app's own signer.
+    private const string ReferenceKey = "RWQ3Z8/6xRPKcvIejyLy7FUdMIMCUMx0JGKGTQSgupGaXVpmaRj+YaBD";
+    private const string ReferenceSignature = "untrusted comment: signature from minisign secret key\nRUQ3Z8/6xRPKcuCiR8cKssywN1/LOZmWmV25gMoG6rm9Y1CowX7YVky2H9hOtscwJxPB75jmWuuY5+SGTUkwfiqIpSqG61UrJg8=\ntrusted comment: timestamp:1762550000\tfile:SHA256SUMS\thashed\nRPPoaDa2hlW8/UiEZ84NoCRXpA6+b0zvMMES3M8AzifQ/gw4gxqVekOg1g+xuC+TjwX/s+T0BEGfPKoc37KvBg==\n";
+    private const string ReferenceLegacy = "untrusted comment: signature from minisign secret key\nRWQ3Z8/6xRPKcuRM2kYmMyRFVvTSFOL6Hak5S5BgkVP3h+VhvIqkN+Au8SjOZeeBObvG3CNIjfcfsAJwtgq89a0r1Cm8cFBhdAI=\ntrusted comment: legacy\nzJpgVNmDO2s5QeZNwVvTRC0ee9KsPktpkL8MYjf1dX01XqldnaJbCuEiD7EN9LHxMhHMEOs1iz+W6xNWW5VmAA==\n";
+
+    [Fact]
+    public void ReadsMinisignSignaturesAndRejectsAnyChange()
+    {
+        var sums = Encoding.UTF8.GetBytes(new FakeSource().Sums);
+        Assert.True(MinisignSignature.Verify(sums, ReferenceSignature, ReferenceKey));
+        Assert.True(MinisignSignature.Verify("hello"u8, ReferenceLegacy, ReferenceKey));
+        // Another file, another key, or a changed trusted comment are all refused.
+        Assert.False(MinisignSignature.Verify(Encoding.UTF8.GetBytes(new string('0', 64) + "  " + FileName), ReferenceSignature, ReferenceKey));
+        Assert.False(MinisignSignature.Verify(sums, ReferenceSignature, TestSigning.PublicKey));
+        Assert.False(MinisignSignature.Verify(sums, ReferenceSignature.Replace("hashed", "hashes", StringComparison.Ordinal), ReferenceKey));
+        Assert.False(MinisignSignature.Verify(sums, "not a signature", ReferenceKey));
+        Assert.False(MinisignSignature.Verify(sums, ReferenceSignature, ""));
+        Assert.True(MinisignSignature.Verify(sums, TestSigning.Sign(new FakeSource().Sums), TestSigning.PublicKey));
+    }
+
+    [Fact]
+    public async Task APackageWhoseChecksumListIsNotSignedByTheOwnerIsNeverInstalled()
+    {
+        // Someone with access to the GitHub release replaced the package and its checksum list.
+        var forged = new string('a', 64) + "  " + FileName;
+        foreach (var source in new[]
+        {
+            new FakeSource { Sums = forged, Signature = TestSigning.Sign(new FakeSource().Sums) },
+            new FakeSource { Signature = ReferenceSignature },
+        })
+        {
+            var installer = new FakeInstaller();
+            var cache = Path.Combine(Path.GetTempPath(), "aurelia-update-" + Guid.NewGuid().ToString("N"));
+            using var updater = new AppUpdater(source, installer, new MemorySettingsStore(), cache, new Version(0, 3, 0), 4,
+                architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
+            try
+            {
+                await updater.CheckAsync(true, TestContext.Current.CancellationToken);
+                Assert.False(await updater.InstallAsync(() => { installer.Prepared = true; return Task.CompletedTask; }, TestContext.Current.CancellationToken));
+                Assert.False(installer.Installed);
+                Assert.Contains("signature", updater.Status, StringComparison.Ordinal);
+            }
+            finally { if (Directory.Exists(cache)) Directory.Delete(cache, true); }
+        }
+    }
+
+    [Fact]
+    public async Task WithoutASignatureOrAKeyNothingIsInstalled()
+    {
+        var unsigned = new UnsignedSource();
+        var installer = new FakeInstaller();
+        using (var updater = new AppUpdater(unsigned, installer, new MemorySettingsStore(), Path.GetTempPath(), new Version(0, 3, 0), 4,
+            architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey))
+        {
+            await updater.CheckAsync(true, TestContext.Current.CancellationToken);
+            Assert.NotNull(updater.Available);
+            Assert.False(await updater.InstallAsync(cancellation: TestContext.Current.CancellationToken));
+            Assert.Contains("not signed", updater.Status, StringComparison.Ordinal);
+        }
+        using var keyless = new AppUpdater(new FakeSource(), installer, new MemorySettingsStore(), Path.GetTempPath(), new Version(0, 3, 0), 4,
+            architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: "");
+        await keyless.CheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.False(await keyless.InstallAsync(cancellation: TestContext.Current.CancellationToken));
+        Assert.Contains("cannot check update signatures", keyless.Status, StringComparison.Ordinal);
+        Assert.False(installer.Installed);
+    }
+
+    private sealed class UnsignedSource : IReleaseSource
+    {
+        public Task<JsonArray> ReleasesAsync(CancellationToken cancellation)
+        {
+            var release = ReleaseNode("linux-app-1.0.0-5");
+            release["assets"]!.AsArray().RemoveAt(2);
+            return Task.FromResult(new JsonArray(release));
+        }
+        public Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation) => Task.FromResult(new FakeSource().Sums);
+        public Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation) => throw new IOException("Never asked without a signature asset.");
+        public Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation) => throw new IOException("Never downloaded.");
+    }
 
     private sealed class FakeSource : IReleaseSource
     {
@@ -417,7 +499,80 @@ public sealed class AppUpdateTests
         public int Checks { get; private set; }
         public Task<JsonArray> ReleasesAsync(CancellationToken cancellation) { Checks++; return Task.FromResult(new JsonArray(ReleaseNode("linux-app-1.0.0-5"))); }
         public Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation) => Task.FromResult(Sums);
+        /// <summary>Signed with the test key by default; a test may supply another signature.</summary>
+        public string? Signature { get; init; }
+        public Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation) => Task.FromResult(Signature ?? TestSigning.Sign(Sums));
         public async Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation) => await destination.WriteAsync(Package, cancellation);
+    }
+
+    [Fact]
+    public async Task WithoutASupportedPackageManagerOnlyUpdatingIsUnavailable()
+    {
+        // Creating the installer must not fail, or the app would not open on such a distribution.
+        var installer = new LinuxPackageInstaller();
+        using var updater = new AppUpdater(new FakeSource(), new UnsupportedInstaller(), new MemorySettingsStore(), "unused", new Version(0, 3, 0), 4, architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
+        await updater.CheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Null(updater.Available);
+        Assert.Contains("no supported package manager", updater.Status, StringComparison.Ordinal);
+        Assert.False(updater.IsBusy);
+        Assert.NotNull(installer);
+    }
+
+    [Fact]
+    public async Task OtherArchitecturesAreNotOfferedAPackage()
+    {
+        var source = new FakeSource();
+        using var updater = new AppUpdater(source, new FakeInstaller(), new MemorySettingsStore(), "unused", new Version(0, 3, 0), 4,
+            architecture: System.Runtime.InteropServices.Architecture.Arm, signingKey: TestSigning.PublicKey);
+        await updater.CheckAsync(true, TestContext.Current.CancellationToken);
+        Assert.Null(updater.Available);
+        Assert.Equal(0, source.Checks);
+        Assert.Contains("64-bit Intel, AMD and ARM", updater.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Arm64ComputersTakeTheArm64PackageOfTheirDistribution()
+    {
+        var version = new Version(2, 0, 0);
+        Assert.Equal("Aurelia-Desktop-2.0.0-25-arm64.deb", AppRelease.PackageName(version, 25, LinuxPackageKind.Debian, arm64: true));
+        Assert.Equal("Aurelia-Desktop-2.0.0-25-aarch64.rpm", AppRelease.PackageName(version, 25, LinuxPackageKind.Rpm, arm64: true));
+        Assert.Equal("Aurelia-Desktop-2.0.0-25-aarch64.pkg.tar.zst", AppRelease.PackageName(version, 25, LinuxPackageKind.Arch, arm64: true));
+        Assert.Equal("Aurelia-Desktop-2.0.0-25-amd64.deb", AppRelease.PackageName(version, 25, LinuxPackageKind.Debian));
+        Assert.Equal("Aurelia-Desktop-2.0.0-25-x86_64.pkg.tar.zst", AppRelease.PackageName(version, 25, LinuxPackageKind.Arch));
+    }
+
+    [Fact]
+    public async Task AFailedAutomaticCheckIsTriedAgainAtTheNextStart()
+    {
+        var settings = new MemorySettingsStore();
+        var failing = new FailingSource();
+        using (var updater = new AppUpdater(failing, new FakeInstaller(), settings, "unused", new Version(0, 3, 0), 4,
+            architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey))
+        {
+            await updater.CheckAsync(false, TestContext.Current.CancellationToken);
+            Assert.Contains("limiting", updater.Status, StringComparison.Ordinal);
+        }
+        var source = new FakeSource();
+        using var next = new AppUpdater(source, new FakeInstaller(), settings, "unused", new Version(0, 3, 0), 4,
+            architecture: System.Runtime.InteropServices.Architecture.X64, signingKey: TestSigning.PublicKey);
+        await next.CheckAsync(false, TestContext.Current.CancellationToken);
+        Assert.Equal(1, source.Checks);
+        Assert.NotNull(next.Available);
+    }
+
+    private sealed class FailingSource : IReleaseSource
+    {
+        public Task<JsonArray> ReleasesAsync(CancellationToken cancellation) =>
+            throw new IOException("GitHub is limiting update checks right now. Try again in about an hour.");
+        public Task<string> ChecksumsAsync(AppRelease release, CancellationToken cancellation) => throw new IOException("unused");
+        public Task<string> SignatureAsync(AppRelease release, CancellationToken cancellation) => throw new IOException("unused");
+        public Task DownloadAsync(AppRelease release, Stream destination, CancellationToken cancellation) => throw new IOException("unused");
+    }
+
+    private sealed class UnsupportedInstaller : IPackageInstaller
+    {
+        public LinuxPackageKind Kind => LinuxPackageInstaller.Detect(_ => false);
+        public Task InstallAsync(string path, CancellationToken cancellation) => throw new InvalidOperationException("Never installs.");
     }
 
     private sealed class FakeInstaller : IPackageInstaller

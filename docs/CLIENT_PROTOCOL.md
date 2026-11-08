@@ -59,7 +59,12 @@ storage is offline. They are database records, never embedded video edits.
 ## Web browser sign-in
 
 The browser app ([WEB_APP.md](WEB_APP.md)) is served by the server from `/` and `/web/`. It
-uses the same owner-approved code as an Apple TV, but no script ever sees a credential:
+signs in with the main device's pairing code like every other client, but no script ever sees
+a credential:
+
+- `POST /api/v1/web/pair` with `{code, deviceName}` redeems the code and sets the HttpOnly
+  device cookie; the answer is empty (204). Servers before `web-pairing-code-v1` only offer the
+  owner-approved flow below, which stays for older browser app versions.
 
 - `POST /api/v1/web/pairing` with `{deviceName}` starts a device pairing. The answer has
   only the code, its expiry and the poll interval. The pairing's id and secret go into an

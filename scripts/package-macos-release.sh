@@ -27,27 +27,26 @@ build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$info")
 [[ "$version" == <->.<-> || "$version" == <->.<->.<-> ]] && [[ "$build" == <-> ]] || {
   echo "Invalid release version or build number." >&2; exit 1
 }
-name="Aurelia-$version-build-$build-macOS-universal"
+# One package per architecture, named by it: arm64 (Apple silicon) or x64 (Intel).
+case "$(/usr/bin/lipo -archs "$candidate/Contents/MacOS/Aurelia")" in
+  arm64) arch=arm64; xcode_arch=arm64; runtime=osx-arm64 ;;
+  x86_64) arch=x64; xcode_arch=x86_64; runtime=osx-x64 ;;
+  *) echo "Expected an app built for one architecture." >&2; exit 1 ;;
+esac
+name="Aurelia-$version-build-$build-macOS-$arch"
 output="$other_root/Releases/$name"
 [[ ! -e "$output" ]] || { echo "Release output already exists; refusing to overwrite it." >&2; exit 1; }
 mkdir -p "$other_root/Releases"
 stage=$(mktemp -d "$other_root/Releases/.package.XXXXXX")
 trap '[[ "$stage" == "$other_root/Releases/.package."* ]] && find "$stage" -depth -delete' EXIT
 /usr/bin/ditto "$candidate" "$stage/Aurelia.app"
-for executable in Aurelia Helpers; do
-  if [[ "$executable" == Aurelia ]]; then
-    binary="$stage/Aurelia.app/Contents/MacOS/Aurelia"
-  else
-    binary="$stage/Aurelia.app/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"
-  fi
-  /usr/bin/lipo "$binary" -verify_arch arm64
-  /usr/bin/lipo "$binary" -verify_arch x86_64
+for binary in "$stage/Aurelia.app/Contents/MacOS/Aurelia" \
+  "$stage/Aurelia.app/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost"; do
+  [[ "$(/usr/bin/lipo -archs "$binary")" == "$xcode_arch" ]] || { echo "Mixed architectures in $binary." >&2; exit 1; }
 done
-for runtime in osx-arm64 osx-x64; do
-  [[ -x "$stage/Aurelia.app/Contents/Resources/Server/$runtime/Aurelia.Server" ]] || {
-    echo "Missing server payload: $runtime" >&2; exit 1
-  }
-done
+[[ -x "$stage/Aurelia.app/Contents/Resources/Server/$runtime/Aurelia.Server" ]] || {
+  echo "Missing server payload: $runtime" >&2; exit 1
+}
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$stage/Aurelia.app" "$stage/submission.zip"
 DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun notarytool submit "$stage/submission.zip" \
   --keychain-profile "$AURELIA_NOTARY_PROFILE" --wait --output-format json >"$stage/notarization.json"

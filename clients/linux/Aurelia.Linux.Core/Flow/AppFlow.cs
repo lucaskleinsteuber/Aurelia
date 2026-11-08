@@ -13,6 +13,7 @@ public enum OperatingMode
 public enum AppScreen
 {
     Starting,
+    Introduction,
     Welcome,
     HostSetup,
     Connection,
@@ -20,6 +21,8 @@ public enum AppScreen
     ProfilePicker,
     InitialLibrarySetup,
     Library,
+    /// <summary>Downloads only, without the server.</summary>
+    Offline,
 }
 
 /// <summary>
@@ -44,7 +47,11 @@ public sealed class AppFlow : ObservableObject
             "client" => OperatingMode.Client,
             _ => null,
         };
+        Guide = new SetupGuide(settings, alreadySetUp: mode is not null);
     }
+
+    /// <summary>The setup assistant; it decides whether the introduction comes before the welcome choice.</summary>
+    public SetupGuide Guide { get; }
 
     public AppScreen Screen
     {
@@ -82,6 +89,20 @@ public sealed class AppFlow : ObservableObject
     {
         OperatingMode.Host => AppScreen.HostSetup,
         OperatingMode.Client => AppScreen.Connection,
-        _ => AppScreen.Welcome,
+        _ => Guide.IntroSeen ? AppScreen.Welcome : AppScreen.Introduction,
     };
+
+    /// <summary>"I Know Aurelia" on the introduction: the plain welcome choice follows.</summary>
+    public void SkipIntroduction()
+    {
+        Guide.Skip();
+        Screen = ScreenForMode();
+    }
+
+    /// <summary>The introduction's questions are answered: the guided setup starts where the media lives.</summary>
+    public void StartGuidedSetup(OperatingMode chosen)
+    {
+        Guide.Start();
+        ChooseMode(chosen);
+    }
 }

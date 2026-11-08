@@ -111,6 +111,7 @@ struct TVDetailView: View {
         playing = nil
         focusRequest = nil
       }
+      .onChange(of: model.remoteStopRequests) { _, _ in playing = nil }
       .fullScreenCover(
         item: $playing, onDismiss: playerDismissed,
         content: { request in

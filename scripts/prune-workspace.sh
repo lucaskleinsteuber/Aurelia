@@ -1,7 +1,7 @@
 #!/bin/sh
 # Removes old generated output so the Local workspace does not grow without bound.
 # Build and test scripts call this before they write anything new. It keeps:
-#   - the newest numbered Mac build ("Build <n>") and the newest tvOS, Linux server and Linux app build
+#   - the newest numbered Mac builds ("Build <n>" for Apple silicon, "Build <n> x64" for Intel) and the newest tvOS, Linux server and Linux app build
 #     (AURELIA_KEEP_BUILDS, default 1 each); every release is on GitHub;
 #   - .NET configurations/frameworks/RIDs used in the last seven days, for incremental builds;
 #     shared restore files at the project level stay. Older whole units are pruned only while
@@ -170,6 +170,7 @@ build="$other_root/Build"
 if real_directory "$build"; then
   if simple_names "$build"; then
     ls "$build" | grep -E '^Build [0-9]+$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
+    ls "$build" | grep -E '^Build [0-9]+ x64$' | sort -k2 -n -r | remove_all_but "$keep_builds" "$build"
   fi
   for platform in tvOS Linux LinuxApp; do
     if real_directory "$build/$platform" && simple_names "$build/$platform"; then

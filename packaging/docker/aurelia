@@ -1,7 +1,7 @@
 #!/bin/bash
 # Aurelia Server commands inside the container, for example:
 #   docker compose run --rm aurelia setup      (once, before the server first starts)
-#   docker compose exec aurelia aurelia approve CODE
+#   docker compose exec aurelia aurelia pair
 set -euo pipefail
 server=/opt/aurelia/server/Aurelia.Server
 # Started as root only to hand the data folder to the aurelia user (a new volume or a folder
@@ -27,8 +27,8 @@ case "$command" in
     echo
     echo "Start the server with: docker compose up -d"
     echo "Then connect your devices; the first one also asks for the owner's new viewing PIN:"
-    echo "  Apple TV: choose this server, then run: docker compose exec aurelia aurelia approve CODE"
-    echo "  Mac:      run: docker compose exec aurelia aurelia pair, then enter the code in Aurelia"
+    echo "  Run: docker compose exec aurelia aurelia pair, then type the code in Aurelia on the new device"
+    echo "  (Mac, Linux PC, Apple TV, iPhone, iPad, or this server's address in a browser)."
     ;;
   approve)
     if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then code=$1; shift; exec "$server" pairing approve --code "$code" "$@"; fi
@@ -42,8 +42,8 @@ case "$command" in
 Aurelia Server in a container
 
   setup                    Create the owner (run once with: docker compose run --rm aurelia setup)
-  approve [CODE]           Allow an Apple TV or browser that shows a code
-  pair                     Show a code to enter on a Mac or Linux PC
+  pair                     Show a code to type on a new device (any Aurelia app or a browser)
+  approve [CODE]           Allow an older app that shows a code itself
   library add --path /media/Movies [--kind automatic|movies|tv]
   library list | scan --all
   status | version

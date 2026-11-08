@@ -150,12 +150,26 @@ internal sealed class ScrubPreviews(PlaybackController controller) : IDisposable
     }
 }
 
-/// <summary>Scene notes: loaded for the title, shown as cues while playing, added and removed in a flyout.</summary>
+/// <summary>
+/// Scene notes, as the Mac's popover: mark the current moment or a time range with an optional
+/// note, edit or remove notes, jump to them, and see them as cues while playing. Notes are
+/// private to the profile; playback keeps running.
+/// </summary>
 internal sealed class SceneNotes(PlaybackController controller)
 {
     private readonly SceneNoteCues cues = new();
-    private readonly StackPanel list = new() { Spacing = 6 };
-    private readonly TextBox entry = new() { PlaceholderText = "Note at this moment", Width = 300, MaxLength = 2000 };
+    private readonly StackPanel list = new() { Spacing = 10 };
+    private readonly StackPanel draftPanel = new() { Spacing = 9, IsVisible = false };
+    private readonly Button create = new() { Content = "Mark Current Position", Classes = { "chip" } };
+    private readonly TextBlock problem = new() { Foreground = new SolidColorBrush(Color.Parse("#FFB45C")), FontSize = 12, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+    private readonly TextBox start = new() { PlaceholderText = "m:ss or h:mm:ss", Width = 170 };
+    private readonly TextBox end = new() { PlaceholderText = "m:ss or h:mm:ss", Width = 170 };
+    private readonly TextBox text = new() { PlaceholderText = "Note (optional)", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 64, MaxLength = 2000 };
+    private readonly Button moment = new() { Content = "Moment", Classes = { "chip" } };
+    private readonly Button range = new() { Content = "Time Range", Classes = { "chip" } };
+    private readonly StackPanel endRow = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
+    private SceneNoteSummary? editing;
+    private bool isRange;
     private Guid? loadedFor;
 
     public event Action<IReadOnlyList<string>>? CuesChanged;
@@ -167,10 +181,12 @@ internal sealed class SceneNotes(PlaybackController controller)
         try
         {
             cues.Replace(await controller.Client.NotesAsync(item.Id, CancellationToken.None));
+            ShowProblem(null);
         }
-        catch (AureliaApiException)
+        catch (AureliaApiException failure)
         {
-            cues.Replace([]);
+            if (cues.Notes.Count == 0) cues.Replace([]);
+            ShowProblem(failure.Message);
         }
         Fill();
     }
@@ -187,52 +203,179 @@ internal sealed class SceneNotes(PlaybackController controller)
 
     public StackPanel Editor()
     {
-        AutomationProperties.SetName(entry, "New Scene Note");
-        var add = new Button { Content = "Add Note", Classes = { "primary" } };
-        add.Click += async (_, _) => await AddAsync();
-        entry.KeyDown += async (_, e) =>
+        AutomationProperties.SetName(start, "Start");
+        AutomationProperties.SetName(end, "End");
+        AutomationProperties.SetName(text, "Note");
+        AutomationProperties.SetName(create, "Mark Current Position");
+        create.Click += (_, _) => BeginDraft(null);
+        moment.Click += (_, _) => SetRange(false);
+        range.Click += (_, _) => SetRange(true);
+        var cancel = new Button { Content = "Cancel", Classes = { "chip" } };
+        cancel.Click += (_, _) => EndDraft();
+        var save = new Button { Content = "Save", Classes = { "primary" } };
+        save.Click += async (_, _) =>
         {
-            if (e.Key == Avalonia.Input.Key.Enter) await AddAsync();
+            save.IsEnabled = false;
+            await SaveAsync();
+            save.IsEnabled = true;
         };
+        endRow.Children.Add(Label("End"));
+        endRow.Children.Add(end);
+        endRow.Children.Add(UseCurrent(end));
+        draftPanel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { moment, range } });
+        draftPanel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Label("Start"), start, UseCurrent(start) } });
+        draftPanel.Children.Add(endRow);
+        draftPanel.Children.Add(text);
+        draftPanel.Children.Add(new DockPanel { Children = { save.Also(b => DockPanel.SetDock(b, Dock.Right)), cancel.Also(b => { b.HorizontalAlignment = HorizontalAlignment.Left; }) } });
+        var reload = new Button { Classes = { "link" }, Content = "Reload" };
+        ToolTip.SetTip(reload, "Reload scene notes without replacing your draft");
+        reload.Click += async (_, _) => await LoadAsync();
         return new StackPanel
         {
-            Spacing = 10,
+            Spacing = 12,
             Width = 340,
             Children =
             {
-                new TextBlock { Text = "Scene Notes", FontWeight = FontWeight.Bold, FontSize = 16 },
-                new ScrollViewer { Content = list, MaxHeight = 260 },
-                entry,
-                add,
+                new DockPanel
+                {
+                    Children =
+                    {
+                        reload.Also(r => DockPanel.SetDock(r, Dock.Right)),
+                        new TextBlock { Text = "Scene Notes", FontWeight = FontWeight.Bold, FontSize = 16, VerticalAlignment = VerticalAlignment.Center },
+                    },
+                },
+                create,
+                draftPanel,
+                problem,
+                new Border { Height = 1, Background = new SolidColorBrush(Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)) },
+                new ScrollViewer { Content = list, MaxHeight = 220 },
+                new TextBlock { Text = "Private to your profile. Playback keeps running.", Classes = { "subdued" }, FontSize = 11 },
             },
         };
     }
 
-    private async Task AddAsync()
+    /// <summary>Reads "m:ss" or "h:mm:ss" (also plain seconds) as milliseconds.</summary>
+    internal static long? ParseTime(string? value)
     {
-        if (controller.Item is not { } item || string.IsNullOrWhiteSpace(entry.Text)) return;
+        var parts = (value ?? "").Trim().Split(':');
+        if (parts.Length is < 1 or > 3 || parts.Any(part => part.Length == 0 || !part.All(char.IsAsciiDigit))) return null;
+        long seconds = 0;
+        foreach (var part in parts)
+        {
+            if (!long.TryParse(part, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number)) return null;
+            seconds = seconds * 60 + number;
+        }
+        if (parts.Length > 1 && parts.Skip(1).Any(part => part.Length != 2 || int.Parse(part, System.Globalization.CultureInfo.InvariantCulture) > 59)) return null;
+        return seconds * 1000;
+    }
+
+    private static TextBlock Label(string value) => new() { Text = value, Width = 38, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+
+    private Button UseCurrent(TextBox target)
+    {
+        var button = new Button { Classes = { "link" }, Content = "Now" };
+        ToolTip.SetTip(button, "Use current playback position");
+        AutomationProperties.SetName(button, "Use Current Position");
+        button.Click += (_, _) => target.Text = PlayerPolicy.TimeLabel(controller.Position);
+        return button;
+    }
+
+    private void BeginDraft(SceneNoteSummary? note)
+    {
+        editing = note;
+        start.Text = PlayerPolicy.TimeLabel(note?.StartMilliseconds ?? controller.Position);
+        end.Text = note?.EndMilliseconds is { } until ? PlayerPolicy.TimeLabel(until) : PlayerPolicy.TimeLabel(controller.Position + 30_000);
+        text.Text = note?.Text ?? "";
+        SetRange(note?.EndMilliseconds is not null);
+        create.IsVisible = false;
+        draftPanel.IsVisible = true;
+        ShowProblem(null);
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => text.Focus());
+    }
+
+    private void SetRange(bool value)
+    {
+        isRange = value;
+        endRow.IsVisible = value;
+        moment.Classes.Set("selected", !value);
+        range.Classes.Set("selected", value);
+    }
+
+    private void EndDraft()
+    {
+        editing = null;
+        draftPanel.IsVisible = false;
+        create.IsVisible = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (controller.Item is not { } item) return;
+        if (ParseTime(start.Text) is not { } from)
+        {
+            ShowProblem("Enter the start as m:ss or h:mm:ss.");
+            return;
+        }
+        long? until = null;
+        if (isRange)
+        {
+            if (ParseTime(end.Text) is not { } to || to <= from)
+            {
+                ShowProblem("Enter an end after the start, as m:ss or h:mm:ss.");
+                return;
+            }
+            until = to;
+        }
         try
         {
-            await controller.Client.SaveNoteAsync(item.Id, Guid.NewGuid(),
-                new SaveSceneNoteRequest(controller.Position, null, entry.Text.Trim(), 0), CancellationToken.None);
-            entry.Text = "";
+            await controller.Client.SaveNoteAsync(item.Id, editing?.Id ?? Guid.NewGuid(),
+                new SaveSceneNoteRequest(from, until, (text.Text ?? "").Trim(), editing?.Revision ?? 0), CancellationToken.None);
+            EndDraft();
             await LoadAsync();
         }
-        catch (AureliaApiException)
+        catch (AureliaApiException failure)
         {
+            ShowProblem(failure.Message);
         }
+    }
+
+    private void ShowProblem(string? message)
+    {
+        problem.Text = message;
+        problem.IsVisible = message is not null;
     }
 
     private void Fill()
     {
         list.Children.Clear();
-        if (cues.Notes.Count == 0) list.Children.Add(new TextBlock { Text = "No notes for this title yet.", Classes = { "subdued" } });
+        if (cues.Notes.Count == 0) list.Children.Add(new TextBlock { Text = "No scene notes yet.", Classes = { "subdued" } });
         foreach (var note in cues.Notes)
         {
-            var jump = new Button { Content = PlayerPolicy.TimeLabel(note.StartMilliseconds), Classes = { "link" } };
+            var time = PlayerPolicy.TimeLabel(note.StartMilliseconds) + (note.EndMilliseconds is { } until ? " – " + PlayerPolicy.TimeLabel(until) : "");
+            var label = string.IsNullOrWhiteSpace(note.Text) ? "Marked scene" : note.Text;
+            var jump = new Button
+            {
+                Classes = { "plain" },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Content = new StackPanel
+                {
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = time, FontSize = 11, Classes = { "subdued" } },
+                        new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, MaxLines = 3 },
+                    },
+                },
+            };
+            ToolTip.SetTip(jump, "Jump to this scene");
+            AutomationProperties.SetName(jump, $"{time}, {label}");
             jump.Click += (_, _) => controller.SeekTo(note.StartMilliseconds);
-            var remove = new Button { Content = "Delete", Classes = { "link" } };
-            AutomationProperties.SetName(remove, "Delete Note at " + PlayerPolicy.TimeLabel(note.StartMilliseconds));
+            var more = new Button { Classes = { "link" }, Content = "•••" };
+            AutomationProperties.SetName(more, "More for Note at " + PlayerPolicy.TimeLabel(note.StartMilliseconds));
+            var edit = new MenuItem { Header = "Edit" };
+            edit.Click += (_, _) => BeginDraft(note);
+            var remove = new MenuItem { Header = "Remove", Classes = { "destructive" } };
             remove.Click += async (_, _) =>
             {
                 try
@@ -240,17 +383,19 @@ internal sealed class SceneNotes(PlaybackController controller)
                     await controller.Client.DeleteNoteAsync(note.MediaId, note.Id, note.Revision, CancellationToken.None);
                     await LoadAsync();
                 }
-                catch (AureliaApiException)
+                catch (AureliaApiException failure)
                 {
+                    ShowProblem(failure.Message);
                 }
             };
+            var menu = new MenuFlyout { ItemsSource = new List<Control> { edit, remove } };
+            more.Click += (_, _) => menu.ShowAt(more);
             list.Children.Add(new DockPanel
             {
                 Children =
                 {
-                    jump.Also(j => DockPanel.SetDock(j, Dock.Left)),
-                    remove.Also(r => DockPanel.SetDock(r, Dock.Right)),
-                    new TextBlock { Text = note.Text, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center },
+                    more.Also(r => { DockPanel.SetDock(r, Dock.Right); r.VerticalAlignment = VerticalAlignment.Top; }),
+                    jump,
                 },
             });
         }

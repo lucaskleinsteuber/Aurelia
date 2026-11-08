@@ -39,7 +39,7 @@ internal static class MediaCards
         };
         var card = Card(new StackPanel { Spacing = 8, Children = { picture, caption } }, item.Title);
         card.Click += (_, _) => context.OpenDetail(item);
-        card.ContextMenu = MediaMenu.For(context, item);
+        MediaMenu.Attach(card, context, item);
         PrepareOnFocus(card, context, item);
         return card;
     }
@@ -79,7 +79,7 @@ internal static class MediaCards
             if (plays && LibraryPresentation.IsPlayable(item)) context.Play(item, resume: true);
             else context.OpenDetail(item);
         };
-        card.ContextMenu = MediaMenu.For(context, item);
+        MediaMenu.Attach(card, context, item);
         PrepareOnFocus(card, context, item);
         return card;
     }

@@ -197,7 +197,7 @@ public sealed class AppSession : ObservableObject
     /// <summary>Wakes and reaches the saved server, then opens the profile picker.</summary>
     public async Task ReachServerAsync()
     {
-        if (Server is not { } saved) return;
+        if (IsOffline || Server is not { } saved) return;
         reaching?.Cancel();
         var attempt = new CancellationTokenSource();
         reaching = attempt;
@@ -208,7 +208,7 @@ public sealed class AppSession : ObservableObject
             var reached = await wakeUp.ReachAsync(saved, value => Status = value, attempt.Token);
             if (reached is null)
             {
-                flow.Show(AppScreen.ServerUnreachable);
+                ShowUnreachable();
                 return;
             }
             Capabilities = reached.Info.Capabilities ?? [];
@@ -218,12 +218,12 @@ public sealed class AppSession : ObservableObject
         }
         catch (OperationCanceledException) when (attempt.IsCancellationRequested)
         {
-            flow.Show(AppScreen.ServerUnreachable);
+            ShowUnreachable();
         }
         catch (AureliaApiException error)
         {
             Message = error.Message;
-            flow.Show(AppScreen.ServerUnreachable);
+            ShowUnreachable();
         }
         finally
         {
@@ -234,6 +234,39 @@ public sealed class AppSession : ObservableObject
 
     /// <summary>"Stop Waiting": gives up on waking the server for now.</summary>
     public void StopWaiting() => reaching?.Cancel();
+
+    /// <summary>The offline mode shows: no wake packets, reconnects or "not answering" until it is left.</summary>
+    public bool IsOffline { get; private set; }
+
+    /// <summary>A profile opened with the server, with the PIN it was opened with, so it can be remembered for the offline mode.</summary>
+    public event Action<WatchingProfile, string?>? ProfileUnlocked;
+
+    /// <summary>This computer left a server; its offline cards go too.</summary>
+    public event Action<Guid>? ServerForgotten;
+
+    internal void NotifyUnlocked(WatchingProfile profile, string? pin) => ProfileUnlocked?.Invoke(profile, pin);
+
+    /// <summary>Stops looking for the server and shows the downloads on this computer.</summary>
+    public void EnterOffline()
+    {
+        IsOffline = true;
+        reaching?.Cancel();
+        CloseLibrary();
+        flow.Show(AppScreen.Offline);
+    }
+
+    /// <summary>Leaves the offline mode and looks for the server again.</summary>
+    public async Task LeaveOfflineAsync()
+    {
+        if (!IsOffline) return;
+        IsOffline = false;
+        await ReachServerAsync();
+    }
+
+    private void ShowUnreachable()
+    {
+        if (!IsOffline) flow.Show(AppScreen.ServerUnreachable);
+    }
 
     /// <summary>Saves a new pairing in the keyring and opens its profile picker.</summary>
     public async Task CompletePairingAsync(StoredServer paired, IReadOnlyList<string>? serverCapabilities = null)
@@ -266,6 +299,12 @@ public sealed class AppSession : ObservableObject
         flow.Show(NeedsInitialLibrarySetup && session.User.Role == UserRole.Owner ? AppScreen.InitialLibrarySetup : AppScreen.Library);
     }
 
+    /// <summary>The open profile's name or picture changed on the server: show the new one everywhere.</summary>
+    public void UpdateProfileUser(UserSummary user)
+    {
+        if (Profile is { } open && open.User.Id == user.Id) Profile = open with { User = user };
+    }
+
     /// <summary>The first storage locations are added, or skipped for now: show the library.</summary>
     public void CompleteInitialLibrarySetup()
     {
@@ -286,6 +325,7 @@ public sealed class AppSession : ObservableObject
     /// <summary>Forgets the connection to this computer's own server, before connecting elsewhere.</summary>
     public async Task ForgetLocalServerAsync()
     {
+        var saved = Server;
         CancelNetworkConfirmation();
         ServerInterrupted();
         try
@@ -297,6 +337,7 @@ public sealed class AppSession : ObservableObject
             Message = error.Message;
         }
         Server = null;
+        if (saved is not null) ServerForgotten?.Invoke(saved.ServerId);
     }
 
     /// <summary>Ends the open profile on the server and returns to "Who's watching?".</summary>
@@ -362,6 +403,7 @@ public sealed class AppSession : ObservableObject
             }
         }
         Server = null;
+        if (saved is not null) ServerForgotten?.Invoke(saved.ServerId);
         flow.Show(AppScreen.Connection);
     }
 
@@ -389,7 +431,7 @@ public sealed class AppSession : ObservableObject
         if (reached is null)
         {
             CloseLibrary();
-            flow.Show(AppScreen.ServerUnreachable);
+            ShowUnreachable();
             return;
         }
         if (Profile is { } open && open.ExpiresAt > time.GetUtcNow()) OpenProfile(open);
@@ -464,6 +506,22 @@ public sealed class AppSession : ObservableObject
             Message = error.Message;
         }
     }
+
+    /// <summary>
+    /// Downloads that may play while the server does not answer: only those of a profile that is
+    /// still open here, because its PIN and age restrictions were checked when it was opened.
+    /// Without an open profile nothing is offered.
+    /// </summary>
+    public IReadOnlyList<Playback.OfflineTitle> OfflineTitlesForOpenProfile(Playback.OfflineDownloads? downloads) =>
+        downloads is not null && Server is { } saved && Profile is { } open && open.ExpiresAt > time.GetUtcNow()
+            ? downloads.For(saved.ServerId, open.User.Id)
+            : [];
+
+    /// <summary>A library client for the open profile, for playing a download while the library is closed.</summary>
+    public LibraryClient? OfflineClient() =>
+        Library?.Client ?? (Server is { } saved && Profile is { } open && open.ExpiresAt > time.GetUtcNow()
+            ? new LibraryClient(Api, saved, open, Capabilities)
+            : null);
 
     /// <summary>True when the open profile may use owner or administrator screens.</summary>
     public bool CanManageMedia => Profile?.User.Role is UserRole.Owner or UserRole.Admin;

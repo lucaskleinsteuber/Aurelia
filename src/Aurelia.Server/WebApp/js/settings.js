@@ -5,9 +5,9 @@
 import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import {
-  PLAYBACK_DEFAULTS, PLAYBACK_RATES,
-  loadManagementSections, managementPermissions, normalizeGeneralPreferences,
-  rateLabel, scrubPreviewUsageText
+  MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
+  ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
+  rateLabel, scrubPreviewUsageText, shownName
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
@@ -23,6 +23,7 @@ const CATEGORIES = [
   { id: "server", label: "Server", symbol: "tv", adminOnly: true },
   { id: "updates", label: "Updates", symbol: "arrow", adminOnly: false },
   { id: "advanced", label: "Advanced", symbol: "gear", adminOnly: true },
+  { id: "about", label: "About", symbol: "star", adminOnly: false },
 ];
 
 /**
@@ -212,6 +213,7 @@ export function createSettings(app) {
       case "server": return serverPage(sections, refresh);
       case "updates": return updatesPage(sections, refresh);
       case "advanced": return advancedPage(sections, refresh);
+      case "about": return h("div", { class: "settings-stack" }, ...aboutSections());
       default: return generalPage(refresh);
     }
   }
@@ -226,6 +228,7 @@ export function createSettings(app) {
       ...(canManage() && sections ? serverSections(sections, refresh) : []),
       ...updatesSections(sections, refresh),
       ...(canManage() && sections ? advancedSections(sections, refresh) : []),
+      ...aboutSections(),
     ];
 
     const query = searchQuery.toLowerCase();
@@ -496,11 +499,13 @@ export function createSettings(app) {
 
     return [
       section("Current Profile", "lock", null,
-        h("div", { class: "settings-profile" }, app.profilePicture(profile.id, profile.username, "medium settings-avatar"),
-          h("div", {}, h("div", { class: "settings-profile-name" }, profile.username), h("div", { class: "muted small" }, roleTitle(profile.role)))),
+        h("div", { class: "settings-profile" }, app.profilePicture(profile, "medium settings-avatar"),
+          h("div", {}, h("div", { class: "settings-profile-name" }, shownName(profile)), h("div", { class: "muted small" }, roleTitle(profile.role)))),
         h("div", { class: "button-row" },
           h("button", { class: "secondary-button", onclick: () => app.switchProfile() }, "Switch Profile"),
           h("button", { class: "secondary-button danger", onclick: () => app.confirmSignOut() }, "Sign Out of This Browser"))),
+
+      nameAndPicture(profile),
 
       section("Signed-In Devices", "lock", "Devices and browsers signed in to this account.",
         (devices ?? []).filter((device) => !device.revokedAt).map((device) => h("div", { class: "settings-card" },
@@ -511,8 +516,8 @@ export function createSettings(app) {
             button("Sign Out", () => api.approved(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" }), `${device.deviceName} is signed out.`, "secondary-button", refresh))))),
 
       permissions.owner ? section("User Accounts", "lock", "Choose who can watch and what they can see.",
-        users.map((entry) => row(h("span", { class: "inline-control" }, app.profilePicture(entry.user.id, entry.user.username), entry.user.username),
-          h("div", { class: "inline-control" }, value(`${roleTitle(entry.user.role)}${entry.isEnabled ? "" : " · Disabled"}`), openButton("Edit…", () => editors.editProfile(entry))))),
+        users.map((entry) => row(h("span", { class: "inline-control" }, app.profilePicture(entry.user), shownName(entry.user)),
+          h("div", { class: "inline-control" }, value(`${ageLimitSummary(entry.user.ageLimit) ?? roleTitle(entry.user.role)}${entry.isEnabled ? "" : " · Disabled"}`), openButton("Edit…", () => editors.editProfile(entry))))),
         h("div", { class: "button-row" }, openButton("Create Profile…", () => editors.editProfile()))) : null,
     ].filter(Boolean);
   }
@@ -656,20 +661,119 @@ export function createSettings(app) {
     }
 
     return [
-      section("Application Updates", "arrow", "Keep Aurelia up to date with new features and fixes.",
-        row("Browser App Version", value(state.server?.version ?? "—")),
-        row("Server Version", value(state.server?.version ?? "—")),
-        row("Update Channel", value("Stable")),
-        row("Check For Updates Automatically", toggle(true, (on) => { app.toast(on ? "Auto-check enabled." : "Auto-check disabled."); }, "Check For Updates Automatically"),
-          "Checks for newer versions on server start.")),
+      section("Server Version", "arrow", "The browser app comes with the server, so it is always the server's version.",
+        row("Version", value(state.server?.version ?? "—"))),
 
       updatesView?.element ?? null,
-
-      section("Release Highlights", "arrow", "Key improvements in recent versions.",
-        row("Version 1.19.0", value("Tiered security model, password confirmation for critical actions only, redesigned settings")),
-        row("Version 1.18.0", value("Server Health diagnostic page, timeline scrub previews, Watchlist shelf")),
-        row("Version 1.17.0", value("Universal Apple TV client, high-bitrate streaming engine, audio track switching"))),
     ].filter(Boolean);
+  }
+
+  // MARK: About
+
+  function aboutSections() {
+    return [
+      section("About Aurelia", "star", "Your movies and shows from your own server, in this browser.",
+        row("Version", value(state.server?.version ?? "—"), "The browser app comes with the server."),
+        row("Source Code", h("a", { class: "link-button", href: "https://github.com/lucaskleinsteuber/Aurelia", target: "_blank", rel: "noopener" }, "Open on GitHub"),
+          "Aurelia is open source. Its code, releases and full change history are on GitHub.")),
+      section("Getting Started", "play", "Take the short tour of the browser app again.",
+        h("div", { class: "button-row" }, h("button", { class: "secondary-button", onclick: () => app.startTour?.() }, "Show Tour"))),
+      section("Legal", "lock", null,
+        h("p", { class: "small" }, "© 2026 Lucas Kleinsteuber. Released under the MIT License."),
+        h("p", { class: "small" }, h("a", { class: "link-button", href: "https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md", target: "_blank", rel: "noopener" }, "Privacy Policy")),
+        h("p", { class: "muted small" }, "Movie and series details and pictures can come from TMDB when the server's owner turns it on; subtitles can come from OpenSubtitles. This product uses the TMDB API but is not endorsed or certified by TMDB, and Aurelia is not endorsed by OpenSubtitles.")),
+    ];
+  }
+
+  // MARK: Name and Picture
+
+  /** The signed-in profile chooses the name everyone sees and its picture. */
+  function nameAndPicture(profile) {
+    const supported = state.server?.capabilities?.includes("profile-personalization-v1");
+    if (!supported) return null;
+    let key = profile.pictureKey ?? null;
+    let palette = parsePicture(key)?.palette ?? "blue";
+    let photo = null;
+    const name = h("input", { class: "text-field", type: "text", maxlength: "40", value: shownName(profile), "aria-label": "Your Name" });
+    const preview = h("span", { class: "picture-preview" });
+    const message = h("p", { class: "muted small", role: "status" });
+    const symbols = h("div", { class: "picture-symbols" });
+    const palettes = h("div", { class: "picture-palettes" });
+    const paint = () => {
+      clear(preview);
+      if (photo) {
+        const image = h("img", { class: "profile-photo", alt: "" });
+        app.pictureAddress(photo).then((address) => { if (address) image.src = address; });
+        preview.append(h("span", { class: "profile-picture medium" }, image));
+      }
+      else preview.append(app.profilePicture({ ...profile, displayName: name.value, pictureKey: key }, "medium"));
+      clear(symbols);
+      for (const symbol of PICTURE_SYMBOLS) {
+        const candidate = `${symbol}:${palette}`;
+        const chooser = h("button", { type: "button", class: `picture-choice ${key === candidate ? "selected" : ""}`, "aria-label": `Picture ${symbol}`, "aria-pressed": String(key === candidate),
+          onclick: () => { key = candidate; photo = null; paint(); } },
+        app.profilePicture({ id: profile.id, pictureKey: candidate }, "small"));
+        symbols.append(chooser);
+      }
+      clear(palettes);
+      for (const candidate of PICTURE_PALETTES) {
+        palettes.append(h("button", { type: "button", class: `palette-choice palette-${PICTURE_PALETTES.indexOf(candidate)} ${palette === candidate ? "selected" : ""}`, "aria-label": `Color ${candidate}`, "aria-pressed": String(palette === candidate),
+          onclick: () => {
+            palette = candidate;
+            const builtin = parsePicture(key);
+            if (builtin) key = `${builtin.symbol}:${candidate}`;
+            paint();
+          } }));
+      }
+    };
+    const file = h("input", { type: "file", accept: "image/jpeg,image/png,image/webp", hidden: true });
+    file.addEventListener("change", () => {
+      const chosen = file.files?.[0];
+      if (!chosen) return;
+      if (chosen.size > MAXIMUM_PHOTO_BYTES) {
+        message.textContent = "Choose a photo smaller than 8 MB.";
+        return;
+      }
+      photo = chosen;
+      key = PHOTO_PICTURE;
+      message.textContent = "";
+      paint();
+    });
+    name.addEventListener("input", () => { if (!photo && !key) paint(); });
+    const save = h("button", { class: "primary-button", onclick: async () => {
+      const wanted = name.value.trim();
+      if (wanted.length < 1 || wanted.length > 40) {
+        message.textContent = "Use a name with 1 to 40 characters.";
+        return;
+      }
+      save.disabled = true;
+      message.textContent = "Saving…";
+      try {
+        let user = null;
+        if (wanted !== shownName(profile)) user = await api.renameProfile(wanted);
+        if (photo) {
+          user = await api.uploadPhoto(photo);
+          app.rememberPhoto?.(user, photo);
+        } else if (key !== (profile.pictureKey ?? null)) {
+          user = await api.setPicture(key);
+        }
+        message.textContent = "Saved.";
+        if (user) app.updateProfile?.(user);
+      } catch (error) {
+        if (!app.handleError(error)) message.textContent = error.message;
+      } finally {
+        save.disabled = false;
+      }
+    } }, "Save Name and Picture");
+    paint();
+    return section("Name and Picture", "star", "The name everyone sees on every device, and your picture.",
+      row("Your Name", name),
+      h("div", { class: "picture-editor" }, preview,
+        h("div", { class: "button-row" },
+          h("button", { type: "button", class: "secondary-button", onclick: () => file.click() }, "Choose Photo…"),
+          h("button", { type: "button", class: "secondary-button", onclick: () => { key = null; photo = null; paint(); } }, "Use Initial"))),
+      symbols, palettes, file,
+      h("div", { class: "button-row" }, save), message);
   }
 
   function updatesPage(sections, refresh) {

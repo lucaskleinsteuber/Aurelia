@@ -24,6 +24,8 @@ export function isTypeSupported(type) {
 }
 
 const RETRIES = 3;
+/** How long the playhead must rest after a seek outside what has arrived before a new stream starts. */
+export const SEEK_SETTLE_MS = 250;
 
 export class LiveSource {
   /**
@@ -274,15 +276,30 @@ export class LiveSource {
 
   seeking() {
     if (this.destroyed || !this.buffer) return;
-    const target = this.video.currentTime;
-    const action = rules.seekAction({
+    if (this.seekAction() !== "restart") {
+      clearTimeout(this.seekTimer);
+      this.seekTimer = null;
+      this.wake();
+      return;
+    }
+    // Dragging the timeline seeks many times a second. Only the point it comes to rest at
+    // starts a new stream, so the server does not start (and drop) a conversion for each step.
+    clearTimeout(this.seekTimer);
+    this.seekTimer = setTimeout(() => {
+      this.seekTimer = null;
+      if (this.destroyed || !this.buffer) return;
+      if (this.seekAction() === "restart") this.restart(this.video.currentTime);
+      else this.wake();
+    }, SEEK_SETTLE_MS);
+  }
+
+  seekAction() {
+    return rules.seekAction({
       buffered: rules.ranges(this.buffer.buffered),
-      target,
+      target: this.video.currentTime,
       streaming: this.streaming,
       streamStart: this.streamStart,
     });
-    if (action === "restart") this.restart(target);
-    else this.wake();
   }
 
   /** Resolves when the source buffer is not busy. */
@@ -320,6 +337,7 @@ export class LiveSource {
     if (this.destroyed) return;
     this.destroyed = true;
     this.generation += 1;
+    clearTimeout(this.seekTimer);
     this.detach();
     this.wake();
     this.listeners.forEach((remove) => remove());

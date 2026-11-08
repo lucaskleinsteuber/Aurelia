@@ -112,8 +112,9 @@ Aurelia Server
 
   sudo aurelia setup [--name "Server Name"] [--power always|save|stop-only]
                                               Create the owner, turn on network access, choose power use
-  aurelia approve [CODE]                      Allow an Apple TV that shows a code
-  aurelia pair                                Show a code to enter on a Mac
+  aurelia pair                                Show a code to type on a new device (Mac, Linux PC,
+                                              Apple TV, iPhone, iPad or browser)
+  aurelia approve [CODE]                      Allow an older app that shows a code itself
   aurelia library add --path PATH [--kind automatic|movies|tv] [--name NAME]
   aurelia library list | scan --all | remove --id ID --yes
   aurelia status                              Is the server running, and its fingerprint
@@ -184,8 +185,8 @@ case "$command" in
     echo "Change this any time in Aurelia on a Mac (Settings › Server › Power) or with: sudo aurelia sleep"
     echo
     echo "Next, connect your devices. The first one also asks for the owner's new viewing PIN."
-    echo "  Apple TV: choose this server, then run here: aurelia approve CODE"
-    echo "  Mac:      run here: aurelia pair, then enter the code in Aurelia on the Mac"
+    echo "  Run here: aurelia pair, then type the code in Aurelia on the new device"
+    echo "  (Mac, Linux PC, Apple TV, iPhone, iPad, or this server's address in a browser)."
     ;;
   approve)
     ensure_running

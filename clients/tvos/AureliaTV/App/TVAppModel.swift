@@ -27,8 +27,6 @@ final class TVAppModel: ObservableObject {
   let artwork = TVArtworkPipeline()
   @Published var progressWarning: String?
   @Published private(set) var capabilities: TVCapabilities?
-  /// The FRITZ!Box sign-in used to wake the server, if one is set up on this Apple TV.
-  @Published private(set) var routerWake: TVRouterWake.Account?
   @Published private(set) var watchlistItems: [TVCatalogItem] = []
   @Published private(set) var watchlistIds: Set<UUID> = []
   @Published private(set) var home: TVHome?
@@ -42,6 +40,10 @@ final class TVAppModel: ObservableObject {
   @Published private(set) var acknowledgedProgress: [UUID: TVPlaybackProgress] = [:]
   @Published private var mutationSummaries: [UUID: TVCatalogItem] = [:]
   @Published var remotePlaybackItem: TVCatalogItem?
+  /// Counts Stop requests from another device; the screen showing the player closes it.
+  @Published private(set) var remoteStopRequests = 0
+  /// The player on screen, so the heartbeat can tell other devices what plays.
+  private weak var openPlayer: TVPlaybackController?
   /// The Watch Together party this Apple TV is in, if any.
   @Published private(set) var watchParty: TVWatchTogetherSession?
   /// Parties others started on the server, offered on Home and title pages.
@@ -65,6 +67,12 @@ final class TVAppModel: ObservableObject {
     UserDefaults.standard.set(newId, forKey: "AureliaTVDeviceId")
     return newId
   }
+  /// The name the Mac and other devices show for this one.
+  var deviceName: String {
+    TVDeviceName.display(
+      systemName: UIDevice.current.name, model: UIDevice.current.model,
+      tag: UIDevice.current.identifierForVendor)
+  }
   private let credentials = TVCredentialStore()
   let environment = TVAppEnvironment.current()
   private var generation = UUID()
@@ -75,8 +83,6 @@ final class TVAppModel: ObservableObject {
   /// screen left on for hours.
   private var wakeAllowedUntil: Date?
   private var isForeground = true
-  /// The FRITZ!Box is asked at most once a minute.
-  private var lastRouterWake: Date?
   private var outboxTransition: Task<Void, Never>?
 
   var client: TVAPIClient? {
@@ -85,7 +91,57 @@ final class TVAppModel: ObservableObject {
   }
 
   var browsePreferences: TVBrowsePreferenceStore { environment.browsePreferences }
-  init() { routerWake = environment.routerWakeStore.load() }
+  /// The setup assistant: introduction, guided connection and the tour.
+  let setupGuide: TVSetupGuide
+  private var setupGuideObservation: AnyCancellable?
+
+  init() {
+    #if DEBUG
+      let fixture = TVUITestScenario.current != nil
+      let assistantFixture = ProcessInfo.processInfo.environment["AURELIA_TV_ASSISTANT"] == "1"
+    #else
+      let fixture = false
+      let assistantFixture = false
+    #endif
+    if !fixture { TVTestEdition.forgetLeftoversAfterReinstall() }
+    let alreadyConnected = !fixture && (try? TVCredentialStore().load()) != nil
+    setupGuide = TVSetupGuide(
+      defaults: fixture
+        ? (UserDefaults(suiteName: "Aurelia.TV.SetupGuide.\(UUID().uuidString)") ?? .standard)
+        : .standard,
+      alreadySetUp: alreadyConnected || (fixture && !assistantFixture))
+    // Waking through a FRITZ!Box needed the router's sign-in; that is gone, and a sign-in saved
+    // by an earlier version is erased.
+    if environment.allowsPersistentCredentials { TVLegacyRouterSignIn.erase() }
+    setupGuideObservation = setupGuide.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
+    TVProfilePhotoCache.shared.loader = { [weak self] id, revision in
+      guard let self, let connection = self.connection else { throw TVCoreError.profileRequired }
+      return try await self.makeClient(connection: connection).profilePhoto(
+        id: id, revision: revision)
+    }
+  }
+
+  var supportsProfilePersonalization: Bool {
+    capabilities?.supportsProfilePersonalization ?? false
+  }
+
+  /// The signed-in profile was renamed or got a new picture.
+  func updateProfileUser(_ user: TVUser) {
+    if let session, session.user.id == user.id {
+      self.session = TVProfileSession(
+        user: user, sessionId: session.sessionId, token: session.token,
+        expiresAt: session.expiresAt)
+    }
+    if let index = profiles.firstIndex(where: { $0.id == user.id }) {
+      let old = profiles[index]
+      profiles[index] = TVWatchingProfile(
+        id: old.id, name: user.shownName, role: old.role, needsPinSetup: old.needsPinSetup,
+        pinProtectionEnabled: old.pinProtectionEnabled, pictureKey: user.pictureKey,
+        pictureRevision: user.pictureRevision ?? 0, ageLimit: user.ageLimit)
+    }
+  }
 
   func start() async {
     guard !started else { return }
@@ -142,7 +198,7 @@ final class TVAppModel: ObservableObject {
         guard candidate.info.isSetup else {
           throw TVCoreError.server(
             status: 409, code: "setup_required",
-            message: "Set up this server in Aurelia on your Mac first.", retryAfter: nil)
+            message: "Set up this server in Aurelia on the Mac or Linux computer that runs it first.", retryAfter: nil)
         }
         inspected = candidate
         phase = .trust
@@ -209,45 +265,6 @@ final class TVAppModel: ObservableObject {
   private func wakeIfAllowed(_ serverID: UUID) {
     guard isForeground, let until = wakeAllowedUntil, until > Date() else { return }
     TVWakeOnLan.wake(serverID: serverID)
-    guard let account = routerWake,
-      lastRouterWake.map({ Date().timeIntervalSince($0) >= 60 }) ?? true
-    else { return }
-    let cards = TVWakeOnLan.target(for: serverID)?.hardwareAddresses
-      .compactMap(TVWakeOnLan.hardwareAddress) ?? []
-    guard !cards.isEmpty else { return }
-    lastRouterWake = Date()
-    let transport = environment.routerWakeTransport
-    Task { _ = await TVRouterWake.wake(cards: cards, account: account, transport: transport) }
-  }
-
-  /// Checks the sign-in, then saves it. When the server's network card is known, the FRITZ!Box
-  /// is asked to wake it right away, which also proves the user may wake devices; a server that
-  /// is already on ignores it. Returns a message for the user when something is wrong.
-  func saveRouterWake(host: String, username: String, password: String) async -> String? {
-    guard let normalized = TVRouterWake.normalizedHost(host) else {
-      return TVRouterWake.Failure.invalidAddress.message
-    }
-    let account = TVRouterWake.Account(host: normalized, username: username, password: password)
-    let transport = environment.routerWakeTransport
-    let cards =
-      connection.flatMap { TVWakeOnLan.target(for: $0.serverID) }?.hardwareAddresses
-      .compactMap(TVWakeOnLan.hardwareAddress) ?? []
-    let failure =
-      cards.isEmpty
-      ? await TVRouterWake.check(account: account, transport: transport)
-      : await TVRouterWake.wake(cards: cards, account: account, transport: transport)
-    if let failure, failure != .unknownDevice { return failure.message }
-    do { try environment.routerWakeStore.save(account) } catch { return error.localizedDescription }
-    routerWake = account
-    if cards.isEmpty, connection != nil {
-      return "Saved. The server hasn’t told this Apple TV its network card yet; that happens the next time they connect."
-    }
-    return failure?.message
-  }
-
-  func removeRouterWake() {
-    environment.routerWakeStore.delete()
-    routerWake = nil
   }
 
   /// Stops trying the saved server, so another one can be chosen at once.
@@ -259,81 +276,39 @@ final class TVAppModel: ObservableObject {
     startDiscovery()
   }
 
+  /// After the server's fingerprint is trusted: asks for the 8-digit code that the main device
+  /// (Aurelia on a Mac, the Linux app, or `aurelia pair` on a Linux server) shows. Every
+  /// device pairs this way, so nobody has to work out which side shows the code.
   func beginPairing() {
-    guard !isBusy, let inspected else { return }
-    let previous = pairing
+    guard !isBusy, inspected != nil else { return }
+    retireWork()
+    error = nil
     pairing = nil
-    let run = beginWork()
     phase = .pairing
+  }
+
+  /// Pairs this Apple TV with the code from the main device.
+  func pair(code: String) {
+    guard !isBusy, let inspected else { return }
+    let digits = code.filter(\.isNumber)
+    guard digits.count == 8 else {
+      error = "Enter the 8-digit code shown on your Mac or Linux computer."
+      return
+    }
+    let run = beginWork()
     task = Task {
       defer { finish(run) }
       do {
-        let api = makeClient(inspected: inspected)
-        if let previous {
-          _ = try? await api.cancelPairing(id: previous.id, secret: previous.secret)
-          guard current(run) else { return }
-        }
-        let created = try await api.startPairing(deviceName: UIDevice.current.name)
-        guard current(run) else {
-          Task { _ = try? await api.cancelPairing(id: created.id, secret: created.secret) }
-          return
-        }
-        pairing = created
-        var delay = max(5, created.pollIntervalSeconds)
-        while current(run) {
-          try await Task.sleep(for: .seconds(delay))
-          guard current(run) else { return }
-          if let date = TVServerDate.parse(created.expiresAt), date <= Date() {
-            throw TVCoreError.server(
-              status: 410, code: "pairing_expired",
-              message: "This code has expired. Start a new pairing.", retryAfter: nil)
-          }
-          do {
-            let result = try await api.pairingStatus(id: created.id, secret: created.secret)
-            guard current(run) else { return }
-            delay = max(5, result.pollIntervalSeconds)
-            switch result.state {
-            case .pending: continue
-            case .approved:
-              guard let auth = result.authentication else { throw TVCoreError.invalidResponse }
-              var paired = try inspected.connection(authentication: auth)
-              TVWakeOnLan.remember(
-                serverID: inspected.info.serverId, info: inspected.info,
-                hosts: [inspected.baseURL.host].compactMap { $0 })
-              paired.pendingAcknowledgement = TVPendingPairingAcknowledgement(
-                id: created.id, secret: created.secret, expiresAt: created.expiresAt)
-              try saveCredentials(paired)
-              connection = paired
-              let receipt = try await api.acknowledgePairing(id: created.id, secret: created.secret)
-              guard current(run) else {
-                Task { try? await makeClient(connection: paired).disconnectDevice() }
-                return
-              }
-              guard receipt.acknowledged else { throw TVCoreError.invalidResponse }
-              paired.pendingAcknowledgement = nil
-              try saveCredentials(paired)
-              guard current(run) else { return }
-              connection = paired
-              pairing = nil
-              try await loadProfiles(run: run)
-              return
-            case .denied:
-              throw TVCoreError.server(
-                status: 403, code: "pairing_denied",
-                message: "This device was not approved on your Mac.", retryAfter: nil)
-            case .expired, .cancelled, .unknown:
-              throw TVCoreError.server(
-                status: 409, code: "pairing_expired",
-                message: "This code is no longer available. Start a new pairing.", retryAfter: nil)
-            }
-          } catch let failure as TVCoreError where failure.statusCode == 429 || failure.isTransient
-          {
-            delay = max(5, Int(ceil(failure.retryAfter ?? 5)))
-            if let date = TVServerDate.parse(created.expiresAt), date <= Date() { throw failure }
-          } catch let failure as URLError where failure.code != .cancelled {
-            delay = 5
-          }
-        }
+        let auth = try await makeClient(inspected: inspected).redeemPairingCode(
+          digits, deviceName: deviceName)
+        guard current(run) else { return }
+        let paired = try inspected.connection(authentication: auth)
+        TVWakeOnLan.remember(
+          serverID: inspected.info.serverId, info: inspected.info,
+          hosts: [inspected.baseURL.host].compactMap { $0 })
+        try saveCredentials(paired)
+        connection = paired
+        try await loadProfiles(run: run)
       } catch { show(error, run: run) }
     }
   }
@@ -445,7 +420,20 @@ final class TVAppModel: ObservableObject {
     phase = .connection
     do { try deleteCredentials() } catch { self.error = error.localizedDescription }
     startDiscovery()
-    if let stored { try? await makeClient(connection: stored).disconnectDevice() }
+    // Nothing of this server stays behind: stored artwork and its wake address go too.
+    await artwork.removeStored()
+    guard let stored else { return }
+    TVWakeOnLan.forget(serverID: stored.serverID)
+    do {
+      try await makeClient(connection: stored).disconnectDevice()
+    } catch let failure as TVCoreError where failure.isAuthenticationFailure {
+      // The server had already removed this Apple TV.
+    } catch {
+      if self.error == nil {
+        self.error =
+          "This Apple TV is disconnected, but the server could not be told. Remove it in Aurelia on your Mac."
+      }
+    }
   }
 
   func handleSessionFailure(_ failure: Error) {
@@ -560,6 +548,9 @@ final class TVAppModel: ObservableObject {
           return candidate
         } catch {
           guard current(run) else { throw CancellationError() }
+          // An address found on the network may be a stale entry or another computer; only the
+          // saved address itself proves that the server's identity changed.
+          if address != saved.baseURL, (error as? TVCoreError) == .identityMismatch { continue }
           guard (error as? TVCoreError)?.isTransient == true || error is URLError else {
             throw error
           }
@@ -575,13 +566,11 @@ final class TVAppModel: ObservableObject {
     phase = .profiles
     let result = try await makeClient(connection: connection).profiles()
     guard current(run) else { return }
-    guard result.formatVersion == 1 || result.formatVersion == 2 else {
-      throw TVCoreError.unsupportedServer
-    }
+    try TVProtocolVersion.check(result.formatVersion)
     if result.managementSetupRequired {
       throw TVCoreError.server(
         status: 409, code: "setup_required",
-        message: "Finish profile setup in Aurelia on your Mac first.", retryAfter: nil)
+        message: "Finish profile setup in Aurelia on the Mac or Linux computer that runs the server.", retryAfter: nil)
     }
     profiles = result.profiles
     error = nil
@@ -590,8 +579,8 @@ final class TVAppModel: ObservableObject {
   }
 
   private func validate(_ capabilities: TVCapabilities) throws {
-    guard [1, 2].contains(capabilities.formatVersion),
-      Set(["device-authorization-v1", "library-state-v1"]).isSubset(
+    try TVProtocolVersion.check(capabilities.formatVersion)
+    guard Set(["device-authorization-v1", "library-state-v1"]).isSubset(
         of: Set(capabilities.capabilities ?? []))
     else { throw TVCoreError.unsupportedServer }
   }
@@ -646,7 +635,7 @@ final class TVAppModel: ObservableObject {
   func joinWatchTogether(_ party: TVWatchPartySummary) async {
     await leaveWatchTogether()
     guard let api = watchClient() else { return }
-    let joined = TVWatchTogetherSession(api: api, deviceName: UIDevice.current.name)
+    let joined = TVWatchTogetherSession(api: api, deviceName: deviceName)
     watchParty = joined
     guard await joined.join(party), let state = joined.state,
       let item = try? await api.summary(id: state.mediaId)
@@ -663,10 +652,11 @@ final class TVAppModel: ObservableObject {
   func startWatchTogether(with controller: TVPlaybackController) async {
     await leaveWatchTogether()
     guard let api = watchClient() else { return }
-    let started = TVWatchTogetherSession(api: api, deviceName: UIDevice.current.name)
+    let started = TVWatchTogetherSession(api: api, deviceName: deviceName)
     watchParty = started
     if await started.start(
-      mediaID: controller.currentMediaID, position: controller.position, playing: controller.isPlaying)
+      mediaID: controller.currentMediaID, position: controller.position,
+      playing: controller.isPlaying)
     {
       attachWatchParty(to: controller)
     }
@@ -674,6 +664,7 @@ final class TVAppModel: ObservableObject {
 
   /// A player opened: a party this Apple TV is in follows it.
   func attachWatchParty(to controller: TVPlaybackController) {
+    openPlayer = controller
     guard let party = watchParty, let api = watchClient() else { return }
     party.openTitle = { [weak controller] mediaID in
       Task {
@@ -688,6 +679,7 @@ final class TVAppModel: ObservableObject {
 
   /// The player closed: closing it leaves the party.
   func playerClosed(_ controller: TVPlaybackController) {
+    if openPlayer === controller { openPlayer = nil }
     controller.userActionObserver = nil
     controller.watchStateObserver = nil
     guard let party = watchParty, party.isFollowing(controller) else { return }
@@ -857,6 +849,9 @@ final class TVAppModel: ObservableObject {
     }
   }
 
+  /// Closes the open player, wherever it shows. Closing it saves the progress as usual.
+  func stopPlayer() { remoteStopRequests += 1 }
+
   private func observePersonalState(connection: TVStoredConnection, session: TVProfileSession) {
     syncTask?.cancel()
     progressObserver?.cancel()
@@ -866,7 +861,7 @@ final class TVAppModel: ObservableObject {
     let sessionID = session.sessionId
     let scope = TVProgressScope(connection: connection, session: session)
     let deviceId = tvDeviceId
-    let deviceName = UIDevice.current.name
+    let deviceName = self.deviceName
 
     remoteDeviceHeartbeatTask = Task { [weak self] in
       while !Task.isCancelled {
@@ -875,7 +870,14 @@ final class TVAppModel: ObservableObject {
           deviceId: deviceId,
           deviceName: deviceName,
           clientType: "tvos",
-          isPlaying: self.playerPresented
+          isPlaying: self.openPlayer != nil || self.playerPresented,
+          mediaId: self.openPlayer?.currentMediaID,
+          title: self.openPlayer?.title,
+          positionSeconds: self.openPlayer.map { Double($0.position) / 1_000 },
+          durationSeconds: self.openPlayer.flatMap {
+            $0.duration > 0 ? Double($0.duration) / 1_000 : nil
+          },
+          isPaused: self.openPlayer.map { !$0.isPlaying } ?? false
         )
         do { try await Task.sleep(for: .seconds(15)) } catch { return }
       }
@@ -897,7 +899,7 @@ final class TVAppModel: ObservableObject {
             } else if cmd.action.lowercased() == "stop" {
               await MainActor.run { [weak self] in
                 self?.remotePlaybackItem = nil
-                self?.playerPresented = false
+                self?.stopPlayer()
               }
             }
           }

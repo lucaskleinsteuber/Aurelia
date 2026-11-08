@@ -19,7 +19,9 @@ struct KeychainServerStore: ServerProfileStore {
     }
   }
 
-  static let productionService = "com.lucas.aurelia.media.connection.v1"
+  static let productionService =
+    AppEdition.isTest
+    ? "com.lucas.aurelia.media.test.connection.v1" : "com.lucas.aurelia.media.connection.v1"
   static let legacyService = "com.lucas.aureliahome.connection.v2"
 
   let service: String
@@ -28,7 +30,8 @@ struct KeychainServerStore: ServerProfileStore {
   init(service: String = productionService, migrationService: String? = nil) {
     self.service = service
     self.migrationService =
-      migrationService ?? (service == Self.productionService ? Self.legacyService : nil)
+      migrationService
+      ?? (service == Self.productionService && !AppEdition.isTest ? Self.legacyService : nil)
   }
 
   func load() throws -> StoredServerProfile? {

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and how-tos
+    url: https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/README.md
+    about: The guides answer most questions, from setup to watching away from home. Troubleshooting is in docs/TROUBLESHOOTING.md.
+  - name: Report a security problem privately
+    url: https://github.com/lucaskleinsteuber/Aurelia/security/advisories/new
+    about: Please do not open a public issue for vulnerabilities.

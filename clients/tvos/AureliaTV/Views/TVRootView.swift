@@ -5,14 +5,61 @@ private enum TVLibraryTab: Hashable { case home, movies, shows, search, profile 
 struct TVRootView: View {
   @EnvironmentObject private var model: TVAppModel
   @State private var tab: TVLibraryTab = .home
+  @State private var introductionReplay = false
+
+  private var guide: TVSetupGuide { model.setupGuide }
+  private var tabIndex: Binding<Int> {
+    let order: [TVLibraryTab] = [.home, .movies, .shows, .search, .profile]
+    return Binding(
+      get: { order.firstIndex(of: tab) ?? 0 },
+      set: { tab = order[min(max($0, 0), order.count - 1)] })
+  }
 
   var body: some View {
     Group {
+      if introductionReplay {
+        TVSetupIntroductionView(guide: guide, replay: true) { introductionReplay = false }
+      } else if model.phase == .connection, model.connection == nil, !guide.introSeen {
+        TVSetupIntroductionView(guide: guide)
+      } else if model.phase == .library, guide.isGuiding {
+        TVSetupDoneView(guide: guide).overlay(alignment: .top) { stepBar(.done) }
+      } else {
+        phaseView
+      }
+    }
+    .background(TVDesign.canvas.ignoresSafeArea())
+    .onReceive(NotificationCenter.default.publisher(for: .tvShowIntroduction)) { _ in
+      introductionReplay = true
+    }
+    .onChange(of: model.session?.sessionId) { _, _ in tab = .home }
+    .alert(
+      "Playback Progress",
+      isPresented: Binding(
+        get: { model.progressWarning != nil }, set: { if !$0 { model.progressWarning = nil } }
+      )
+    ) {
+      Button("OK") { model.progressWarning = nil }
+    } message: {
+      Text(model.progressWarning ?? "")
+    }
+  }
+
+  @ViewBuilder
+  private func stepBar(_ step: TVSetupStep) -> some View {
+    if guide.isGuiding {
+      TVSetupStepBar(current: step).padding(.top, 30)
+    }
+  }
+
+  @ViewBuilder
+  private var phaseView: some View {
+    Group {
       switch model.phase {
-      case .connection: TVConnectionView(browser: model.browser)
-      case .trust: TVServerTrustView()
-      case .pairing: TVPairingView()
-      case .profiles: TVProfilesView()
+      case .connection:
+        TVConnectionView(browser: model.browser).overlay(alignment: .top) { stepBar(.connect) }
+      case .trust: TVServerTrustView().overlay(alignment: .top) { stepBar(.approve) }
+      case .pairing: TVPairingView().overlay(alignment: .top) { stepBar(.approve) }
+      case .profiles: TVProfilesView().overlay(alignment: .top) { stepBar(.profile) }
       case .library:
         TabView(selection: $tab) {
           NavigationStack { TVHomeView() }.tabItem { Label("Home", systemImage: "house.fill") }.tag(
@@ -26,23 +73,16 @@ struct TVRootView: View {
           }.tag(TVLibraryTab.search)
           NavigationStack { TVConnectionMenu() }
             .tabItem {
-              Label(model.session?.user.username ?? "Profile", systemImage: "person.crop.circle")
+              Label(model.session?.user.shownName ?? "Profile", systemImage: "person.crop.circle")
             }
             .tag(TVLibraryTab.profile)
         }
+        .overlay {
+          if guide.tourPending, !guide.isGuiding {
+            TVLibraryTour(tab: tabIndex) { guide.tourShown() }
+          }
+        }
       }
-    }
-    .background(TVDesign.canvas.ignoresSafeArea())
-    .onChange(of: model.session?.sessionId) { _, _ in tab = .home }
-    .alert(
-      "Playback Progress",
-      isPresented: Binding(
-        get: { model.progressWarning != nil }, set: { if !$0 { model.progressWarning = nil } }
-      )
-    ) {
-      Button("OK") { model.progressWarning = nil }
-    } message: {
-      Text(model.progressWarning ?? "")
     }
   }
 }
@@ -124,7 +164,6 @@ struct TVSavedServerView: View {
   @EnvironmentObject private var model: TVAppModel
   let name: String
   let chooseOtherServer: () -> Void
-  @State private var settingUpRouterWake = false
 
   var body: some View {
     VStack(spacing: 34) {
@@ -138,11 +177,7 @@ struct TVSavedServerView: View {
           )
           .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
           .frame(maxWidth: 1100)
-          Text(
-            model.routerWake == nil
-              ? "This Apple TV connects by itself as soon as the server is on."
-              : "Aurelia asked your FRITZ!Box to wake it and connects as soon as the server is on."
-          )
+          Text("This Apple TV connects by itself as soon as the server is on.")
           .font(.title3).foregroundStyle(.tertiary).multilineTextAlignment(.center)
         }
         ZStack {
@@ -158,17 +193,10 @@ struct TVSavedServerView: View {
         Text("Connecting to \(name)…").font(.system(size: 40, weight: .semibold))
       }
       HStack(spacing: 30) {
-        if model.savedServerUnreachable {
-          Button(model.routerWake == nil ? "Wake with FRITZ!Box…" : "FRITZ!Box Wake Settings") {
-            settingUpRouterWake = true
-          }
-          .accessibilityIdentifier("tv-router-wake")
-        }
         Button("Connect to Another Server", action: chooseOtherServer)
           .accessibilityIdentifier("tv-other-server")
       }.font(.system(size: 24)).padding(.top, 20)
     }
-    .fullScreenCover(isPresented: $settingUpRouterWake) { TVRouterWakeView() }
     .padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
     .accessibilityIdentifier("tv-server-asleep")
     .task(id: model.savedServerUnreachable) {
@@ -188,7 +216,7 @@ struct TVServerTrustView: View {
   var body: some View {
     VStack(spacing: 30) {
       Text(model.inspected?.info.name ?? "Aurelia Server").font(.largeTitle.bold())
-      Text("Confirm this fingerprint on your Mac.").font(.title3)
+      Text("Confirm this fingerprint on your Mac or Linux computer.").font(.title3)
       Text(TVServerIdentity.display(model.inspected?.fingerprint ?? ""))
         .font(.system(size: 23, weight: .medium, design: .monospaced))
         .multilineTextAlignment(.center).frame(maxWidth: 980)
@@ -206,39 +234,41 @@ struct TVServerTrustView: View {
 
 struct TVPairingView: View {
   @EnvironmentObject private var model: TVAppModel
+  @State private var code = ""
 
   var body: some View {
     VStack(spacing: 28) {
-      Text("Approve this Apple TV").font(.largeTitle.bold())
-      Text("Enter this code in Aurelia on your Mac.").font(.title3)
-      if let pairing = model.pairing {
-        Text(pairing.code).font(.system(size: 76, weight: .semibold, design: .monospaced))
-          .tracking(10).accessibilityLabel(pairing.code.map(String.init).joined(separator: " "))
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-          let remaining = max(
-            0,
-            Int(
-              (TVServerDate.parse(pairing.expiresAt) ?? context.date).timeIntervalSince(
-                context.date)))
-          Text(
-            remaining > 0
-              ? "Expires in \(remaining / 60):\(String(format: "%02d", remaining % 60))"
-              : "Code expired"
-          )
-          .foregroundStyle(.secondary)
-        }
+      Text("Enter the Code").font(.largeTitle.bold())
+      Text("Your Mac or Linux computer shows the code; you type it here.").font(.title3)
+      VStack(alignment: .leading, spacing: 10) {
+        Text("1. On the computer that runs Aurelia, open Settings › Profiles and Devices.")
+        Text("2. Choose Create Code. On a Linux server without screen, run aurelia pair.")
+        Text("3. Type the 8 digits here. A code works once and for five minutes.")
       }
-      if let error = model.error {
-        TVErrorText(message: error)
-        if model.connection?.pendingAcknowledgement != nil {
-          Button("Finish Pairing") { Task { await model.reconnect() } }.disabled(model.isBusy)
-        } else {
-          Button("New Code") { model.beginPairing() }.disabled(model.isBusy)
+      .font(.callout).foregroundStyle(.secondary).frame(maxWidth: 1100, alignment: .leading)
+      TextField("8-digit code", text: $code)
+        .keyboardType(.numberPad)
+        .font(.system(size: 48, weight: .semibold, design: .monospaced))
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 560)
+        .onChange(of: code) { _, value in
+          let digits = String(value.filter(\.isNumber).prefix(8))
+          if digits != value { code = digits }
         }
-      } else {
-        ProgressView("Waiting for approval…")
+        .onSubmit { model.pair(code: code) }
+        .accessibilityLabel("Pairing code")
+        .accessibilityIdentifier("pairing-code")
+      if let error = model.error { TVErrorText(message: error) }
+      HStack(spacing: 32) {
+        Button("Cancel") { model.cancelPairing() }
+        Button {
+          model.pair(code: code)
+        } label: {
+          if model.isBusy { ProgressView() } else { Text("Pair This Apple TV") }
+        }
+        .buttonStyle(TVButtonStyle(kind: .primary))
+        .disabled(code.count != 8 || model.isBusy)
       }
-      Button("Cancel") { model.cancelPairing() }
     }.padding(80).frame(maxWidth: .infinity, maxHeight: .infinity)
       .onExitCommand { model.cancelPairing() }
   }
@@ -249,48 +279,62 @@ struct TVConnectionMenu: View {
   @State private var confirmingDisconnect = false
 
   var body: some View {
-    VStack(spacing: 44) {
-      VStack(spacing: 18) {
-        TVProfilePicture(
-          id: model.session?.user.id, name: model.session?.user.username ?? "Profile", size: 150)
-        Text(model.session?.user.username ?? "Profile").font(.system(size: 48, weight: .bold))
-        Text(model.connection?.name ?? "Aurelia Server").font(.system(size: 24))
-          .foregroundStyle(.secondary)
-      }
-      VStack(spacing: 22) {
-        NavigationLink {
-          TVPlaybackSettingsView()
-        } label: {
-          Label("Playback Settings", systemImage: "play.rectangle").frame(width: 560)
-        }.accessibilityIdentifier("profile-playback-settings")
-        NavigationLink {
-          TVRouterWakeView()
-        } label: {
-          Label("Wake with FRITZ!Box", systemImage: "power").frame(width: 560)
-        }.accessibilityIdentifier("profile-router-wake")
-        Button {
-          Task { await model.switchProfile() }
-        } label: {
-          Label("Switch Profile", systemImage: "person.2").frame(width: 560)
+    ScrollView {
+      VStack(spacing: 44) {
+        VStack(spacing: 18) {
+          TVProfilePicture(
+            id: model.session?.user.id, name: model.session?.user.shownName ?? "Profile", size: 150,
+            pictureKey: model.session?.user.pictureKey,
+            pictureRevision: model.session?.user.pictureRevision ?? 0)
+          Text(model.session?.user.shownName ?? "Profile").font(.system(size: 48, weight: .bold))
+          Text(model.connection?.name ?? "Aurelia Server").font(.system(size: 24))
+            .foregroundStyle(.secondary)
         }
-        Button(role: .destructive) {
-          confirmingDisconnect = true
-        } label: {
-          Label("Disconnect Apple TV", systemImage: "xmark.circle").frame(width: 560)
+        VStack(spacing: 22) {
+          if model.supportsProfilePersonalization {
+            NavigationLink {
+              TVNameAndPictureView()
+            } label: {
+              Label("Name and Picture", systemImage: "person.crop.circle").frame(width: 560)
+            }.accessibilityIdentifier("profile-name-picture")
+          }
+          NavigationLink {
+            TVPlaybackSettingsView()
+          } label: {
+            Label("Playback Settings", systemImage: "play.rectangle").frame(width: 560)
+          }.accessibilityIdentifier("profile-playback-settings")
+          NavigationLink {
+            TVAboutView()
+          } label: {
+            Label("About Aurelia", systemImage: "info.circle").frame(width: 560)
+          }.accessibilityIdentifier("profile-about")
+          Button {
+            Task { await model.switchProfile() }
+          } label: {
+            Label("Switch Profile", systemImage: "person.2").frame(width: 560)
+          }
+          Button(role: .destructive) {
+            confirmingDisconnect = true
+          } label: {
+            Label("Disconnect Apple TV", systemImage: "xmark.circle").frame(width: 560)
+          }
+        }.buttonStyle(TVButtonStyle()).focusSection()
+        if TVTestEdition.isActive {
+          TVTestToolsSection()
         }
-      }.buttonStyle(TVButtonStyle()).focusSection()
-      Text(
-        "Aurelia \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))"
-      ).font(.system(size: 20)).foregroundStyle(.tertiary)
-    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-      .background(TVDesign.canvas.ignoresSafeArea())
-      .confirmationDialog(
-        "Disconnect from this server?", isPresented: $confirmingDisconnect,
-        titleVisibility: .visible
-      ) {
-        Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }
-        Button("Cancel", role: .cancel) {}
-      }
+        Text(
+          "Aurelia \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))"
+        ).font(.system(size: 20)).foregroundStyle(.tertiary)
+      }.padding(.vertical, 40).frame(maxWidth: .infinity)
+    }
+    .background(TVDesign.canvas.ignoresSafeArea())
+    .confirmationDialog(
+      "Disconnect from this server?", isPresented: $confirmingDisconnect,
+      titleVisibility: .visible
+    ) {
+      Button("Disconnect", role: .destructive) { Task { await model.disconnect() } }
+      Button("Cancel", role: .cancel) {}
+    }
   }
 }
 

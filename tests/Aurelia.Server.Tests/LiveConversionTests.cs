@@ -25,6 +25,47 @@ public sealed partial class LiveConversionTests
     private static readonly LiveConversionRequest Browser = new(["h264", "hevc"], ["aac", "mp3"]);
 
     [Fact]
+    public void InputPathKeepsTheSameFileWhenOnlyItsStatusChanges()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var tempDir = Path.Combine(Path.GetTempPath(), "aurelia-identity-status-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var file = Path.Combine(tempDir, "title.mkv");
+            var link = Path.Combine(tempDir, "same-inode.mkv");
+            var copy = Path.Combine(tempDir, "copy.mkv");
+            File.WriteAllBytes(file, [1, 2, 3, 4]);
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            // A permission change moves only the status-change time; the file stays the same.
+            Thread.Sleep(20);
+            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+            Assert.NotEmpty(LiveConversionService.InputPath(stream, file));
+            // A hard link names the same device and inode; a copy is another file.
+            CreateHardLink(file, link);
+            Assert.NotEmpty(LiveConversionService.InputPath(stream, link));
+            File.Copy(file, copy);
+            Assert.Throws<IOException>(() => LiveConversionService.InputPath(stream, copy));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    private static void CreateHardLink(string existing, string created)
+    {
+        // /bin/ln without a shell: the paths are passed as separate arguments.
+        var start = new System.Diagnostics.ProcessStartInfo("/bin/ln") { UseShellExecute = false };
+        start.ArgumentList.Add(existing);
+        start.ArgumentList.Add(created);
+        using var process = System.Diagnostics.Process.Start(start)
+            ?? throw new IOException("The hard link could not be created.");
+        process.WaitForExit();
+        if (process.ExitCode != 0) throw new IOException("The hard link could not be created.");
+    }
+
+    [Fact]
     public void InputPathFailsClosedWhenIdentityChangesOrIsSymlinked()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "aurelia-identity-test-" + Guid.NewGuid().ToString("N"));

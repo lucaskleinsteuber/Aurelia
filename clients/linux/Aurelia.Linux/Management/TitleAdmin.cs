@@ -546,7 +546,7 @@ public sealed class MetadataEditorSheet : UserControl
             if (current is null) return;
             var bytes = await ImageBytesAsync(current);
             if (bytes is null) return;
-            var sheet = new CropSheet(scope, bytes, aspect, current.Crop);
+            var sheet = new CropSheet(scope.Sheets, bytes, aspect, current.Crop);
             if (await scope.Sheets.ShowAsync(sheet))
             {
                 set(current with { Crop = sheet.Result });
@@ -619,7 +619,7 @@ public sealed class MetadataEditorSheet : UserControl
         }
         EditorUploadSummary? upload = null;
         if (!await scope.RunAsync(async () => upload = await scope.Client.UploadArtworkAsync(mediaId, bytes), problem) || upload is null) return replacing;
-        var crop = new CropSheet(scope, bytes, aspect, null);
+        var crop = new CropSheet(scope.Sheets, bytes, aspect, null);
         var cropped = await scope.Sheets.ShowAsync(crop);
         return new EditorArtwork(UploadId: upload.Id, Crop: cropped ? crop.Result : null);
     }
@@ -766,7 +766,7 @@ public sealed class CropSheet : UserControl
 {
     private const double Area = 360;
 
-    public CropSheet(AdminScope scope, byte[] image, double aspect, ArtworkCrop? existing)
+    public CropSheet(Library.SheetHost sheets, byte[] image, double aspect, ArtworkCrop? existing, string title = "Crop Image", string useLabel = "Use Crop")
     {
         Bitmap? bitmap = null;
         try
@@ -835,9 +835,9 @@ public sealed class CropSheet : UserControl
             Layout();
         };
         var cancel = new Button { Content = "Cancel", Classes = { "chip" }, IsCancel = true };
-        cancel.Click += (_, _) => scope.Sheets.Close(false);
-        var use = new Button { Content = "Use Crop", Classes = { "primary" }, IsDefault = true, IsEnabled = bitmap is not null };
-        use.Click += (_, _) => scope.Sheets.Close(true);
+        cancel.Click += (_, _) => sheets.Close(false);
+        var use = new Button { Content = useLabel, Classes = { "primary" }, IsDefault = true, IsEnabled = bitmap is not null };
+        use.Click += (_, _) => sheets.Close(true);
         Layout();
         Content = new StackPanel
         {
@@ -845,7 +845,7 @@ public sealed class CropSheet : UserControl
             Width = 640,
             Children =
             {
-                new TextBlock { Text = "Crop Image", FontSize = 18, FontWeight = FontWeight.Bold },
+                new TextBlock { Text = title, FontSize = 18, FontWeight = FontWeight.Bold },
                 bitmap is null ? Note("This image cannot be shown here. It is kept as it is.") : new DockPanel
                 {
                     Children =
@@ -873,6 +873,44 @@ public sealed class CropSheet : UserControl
     }
 
     public ArtworkCrop? Result { get; private set; }
+
+    /// <summary>
+    /// The cropped part of <paramref name="image"/> as a PNG of at most <paramref name="maxSide"/>
+    /// pixels on its longer side, for pictures that are sent already cropped; null when it cannot be read.
+    /// </summary>
+    public static byte[]? Render(byte[] image, ArtworkCrop crop, int maxSide)
+    {
+        try
+        {
+            using var bitmap = new Bitmap(new MemoryStream(image));
+            var (w, h) = (bitmap.PixelSize.Width, bitmap.PixelSize.Height);
+            var (rotatedWidth, rotatedHeight) = crop.Rotation is 90 or 270 ? (h, w) : (w, h);
+            var cropWidth = crop.Width * rotatedWidth;
+            var cropHeight = crop.Height * rotatedHeight;
+            var scale = Math.Min(1, maxSide / Math.Max(cropWidth, cropHeight));
+            var size = new PixelSize(Math.Max(1, (int)Math.Round(cropWidth * scale)), Math.Max(1, (int)Math.Round(cropHeight * scale)));
+            // Clockwise quarter turns as the sheet shows them, moved back into positive coordinates.
+            var turn = crop.Rotation switch
+            {
+                90 => Matrix.CreateRotation(Math.PI / 2) * Matrix.CreateTranslation(h, 0),
+                180 => Matrix.CreateRotation(Math.PI) * Matrix.CreateTranslation(w, h),
+                270 => Matrix.CreateRotation(Math.PI * 3 / 2) * Matrix.CreateTranslation(0, w),
+                _ => Matrix.Identity,
+            };
+            var place = turn * Matrix.CreateTranslation(-crop.X * rotatedWidth, -crop.Y * rotatedHeight) * Matrix.CreateScale(scale, scale);
+            using var target = new RenderTargetBitmap(size);
+            using (var context = target.CreateDrawingContext())
+            using (context.PushTransform(place))
+                context.DrawImage(bitmap, new Rect(0, 0, w, h));
+            using var output = new MemoryStream();
+            target.Save(output, new PngBitmapEncoderOptions());
+            return output.ToArray();
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException or NotSupportedException or IOException)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>The Mac's LibraryHealthView: duplicates, offline titles, unmatched metadata and excluded items.</summary>

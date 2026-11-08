@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// A title downloaded to this Mac to watch without the server (owner's decision, 07.11.2026):
@@ -20,6 +21,35 @@ struct OfflineTitle: Codable, Identifiable, Equatable, Sendable {
   var progressSavedAt: Date?
   var progressDirty: Bool
   var subtitles: [OfflineSubtitle]
+  /// The server's progress revision when this Mac last knew it; older downloads have none.
+  var serverRevision: Int64? = nil
+  // What the offline library shows besides the file. Downloads made before these existed get
+  // them the next time their profile is open while the server answers.
+  var overview: String? = nil
+  var year: Int? = nil
+  var genres: [String]? = nil
+  var parentId: UUID? = nil
+  var parentTitle: String? = nil
+  var seasonNumber: Int? = nil
+  var episodeNumber: Int? = nil
+  /// File names of the poster and the backdrop in the title's folder.
+  var posterFile: String? = nil
+  var backdropFile: String? = nil
+  /// An episode's series poster, so the offline library shows the series like the library does.
+  var seriesPosterFile: String? = nil
+
+  var isEpisode: Bool { kind == "episode" }
+  var hasArtwork: Bool { posterFile != nil || backdropFile != nil }
+  /// "S1 E3" for an episode.
+  var episodeLabel: String? {
+    guard isEpisode, let seasonNumber else { return nil }
+    return "S\(seasonNumber) E\(episodeNumber ?? 0)"
+  }
+  var isInProgress: Bool { positionMilliseconds > 0 && !isCompleted }
+  var watchedShare: Double {
+    guard durationMilliseconds > 0 else { return 0 }
+    return min(1, Double(positionMilliseconds) / Double(durationMilliseconds))
+  }
 }
 
 struct OfflineSubtitle: Codable, Equatable, Sendable {
@@ -66,6 +96,22 @@ final class OfflineDownloads: ObservableObject {
 
   func title(_ id: UUID) -> OfflineTitle? { titles.first { $0.id == id } }
 
+  private var artworkImages: [String: NSImage] = [:]
+
+  /// A download's poster or backdrop from this Mac; nil when it has none.
+  func artwork(_ title: OfflineTitle, backdrop: Bool = false, series: Bool = false) -> NSImage? {
+    guard
+      let name = series
+        ? title.seriesPosterFile : (backdrop ? title.backdropFile : title.posterFile)
+    else { return nil }
+    let key = "\(title.id.uuidString)/\(name)"
+    if let image = artworkImages[key] { return image }
+    guard let image = NSImage(contentsOf: folder(for: title.id).appendingPathComponent(name))
+    else { return nil }
+    artworkImages[key] = image
+    return image
+  }
+
   /// Downloads for one profile on one server.
   func titles(serverId: UUID, userId: UUID) -> [OfflineTitle] {
     titles.filter { $0.serverId == serverId && $0.userId == userId }
@@ -77,8 +123,18 @@ final class OfflineDownloads: ObservableObject {
   func isDownloaded(_ id: UUID) -> Bool { title(id) != nil }
 
   /// Downloads a movie or episode for the signed-in profile.
-  func download(_ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile) {
-    guard let userId = profile.user?.id, tasks[item.id] == nil, title(item.id) == nil else { return }
+  func download(
+    _ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile,
+    series: CatalogItemSummary? = nil
+  ) {
+    guard let userId = profile.user?.id, tasks[item.id] == nil else { return }
+    if let existing = title(item.id) {
+      // One copy per title on this Mac: say so, rather than doing nothing.
+      if existing.userId != userId {
+        errorMessage = "\(item.title) is already downloaded on this Mac by another profile."
+      }
+      return
+    }
     active[item.id] = 0
     activeNames[item.id] = subtitle.map { "\(item.title) · \($0)" } ?? item.title
     errorMessage = nil
@@ -86,7 +142,7 @@ final class OfflineDownloads: ObservableObject {
       guard let self else { return }
       do {
         let downloaded = try await self.fetch(
-          item, subtitle: subtitle, profile: profile, userId: userId)
+          item, subtitle: subtitle, profile: profile, userId: userId, series: series)
         self.titles.append(downloaded)
         self.save()
       } catch is CancellationError {
@@ -111,7 +167,78 @@ final class OfflineDownloads: ObservableObject {
   func remove(_ id: UUID) {
     cancel(id)
     titles.removeAll { $0.id == id }
+    artworkImages = artworkImages.filter { !$0.key.hasPrefix(id.uuidString) }
     save()
+  }
+
+  /// Gives downloads made before artwork and descriptions were kept their poster, backdrop and
+  /// description, from the library the open profile sees.
+  func completeDetails(profile: StoredServerProfile, catalog: [CatalogItemSummary]) async {
+    guard
+      titles.contains(where: {
+        !$0.hasArtwork && $0.serverId == profile.serverId && $0.userId == profile.user?.id
+      })
+    else { return }
+    guard let userId = profile.user?.id else { return }
+    let api = APIClient(profile: profile)
+    for title in titles
+    where !title.hasArtwork && title.serverId == profile.serverId && title.userId == userId {
+      guard let item = catalog.first(where: { $0.id == title.id }) else { continue }
+      let series = item.parentId.flatMap { parent in catalog.first { $0.id == parent } }
+      let details = await Self.details(
+        of: item, series: series, into: folder(for: title.id), api: api)
+      guard let index = titles.firstIndex(where: { $0.id == title.id }) else { continue }
+      details.apply(to: &titles[index])
+    }
+    save()
+  }
+
+  /// A title's description and artwork, written next to its file. Artwork that fails to load is
+  /// left out; the offline library then draws a placeholder.
+  private struct Details {
+    var overview: String?
+    var year: Int?
+    var genres: [String]
+    var parentId: UUID?
+    var parentTitle: String?
+    var seasonNumber: Int?
+    var episodeNumber: Int?
+    var posterFile: String?
+    var backdropFile: String?
+    var seriesPosterFile: String?
+
+    func apply(to title: inout OfflineTitle) {
+      title.overview = overview
+      title.year = year
+      title.genres = genres
+      title.parentId = parentId
+      title.parentTitle = parentTitle
+      title.seasonNumber = seasonNumber
+      title.episodeNumber = episodeNumber
+      title.posterFile = posterFile ?? title.posterFile
+      title.backdropFile = backdropFile ?? title.backdropFile
+      title.seriesPosterFile = seriesPosterFile ?? title.seriesPosterFile
+    }
+  }
+
+  private static func details(
+    of item: CatalogItemSummary, series: CatalogItemSummary?, into folder: URL, api: APIClient
+  ) async -> Details {
+    func keep(_ artwork: ArtworkSummary?, width: Int, name: String) async -> String? {
+      guard let artwork else { return nil }
+      let variant = ArtworkVariantRequest.artwork(artwork, width: width)
+      guard let data = try? await api.artworkData(path: variant.path), NSImage(data: data) != nil,
+        (try? data.write(to: folder.appendingPathComponent(name), options: .atomic)) != nil
+      else { return nil }
+      return name
+    }
+    return Details(
+      overview: item.overview, year: item.year, genres: item.genres, parentId: item.parentId,
+      parentTitle: item.parentTitle, seasonNumber: item.seasonNumber,
+      episodeNumber: item.episodeNumber,
+      posterFile: await keep(item.poster, width: 640, name: "poster.image"),
+      backdropFile: await keep(item.backdrop, width: 1920, name: "backdrop.image"),
+      seriesPosterFile: await keep(series?.poster, width: 640, name: "series-poster.image"))
   }
 
   /// Progress watched offline, sent to the server once it answers again.
@@ -134,15 +261,17 @@ final class OfflineDownloads: ObservableObject {
     {
       do {
         let server = try await api.playbackProgress(mediaId: title.id)
-        let serverDate = server.updatedAt.flatMap(Self.date)
-        if let saved = title.progressSavedAt, serverDate.map({ $0 < saved }) ?? true {
-          _ = try await api.updatePlaybackProgress(
+        var revision = server.revision
+        if Self.offlineIsNewer(title, server: server) {
+          revision = try await api.updatePlaybackProgress(
             mediaId: title.id, positionMilliseconds: title.positionMilliseconds,
             durationMilliseconds: title.durationMilliseconds, isFinished: title.isCompleted,
-            expectedRevision: server.revision ?? 0, clientMutationId: UUID())
+            expectedRevision: server.revision ?? 0, clientMutationId: UUID()
+          ).revision
         }
         if let index = titles.firstIndex(where: { $0.id == title.id }) {
           titles[index].progressDirty = false
+          titles[index].serverRevision = revision
         }
       } catch {
         // Tried again at the next refresh.
@@ -152,7 +281,8 @@ final class OfflineDownloads: ObservableObject {
   }
 
   private func fetch(
-    _ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile, userId: UUID
+    _ item: CatalogItemSummary, subtitle: String?, profile: StoredServerProfile, userId: UUID,
+    series: CatalogItemSummary?
   ) async throws -> OfflineTitle {
     let api = APIClient(profile: profile)
     let ticket = try await api.createPlayback(mediaId: item.id)
@@ -187,7 +317,7 @@ final class OfflineDownloads: ObservableObject {
       if let tracks = try? await api.streamSubtitles(ticket: ticket.id) {
         for track in tracks where track.isSidecar && track.supported {
           guard let url = relay.subtitleURL(index: track.index),
-            let (data, response) = try? await URLSession.shared.data(from: url),
+            let (data, response) = try? await Self.uncachedSession.data(from: url),
             (response as? HTTPURLResponse)?.statusCode == 200
           else { continue }
           let name = "subtitle-\(track.index).vtt"
@@ -201,18 +331,40 @@ final class OfflineDownloads: ObservableObject {
       let size =
         (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int64)
         ?? ticket.contentLength
-      return OfflineTitle(
+      let details = await Self.details(of: item, series: series, into: folder, api: api)
+      var downloaded = OfflineTitle(
         id: item.id, serverId: profile.serverId, userId: userId, title: item.title,
         subtitle: subtitle, kind: item.kind.rawValue, fileName: fileName,
         contentType: ticket.contentType, bytes: size, downloadedAt: Date(),
         positionMilliseconds: item.progress?.positionMilliseconds ?? 0,
         durationMilliseconds: item.progress?.durationMilliseconds ?? 0,
         isCompleted: item.progress?.isCompleted ?? false, progressSavedAt: nil,
-        progressDirty: false, subtitles: subtitles)
+        progressDirty: false, subtitles: subtitles, serverRevision: item.progress?.revision)
+      details.apply(to: &downloaded)
+      return downloaded
     } catch {
       try? FileManager.default.removeItem(at: folder)
       throw error
     }
+  }
+
+  /// Subtitles come from the local relay; no copy of them or of its secret address goes to a cache.
+  private static let uncachedSession: URLSession = {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.urlCache = nil
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    return URLSession(configuration: configuration)
+  }()
+
+  /// Whether progress watched offline replaces the server's. Unchanged since the download (same
+  /// revision) it always does, whatever this Mac's clock says; only when the server's progress
+  /// changed meanwhile do the times decide, and the later one wins.
+  nonisolated static func offlineIsNewer(_ title: OfflineTitle, server: PlaybackProgressResponse)
+    -> Bool
+  {
+    if let known = title.serverRevision, server.revision == known { return true }
+    guard let saved = title.progressSavedAt else { return false }
+    return server.updatedAt.flatMap(date).map { $0 < saved } ?? true
   }
 
   static func fileExtension(_ contentType: String) -> String {
@@ -226,7 +378,7 @@ final class OfflineDownloads: ObservableObject {
     }
   }
 
-  static func date(_ text: String) -> Date? {
+  nonisolated static func date(_ text: String) -> Date? {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     if let date = formatter.date(from: text) { return date }

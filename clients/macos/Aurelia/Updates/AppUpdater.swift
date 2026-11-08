@@ -36,7 +36,9 @@ final class AppUpdater: ObservableObject {
     self.client = client
     self.defaults = defaults
     let configured = bundle.object(forInfoDictionaryKey: "AureliaUpdateRepository") as? String
-    repository = configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
+    // Aurelia Test never updates itself: an update would install the real app.
+    repository =
+      AppEdition.isTest ? nil : configured.flatMap { AppUpdateLogic.isRepository($0) ? $0 : nil }
     AppUpdateSource.retirePublicTest(in: defaults)
     currentVersion =
       bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"

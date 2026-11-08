@@ -10,9 +10,24 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public Guid? AccessUserId { get; set; }
     public bool AccessIsOwner { get; set; }
     public ProfileAccessMode AccessMode { get; set; }
-    public bool AccessWholeCatalog => AccessIsOwner || AccessMode == ProfileAccessMode.EntireLibrary;
+
+    /// <summary>A children's profile's FSK limit; it narrows <see cref="ProfileAccessMode.EntireLibrary"/>.</summary>
+    public int? AccessAgeLimit { get; set; }
+
+    /// <summary>The stored ratings <see cref="AccessAgeLimit"/> allows (see <see cref="AgeRatings"/>).</summary>
+    public string[] AccessAllowedRatings => AgeRatings.AllowedFor(AccessAgeLimit);
+
+    /// <summary>Every title, without any per-title or age check.</summary>
+    public bool AccessWholeCatalog => AccessIsOwner || (AccessMode == ProfileAccessMode.EntireLibrary && AccessAgeLimit == null);
+
+    /// <summary>Every storage location; a children's profile sees all of them but only some of their titles.</summary>
+    public bool AccessAllLibraries => AccessIsOwner || AccessMode == ProfileAccessMode.EntireLibrary;
+
+    public bool AccessAgeLimited => !AccessIsOwner && AccessMode == ProfileAccessMode.EntireLibrary && AccessAgeLimit != null;
     public DbSet<UserLibraryGrant> UserLibraryGrants => Set<UserLibraryGrant>();
     public DbSet<UserTitleGrant> UserTitleGrants => Set<UserTitleGrant>();
+    public DbSet<UserTitleRule> UserTitleRules => Set<UserTitleRule>();
+    public DbSet<ProfilePhoto> ProfilePhotos => Set<ProfilePhoto>();
     public DbSet<ServerAdministrationCredential> AdministrationCredentials => Set<ServerAdministrationCredential>();
     public DbSet<ServerUser> Users => Set<ServerUser>();
 
@@ -73,7 +88,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         {
             if (entry.State == EntityState.Added || new[] { nameof(ServerUser.Role), nameof(ServerUser.IsEnabled),
                     nameof(ServerUser.PinHash), nameof(ServerUser.PinProtectionEnabled), nameof(ServerUser.AccessMode),
-                    nameof(ServerUser.AccessRevision) }.Any(name => entry.Property(name).IsModified))
+                    nameof(ServerUser.AccessRevision), nameof(ServerUser.DisplayName), nameof(ServerUser.PictureRevision),
+                    nameof(ServerUser.AgeLimit) }.Any(name => entry.Property(name).IsModified))
                 entry.Entity.ProfileRevision = entry.State == EntityState.Added ? 1 : checked(entry.Entity.ProfileRevision + 1);
         }
         foreach (var entry in ChangeTracker.Entries<MediaMetadata>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
@@ -150,8 +166,10 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         // Root-only and deleted-media changes cannot be checked through a surviving
         // media row. Target resets to the users who had access before the commit;
         // do not broadcast hidden libraries or collection names/counts globally.
+        // The recipients are every profile with access, not only those the saving
+        // profile's own access boundary shows, so these lookups ignore the query filters.
         if (affectedLibraries.Count > 0)
-            foreach (var userId in Users.Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+            foreach (var userId in Users.IgnoreQueryFilters().Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
                 || user.LibraryGrants.Any(grant => affectedLibraries.Contains(grant.LibraryRootId))
                 || UserTitleGrants.Any(grant => grant.UserId == user.Id && affectedLibraries.Contains(grant.MediaItem.LibraryRootId)))
                 .Select(user => user.Id).ToList())
@@ -160,7 +178,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
                 changes.Add((SyncChangeArea.Catalog, userId, null));
             }
         if (changedCollections.Count > 0)
-            foreach (var userId in Users.Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
+            foreach (var userId in Users.IgnoreQueryFilters().Where(user => user.AccessMode == ProfileAccessMode.EntireLibrary
                 || user.LibraryGrants.Any(grant => MediaCollectionMembers.IgnoreQueryFilters().Any(member => changedCollections.Contains(member.CollectionId)
                     && member.MediaItem.LibraryRootId == grant.LibraryRootId))
                 || UserTitleGrants.Any(grant => grant.UserId == user.Id && MediaCollectionMembers.IgnoreQueryFilters().Any(member =>
@@ -195,6 +213,19 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasOne(grant => grant.MediaItem).WithMany().HasForeignKey(grant => grant.MediaItemId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<UserTitleGrant>().HasQueryFilter(grant => AccessUserId == null || AccessIsOwner || grant.UserId == AccessUserId);
+        modelBuilder.Entity<UserTitleRule>(entity =>
+        {
+            entity.HasKey(rule => new { rule.UserId, rule.MediaItemId });
+            entity.HasOne(rule => rule.User).WithMany().HasForeignKey(rule => rule.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(rule => rule.MediaItem).WithMany().HasForeignKey(rule => rule.MediaItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<UserTitleRule>().HasQueryFilter(rule => AccessUserId == null || AccessIsOwner || rule.UserId == AccessUserId);
+        modelBuilder.Entity<ProfilePhoto>(entity =>
+        {
+            entity.HasKey(photo => photo.UserId);
+            entity.HasOne(photo => photo.User).WithOne().HasForeignKey<ProfilePhoto>(photo => photo.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(photo => photo.Jpeg).IsRequired();
+        });
         modelBuilder.Entity<LibraryImportAssignment>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
             || LibraryRoots.Any(root => root.Id == item.LibraryRootId));
         modelBuilder.Entity<LibraryImportPreview>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
@@ -244,7 +275,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(item => item.State).HasMaxLength(32);
             entity.Property(item => item.Error).HasMaxLength(512);
         });
-        modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessWholeCatalog
+        modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessAllLibraries
             || (AccessMode == ProfileAccessMode.LegacyLibraries && UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == library.Id))
             || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId && grant.MediaItem.LibraryRootId == library.Id)));
         modelBuilder.Entity<MediaItem>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
@@ -252,7 +283,16 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId
                 && (grant.MediaItemId == item.Id || grant.MediaItemId == item.ParentId
                     || MediaItems.IgnoreQueryFilters().Any(parent => parent.Id == item.ParentId
-                        && (parent.ParentId == grant.MediaItemId || MediaItems.IgnoreQueryFilters().Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId)))))));
+                        && (parent.ParentId == grant.MediaItemId || MediaItems.IgnoreQueryFilters().Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId))))))
+            // A children's profile: its film or series (episodes and seasons follow it) is allowed anyway, or not
+            // hidden and rated for the profile's age. Titles without a rating stay hidden.
+            || (AccessAgeLimited && MediaItems.IgnoreQueryFilters().Any(top => top.ParentId == null
+                && (top.Id == item.Id || top.Id == item.ParentId
+                    || MediaItems.IgnoreQueryFilters().Any(parent => parent.Id == item.ParentId && parent.ParentId == top.Id))
+                && (UserTitleRules.Any(rule => rule.UserId == AccessUserId && rule.MediaItemId == top.Id && rule.Allowed)
+                    || (!UserTitleRules.Any(rule => rule.UserId == AccessUserId && rule.MediaItemId == top.Id && !rule.Allowed)
+                        && MediaMetadata.IgnoreQueryFilters().Any(metadata => metadata.MediaItemId == top.Id
+                            && AccessAllowedRatings.Contains(metadata.ManualContentRating ?? metadata.ProviderContentRating)))))));
         modelBuilder.Entity<LibraryScan>().HasQueryFilter(scan => AccessUserId == null || AccessWholeCatalog
             || LibraryRoots.Any(root => root.Id == scan.LibraryRootId));
         modelBuilder.Entity<LibraryDiscovery>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
@@ -319,6 +359,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(user => user.ProfileRevision).IsConcurrencyToken();
             entity.Property(user => user.AccessMode).HasConversion<string>().HasMaxLength(32);
             entity.Property(user => user.AccessRevision).IsConcurrencyToken();
+            entity.Property(user => user.DisplayName).HasMaxLength(64);
+            entity.Property(user => user.PictureKey).HasMaxLength(64);
             entity.Property(user => user.Role).HasConversion<string>().HasMaxLength(16);
             entity.Property(user => user.CreatedAt).HasConversion(dateTimeOffsetConverter);
             entity.HasIndex(user => user.NormalizedUsername).IsUnique();

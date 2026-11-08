@@ -50,7 +50,11 @@ public sealed record UserSummary(
     ProfileAccessMode AccessMode = ProfileAccessMode.LegacyLibraries,
     bool PinProtectionEnabled = true,
     bool NeedsPinSetup = false,
-    long ProfileRevision = 0);
+    long ProfileRevision = 0,
+    string? DisplayName = null,
+    string? PictureKey = null,
+    long PictureRevision = 0,
+    int? AgeLimit = null);
 
 public sealed record CreateUserRequest(
     string Username,
@@ -60,7 +64,10 @@ public sealed record CreateUserRequest(
     bool? PinProtectionEnabled = null,
     ProfileAccessMode? AccessMode = null,
     IReadOnlyList<Guid>? TitleIds = null,
-    bool IsEnabled = true);
+    bool IsEnabled = true,
+    string? DisplayName = null,
+    string? PictureKey = null,
+    int? AgeLimit = null);
 
 public sealed record ChangeUserRoleRequest(UserRole Role);
 

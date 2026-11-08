@@ -226,10 +226,31 @@ public sealed class MetadataService(
         metadata.ProviderUpdatedAt = DateTimeOffset.UtcNow;
         metadata.UpdatedAt = DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
+        var credits = ReplaceCredits(item, metadata, provider.Credits);
+        await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken, canApply);
+        await artworkStore.StoreAsync(database, item.Id, item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, provider.BackdropPath, cancellationToken, canApply);
+        await StoreProfilesAsync(item.Id, credits, canApply, cancellationToken);
+        if (canApply is not null && !await canApply(cancellationToken)) return;
+        metadata.ProviderCreditsJson = JsonSerializer.Serialize(credits.Select(credit => MediaEditorService.Credit(item, credit)), MediaEditorService.Json);
+        var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
+        if (review is not null) review.State = MetadataReviewState.Matched;
+        if (provider.Collection is not null && item.Kind == MediaKind.Movie)
+            await UpsertCollectionAsync(item, "tmdb", provider.Collection.ProviderId, provider.Collection.Name, cancellationToken);
+        await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
+        await database.SaveChangesAsync(cancellationToken);
+        original.Metadata = metadata;
+    }
+
+    // Pictures of the first people only: everyone's picture for every title would fill the
+    // artwork limit; the others show their initials.
+    private const int ProfilePictures = 20;
+
+    /// <summary>Replaces a title's provider credits unless someone edited them by hand.</summary>
+    private List<MediaCredit> ReplaceCredits(MediaItem item, MediaMetadata metadata, IReadOnlyList<TmdbCredit> providerCredits)
+    {
         var manualCredits = MetadataPresentation.ManualFields(metadata).Contains("credits");
         if (!manualCredits) { database.MediaCredits.RemoveRange(metadata.Credits); metadata.Credits.Clear(); }
-        var deduplicatedCredits = MetadataCreditDeduplicator.Deduplicate(provider.Credits);
-        var credits = deduplicatedCredits.Select(credit => new MediaCredit
+        var credits = MetadataCreditDeduplicator.Deduplicate(providerCredits).Select(credit => new MediaCredit
         {
             Id = Guid.NewGuid(),
             MediaItemId = item.Id,
@@ -242,18 +263,40 @@ public sealed class MetadataService(
             ProfilePath = credit.ProfilePath,
         }).ToList();
         if (!manualCredits) database.MediaCredits.AddRange(credits);
-        await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Poster, provider.PosterPath, cancellationToken, canApply);
-        await artworkStore.StoreAsync(database, item.Id, item.Kind == MediaKind.Episode ? ArtworkKind.Still : ArtworkKind.Backdrop, provider.BackdropPath, cancellationToken, canApply);
-        foreach (var profilePath in deduplicatedCredits.Select(credit => credit.ProfilePath).Where(path => path is not null).Distinct().Take(20))
-            await artworkStore.StoreAsync(database, item.Id, ArtworkKind.Profile, profilePath, cancellationToken, canApply);
-        if (canApply is not null && !await canApply(cancellationToken)) return;
+        return credits;
+    }
+
+    private async Task StoreProfilesAsync(Guid itemId, IEnumerable<MediaCredit> credits, Func<CancellationToken, Task<bool>>? canApply, CancellationToken cancellationToken)
+    {
+        foreach (var profilePath in credits.Select(credit => credit.ProfilePath).Where(path => path is not null).Distinct().Take(ProfilePictures))
+            await artworkStore.StoreAsync(database, itemId, ArtworkKind.Profile, profilePath, cancellationToken, canApply);
+    }
+
+    /// <summary>
+    /// Gives an already matched title the full cast and crew from its provider again and places it in
+    /// its shared universes; its match, texts, artwork and hand edits stay. False when the title is
+    /// gone or its credits were edited.
+    /// </summary>
+    internal async Task<bool> RefreshCreditsAsync(Guid itemId, TmdbMetadata provider, CancellationToken cancellationToken)
+    {
+        using var lease = await mutations.EnterAsync(cancellationToken);
+        var item = await database.MediaItems.Include(media => media.Metadata)!.ThenInclude(meta => meta!.Credits)
+            .Include(media => media.Metadata)!.ThenInclude(meta => meta!.Artwork)
+            .AsSplitQuery()
+            .SingleOrDefaultAsync(media => media.Id == itemId, cancellationToken);
+        if (item?.Metadata is not { } metadata) return false;
+        await JoinUniversesAsync(item, provider.Keywords, cancellationToken);
+        if (MetadataPresentation.ManualFields(metadata).Contains("credits"))
+        {
+            await database.SaveChangesAsync(cancellationToken);
+            return false;
+        }
+        var credits = ReplaceCredits(item, metadata, provider.Credits);
+        try { await StoreProfilesAsync(item.Id, credits, null, cancellationToken); }
+        catch (MetadataException exception) when (exception.Code == "artwork_limit_reached") { }
         metadata.ProviderCreditsJson = JsonSerializer.Serialize(credits.Select(credit => MediaEditorService.Credit(item, credit)), MediaEditorService.Json);
-        var review = await database.MetadataReviews.SingleOrDefaultAsync(value => value.MediaItemId == item.Id, cancellationToken);
-        if (review is not null) review.State = MetadataReviewState.Matched;
-        if (provider.Collection is not null && item.Kind == MediaKind.Movie)
-            await UpsertCollectionAsync(item, provider.Collection, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
-        original.Metadata = metadata;
+        return true;
     }
 
     internal async Task ApplyEpisodesAsync(MediaItem series, TmdbMetadata provider, MetadataProviderConfiguration configuration, CancellationToken cancellationToken, Func<CancellationToken, Task<bool>>? canApply = null)
@@ -301,16 +344,24 @@ public sealed class MetadataService(
         }
     }
 
-    private async Task UpsertCollectionAsync(MediaItem item, TmdbCollectionInfo provider, CancellationToken cancellationToken)
+    private async Task JoinUniversesAsync(MediaItem item, IReadOnlyList<string>? keywords, CancellationToken cancellationToken)
     {
-        var collection = await database.MediaCollections.Include(value => value.Members).SingleOrDefaultAsync(
-            value => value.Provider == "tmdb" && value.ProviderCollectionId == provider.ProviderId, cancellationToken);
+        if (item.Kind is not (MediaKind.Movie or MediaKind.Series)) return;
+        foreach (var (key, name) in MediaUniverses.Find(keywords))
+            await UpsertCollectionAsync(item, MediaUniverses.Provider, key, name, cancellationToken);
+    }
+
+    private async Task UpsertCollectionAsync(MediaItem item, string providerName, string providerId, string name, CancellationToken cancellationToken)
+    {
+        var collection = database.MediaCollections.Local.FirstOrDefault(value => value.Provider == providerName && value.ProviderCollectionId == providerId)
+            ?? await database.MediaCollections.Include(value => value.Members).SingleOrDefaultAsync(
+                value => value.Provider == providerName && value.ProviderCollectionId == providerId, cancellationToken);
         if (collection is null)
         {
-            collection = new MediaCollectionRecord { Id = Guid.NewGuid(), Name = provider.Name, Provider = "tmdb", ProviderCollectionId = provider.ProviderId, CreatedAt = DateTimeOffset.UtcNow };
+            collection = new MediaCollectionRecord { Id = Guid.NewGuid(), Name = name, Provider = providerName, ProviderCollectionId = providerId, CreatedAt = DateTimeOffset.UtcNow };
             database.MediaCollections.Add(collection);
         }
-        collection.Name = provider.Name;
+        collection.Name = name;
         collection.UpdatedAt = DateTimeOffset.UtcNow;
         if (!collection.Members.Any(member => member.MediaItemId == item.Id))
             collection.Members.Add(new MediaCollectionMember { CollectionId = collection.Id, MediaItemId = item.Id, SortOrder = collection.Members.Count });

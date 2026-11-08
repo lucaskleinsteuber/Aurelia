@@ -178,6 +178,7 @@ public sealed class ProfilePickerModel : ObservableObject
             Selected = null;
             Pin = "";
             session.OpenProfile(opened);
+            session.NotifyUnlocked(profile, enteredPin);
         }
         catch (AureliaApiException failure)
         {

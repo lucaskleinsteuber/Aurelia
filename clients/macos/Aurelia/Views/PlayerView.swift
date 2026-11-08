@@ -151,7 +151,7 @@ struct PlayerView: View {
         fullScreenKeyboard.install(
           on: window,
           isBlocked: {
-            notesPresented || confirmProgressReplacement
+            notesPresented || confirmProgressReplacement || model.isSettingsPresented
               || controlsPolicy.holds.contains("diagnostics-export")
               || controlsPolicy.holds.contains { $0.hasPrefix("menu-") }
           }, onToggle: toggleFullScreen)
@@ -946,6 +946,15 @@ struct PlayerView: View {
   }
 
   private func handleKey(_ event: NSEvent) -> Bool {
+    // Settings opened over the player take the keyboard: Esc closes them (instead of the
+    // player), and every other key belongs to them.
+    if model.isSettingsPresented {
+      if event.keyCode == 53 {
+        model.isSettingsPresented = false
+        return true
+      }
+      return false
+    }
     revealControls()
     guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
       return false
@@ -1283,12 +1292,30 @@ private final class PlayerTrackingView: NSView {
 
   override var acceptsFirstResponder: Bool { true }
 
+  private var reclaimObserver: NSObjectProtocol?
+
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
       self.window?.makeFirstResponder(self)
     }
+    // Settings shown over the player leave their search field's editor behind; the player takes
+    // the keyboard back when they close, so Space, the arrows and F work again at once.
+    if reclaimObserver == nil {
+      reclaimObserver = NotificationCenter.default.addObserver(
+        forName: .aureliaPlayerReclaimKeyboard, object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self, let window = self.window else { return }
+          window.makeFirstResponder(self)
+        }
+      }
+    }
+  }
+
+  isolated deinit {
+    if let reclaimObserver { NotificationCenter.default.removeObserver(reclaimObserver) }
   }
 
   override func updateTrackingAreas() {
@@ -1524,4 +1551,9 @@ private struct PlayerAudioPreferencesModifier: ViewModifier {
       }
       .onChange(of: preferences.preferences.volumeLeveling) { controller.reopenForAudioChange() }
   }
+}
+
+extension Notification.Name {
+  /// Asks the open player to take the keyboard back, for example after Settings over it closed.
+  static let aureliaPlayerReclaimKeyboard = Notification.Name("AureliaPlayerReclaimKeyboard")
 }

@@ -82,21 +82,37 @@ public sealed class JsonFileSettingsStore : ISettingsStore
         {
             return JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? [];
         }
-        catch (Exception exception) when (exception is JsonException or IOException)
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
         {
-            File.Move(path, path + ".damaged", overwrite: true);
+            try { File.Move(path, path + ".damaged", overwrite: true); }
+            catch (Exception move) when (move is IOException or UnauthorizedAccessException) { }
             return [];
         }
     }
 
+    /// <summary>
+    /// A full or read-only disk keeps the value for this session instead of ending the app; the
+    /// next successful write saves everything.
+    /// </summary>
     private void Save()
     {
-        var directory = Path.GetDirectoryName(path)!;
-        PrivateFiles.CreateDirectory(directory);
-        var temporary = path + ".tmp";
-        PrivateFiles.WriteAllText(temporary, values.ToJsonString(SettingsJson.Options));
-        File.Move(temporary, path, overwrite: true);
+        try
+        {
+            var directory = Path.GetDirectoryName(path)!;
+            PrivateFiles.CreateDirectory(directory);
+            var temporary = path + ".tmp";
+            PrivateFiles.WriteAllText(temporary, values.ToJsonString(SettingsJson.Options));
+            File.Move(temporary, path, overwrite: true);
+            LastSaveFailed = false;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            LastSaveFailed = true;
+        }
     }
+
+    /// <summary>True when the last change could not be written to disk.</summary>
+    public bool LastSaveFailed { get; private set; }
 }
 
 internal static class SettingsJson

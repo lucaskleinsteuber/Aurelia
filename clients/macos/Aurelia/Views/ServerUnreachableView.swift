@@ -14,8 +14,11 @@ struct ServerUnreachableView: View {
           .foregroundStyle(.white.opacity(0.86))
         ServerConnectionStatusText(status: status, serverName: serverName)
         ProgressView().controlSize(.small)
-        if case .waking = status {
-          Button("Stop Waiting") { model.stopWaitingForServer() }
+        HStack(spacing: 12) {
+          if case .waking = status {
+            Button("Stop Waiting") { model.stopWaitingForServer() }
+          }
+          WatchOfflineButton()
         }
       } else {
         Image(systemName: model.canWakeCurrentServer ? "moon.zzz.fill" : "wifi.slash")
@@ -54,13 +57,13 @@ struct ServerUnreachableView: View {
               .accessibilityIdentifier("server-retry")
           }
         }
-        // Downloads play without the server.
-        if !model.offlineTitles.isEmpty {
-          VStack(alignment: .leading, spacing: 10) {
-            Text("Watch a Download").font(.headline)
-            ScrollView { OfflineTitleList() }.frame(maxHeight: 260)
+        // Downloads play without the server, in the offline mode.
+        if model.canOfferOfflineMode {
+          VStack(spacing: 8) {
+            WatchOfflineButton()
+            Text("Shows only the titles on this Mac, without the server. Progress goes back to it later.")
+              .font(.caption).foregroundStyle(.secondary)
           }
-          .frame(maxWidth: 620)
           .padding(.top, 12)
           .accessibilityIdentifier("server-unreachable-downloads")
         }

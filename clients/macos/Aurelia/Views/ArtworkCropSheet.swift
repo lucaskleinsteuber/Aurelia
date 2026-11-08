@@ -6,6 +6,9 @@ import SwiftUI
   let image: NSImage
   let ratio: Double
   let roundPreview: Bool
+  let title: String
+  let previewAccessibilityLabel: String
+  let note: String
   let onSave: (ArtworkCrop) -> Void
   @State private var geometry: ArtworkCropGeometry
   @State private var displayedImage: NSImage
@@ -19,11 +22,16 @@ import SwiftUI
 
   init(
     image: NSImage, ratio: Double, roundPreview: Bool, initial: ArtworkCrop?,
+    title: String = "Crop Image", previewAccessibilityLabel: String = "Circular Person Preview",
+    note: String = "Original retained",
     onSave: @escaping (ArtworkCrop) -> Void
   ) {
     self.image = image
     self.ratio = ratio
     self.roundPreview = roundPreview
+    self.title = title
+    self.previewAccessibilityLabel = previewAccessibilityLabel
+    self.note = note
     self.onSave = onSave
     _geometry = State(
       initialValue: ArtworkCropGeometry(size: image.size, ratio: ratio, initial: initial))
@@ -33,7 +41,7 @@ import SwiftUI
   var body: some View {
     VStack(spacing: 0) {
       HStack {
-        Text("Crop Image").font(.title2.bold())
+        Text(title).font(.title2.bold())
         Spacer()
         Text(roundPreview ? "1:1" : ratio < 1 ? "2:3" : "16:9")
           .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
@@ -56,7 +64,7 @@ import SwiftUI
             )
             .resizable().scaledToFill().frame(width: 96, height: 96)
             .clipShape(Circle()).overlay { Circle().stroke(AureliaDesign.hairline) }
-            .accessibilityLabel("Circular Person Preview")
+            .accessibilityLabel(previewAccessibilityLabel)
           }.frame(width: 104)
         }
       }.padding(20)
@@ -99,7 +107,7 @@ import SwiftUI
         .disabled(history.redo.isEmpty).accessibilityLabel("Redo Crop")
         .accessibilityIdentifier("crop-redo").keyboardShortcut("z", modifiers: [.command, .shift])
         Spacer()
-        Text("Original retained").font(.caption).foregroundStyle(.secondary)
+        Text(note).font(.caption).foregroundStyle(.secondary)
         Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
           .accessibilityIdentifier("crop-cancel")
         Button("Use Crop") { onSave(geometry.crop) }

@@ -76,15 +76,15 @@ struct IOSLibraryLogicTests {
 
   @Test func invalidYearRangeAndUnsupportedKindsNeverSendRequests() throws {
     var query = IOSBrowseQuery(kind: .episode)
-    #expect(throws: IOSCoreError.invalidResponse) { try query.queryItems(search: "") }
+    #expect(throws: IOSCoreError.invalidRequest) { try query.queryItems(search: "") }
     query.kind = nil
     query.yearFrom = 2026
     query.yearTo = 2000
-    #expect(throws: IOSCoreError.invalidResponse) { try query.queryItems(search: "") }
+    #expect(throws: IOSCoreError.invalidRequest) { try query.queryItems(search: "") }
     query.yearFrom = -1
     query.yearTo = nil
-    #expect(throws: IOSCoreError.invalidResponse) { try query.queryItems(search: "") }
-    #expect(throws: IOSCoreError.invalidResponse) {
+    #expect(throws: IOSCoreError.invalidRequest) { try query.queryItems(search: "") }
+    #expect(throws: IOSCoreError.invalidRequest) {
       try IOSBrowseQuery().queryItems(search: String(repeating: "a", count: 201))
     }
   }

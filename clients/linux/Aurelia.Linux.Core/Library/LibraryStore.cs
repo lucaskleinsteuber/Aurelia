@@ -89,6 +89,16 @@ public sealed partial class LibraryStore(LibraryClient client, ArtworkCache artw
             var catalogTask = Client.BrowseAsync(new BrowseQuery(), null, CancellationToken.None);
             var collectionsTask = Client.CollectionsAsync(CancellationToken.None);
             var watchlistTask = Client.SupportsWatchlist ? Client.WatchlistAsync(CancellationToken.None) : Task.FromResult<WatchlistResponse?>(null)!;
+            // The first Home is shown as soon as it arrives; the whole catalog and every collection
+            // of a large library take longer and fill in the rows after it.
+            if (home is null)
+            {
+                var first = await homeTask;
+                if (request != homeRequest) return;
+                Home = first;
+                Error = null;
+                NotifyChanged();
+            }
             await Task.WhenAll(homeTask, catalogTask, collectionsTask, watchlistTask);
             if (request != homeRequest) return;
             Home = homeTask.Result;

@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
 using Aurelia.Server.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -266,6 +268,63 @@ public sealed class ServerAccessFoundationTests
         tooLarge.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
         using var oversized = await client.SendAsync(tooLarge);
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversized.StatusCode);
+        Assert.Equal("request_too_large", (await oversized.Content.ReadFromJsonAsync<ApiProblem>())?.Code);
+    }
+
+    [Fact]
+    public async Task ADeviceOutsideTheAllowedNetworksLearnsWhyItWasRejected()
+    {
+        using var factory = new AureliaServerFactory(configureServices: services =>
+            services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, PublicAddressFilter>());
+        using var client = factory.CreateClient();
+        using var response = await client.GetAsync("/api/v1/server/info");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        // Not an empty answer that a device could take for an outage or a missing permission.
+        Assert.Equal("network_not_allowed", (await response.Content.ReadFromJsonAsync<ApiProblem>())?.Code);
+    }
+
+    [Fact]
+    public async Task AnUploadThatEndsEarlyIsNotReportedAsAStorageFailure()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var context = await factory.Server.SendAsync(request =>
+        {
+            request.Request.Method = HttpMethods.Put;
+            request.Request.Path = $"/api/v1/server/backups/uploads/{Guid.NewGuid()}";
+            request.Request.Headers.Authorization = $"Bearer {owner.Token}";
+            request.Request.ContentLength = 4096;
+            request.Request.Body = new EndsEarlyStream();
+        });
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        var problem = await System.Text.Json.JsonSerializer.DeserializeAsync<ApiProblem>(context.Response.Body, ApiTestClient.JsonOptions);
+        Assert.Equal("request_incomplete", problem?.Code);
+        var diagnostics = factory.Services.GetRequiredService<ServerDiagnosticsStore>();
+        await diagnostics.FlushAsync(CancellationToken.None);
+        Assert.DoesNotContain(diagnostics.Read(), entry => entry.Code == "server_storage_operation_failed");
+    }
+
+    /// <summary>A request body whose connection ends before its announced length, as Kestrel reports it.</summary>
+    private sealed class EndsEarlyStream : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            throw new BadHttpRequestException("Unexpected end of request content.", StatusCodes.Status400BadRequest);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            throw new BadHttpRequestException("Unexpected end of request content.", StatusCodes.Status400BadRequest);
+    }
+
+    private sealed class PublicAddressFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, following) =>
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Parse("2001:db8::20");
+                return following(context);
+            });
+            next(app);
+        };
     }
 
     [Fact]

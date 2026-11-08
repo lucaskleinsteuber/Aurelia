@@ -31,6 +31,25 @@ internal static class SettingsRows
         return new StackPanel { Spacing = 8, Children = { new Border { Classes = { "card" }, Padding = new Thickness(0, 4, 0, 6), Child = card } } };
     }
 
+    /// <summary>
+    /// Text and buttons of one section as a single padded block, so they line up with the
+    /// section's title instead of touching the card's edge with a line between each of them.
+    /// </summary>
+    public static StackPanel Padded(params Control[] children)
+    {
+        var panel = new StackPanel { Spacing = 10, Margin = new Thickness(16, 6, 16, 10) };
+        foreach (var child in children) panel.Children.Add(child);
+        return panel;
+    }
+
+    /// <summary>A button inside a settings card: a rounded, lighter capsule that stands out from the card.</summary>
+    public static Button CardButton(string label)
+    {
+        var button = new Button { Content = label, Classes = { "cardAction" }, HorizontalAlignment = HorizontalAlignment.Left };
+        AutomationProperties.SetName(button, label);
+        return button;
+    }
+
     /// <summary>A symbol for a section, where one fits; others show their title alone.</summary>
     internal static string? SectionIcon(string title) => title switch
     {
@@ -52,6 +71,8 @@ internal static class SettingsRows
         "Favorites" => "IconFavorite",
         "Collections" or "Franchises in Library" => "IconCollections",
         "Advanced" => "IconSliders",
+        "What's New in This Version" or "Getting Started" => "IconSparkle",
+        "Source Code" => "IconComputer",
         _ => null,
     };
 
@@ -64,7 +85,9 @@ internal static class SettingsRows
         return new DockPanel
         {
             Margin = new Thickness(16, 10),
-            Children = { control.Also(c => { DockPanel.SetDock(c, Dock.Right); c.Margin = new Thickness(16, 0, 0, 0); }), text },
+            Children = { control.Also(c => { DockPanel.SetDock(c, Dock.Right); // A switch without text still keeps a 12 px gap for it on its right; take it back so the
+                // switch ends where the menus and buttons of the other rows end.
+                c.Margin = new Thickness(16, 0, c is ToggleSwitch ? -12 : 0, 0); }), text },
         };
     }
 
@@ -89,7 +112,7 @@ internal static class SettingsRows
     public static DockPanel Value(string label, string value) =>
         Row(label, null, new TextBlock { Text = value, Classes = { "subdued" }, TextWrapping = TextWrapping.Wrap, MaxWidth = 360, TextAlignment = TextAlignment.Right });
 
-    public static Button Action(string label, Action action, string classes = "chip")
+    public static Button Action(string label, Action action, string classes = "cardAction")
     {
         var button = new Button { Content = label, Classes = { classes } };
         button.Click += (_, _) => action();

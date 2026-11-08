@@ -13,6 +13,85 @@ namespace Aurelia.Server.Tests;
 public sealed class SyncHistoryTests
 {
     [Fact]
+    public async Task ALibraryChangeByAnAdminReachesEveryProfileWithAccess()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var adminId = Guid.NewGuid();
+        var libraryViewerId = Guid.NewGuid();
+        var titleViewerId = Guid.NewGuid();
+        var libraryId = Guid.NewGuid();
+        var mediaId = Guid.NewGuid();
+        await using (var seed = factory.Services.CreateAsyncScope())
+        {
+            var database = seed.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var root = Path.Combine(factory.DataDirectory, "Invented Sync Library");
+            var library = new LibraryRoot
+            {
+                Id = libraryId,
+                Name = "Invented",
+                Path = root,
+                NormalizedPath = MediaPath.Normalize(root),
+                Kind = LibraryKind.Movies,
+                Availability = LibraryAvailability.Available,
+                CreatedAt = now,
+            };
+            var path = Path.Combine(root, "Invented Film.mkv");
+            database.MediaItems.Add(new MediaItem
+            {
+                Id = mediaId,
+                LibraryRoot = library,
+                LibraryRootId = libraryId,
+                Kind = MediaKind.Movie,
+                SourcePath = path,
+                NormalizedSourcePath = MediaPath.Normalize(path),
+                DetectedTitle = "Invented Film",
+                Category = string.Empty,
+                Extension = ".mkv",
+                FileSize = 1,
+                FileModifiedAt = now,
+                Availability = MediaAvailability.Available,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            foreach (var (id, role, mode) in new[] { (adminId, UserRole.Admin, ProfileAccessMode.LegacyLibraries),
+                         (libraryViewerId, UserRole.User, ProfileAccessMode.LegacyLibraries), (titleViewerId, UserRole.User, ProfileAccessMode.SelectedTitles) })
+                database.Users.Add(new ServerUser
+                {
+                    Id = id,
+                    Username = $"invented {id:N}",
+                    NormalizedUsername = $"INVENTED {id:N}",
+                    Role = role,
+                    PasswordHash = "synthetic",
+                    AccessMode = mode,
+                    CreatedAt = now
+                });
+            database.UserLibraryGrants.Add(new UserLibraryGrant { UserId = adminId, LibraryRootId = libraryId });
+            database.UserLibraryGrants.Add(new UserLibraryGrant { UserId = libraryViewerId, LibraryRootId = libraryId });
+            database.UserTitleGrants.Add(new UserTitleGrant { UserId = titleViewerId, MediaItemId = mediaId, MediaItem = null! });
+            await database.SaveChangesAsync();
+        }
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            // The change is saved with the admin's own access boundary, as during its request.
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            database.AccessUserId = adminId;
+            database.AccessMode = ProfileAccessMode.LegacyLibraries;
+            var library = await database.LibraryRoots.SingleAsync(root => root.Id == libraryId);
+            library.Name = "Invented Renamed";
+            await database.SaveChangesAsync();
+        }
+
+        await using var check = factory.Services.CreateAsyncScope();
+        var changes = await check.ServiceProvider.GetRequiredService<AureliaDbContext>().SyncChanges.IgnoreQueryFilters()
+            .Where(change => change.Area == SyncChangeArea.Libraries).Select(change => change.UserId).ToListAsync();
+        Assert.Contains(libraryViewerId, changes);
+        Assert.Contains(titleViewerId, changes);
+    }
+
+    [Fact]
     public async Task RoleChangeInvalidatesTheAffectedUsersCatalogAndConditionalHome()
     {
         using var factory = new AureliaServerFactory();

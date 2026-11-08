@@ -1,6 +1,8 @@
 import AppKit
+import Combine
 import Foundation
 import OSLog
+import ServiceManagement
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -33,6 +35,9 @@ final class AppModel: ObservableObject {
     }
   }
   @Published private(set) var inspectedServer: InspectedServer?
+  /// The setup assistant: introduction, guided setup and the library tour.
+  let setupGuide: SetupGuide
+  private var setupGuideObservation: AnyCancellable?
   @Published private(set) var deviceConnection: StoredServerProfile?
   @Published private(set) var watchingProfiles: [WatchingProfile] = []
   @Published private(set) var managementSetupRequired = false
@@ -169,6 +174,13 @@ final class AppModel: ObservableObject {
   @Published var isKeyboardShortcutsPresented = false
   /// Settings show inside the window, over the library, rather than in a window of their own.
   @Published var isSettingsPresented = false
+  /// The settings page to show when Settings opens next (Settings clears it).
+  @Published var requestedSettingsCategory: SettingsCategory?
+
+  func openSettings(_ category: SettingsCategory) {
+    requestedSettingsCategory = category
+    isSettingsPresented = true
+  }
   @Published var importPreviewLibrary: LibrarySummary?
 
   let artworkLoader = ArtworkLoader()
@@ -192,6 +204,13 @@ final class AppModel: ObservableObject {
   private var detailPreparations: [UUID: Task<Void, Never>] = [:]
   private static let preparedDetailLifetime: TimeInterval = 30
   private var hasStarted = false
+  /// The offline mode: downloads only, without the server; see `openOfflineMode`.
+  @Published private(set) var offlineMode: OfflineModeState?
+  /// Wrong offline PINs in a row, and until when the next try must wait.
+  private var offlinePINFailures = 0
+  @Published private(set) var offlinePINLockedUntil: Date?
+  lazy var offlineProfileStore: any OfflineProfileStoring =
+    Self.isTestProcess ? MemoryOfflineProfileStore() : KeychainOfflineProfileStore()
   private var hostPollTask: Task<Void, Never>?
   private var homeRefreshTask: Task<Void, Never>?
   private var scanPollTask: Task<Void, Never>?
@@ -389,9 +408,96 @@ final class AppModel: ObservableObject {
     self.libraryStateClientFactory = libraryStateClientFactory
     self.profile = initialProfile
     self.libraryCapabilities = initialLibraryCapabilities
-    self.operatingMode = UserDefaults.standard.string(forKey: Self.operatingModeKey)
+    let savedMode = UserDefaults.standard.string(forKey: Self.operatingModeKey)
       .flatMap(OperatingMode.init(rawValue:))
+    self.operatingMode = savedMode
+    // Tests and UI fixtures never write the app's own preferences and start past the assistant,
+    // except the fixture that shows it.
+    let assistantFixture = Self.uiTestMode == "assistant"
+    self.setupGuide = SetupGuide(
+      defaults: Self.isTestProcess
+        ? (UserDefaults(suiteName: "AureliaTestSetupGuide") ?? .standard) : .standard,
+      alreadySetUp: savedMode != nil || (Self.isTestProcess && !assistantFixture))
+    if assistantFixture { setupGuide.resetForFixture() }
     Self.active = self
+    // The root view follows the assistant through the model.
+    setupGuideObservation = setupGuide.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
+    ProfilePhotoCache.shared.loader = { [weak self] id, revision in
+      guard let self, let connection = self.photoConnection else {
+        throw APIClientError.invalidResponse
+      }
+      return try await APIClient(profile: connection).profilePhoto(id: id, revision: revision)
+    }
+  }
+
+  /// Profile photos are read with the paired device's credential, so the picker shows them before
+  /// a profile is unlocked.
+  private var photoConnection: StoredServerProfile? {
+    if let deviceConnection { return deviceConnection }
+    if let profile, !profile.isViewingSession { return profile }
+    return nil
+  }
+
+  /// Aurelia Test's Reset App Data: stops and unregisters its own server host, erases the test edition's
+  /// Keychain entry, preferences and files (its own container and App Group), then opens it again from the
+  /// beginning. Only the test edition can do this; the real app, its data and media are never touched.
+  func resetTestEditionData() async {
+    guard AppEdition.isTest, Bundle.main.bundleIdentifier == AppEdition.bundleIdentifier else { return }
+    await PlaybackShutdownCoordinator.shared.shutdown()
+    hostPollTask?.cancel()
+    hostPollTask = nil
+    await serverHost.stop()
+    for startAtLogin in [false, true] {
+      try? await SMAppService.agent(plistName: AppEdition.agentName(startAtLogin: startAtLogin) + ".plist")
+        .unregister()
+    }
+    try? store.delete()
+    UserDefaults.standard.removePersistentDomain(forName: AppEdition.bundleIdentifier)
+    UserDefaults.standard.synchronize()
+    let files = FileManager.default
+    var folders = [
+      files.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+      files.urls(for: .cachesDirectory, in: .userDomainMask).first,
+    ]
+    folders.append(files.containerURL(forSecurityApplicationGroupIdentifier: AppEdition.appGroup))
+    for folder in folders.compactMap({ $0 }) {
+      // Only folders inside this test app's own sandbox container or App Group.
+      guard folder.path.contains(AppEdition.bundleIdentifier) || folder.path.contains(AppEdition.appGroup),
+        let items = try? files.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+      else { continue }
+      for item in items { try? files.removeItem(at: item) }
+    }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.createsNewApplicationInstance = true
+    let bundle = Bundle.main.bundleURL
+    Task.detached {
+      try? await Task.sleep(for: .milliseconds(600))
+      _ = try? await NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+    }
+    NSApplication.shared.terminate(nil)
+  }
+
+  /// A profile was renamed or got a new picture: the signed-in profile and the picker show it.
+  func updateProfileUser(_ user: UserSummary) {
+    if let profile, profile.user?.id == user.id {
+      self.profile = profile.changingUser(user)
+    }
+    if let index = watchingProfiles.firstIndex(where: { $0.id == user.id }) {
+      let old = watchingProfiles[index]
+      watchingProfiles[index] = WatchingProfile(
+        id: old.id, name: user.shownName, role: user.role, needsPinSetup: old.needsPinSetup,
+        pinProtectionEnabled: old.pinProtectionEnabled, pictureKey: user.pictureKey,
+        pictureRevision: user.pictureRevision, ageLimit: user.ageLimit)
+    }
+  }
+
+  var supportsProfilePersonalization: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.profilePersonalization)
+  }
+  var supportsAgeLimits: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.ageLimits)
   }
 
   func start() async {
@@ -521,7 +627,7 @@ final class AppModel: ObservableObject {
         isStarting = false
         return
       }
-      if Self.uiTestMode == "welcome" {
+      if Self.uiTestMode == "welcome" || Self.uiTestMode == "assistant" {
         operatingMode = nil
         isStarting = false
         return
@@ -639,6 +745,7 @@ final class AppModel: ObservableObject {
       } else if let profile {
         await wakeServerIfAsleep(profile)
         try await refreshSettlingAfterWake()
+        syncOfflineProgress()
         startSync()
       }
     } catch {
@@ -674,7 +781,7 @@ final class AppModel: ObservableObject {
   }
 
   func shouldRest() -> Bool {
-    !isResting && !isLeavingRest && !isStarting
+    !isResting && !isLeavingRest && !isStarting && offlineMode == nil
       && AureliaRest.shouldRest(
         enabled: AureliaRest.isEnabled(), minutes: AureliaRest.minutes(),
         secondsWithoutInput: secondsWithoutUse(), playing: playerIsPlaying,
@@ -731,7 +838,7 @@ final class AppModel: ObservableObject {
     let generation = connectionGeneration
     do {
       try await refresh(requireCompleteSnapshot: true)
-    } catch where failedWhileServerSettles(error) {
+    } catch  where failedWhileServerSettles(error) {
       for attempt in 1...3 {
         try await Task.sleep(for: .seconds(2))
         guard isCurrent(generation) else { throw CancellationError() }
@@ -739,7 +846,7 @@ final class AppModel: ObservableObject {
         do {
           try await refresh(requireCompleteSnapshot: true)
           return
-        } catch where attempt < 3 && failedWhileServerSettles(error) {}
+        } catch  where attempt < 3 && failedWhileServerSettles(error) {}
       }
     }
   }
@@ -754,6 +861,7 @@ final class AppModel: ObservableObject {
   /// the server answers, and if it sleeps, waking it with the progress shown, instead of letting
   /// the request run into a timeout. Returns whether the server answers.
   private func ensureServerAwake(_ device: StoredServerProfile) async -> Bool {
+    guard offlineMode == nil else { return false }
     guard operatingMode != .host, connectionStatus == nil, serverWakeTask == nil else {
       return true
     }
@@ -876,6 +984,7 @@ final class AppModel: ObservableObject {
     defer { isWorking = false }
     do {
       try await serverHost.configure(name: serverName, lanPort: lanPort)
+      try await requireOwnLocalServer(accepting: [.setupRequired])
       let authentication = try await APIClient.setupOwner(
         username: username,
         password: password,
@@ -893,12 +1002,26 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// The password travels over plain HTTP on 127.0.0.1, so it is sent only while this app's own
+  /// server host reports its server in the expected state: then that server holds the port, not
+  /// another program that took it while the server was stopped or restarting.
+  private func requireOwnLocalServer(accepting states: Set<NativeHostState>) async throws {
+    for attempt in 0..<20 {
+      let snapshot = try await serverHost.status()
+      if states.contains(snapshot.state) { return }
+      guard OperatingModePolicy.isAwaitingReadiness(snapshot.state), attempt < 19 else { break }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+    throw NativeServerHostError.localServerNotReady
+  }
+
   func loginToLocalServer(username: String, password: String) async -> Bool {
     let generation = connectionGeneration
     isWorking = true
     errorMessage = nil
     defer { isWorking = false }
     do {
+      try await requireOwnLocalServer(accepting: [.running])
       let authentication = try await APIClient.loginLocally(
         username: username,
         password: password,
@@ -2467,6 +2590,8 @@ final class AppModel: ObservableObject {
   func closePlayback() async {
     beginPlaybackIntent()
     playback = nil
+    // The offline mode asks the server nothing.
+    guard offlineMode == nil else { return }
     await refreshHome()
   }
 
@@ -2481,12 +2606,17 @@ final class AppModel: ObservableObject {
         item.parentTitle,
         item.seasonNumber.map { season in "S\(season) E\(item.episodeNumber ?? 0)" },
       ].compactMap { $0 }.joined(separator: " · ") : item.year.map(String.init)
-    OfflineDownloads.shared.download(item, subtitle: subtitle, profile: profile)
+    let series = item.parentId.flatMap { parent in catalogItems.first { $0.id == parent } }
+    OfflineDownloads.shared.download(item, subtitle: subtitle, profile: profile, series: series)
   }
 
   /// Plays a download from this Mac; it works while the server is asleep or out of reach.
   func playOffline(_ title: OfflineTitle) {
-    guard profile != nil else { return }
+    // Only a download of the open profile plays, so no one bypasses another profile's PIN or
+    // age restrictions while the server is unreachable.
+    guard profile != nil,
+      (offlineTitles + offlineModeTitles).contains(where: { $0.id == title.id })
+    else { return }
     beginPlaybackIntent()
     var presentation = PlaybackPresentation(
       mediaId: title.id, title: title.title, subtitle: title.subtitle, startIntent: .resume)
@@ -2494,18 +2624,146 @@ final class AppModel: ObservableObject {
     playback = presentation
   }
 
-  /// Downloads for the open profile, or for the whole server while no profile is open.
+  /// Downloads for the open profile only. While no profile is open nothing is offered: the
+  /// profile picker's PIN and the profile's age restrictions cannot be checked without the server.
   var offlineTitles: [OfflineTitle] {
-    guard let device = deviceConnection ?? profile else { return [] }
-    if let user = profile?.user?.id, profile?.isViewingSession == true || !usesProfileSelection {
-      return OfflineDownloads.shared.titles(serverId: device.serverId, userId: user)
+    Self.visibleOfflineTitles(
+      OfflineDownloads.shared.titles, server: (deviceConnection ?? profile)?.serverId,
+      user: profile?.user?.id,
+      profileOpen: profile?.isViewingSession == true || !usesProfileSelection)
+  }
+
+  nonisolated static func visibleOfflineTitles(
+    _ titles: [OfflineTitle], server: UUID?, user: UUID?, profileOpen: Bool
+  ) -> [OfflineTitle] {
+    guard let server, let user, profileOpen else { return [] }
+    return titles.filter { $0.serverId == server && $0.userId == user }
+      .sorted { $0.downloadedAt > $1.downloadedAt }
+  }
+
+  // MARK: Offline mode
+
+  /// The server this Mac is paired with, whose downloads the offline mode shows.
+  private var offlineServerId: UUID? { (deviceConnection ?? profile)?.serverId }
+
+  /// Whether to offer the offline mode: a remote server and downloads of it on this Mac.
+  var canOfferOfflineMode: Bool {
+    guard operatingMode != .host, offlineMode == nil, let server = offlineServerId else {
+      return false
     }
-    return OfflineDownloads.shared.titles.filter { $0.serverId == device.serverId }
+    return OfflineDownloads.shared.titles.contains { $0.serverId == server }
+  }
+
+  /// The profiles that have downloads on this Mac, with their offline card when they have
+  /// one. A profile without a card has not been opened here since offline mode exists.
+  var offlineProfileChoices: [OfflineProfileChoice] {
+    guard let server = offlineServerId else { return [] }
+    let cards = offlineProfileStore.cards(serverId: server)
+    let owners = Set(OfflineDownloads.shared.titles.filter { $0.serverId == server }.map(\.userId))
+    var choices = cards.filter { owners.contains($0.userId) }.map {
+      OfflineProfileChoice(userId: $0.userId, card: $0)
+    }
+    for owner in owners where !cards.contains(where: { $0.userId == owner }) {
+      choices.append(OfflineProfileChoice(userId: owner, card: nil))
+    }
+    return choices
+  }
+
+  /// The downloads the open offline profile sees.
+  var offlineModeTitles: [OfflineTitle] {
+    guard case .open(let session) = offlineMode else { return [] }
+    return OfflineDownloads.shared.titles(serverId: session.serverId, userId: session.userId)
+  }
+
+  /// Stops looking for the server and shows the downloads on this Mac. A profile that is open
+  /// already keeps going; otherwise its offline card and PIN open it.
+  func openOfflineMode() {
+    guard canOfferOfflineMode, let server = offlineServerId else { return }
+    stopLookingForServer()
+    isSettingsPresented = false
+    if let open = profile, let user = open.user,
+      open.isViewingSession || !usesProfileSelection,
+      OfflineDownloads.shared.titles.contains(where: {
+        $0.serverId == server && $0.userId == user.id
+      })
+    {
+      offlineMode = .open(
+        OfflineSession(
+          serverId: server, userId: user.id, name: user.shownName, pictureKey: user.pictureKey,
+          pictureRevision: user.pictureRevision))
+      return
+    }
+    let choices = offlineProfileChoices
+    if choices.count == 1, let card = choices[0].card, !card.pinProtected {
+      offlineMode = .open(OfflineSession(card: card))
+    } else {
+      offlineMode = .choosingProfile
+    }
+  }
+
+  /// Opens a profile's downloads offline. Returns false for a wrong PIN; after five wrong PINs
+  /// each further try waits, doubling up to five minutes.
+  @discardableResult
+  func openOfflineProfile(_ card: OfflineProfileCard, pin: String) -> Bool {
+    guard offlineMode != nil, card.serverId == offlineServerId else { return false }
+    if let until = offlinePINLockedUntil, until > Date() { return false }
+    guard card.accepts(pin) else {
+      offlinePINFailures += 1
+      if offlinePINFailures >= 5 {
+        let seconds = min(300.0, 30 * pow(2, Double(offlinePINFailures - 5)))
+        offlinePINLockedUntil = Date().addingTimeInterval(seconds)
+      }
+      return false
+    }
+    offlinePINFailures = 0
+    offlinePINLockedUntil = nil
+    offlineMode = .open(OfflineSession(card: card))
+    return true
+  }
+
+  /// Back to the profiles of the offline mode.
+  func chooseOtherOfflineProfile() {
+    guard offlineMode != nil else { return }
+    if playback?.offlineID != nil { dismissPlayback() }
+    offlineMode = .choosingProfile
+  }
+
+  /// Leaves the offline mode and looks for the server again.
+  func leaveOfflineMode() async {
+    guard offlineMode != nil else { return }
+    if playback?.offlineID != nil { dismissPlayback() }
+    offlineMode = nil
+    // Opening Aurelia may still be on its first attempt; it shows its own progress.
+    guard !isStarting else { return }
+    await retryConnection()
+  }
+
+  /// No wake packets, reconnects or retries while the offline mode shows.
+  private func stopLookingForServer() {
+    serverWakeTask?.cancel()
+    reconnectTask?.cancel()
+    reconnectTask = nil
+    reconnectCoordinator.cancel()
+  }
+
+  /// Remembers a profile that opened while the server answered, for the offline mode.
+  private func rememberForOffline(_ choice: WatchingProfile, pin: String, serverId: UUID) {
+    let store = offlineProfileStore
+    // Deriving the PIN check takes a moment; keep it off the main actor.
+    Task.detached(priority: .utility) {
+      guard let card = OfflineProfileCard.make(serverId: serverId, profile: choice, pin: pin)
+      else { return }
+      store.remember(card)
+    }
   }
 
   private func syncOfflineProgress() {
     guard let profile, profile.user != nil, !requiresProfileSelection else { return }
-    Task { await OfflineDownloads.shared.syncProgress(profile: profile) }
+    let catalog = catalogItems
+    Task {
+      await OfflineDownloads.shared.syncProgress(profile: profile)
+      await OfflineDownloads.shared.completeDetails(profile: profile, catalog: catalog)
+    }
   }
 
   // MARK: Artwork ahead of scrolling
@@ -2515,7 +2773,9 @@ final class AppModel: ObservableObject {
   /// Loads the posters of Home and the library in the background, a few at a time, so cards
   /// that scroll into view draw them in their first frame instead of fading them in.
   private func prefetchArtwork() {
-    guard let profile, ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil else { return }
+    guard let profile, ProcessInfo.processInfo.environment["AURELIA_UI_TEST_MODE"] == nil else {
+      return
+    }
     let variants = libraryCapabilities.contains("artwork-variants-v1")
     var seen = Set<UUID>()
     var posters: [ArtworkSummary] = []
@@ -2752,6 +3012,7 @@ final class AppModel: ObservableObject {
       clearPersonalViewState()
       let active = viewingProfile(response, device: device)
       acceptedProfile = active
+      rememberForOffline(choice, pin: pin, serverId: device.serverId)
       profile = active
       profileSelectionError = nil
       errorMessage = nil
@@ -2768,6 +3029,8 @@ final class AppModel: ObservableObject {
       else {
         return false
       }
+      // Progress watched offline goes to the server as soon as its profile is open again.
+      syncOfflineProgress()
       startSync()
       return true
     } catch is CancellationError {
@@ -2999,6 +3262,10 @@ final class AppModel: ObservableObject {
     }
     let current = profile
     let paired = deviceConnection
+    if let server = paired?.serverId ?? current?.serverId {
+      offlineProfileStore.forget(serverId: server)
+    }
+    offlineMode = nil
     let retiredGeneration = connectionGeneration
     inspectionGeneration = UUID()
     profile = nil
@@ -3319,7 +3586,7 @@ final class AppModel: ObservableObject {
 
   private func beginReconnectIfNeeded(after error: Error) {
     guard operatingMode != .host, !hasPendingNetworkConfirmation, !isResting,
-      ServerReconnectPolicy.isConnectivityFailure(error),
+      offlineMode == nil, ServerReconnectPolicy.isConnectivityFailure(error),
       reconnectTask == nil, let current = profile
     else { return }
     let generation = connectionGeneration

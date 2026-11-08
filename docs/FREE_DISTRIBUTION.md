@@ -123,10 +123,10 @@ does not change. The Mac app is skipped while it is open. A notification reports
 refresh or failure; the log is `~/Library/Logs/Aurelia Signing Refresh.log`.
 
 Background jobs may not read `~/Documents`, so the job keeps its own copy of the
-script, the checkout and the Apple TV and iPhone apps in
+script, the checkout and the Apple TV, iPhone and iPad apps in
 `~/Library/Application Support/Aurelia Signing Refresh`. Run
 `--adopt-tv` after installing an Apple TV build, `--adopt-iphone` after installing an
-iPhone build, `--force` to refresh now (`--force iphone` for one app only), and
+iPhone build, `--adopt-ipad` after an iPad build, `--force` to refresh now (`--force iphone` for one app only), and
 `--uninstall` to remove the job. A paid Apple Developer Program membership makes this
 unnecessary with one-year profiles.
 
@@ -145,6 +145,12 @@ To protect GitHub's anonymous rate limit (60 requests per hour per IP), checks s
 GitHub answers with `304 Not Modified`, which consumes minimal quota and completes instantly.
 If GitHub limits requests, try again later. With *Beta updates* on, the app reads the list of
 recent releases instead of the latest one, so it also finds pre-releases.
+
+Every Mac release has one disk image per processor, `Aurelia-<version>-<build>-macOS-arm64.dmg`
+(Apple silicon) and `…-macOS-x64.dmg` (Intel), each with only its own server runtime, VLCKit and
+ffmpeg slice. The updater downloads the image named for the architecture it was built for. The
+updater of version 1.34 asks for `…-macOS-universal.dmg`; the first releases from 2.0.0 on also
+carry the Apple silicon image under that name, because 1.34 ran only on Apple silicon Macs.
 
 The update dialog shows the new version and the disk image's published download size.
 Release notes are available on GitHub. *Later*

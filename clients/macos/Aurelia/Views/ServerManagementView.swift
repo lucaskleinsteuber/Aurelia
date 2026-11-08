@@ -62,7 +62,7 @@ struct ServerManagementView: View {
     }
     .onDisappear { cancelDeletion() }
     .alert(
-      "Delete \(profileToDelete?.user.username ?? "Profile")?",
+      "Delete \(profileToDelete?.user.shownName ?? "Profile")?",
       isPresented: Binding(
         get: { profileToDelete != nil },
         set: { if !$0 { profileToDelete = nil } }),
@@ -72,7 +72,7 @@ struct ServerManagementView: View {
       Button("Delete Profile", role: .destructive) { delete(access) }
     } message: { access in
       Text(
-        "Favorites, playback progress and scene notes for \(access.user.username) will be permanently removed. Active sessions will end. Your media and shared library will stay unchanged."
+        "Favorites, playback progress and scene notes for \(access.user.shownName) will be permanently removed. Active sessions will end. Your media and shared library will stay unchanged."
       )
     }
     .sheet(item: $editingUser) { access in
@@ -159,11 +159,9 @@ struct ServerManagementView: View {
       VStack(alignment: .leading, spacing: 12) {
         ForEach(users) { access in
           HStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.fill")
-              .font(.system(size: 34)).symbolRenderingMode(.hierarchical)
-              .foregroundStyle(.secondary)
+            AureliaProfileAvatar(user: access.user, size: 36)
             VStack(alignment: .leading, spacing: 4) {
-              Text(access.user.username).font(.headline)
+              Text(access.user.shownName).font(.headline)
               Text(
                 "\(access.user.role.rawValue.capitalized) · \(access.isEnabled ? "Enabled" : "Disabled")"
               )
@@ -205,6 +203,7 @@ struct ServerManagementView: View {
   }
 
   private func contentStatus(_ user: UserSummary) -> String {
+    if let child = ProfileAgeSteps.summary(for: user.ageLimit) { return child }
     if user.role == .owner || user.accessMode == .entireLibrary { return "Entire Library" }
     return user.accessMode == .selectedTitles ? "Selected Titles" : "Existing Storage Grants"
   }

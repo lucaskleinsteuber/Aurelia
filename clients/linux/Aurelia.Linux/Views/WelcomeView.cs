@@ -49,7 +49,7 @@ public sealed class WelcomeView : UserControl
                 LastChildFill = true,
                 Children =
                 {
-                    new Border { Classes = { "choiceSymbol" }, Child = ScreenParts.Symbol(symbol, 23, foreground: null) }.Also(b => DockPanel.SetDock(b, Dock.Left)),
+                    new Border { Classes = { "choiceSymbol" }, Child = ScreenParts.Symbol(symbol, 23).Also(icon => icon.ClearValue(PathIcon.ForegroundProperty)) }.Also(b => DockPanel.SetDock(b, Dock.Left)),
                     ScreenParts.Symbol("IconChevronRight", 14, new SolidColorBrush(Color.FromArgb(0x59, 0xFF, 0xFF, 0xFF)))
                         .Also(c => { DockPanel.SetDock(c, Dock.Right); c.VerticalAlignment = VerticalAlignment.Center; }),
                     new StackPanel

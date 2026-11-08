@@ -34,6 +34,13 @@ struct TVCoreTests {
     #expect(pool.lease(host: "tv.local", fingerprint: "aa").session !== first.session)
   }
 
+  @Test func aGenericDeviceNameGetsAStableTag() {
+    let tag = UUID(uuidString: "AB12CD34-0000-4000-8000-000000000001")!
+    #expect(TVDeviceName.display(systemName: "iPhone", model: "iPhone", tag: tag) == "iPhone AB12")
+    #expect(TVDeviceName.display(systemName: "Lucas’s iPad", model: "iPad", tag: tag) == "Lucas’s iPad")
+    #expect(TVDeviceName.display(systemName: "Apple TV", model: "Apple TV", tag: nil) == "Apple TV")
+  }
+
   @Test func onlyASilentServerCountsAsAsleep() {
     #expect(TVServerReachability.isUnreachable(URLError(.cannotConnectToHost)))
     #expect(TVServerReachability.isUnreachable(URLError(.timedOut)))
@@ -105,7 +112,10 @@ struct TVCoreTests {
     #expect(throws: TVCoreError.unsupportedServer) { try older.validate() }
     let future = TVCapabilities(
       formatVersion: 99, minimumClientVersion: "1.5.1", capabilities: capabilities.capabilities)
-    #expect(throws: TVCoreError.unsupportedServer) { try future.validate() }
+    #expect(throws: TVCoreError.outdatedClient) { try future.validate() }
+    let ancient = TVCapabilities(
+      formatVersion: 0, minimumClientVersion: "1.0", capabilities: capabilities.capabilities)
+    #expect(throws: TVCoreError.unsupportedServer) { try ancient.validate() }
   }
 
   @Test func inspectDoesNotSendCredentialsAndChecksCapturedIdentity() async throws {
@@ -120,6 +130,14 @@ struct TVCoreTests {
     ])
     await #expect(throws: TVCoreError.identityMismatch) {
       try await TVAPIClient.inspect(baseURL: Self.baseURL, transport: wrong)
+    }
+    // A server that is closed to the home network says so, not that its identity changed.
+    let closed = TVCoreFakeTransport(responses: [
+      response(infoJSON.replacingOccurrences(
+        of: "\"lanAccessEnabled\":true", with: "\"lanAccessEnabled\":false"))
+    ])
+    await #expect(throws: TVCoreError.lanAccessDisabled) {
+      try await TVAPIClient.inspect(baseURL: Self.baseURL, transport: closed)
     }
   }
 

@@ -10,7 +10,7 @@ import { h, icon, clear } from "./dom.js";
 import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
-  playerSubtitle, rateLabel, playbackStartSeconds, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
+  playerSubtitle, rateLabel, playbackStartSeconds, sessionRefused, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
   timelineValueText, trackForLanguage, volumeValueText,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
@@ -20,6 +20,7 @@ import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtit
 
 const SAVE_INTERVAL = 10_000;
 const RENEW_BEFORE = 5 * 60_000;
+const RENEW_RETRY_MS = 20_000;
 const PREFERENCES_KEY = "aurelia.playback";
 
 export const UNPLAYABLE =
@@ -275,7 +276,18 @@ export class Player {
    * or converts; a codec string the browser refuses after all is left out and planned again.
    */
   async startLive(at) {
-    if (this.live || this.closed) return;
+    // The picture check, the sound check and a video error can each ask for live playback
+    // while the plan is still loading; only the first one starts it.
+    if (this.live || this.liveStarting || this.closed) return;
+    this.liveStarting = true;
+    try {
+      await this.openLive(at);
+    } finally {
+      this.liveStarting = false;
+    }
+  }
+
+  async openLive(at) {
     this.startScreen.hidden = false;
     this.video.removeAttribute("src");
     this.video.load();
@@ -318,7 +330,13 @@ export class Player {
       audio: track?.index ?? null,
       onFailure: (status, code) => this.liveFailed(status, code),
     });
-    await this.live.open(at);
+    try {
+      await this.live.open(at);
+    } catch {
+      // The browser refused the stream after all (for example addSourceBuffer threw).
+      if (!this.closed) this.showNotice(UNPLAYABLE, true);
+      return;
+    }
     if (this.closed) return;
     this.restoreTrackChoices();
     await this.play();
@@ -326,7 +344,7 @@ export class Player {
 
   liveFailed(status, code) {
     if (this.closed) return;
-    if (status === 401) {
+    if (sessionRefused(status, code)) {
       this.close();
       this.onSessionEnded?.(new ApiError(status, code, "The profile session ended."));
       return;
@@ -336,6 +354,7 @@ export class Player {
 
   /** A file the browser opened but cannot show or hear plays live converted from where it is. */
   switchToLive() {
+    if (this.liveStarting && !this.closed) return true;
     if (!this.canConvert || this.live || this.closed) return false;
     const at = Math.max(this.resumeAt, this.video.currentTime || 0);
     this.resumeAt = 0;
@@ -431,6 +450,8 @@ export class Player {
     on(video, "leavepictureinpicture", () => this.updatePictureInPicture());
     on(document, "visibilitychange", () => {
       if (document.visibilityState === "hidden") this.saveNow({ keepalive: true });
+      // The browser releases the screen wake lock while the tab is hidden; take it again.
+      else if (!video.paused && !video.ended) this.keepAwake(true);
     });
     on(window, "pagehide", () => this.saveNow({ keepalive: true }));
     this.every(() => {
@@ -1100,7 +1121,7 @@ export class Player {
   }
 
   fail(error) {
-    if (error instanceof ApiError && error.status === 401) {
+    if (error instanceof ApiError && sessionRefused(error.status, error.code)) {
       this.close();
       this.onSessionEnded?.(error);
       return;
@@ -1120,8 +1141,9 @@ export class Player {
   }
 
   /** Tickets last hours; a very long session gets a fresh one before the old one ends. */
-  scheduleRenewal() {
-    const due = new Date(this.source.expiresAt).getTime() - Date.now() - RENEW_BEFORE;
+  scheduleRenewal(retryIn = null) {
+    const expires = new Date(this.source.expiresAt).getTime();
+    const due = retryIn ?? expires - Date.now() - RENEW_BEFORE;
     if (!Number.isFinite(due)) return;
     this.after(async () => {
       if (this.closed) return;
@@ -1149,7 +1171,13 @@ export class Player {
         this.api.revokePlayback(old.id).catch(() => {});
         this.scheduleRenewal();
       } catch (error) {
-        this.fail(error);
+        if (this.closed) return;
+        // The old ticket still plays for a few minutes: a dropped answer or a busy server is
+        // tried again until shortly before it ends. A refused profile ends the session at once.
+        const left = expires - Date.now();
+        const sessionEnded = error instanceof ApiError && sessionRefused(error.status, error.code);
+        if (!sessionEnded && left > RENEW_RETRY_MS * 2) this.scheduleRenewal(RENEW_RETRY_MS);
+        else this.fail(error);
       }
     }, Math.max(0, due));
   }

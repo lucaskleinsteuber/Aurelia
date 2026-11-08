@@ -3,6 +3,9 @@ import SwiftUI
 struct RootView: View {
   @EnvironmentObject private var model: AppModel
   @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @State private var introductionReplay: UUID?
+
+  private var guide: SetupGuide { model.setupGuide }
 
   var body: some View {
     ZStack {
@@ -13,6 +16,8 @@ struct RootView: View {
           #if DEBUG
             ImportPreviewView.uiTestFixture
           #endif
+        } else if model.offlineMode != nil {
+          OfflineModeView()
         } else if model.isStarting {
           VStack(spacing: 22) {
             Image(systemName: "play.rectangle.on.rectangle.fill")
@@ -23,37 +28,60 @@ struct RootView: View {
               status: model.connectionStatus, serverName: model.profile?.name)
             ProgressView()
               .controlSize(.small)
-            if case .waking = model.connectionStatus {
-              Button("Stop Waiting") { model.stopWaitingForServer() }
-                .accessibilityIdentifier("server-stop-waiting")
+            HStack(spacing: 12) {
+              if case .waking = model.connectionStatus {
+                Button("Stop Waiting") { model.stopWaitingForServer() }
+                  .accessibilityIdentifier("server-stop-waiting")
+              }
+              WatchOfflineButton()
             }
           }
           .accessibilityIdentifier("startup-progress")
         } else if model.operatingMode == nil {
-          OperatingModeView()
+          if guide.introSeen {
+            OperatingModeView()
+          } else {
+            SetupIntroductionView(guide: guide)
+          }
         } else if model.operatingMode == .host && model.profile == nil {
-          NativeHostSetupView()
+          NativeHostSetupView().setupStep(.secure, guide: guide, hosting: true)
         } else if model.isSwitchingProfile {
           ProgressView("Switching Profile…")
             .accessibilityIdentifier("profile-switch-progress")
         } else if model.requiresProfileSelection {
           ProfilePickerView()
+            .setupStep(
+              model.isLocalHost ? .pin : .profile, guide: guide, hosting: model.isLocalHost)
         } else if model.needsInitialLibrarySetup, model.canManageStorage {
-          InitialLibrarySetupView()
+          InitialLibrarySetupView().setupStep(.media, guide: guide, hosting: true)
         } else if model.profile == nil {
-          ConnectionView()
+          ConnectionView().setupStep(.connect, guide: guide, hosting: false)
+        } else if guide.isGuiding {
+          SetupFinishView(
+            guide: guide, offersPeople: SetupFinishView.offersPeople(model: model, guide: guide))
         } else {
           LibraryShellView()
         }
       }
       .accessibilityHidden(model.playback != nil || model.isSettingsPresented)
 
-      if model.isSettingsPresented {
-        AppSettingsView()
+      if let replay = introductionReplay {
+        SetupIntroductionView(guide: guide, replay: true) { introductionReplay = nil }
+          .id(replay)
+          .transition(.opacity)
+          .zIndex(6)
+      }
+
+      if model.isSettingsPresented, model.offlineMode == nil {
+        // Fading and a short slide only: scaling the whole window of text and controls made
+        // macOS redraw every frame and stutter.
+        AppSettingsView(initialCategory: model.requestedSettingsCategory)
           .transition(
-            reduceMotion
-              ? .opacity : .opacity.combined(with: .scale(scale: 0.985, anchor: .center)))
-          .zIndex(5)
+            reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 10))
+          )
+          // Opened while a title plays (⌘, or the menu), Settings cover the player too; Done or
+          // Esc returns to it. Below the player they were invisible until it closed.
+          .zIndex(model.playback == nil ? 5 : 11)
       }
 
       if let profile = model.profile, let playback = model.playback {
@@ -75,6 +103,11 @@ struct RootView: View {
     .aureliaRemoveEmptyWindowToolbar()
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.playback)
     .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.isSettingsPresented)
+    .onChange(of: model.isSettingsPresented) { _, presented in
+      if !presented, model.playback != nil {
+        NotificationCenter.default.post(name: .aureliaPlayerReclaimKeyboard, object: nil)
+      }
+    }
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: model.isResting)
     .preferredColorScheme(.dark)
     // While playing, the window may shrink to a 16:9 picture-in-picture size; a library minimum
@@ -92,6 +125,67 @@ struct RootView: View {
     }
     .sheet(isPresented: $model.isKeyboardShortcutsPresented) {
       KeyboardShortcutsSheet()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .aureliaShowIntroduction)) { _ in
+      model.isSettingsPresented = false
+      introductionReplay = UUID()
+    }
+  }
+}
+
+/// Watch Downloads Offline: offered while Aurelia looks for, wakes or waits for its server, when
+/// this Mac has downloads of it.
+struct WatchOfflineButton: View {
+  @EnvironmentObject private var model: AppModel
+  var prominent = false
+
+  var body: some View {
+    if model.canOfferOfflineMode {
+      if prominent {
+        button.buttonStyle(AureliaPrimaryActionButtonStyle())
+      } else {
+        button.buttonStyle(.bordered)
+      }
+    }
+  }
+
+  private var button: some View {
+    Button {
+      model.openOfflineMode()
+    } label: {
+      Label("Watch Downloads Offline", systemImage: "arrow.down.circle")
+    }
+    .help("Stop looking for the server and show only the titles downloaded to this Mac")
+    .accessibilityIdentifier("open-offline-mode")
+  }
+}
+
+extension Notification.Name {
+  /// Settings › About › Show Introduction.
+  static let aureliaShowIntroduction = Notification.Name("AureliaShowIntroduction")
+}
+
+extension View {
+  /// Puts the guided setup's step bar above a setup screen while the assistant guides.
+  func setupStep(_ step: SetupStep, guide: SetupGuide, hosting: Bool) -> some View {
+    modifier(SetupStepModifier(step: step, guide: guide, hosting: hosting))
+  }
+}
+
+private struct SetupStepModifier: ViewModifier {
+  let step: SetupStep
+  @ObservedObject var guide: SetupGuide
+  let hosting: Bool
+
+  func body(content: Content) -> some View {
+    content.overlay(alignment: .top) {
+      if guide.isGuiding {
+        let steps = guide.steps(hosting: hosting)
+        SetupStepBar(steps: steps, current: step) {
+          guide.skip()
+        }
+        .padding(.top, 14)
+      }
     }
   }
 }

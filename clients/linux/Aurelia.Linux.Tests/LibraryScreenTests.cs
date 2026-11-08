@@ -32,6 +32,70 @@ public sealed class LibraryScreenTests
     }
 
     [AvaloniaFact]
+    public void AFailedFirstLoadOffersTryAgainInsteadOfSpinning()
+    {
+        var server = FakeLibrary.Create().Replace("GET", "/api/v1/home",
+            """{"code":"server_busy","message":"The server is busy."}""", System.Net.HttpStatusCode.ServiceUnavailable);
+        var window = FakeLibrary.ShowLibrary(server);
+        static bool Shows(Control page, string text) => page.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == text);
+        FakeLibrary.Pump(() => window.Shell?.CurrentPage is HomePage page && Shows(page, "Server Unavailable"));
+        var home = Assert.IsType<HomePage>(window.Shell!.CurrentPage);
+        Assert.True(Shows(home, "Server Unavailable"));
+        Assert.Empty(home.GetVisualDescendants().OfType<Aurelia.Linux.Controls.Spinner>());
+
+        server.Replace("GET", "/api/v1/home", System.Text.Json.JsonSerializer.Serialize(
+            new HomeResponse(null, [], [], [], [], DateTimeOffset.UtcNow.AddHours(1)), Aurelia.Linux.Core.Api.AureliaJson.Options));
+        Click(home.GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == "Try Again"));
+        FakeLibrary.Pump(() => window.Session.Library!.Home is not null && !Shows(home, "Server Unavailable"));
+        Assert.NotNull(window.Session.Library!.Home);
+        Assert.False(Shows(home, "Server Unavailable"));
+    }
+
+    [AvaloniaFact]
+    public void ALargeLibraryMakesOnlyTheCardsNearTheViewAndMoreWhileScrolling()
+    {
+        var titles = Enumerable.Range(0, 600).Select(index => new CatalogItemSummary(Guid.NewGuid(), MediaKind.Movie, $"Invented Film {index:D3}", null, 2000,
+            null, ["Drama"], null, null, MediaAvailability.Available, false, null, DateTimeOffset.UtcNow.AddMinutes(-index))).ToArray();
+        var server = FakeLibrary.Create().Replace("GET", "/api/v1/catalog/items", System.Text.Json.JsonSerializer.Serialize(
+            new PagedResponse<CatalogItemSummary>(titles, 0, titles.Length, titles.Length, "r1"), Aurelia.Linux.Core.Api.AureliaJson.Options));
+        var window = FakeLibrary.ShowLibrary(server);
+        window.Shell!.Destination = LibraryDestination.Movies;
+        FakeLibrary.Pump(() => (window.Shell.CurrentPage as BrowsePage)?.Model.Items.Count == 600, rounds: 400);
+        FakeLibrary.Pump(() => false, rounds: 10);
+        var page = Assert.IsType<BrowsePage>(window.Shell.CurrentPage);
+        var grid = page.GetVisualDescendants().OfType<LazyCards>().Single();
+        Assert.Equal(600, grid.Count);
+        Assert.InRange(grid.Children.Count, 4, 60);
+        Assert.Contains(page.GetVisualDescendants().OfType<Button>(), b => AutomationProperties.GetName(b) == "Invented Film 000");
+
+        // Far down the page the cards there are made, in their places.
+        page.GetVisualDescendants().OfType<ScrollViewer>().First().Offset = new Avalonia.Vector(0, 20_000);
+        FakeLibrary.Pump(() => false, rounds: 20);
+        window.UpdateLayout();
+        FakeLibrary.Pump(() => false, rounds: 10);
+        var shown = grid.Children.OfType<Button>().Where(b => b.IsEffectivelyVisible && b.Bounds.Top > 0).ToList();
+        Assert.InRange(grid.Children.Count, 8, 160);
+        Assert.Contains(grid.Children.OfType<Button>(), b => int.Parse(AutomationProperties.GetName(b)![^3..], System.Globalization.CultureInfo.InvariantCulture) > 200);
+        Assert.NotEmpty(shown);
+    }
+
+    [AvaloniaFact]
+    public void ACardBuildsItsMenuWhenItOpens()
+    {
+        var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());
+        window.Shell!.Destination = LibraryDestination.Movies;
+        FakeLibrary.Pump(() => (window.Shell.CurrentPage as BrowsePage)?.Model.Items.Count > 0);
+        var card = window.Shell.CurrentPage!.GetVisualDescendants().OfType<Button>().First(b => AutomationProperties.GetName(b) == "Quiet Orbit");
+        var menu = Assert.IsType<ContextMenu>(card.ContextMenu);
+        Assert.Single(menu.ItemsSource!.OfType<MenuItem>());
+        // Asking for the menu (right click, menu key) fills it before it opens.
+        card.RaiseEvent(new Avalonia.Input.ContextRequestedEventArgs { RoutedEvent = Control.ContextRequestedEvent, Source = card });
+        FakeLibrary.Pump(() => false, rounds: 5);
+        Assert.Contains(menu.ItemsSource!.OfType<MenuItem>(), item => item.Header as string == "Play");
+        menu.Close();
+    }
+
+    [AvaloniaFact]
     public void ASeriesPageResumesItsEpisodeAndGoesBack()
     {
         var window = FakeLibrary.ShowLibrary(FakeLibrary.Create());

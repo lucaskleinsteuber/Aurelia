@@ -38,6 +38,48 @@ struct TVPlayerLogicTests {
         position: 119_500, duration: 120_000, observedPlayback: true, transportFailed: false))
   }
 
+  @Test func aRefusedTitleIsExplainedInsteadOfEndingTheSession() {
+    let notAllowed = TVPlayerPolicy.response(to: .server(status: 403, code: "forbidden"))
+    #expect(notAllowed == .fail(TVPlayerPolicy.notAllowedMessage, canRetry: false))
+    let revoked = TVPlayerPolicy.response(
+      to: .server(status: 403, code: "profile_session_revoked"))
+    #expect(
+      revoked
+        == .endSession(
+          .server(status: 403, code: "profile_session_revoked", message: nil, retryAfter: nil)))
+    #expect(
+      TVPlayerPolicy.response(to: .server(status: 401, code: nil))
+        == .endSession(.server(status: 401, code: nil, message: nil, retryAfter: nil)))
+    #expect(TVPlayerPolicy.response(to: .untrustedServer) == .endSession(.identityMismatch))
+    let refused = TVCoreError.server(
+      status: 403, code: "forbidden", message: "Not for this profile.", retryAfter: nil)
+    #expect(TVPlayerPolicy.refusal(refused) == "Not for this profile.")
+    #expect(!refused.endsSession)
+    #expect(
+      TVPlayerPolicy.refusal(
+        .server(status: 403, code: "device_session_revoked", message: nil, retryAfter: nil)) == nil)
+  }
+
+  @Test func aMissingFileIsReportedInsteadOfReconnectingInALoop() {
+    for status in [404, 410] {
+      #expect(
+        TVPlayerPolicy.response(to: .server(status: status, code: nil))
+          == .fail(TVPlayerPolicy.unavailableMessage, canRetry: true))
+    }
+    if case .fail = TVPlayerPolicy.response(to: .server(status: 429, code: nil)) {
+    } else {
+      Issue.record("A busy server must not start a reconnect loop")
+    }
+    #expect(
+      TVPlayerPolicy.response(to: .server(status: 503, code: "media_unavailable"))
+        == .fail(TVPlayerPolicy.unavailableMessage, canRetry: true))
+    let offline = TVCoreError.server(
+      status: 503, code: "media_unavailable", message: "Reconnect the drive.", retryAfter: nil)
+    #expect(TVPlayerPolicy.unavailability(offline) == "Reconnect the drive.")
+    #expect(TVPlayerPolicy.response(to: .server(status: 503, code: nil)) == .reconnect)
+    #expect(TVPlayerPolicy.response(to: .interrupted) == .reconnect)
+  }
+
   @Test func controlsRemainWhilePausedBusyOrChoosingATrack() {
     #expect(
       TVPlayerPolicy.mayHideControls(

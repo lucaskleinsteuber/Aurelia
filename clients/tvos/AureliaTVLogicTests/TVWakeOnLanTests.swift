@@ -34,6 +34,16 @@ struct TVWakeOnLanTests {
     #expect(target.ipv4Hosts == ["10.0.0.21", "10.0.0.20"])
   }
 
+  @Test func aDisconnectedServerIsForgotten() throws {
+    let defaults = isolatedDefaults()
+    TVWakeOnLan.remember(
+      serverID: serverID, info: try info(["02-00-5E-10-00-01"]), hosts: ["10.0.0.20"],
+      defaults: defaults)
+    #expect(TVWakeOnLan.target(for: serverID, defaults: defaults) != nil)
+    TVWakeOnLan.forget(serverID: serverID, defaults: defaults)
+    #expect(TVWakeOnLan.target(for: serverID, defaults: defaults) == nil)
+  }
+
   @Test func packetAndAddressRules() {
     let card: [UInt8] = [0x02, 0x00, 0x5E, 0x10, 0x00, 0x01]
     let packet = TVWakeOnLan.magicPacket(card)

@@ -65,7 +65,8 @@ import Foundation
 PY
 for name in Sender Receiver; do
   xcrun swiftc -warnings-as-errors -swift-version 6 \
-    "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" "$run_root/$name.swift" \
+    "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
+    "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" "$run_root/$name.swift" \
     -o "$run_root/$name.app/Contents/MacOS/$name"
   if [[ "$name" == Sender ]]; then
     codesign --force --sign - --entitlements "$run_root/sender.entitlements" "$run_root/$name.app"

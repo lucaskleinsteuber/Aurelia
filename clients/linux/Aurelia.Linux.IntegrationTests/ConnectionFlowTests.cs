@@ -101,6 +101,8 @@ public sealed class ConnectionFlowTests : IDisposable
         var flow = new AppFlow(settings);
         var session = NewSession(flow, keyring);
         await session.StartAsync();
+        Assert.Equal(AppScreen.Introduction, flow.Screen);
+        flow.SkipIntroduction();
         Assert.Equal(AppScreen.Welcome, flow.Screen);
         flow.ChooseMode(OperatingMode.Client);
 

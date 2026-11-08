@@ -146,8 +146,20 @@ enum AppUpdateLogic {
     return (String(parts[0]), build)
   }
 
-  /// The disk image publish-release.sh attaches for a tag.
-  static func diskImageName(tag: String) -> String { "Aurelia-\(tag)-macOS-universal.dmg" }
+  /// The architecture this app was built for, as the disk images name it: arm64 for Apple
+  /// silicon, x64 for Intel. Each Mac takes only the image made for it.
+  static var architecture: String {
+    #if arch(arm64)
+      "arm64"
+    #else
+      "x64"
+    #endif
+  }
+
+  /// The disk image publish-release.sh attaches for a tag and this Mac's architecture.
+  static func diskImageName(tag: String, architecture: String = architecture) -> String {
+    "Aurelia-\(tag)-macOS-\(architecture).dmg"
+  }
 
   /// A release is newer when its build number is higher; build numbers only ever rise.
   static func isNewer(build: Int, than currentBuild: Int) -> Bool { build > currentBuild }

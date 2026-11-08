@@ -77,4 +77,52 @@ struct OfflineDownloadTests {
     #expect(OfflineDownloads.fileExtension("video/mp4") == "mp4")
     #expect(OfflineDownloads.fileExtension("video/x-matroska") == "mkv")
   }
+
+  @Test
+  func withoutAnOpenProfileNoDownloadIsOffered() {
+    let server = UUID()
+    let child = UUID()
+    let adult = UUID()
+    func title(_ user: UUID) -> OfflineTitle {
+      OfflineTitle(
+        id: UUID(), serverId: server, userId: user, title: "Invented Film", subtitle: nil,
+        kind: "movie", fileName: "title.mkv", contentType: "video/x-matroska", bytes: 4,
+        downloadedAt: Date(), positionMilliseconds: 0, durationMilliseconds: 0,
+        isCompleted: false, progressSavedAt: nil, progressDirty: false, subtitles: [])
+    }
+    let titles = [title(child), title(adult), title(adult)]
+    // At "Server Not Answering" before anyone chose a profile: nothing, not every profile's titles.
+    #expect(
+      AppModel.visibleOfflineTitles(titles, server: server, user: nil, profileOpen: false).isEmpty)
+    #expect(
+      AppModel.visibleOfflineTitles(titles, server: server, user: child, profileOpen: false)
+        .isEmpty)
+    let childTitles = AppModel.visibleOfflineTitles(
+      titles, server: server, user: child, profileOpen: true)
+    #expect(childTitles.map(\.userId) == [child])
+    #expect(
+      AppModel.visibleOfflineTitles(titles, server: UUID(), user: adult, profileOpen: true)
+        .isEmpty)
+  }
+
+  @Test
+  func offlineProgressWinsWhileTheServerKeptItsRevisionWhateverTheClock() {
+    var title = OfflineTitle(
+      id: UUID(), serverId: UUID(), userId: UUID(), title: "Invented Film", subtitle: nil,
+      kind: "movie", fileName: "title.mkv", contentType: "video/x-matroska", bytes: 4,
+      downloadedAt: Date(), positionMilliseconds: 120_000, durationMilliseconds: 600_000,
+      isCompleted: false, progressSavedAt: Date().addingTimeInterval(-7_200), progressDirty: true,
+      subtitles: [], serverRevision: 7)
+    // This Mac's clock runs two hours behind, so the server's time looks later.
+    let now = ISO8601DateFormatter().string(from: Date())
+    let unchanged = PlaybackProgressResponse(
+      mediaId: title.id, positionMilliseconds: 0, durationMilliseconds: 600_000,
+      isCompleted: false, lastPlayedAt: nil, updatedAt: now, revision: 7)
+    #expect(OfflineDownloads.offlineIsNewer(title, server: unchanged))
+    var elsewhere = unchanged
+    elsewhere.revision = 8
+    #expect(!OfflineDownloads.offlineIsNewer(title, server: elsewhere))
+    title.serverRevision = nil
+    #expect(!OfflineDownloads.offlineIsNewer(title, server: unchanged))
+  }
 }

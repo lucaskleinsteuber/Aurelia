@@ -7,7 +7,8 @@ namespace Aurelia.Server.Endpoints;
 
 /// <summary>
 /// Aurelia in a web browser. The server hands out the app's files and signs a browser in with the
-/// same owner-approved code as an Apple TV, but keeps every credential in HttpOnly cookies
+/// pairing code from the main device (older setups: an owner-approved code the browser shows),
+/// but keeps every credential in HttpOnly cookies
 /// (<see cref="WebCookies"/>). Everything else the app does goes through the normal API.
 /// </summary>
 public static class WebAppEndpoints
@@ -43,6 +44,16 @@ public static class WebAppEndpoints
             if (status.State != DeviceAuthorizationState.Pending) WebCookies.Delete(context, WebCookies.Pairing, WebCookies.PairingPath);
             return new WebPairingStatusResponse(status.State, status.ExpiresAt, status.PollIntervalSeconds);
         });
+        // The same 8-digit code every Aurelia app enters: created on the main device (a Mac, the
+        // Linux app or `aurelia pair`) and typed into the browser. The credential goes into the
+        // HttpOnly device cookie and never into the response.
+        web.MapPost("/pair", async (RedeemPairingCodeRequest request, AccountService accounts, HttpContext context) =>
+        {
+            var credential = await accounts.RedeemPairingCodeAsync(request, context.RequestAborted);
+            WebCookies.Set(context, WebCookies.Device, credential.Token, credential.ExpiresAt);
+            WebCookies.Delete(context, WebCookies.Pairing, WebCookies.PairingPath);
+            return Results.NoContent();
+        }).RequireRateLimiting("authentication");
         web.MapPost("/pairing/cancel", async (DeviceAuthorizationService service, HttpContext context) =>
         {
             if (context.Request.Cookies.ContainsKey(WebCookies.Pairing))

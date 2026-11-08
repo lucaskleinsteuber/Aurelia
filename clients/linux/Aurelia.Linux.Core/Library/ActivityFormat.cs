@@ -1,4 +1,5 @@
 using System.Globalization;
+using Aurelia.Contracts;
 
 namespace Aurelia.Linux.Core.Library;
 
@@ -34,4 +35,35 @@ public static class ActivityFormat
     public static string Time(DateTimeOffset when) => when.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
 
     public static string Percent(double fraction) => ((int)Math.Round(Math.Clamp(fraction, 0, 1) * 100)).ToString(CultureInfo.InvariantCulture) + " %";
+
+    /// <summary>
+    /// The last weeks up to this one, oldest first, with no watch time where nothing was watched;
+    /// the server lists only weeks with watching, as on the Mac.
+    /// </summary>
+    public static List<PeriodHours> LastWeeks(IEnumerable<PeriodHours> periods, DateTime today, int count = 12)
+    {
+        var hours = periods.GroupBy(period => period.Period).ToDictionary(group => group.Key, group => group.Sum(period => period.Hours));
+        return [.. Enumerable.Range(0, count).Reverse().Select(back =>
+        {
+            var day = today.Date.AddDays(-7 * back);
+            var key = $"{ISOWeek.GetYear(day)}-W{ISOWeek.GetWeekOfYear(day):D2}";
+            return new PeriodHours(key, hours.GetValueOrDefault(key));
+        })];
+    }
+
+    /// <summary>"Nov 3": the Monday a week of the form 2026-W45 starts on.</summary>
+    public static string WeekStart(string period)
+    {
+        var parts = period.Split("-W");
+        return parts.Length == 2 && int.TryParse(parts[0], CultureInfo.InvariantCulture, out var year)
+            && int.TryParse(parts[1], CultureInfo.InvariantCulture, out var week) && week is >= 1 and <= 53
+            ? ISOWeek.ToDateTime(year, week, DayOfWeek.Monday).ToString("MMM d", CultureInfo.GetCultureInfo("en-US"))
+            : period;
+    }
+
+    /// <summary>"November 1, 2026" for a day of the form 2026-11-01.</summary>
+    public static string LongDay(string day) =>
+        DateTime.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date.ToString("MMMM d, yyyy", CultureInfo.GetCultureInfo("en-US"))
+            : day;
 }

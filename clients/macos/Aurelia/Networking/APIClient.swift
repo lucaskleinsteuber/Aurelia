@@ -56,7 +56,9 @@ enum APIClientError: LocalizedError, Equatable {
       message
         ?? (status == 401
           ? "The device session has expired or was revoked. Sign in again."
-          : "The server request failed (HTTP \(status)).")
+          : status == 403
+            ? "The server did not allow this. Your profile may not have access."
+            : "The server request failed (HTTP \(status)).")
     }
   }
 }
@@ -278,6 +280,62 @@ struct APIClient: Sendable {
       from: await perform(
         path: "/api/v1/users/\(id.uuidString)/profile", method: "PUT",
         body: JSONEncoder().encode(request)))
+  }
+  /// A profile's photo (JPEG), shown in the picker before any profile is unlocked.
+  func profilePhoto(id: UUID, revision: Int64) async throws -> Data {
+    try await perform(path: "/api/v1/profiles/\(id.uuidString)/picture?rev=\(revision)")
+  }
+  /// Renames the signed-in profile; an owner keeps signing in with the original name.
+  func renameOwnProfile(_ name: String) async throws -> UserSummary {
+    try Self.decode(
+      UserSummary.self,
+      from: await perform(
+        path: "/api/v1/profile/name", method: "PUT",
+        body: JSONEncoder().encode(ProfileNameRequest(name: name))))
+  }
+  func setOwnPicture(builtin: String?) async throws -> UserSummary {
+    try Self.decode(
+      UserSummary.self,
+      from: await perform(
+        path: "/api/v1/profile/picture", method: "PUT",
+        body: JSONEncoder().encode(ProfilePictureRequest(builtin: builtin))))
+  }
+  func uploadOwnPhoto(_ image: Data) async throws -> UserSummary {
+    try Self.decode(
+      UserSummary.self,
+      from: await perform(
+        path: "/api/v1/profile/picture/photo", method: "PUT", body: image, timeout: 60))
+  }
+  func renameProfile(id: UUID, name: String) async throws -> UserSummary {
+    try Self.decode(
+      UserSummary.self,
+      from: await perform(
+        path: "/api/v1/users/\(id.uuidString)/name", method: "PUT",
+        body: JSONEncoder().encode(ProfileNameRequest(name: name))))
+  }
+  func setProfilePicture(id: UUID, builtin: String?) async throws -> UserSummary {
+    try Self.decode(
+      UserSummary.self,
+      from: await perform(
+        path: "/api/v1/users/\(id.uuidString)/picture", method: "PUT",
+        body: JSONEncoder().encode(ProfilePictureRequest(builtin: builtin))))
+  }
+  func uploadProfilePhoto(id: UUID, image: Data) async throws -> UserSummary {
+    try Self.decode(
+      UserSummary.self,
+      from: await perform(
+        path: "/api/v1/users/\(id.uuidString)/picture/photo", method: "PUT", body: image,
+        timeout: 60))
+  }
+  func ageLimit(user: UUID) async throws -> ProfileAgeLimit {
+    try await get("/api/v1/users/\(user.uuidString)/age-limit")
+  }
+  func setAgeLimit(user: UUID, _ value: ProfileAgeLimit) async throws -> ProfileAgeLimit {
+    try Self.decode(
+      ProfileAgeLimit.self,
+      from: await perform(
+        path: "/api/v1/users/\(user.uuidString)/age-limit", method: "PUT",
+        body: JSONEncoder().encode(value)))
   }
   func unlockManagement(password: String) async throws -> String {
     struct Payload: Encodable { let password: String }
@@ -1820,7 +1878,8 @@ struct APIClient: Sendable {
     if let body {
       request.httpBody = body
       request.setValue(
-        path.hasSuffix("/editor/uploads") ? "image/png" : "application/json",
+        path.hasSuffix("/editor/uploads")
+          ? "image/png" : path.hasSuffix("/picture/photo") ? "image/jpeg" : "application/json",
         forHTTPHeaderField: "Content-Type")
     }
 

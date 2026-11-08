@@ -22,8 +22,8 @@ namespace Aurelia.Linux.Playback;
 /// Volume Leveling), subtitles, sleep timer and scene notes; the play controls in a capsule in
 /// the middle; at the bottom the title, a capsule with chapters, volume, Fill Screen and full
 /// screen, and the timeline with preview pictures. Controls hide after the chosen delay while
-/// playing and return with the pointer or a key. The picture can fill the window without black
-/// bars (Z), a choice that is remembered.
+/// playing and return with the pointer or a key. The picture fills the window without black
+/// bars.
 /// </summary>
 public sealed class PlayerView : UserControl, IDisposable
 {
@@ -49,8 +49,8 @@ public sealed class PlayerView : UserControl, IDisposable
     private readonly Button notes;
     private readonly Button chapters;
     private readonly Canvas chapterMarkers = new() { IsHitTestVisible = false };
+    private readonly Canvas previewLayer = new() { IsHitTestVisible = false, ClipToBounds = false };
     private readonly Button mute;
-    private readonly Button fill;
     private readonly Button fullScreen;
     private readonly Slider volume = new() { Minimum = 0, Maximum = 1, Width = 96, VerticalAlignment = VerticalAlignment.Center, Classes = { "volume" } };
     private readonly Border top;
@@ -62,7 +62,7 @@ public sealed class PlayerView : UserControl, IDisposable
     private readonly Border status = new() { Classes = { "playerMaterial", "playerPanel" }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock statusText = new() { Foreground = Brushes.White, FontSize = 15, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 480 };
     private readonly StackPanel statusActions = new() { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
-    private readonly ProgressBar spinner = new() { IsIndeterminate = true, Width = 140 };
+    private readonly Aurelia.Linux.Controls.Spinner spinner = new(40);
     private readonly Border conflict = new() { Classes = { "playerMaterial", "playerPill" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly Border previewBubble = new() { Classes = { "previewBubble" }, IsVisible = false, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Left };
     private readonly Image previewImage = new() { Width = 240, Height = 135, Stretch = Stretch.UniformToFill };
@@ -71,6 +71,9 @@ public sealed class PlayerView : UserControl, IDisposable
     private readonly ScrubPreviews previews;
     private readonly SceneNotes sceneNotes;
     private DispatcherTimer? hideTimer;
+    // Menus open in their own popup surfaces outside this view, so the view counts them itself:
+    // while one is open the controls stay, and closing it starts the hide delay anew.
+    private int openMenus;
     private bool draggingTimeline;
     private bool updatingTimeline;
     private bool exportingDiagnostics;
@@ -116,6 +119,7 @@ public sealed class PlayerView : UserControl, IDisposable
         sleep = Menu("IconSleep", "Sleep Timer", SleepMenu, PlacementMode.BottomEdgeAlignedRight);
         notes = Control("IconNote", "Scene Notes", () => { });
         notes.Flyout = new Flyout { Content = sceneNotes.Editor(), Placement = PlacementMode.BottomEdgeAlignedRight };
+        Track(notes.Flyout);
         top = new Border
         {
             VerticalAlignment = VerticalAlignment.Top,
@@ -139,6 +143,9 @@ public sealed class PlayerView : UserControl, IDisposable
         next = Control("IconNextTrack", "Next Episode (N)", () => _ = controller.NextAsync());
         var back10 = Control("IconBackward", $"Back {controller.Preferences.SeekIntervalSeconds} Seconds", () => controller.SeekBy(forward: false), size: 22);
         var forward10 = Control("IconForward", $"Forward {controller.Preferences.SeekIntervalSeconds} Seconds", () => controller.SeekBy(forward: true), size: 22);
+        // A circling arrow with the seconds in it, like the Mac's skip buttons.
+        back10.Content = SkipSymbol(forward: false, controller.Preferences.SeekIntervalSeconds);
+        forward10.Content = SkipSymbol(forward: true, controller.Preferences.SeekIntervalSeconds);
         transport = Capsule(previous, back10, playPause, forward10, next);
         transport.HorizontalAlignment = HorizontalAlignment.Center;
         transport.VerticalAlignment = VerticalAlignment.Center;
@@ -148,7 +155,6 @@ public sealed class PlayerView : UserControl, IDisposable
         chapters = Menu("IconChapters", "Chapters", ChapterMenu, PlacementMode.TopEdgeAlignedRight);
         chapterMarkers.SizeChanged += (_, _) => DrawChapterMarkers();
         mute = Control("IconVolume", "Mute (M)", () => controller.Muted = !controller.Muted);
-        fill = Control("IconFillScreen", "Fill Screen (Z)", () => controller.SetFillsScreen(!controller.Preferences.FillsScreen));
         fullScreen = Control("IconFullScreen", "Full Screen (F)", ToggleFullScreen);
         volume.Value = controller.Volume;
         volume.PropertyChanged += (_, e) =>
@@ -167,7 +173,8 @@ public sealed class PlayerView : UserControl, IDisposable
         timeline.AddHandler(PointerPressedEvent, (_, _) => draggingTimeline = true, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         timeline.AddHandler(PointerReleasedEvent, (_, _) => draggingTimeline = false, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         previewBubble.Child = new StackPanel { Spacing = 6, Children = { new Border { CornerRadius = new CornerRadius(8), ClipToBounds = true, Child = previewImage }, previewTime } };
-        var trailing = Capsule(chapters, mute, volume, fill, fullScreen);
+        previewLayer.Children.Add(previewBubble);
+        var trailing = Capsule(chapters, mute, volume, fullScreen);
         trailing.Padding = new Thickness(6, 4);
         trailing.VerticalAlignment = VerticalAlignment.Bottom;
         bottom = new StackPanel
@@ -192,7 +199,9 @@ public sealed class PlayerView : UserControl, IDisposable
                     Children =
                     {
                         elapsed,
-                        new Panel { Children = { timeline, chapterMarkers, previewBubble } }.Also(p => Grid.SetColumn(p, 1)),
+                        // The preview floats above the timeline on a canvas, so showing it never
+                        // changes the timeline's height (it made the bar jump and hid the markers).
+                        new Panel { Children = { timeline, chapterMarkers, previewLayer } }.Also(p => Grid.SetColumn(p, 1)),
                         total.Also(t => Grid.SetColumn(t, 2)),
                     },
                 },
@@ -274,6 +283,9 @@ public sealed class PlayerView : UserControl, IDisposable
 
     internal bool ControlsVisible => chrome.IsVisible;
 
+    /// <summary>Whether a player menu is open; the controls stay while it is.</summary>
+    internal bool HasOpenMenu => openMenus > 0;
+
     private bool IsFullScreen => window?.WindowState == WindowState.FullScreen;
 
     private void OnWindowChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
@@ -332,11 +344,8 @@ public sealed class PlayerView : UserControl, IDisposable
         speedLabel.Text = RateLabel(controller.Rate);
         ((PathIcon)mute.Content!).Data = Application.Current?.FindResource(controller.Muted ? "IconMuted" : "IconVolume") as Geometry;
         AutomationProperties.SetName(mute, controller.Muted ? "Unmute (M)" : "Mute (M)");
-        var fills = controller.Preferences.FillsScreen;
-        surface.Fills = fills;
-        ((PathIcon)fill.Content!).Data = Application.Current?.FindResource(fills ? "IconFitScreen" : "IconFillScreen") as Geometry;
-        AutomationProperties.SetName(fill, fills ? "Show Whole Picture (Z)" : "Fill Screen (Z)");
-        ToolTip.SetTip(fill, fills ? "Show Whole Picture (Z)" : "Fill Screen, Without Black Bars (Z)");
+        // The picture always fills the window, without black bars (owner's decision, 07.11.2026).
+        surface.Fills = true;
         if (!draggingTimeline && controller.Duration > 0)
         {
             updatingTimeline = true;
@@ -383,7 +392,7 @@ public sealed class PlayerView : UserControl, IDisposable
         }
         statusActions.IsVisible = statusActions.Children.Count > 0;
         sleep.Classes.Set("active", controller.SleepTimer.IsOn);
-        subtitles.Classes.Set("active", controller.SubtitleTrack >= 0);
+        subtitles.Classes.Set("active", controller.SubtitleTracks.Any(track => track.Id == controller.SubtitleTrack));
     }
 
     private static string RateLabel(double rate) => rate.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "×";
@@ -408,9 +417,6 @@ public sealed class PlayerView : UserControl, IDisposable
                 break;
             case Key.F:
                 ToggleFullScreen();
-                break;
-            case Key.Z:
-                controller.SetFillsScreen(!controller.Preferences.FillsScreen);
                 break;
             case Key.P:
                 _ = controller.PreviousAsync();
@@ -452,7 +458,7 @@ public sealed class PlayerView : UserControl, IDisposable
         hideTimer.Tick += (_, _) =>
         {
             hideTimer?.Stop();
-            var menuOpen = this.GetVisualDescendantsOfType<Popup>().Any(p => p.IsOpen) || draggingTimeline || exportingDiagnostics || ContextMenu?.IsOpen == true;
+            var menuOpen = openMenus > 0 || this.GetVisualDescendantsOfType<Popup>().Any(p => p.IsOpen) || draggingTimeline || exportingDiagnostics || ContextMenu?.IsOpen == true;
             if (controller.State == PlayerState.Playing && !menuOpen && !IsPointerOverControls())
             {
                 chrome.IsVisible = false;
@@ -511,7 +517,8 @@ public sealed class PlayerView : UserControl, IDisposable
         var fraction = Math.Clamp(x / timeline.Bounds.Width, 0, 1);
         var at = (long)(fraction * controller.Duration);
         previewTime.Text = PlayerPolicy.TimeLabel(at);
-        previewBubble.Margin = new Thickness(Math.Clamp(x - 128, 0, Math.Max(0, timeline.Bounds.Width - 256)), 0, 0, 36);
+        Canvas.SetLeft(previewBubble, Math.Clamp(x - 128, 0, Math.Max(0, timeline.Bounds.Width - 256)));
+        Canvas.SetBottom(previewBubble, timeline.Bounds.Height / 2 + 14);
         previewBubble.IsVisible = true;
         // The cache may evict or reset its old bitmap while the next frame is awaited.
         previewImage.Source = null;
@@ -548,9 +555,10 @@ public sealed class PlayerView : UserControl, IDisposable
         if (controller.Duration <= 0 || chapterMarkers.Bounds.Width <= 0) return;
         foreach (var chapter in controller.Chapters.Where(chapter => chapter.PositionMilliseconds > 0))
         {
-            var marker = new Border { Width = 1, Height = 7, Background = new SolidColorBrush(Color.FromArgb(160, 255, 255, 255)) };
-            Canvas.SetLeft(marker, chapterMarkers.Bounds.Width * Math.Clamp((double)chapter.PositionMilliseconds / controller.Duration, 0, 1));
-            Canvas.SetTop(marker, Math.Max(0, chapterMarkers.Bounds.Height / 2 - 3.5));
+            // A small gap in the bar, as on the Mac, centered on the track.
+            var marker = new Border { Width = 2, Height = 6, CornerRadius = new CornerRadius(1), Background = new SolidColorBrush(Color.FromArgb(200, 12, 14, 16)) };
+            Canvas.SetLeft(marker, chapterMarkers.Bounds.Width * Math.Clamp((double)chapter.PositionMilliseconds / controller.Duration, 0, 1) - 1);
+            Canvas.SetTop(marker, Math.Max(0, chapterMarkers.Bounds.Height / 2 - 3));
             chapterMarkers.Children.Add(marker);
         }
     }
@@ -560,14 +568,14 @@ public sealed class PlayerView : UserControl, IDisposable
     private List<Control> AudioMenu()
     {
         var items = new List<Control>();
-        if (controller.AudioTracks.Count == 0) items.Add(new MenuItem { Header = "No audio tracks available", IsEnabled = false });
+        if (controller.AudioTracks.Count == 0) items.Add(Note("No audio tracks available"));
         foreach (var track in controller.AudioTracks) items.Add(Choice(track.Name, controller.AudioTrack == track.Id, () => controller.SelectAudio(track)));
         items.Add(new Separator());
-        items.Add(new MenuItem { Header = "Dialogue Boost", IsEnabled = false });
+        items.Add(SectionTitle("Dialogue Boost"));
         foreach (var mode in Enum.GetValues<DialogueBoost>())
             items.Add(Choice(mode.ToString(), controller.Preferences.DialogueBoost == mode, () => controller.SetDialogueBoost(mode)));
         items.Add(new Separator());
-        items.Add(new MenuItem { Header = "Volume Leveling", IsEnabled = false });
+        items.Add(SectionTitle("Volume Leveling"));
         foreach (var mode in Enum.GetValues<VolumeLeveling>())
             items.Add(Choice(mode.ToString(), controller.Preferences.EffectiveLeveling == mode, () => _ = controller.SetVolumeLevelingAsync(mode)));
         return items;
@@ -594,12 +602,35 @@ public sealed class PlayerView : UserControl, IDisposable
         return items;
     }
 
+    /// <summary>
+    /// One choice of a player menu. The chosen one carries a checkmark and stands out, as in the
+    /// Mac app's menus; every entry keeps the checkmark's room so the names line up.
+    /// </summary>
     private static MenuItem Choice(string header, bool selected, Action action)
     {
-        var item = new MenuItem { Header = header, ToggleType = MenuItemToggleType.Radio, IsChecked = selected };
+        var item = new MenuItem
+        {
+            Header = header,
+            Classes = { "playerChoice" },
+            Icon = new PathIcon
+            {
+                Data = Application.Current?.FindResource("IconCheck") as Geometry,
+                Opacity = selected ? 1 : 0,
+            },
+        };
+        if (selected) item.Classes.Add("chosen");
+        AutomationProperties.SetName(item, selected ? header + ", selected" : header);
         item.Click += (_, _) => action();
         return item;
     }
+
+    /// <summary>A small title over a group of choices, such as "Dialogue Boost".</summary>
+    private static MenuItem SectionTitle(string header) =>
+        new() { Header = header, IsEnabled = false, Focusable = false, Classes = { "menuSectionTitle" } };
+
+    /// <summary>A quiet line that only informs, such as "No audio tracks available".</summary>
+    private static MenuItem Note(string header) =>
+        new() { Header = header, IsEnabled = false, Focusable = false, Classes = { "menuNote" } };
 
     /// <summary>Watch Together: start a party for this title, or see who watches along and leave.</summary>
     private Button TogetherButton()
@@ -608,6 +639,7 @@ public sealed class PlayerView : UserControl, IDisposable
         var content = new StackPanel { Spacing = 10, Width = 280, Margin = new Thickness(6) };
         var flyout = new Flyout { Content = content, Placement = PlacementMode.BottomEdgeAlignedRight };
         flyout.Opening += (_, _) => FillTogether(content, flyout);
+        Track(flyout);
         button.Flyout = flyout;
         return button;
     }
@@ -666,13 +698,29 @@ public sealed class PlayerView : UserControl, IDisposable
 
     internal string? TogetherNoticeText => togetherNotice.IsVisible ? (togetherNotice.Child as TextBlock)?.Text : null;
 
-    private static Button Menu(string icon, string label, Func<List<Control>> items, PlacementMode placement)
+    private Button Menu(string icon, string label, Func<List<Control>> items, PlacementMode placement)
     {
-        var button = Control(icon, label, () => { });
+        // The entries are filled before the menu opens: filled only while opening, the menu
+        // showed as an empty box. The menu is kept in Tag for tests.
         var flyout = new MenuFlyout { Placement = placement };
         flyout.Opening += (_, _) => flyout.ItemsSource = items();
-        button.Flyout = flyout;
+        Track(flyout);
+        Button? button = null;
+        button = Control(icon, label, () =>
+        {
+            // A second click on the same button closes its menu instead of opening it again.
+            if (flyout.IsOpen) { flyout.Hide(); return; }
+            flyout.ItemsSource = items();
+            flyout.ShowAt(button!);
+        });
+        button.Tag = flyout;
         return button;
+    }
+
+    private void Track(FlyoutBase flyout)
+    {
+        flyout.Opened += (_, _) => { openMenus++; ShowControls(); };
+        flyout.Closed += (_, _) => { openMenus = Math.Max(0, openMenus - 1); ShowControls(); };
     }
 
     private static Button Control(string icon, string label, Action action, double size = 18)
@@ -686,6 +734,49 @@ public sealed class PlayerView : UserControl, IDisposable
         ToolTip.SetTip(button, label);
         button.Click += (_, _) => action();
         return button;
+    }
+
+    /// <summary>An open circle with an arrowhead at its top and the skip seconds inside.</summary>
+    internal static Control SkipSymbol(bool forward, int seconds)
+    {
+        var white = Brushes.White;
+        var symbol = new Grid
+        {
+            Width = 26,
+            Height = 26,
+            Children =
+            {
+                new Avalonia.Controls.Shapes.Path
+                {
+                    // From the top, around, ending up left; open at the upper left.
+                    Data = Geometry.Parse("M 13,3.7 A 9.5,9.5 0 1 1 4.8,8.45"),
+                    Stroke = white,
+                    StrokeThickness = 2,
+                    StrokeLineCap = PenLineCap.Round,
+                },
+                new Avalonia.Controls.Shapes.Path { Data = Geometry.Parse("M 13.6,0.6 L 13.6,6.8 L 9.4,3.7 Z"), Fill = white },
+                new TextBlock
+                {
+                    Text = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    FontSize = 9.5,
+                    FontWeight = FontWeight.Bold,
+                    Foreground = white,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 2, 0, 0),
+                },
+            },
+        };
+        if (forward)
+        {
+            // The arrow turns the other way; the number stays readable.
+            foreach (var shape in symbol.Children.OfType<Avalonia.Controls.Shapes.Path>())
+            {
+                shape.RenderTransformOrigin = new RelativePoint(13 / 26.0, 0.5, RelativeUnit.Relative);
+                shape.RenderTransform = new ScaleTransform(-1, 1);
+            }
+        }
+        return symbol;
     }
 
     /// <summary>One shared glass capsule, as the Mac draws its control groups.</summary>

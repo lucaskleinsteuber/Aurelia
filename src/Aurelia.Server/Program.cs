@@ -179,6 +179,7 @@ builder.Services.AddSingleton<ArtworkStore>();
 builder.Services.AddSingleton<ArtworkVariantStore>();
 // Prepares common artwork widths in the background; tests drive it explicitly.
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<ArtworkVariantWarmer>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<QueryWarmer>();
 builder.Services.AddSingleton<MetadataJobScheduler>();
 builder.Services.AddHttpClient<ITmdbClient, TmdbClient>(client =>
 {
@@ -201,6 +202,8 @@ builder.Services.AddScoped<SubtitleDownloadService>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService<SubtitleAutoDownloader>();
 builder.Services.AddSingleton<ContentRatingRefresh>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ContentRatingRefresh>());
+builder.Services.AddSingleton<CreditRefresh>();
+if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<CreditRefresh>());
 builder.Services.AddHostedService<LibraryMonitoringService>();
 builder.Services.AddHostedService<MaintenanceService>();
 builder.Services.AddHostedService<BonjourAdvertisementService>();
@@ -305,12 +308,17 @@ app.Use(async (context, next) =>
     {
         context.Response.StatusCode = 403;
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("network_access_rejected", "warning", status: 403);
+        // Say why, so a device can tell a network setting from a missing permission or an outage.
+        await context.Response.WriteAsJsonAsync(new ApiProblem("network_not_allowed",
+            "This device's network address is not allowed by the server's network settings."));
         return;
     }
     var backupUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase);
     var editorPath = (context.Request.Path.Value ?? "").Contains("/editor", StringComparison.Ordinal);
     var imageUpload = editorPath && HttpMethods.IsPost(context.Request.Method) && context.Request.Path.Value!.EndsWith("/uploads", StringComparison.Ordinal);
+    var photoUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").EndsWith("/picture/photo", StringComparison.OrdinalIgnoreCase);
     var maximumBytes = backupUpload ? EncryptedBackupContainer.MaximumBytes : imageUpload ? EditorArtworkStore.MaximumUploadBytes
+        : photoUpload ? ProfilePictures.MaximumUploadBytes
         : editorPath ? 1024 * 1024 : ServerRequestGuard.MaximumJsonBytes;
     if (context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } feature)
         feature.MaxRequestBodySize = maximumBytes;
@@ -318,6 +326,7 @@ app.Use(async (context, next) =>
     {
         context.Response.StatusCode = 413;
         context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_too_large", "warning", status: 413);
+        await context.Response.WriteAsJsonAsync(new ApiProblem("request_too_large", "The request is larger than the server accepts."));
         return;
     }
     await next(context);
@@ -374,6 +383,22 @@ app.Use(async (context, next) =>
             context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, 400);
         context.Items["Aurelia.FailureRecorded"] = true;
         await context.Response.WriteAsJsonAsync(new ApiProblem("invalid_server_data", "The operation data could not be validated. Active server data was not replaced."));
+    }
+    // A request body that ends early or exceeds the limit is the device's request, not the
+    // server's storage: it is also an IOException, so it is answered before the storage case.
+    catch (BadHttpRequestException exception) when (!context.Response.HasStarted)
+    {
+        context.Response.StatusCode = exception.StatusCode;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("request_body_rejected", "warning",
+            context.User.Identity?.IsAuthenticated == true ? context.User.RequireUserId() : null, exception.StatusCode);
+        context.Items["Aurelia.FailureRecorded"] = true;
+        await context.Response.WriteAsJsonAsync(exception.StatusCode == StatusCodes.Status413PayloadTooLarge
+            ? new ApiProblem("request_too_large", "The request is larger than the server accepts.")
+            : new ApiProblem("request_incomplete", "The request did not arrive completely. Try again."));
+    }
+    catch (IOException) when (context.RequestAborted.IsCancellationRequested)
+    {
+        // The device went away mid-request; nothing failed on the server.
     }
     catch (IOException) when (!context.Response.HasStarted && (context.Request.Path.StartsWithSegments("/api/v1/server")
         || context.Request.Path.StartsWithSegments("/api/v1/media") || context.Request.Path.StartsWithSegments("/api/v1/libraries")))

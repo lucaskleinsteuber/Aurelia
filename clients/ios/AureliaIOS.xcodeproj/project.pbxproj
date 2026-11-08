@@ -6,6 +6,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B300000000000000000000F2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000F2; };
 		B30000000000000000000001 /* MobileVLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006; };
 		B30000000000000000000002 /* MobileVLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B30000000000000000000003 /* MobileVLCKit-COPYING.txt in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007; };
@@ -17,6 +18,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B200000000000000000000F2 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Configuration/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		B20000000000000000000001 /* Aurelia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Aurelia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000000000000000000002 /* AureliaIOSLogicTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AureliaIOSLogicTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20000000000000000000003 /* AureliaIOS-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "AureliaIOS-Info.plist"; sourceTree = "<group>"; };
@@ -93,7 +95,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		B40000000000000000000004 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B30000000000000000000003, B300000000000000000000F1, ); runOnlyForDeploymentPostprocessing = 0; };
+		B40000000000000000000004 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (B300000000000000000000F2 /* PrivacyInfo.xcprivacy in Resources */, B30000000000000000000003, B300000000000000000000F1, ); runOnlyForDeploymentPostprocessing = 0; };
 		B40000000000000000000007 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 

@@ -8,7 +8,8 @@ namespace Aurelia.Server.Endpoints;
 
 /// <summary>
 /// Watch Together. Any profile that may play a title can start or join a party for it; the
-/// party only ever holds titles every member's profile can open when they join.
+/// party only holds titles its members' profiles can open, and a member whose profile cannot
+/// open a newly chosen title leaves the party.
 /// </summary>
 public static class WatchTogetherEndpoints
 {
@@ -32,8 +33,9 @@ public static class WatchTogetherEndpoints
                 request.MediaId, title, request.PositionMilliseconds, request.IsPlaying);
         }));
 
-        parties.MapGet("/{partyId:guid}", (HttpContext context, Guid partyId, long? after, int? waitMs, WatchTogetherService service) =>
-            Run(() => service.WaitAsync(partyId, context.User.RequireProfileSessionId(), after, waitMs ?? 0, context.RequestAborted)));
+        parties.MapGet("/{partyId:guid}", (HttpContext context, Guid partyId, long? after, int? waitMs, WatchTogetherService service, AureliaDbContext database) =>
+            Run(async () => await VisibleAsync(context, service, database,
+                await service.WaitAsync(partyId, context.User.RequireProfileSessionId(), after, waitMs ?? 0, context.RequestAborted))));
 
         parties.MapPost("/{partyId:guid}/join", (HttpContext context, Guid partyId, JoinWatchPartyRequest request, WatchTogetherService service,
             AureliaDbContext database, CancellationToken token) => Run(async () =>
@@ -50,7 +52,7 @@ public static class WatchTogetherEndpoints
             string? title = null;
             if (request.MediaId is { } media && string.Equals(request.Action?.Trim(), "change", StringComparison.OrdinalIgnoreCase))
                 title = await TitleAsync(database, presentation, context.User.RequireUserId(), media, token);
-            return service.Command(partyId, context.User.RequireProfileSessionId(), request, title);
+            return await VisibleAsync(context, service, database, service.Command(partyId, context.User.RequireProfileSessionId(), request, title));
         }));
 
         parties.MapDelete("/{partyId:guid}/members/me", (HttpContext context, Guid partyId, WatchTogetherService service) =>
@@ -70,6 +72,17 @@ public static class WatchTogetherEndpoints
         return summary.Kind == MediaKind.Episode && summary.ParentTitle is { } series
             ? $"{series} · S{summary.SeasonNumber} E{summary.EpisodeNumber}"
             : summary.Title;
+    }
+
+    /// <summary>
+    /// Another member may change the party to a title this profile cannot open. The profile then
+    /// leaves the party and learns neither the title nor its id.
+    /// </summary>
+    private static async Task<WatchPartyState> VisibleAsync(HttpContext context, WatchTogetherService service, AureliaDbContext database, WatchPartyState state)
+    {
+        if (await database.MediaItems.AsNoTracking().AnyAsync(item => item.Id == state.MediaId, context.RequestAborted)) return state;
+        service.Leave(state.Id, context.User.RequireProfileSessionId());
+        throw new PlaybackException("party_title_unavailable", "The party changed to a title this profile cannot open.", StatusCodes.Status404NotFound);
     }
 
     private static async Task<string> NameAsync(AureliaDbContext database, Guid userId, CancellationToken token) =>

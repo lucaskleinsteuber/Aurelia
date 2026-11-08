@@ -174,3 +174,20 @@ test("Continue Watching honors the displayed action if another device changed vi
   assert.equal(writes[0].isHidden, true, "Remove must not become Show because the fresh snapshot is already hidden.");
   assert.equal(writes[0].stateToken, state.stateToken);
 });
+test("titles hidden by this browser's settings are counted apart and fully hidden pages load on their own", async (t) => {
+  installDOM(t);
+  const requests = [], cards = [];
+  const view = createCatalogView({
+    api: { catalogPage: async (query) => { requests.push(query.offset); return { items: items(query.offset, Math.min(100, 300 - query.offset)), total: 300, revision: "r1" }; } },
+    navigate() {}, replaceRoute() {}, posterCard: (item) => { cards.push(item); return h("a", {}, item.title); }, collectionCard: () => h("a"),
+    emptyState: (_s, title, text) => h("div", {}, title, text), openMenu() {}, menuOption: (label) => h("button", {}, label),
+    handleError: () => false, toast() {}, onChanged() {},
+    showsTitle: (item) => Number(item.id.split("-")[1]) >= 250,
+  });
+  t.after(() => view.close());
+  const page = await view.browse({ name: "library" }); await flush();
+  assert.deepEqual(requests, [0, 100, 200]);
+  assert.equal(cards.length, 50);
+  assert.match(page.textContent, /50 shown · 250 hidden by this browser’s settings/);
+  assert.doesNotMatch(page.textContent, /No title matches/);
+});

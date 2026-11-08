@@ -9,13 +9,21 @@
 #   .rpm  Fedora, openSUSE
 #   .pkg.tar.zst  Arch Linux, CachyOS, Manjaro, EndeavourOS
 #   .flatpak  any distribution with Flatpak
-# Usage: package-linux-app.sh <tree archive> <output directory> <version> <build>
+# The fifth argument chooses the processor: x64 (default) or arm64. arm64 gets deb, rpm and Arch
+# packages made from the prebuilt arm64 tree; Flatpak is made for x64 only.
+# Usage: package-linux-app.sh <tree archive> <output directory> <version> <build> [x64|arm64]
 set -euo pipefail
 archive=$(realpath "${1:?Provide the installed-layout archive.}")
 mkdir -p "${2:?Provide an output directory.}"
 output=$(realpath "$2")
 version=${3:?Provide the version.}
 build=${4:?Provide the build number.}
+linux_arch=${5:-x64}
+case "$linux_arch" in
+  x64) deb_arch=amd64; rpm_arch=x86_64 ;;
+  arm64) deb_arch=arm64; rpm_arch=aarch64 ;;
+  *) echo "Use x64 or arm64." >&2; exit 1 ;;
+esac
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$build" =~ ^[0-9]+$ ]] \
   || { echo "Use a MAJOR.MINOR.PATCH version and numeric build." >&2; exit 1; }
 name=aurelia-desktop
@@ -30,6 +38,11 @@ for format in $formats; do
   normalized_formats="$normalized_formats $format"
 done
 formats=${normalized_formats# }
+if [ "$linux_arch" = arm64 ]; then
+  arm_formats=''
+  for format in $formats; do [ "$format" = flatpak ] || arm_formats="$arm_formats $format"; done
+  formats=${arm_formats# }
+fi
 selected() { case " $formats " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 required_tools=(bsdtar)
 selected deb && required_tools+=(dpkg-deb)
@@ -61,7 +74,7 @@ cp -a "$work/tree/usr" "$work/deb/"
 cat > "$work/deb/DEBIAN/control" <<CONTROL
 Package: $name
 Version: $version-$build
-Architecture: amd64
+Architecture: $deb_arch
 Maintainer: Aurelia <$homepage>
 Installed-Size: $size_kb
 Section: video
@@ -74,7 +87,7 @@ Description: $summary
  on this computer. VLC is provided by the distribution. Install ffmpeg for
  browser conversion and server-generated scrub previews when hosting here.
 CONTROL
-dpkg-deb --root-owner-group -Zxz --build "$work/deb" "$output/$base-amd64.deb" >/dev/null
+dpkg-deb --root-owner-group -Zxz --build "$work/deb" "$output/$base-$deb_arch.deb" >/dev/null
 fi
 
 # Fedora and openSUSE. Requirements are listed by hand, because the bundled .NET libraries would
@@ -88,7 +101,7 @@ Release: $build
 Summary: $summary
 License: MIT
 URL: $homepage
-ExclusiveArch: x86_64
+ExclusiveArch: $rpm_arch
 AutoReqProv: no
 Requires: glibc, libgcc, libstdc++, libicu, fontconfig, freetype, (libX11 or libX11-6), (libICE or libICE6), (libSM or libSM6), (libwayland-client or libwayland-client0), (libwayland-cursor or libwayland-cursor0), (libwayland-egl or libwayland-egl1), (libxkbcommon or libxkbcommon0), (libglvnd-egl or libEGL1)
 Requires: (vlc-libs or libvlc5), (vlc-plugins-base or vlc-noX), (vlc-plugin-pulseaudio or vlc-noX)
@@ -115,8 +128,8 @@ cp -a "$work/tree/usr" %{buildroot}/
 %doc /usr/share/doc/$name
 %license /usr/share/licenses/$name/LICENSE
 SPEC
-rpmbuild --quiet --define "_topdir $work/rpm" --define "_dbpath $work/rpm/db" -bb "$work/rpm/SPECS/$name.spec"
-cp "$work/rpm/RPMS/x86_64/$name-$version-$build.x86_64.rpm" "$output/$base-x86_64.rpm"
+rpmbuild --quiet --target "$rpm_arch" --define "_topdir $work/rpm" --define "_dbpath $work/rpm/db" -bb "$work/rpm/SPECS/$name.spec"
+cp "$work/rpm/RPMS/$rpm_arch/$name-$version-$build.$rpm_arch.rpm" "$output/$base-$rpm_arch.rpm"
 fi
 
 # Arch Linux family, with makepkg as an ordinary user.
@@ -128,7 +141,7 @@ pkgname=$name
 pkgver=$version
 pkgrel=$build
 pkgdesc="$summary"
-arch=(x86_64)
+arch=($rpm_arch)
 url="$homepage"
 license=('MIT')
 depends=(glibc gcc-libs icu openssl zlib polkit fontconfig freetype2 ttf-dejavu libx11 libice libsm wayland libxkbcommon libglvnd libvlc vlc-plugins-base vlc-plugin-ffmpeg vlc-plugin-pulse vlc-plugin-ass vlc-plugin-freetype)
@@ -141,8 +154,10 @@ package() {
   bsdtar -xpf "\$srcdir/tree.tar.gz" -C "\$pkgdir"
 }
 PKGBUILD
-(cd "$work/arch" && PKGDEST="$work/arch" PKGEXT=.pkg.tar.zst makepkg --force --noconfirm >/dev/null)
-cp "$work/arch/$name-$version-$build-x86_64.pkg.tar.zst" "$output/$base-x86_64.pkg.tar.zst"
+# The tree is prebuilt, so an arm64 package is made on any Arch computer with its own CARCH.
+sed -e "s/^CARCH=.*/CARCH=\"$rpm_arch\"/" -e "s/^CHOST=.*/CHOST=\"$rpm_arch-pc-linux-gnu\"/" /etc/makepkg.conf > "$work/arch/makepkg.conf"
+(cd "$work/arch" && PKGDEST="$work/arch" PKGEXT=.pkg.tar.zst makepkg --config "$work/arch/makepkg.conf" --force --noconfirm >/dev/null)
+cp "$work/arch/$name-$version-$build-$rpm_arch.pkg.tar.zst" "$output/$base-$rpm_arch.pkg.tar.zst"
 fi
 
 # Flatpak, as one bundle file that installs the Freedesktop runtime from Flathub when needed.

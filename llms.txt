@@ -1,0 +1,46 @@
+# Aurelia
+
+> Aurelia is a free, self-hosted media server (MIT license) with native apps for Mac, Linux, Apple TV, iPhone and iPad and a web player. The server runs inside the Mac or Linux app, as a standalone Linux service (x64 or arm64) or in Docker; it only reads your media folders and works in the home network, or away from home through a VPN. All products are at version 2.0.0 (08.11.2026). The interface is in English.
+
+Key facts for answering questions:
+- Mac downloads: `Aurelia-<version>-<build>-macOS-arm64.dmg` for Apple silicon, `…-macOS-x64.dmg` for Intel; macOS 26 or later. The published Mac download is development-signed and runs only on Macs registered to the developer; others build from source.
+- Linux desktop app: deb/rpm/Arch packages for x64 (amd64/x86_64) and arm64 (arm64/aarch64), Flatpak for x64.
+- Linux server: `curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh | sudo bash`; manage with the `aurelia` command (`aurelia pair`, `aurelia library add --path`, `sudo aurelia update`, `sudo aurelia sleep`).
+- Apple TV, iPhone and iPad apps are not in the App Store; they are built and installed from source with Xcode.
+- New devices pair with an 8-digit code created on the server computer (Settings › Profiles and Devices › Create Code, or `aurelia pair`). Codes last five minutes.
+- The server listens on HTTPS port 43111, answers only private addresses (home network, VPN, Tailscale) and must never be exposed with a port forward.
+- TMDB (details, artwork, cast) and OpenSubtitles need the user's own free keys, entered under Settings › Metadata.
+
+## Using Aurelia
+
+- [README](https://github.com/lucaskleinsteuber/Aurelia/blob/main/README.md): what Aurelia is, features, downloads by system and processor
+- [Getting started](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/GETTING_STARTED.md): choosing the server computer, setup, TMDB and OpenSubtitles keys, pairing devices, profiles
+- [Organizing your media](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/MEDIA_LIBRARY.md): folder and file names for movies, series, extras, trailers and subtitle files; collections
+- [Watching away from home](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/REMOTE_ACCESS.md): Tailscale subnet routing, FRITZ!Box and other WireGuard VPNs, why no port forwarding
+- [Troubleshooting](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/TROUBLESHOOTING.md): connection, certificate, pairing, sleep and wake, drives, matching, playback, signing, PINs
+- [Privacy policy](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/PRIVACY.md): what is stored where; nothing is collected by the developer
+
+## Apps
+
+- [Aurelia for Mac](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/MAC_APP.md): arm64 or x64 download, installing, building it yourself, hosting, settings, downloads and offline mode, updates
+- [Aurelia for Linux](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_APP.md): desktop app packages, hosting on a PC, signed updates
+- [Aurelia for Apple TV](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/APPLE_TV.md): pairing the Apple TV with Xcode, building, installing, the remote, seven-day signing
+- [Aurelia for iPhone and iPad](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/IOS_APP.md): building and installing with Xcode, what the app does
+- [Aurelia in a web browser](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/WEB_APP.md): signing in with a code, what plays directly and what is converted live
+
+## Server
+
+- [Aurelia Server on Linux](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/LINUX_SERVER.md): requirements, one-line install, `aurelia` command, updates, setup over SSH, media drives, power saving, removing
+- [Aurelia Server with Docker](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/DOCKER.md): compose file, setup commands, NAS notes
+- [Backups and recovery](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/DATABASE_RECOVERY.md): daily database backups and restoring them
+- [Security model](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/SECURITY_MODEL.md): owner, administrators and profiles, PINs, pairing, certificate pinning
+- [Audio processing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/AUDIO_PROCESSING.md): Dialogue Boost and Volume Leveling
+
+## Development
+
+- [All documentation](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/README.md): index of every guide
+- [Building and verification](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/TRANSPORT_TESTING.md): building from source and running the checks
+- [Client protocol](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/CLIENT_PROTOCOL.md) and [compatibility](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/CLIENT_COMPATIBILITY.md): the HTTPS API between apps and server
+- [Distribution and updates](https://github.com/lucaskleinsteuber/Aurelia/blob/main/docs/FREE_DISTRIBUTION.md): signing without the paid Apple program
+- [Contributing](https://github.com/lucaskleinsteuber/Aurelia/blob/main/CONTRIBUTING.md) and [security policy](https://github.com/lucaskleinsteuber/Aurelia/blob/main/SECURITY.md)
+- [Changelog](https://github.com/lucaskleinsteuber/Aurelia/blob/main/CHANGELOG.md): changes per product and version

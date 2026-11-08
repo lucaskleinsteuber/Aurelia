@@ -111,8 +111,11 @@ private struct IOSProfileEntry: View {
 
   var body: some View {
     VStack(spacing: 10) {
-      IOSProfilePicture(id: profile.id, name: profile.name, size: 96)
-        .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+      IOSProfilePicture(
+        id: profile.id, name: profile.name, size: 96, pictureKey: profile.pictureKey,
+        pictureRevision: profile.pictureRevision
+      )
+      .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
       HStack(spacing: 4) {
         Text(profile.name).font(.subheadline.weight(.semibold)).lineLimit(2)
           .multilineTextAlignment(.center)
@@ -122,7 +125,7 @@ private struct IOSProfileEntry: View {
         }
       }
       if profile.needsPinSetup {
-        Text("Set up a PIN on the Mac").font(.caption2).foregroundStyle(.secondary)
+        Text("Set up a PIN on the server computer").font(.caption2).foregroundStyle(.secondary)
           .multilineTextAlignment(.center)
       }
     }
@@ -130,12 +133,26 @@ private struct IOSProfileEntry: View {
   }
 }
 
-/// A round profile picture with the profile's initial on a gradient, in the same color the Mac
-/// app gives that profile.
+/// A round profile picture: the profile's photo, a built-in picture (a symbol on a gradient), or
+/// the initial on a gradient in the same color the Mac app gives that profile.
 struct IOSProfilePicture: View {
   let id: UUID?
   let name: String
   var size: CGFloat = 200
+  var pictureKey: String? = nil
+  var pictureRevision: Int64 = 0
+  @ObservedObject private var photos = IOSProfilePhotoCache.shared
+
+  init(
+    id: UUID?, name: String, size: CGFloat = 200, pictureKey: String? = nil,
+    pictureRevision: Int64 = 0
+  ) {
+    self.id = id
+    self.name = name
+    self.size = size
+    self.pictureKey = pictureKey
+    self.pictureRevision = pictureRevision
+  }
 
   static let palettes: [(Color, Color)] = [
     (Color(red: 0.36, green: 0.62, blue: 1.0), Color(red: 0.13, green: 0.36, blue: 0.86)),
@@ -147,19 +164,43 @@ struct IOSProfilePicture: View {
     (Color(red: 0.55, green: 0.6, blue: 1.0), Color(red: 0.28, green: 0.3, blue: 0.8)),
   ]
 
+  /// Built-in pictures' colors: the seven gradients above plus red.
+  static func namedPalette(_ name: String) -> (Color, Color) {
+    let index = IOSProfilePictures.paletteIndex(named: name)
+    if index < palettes.count { return palettes[index] }
+    return (Color(red: 1.0, green: 0.48, blue: 0.42), Color(red: 0.79, green: 0.19, blue: 0.17))
+  }
+
   var body: some View {
-    let colors = Self.palettes[IOSProfileColor.index(for: id) % Self.palettes.count]
+    let builtin = IOSProfilePictures.parse(pictureKey)
+    let colors =
+      builtin.map { Self.namedPalette($0.palette) }
+      ?? Self.palettes[IOSProfileColor.index(for: id) % Self.palettes.count]
+    let photo =
+      pictureKey == IOSProfilePictures.photoKey
+      ? id.flatMap { photos.image(id: $0, revision: pictureRevision) } : nil
     Circle()
       .fill(LinearGradient(colors: [colors.0, colors.1], startPoint: .top, endPoint: .bottom))
       .overlay {
-        Text(IOSProfileColor.initial(of: name))
-          .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
-          .foregroundStyle(.white)
-          .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        if let photo {
+          Image(uiImage: photo).resizable().scaledToFill().clipShape(Circle())
+        } else if let builtin {
+          IOSProfileSymbol(symbol: builtin.symbol, size: size)
+        } else {
+          Text(IOSProfileColor.initial(of: name))
+            .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        }
       }
       .overlay { Circle().strokeBorder(.white.opacity(0.14), lineWidth: 1.5) }
       .frame(width: size, height: size)
       .accessibilityHidden(true)
+      .task(id: "\(id?.uuidString ?? "")-\(pictureKey ?? "")-\(pictureRevision)") {
+        if pictureKey == IOSProfilePictures.photoKey, let id {
+          photos.load(id: id, revision: pictureRevision)
+        }
+      }
   }
 }
 
@@ -263,8 +304,11 @@ struct IOSPINView: View {
 
   private var identity: some View {
     VStack(spacing: 12) {
-      IOSProfilePicture(id: profile.id, name: profile.name, size: 72)
-        .shadow(color: .black.opacity(0.3), radius: 10, y: 5)
+      IOSProfilePicture(
+        id: profile.id, name: profile.name, size: 72, pictureKey: profile.pictureKey,
+        pictureRevision: profile.pictureRevision
+      )
+      .shadow(color: .black.opacity(0.3), radius: 10, y: 5)
       VStack(spacing: 2) {
         Text(profile.name).font(.title3.weight(.semibold)).multilineTextAlignment(.center)
           .lineLimit(2)

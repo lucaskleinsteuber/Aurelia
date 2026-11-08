@@ -19,6 +19,10 @@ public sealed class CredentialStoreUnavailableException(string message, Exceptio
     public static CredentialStoreUnavailableException NoKeyring(Exception? inner = null) => new(
         "Aurelia keeps its server connection in your desktop's keyring, but none is available. Install and start GNOME Keyring or KDE Wallet, then try again.",
         inner);
+
+    public static CredentialStoreUnavailableException KeyringFailed(Exception? inner = null) => new(
+        "Your desktop's keyring did not give Aurelia its saved connection. Unlock the keyring if it asks, then try again.",
+        inner);
 }
 
 /// <summary>Holds the connection in memory, for tests.</summary>

@@ -104,9 +104,10 @@ with `sudo aurelia sleep` or in Aurelia on a Mac.
 Then connect the devices and compare the verification fingerprint they show with the one from
 `aurelia status`:
 
-- **Apple TV:** choose the server; it shows a code. Approve it on the server with
+- **Every device** (Mac, Linux PC, Apple TV, iPhone, iPad, browser): run `aurelia pair` on the
+  server and type the code it shows on the device. A code works once and for five minutes.
+- **Older Apple TV, iPhone, iPad or browser versions** show a code themselves; approve it with
   `aurelia approve 12345678`.
-- **Mac:** run `aurelia pair` on the server and enter the code it shows in Aurelia on the Mac.
 
 The first of these asks for the owner's new viewing PIN. Add media folders with:
 
@@ -150,7 +151,7 @@ sudo aurelia sleep status
   Apple TV connects, Aurelia starts again within seconds; the app's first attempt is dropped and
   it tries again by itself.
 - **Put the computer to sleep** suspends it to RAM, using a few watts. Aurelia on a Mac wakes it
-  when you open it (Wake-on-LAN), and a router such as a Fritzbox can wake it too. An Apple TV
+  when you open it (Wake-on-LAN). An Apple TV
   cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH keeps
   the computer awake.
 - Either happens after `--idle` minutes (15 by default) in which nobody used Aurelia (browsing,

@@ -4,13 +4,115 @@ All notable changes to Aurelia are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and new versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Mac/server, Linux, Apple TV and iOS have independent versions. Historical development
+Mac, server, Linux, Apple TV and iPhone & iPad have independent version counters; with 2.0.0
+every product starts again from the same version. Historical development
 builds and the archived desktop client are included; an entry does not imply public
 availability. Dates use DD.MM.YYYY. Early Builds 1–11 retain their original 0.1.0
 version and individual build numbers. Builds 25, 26, 29 and 30 have no separate
 versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
+
+## Mac 2.0.0 (153) - 08.11.2026
+
+Aurelia 2.0 is the first release with every app at the same version and is a stable release.
+
+### Added
+
+- One download for Macs with Apple silicon (arm64) and one for Macs with an Intel processor (x64); each carries only its own server, so the app is smaller. The updater takes the download made for its Mac.
+- An offline mode: while Aurelia looks for or wakes its server, or when the server does not answer, Watch Downloads Offline shows the downloads with Continue Watching, movies and series. Each profile stays private and opens with its PIN.
+- Downloads keep their poster, backdrop, description and episode numbers; Downloads shows each poster.
+- Settings › About shows what changed in this version, the full license texts of Aurelia, VLCKit and FFmpeg, the notices of every other component and the privacy policy.
+- A profile photo opens in a crop sheet after choosing it, and Adjust Photo frames it again.
+
+### Changed
+
+- Every new device pairs with one code: Create Code on this Mac, and type it on the Apple TV, iPhone, iPad, Linux PC or in a browser. Enter Code from Device is gone.
+- Back returns through every page opened from another, such as a series, an actor and the actor's other titles.
+- Settings open with a quiet fade on the page asked for, and load the server's details after it.
+- A title's cast and crew are complete, and collections gather a whole film series in the order it came out, as well as movies and series of one shared universe.
+
+### Fixed
+
+- The offline mode found no profiles, because the Keychain refused to list them.
+- Downloads are offered only to the profile that made them, and a refused request explains itself instead of showing HTTP 403.
+- Settings opened while a title plays (⌘, or the menu) appear over the player instead of invisibly behind it; Esc closes them and the player keeps its keys.
+
+## Server 2.0.0 (148) - 08.11.2026
+
+### Added
+
+- Cast and crew are complete: every actor and every crew job from TMDB, for a series from all its seasons. Titles matched earlier get their whole cast once, shortly after the update, without changing their match or hand-edited credits.
+- Collections for shared universes: movies and series that TMDB marks as part of one world (for example the Marvel Cinematic Universe or Middle-earth) come together in one collection, beside each film series.
+- Pairing a browser with the code that the Mac or Linux app creates.
+
+### Changed
+
+- Film series and universes list their titles in the order they came out.
+- Home answers about a quarter faster in large libraries, and the server prepares Home and the library right after it starts, so the first app to open them no longer waits.
+- For a title without a German rating, a children's profile counts its US rating as the next FSK at or above that age (PG-13 and TV-14 as FSK 16, R and TV-MA as FSK 18).
+- Watch statistics count an episode with its series' genres, so Favorite Genres no longer stays empty for someone who watches series.
+
+### Removed
+
+- Waking the server through a FRITZ!Box sign-in on the Apple TV; Wake-on-LAN from the apps stays.
+
+### Fixed
+
+- The media file check compares device and inode, a library change reaches every profile that can open it, Watch Together leaves out titles a profile cannot open, and an interrupted upload no longer reports a storage failure.
+- The browser app keeps the last playback position when saves overlap, starts one live stream per seek, and ends a revoked profile's session also in the player.
+
+## Linux Desktop 2.0.0 (25) - 08.11.2026
+
+### Added
+
+- Packages for 64-bit ARM computers (arm64: deb, rpm and Arch) beside the x64 packages; the updater takes the package for its processor. Flatpak stays x64.
+- An offline mode as on the Mac: while Aurelia looks for or wakes its server, or when it does not answer, the downloads open in a small library of their own, private per profile.
+- Downloads keep their artwork and description, and a profile photo opens in a crop sheet with Adjust Photo, as on the Mac.
+- Settings › About shows the license texts and the privacy policy.
+- Updates install only when the release carries the owner's signature.
+
+### Changed
+
+- Home appears as soon as its own rows arrive; the whole catalog of a large library fills in after it.
+- Long rows and grids make only the cards near the view: with 1,500 titles Home rebuilds in about 60 ms instead of up to a second.
+- Settings › Activity shows the last twelve weeks across the page, and starts beside the sidebar instead of under it.
+
+### Fixed
+
+- Home no longer keeps loading forever when the server does not answer; loading rings sit in the middle.
+- The player keeps its controls while a menu is open; a second click closes the menu, and long track names end in "…".
+- Menus on X11 are drawn inside the window, and popups are transparent, so rounded menus show no square corners.
+
+## Apple TV 2.0.0 (35) - 08.11.2026
+
+### Changed
+
+- The Apple TV pairs with the code that the Mac or Linux app creates.
+- Settings › About shows the license texts of Aurelia and TVVLCKit and the privacy policy, with a QR code to read them online.
+- The player keeps its focus steady: loading after a skip no longer moves it away and back, and moving between rows moves it once.
+
+### Removed
+
+- Waking the server through a FRITZ!Box, which needed the router's sign-in; a sign-in saved earlier is erased.
+
+### Fixed
+
+- Picture and color choices for a profile have no gray frame.
+
+## iPhone & iPad 2.0.0 (16) - 08.11.2026
+
+### Changed
+
+- A series shows its episodes, trailers and extras as wide cards with picture, title and description, as on the Mac.
+- iPhone and iPad pair with the code that the Mac or Linux app creates.
+- Settings › About shows the full license texts of Aurelia and MobileVLCKit and links the privacy policy.
+- Activity shows the last twelve weeks of watch time.
+
+### Fixed
+
+- Removing a title from Watch History shows a red button with its trash symbol.
+- The player explains a refused title instead of closing, and the status bar stays hidden during playback.
 
 ## Mac 1.34.0 (148) Beta - 07.11.2026
 
@@ -20,16 +122,26 @@ versioned commit, so their skipped numbers are preserved.
 - Posters of Home and the library load in the background ahead of scrolling, so cards no longer show them appearing.
 - A title's Information lists only what is known instead of dashes for missing details.
 
-## Linux Desktop 1.6.0 (16) Beta - 07.11.2026
+## Linux Desktop 1.6.0 (17) Beta - 07.11.2026
+
+### Added
+
+- Settings › About: version and build, what changed in this version, the GitHub link, the license and the open-source parts Aurelia is built with.
+- Scene notes as on the Mac: mark a moment or a time range with an optional note, take the current position for start and end, and edit or remove notes.
 
 ### Changed
 
 - Pages, sheets, Settings and menus appear with short, quiet motion (off with Reduce Motion); covers load ahead of scrolling and appear at once when shown again.
 - Settings open inside the window instead of a window of their own; the temporary Public Update Test switch is gone.
 - Menus are rounded dark glass with icons; the metadata editor opens faster by showing the first ten people of long casts.
+- The picture always fills the window without black bars; the switch for it is gone. The skip buttons show a circling arrow with the seconds, and loading shows a turning ring instead of a bar.
+- Downloads without any titles show a short guide.
 
 ### Fixed
 
+- The player's playback rate, audio, subtitle, sleep timer and chapter menus showed an empty box; the subtitle button was highlighted without subtitles.
+- The timeline jumped up when pointed at, hid its chapter marks and its preview pictures; chapter marks are now small gaps in the bar.
+- Some library filters kept loading forever when their result came from the cache.
 - Choosing Home in the sidebar while a title is open returns to Home.
 - The foot of the sidebar no longer lets the page show through, and the PIN field lost the gray box inside it.
 

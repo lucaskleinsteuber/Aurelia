@@ -74,10 +74,13 @@ public sealed class PresentationService(
             .ToList();
 
         CollectionSummary? franchiseSummary = null;
-        if (item.Kind == MediaKind.Movie)
+        if (item.Kind is MediaKind.Movie or MediaKind.Series)
         {
+            // A movie's own film series first, then the wider universe it shares with series.
             var franchise = await database.MediaCollections.AsNoTracking()
-                .Where(c => c.Provider == "tmdb" && c.Members.Any(m => m.MediaItemId == mediaId))
+                .Where(c => (c.Provider == "tmdb" || c.Provider == MediaUniverses.Provider) && c.Members.Count >= 2
+                    && c.Members.Any(m => m.MediaItemId == mediaId))
+                .OrderBy(c => c.Provider == "tmdb" ? 0 : 1)
                 .Select(c => new
                 {
                     c.Id,
@@ -88,7 +91,7 @@ public sealed class PresentationService(
 
             if (franchise is not null && franchise.Ids.Count >= 2)
             {
-                var franchiseCards = await SummariesAsync(userId, franchise.Ids, cancellationToken);
+                var franchiseCards = ByRelease(await SummariesAsync(userId, franchise.Ids, cancellationToken));
                 var poster = franchiseCards.Select(c => c.Poster).FirstOrDefault(p => p is not null);
                 franchiseSummary = new CollectionSummary(
                     franchise.Id,
@@ -286,8 +289,12 @@ public sealed class PresentationService(
             .Concat(movieTargets.Select(item => (item.Id, item.Played)))
             .OrderByDescending(item => item.Played).ThenBy(item => item.Id).Take(20).Select(item => item.Id).ToList();
         var continueItems = await SummariesAsync(userId, continueIds, cancellationToken);
-        var recentItems = await Cards(topLevel.OrderByDescending(item => item.CreatedAt)
-            .ThenBy(item => item.Id).Take(30), userId).ToListAsync(cancellationToken);
+        // The newest 30 by id first, then only their cards, in that order.
+        var recentIds = await topLevel.OrderByDescending(item => item.CreatedAt).ThenBy(item => item.Id)
+            .Take(30).Select(item => item.Id).ToListAsync(cancellationToken);
+        var recentCards = await Cards(BaseItems(userId).Where(item => recentIds.Contains(item.Id)), userId).ToListAsync(cancellationToken);
+        var recentOrder = recentIds.Select((id, index) => (id, index)).ToDictionary(pair => pair.id, pair => pair.index);
+        var recentItems = recentCards.OrderBy(card => recentOrder[card.Id]).ToList();
         var favoriteItems = await Cards(topLevel
             .Where(item => item.Favorites.Any(value => value.UserId == userId))
             .OrderBy(item => item.DetectedTitle).ThenBy(item => item.Id)
@@ -296,16 +303,14 @@ public sealed class PresentationService(
         var hour = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero);
         var preferred = topLevel.Where(item => !item.PlaybackProgress.Any(
             progress => progress.UserId == userId && progress.IsCompleted));
-        var preferredCount = await preferred.CountAsync(cancellationToken);
-        var recommendationQuery = preferredCount == 0 ? topLevel : preferred;
-        var recommendationCount = preferredCount == 0
-            ? await topLevel.CountAsync(cancellationToken)
-            : preferredCount;
-        var recommendationItem = recommendationCount == 0
+        // The hour's title: one read of the candidates' ids, counted and chosen here, then only
+        // that card. Counting and then skipping through them in the database walked them twice.
+        var pool = await preferred.OrderBy(item => item.Id).Select(item => item.Id).ToListAsync(cancellationToken);
+        if (pool.Count == 0) pool = await topLevel.OrderBy(item => item.Id).Select(item => item.Id).ToListAsync(cancellationToken);
+        Guid? chosen = pool.Count == 0 ? null : pool[StableIndex(userId, hour, pool.Count)];
+        var recommendationItem = chosen is not { } chosenId
             ? null
-            : await Cards(recommendationQuery.OrderBy(item => item.Id)
-                .Skip(StableIndex(userId, hour, recommendationCount)).Take(1), userId)
-                .SingleAsync(cancellationToken);
+            : await Cards(BaseItems(userId).Where(item => item.Id == chosenId), userId).SingleOrDefaultAsync(cancellationToken);
         return new HomeResponse(
             recommendationItem is null ? null : ToCatalog(recommendationItem, userId),
             continueItems,
@@ -336,6 +341,7 @@ public sealed class PresentationService(
                 collection.IsSmart,
                 collection.SmartRulesJson,
                 collection.UserId,
+                collection.Provider,
                 Ids = collection.Members.OrderBy(member => member.SortOrder).Select(member => member.MediaItemId).ToList()
             })
             .ToListAsync(cancellationToken);
@@ -371,6 +377,7 @@ public sealed class PresentationService(
             else
             {
                 var members = collection.Ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+                if (collection.Provider is not null) members = ByRelease(members);
                 results.Add(new CollectionSummary(
                     collection.Id,
                     collection.Name,
@@ -497,11 +504,15 @@ public sealed class PresentationService(
         }
     }
 
+    /// <summary>A film series or universe in the order its titles came out; undated ones last.</summary>
+    internal static List<CatalogItemSummary> ByRelease(IEnumerable<CatalogItemSummary> items) =>
+        [.. items.OrderBy(item => item.Year ?? int.MaxValue).ThenBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)];
+
     public async Task<IReadOnlyList<CollectionSummary>> FranchisesAsync(Guid userId, int offset, int limit, CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
         var franchises = await database.MediaCollections.AsNoTracking()
-            .Where(c => c.Provider == "tmdb" && c.Members.Count >= 1)
+            .Where(c => (c.Provider == "tmdb" || c.Provider == MediaUniverses.Provider) && c.Members.Count >= 1)
             .OrderBy(c => c.Name).ThenBy(c => c.Id)
             .Skip(offset).Take(limit)
             .Select(c => new
@@ -518,7 +529,7 @@ public sealed class PresentationService(
 
         return franchises.Select(f =>
         {
-            var members = f.Ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+            var members = ByRelease(f.Ids.Where(byId.ContainsKey).Select(id => byId[id]));
             var poster = members.Select(m => m.Poster).FirstOrDefault(p => p is not null);
             return new CollectionSummary(f.Id, f.Name, poster, members, IsSmart: false, TotalCount: members.Count, IsShared: true);
         }).ToList();
@@ -529,7 +540,7 @@ public sealed class PresentationService(
         // Only a provider franchise can be copied, never another profile's own collection.
         var franchise = await database.MediaCollections.AsNoTracking()
             .Include(c => c.Members)
-            .SingleOrDefaultAsync(c => c.Id == franchiseId && c.Provider == "tmdb", cancellationToken)
+            .SingleOrDefaultAsync(c => c.Id == franchiseId && (c.Provider == "tmdb" || c.Provider == MediaUniverses.Provider), cancellationToken)
             ?? throw new MetadataException("franchise_not_found", "Franchise collection not found.", StatusCodes.Status404NotFound);
 
         var memberIds = franchise.Members.OrderBy(m => m.SortOrder).Select(m => m.MediaItemId).ToList();
@@ -618,7 +629,10 @@ public sealed class PresentationService(
             || (database.AccessMode == ProfileAccessMode.SelectedTitles && database.UserTitleGrants.Any(grant => grant.UserId == database.AccessUserId
                 && (grant.MediaItemId == child.Id || grant.MediaItemId == child.ParentId
                     || database.MediaItems.Any(parent => parent.Id == child.ParentId
-                        && (parent.ParentId == grant.MediaItemId || database.MediaItems.Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId)))))))
+                        && (parent.ParentId == grant.MediaItemId || database.MediaItems.Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId))))))
+            // A children's profile: an episode follows its season or series, which the MediaItems filter already
+            // checks by age. IgnoreQueryFilters would switch off every filter of this query, so it is not used here.
+            || (database.AccessAgeLimited && database.MediaItems.Any(parent => parent.Id == child.ParentId)))
         .Select(child => child.Id);
 
     private IQueryable<MediaItem> BaseItems(Guid userId)

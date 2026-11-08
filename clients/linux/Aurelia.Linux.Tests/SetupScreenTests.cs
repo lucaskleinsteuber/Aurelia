@@ -136,6 +136,9 @@ public sealed class SetupScreenTests
         }
         Assert.Equal(AppScreen.ServerUnreachable, window.Flow.Screen);
         Assert.NotNull(Visible<Button>(window, b => b.Content as string == "Try Again"));
+        // No profile was opened, so no profile's downloads may be offered here.
+        Assert.DoesNotContain(window.CurrentScreen!.GetVisualDescendants().OfType<TextBlock>(),
+            t => t.IsEffectivelyVisible && t.Text == "Watch a Download");
         Snapshot(window, "server-unreachable");
     }
 

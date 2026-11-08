@@ -123,10 +123,18 @@ struct IOSHomeView: View {
       }
     )
     .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
+    .onChange(of: model.remoteStopRequests) { _, _ in playback = nil }
     .onChange(of: model.remotePlaybackItem) { _, item in
-      if let item {
-        playback = IOSHomePlayback(target: item, queue: [], title: item.title)
-        model.remotePlaybackItem = nil
+      guard let item else { return }
+      model.remotePlaybackItem = nil
+      Task {
+        // A player that is already open closes first, so it saves its progress.
+        if model.playerPresented { model.stopPlayer() }
+        for _ in 0..<20 where model.playerPresented {
+          try? await Task.sleep(for: .milliseconds(100))
+        }
+        // The same way as choosing the title: playable check, resume target, next episode.
+        play(item)
       }
     }
     .alert(

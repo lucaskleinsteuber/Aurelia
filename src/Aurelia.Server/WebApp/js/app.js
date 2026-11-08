@@ -5,6 +5,7 @@ import { h, icon, clear } from "./dom.js";
 import { createApi, ApiError } from "./api.js";
 import { createCatalogView } from "./catalog-view.js";
 import * as logic from "./logic.js";
+import { PROFILE_SYMBOL_PATHS } from "./profile-symbols.js";
 import { createWatchTogether } from "./watch-together.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
@@ -78,11 +79,14 @@ function showServerOff() {
     h("p", {}, `“${name}” isn’t answering. The computer may be asleep or turned off. You can wake it with Aurelia on your Mac if Wake-on-LAN is set up, or check that the computer is turned on.`),
     h("p", { class: "muted" }, "This page connects by itself as soon as the server is on."),
     h("div", { class: "button-row" }, h("button", { class: "primary-button", onclick: () => start() }, "Try Again")))));
+  // Several requests can fail at once; only one retry may be waiting.
+  clearTimeout(state.retryTimer);
   state.retryTimer = setTimeout(() => start(), 20_000);
 }
 
 // Settings needs these app functions; they are declarations, so they exist already.
-const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut });
+const settings = createSettings({ api, state, navigate, toast, handleError, profilePicture, switchProfile, confirmSignOut,
+  rememberPhoto, updateProfile, pictureAddress, startTour: () => { navigate({ name: "home" }); setTimeout(() => startTour(), 400); } });
 
 const catalog = createCatalogView({ api, navigate, posterCard, collectionCard, emptyState, openMenu, menuOption, handleError, toast,
   play: playTitle, canManage: () => logic.managementPermissions(state.profile).administrator,
@@ -122,82 +126,65 @@ async function showPairing(note) {
   stopSync();
   document.title = "Aurelia";
   const token = ++state.renderToken;
-  const code = h("div", { class: "pairing-code", "aria-live": "polite" }, "…");
-  const expiry = h("p", { class: "muted pairing-expiry" });
+  let busy = false;
+  // Every Aurelia app pairs the same way: the main device shows the code, this browser types it.
+  const field = h("input", {
+    class: "pairing-code pairing-input",
+    type: "text",
+    inputmode: "numeric",
+    pattern: "[0-9]*",
+    maxlength: "9",
+    autocomplete: "one-time-code",
+    placeholder: "0000 0000",
+    "aria-label": "Pairing code",
+  });
   const message = h("p", { class: "error-text", role: "alert" }, note ?? "");
-  const renew = h("button", { class: "secondary-button", hidden: true, onclick: () => showPairing() }, "Create a New Code");
-  clear(root);
-  root.append(screenFrame(h("div", { class: "center-stack narrow" },
-    h("img", { class: "brand-mark", src: "/web/icon.svg", alt: "" }),
-    h("h1", {}, "Sign In to Aurelia"),
-    h("p", {}, "In Aurelia on your Mac, open Settings › Server › Devices, choose “Enter Code from Apple TV or Browser…” and type this code."),
-    code, expiry, message, h("div", { class: "button-row" }, renew),
-    h("p", { class: "muted small" }, `Server: ${state.server?.name ?? "Aurelia"}`))));
-
-  let pairing;
-  try {
-    pairing = await api.startPairing(logic.deviceName(navigator.userAgent, navigator.maxTouchPoints));
-  } catch (error) {
-    if (token !== state.renderToken) return;
-    if (error instanceof ApiError && error.offline) return showServerOff();
-    code.textContent = "— — — —";
-    message.textContent = error.code === "pairing_disabled"
-      ? "Signing in new devices is turned off on this server. Turn it on in Aurelia on your Mac."
-      : error.code === "https_required"
-        ? "Open this page with the server’s https:// address to sign in."
-        : error.message;
-    renew.hidden = false;
-    renew.textContent = "Try Again";
-    return;
-  }
-  if (token !== state.renderToken) return;
-  code.textContent = logic.formatCode(pairing.code);
-  code.setAttribute("aria-label", `Code ${pairing.code.split("").join(" ")}`);
-
-  const tick = () => {
-    const left = logic.countdown(pairing.expiresAt);
-    expiry.textContent = left ? `Valid for ${left}` : "This code has expired.";
-    if (!left) {
-      code.classList.add("expired");
-      renew.hidden = false;
-    }
-    return Boolean(left);
-  };
-  tick();
-  const ticker = setInterval(() => {
-    if (token !== state.renderToken || !tick()) clearInterval(ticker);
-  }, 1000);
-
-  const interval = Math.max(5, pairing.pollIntervalSeconds ?? 5) * 1000 + 500;
-  const poll = async () => {
-    if (token !== state.renderToken || !logic.countdown(pairing.expiresAt)) return;
+  const submit = h("button", { class: "primary-button", type: "submit", disabled: true }, "Sign In");
+  field.addEventListener("input", () => {
+    const digits = logic.pairingDigits(field.value);
+    field.value = logic.formatCode(digits);
+    submit.disabled = busy || digits.length !== 8;
+  });
+  const form = h("form", { class: "center-stack narrow", onsubmit: async (event) => {
+    event.preventDefault();
+    const digits = logic.pairingDigits(field.value);
+    if (busy || digits.length !== 8) return;
+    busy = true;
+    submit.disabled = true;
+    message.textContent = "";
     try {
-      const status = await api.pairingStatus();
+      await api.redeemPairingCode(digits, logic.deviceName(navigator.userAgent, navigator.maxTouchPoints));
       if (token !== state.renderToken) return;
-      if (status.state === "approved") return showProfiles();
-      if (status.state === "denied") {
-        message.textContent = "The code was declined on the Mac.";
-        code.classList.add("expired");
-        renew.hidden = false;
-        return;
-      }
-      if (status.state !== "pending") {
-        code.classList.add("expired");
-        renew.hidden = false;
-        return;
-      }
+      return showProfiles();
     } catch (error) {
       if (token !== state.renderToken) return;
-      if (error instanceof ApiError && error.status === 404) {
-        code.classList.add("expired");
-        renew.hidden = false;
-        return;
-      }
-      // Offline for a moment or polled too soon: keep waiting.
+      if (error instanceof ApiError && error.offline) return showServerOff();
+      message.textContent = error.code === "invalid_pairing_code"
+        ? "This code is wrong, used or expired. Create a new one on your Mac or Linux computer."
+        : error.code === "forbidden" || error.code === "pairing_disabled"
+          ? "Signing in new devices is turned off on this server. Turn it on in Aurelia on the main device."
+          : error.code === "https_required"
+            ? "Open this page with the server’s https:// address to sign in."
+            : error.message;
+      field.value = "";
+      field.focus();
+    } finally {
+      busy = false;
+      submit.disabled = logic.pairingDigits(field.value).length !== 8;
     }
-    setTimeout(poll, interval);
-  };
-  setTimeout(poll, interval);
+  } },
+    h("img", { class: "brand-mark", src: "/web/icon.svg", alt: "" }),
+    h("h1", {}, "Sign In to Aurelia"),
+    h("p", {}, "Your Mac or Linux computer shows a code; you type it here."),
+    h("ol", { class: "pairing-steps" },
+      h("li", {}, "On the computer that runs Aurelia, open Settings › Profiles and Devices."),
+      h("li", {}, "Click Create Code. On a Linux server without screen, run aurelia pair."),
+      h("li", {}, "Type the 8 digits below. A code works once and for five minutes.")),
+    field, message, h("div", { class: "button-row" }, submit),
+    h("p", { class: "muted small" }, `Server: ${state.server?.name ?? "Aurelia"}`));
+  clear(root);
+  root.append(screenFrame(form));
+  field.focus();
 }
 
 // MARK: Profiles
@@ -221,7 +208,7 @@ async function showProfiles(note) {
   if (token !== state.renderToken) return;
   const list = h("div", { class: "profile-grid" }, picker.profiles.map((profile) =>
     h("button", { class: "profile-entry", onclick: () => chooseProfile(profile) },
-      profilePicture(profile.id, profile.name, "large"),
+      profilePicture(profile, "large"),
       h("span", { class: "profile-name" }, profile.name, profile.pinProtectionEnabled ? icon("lock", { size: 14, label: "PIN protected" }) : null))));
   const message = h("p", { class: "error-text", role: "alert" }, note ?? "");
   if (picker.managementSetupRequired) message.textContent = "Finish setting up profiles in Aurelia on your Mac first.";
@@ -233,8 +220,67 @@ async function showProfiles(note) {
   list.querySelector("button")?.focus();
 }
 
-function profilePicture(id, name, size = "small") {
-  return h("span", { class: `profile-picture ${size} palette-${logic.profileColorIndex(id)}`, "aria-hidden": "true" }, logic.initial(name));
+const photoUrls = new Map();
+
+/** A picture as a data: address; the page's security policy allows data: images, not blob: ones. */
+function pictureAddress(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * A round profile picture: the profile's photo, a built-in picture (a symbol on a palette), or its
+ * initial on the gradient every client gives that profile. `person` is a user or picker profile.
+ */
+function profilePicture(person, size = "small") {
+  const id = person?.id;
+  const name = logic.shownName(person);
+  const builtin = logic.parsePicture(person?.pictureKey);
+  const palette = builtin ? builtin.paletteIndex : logic.profileColorIndex(id);
+  const picture = h("span", { class: `profile-picture ${size} palette-${palette}`, "aria-hidden": "true" });
+  if (builtin) {
+    const svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("class", "profile-symbol");
+    const shape = document.createElementNS(SVG, "path");
+    shape.setAttribute("d", PROFILE_SYMBOL_PATHS[builtin.symbol]);
+    shape.setAttribute("fill-rule", "evenodd");
+    svg.append(shape);
+    picture.append(svg);
+    return picture;
+  }
+  picture.append(logic.initial(name));
+  if (person?.pictureKey === logic.PHOTO_PICTURE && id) {
+    const key = `${id}-${person.pictureRevision ?? 0}`;
+    const show = (url) => {
+      picture.textContent = "";
+      picture.append(h("img", { class: "profile-photo", src: url, alt: "" }));
+    };
+    if (photoUrls.has(key)) {
+      photoUrls.get(key).then((url) => url && show(url));
+    } else {
+      const loading = api.profilePhoto(id, person.pictureRevision ?? 0).then((blob) => pictureAddress(blob)).catch(() => null);
+      photoUrls.set(key, loading);
+      loading.then((url) => url && show(url));
+    }
+  }
+  return picture;
+}
+
+/** Keeps a just-uploaded photo so it shows at once. */
+function rememberPhoto(person, file) {
+  photoUrls.set(`${person.id}-${person.pictureRevision ?? 0}`, pictureAddress(file));
+}
+
+/** The profile changed its name or picture in Settings. */
+function updateProfile(user) {
+  if (!state.profile || state.profile.id !== user.id) return;
+  state.profile = { ...state.profile, ...user };
+  renderRoute({ quiet: true });
 }
 
 async function chooseProfile(profile) {
@@ -319,7 +365,7 @@ function showPin(profile) {
   clear(root);
   root.append(screenFrame(h("div", { class: "center-stack pin-layout" },
     h("button", { class: "profile-back", type: "button", onclick: () => showProfiles(), "aria-label": `${profile.name}, back to profiles` },
-      profilePicture(profile.id, profile.name, "large"), h("span", { class: "profile-name pin-name" }, profile.name)),
+      profilePicture(profile, "large"), h("span", { class: "profile-name pin-name" }, profile.name)),
     h("p", { class: "muted pin-prompt" }, "Enter your PIN"),
     form,
     message)));
@@ -339,7 +385,7 @@ async function enterProfile(user) {
 function confirmSignOut() {
   const dialog = h("dialog", { class: "sheet" },
     h("h2", {}, "Sign out of this browser?"),
-    h("p", {}, "To use Aurelia here again, the owner has to approve a new code on the Mac."),
+    h("p", {}, "To use Aurelia here again, you need a new code from the Mac or Linux computer that runs Aurelia."),
     h("div", { class: "button-row end" },
       h("button", { class: "secondary-button", onclick: () => dialog.close() }, "Cancel"),
       h("button", { class: "danger-button", onclick: async () => {
@@ -412,12 +458,12 @@ async function sessionEnded() {
     showProfiles("Your profile session ended. Choose your profile again.");
   } catch (error) {
     if (error instanceof ApiError && error.offline) return showServerOff();
-    showPairing("This browser was signed out. Ask the owner to approve a new code.");
+    showPairing("This browser was signed out. Ask the owner for a new code.");
   }
 }
 
 function handleError(error) {
-  if (error instanceof ApiError && (error.status === 401 || (error.status === 403 && /session|profile|device/.test(error.code)))) {
+  if (error instanceof ApiError && logic.sessionRefused(error.status, error.code)) {
     sessionEnded();
     return true;
   }
@@ -432,6 +478,7 @@ function handleError(error) {
 
 function navigate(route, { replace = false } = {}) {
   settings.closeEditors();
+  endTour();
   const currentPath = logic.routePath(state.route) || (location.pathname + location.search);
   if (!replace) scrollMemory.remember(currentPath, window.scrollY);
   const path = logic.routePath(route);
@@ -471,7 +518,7 @@ function shell(content) {
   ].filter(([name]) => sidebarShows(name));
   const current = state.route.name;
   const menu = h("div", { class: "profile-menu", hidden: true },
-    h("div", { class: "menu-header" }, profilePicture(state.profile.id, state.profile.username), h("span", {}, state.profile.username)),
+    h("div", { class: "menu-header" }, profilePicture(state.profile), h("span", {}, logic.shownName(state.profile))),
     h("a", { class: "menu-item", href: "/history", "data-route": true }, "Watch History"),
     h("a", { class: "menu-item", href: "/statistics", "data-route": true }, "Statistics"),
     h("a", { class: "menu-item", href: "/settings", "data-route": true }, "Settings…"),
@@ -493,8 +540,8 @@ function shell(content) {
     h("div", { class: "top-actions" },
       h("a", { class: `icon-button ${current === "search" ? "selected" : ""}`, href: "/search", "data-route": true, "aria-label": "Search" }, icon("search")),
       h("div", { class: "menu-anchor" },
-        h("button", { class: "avatar-button", "aria-label": `${state.profile.username}, profile menu`, "aria-haspopup": "menu", onclick: toggleMenu },
-          profilePicture(state.profile.id, state.profile.username)), menu)));
+        h("button", { class: "avatar-button", "aria-label": `${logic.shownName(state.profile)}, profile menu`, "aria-haspopup": "menu", onclick: toggleMenu },
+          profilePicture(state.profile)), menu)));
   return h("div", { class: "app-shell" }, header, h("main", { class: "page", id: "page" }, content));
 }
 
@@ -534,8 +581,93 @@ async function renderRoute({ quiet = false, restoreScroll = false } = {}) {
     }
   }
   isRenderingRoute = false;
+  if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
   const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
+}
+
+// MARK: Tour
+
+let tour = null;
+
+function safeStorage() {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The short tour on the first sign-in in this browser: the page dims around one place and a note
+ * explains it. Next or Enter moves on; Skip Tour, Esc or opening another page ends it.
+ */
+function startTour() {
+  if (tour || !state.profile) return;
+  logic.markTourSeen(safeStorage());
+  let index = 0;
+  const ring = h("div", { class: "tour-ring", "aria-hidden": "true" });
+  const title = h("h2", { class: "tour-title", id: "tour-title" });
+  const text = h("p", { class: "tour-text" });
+  const counter = h("span", { class: "muted small" });
+  const next = h("button", { class: "primary-button", onclick: () => advance() }, "Next");
+  const bubble = h("div", { class: "tour-bubble", role: "dialog", "aria-modal": "false", "aria-labelledby": "tour-title" },
+    title, text,
+    h("div", { class: "tour-actions" }, counter,
+      h("button", { class: "link-button", onclick: () => endTour() }, "Skip Tour"), next));
+  const layer = h("div", { class: "tour-layer" }, ring, bubble);
+  const place = () => {
+    const stop = logic.TOUR_STOPS[index];
+    const target = document.querySelector(stop.target);
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    let hole = null;
+    if (target) {
+      target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      const rect = target.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        hole = { left: rect.left - 8, top: rect.top - 8, right: rect.right + 8, bottom: rect.bottom + 8 };
+      }
+    }
+    ring.hidden = !hole;
+    layer.classList.toggle("dimmed", !hole);
+    if (hole) Object.assign(ring.style, { left: `${hole.left}px`, top: `${hole.top}px`, width: `${hole.right - hole.left}px`, height: `${hole.bottom - hole.top}px` });
+    const position = logic.tourBubblePosition(hole, viewport, { width: Math.min(320, viewport.width - 32), height: bubble.offsetHeight || 170 });
+    Object.assign(bubble.style, { left: `${position.x}px`, top: `${position.y}px` });
+  };
+  const show = () => {
+    const stop = logic.TOUR_STOPS[index];
+    title.textContent = stop.title;
+    text.textContent = stop.text;
+    counter.textContent = `${index + 1} of ${logic.TOUR_STOPS.length}`;
+    next.textContent = index === logic.TOUR_STOPS.length - 1 ? "Done" : "Next";
+    place();
+    next.focus();
+  };
+  const advance = () => {
+    index += 1;
+    if (index >= logic.TOUR_STOPS.length) endTour();
+    else show();
+  };
+  const keys = (event) => {
+    if (event.key === "Escape") endTour();
+    else if (event.key === "Enter" && document.activeElement !== next) advance();
+    else return;
+    event.preventDefault();
+  };
+  document.addEventListener("keydown", keys);
+  window.addEventListener("resize", place);
+  tour = { layer, close: () => {
+    document.removeEventListener("keydown", keys);
+    window.removeEventListener("resize", place);
+    layer.remove();
+  } };
+  document.body.append(layer);
+  show();
+}
+
+function endTour() {
+  tour?.close();
+  tour = null;
 }
 
 function screenFor(route, token) {
@@ -1166,7 +1298,7 @@ async function statisticsScreen() {
     statCard("Watches Most", stats.busiestWeekday ?? "—", timeOfDay(stats.busiestTimeOfDay)));
 
   const weekTitle = (period) => logic.weekStart(period)?.toLocaleDateString(undefined, { day: "numeric", month: "short" }) ?? period;
-  const weeks = stats.hoursByWeek ?? [];
+  const weeks = stats.hoursByWeek?.length ? logic.lastWeeks(stats.hoursByWeek) : [];
   const longestWeek = Math.max(0.0001, ...weeks.map((week) => week.hours));
   const weeklySection = weeks.length ? h("section", { class: "stat-section" },
     h("h2", {}, "Last 12 Weeks"),
@@ -1504,6 +1636,7 @@ function startSync() {
     let generation;
     let first = true;
     let failures = 0;
+    let offlineInRow = 0;
     while (!controller.signal.aborted) {
       try {
         const changes = await api.changes(after, generation, controller.signal);
@@ -1513,11 +1646,17 @@ function startSync() {
         generation = changes.generation ?? generation;
         first = false;
         failures = 0;
+        offlineInRow = 0;
       } catch (error) {
         if (controller.signal.aborted || error?.name === "AbortError") return;
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return sessionEnded();
         failures += 1;
-        await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4))));
+        offlineInRow = error instanceof ApiError && error.offline ? offlineInRow + 1 : 0;
+        // An open page notices a server that went off, not only the next click. A playing
+        // title reports its own problems, so the feed keeps waiting while the player is open.
+        const next = logic.syncFailure(error instanceof ApiError ? error : null, failures, offlineInRow);
+        if (next.action === "sessionEnded") return sessionEnded();
+        if (next.action === "offline" && !state.player) return showServerOff();
+        await new Promise((resolve) => setTimeout(resolve, next.delay));
       }
     }
   })();

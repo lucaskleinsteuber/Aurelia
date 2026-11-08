@@ -8,10 +8,12 @@ public enum LinuxPackageKind { Debian, Rpm, Arch, Flatpak }
 /// <summary>A Linux app release, independent of the Mac/server releases in the repository. A beta is a
 /// GitHub pre-release, offered only when beta updates are on.</summary>
 public sealed record AppRelease(string Tag, Version Version, int Build, string Notes, string FileName, Uri Download,
-    Uri Checksums, long Bytes, string SourceRepository = UpdateFeed.StandardRepository, bool IsBeta = false)
+    Uri Checksums, long Bytes, string SourceRepository = UpdateFeed.StandardRepository, bool IsBeta = false, Uri? Signature = null)
 {
     public const string Repository = UpdateFeed.StandardRepository;
     public const string TagPrefix = "linux-app-";
+    /// <summary>The owner's minisign signature of SHA256SUMS; without it nothing is installed.</summary>
+    public const string SignatureFile = "SHA256SUMS.minisig";
 
     public static (Version Version, int Build)? ParseTag(string tag)
     {
@@ -25,17 +27,21 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
         return (version, build);
     }
 
-    public static string PackageName(Version version, int build, LinuxPackageKind kind) =>
+    /// <summary>
+    /// The package for this kind and processor, named as each distribution names it: amd64/arm64
+    /// for Debian, x86_64/aarch64 for the others. 64-bit ARM (arm64) has every format except Flatpak.
+    /// </summary>
+    public static string PackageName(Version version, int build, LinuxPackageKind kind, bool arm64 = false) =>
         $"Aurelia-Desktop-{version}-{build}-" + (kind switch
         {
-            LinuxPackageKind.Debian => "amd64.deb",
-            LinuxPackageKind.Rpm => "x86_64.rpm",
-            LinuxPackageKind.Arch => "x86_64.pkg.tar.zst",
-            _ => "x86_64.flatpak",
+            LinuxPackageKind.Debian => arm64 ? "arm64.deb" : "amd64.deb",
+            LinuxPackageKind.Rpm => arm64 ? "aarch64.rpm" : "x86_64.rpm",
+            LinuxPackageKind.Arch => arm64 ? "aarch64.pkg.tar.zst" : "x86_64.pkg.tar.zst",
+            _ => arm64 ? "aarch64.flatpak" : "x86_64.flatpak",
         });
 
     public static AppRelease? Newest(JsonArray releases, LinuxPackageKind kind, Version currentVersion, int currentBuild, string repository = Repository,
-        bool includeBeta = false)
+        bool includeBeta = false, bool arm64 = false)
     {
         if (!UpdateFeed.IsAllowed(repository)) return null;
         var candidates = new List<AppRelease>();
@@ -45,14 +51,16 @@ public sealed record AppRelease(string Tag, Version Version, int Build, string N
             if (node["draft"]?.GetValue<bool>() == true || (beta && !includeBeta)
                 || node["tag_name"]?.GetValue<string>() is not { } tag || ParseTag(tag) is not { } parsed
                 || parsed.Build <= currentBuild || parsed.Version < currentVersion || node["assets"] is not JsonArray assets) continue;
-            var name = PackageName(parsed.Version, parsed.Build, kind);
+            var name = PackageName(parsed.Version, parsed.Build, kind, arm64);
             JsonObject? Asset(string file) => assets.OfType<JsonObject>().FirstOrDefault(a => a["name"]?.GetValue<string>() == file && a["state"]?.GetValue<string>() == "uploaded");
             var package = Asset(name);
             var sums = Asset("SHA256SUMS");
             if (package?["url"]?.GetValue<string>() is not { } address || sums?["url"]?.GetValue<string>() is not { } checksums
                 || !IsAssetUrl(address, repository) || !IsAssetUrl(checksums, repository) || package["size"]?.GetValue<long>() is not > 0) continue;
+            // A release without a signature is still shown, so the person learns of it, but it is never installed.
+            Uri? signature = Asset(SignatureFile)?["url"]?.GetValue<string>() is { } signed && IsAssetUrl(signed, repository) ? new Uri(signed) : null;
             candidates.Add(new(tag, parsed.Version, parsed.Build, node["body"]?.GetValue<string>() ?? "", name,
-                new Uri(address), new Uri(checksums), package["size"]!.GetValue<long>(), repository, beta));
+                new Uri(address), new Uri(checksums), package["size"]!.GetValue<long>(), repository, beta, signature));
         }
         return candidates.OrderByDescending(c => c.Version).ThenByDescending(c => c.Build).FirstOrDefault();
     }

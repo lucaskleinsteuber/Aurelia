@@ -221,7 +221,7 @@ public sealed class StatisticsPage : LibraryPageBase
                 Tile("Watches Most", $"{stats.BusiestWeekday}, {stats.BusiestTimeOfDay}".Trim(' ', ',')),
             },
         });
-        page.Children.Add(Section("Last 12 Weeks", WeekChart(stats.HoursByWeek.TakeLast(12).ToList())));
+        page.Children.Add(Section("Last 12 Weeks", WeekChart(ActivityFormat.LastWeeks(stats.HoursByWeek, DateTime.Now))));
         page.Children.Add(new WrapPanel
         {
             Margin = Inset(),
@@ -251,36 +251,43 @@ public sealed class StatisticsPage : LibraryPageBase
         },
     };
 
-    private StackPanel WeekChart(List<PeriodHours> weeks)
+    /// <summary>Twelve weeks across the page's width, as on the Mac; a week without watching shows a flat line.</summary>
+    private Grid WeekChart(List<PeriodHours> weeks)
     {
         var peak = Math.Max(0.1, weeks.Count == 0 ? 0 : weeks.Max(w => w.Hours));
-        var bars = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = Inset(), Height = 180, HorizontalAlignment = HorizontalAlignment.Left };
-        foreach (var week in weeks)
+        var accent = Application.Current?.FindResource("AureliaAccentBrush") as IBrush;
+        var chart = new Grid { Margin = Inset(), Height = 180 };
+        foreach (var _ in weeks) chart.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
+        for (var index = 0; index < weeks.Count; index++)
         {
+            var week = weeks[index];
             var bar = new Rectangle
             {
-                Width = 36,
+                MaxWidth = 44,
                 Height = Math.Max(3, 140 * week.Hours / peak),
                 RadiusX = 6,
                 RadiusY = 6,
-                Fill = Application.Current?.FindResource("AureliaAccentBrush") as IBrush,
+                Fill = accent,
+                Opacity = week.Hours > 0 ? 1 : 0.3,
+                Margin = new Thickness(5, 0),
                 VerticalAlignment = VerticalAlignment.Bottom,
             };
-            ToolTip.SetTip(bar, $"{week.Period}: {ActivityFormat.Hours(week.Hours)}");
-            AutomationProperties.SetName(bar, $"{week.Period}, {ActivityFormat.Hours(week.Hours)}");
-            bars.Children.Add(new DockPanel
+            ToolTip.SetTip(bar, $"Week of {ActivityFormat.WeekStart(week.Period)}: {ActivityFormat.Hours(week.Hours)}");
+            AutomationProperties.SetName(bar, $"Week of {ActivityFormat.WeekStart(week.Period)}, {ActivityFormat.Hours(week.Hours)}");
+            var column = new DockPanel
             {
                 Children =
                 {
-                    new TextBlock { Text = ShortWeek(week.Period), FontSize = 10, Classes = { "subdued" }, HorizontalAlignment = HorizontalAlignment.Center }.Also(t => DockPanel.SetDock(t, Dock.Bottom)),
+                    new TextBlock { Text = ActivityFormat.WeekStart(week.Period), FontSize = 10, Classes = { "subdued" }, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) }.Also(t => DockPanel.SetDock(t, Dock.Bottom)),
                     bar,
                 },
-            });
+            };
+            Avalonia.Controls.Grid.SetColumn(column, index);
+            chart.Children.Add(column);
         }
-        return bars;
+        return chart;
     }
 
-    private static string ShortWeek(string period) => period.Contains("-W", StringComparison.Ordinal) ? "W" + period[(period.IndexOf("-W", StringComparison.Ordinal) + 2)..] : period;
 
     private static StackPanel Ranking(string title, IEnumerable<NamedCount> entries)
     {
@@ -340,7 +347,7 @@ public sealed class StatisticsPage : LibraryPageBase
             tiles.Children.Add(Tile("Episodes", r.EpisodesWatched.ToString(CultureInfo.InvariantCulture)));
             if (r.TopGenre is { } genre) tiles.Children.Add(Tile("Favorite Genre", genre));
             if (r.TopTitle is { } top) tiles.Children.Add(Tile("Most Watched", top));
-            if (r.BusiestDay is { } day) tiles.Children.Add(Tile("Busiest Day", r.BusiestDayHours is { } hours ? $"{day} ({ActivityFormat.Hours(hours)})" : day));
+            if (r.BusiestDay is { } day) tiles.Children.Add(Tile("Busiest Day", r.BusiestDayHours is { } hours ? $"{ActivityFormat.LongDay(day)} · {ActivityFormat.Hours(hours)}" : ActivityFormat.LongDay(day)));
         }
         return new StackPanel
         {

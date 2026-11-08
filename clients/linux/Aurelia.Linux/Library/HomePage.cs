@@ -16,14 +16,34 @@ public sealed class HomePage(LibraryContext context) : LibraryPageBase(context)
 {
     public const double HeroHeight = 500;
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Context.Store.PropertyChanged += OnStorePropertyChanged;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        Context.Store.PropertyChanged -= OnStorePropertyChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    // A failed first load only sets IsLoading and Error and raises no Changed, so without this the
+    // spinner stayed after the request had long given up.
+    private void OnStorePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (Context.Store.Home is null && e.PropertyName is nameof(LibraryStore.IsLoading) or nameof(LibraryStore.Error)) Rebuild();
+    }
+
     protected override Control Build()
     {
         var store = Context.Store;
         if (store.Home is not { } home)
         {
-            return store.IsLoading
-                ? new ProgressBar { IsIndeterminate = true, Width = 160, Margin = Inset(140), HorizontalAlignment = HorizontalAlignment.Left }
-                : EmptyState("Server Unavailable", store.Error ?? "Aurelia could not load your library.");
+            if (store.IsLoading) return new Aurelia.Linux.Controls.Spinner { Margin = Inset(160), HorizontalAlignment = HorizontalAlignment.Center };
+            var retry = new Button { Content = "Try Again", Classes = { "primary" } };
+            retry.Click += (_, _) => _ = store.RefreshAsync();
+            return EmptyState("Server Unavailable", store.Error ?? "Aurelia could not load your library.", retry);
         }
         var prefs = store.Preferences;
         IReadOnlyList<CatalogItemSummary> Visible(IEnumerable<CatalogItemSummary> items) =>
@@ -42,21 +62,21 @@ public sealed class HomePage(LibraryContext context) : LibraryPageBase(context)
         if (home.ContinueWatching.Count > 0)
         {
             page.Children.Add(Section("Continue Watching",
-                Shelf("Continue Watching", home.ContinueWatching.Select(item => MediaCards.Landscape(Context, item, 320, "CONTINUE WATCHING", plays: true))),
+                Shelf("Continue Watching", home.ContinueWatching, item => MediaCards.Landscape(Context, item, 320, "CONTINUE WATCHING", plays: true)),
                 home.ContinueWatching.Count));
         }
         foreach (var row in LibraryPresentation.GenreRows(Visible(store.Catalog.Where(item => item.Kind is MediaKind.Movie or MediaKind.Series))))
         {
-            page.Children.Add(Section(row.Title, Shelf(row.Title, row.Items.Select(item => MediaCards.Poster(Context, item, posterWidth))), row.Items.Count));
+            page.Children.Add(Section(row.Title, Shelf(row.Title, row.Items, item => MediaCards.Poster(Context, item, posterWidth)), row.Items.Count));
         }
         var favorites = Visible(home.Favorites);
         if (favorites.Count > 0)
-            page.Children.Add(Section("Favorites", Shelf("Favorites", favorites.Select(item => MediaCards.Poster(Context, item, posterWidth))), favorites.Count));
+            page.Children.Add(Section("Favorites", Shelf("Favorites", favorites, item => MediaCards.Poster(Context, item, posterWidth)), favorites.Count));
         if (home.Collections.Count > 0)
-            page.Children.Add(Section("Collections", Shelf("Collections", home.Collections.Select(c => MediaCards.Collection(Context, c))), home.Collections.Count));
+            page.Children.Add(Section("Collections", Shelf("Collections", home.Collections, c => MediaCards.Collection(Context, c)), home.Collections.Count));
         var recent = Visible(home.RecentlyAdded);
         if (recent.Count > 0)
-            page.Children.Add(Section("Recently Added", Shelf("Recently Added", recent.Select(item => MediaCards.Poster(Context, item, posterWidth))), recent.Count));
+            page.Children.Add(Section("Recently Added", Shelf("Recently Added", recent, item => MediaCards.Poster(Context, item, posterWidth)), recent.Count));
         return page;
     }
 

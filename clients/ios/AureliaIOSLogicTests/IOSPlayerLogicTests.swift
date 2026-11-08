@@ -39,6 +39,48 @@ struct IOSPlayerLogicTests {
         position: 119_500, duration: 120_000, observedPlayback: true, transportFailed: false))
   }
 
+  @Test func aRefusedTitleIsExplainedInsteadOfEndingTheSession() {
+    let notAllowed = IOSPlayerPolicy.response(to: .server(status: 403, code: "forbidden"))
+    #expect(notAllowed == .fail(IOSPlayerPolicy.notAllowedMessage, canRetry: false))
+    let revoked = IOSPlayerPolicy.response(
+      to: .server(status: 403, code: "profile_session_revoked"))
+    #expect(
+      revoked
+        == .endSession(
+          .server(status: 403, code: "profile_session_revoked", message: nil, retryAfter: nil)))
+    #expect(
+      IOSPlayerPolicy.response(to: .server(status: 401, code: nil))
+        == .endSession(.server(status: 401, code: nil, message: nil, retryAfter: nil)))
+    #expect(IOSPlayerPolicy.response(to: .untrustedServer) == .endSession(.identityMismatch))
+    let refused = IOSCoreError.server(
+      status: 403, code: "forbidden", message: "Not for this profile.", retryAfter: nil)
+    #expect(IOSPlayerPolicy.refusal(refused) == "Not for this profile.")
+    #expect(!refused.endsSession)
+    #expect(
+      IOSPlayerPolicy.refusal(
+        .server(status: 403, code: "device_session_revoked", message: nil, retryAfter: nil)) == nil)
+  }
+
+  @Test func aMissingFileIsReportedInsteadOfReconnectingInALoop() {
+    for status in [404, 410] {
+      #expect(
+        IOSPlayerPolicy.response(to: .server(status: status, code: nil))
+          == .fail(IOSPlayerPolicy.unavailableMessage, canRetry: true))
+    }
+    if case .fail = IOSPlayerPolicy.response(to: .server(status: 429, code: nil)) {
+    } else {
+      Issue.record("A busy server must not start a reconnect loop")
+    }
+    #expect(
+      IOSPlayerPolicy.response(to: .server(status: 503, code: "media_unavailable"))
+        == .fail(IOSPlayerPolicy.unavailableMessage, canRetry: true))
+    let offline = IOSCoreError.server(
+      status: 503, code: "media_unavailable", message: "Reconnect the drive.", retryAfter: nil)
+    #expect(IOSPlayerPolicy.unavailability(offline) == "Reconnect the drive.")
+    #expect(IOSPlayerPolicy.response(to: .server(status: 503, code: nil)) == .reconnect)
+    #expect(IOSPlayerPolicy.response(to: .interrupted) == .reconnect)
+  }
+
   @Test func controlsRemainWhilePausedBusyOrChoosingATrack() {
     #expect(
       IOSPlayerPolicy.mayHideControls(

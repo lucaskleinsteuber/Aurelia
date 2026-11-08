@@ -6,6 +6,8 @@ import UIKit
 @MainActor
 enum IOSDesign {
   static var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+  /// "iPad" or "iPhone", for text that names this device.
+  static var deviceName: String { isPad ? "iPad" : "iPhone" }
 
   static let canvas = Color(red: 20 / 255, green: 22 / 255, blue: 25 / 255)
   static let surface = Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255)

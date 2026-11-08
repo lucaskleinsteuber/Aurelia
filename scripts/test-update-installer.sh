@@ -19,6 +19,7 @@ xcrun swiftc -warnings-as-errors -swift-version 6 \
   "$repository_root/clients/macos/AureliaServerHost/UpdateInstallation.swift" \
   "$repository_root/clients/macos/AureliaServerHost/UpdateInstaller.swift" \
   "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
+  "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" \
   "$repository_root/scripts/tests/UpdateInstallerDiagnostic.swift" \
   -o "$run_root/installer-diagnostic"
 diagnostic_directory="$run_root/Updates/$(uuidgen)"
@@ -35,5 +36,6 @@ fi
 echo "Passed diagnostic failure exit cleanup; 24 total installer scenarios, no apps launched or installed."
 xcrun swiftc -warnings-as-errors -swift-version 6 \
   "$repository_root/clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift" \
+  "$repository_root/clients/macos/UpdateHandoff/AppEdition.swift" \
   "$repository_root/scripts/tests/UpdateHandoffTests.swift" -o "$run_root/handoff-tests"
 "$run_root/handoff-tests" "$run_root"

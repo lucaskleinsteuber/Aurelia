@@ -40,6 +40,10 @@ final class IOSAppModel: ObservableObject {
   @Published private(set) var acknowledgedProgress: [UUID: IOSPlaybackProgress] = [:]
   @Published private var mutationSummaries: [UUID: IOSCatalogItem] = [:]
   @Published var remotePlaybackItem: IOSCatalogItem?
+  /// Counts Stop requests from another device; the screen showing the player closes it.
+  @Published private(set) var remoteStopRequests = 0
+  /// The player on screen, so the heartbeat can tell other devices what plays.
+  private weak var openPlayer: IOSPlaybackController?
   /// The Watch Together party this device is in, if any.
   @Published private(set) var watchParty: IOSWatchTogetherSession?
   /// Parties others started on the server, offered on Home and title pages.
@@ -63,6 +67,12 @@ final class IOSAppModel: ObservableObject {
     UserDefaults.standard.set(newId, forKey: "AureliaIOSDeviceId")
     return newId
   }
+  /// The name the Mac and other devices show for this one.
+  var deviceName: String {
+    IOSDeviceName.display(
+      systemName: UIDevice.current.name, model: UIDevice.current.model,
+      tag: UIDevice.current.identifierForVendor)
+  }
   private let credentials = IOSCredentialStore()
   let environment = IOSAppEnvironment.current()
   private var generation = UUID()
@@ -81,7 +91,54 @@ final class IOSAppModel: ObservableObject {
   }
 
   var browsePreferences: IOSBrowsePreferenceStore { environment.browsePreferences }
-  init() {}
+  /// The setup assistant: introduction, guided connection and the tour.
+  let setupGuide: IOSSetupGuide
+  private var setupGuideObservation: AnyCancellable?
+
+  init() {
+    #if DEBUG
+      let fixture = IOSUITestScenario.current != nil
+      let assistantFixture = ProcessInfo.processInfo.environment["AURELIA_IOS_ASSISTANT"] == "1"
+    #else
+      let fixture = false
+      let assistantFixture = false
+    #endif
+    if !fixture { IOSTestEdition.forgetLeftoversAfterReinstall() }
+    let alreadyConnected = !fixture && (try? IOSCredentialStore().load()) != nil
+    setupGuide = IOSSetupGuide(
+      defaults: fixture
+        ? (UserDefaults(suiteName: "Aurelia.IOS.SetupGuide.\(UUID().uuidString)") ?? .standard)
+        : .standard,
+      alreadySetUp: alreadyConnected || (fixture && !assistantFixture))
+    setupGuideObservation = setupGuide.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
+    IOSProfilePhotoCache.shared.loader = { [weak self] id, revision in
+      guard let self, let connection = self.connection else { throw IOSCoreError.profileRequired }
+      return try await self.makeClient(connection: connection).profilePhoto(
+        id: id, revision: revision)
+    }
+  }
+
+  var supportsProfilePersonalization: Bool {
+    capabilities?.supportsProfilePersonalization ?? false
+  }
+
+  /// The signed-in profile was renamed or got a new picture.
+  func updateProfileUser(_ user: IOSUser) {
+    if let session, session.user.id == user.id {
+      self.session = IOSProfileSession(
+        user: user, sessionId: session.sessionId, token: session.token,
+        expiresAt: session.expiresAt)
+    }
+    if let index = profiles.firstIndex(where: { $0.id == user.id }) {
+      let old = profiles[index]
+      profiles[index] = IOSWatchingProfile(
+        id: old.id, name: user.shownName, role: old.role, needsPinSetup: old.needsPinSetup,
+        pinProtectionEnabled: old.pinProtectionEnabled, pictureKey: user.pictureKey,
+        pictureRevision: user.pictureRevision ?? 0, ageLimit: user.ageLimit)
+    }
+  }
 
   func start() async {
     guard !started else { return }
@@ -138,7 +195,7 @@ final class IOSAppModel: ObservableObject {
         guard candidate.info.isSetup else {
           throw IOSCoreError.server(
             status: 409, code: "setup_required",
-            message: "Set up this server in Aurelia on your Mac first.", retryAfter: nil)
+            message: "Set up this server in Aurelia on the Mac or Linux computer that runs it first.", retryAfter: nil)
         }
         inspected = candidate
         phase = .trust
@@ -216,81 +273,39 @@ final class IOSAppModel: ObservableObject {
     startDiscovery()
   }
 
+  /// After the server's fingerprint is trusted: asks for the 8-digit code that the main device
+  /// (Aurelia on a Mac, the Linux app, or `aurelia pair` on a Linux server) shows. Every
+  /// device pairs this way, so nobody has to work out which side shows the code.
   func beginPairing() {
-    guard !isBusy, let inspected else { return }
-    let previous = pairing
+    guard !isBusy, inspected != nil else { return }
+    retireWork()
+    error = nil
     pairing = nil
-    let run = beginWork()
     phase = .pairing
+  }
+
+  /// Pairs this device with the code from the main device.
+  func pair(code: String) {
+    guard !isBusy, let inspected else { return }
+    let digits = code.filter(\.isNumber)
+    guard digits.count == 8 else {
+      error = "Enter the 8-digit code shown on your Mac or Linux computer."
+      return
+    }
+    let run = beginWork()
     task = Task {
       defer { finish(run) }
       do {
-        let api = makeClient(inspected: inspected)
-        if let previous {
-          _ = try? await api.cancelPairing(id: previous.id, secret: previous.secret)
-          guard current(run) else { return }
-        }
-        let created = try await api.startPairing(deviceName: UIDevice.current.name)
-        guard current(run) else {
-          Task { _ = try? await api.cancelPairing(id: created.id, secret: created.secret) }
-          return
-        }
-        pairing = created
-        var delay = max(5, created.pollIntervalSeconds)
-        while current(run) {
-          try await Task.sleep(for: .seconds(delay))
-          guard current(run) else { return }
-          if let date = IOSServerDate.parse(created.expiresAt), date <= Date() {
-            throw IOSCoreError.server(
-              status: 410, code: "pairing_expired",
-              message: "This code has expired. Start a new pairing.", retryAfter: nil)
-          }
-          do {
-            let result = try await api.pairingStatus(id: created.id, secret: created.secret)
-            guard current(run) else { return }
-            delay = max(5, result.pollIntervalSeconds)
-            switch result.state {
-            case .pending: continue
-            case .approved:
-              guard let auth = result.authentication else { throw IOSCoreError.invalidResponse }
-              var paired = try inspected.connection(authentication: auth)
-              IOSWakeOnLan.remember(
-                serverID: inspected.info.serverId, info: inspected.info,
-                hosts: [inspected.baseURL.host].compactMap { $0 })
-              paired.pendingAcknowledgement = IOSPendingPairingAcknowledgement(
-                id: created.id, secret: created.secret, expiresAt: created.expiresAt)
-              try saveCredentials(paired)
-              connection = paired
-              let receipt = try await api.acknowledgePairing(id: created.id, secret: created.secret)
-              guard current(run) else {
-                Task { try? await makeClient(connection: paired).disconnectDevice() }
-                return
-              }
-              guard receipt.acknowledged else { throw IOSCoreError.invalidResponse }
-              paired.pendingAcknowledgement = nil
-              try saveCredentials(paired)
-              guard current(run) else { return }
-              connection = paired
-              pairing = nil
-              try await loadProfiles(run: run)
-              return
-            case .denied:
-              throw IOSCoreError.server(
-                status: 403, code: "pairing_denied",
-                message: "This device was not approved on your Mac.", retryAfter: nil)
-            case .expired, .cancelled, .unknown:
-              throw IOSCoreError.server(
-                status: 409, code: "pairing_expired",
-                message: "This code is no longer available. Start a new pairing.", retryAfter: nil)
-            }
-          } catch let failure as IOSCoreError where failure.statusCode == 429 || failure.isTransient
-          {
-            delay = max(5, Int(ceil(failure.retryAfter ?? 5)))
-            if let date = IOSServerDate.parse(created.expiresAt), date <= Date() { throw failure }
-          } catch let failure as URLError where failure.code != .cancelled {
-            delay = 5
-          }
-        }
+        let auth = try await makeClient(inspected: inspected).redeemPairingCode(
+          digits, deviceName: deviceName)
+        guard current(run) else { return }
+        let paired = try inspected.connection(authentication: auth)
+        IOSWakeOnLan.remember(
+          serverID: inspected.info.serverId, info: inspected.info,
+          hosts: [inspected.baseURL.host].compactMap { $0 })
+        try saveCredentials(paired)
+        connection = paired
+        try await loadProfiles(run: run)
       } catch { show(error, run: run) }
     }
   }
@@ -402,7 +417,20 @@ final class IOSAppModel: ObservableObject {
     phase = .connection
     do { try deleteCredentials() } catch { self.error = error.localizedDescription }
     startDiscovery()
-    if let stored { try? await makeClient(connection: stored).disconnectDevice() }
+    // Nothing of this server stays behind: stored artwork and its wake address go too.
+    await artwork.removeStored()
+    guard let stored else { return }
+    IOSWakeOnLan.forget(serverID: stored.serverID)
+    do {
+      try await makeClient(connection: stored).disconnectDevice()
+    } catch let failure as IOSCoreError where failure.isAuthenticationFailure {
+      // The server had already removed this device.
+    } catch {
+      if self.error == nil {
+        self.error =
+          "This device is disconnected, but the server could not be told. Remove it in Aurelia on your Mac."
+      }
+    }
   }
 
   func handleSessionFailure(_ failure: Error) {
@@ -519,6 +547,9 @@ final class IOSAppModel: ObservableObject {
           return candidate
         } catch {
           guard current(run) else { throw CancellationError() }
+          // An address found on the network may be a stale entry or another computer; only the
+          // saved address itself proves that the server's identity changed.
+          if address != saved.baseURL, (error as? IOSCoreError) == .identityMismatch { continue }
           guard (error as? IOSCoreError)?.isTransient == true || error is URLError else {
             throw error
           }
@@ -534,13 +565,11 @@ final class IOSAppModel: ObservableObject {
     phase = .profiles
     let result = try await makeClient(connection: connection).profiles()
     guard current(run) else { return }
-    guard result.formatVersion == 1 || result.formatVersion == 2 else {
-      throw IOSCoreError.unsupportedServer
-    }
+    try IOSProtocolVersion.check(result.formatVersion)
     if result.managementSetupRequired {
       throw IOSCoreError.server(
         status: 409, code: "setup_required",
-        message: "Finish profile setup in Aurelia on your Mac first.", retryAfter: nil)
+        message: "Finish profile setup in Aurelia on the Mac or Linux computer that runs the server.", retryAfter: nil)
     }
     profiles = result.profiles
     error = nil
@@ -549,8 +578,8 @@ final class IOSAppModel: ObservableObject {
   }
 
   private func validate(_ capabilities: IOSCapabilities) throws {
-    guard [1, 2].contains(capabilities.formatVersion),
-      Set(["device-authorization-v1", "library-state-v1"]).isSubset(
+    try IOSProtocolVersion.check(capabilities.formatVersion)
+    guard Set(["device-authorization-v1", "library-state-v1"]).isSubset(
         of: Set(capabilities.capabilities ?? []))
     else { throw IOSCoreError.unsupportedServer }
   }
@@ -605,7 +634,7 @@ final class IOSAppModel: ObservableObject {
   func joinWatchTogether(_ party: IOSWatchPartySummary) async {
     await leaveWatchTogether()
     guard let api = watchClient() else { return }
-    let joined = IOSWatchTogetherSession(api: api, deviceName: UIDevice.current.name)
+    let joined = IOSWatchTogetherSession(api: api, deviceName: deviceName)
     watchParty = joined
     guard await joined.join(party), let state = joined.state,
       let item = try? await api.summary(id: state.mediaId)
@@ -622,10 +651,11 @@ final class IOSAppModel: ObservableObject {
   func startWatchTogether(with controller: IOSPlaybackController) async {
     await leaveWatchTogether()
     guard let api = watchClient() else { return }
-    let started = IOSWatchTogetherSession(api: api, deviceName: UIDevice.current.name)
+    let started = IOSWatchTogetherSession(api: api, deviceName: deviceName)
     watchParty = started
     if await started.start(
-      mediaID: controller.currentMediaID, position: controller.position, playing: controller.isPlaying)
+      mediaID: controller.currentMediaID, position: controller.position,
+      playing: controller.isPlaying)
     {
       attachWatchParty(to: controller)
     }
@@ -633,6 +663,7 @@ final class IOSAppModel: ObservableObject {
 
   /// A player opened: a party this device is in follows it.
   func attachWatchParty(to controller: IOSPlaybackController) {
+    openPlayer = controller
     guard let party = watchParty, let api = watchClient() else { return }
     party.openTitle = { [weak controller] mediaID in
       Task {
@@ -647,6 +678,7 @@ final class IOSAppModel: ObservableObject {
 
   /// The player closed: closing it leaves the party.
   func playerClosed(_ controller: IOSPlaybackController) {
+    if openPlayer === controller { openPlayer = nil }
     controller.userActionObserver = nil
     controller.watchStateObserver = nil
     guard let party = watchParty, party.isFollowing(controller) else { return }
@@ -816,6 +848,9 @@ final class IOSAppModel: ObservableObject {
     }
   }
 
+  /// Closes the open player, wherever it shows. Closing it saves the progress as usual.
+  func stopPlayer() { remoteStopRequests += 1 }
+
   private func observePersonalState(connection: IOSStoredConnection, session: IOSProfileSession) {
     syncTask?.cancel()
     progressObserver?.cancel()
@@ -825,7 +860,7 @@ final class IOSAppModel: ObservableObject {
     let sessionID = session.sessionId
     let scope = IOSProgressScope(connection: connection, session: session)
     let deviceId = tvDeviceId
-    let deviceName = UIDevice.current.name
+    let deviceName = self.deviceName
 
     remoteDeviceHeartbeatTask = Task { [weak self] in
       while !Task.isCancelled {
@@ -834,7 +869,14 @@ final class IOSAppModel: ObservableObject {
           deviceId: deviceId,
           deviceName: deviceName,
           clientType: "ios",
-          isPlaying: self.playerPresented
+          isPlaying: self.openPlayer != nil || self.playerPresented,
+          mediaId: self.openPlayer?.currentMediaID,
+          title: self.openPlayer?.title,
+          positionSeconds: self.openPlayer.map { Double($0.position) / 1_000 },
+          durationSeconds: self.openPlayer.flatMap {
+            $0.duration > 0 ? Double($0.duration) / 1_000 : nil
+          },
+          isPaused: self.openPlayer.map { !$0.isPlaying } ?? false
         )
         do { try await Task.sleep(for: .seconds(15)) } catch { return }
       }
@@ -856,7 +898,7 @@ final class IOSAppModel: ObservableObject {
             } else if cmd.action.lowercased() == "stop" {
               await MainActor.run { [weak self] in
                 self?.remotePlaybackItem = nil
-                self?.playerPresented = false
+                self?.stopPlayer()
               }
             }
           }

@@ -56,13 +56,16 @@ public sealed class BrowsePage : LibraryPageBase
 
     private void OnModelChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(BrowseModel.Items) or nameof(BrowseModel.Error) or nameof(BrowseModel.Query)) Rebuild();
+        // IsLoading too: a filter answered from the cache keeps the same items, and only the end of
+        // loading then replaces the spinner.
+        if (e.PropertyName is nameof(BrowseModel.Items) or nameof(BrowseModel.Error) or nameof(BrowseModel.Query) or nameof(BrowseModel.IsLoading)) Rebuild();
     }
 
     private DockPanel Header()
     {
         if (search.Parent is Panel old) old.Children.Remove(search);
-        var sort = new Button { Classes = { "chip" }, Content = SortLabel(), Flyout = SortFlyout() };
+        // As tall as the search field beside it, with its text centered.
+        var sort = new Button { Classes = { "chip" }, Content = SortLabel(), Flyout = SortFlyout(), VerticalAlignment = VerticalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new CornerRadius(10), Padding = new Thickness(16, 0) };
         AutomationProperties.SetName(sort, "Sort");
         return new DockPanel
         {
@@ -127,7 +130,7 @@ public sealed class BrowsePage : LibraryPageBase
         var items = LibraryPresentation.Visible(Model.Items, keepWatched: true, showWatched: true, Context.Store.Preferences.HideOfflineTitles);
         if (items.Count == 0)
         {
-            if (Model.IsLoading) return new ProgressBar { IsIndeterminate = true, Width = 160, Margin = Inset(40), HorizontalAlignment = HorizontalAlignment.Left };
+            if (Model.IsLoading) return new Aurelia.Linux.Controls.Spinner { Margin = Inset(120), HorizontalAlignment = HorizontalAlignment.Center };
             return Model.IsSearching || Model.Query.HasFilters
                 ? EmptyState("No Results", "No titles match. Try another search or fewer filters.")
                 : EmptyState("No Media Yet", Context.Store.CanManageMedia ? "Add a folder with movies or TV shows on the server." : "Titles appear here once the server's owner adds media.");
@@ -136,18 +139,18 @@ public sealed class BrowsePage : LibraryPageBase
         var results = new StackPanel { Spacing = 30 };
         if (Model.Section == BrowseSection.Library && !Model.IsSearching && !Model.Query.HasFilters && Context.Store.Collections.Count > 0)
         {
-            results.Children.Add(Section("Collections", Shelf("Collections", Context.Store.Collections.Select(c => MediaCards.Collection(Context, c))), Context.Store.Collections.Count));
+            results.Children.Add(Section("Collections", Shelf("Collections", Context.Store.Collections, c => MediaCards.Collection(Context, c)), Context.Store.Collections.Count));
         }
         var grouped = Model.Section is BrowseSection.Library || (Model.Section == BrowseSection.RecentlyAdded && items.Any(item => item.Kind == MediaKind.Episode));
         if (!grouped)
         {
-            results.Children.Add(Grid(items.Select(item => MediaCards.Poster(Context, item, width))));
+            results.Children.Add(Grid(items, item => MediaCards.Poster(Context, item, width)));
             return results;
         }
         void Group(string name, IEnumerable<CatalogItemSummary> group, Func<CatalogItemSummary, Control> card)
         {
             var list = group.ToList();
-            if (list.Count > 0) results.Children.Add(Section(name, Grid(list.Select(card)), list.Count));
+            if (list.Count > 0) results.Children.Add(Section(name, Grid(list, card), list.Count));
         }
         Group("Movies", items.Where(item => item.Kind == MediaKind.Movie), item => MediaCards.Poster(Context, item, width));
         Group("TV Shows", items.Where(item => item.Kind == MediaKind.Series), item => MediaCards.Poster(Context, item, width));

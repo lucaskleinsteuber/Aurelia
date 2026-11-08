@@ -9,8 +9,6 @@ struct TVAppEnvironment {
   let browsePreferences: TVBrowsePreferenceStore
   let allowsDiscovery: Bool
   let allowsPersistentCredentials: Bool
-  let routerWakeStore: any TVRouterWakeStore
-  let routerWakeTransport: any TVRouterWakeTransport
 
   static func current() -> Self {
     #if DEBUG
@@ -26,15 +24,13 @@ struct TVAppEnvironment {
           makePlaybackRuntime: { TVUITestEngine.runtime(scenario: scenario) },
           preferences: TVPlaybackPreferencesStore(defaults: defaults),
           browsePreferences: TVBrowsePreferenceStore(defaults: defaults), allowsDiscovery: false,
-          allowsPersistentCredentials: false, routerWakeStore: TVRouterWakeMemoryStore(),
-          routerWakeTransport: TVUITestRouterWakeTransport())
+          allowsPersistentCredentials: false)
       }
     #endif
     return Self(
       transport: TVURLSessionTransport(), outbox: .shared,
       makePlaybackRuntime: { .live() }, preferences: .shared,
       browsePreferences: TVBrowsePreferenceStore(defaults: .standard), allowsDiscovery: true,
-      allowsPersistentCredentials: true, routerWakeStore: TVRouterWakeKeychainStore(),
-      routerWakeTransport: TVRouterWakeURLSessionTransport())
+      allowsPersistentCredentials: true)
   }
 }

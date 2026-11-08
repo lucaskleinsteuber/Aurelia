@@ -76,4 +76,31 @@ public sealed class HostingRaceTests
         // Nothing free nearby: the wanted port stays, and the server reports the problem itself.
         Assert.Equal(43111, Aurelia.Linux.Core.Hosting.LocalServerHost.FreePort(43111, 43110, _ => false));
     }
+
+    [Fact]
+    public async Task TheServerPasswordIsNotSentToAProgramHoldingThePort()
+    {
+        // Another program took the port while this app's server is not running.
+        var squatter = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        squatter.Start();
+        var port = ((System.Net.IPEndPoint)squatter.LocalEndpoint).Port;
+        var root = Path.Combine(Path.GetTempPath(), "aurelia-host-port-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var host = new LocalServerHost(new LocalServerOptions("missing-synthetic-server", root, Path.Combine(root, "logs"), port, 43111, false, "Synthetic"));
+            var signIn = await Assert.ThrowsAsync<Aurelia.Linux.Core.Api.AureliaApiException>(() =>
+                host.SignInAsync("owner", "synthetic server password", "Test PC", TestContext.Current.CancellationToken));
+            Assert.Equal("server_unavailable", signIn.Code);
+            var reset = await Assert.ThrowsAsync<Aurelia.Linux.Core.Api.AureliaApiException>(() =>
+                host.ResetOwnerPinAsync("synthetic server password", "2468", TestContext.Current.CancellationToken));
+            Assert.Equal("server_unavailable", reset.Code);
+            Assert.False(squatter.Pending());
+        }
+        finally
+        {
+            squatter.Stop();
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

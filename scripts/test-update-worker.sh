@@ -136,7 +136,7 @@ import Foundation
  }
 }
 '''.replace('ROOT',quote(root)))
-    common=[repository/'clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift']
+    common=[repository/'clients/macos/UpdateHandoff/MacUpdateInstallRequest.swift',repository/'clients/macos/UpdateHandoff/AppEdition.swift']
     run(['xcrun','swiftc','-O','-warnings-as-errors','-swift-version','6',*common,repository/'clients/macos/Aurelia/ApplicationTerminationCoordinator.swift',root/'Fixture.swift','-o',app/'Contents/MacOS/Fixture'])
     shutil.copy2(app/'Contents/MacOS/Fixture',candidate/'Contents/MacOS/Fixture')
     run(['xcrun','swiftc','-O','-warnings-as-errors','-swift-version','6',*common,*[repository/('clients/macos/AureliaServerHost/'+n+'.swift') for n in ('UpdateInstaller','UpdateInstallation','UpdateInstallationPresenter')],root/'Worker.swift','-o',helper/'Contents/MacOS/Worker'])

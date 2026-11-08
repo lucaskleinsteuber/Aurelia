@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds Aurelia for Linux (x64): verifies it with test-linux-app.sh, publishes it self-contained
+# Builds Aurelia for Linux for x64 and arm64 (AURELIA_LINUX_ARCHES may choose one): verifies it with test-linux-app.sh, publishes it self-contained
 # and lays it out as installed (/usr/lib/aurelia-desktop, /usr/bin/aurelia-desktop, desktop entry,
 # icon, AppStream metadata, notices). The packages (.deb, .rpm, Arch, Flatpak) are made on Linux by
 # package-linux-app.sh: here when this computer is Linux, otherwise on the Linux computer named by
@@ -19,6 +19,10 @@ for package_format in $package_formats; do
   normalized_formats="$normalized_formats $package_format"
 done
 package_formats=${normalized_formats# }
+linux_arches="${AURELIA_LINUX_ARCHES:-x64 arm64}"
+for linux_arch in $linux_arches; do
+  case "$linux_arch" in x64|arm64) ;; *) echo "Unknown architecture: $linux_arch (x64 or arm64)" >&2; exit 1 ;; esac
+done
 
 # The tests also prune old builds and results first.
 "$repository_root/scripts/test-linux-app.sh"
@@ -28,10 +32,8 @@ build=$("$DOTNET_BIN" msbuild "$project" -getProperty:AureliaLinuxBuildNumber)
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$build" =~ ^[0-9]+$ ]] \
   || { echo "The Linux app must have a MAJOR.MINOR.PATCH version and numeric build." >&2; exit 1; }
 output="$other_root/Build/LinuxApp/$version-$build"
-tree="$output/tree"
 rm -rf "$output"
-mkdir -p "$tree/usr/bin" "$tree/usr/share/applications" "$tree/usr/share/metainfo" \
-  "$tree/usr/share/icons/hicolor/scalable/apps" "$tree/usr/share/doc/aurelia-desktop"
+mkdir -p "$output"
 git -C "$repository_root" rev-parse HEAD > "$output/SOURCE_COMMIT"
 if [ -z "$(git -C "$repository_root" status --porcelain --untracked-files=normal)" ]; then
   echo true > "$output/SOURCE_CLEAN"
@@ -39,62 +41,68 @@ else
   echo false > "$output/SOURCE_CLEAN"
 fi
 
-"$DOTNET_BIN" restore "$project" --runtime linux-x64
-"$DOTNET_BIN" publish "$project" --configuration Release --runtime linux-x64 --self-contained true \
-  --no-restore -p:DebugType=none --output "$tree/usr/lib/aurelia-desktop"
-chmod 0755 "$tree/usr/lib/aurelia-desktop/aurelia-desktop"
-# The server for "Set Up This PC" comes with the app; the app starts it on demand.
-server_project="$repository_root/src/Aurelia.Server/Aurelia.Server.csproj"
-"$DOTNET_BIN" restore "$server_project" --runtime linux-x64
-"$DOTNET_BIN" publish "$server_project" --configuration Release --runtime linux-x64 --self-contained true \
-  --no-restore -p:DebugType=none --output "$tree/usr/lib/aurelia-desktop/server"
-chmod 0755 "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server"
-ln -s ../lib/aurelia-desktop/aurelia-desktop "$tree/usr/bin/aurelia-desktop"
-cp "$packaging/$app_id.desktop" "$tree/usr/share/applications/"
-sed -e "s/@VERSION@/$version/" -e "s/@DATE@/$(date -u +%Y-%m-%d)/" "$packaging/$app_id.metainfo.xml" \
-  > "$tree/usr/share/metainfo/$app_id.metainfo.xml"
-cp "$repository_root/docs/assets/aurelia-icon.svg" "$tree/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
+for linux_arch in $linux_arches; do
+  tree="$output/tree-$linux_arch"
+  rm -rf "$tree"
+  mkdir -p "$tree/usr/bin" "$tree/usr/share/applications" "$tree/usr/share/metainfo" \
+    "$tree/usr/share/icons/hicolor/scalable/apps" "$tree/usr/share/doc/aurelia-desktop"
+  "$DOTNET_BIN" restore "$project" --runtime linux-$linux_arch
+  "$DOTNET_BIN" publish "$project" --configuration Release --runtime linux-$linux_arch --self-contained true \
+    --no-restore -p:DebugType=none --output "$tree/usr/lib/aurelia-desktop"
+  chmod 0755 "$tree/usr/lib/aurelia-desktop/aurelia-desktop"
+  # The server for "Set Up This PC" comes with the app; the app starts it on demand.
+  server_project="$repository_root/src/Aurelia.Server/Aurelia.Server.csproj"
+  "$DOTNET_BIN" restore "$server_project" --runtime linux-$linux_arch
+  "$DOTNET_BIN" publish "$server_project" --configuration Release --runtime linux-$linux_arch --self-contained true \
+    --no-restore -p:DebugType=none --output "$tree/usr/lib/aurelia-desktop/server"
+  chmod 0755 "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server"
+  ln -s ../lib/aurelia-desktop/aurelia-desktop "$tree/usr/bin/aurelia-desktop"
+  cp "$packaging/$app_id.desktop" "$tree/usr/share/applications/"
+  sed -e "s/@VERSION@/$version/" -e "s/@DATE@/$(date -u +%Y-%m-%d)/" "$packaging/$app_id.metainfo.xml" \
+    > "$tree/usr/share/metainfo/$app_id.metainfo.xml"
+  cp "$repository_root/docs/assets/aurelia-icon.svg" "$tree/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
 
-notices="$tree/usr/share/doc/aurelia-desktop/notices"
-assets_path=$("$DOTNET_BIN" msbuild "$project" -getProperty:ProjectAssetsFile)
-zsh "$repository_root/scripts/collect-third-party-notices.sh" \
-  "$tree/usr/lib/aurelia-desktop/aurelia-desktop.deps.json" "$assets_path" "$notices" "$packaging/THIRD_PARTY_NOTICES.md"
-server_assets=$("$DOTNET_BIN" msbuild "$server_project" -getProperty:ProjectAssetsFile)
-zsh "$repository_root/scripts/collect-third-party-notices.sh" \
-  "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server.deps.json" "$server_assets" "$notices/server"
-cp "$repository_root/docs/licenses/Inter-OFL-1.1.txt" "$notices/"
-mkdir -p "$tree/usr/share/licenses/aurelia-desktop"
-cp "$repository_root/LICENSE" "$tree/usr/share/licenses/aurelia-desktop/LICENSE"
-printf '%s (%s)\n' "$version" "$build" > "$tree/usr/lib/aurelia-desktop/VERSION"
-cp "$output/SOURCE_COMMIT" "$tree/usr/lib/aurelia-desktop/SOURCE_COMMIT"
+  notices="$tree/usr/share/doc/aurelia-desktop/notices"
+  assets_path=$("$DOTNET_BIN" msbuild "$project" -getProperty:ProjectAssetsFile)
+  zsh "$repository_root/scripts/collect-third-party-notices.sh" \
+    "$tree/usr/lib/aurelia-desktop/aurelia-desktop.deps.json" "$assets_path" "$notices" "$packaging/THIRD_PARTY_NOTICES.md"
+  server_assets=$("$DOTNET_BIN" msbuild "$server_project" -getProperty:ProjectAssetsFile)
+  zsh "$repository_root/scripts/collect-third-party-notices.sh" \
+    "$tree/usr/lib/aurelia-desktop/server/Aurelia.Server.deps.json" "$server_assets" "$notices/server"
+  cp "$repository_root/docs/licenses/Inter-OFL-1.1.txt" "$notices/"
+  mkdir -p "$tree/usr/share/licenses/aurelia-desktop"
+  cp "$repository_root/LICENSE" "$tree/usr/share/licenses/aurelia-desktop/LICENSE"
+  printf '%s (%s)\n' "$version" "$build" > "$tree/usr/lib/aurelia-desktop/VERSION"
+  cp "$output/SOURCE_COMMIT" "$tree/usr/lib/aurelia-desktop/SOURCE_COMMIT"
 
-# The installed layout as one archive, owned by root, without macOS metadata; the packages are made from it.
-archive="$output/Aurelia-Desktop-$version-$build-linux-x64-tree.tar.gz"
-if [ "$(uname -s)" = Darwin ]; then
-  COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --uid 0 --gid 0 --uname root --gname root \
-    -czf "$archive" -C "$tree" usr
-else
-  tar --owner=root:0 --group=root:0 -czf "$archive" -C "$tree" usr
-fi
-rm -rf "$tree"
+  # The installed layout as one archive, owned by root, without macOS metadata; the packages are made from it.
+  archive="$output/Aurelia-Desktop-$version-$build-linux-$linux_arch-tree.tar.gz"
+  if [ "$(uname -s)" = Darwin ]; then
+    COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --no-acls --uid 0 --gid 0 --uname root --gname root \
+      -czf "$archive" -C "$tree" usr
+  else
+    tar --owner=root:0 --group=root:0 -czf "$archive" -C "$tree" usr
+  fi
+  rm -rf "$tree"
 
-if [ "$(uname -s)" = Linux ]; then
-  bash "$repository_root/scripts/package-linux-app.sh" "$archive" "$output" "$version" "$build"
-elif [ -n "${AURELIA_LINUX_PACKAGE_HOST:-}" ]; then
-  ssh_options=(-o BatchMode=yes)
-  [ -z "${AURELIA_LINUX_PACKAGE_SSH_CONFIG:-}" ] || ssh_options+=(-F "$AURELIA_LINUX_PACKAGE_SSH_CONFIG")
-  remote_dir=".cache/aurelia-package/$version-$build"
-  ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && mkdir -p '$remote_dir/packaging'"
-  scp -q "${ssh_options[@]}" "$archive" "$repository_root/scripts/package-linux-app.sh" \
-    "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/"
-  scp -qr "${ssh_options[@]}" "$packaging/flatpak" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/packaging/"
-  # The login shell may not be bash (fish, zsh), so the script runs under an explicit bash.
-  ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" \
-    "cd '$remote_dir' && AURELIA_LINUX_PACKAGE_FORMATS='$package_formats' bash package-linux-app.sh '${archive##*/}' out '$version' '$build'"
-  scp -q "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/out/*" "$output/"
-  ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && rmdir .cache/aurelia-package 2>/dev/null; true"
-else
-  echo "warning: no Linux computer for the packages; set AURELIA_LINUX_PACKAGE_HOST. Only the archive was made." >&2
-fi
+  if [ "$(uname -s)" = Linux ]; then
+    bash "$repository_root/scripts/package-linux-app.sh" "$archive" "$output" "$version" "$build" "$linux_arch"
+  elif [ -n "${AURELIA_LINUX_PACKAGE_HOST:-}" ]; then
+    ssh_options=(-o BatchMode=yes)
+    [ -z "${AURELIA_LINUX_PACKAGE_SSH_CONFIG:-}" ] || ssh_options+=(-F "$AURELIA_LINUX_PACKAGE_SSH_CONFIG")
+    remote_dir=".cache/aurelia-package/$version-$build"
+    ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && mkdir -p '$remote_dir/packaging'"
+    scp -q "${ssh_options[@]}" "$archive" "$repository_root/scripts/package-linux-app.sh" \
+      "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/"
+    scp -qr "${ssh_options[@]}" "$packaging/flatpak" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/packaging/"
+    # The login shell may not be bash (fish, zsh), so the script runs under an explicit bash.
+    ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" \
+      "cd '$remote_dir' && AURELIA_LINUX_PACKAGE_FORMATS='$package_formats' bash package-linux-app.sh '${archive##*/}' out '$version' '$build' '$linux_arch'"
+    scp -q "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST:$remote_dir/out/*" "$output/"
+    ssh "${ssh_options[@]}" "$AURELIA_LINUX_PACKAGE_HOST" "rm -rf '$remote_dir' && rmdir .cache/aurelia-package 2>/dev/null; true"
+  else
+    echo "warning: no Linux computer for the packages; set AURELIA_LINUX_PACKAGE_HOST. Only the archive was made." >&2
+  fi
+done
 (cd "$output" && shasum -a 256 ./* > SHA256SUMS)
 echo "Aurelia for Linux $version ($build) is in $output"

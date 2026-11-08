@@ -98,6 +98,78 @@ public sealed class ContentRatingRefreshTests
         }
     }
 
+    [Fact]
+    public async Task MatchedTitlesGetTheirWholeCastOnceAndHandEditedCreditsStay()
+    {
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Credit Library");
+        Directory.CreateDirectory(root);
+        var provider = new Provider();
+        try
+        {
+            using var factory = new AureliaServerFactory(configureServices: services =>
+            {
+                services.RemoveAll<ITmdbClient>();
+                services.AddSingleton<ITmdbClient>(provider);
+            });
+            using var client = factory.CreateClient();
+            await ApiTestClient.SetupOwnerAsync(client);
+            factory.Services.GetRequiredService<MetadataProviderSettingsStore>().Save(new UpdateMetadataProviderRequest(true, "en", "synthetic-provider-token-with-no-network"));
+            var movie = Guid.NewGuid();
+            var edited = Guid.NewGuid();
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var library = new LibraryRoot { Id = Guid.NewGuid(), Name = "Invented", Path = root, NormalizedPath = MediaPath.Normalize(root), MonitoringEnabled = false, Kind = LibraryKind.Automatic };
+                database.LibraryRoots.Add(library);
+                MediaItem Item(Guid id, string name, string providerId, string? overrides) => new()
+                {
+                    Id = id,
+                    LibraryRootId = library.Id,
+                    Kind = MediaKind.Movie,
+                    DetectedTitle = name,
+                    SourcePath = Path.Combine(root, name),
+                    NormalizedSourcePath = MediaPath.Normalize(Path.Combine(root, name)),
+                    Metadata = new MediaMetadata
+                    {
+                        Provider = "tmdb",
+                        ProviderMediaId = providerId,
+                        ProviderMediaType = "movie",
+                        ProviderTitle = name,
+                        ReviewState = MetadataReviewState.Matched,
+                        ManualFieldsJson = overrides ?? "[]",
+                        Credits = [new MediaCredit { Id = Guid.NewGuid(), MediaItemId = id, Name = "Old Lead", Department = "Acting", SortOrder = 0 }],
+                    },
+                };
+                database.MediaItems.Add(Item(movie, "Invented Heist", "11", null));
+                database.MediaItems.Add(Item(edited, "Invented Edit", "12", "[\"credits\"]"));
+                await database.SaveChangesAsync();
+            }
+
+            var refresh = factory.Services.GetRequiredService<CreditRefresh>();
+            Assert.True(await refresh.RunAsync(TimeSpan.Zero, default));
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                var names = await database.MediaCredits.AsNoTracking().Where(credit => credit.MediaItemId == movie).OrderBy(credit => credit.SortOrder).Select(credit => credit.Name).ToListAsync();
+                Assert.Equal(Enumerable.Range(0, 60).Select(i => $"Actor {i}").Append("Director"), names);
+                Assert.Equal(["Old Lead"], await database.MediaCredits.AsNoTracking().Where(credit => credit.MediaItemId == edited).Select(credit => credit.Name).ToListAsync());
+                Assert.Equal("Invented Heist", (await database.MediaMetadata.AsNoTracking().SingleAsync(metadata => metadata.MediaItemId == movie)).ProviderTitle);
+                // Both join their shared universe, the hand-edited one too; only its credits stay.
+                var universe = await database.MediaCollections.AsNoTracking().Include(collection => collection.Members)
+                    .SingleAsync(collection => collection.Provider == MediaUniverses.Provider);
+                Assert.Equal("Marvel Cinematic Universe", universe.Name);
+                Assert.Equal(new[] { edited, movie }.Order(), universe.Members.Select(member => member.MediaItemId).Order());
+            }
+            var asked = provider.Details.Count;
+            Assert.True(await refresh.RunAsync(TimeSpan.Zero, default));
+            Assert.Equal(asked, provider.Details.Count);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(root)!, recursive: true);
+        }
+    }
+
     private sealed class Provider : ITmdbClient
     {
         public int Searches;
@@ -112,7 +184,10 @@ public sealed class ContentRatingRefreshTests
         {
             Details.Add($"{mediaType}/{providerId}");
             var rating = mediaType == "movie" ? "FSK 12" : "FSK 16";
-            return Task.FromResult(new TmdbMetadata(providerId, mediaType, "Changed Title", null, null, null, null, null, rating, [], [], [], null, null, [], null));
+            IReadOnlyList<TmdbCredit> credits = [.. Enumerable.Range(0, 60).Select(i => new TmdbCredit($"{i + 1}", $"Actor {i}", "Acting", null, $"Role {i}", i, null)),
+                new TmdbCredit("900", "Director", "Directing", "Director", null, 100_000, null)];
+            return Task.FromResult(new TmdbMetadata(providerId, mediaType, "Changed Title", null, null, null, null, null, rating, [], [], [], null, null, credits, null,
+                ["heist", "Marvel Cinematic Universe (MCU)"]));
         }
         public Task<IReadOnlyList<TmdbEpisodeMetadata>> GetEpisodesAsync(string token, string language, string seriesProviderId, int seasonNumber, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<TmdbEpisodeMetadata>>([]);

@@ -52,6 +52,17 @@ struct TVArtworkDiskCache: Sendable {
     try? FileManager.default.removeItem(at: fileURL(forKey: key))
   }
 
+  /// Removes every stored artwork entry, for example when this Apple TV leaves its server.
+  func removeAll() {
+    guard
+      let files = try? FileManager.default.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: nil)
+    else { return }
+    for file in files where file.pathExtension == "artwork" {
+      try? FileManager.default.removeItem(at: file)
+    }
+  }
+
   /// Removes the least recently used entries until the cache is below 80 % of its limit.
   func prune() {
     let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]

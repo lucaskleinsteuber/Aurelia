@@ -86,6 +86,14 @@ if [ "$MODE" = sleep ] && ss -Htn state established '( sport = :22 )' | grep -q 
   exit 0
 fi
 
+# An update is being checked or installed: sleeping now could leave a half-replaced program.
+# This also holds after an ended sleep timer; the timer's signal stays for the next check.
+if systemctl is-active --quiet aurelia-update-request.service aurelia-update-check.service; then
+  echo "$now" > "$state/last-active"
+  say "awake: updating"
+  exit 0
+fi
+
 # A sleep timer ended five minutes ago and nothing played since. A signal older than a quarter of
 # an hour is stale (power saving was off then) and is ignored.
 if [ -f "$ready" ]; then
