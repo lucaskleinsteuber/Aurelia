@@ -63,7 +63,7 @@ devices and backups, scrub previews, Server Health and the server's own updates.
 | General | Start screen, poster size, watched titles in rows, Reduce Motion, window and rest behavior |
 | Sidebar | Which pages appear in the sidebar and in which order |
 | Activity | Your watch history and statistics |
-| Playback | Audio and subtitles, Automatic Resume, Dialogue Boost, Volume Leveling |
+| Playback | Audio and subtitles, Automatic Resume, Cinema Mode, Dialogue Boost, Volume Leveling |
 | Library | Storage folders, scans, Library Health, import previews |
 | Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
 | Profiles and Devices | Profiles, PINs, age limits, devices, **Create Code** for a new device, the browser address |
@@ -119,6 +119,18 @@ your server to your Mac and nowhere else, and is never stored. The first time fo
 macOS loads its speech model from Apple once. It needs macOS 26 on a Mac that supports it, a
 server 2.1.0 or newer (2.2.0 for syncing), and an administrator profile. Clear dialogue works best; songs, heavy
 accents and people talking over each other come out less well.
+
+## Cinema mode
+
+Settings › Playback › **Cinema Mode** turns a film into a night at the cinema. When a film starts
+from the beginning, the Mac first shows one of Aurelia's made-up ads (nothing is for sale), then
+trailers of films in your library you haven't watched yet, and opens the curtain for the film.
+**Ads** and the number of **Trailers** (none to three) can be chosen there. **Skip** (→) jumps
+to the next part, **Start Film** (Return) straight to the film, and Esc closes the player.
+
+A film picked up in the middle, an episode, a download and Watch Together start without a
+pre-show. It needs server 2.3.0 or newer; the trailers come from the trailer files in your film
+folders (see [Organizing your media](MEDIA_LIBRARY.md)).
 
 ## Updates
 

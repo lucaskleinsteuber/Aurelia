@@ -1291,6 +1291,14 @@ struct APIClient: Sendable {
     return source
   }
 
+  /// Trailers of other films the profile hasn't started, for the pre-show before film `mediaId`.
+  /// The server refuses titles that aren't films.
+  func cinemaTrailers(mediaId: UUID, count: Int) async throws -> [CinemaTrailer] {
+    let response: CinemaTrailersResponse = try await get(
+      "/api/v1/media/\(mediaId.uuidString.lowercased())/cinema-trailers?count=\(count)")
+    return response.trailers
+  }
+
   func playbackProgress(mediaId: UUID) async throws -> PlaybackProgressResponse {
     try await get("/api/v1/media/\(mediaId.uuidString.lowercased())/progress")
   }

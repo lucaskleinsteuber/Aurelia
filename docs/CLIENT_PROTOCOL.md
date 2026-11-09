@@ -266,6 +266,17 @@ does no recognition itself.
   original (embedded, beside the video or downloaded) as it is. The device reads the original
   as WebVTT through `GET {streamPath}/subtitles/{index}`.
 
+## Cinema mode
+
+With `cinema-trailers-v1` (server 2.3.0), a player can show trailers before a film, as at the
+cinema. `GET /api/v1/media/{id}/cinema-trailers?count=2` (0 to 3, 2 without `count`) answers
+`{trailers: [{trailer, title}]}`: catalog items for one trailer each of up to `count` other films
+in the profile's library that it has not started or finished, in random order, and the film each
+trailer belongs to. Only trailers whose file is there are listed, and the profile's access and age
+limits apply. A title that is not a film the profile can see answers 404, so a player also learns
+from `count=0` whether a title gets a pre-show at all. Each trailer plays through its own normal
+playback ticket; the player saves no progress for it.
+
 ## Watch Together
 
 Several devices at home play one title in step. The server keeps each party in memory: the

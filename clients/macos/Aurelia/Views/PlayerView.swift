@@ -30,6 +30,8 @@ struct PlayerView: View {
   @StateObject private var cursor = PlayerCursorCoordinator()
   @State private var confirmProgressReplacement = false
   @State private var videoSize: CGSize = .zero
+  /// Cinema mode's ad and trailers, shown before the film starts.
+  @State private var preShow: CinemaPreShow?
   @Environment(\.aureliaReduceMotion) private var reduceMotion
   @Environment(\.aureliaReduceTransparency) private var reduceTransparency
 
@@ -92,7 +94,15 @@ struct PlayerView: View {
             .transition(.opacity)
         }
 
-        if controlsVisible || controller.isPreparing || controller.errorMessage != nil {
+        if let preShow {
+          CinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
+            .frame(width: viewport.width, height: viewport.height)
+            .transition(.opacity)
+        }
+
+        if preShow == nil,
+          controlsVisible || controller.isPreparing || controller.errorMessage != nil
+        {
           controls(in: viewport)
             .frame(width: viewport.width, height: viewport.height)
             .transition(.opacity)
@@ -176,9 +186,12 @@ struct PlayerView: View {
       sceneNotes.reload()
       // A party this Mac is in follows into the new player before it starts.
       model.watchParty?.attach(controller)
+      await runPreShow()
+      guard !Task.isCancelled else { return }
       await controller.start()
     }
     .onDisappear {
+      preShow?.stop()
       hideTask?.cancel()
       sceneNotes.stop()
       previews.reset()
@@ -881,6 +894,23 @@ struct PlayerView: View {
     }
   }
 
+  /// Cinema mode: the ad and trailers before a film, when it gets them.
+  private func runPreShow() async {
+    #if DEBUG
+      if CinemaUITestFixture.playsSimulatedTitles { return }
+    #endif
+    guard
+      let show = await CinemaPreShow.prepare(
+        profile: profile, presentation: controller.presentation,
+        preferences: preferencesStore.preferences, capabilities: model.libraryCapabilities,
+        watchingTogether: model.watchParty != nil),
+      !Task.isCancelled
+    else { return }
+    preShow = show
+    await show.run()
+    preShow = nil
+  }
+
   private var startScreenVisible: Bool {
     controller.showsStartScreen && controller.errorMessage == nil
   }
@@ -954,6 +984,15 @@ struct PlayerView: View {
         return true
       }
       return false
+    }
+    if let preShow, event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+      switch event.keyCode {
+      case 36, 76: preShow.startFilm()
+      case 124: preShow.skip()
+      case 53: closePlayer()
+      default: break
+      }
+      return true
     }
     revealControls()
     guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {

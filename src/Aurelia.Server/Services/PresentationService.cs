@@ -124,6 +124,53 @@ public sealed class PresentationService(
         return ids.Where(byId.ContainsKey).Select(id => ToCatalog(byId[id], userId)).ToList();
     }
 
+    /// <summary>The most trailers one pre-show asks for.</summary>
+    public const int MaximumCinemaTrailers = 3;
+
+    /// <summary>
+    /// Up to <paramref name="count"/> trailers for the pre-show before film <paramref name="mediaId"/>,
+    /// in random order: one each of other films in the profile's library that it has not
+    /// started yet, whose trailer file is there.
+    /// </summary>
+    public async Task<CinemaTrailersResponse> CinemaTrailersAsync(
+        Guid userId, Guid mediaId, int count, CancellationToken cancellationToken)
+    {
+        // Only a film the profile can see has a pre-show; extras, trailers and episodes don't.
+        if (!await database.MediaItems.AsNoTracking()
+            .AnyAsync(item => item.Id == mediaId && item.Kind == MediaKind.Movie, cancellationToken))
+            throw new MetadataException("media_not_found", "The film was not found.", StatusCodes.Status404NotFound);
+        count = Math.Clamp(count, 0, MaximumCinemaTrailers);
+        if (count == 0) return new CinemaTrailersResponse([]);
+        var candidates = await database.MediaItems.AsNoTracking()
+            .Where(item => item.Kind == MediaKind.Trailer && item.ParentId != null && item.ParentId != mediaId
+                && item.Availability == MediaAvailability.Available
+                && item.Parent!.Kind == MediaKind.Movie
+                && !item.Parent.PlaybackProgress.Any(progress => progress.UserId == userId
+                    && (progress.IsCompleted || progress.PositionMilliseconds > 0)))
+            .Select(item => new { item.Id, Film = item.ParentId!.Value })
+            .ToListAsync(cancellationToken);
+        var films = candidates.GroupBy(candidate => candidate.Film)
+            .Select(group => (Film: group.Key, Trailers: group.Select(candidate => candidate.Id).ToArray()))
+            .ToArray();
+        Random.Shared.Shuffle(films);
+
+        // A few spare picks, in case a file went missing since the last scan.
+        var picked = films.Take(count + 3)
+            .Select(film => (film.Film, Trailer: film.Trailers[Random.Shared.Next(film.Trailers.Length)]))
+            .ToList();
+        var trailers = (await SummariesAsync(userId, picked.Select(pick => pick.Trailer).ToList(), cancellationToken))
+            .ToDictionary(trailer => trailer.Id);
+        var titles = (await SummariesAsync(userId, picked.Select(pick => pick.Film).ToList(), cancellationToken))
+            .ToDictionary(title => title.Id);
+        var shown = picked
+            .Where(pick => trailers.TryGetValue(pick.Trailer, out var trailer) && trailer.Availability == MediaAvailability.Available
+                && titles.ContainsKey(pick.Film))
+            .Take(count)
+            .Select(pick => new CinemaTrailer(trailers[pick.Trailer], titles[pick.Film]))
+            .ToList();
+        return new CinemaTrailersResponse(shown);
+    }
+
     public async Task<PersonDetailResponse> PersonAsync(
         Guid userId,
         string? name,

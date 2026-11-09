@@ -597,6 +597,13 @@ public sealed record EpisodePresentation(
     int SeasonNumber,
     int EpisodeNumber);
 
+/// <summary>A trailer for a film's pre-show in cinema mode, and the film in the library it is for.</summary>
+public sealed record CinemaTrailer(
+    CatalogItemSummary Trailer,
+    CatalogItemSummary Title);
+
+public sealed record CinemaTrailersResponse(IReadOnlyList<CinemaTrailer> Trailers);
+
 public sealed record SupplementPresentation(
     CatalogItemSummary Item,
     string Category,

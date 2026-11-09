@@ -104,6 +104,12 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var defaultSubtitleLanguage: String
   /// The picture fills the window, cutting off its edges, instead of showing black bars.
   var fillsScreen = false
+  /// Cinema mode: before a film started from the beginning, an ad and trailers, as at the cinema.
+  var cinemaMode = false
+  /// Cinema mode shows one of Aurelia's made-up ads first.
+  var cinemaAds = true
+  /// Trailers of films not watched yet that cinema mode plays (0…3).
+  var cinemaTrailers = 2
 
   init(
     automaticResume: Bool,
@@ -119,7 +125,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     defaultAudioLanguage: String = "original",
     defaultSubtitleLanguage: String = "off",
     dialogueBoost: DialogueBoost = .off, volumeLeveling: VolumeLeveling? = nil,
-    fillsScreen: Bool = false
+    fillsScreen: Bool = false,
+    cinemaMode: Bool = false, cinemaAds: Bool = true, cinemaTrailers: Int = 2
   ) {
     self.automaticResume = automaticResume
     self.defaultPlaybackRate = defaultPlaybackRate
@@ -135,6 +142,9 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     self.defaultAudioLanguage = defaultAudioLanguage
     self.defaultSubtitleLanguage = defaultSubtitleLanguage
     self.fillsScreen = fillsScreen
+    self.cinemaMode = cinemaMode
+    self.cinemaAds = cinemaAds
+    self.cinemaTrailers = cinemaTrailers
   }
 
   var normalized: PlaybackPreferences {
@@ -147,6 +157,7 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
     value.seekInterval = min(max(value.seekInterval, 5), 60)
     value.upNextCountdownSeconds = min(max(value.upNextCountdownSeconds, 5), 30)
     value.resumeThresholdSeconds = min(max(value.resumeThresholdSeconds, 0), 120)
+    value.cinemaTrailers = min(max(value.cinemaTrailers, 0), 3)
     if !PlaybackLanguage.isChoice(value.defaultAudioLanguage, off: "original") {
       value.defaultAudioLanguage = "original"
     }
@@ -163,7 +174,7 @@ extension PlaybackPreferences {
     case seekInterval, preventSleepDuringPlayback, automaticallyPlayNextEpisode, nightMode
     case upNextCountdownSeconds, resumeThresholdSeconds
     case defaultAudioLanguage, defaultSubtitleLanguage, dialogueBoost, volumeLeveling
-    case fillsScreen
+    case fillsScreen, cinemaMode, cinemaAds, cinemaTrailers
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -191,7 +202,10 @@ extension PlaybackPreferences {
       dialogueBoost: try container.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost)
         ?? .off,
       volumeLeveling: try container.decodeIfPresent(VolumeLeveling.self, forKey: .volumeLeveling),
-      fillsScreen: try container.decodeIfPresent(Bool.self, forKey: .fillsScreen) ?? false)
+      fillsScreen: try container.decodeIfPresent(Bool.self, forKey: .fillsScreen) ?? false,
+      cinemaMode: try container.decodeIfPresent(Bool.self, forKey: .cinemaMode) ?? false,
+      cinemaAds: try container.decodeIfPresent(Bool.self, forKey: .cinemaAds) ?? true,
+      cinemaTrailers: try container.decodeIfPresent(Int.self, forKey: .cinemaTrailers) ?? 2)
   }
   func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -210,6 +224,9 @@ extension PlaybackPreferences {
     try values.encode(dialogueBoost, forKey: .dialogueBoost)
     try values.encode(volumeLeveling, forKey: .volumeLeveling)
     try values.encode(fillsScreen, forKey: .fillsScreen)
+    try values.encode(cinemaMode, forKey: .cinemaMode)
+    try values.encode(cinemaAds, forKey: .cinemaAds)
+    try values.encode(cinemaTrailers, forKey: .cinemaTrailers)
   }
 
 }

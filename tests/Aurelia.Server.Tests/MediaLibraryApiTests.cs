@@ -254,6 +254,69 @@ public sealed class MediaLibraryApiTests
     }
 
     [Fact]
+    public async Task CinemaTrailersComeFromOtherFilmsTheProfileHasNotStarted()
+    {
+        var root = CreateDirectory("Cinema Trailers");
+        foreach (var film in new[] { "Arrival (2016)", "Heat (1995)", "Alien (1979)", "Brazil (1985)" })
+        {
+            Touch(root, $"{film}/{film}.mkv");
+            Touch(root, $"{film}/Trailers/Trailer.mkv");
+        }
+        Touch(root, "Dune (2021)/Dune (2021).mkv");
+        try
+        {
+            using var factory = new AureliaServerFactory();
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var library = await CreateLibraryAsync(client, owner.Token, root, LibraryKind.Movies);
+            Assert.Equal(LibraryScanState.Completed, (await StartAndWaitForScanAsync(client, owner.Token, library.Id)).State);
+            var films = (await GetCatalogAsync(client, owner.Token)).Items.ToDictionary(item => item.Title, item => item.Id);
+            Assert.Equal(5, films.Count);
+
+            // Heat is watched to the end and Alien was started; neither is advertised.
+            foreach (var (film, finished) in new[] { ("Heat", true), ("Alien", false) })
+            {
+                using var progress = ApiTestClient.Authorized(HttpMethod.Put, $"/api/v1/media/{films[film]}/progress", owner.Token);
+                progress.Content = JsonContent.Create(new UpdatePlaybackProgressRequest(60_000, 6_000_000, finished));
+                using var saved = await ApiTestClient.SendAsync(client, progress);
+                saved.EnsureSuccessStatusCode();
+            }
+
+            using var request = ApiTestClient.Authorized(
+                HttpMethod.Get, $"/api/v1/media/{films["Arrival"]}/cinema-trailers?count=3", owner.Token);
+            using var response = await ApiTestClient.SendAsync(client, request);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync();
+            Assert.DoesNotContain(root, json, StringComparison.Ordinal);
+            var trailer = Assert.Single((await ApiTestClient.ReadAsync<CinemaTrailersResponse>(response)).Trailers);
+            Assert.Equal("Brazil", trailer.Title.Title);
+            Assert.Equal(MediaKind.Trailer, trailer.Trailer.Kind);
+            Assert.Equal(films["Brazil"], trailer.Trailer.ParentId);
+
+            using var before = ApiTestClient.Authorized(
+                HttpMethod.Get, $"/api/v1/media/{films["Dune"]}/cinema-trailers", owner.Token);
+            using var beforeResponse = await ApiTestClient.SendAsync(client, before);
+            var shown = (await ApiTestClient.ReadAsync<CinemaTrailersResponse>(beforeResponse)).Trailers;
+            Assert.Equal(["Arrival", "Brazil"], shown.Select(item => item.Title.Title).Order());
+
+            // A trailer has no pre-show of its own; asking for none still says the film has one.
+            using var ofTrailer = ApiTestClient.Authorized(
+                HttpMethod.Get, $"/api/v1/media/{trailer.Trailer.Id}/cinema-trailers", owner.Token);
+            using var ofTrailerResponse = await ApiTestClient.SendAsync(client, ofTrailer);
+            Assert.Equal(HttpStatusCode.NotFound, ofTrailerResponse.StatusCode);
+            using var none = ApiTestClient.Authorized(
+                HttpMethod.Get, $"/api/v1/media/{films["Dune"]}/cinema-trailers?count=0", owner.Token);
+            using var noneResponse = await ApiTestClient.SendAsync(client, none);
+            noneResponse.EnsureSuccessStatusCode();
+            Assert.Empty((await ApiTestClient.ReadAsync<CinemaTrailersResponse>(noneResponse)).Trailers);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
     public async Task TrailerImportReviewsArePrivatePersistentAndLimitedToSameLibraryMovies()
     {
         var root = CreateDirectory("Trailer Import Review");

@@ -141,6 +141,9 @@ public static class ApiEndpointMappings
             states.SetAsync(context.User.RequireUserId(), mediaId, request, token));
         media.MapPut("/{mediaId:guid}/continue-watching", (HttpContext context, Guid mediaId, SetContinueWatchingRequest request, LibraryStateService states, CancellationToken token) =>
             states.SetHiddenAsync(context.User.RequireUserId(), mediaId, request, token));
+        // Trailers of films not started yet, for the pre-show before this film in cinema mode.
+        media.MapGet("/{mediaId:guid}/cinema-trailers", (HttpContext context, Guid mediaId, int? count, PresentationService presentation, CancellationToken token) =>
+            ExecuteAsync(() => presentation.CinemaTrailersAsync(context.User.RequireUserId(), mediaId, count ?? 2, token)));
         media.MapGet("/{mediaId:guid}/progress", GetPlaybackProgressAsync);
         media.MapPut("/{mediaId:guid}/progress", UpdatePlaybackProgressAsync);
         media.MapGet("/{mediaId:guid}/metadata", GetMediaMetadataAsync);

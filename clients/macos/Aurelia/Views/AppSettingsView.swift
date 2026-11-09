@@ -641,8 +641,48 @@ struct AppSettingsView: View {
   @ViewBuilder
   private var playbackSections: some View {
     playbackBehaviorSection
+    cinemaModeSection
     playerControlsSection
     audioSubtitlesSection
+  }
+
+  private var cinemaModeSection: some View {
+    AureliaSettingsSection(
+      "Cinema Mode",
+      symbol: "popcorn.fill",
+      description: "A pre-show before a film, as at the cinema."
+    ) {
+      VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 2) {
+          Toggle("Cinema Mode", isOn: $playbackPreferences.preferences.cinemaMode)
+            .accessibilityIdentifier("playback-cinema-mode")
+          Text(
+            "When a film starts from the beginning, an ad and trailers of films in your library you haven't watched yet come first. Return starts the film at any time."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+        }
+
+        Group {
+          Toggle("Ads", isOn: $playbackPreferences.preferences.cinemaAds)
+            .accessibilityIdentifier("playback-cinema-ads")
+
+          LabeledContent("Trailers") {
+            Picker("Trailers", selection: $playbackPreferences.preferences.cinemaTrailers) {
+              Text("None").tag(0)
+              Text("1").tag(1)
+              Text("2").tag(2)
+              Text("3").tag(3)
+            }
+            .labelsHidden()
+            .frame(width: 140)
+            .accessibilityIdentifier("playback-cinema-trailers")
+          }
+        }
+        .disabled(!playbackPreferences.preferences.cinemaMode)
+      }
+      .toggleStyle(.switch)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
   }
 
   private var playbackBehaviorSection: some View {

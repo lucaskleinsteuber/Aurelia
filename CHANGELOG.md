@@ -15,6 +15,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Mac 2.3.0 (156): Cinema Mode in Settings › Playback. Before a film that starts from the beginning, the Mac shows one of three made-up ads (ice cream, popcorn, phones off) with its own little tune, then up to three trailers of films in your library you haven't watched yet, and opens a curtain for the film. Skip (→) and Start Film (Return) are always at hand.
+- Server 2.3.0 (151): trailers of films a profile hasn't started yet, one per film in random order, for the pre-show before a film.
 - Mac 2.2.0 (155): Sync to Speech in Edit Metadata › Subtitles moves subtitles that appear too early or too late so they fit the speech: any offset up to ten minutes, the frame-rate mix-ups between 23.976, 24 and 25 fps, and subtitles made for another cut, part by part. The result is saved as a synced copy beside the original; subtitles that already fit stay, and subtitles that fit nowhere are refused.
 - Server 2.2.0 (150): synced copies of a title's subtitles are kept per language beside the original ("German · Synced").
 - Mac 2.1.0 (154): Create Subtitles from Speech in Edit Metadata › Subtitles. The Mac listens to a sound track with macOS's own on-device speech recognition and writes subtitles that read like written ones: two lines at most, a new subtitle after each sentence or pause. They are saved on the server and play on every device; nothing of the sound is stored.

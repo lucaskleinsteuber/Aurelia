@@ -1184,6 +1184,16 @@ struct PlaybackQueueItem: Identifiable, Equatable, Sendable {
 }
 
 /// Progress is used only by an explicit Resume action. Episode navigation always plays from zero.
+/// A trailer for cinema mode's pre-show, and the film in the library it is for.
+struct CinemaTrailer: Codable, Equatable, Sendable {
+  let trailer: CatalogItemSummary
+  let title: CatalogItemSummary
+}
+
+struct CinemaTrailersResponse: Codable, Sendable {
+  let trailers: [CinemaTrailer]
+}
+
 enum PlaybackStartIntent: Equatable, Sendable {
   case play, resume
 

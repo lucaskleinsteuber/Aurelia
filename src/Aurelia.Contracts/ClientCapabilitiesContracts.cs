@@ -9,7 +9,7 @@ public static class ServerFeatures
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
-        WebPairingCode,
+        WebPairingCode, CinemaTrailers,
     });
 
     /// <summary>
@@ -17,6 +17,12 @@ public static class ServerFeatures
     /// client ("web-pairing-code-v1").
     /// </summary>
     public const string WebPairingCode = "web-pairing-code-v1";
+
+    /// <summary>
+    /// Trailers of films the profile has not watched yet, for a film's pre-show in cinema mode
+    /// ("cinema-trailers-v1", docs/CLIENT_PROTOCOL.md).
+    /// </summary>
+    public const string CinemaTrailers = "cinema-trailers-v1";
 
     /// <summary>Display names and profile pictures ("profile-personalization-v1").</summary>
     public const string ProfilePersonalization = "profile-personalization-v1";

@@ -134,4 +134,6 @@ enum ProfileAgeSteps {
 enum ServerFeatureNames {
   static let profilePersonalization = "profile-personalization-v1"
   static let ageLimits = "age-limits-v1"
+  /// Trailers of films not watched yet, for cinema mode's pre-show.
+  static let cinemaTrailers = "cinema-trailers-v1"
 }

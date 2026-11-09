@@ -57,6 +57,8 @@ home network; details and artwork from [TMDB](https://www.themoviedb.org) are op
   from a title's speech when none fit, or moves to fit the speech when they are off.
 - Timeline previews, Up Next for series, a sleep timer, Dialogue Boost, Volume Leveling and the
   time a title ends.
+- Cinema Mode on the Mac: a made-up ad and trailers of films you haven't watched yet before the
+  film starts.
 - *Play On* sends a title to another screen at home; *Watch Together* keeps several screens on
   the same moment.
 - Downloads on Mac, Linux, iPhone and iPad for watching without the server, with an offline
