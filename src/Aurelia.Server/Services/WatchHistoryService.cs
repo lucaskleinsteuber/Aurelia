@@ -28,17 +28,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
 
         var total = await query.CountAsync(cancellationToken);
 
-        var events = await query
-            .Skip(offset)
-            .Take(limit)
-            .Include(e => e.MediaItem)
-                .ThenInclude(item => item.Metadata)
-                    .ThenInclude(metadata => metadata!.Artwork)
-            .Include(e => e.MediaItem)
-                .ThenInclude(item => item.Parent)
-                    .ThenInclude(parent => parent!.Metadata)
-                        .ThenInclude(metadata => metadata!.Artwork)
-            .ToListAsync(cancellationToken);
+        var events = await WatchedAsync(query.Skip(offset).Take(limit), artwork: true, cancellationToken);
 
         var items = events.Select(e =>
         {
@@ -115,15 +105,9 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         Guid userId,
         CancellationToken cancellationToken)
     {
-        var events = await database.WatchEvents.AsNoTracking()
+        var events = await WatchedAsync(database.WatchEvents.AsNoTracking()
             .Where(e => e.UserId == userId)
-            .Include(e => e.MediaItem)
-                .ThenInclude(item => item.Metadata)
-            .Include(e => e.MediaItem)
-                .ThenInclude(item => item.Parent)
-                    .ThenInclude(parent => parent!.Metadata)
-            .OrderBy(e => e.Timestamp)
-            .ToListAsync(cancellationToken);
+            .OrderBy(e => e.Timestamp), artwork: false, cancellationToken);
 
         if (events.Count == 0)
         {
@@ -273,14 +257,8 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         var start = new DateTimeOffset(new DateTime(year, 1, 1), zone.GetUtcOffset(new DateTime(year, 1, 1)));
         var end = new DateTimeOffset(new DateTime(year + 1, 1, 1), zone.GetUtcOffset(new DateTime(year + 1, 1, 1)));
 
-        var events = await database.WatchEvents.AsNoTracking()
-            .Where(e => e.UserId == userId && e.Timestamp >= start && e.Timestamp < end)
-            .Include(e => e.MediaItem)
-                .ThenInclude(item => item.Metadata)
-            .Include(e => e.MediaItem)
-                .ThenInclude(item => item.Parent)
-                    .ThenInclude(parent => parent!.Metadata)
-            .ToListAsync(cancellationToken);
+        var events = await WatchedAsync(database.WatchEvents.AsNoTracking()
+            .Where(e => e.UserId == userId && e.Timestamp >= start && e.Timestamp < end), artwork: false, cancellationToken);
 
         if (events.Count == 0)
         {
@@ -332,6 +310,45 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
             topTitle,
             busiestDay,
             busiestDayHours);
+    }
+
+    private sealed record Watched(Guid Id, Guid MediaItemId, MediaItem MediaItem, DateTimeOffset Timestamp,
+        long PositionMilliseconds, long DurationMilliseconds, long SecondsWatched, bool IsCompleted);
+
+    /// <summary>
+    /// Watch events with their titles. Each title and each series is read once, however many
+    /// events name it: read together with the events, a year of episodes repeated the series'
+    /// whole description, full cast included, for every event and every picture.
+    /// </summary>
+    private async Task<List<Watched>> WatchedAsync(IQueryable<WatchEvent> query, bool artwork, CancellationToken cancellationToken)
+    {
+        var events = await query.Select(e => new
+        {
+            e.Id,
+            e.MediaItemId,
+            e.Timestamp,
+            e.PositionMilliseconds,
+            e.DurationMilliseconds,
+            e.SecondsWatched,
+            e.IsCompleted,
+        }).ToListAsync(cancellationToken);
+        var titles = await TitlesAsync(events.Select(e => e.MediaItemId).Distinct().ToList(), artwork, cancellationToken);
+        var series = await TitlesAsync(titles.Values.Where(title => title.ParentId.HasValue)
+            .Select(title => title.ParentId!.Value).Distinct().ToList(), artwork, cancellationToken);
+        foreach (var title in titles.Values)
+            if (title.ParentId is { } parentId && series.TryGetValue(parentId, out var parent)) title.Parent = parent;
+        return events.Where(e => titles.ContainsKey(e.MediaItemId)).Select(e => new Watched(e.Id, e.MediaItemId, titles[e.MediaItemId],
+            e.Timestamp, e.PositionMilliseconds, e.DurationMilliseconds, e.SecondsWatched, e.IsCompleted)).ToList();
+    }
+
+    private async Task<Dictionary<Guid, MediaItem>> TitlesAsync(List<Guid> ids, bool artwork, CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0) return [];
+        var titles = database.MediaItems.AsNoTracking().Where(item => ids.Contains(item.Id));
+        titles = artwork
+            ? titles.Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork).AsSplitQuery()
+            : titles.Include(item => item.Metadata);
+        return await titles.ToDictionaryAsync(item => item.Id, cancellationToken);
     }
 
     /// <summary>Hours to the second, so clients can show exact minutes; tenths of an hour hid them.</summary>

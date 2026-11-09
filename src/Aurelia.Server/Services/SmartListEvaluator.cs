@@ -131,6 +131,8 @@ public sealed class SmartListEvaluator
             .Include(item => item.PlaybackProgress)
             .Include(item => item.Parent)
                 .ThenInclude(parent => parent!.Metadata)
+            // One query would repeat a title's whole description, full cast included, for each of its pictures.
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
         // Preserve order of pagedIds
