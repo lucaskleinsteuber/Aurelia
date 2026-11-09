@@ -5,8 +5,10 @@ import Foundation
 enum CinemaAd: String, CaseIterable, Sendable {
   case iceCream, popcorn, phones
 
+  /// The ads are timed as 15-second scripts and played slower, so there is time to read them.
+  static let pace = 1.4
   /// Every ad runs this long, in seconds.
-  static let duration: Double = 15
+  static let duration: Double = 15 * pace
 }
 
 /// One part of cinema mode's pre-show, in the order of a cinema: ad, trailers, then the curtain.
@@ -435,7 +437,16 @@ enum CinemaTunes {
     notes.map { CinemaNote(time: $0.0, frequency: hertz($0.1), length: length, voice: .bell, level: level) }
   }
 
+  /// The ad's tune, its notes moved to where their pictures are in the slower ad.
   static func notes(for ad: CinemaAd) -> [CinemaNote] {
+    scriptNotes(for: ad).map {
+      CinemaNote(
+        time: $0.time * CinemaAd.pace, frequency: $0.frequency, length: $0.length, voice: $0.voice,
+        level: $0.level)
+    }
+  }
+
+  private static func scriptNotes(for ad: CinemaAd) -> [CinemaNote] {
     switch ad {
     case .iceCream:
       // A bright jingle, a plop for every scoop, and a "ta-da" for the price.

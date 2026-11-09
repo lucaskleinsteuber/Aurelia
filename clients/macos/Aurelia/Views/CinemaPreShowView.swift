@@ -174,6 +174,8 @@ private struct CinemaAdScene: View {
 
 private struct IceCreamAd: View {
   let time: Double
+  /// Where the ad's script is: the words come at a pace you can read, the motion stays lively.
+  private var t: Double { time / CinemaAd.pace }
   let motion: Bool
   let unit: CGFloat
 
@@ -202,7 +204,7 @@ private struct IceCreamAd: View {
         Text("*The foyer is your kitchen. Aurelia does not sell ice cream and never has.")
           .font(.system(size: 2.1 * unit, weight: .medium))
           .foregroundStyle(berry.opacity(0.7))
-          .opacity(shown(time, 11.8, 20))
+          .opacity(shown(t, 11.8, 20))
           .padding(.bottom, 5 * unit)
       }
     }
@@ -219,7 +221,7 @@ private struct IceCreamAd: View {
           .offset(
             x: cos(angle * .pi / 180) * 22 * unit,
             y: -60 * unit + sin(angle * .pi / 180) * 16 * unit)
-          .opacity(shown(time, 5.2, 20))
+          .opacity(shown(t, 5.2, 20))
       }
       CinemaCone()
         .fill(
@@ -230,8 +232,8 @@ private struct IceCreamAd: View {
         .overlay(CinemaWaffle(spacing: 4.5 * unit).stroke(.black.opacity(0.14), lineWidth: 0.5 * unit))
         .clipShape(CinemaCone())
         .frame(width: 25 * unit, height: 36 * unit)
-        .offset(y: motion ? (1 - ease(time, 0.3, 0.9)) * 70 * unit : 0)
-        .opacity(ease(time, 0.3, 0.4))
+        .offset(y: motion ? (1 - ease(t, 0.3, 0.9)) * 70 * unit : 0)
+        .opacity(ease(t, 0.3, 0.4))
       ForEach(scoops.indices, id: \.self) { index in
         let (color, at) = scoops[index]
         Circle()
@@ -243,15 +245,15 @@ private struct IceCreamAd: View {
           .frame(width: 27 * unit, height: 27 * unit)
           .offset(
             y: -(30 * unit + CGFloat(index) * 16 * unit)
-              - (motion ? (1 - bounce(time, at)) * 90 * unit : 0))
-          .opacity(motion ? (time >= at ? 1 : 0) : ease(time, at, 0.3))
+              - (motion ? (1 - bounce(t, at)) * 90 * unit : 0))
+          .opacity(motion ? (t >= at ? 1 : 0) : ease(t, at, 0.3))
       }
       Circle()
         .fill(Color(red: 0.86, green: 0.05, blue: 0.14))
         .overlay(Circle().fill(.white.opacity(0.5)).frame(width: 2 * unit).offset(x: -1.5 * unit, y: -1.5 * unit))
         .frame(width: 8 * unit, height: 8 * unit)
-        .offset(y: -82 * unit - (motion ? (1 - bounce(time, 5.0, 0.6)) * 60 * unit : 0))
-        .opacity(motion ? (time >= 5 ? 1 : 0) : ease(time, 5, 0.3))
+        .offset(y: -82 * unit - (motion ? (1 - bounce(t, 5.0, 0.6)) * 60 * unit : 0))
+        .opacity(motion ? (t >= 5 ? 1 : 0) : ease(t, 5, 0.3))
     }
     .frame(width: 34 * unit, height: 92 * unit, alignment: .bottom)
   }
@@ -261,28 +263,28 @@ private struct IceCreamAd: View {
       VStack(alignment: .leading, spacing: 2 * unit) {
         Text("Feeling warm?")
           .font(.system(size: 8 * unit, weight: .bold, design: .rounded))
-        Text("Ninety minutes is a long time.")
+        Text("Ninety minutes is a long t.")
           .font(.system(size: 4.2 * unit, weight: .medium, design: .rounded))
-          .opacity(ease(time, 2.2))
+          .opacity(ease(t, 2.2))
       }
       .foregroundStyle(berry)
-      .opacity(shown(time, 0.8, 4.6))
+      .opacity(shown(t, 0.8, 4.6))
 
       VStack(alignment: .leading, spacing: 2.5 * unit) {
         Text("Aurelia Ice")
           .font(.system(size: 14 * unit, weight: .black, design: .rounded))
           .foregroundStyle(.white)
           .shadow(color: berry.opacity(0.55), radius: 0, x: 0.8 * unit, y: 0.8 * unit)
-          .scaleEffect(motion ? pop(time, 5.0) : 1, anchor: .leading)
+          .scaleEffect(motion ? pop(t, 5.0) : 1, anchor: .leading)
         Text("Three scoops. Zero plot holes.")
           .font(.system(size: 4.6 * unit, weight: .semibold, design: .rounded))
-          .opacity(ease(time, 6.3))
+          .opacity(ease(t, 6.3))
         Text("Now in the foyer.")
           .font(.system(size: 4.6 * unit, weight: .semibold, design: .rounded))
-          .opacity(ease(time, 8.0))
+          .opacity(ease(t, 8.0))
       }
       .foregroundStyle(berry)
-      .opacity(ease(time, 5.0, 0.3))
+      .opacity(ease(t, 5.0, 0.3))
       .overlay(alignment: .topTrailing) {
         ZStack {
           CinemaSunburst(rays: 14, inner: 0.78).fill(Color(red: 1, green: 0.86, blue: 0.2))
@@ -294,8 +296,8 @@ private struct IceCreamAd: View {
         }
         .frame(width: 20 * unit, height: 20 * unit)
         .rotationEffect(.degrees(-14))
-        .scaleEffect(motion ? max(0, pop(time, 9.4)) : ease(time, 9.4, 0.3))
-        .opacity(time >= 9.4 ? 1 : 0)
+        .scaleEffect(motion ? max(0, pop(t, 9.4)) : ease(t, 9.4, 0.3))
+        .opacity(t >= 9.4 ? 1 : 0)
         .offset(x: 2 * unit, y: -16 * unit)
       }
     }
@@ -304,6 +306,8 @@ private struct IceCreamAd: View {
 
 private struct PopcornAd: View {
   let time: Double
+  /// Where the ad's script is: the words come at a pace you can read, the motion stays lively.
+  private var t: Double { time / CinemaAd.pace }
   let motion: Bool
   let unit: CGFloat
 
@@ -325,7 +329,7 @@ private struct PopcornAd: View {
         Text("*Rustling the bag in the dark is included at no extra cost.")
           .font(.system(size: 2.1 * unit, weight: .medium))
           .foregroundStyle(.white.opacity(0.6))
-          .opacity(shown(time, 12, 20))
+          .opacity(shown(t, 12, 20))
           .padding(.bottom, 6 * unit)
       }
     }
@@ -334,7 +338,9 @@ private struct PopcornAd: View {
   private var bucket: some View {
     let width = 36 * unit
     let height = 42 * unit
-    let landed = motion ? CinemaPopcorn.kernels.filter { $0.launch + 0.7 < time }.count : 40
+    let landed =
+      motion
+      ? CinemaPopcorn.kernels.filter { $0.launch * CinemaAd.pace + 0.7 < time }.count : 40
     return ZStack(alignment: .bottom) {
       // The heap grows as kernels land.
       ForEach(0..<min(landed, 34), id: \.self) { index in
@@ -366,7 +372,7 @@ private struct PopcornAd: View {
       Canvas { context, size in
         guard motion else { return }
         for (index, flying) in CinemaPopcorn.kernels.enumerated() {
-          let age = time - flying.launch
+          let age = time - flying.launch * CinemaAd.pace
           guard age >= 0, age < 2.2 else { continue }
           let start = CGPoint(
             x: size.width / 2 + CGFloat((Double(index % 9) - 4) * 3) * unit,
@@ -394,21 +400,21 @@ private struct PopcornAd: View {
       Text("Aurelia Popcorn")
         .font(.system(size: 11 * unit, weight: .black, design: .rounded))
         .foregroundStyle(gold)
-        .scaleEffect(motion ? pop(time, 0.6) : 1, anchor: .leading)
-        .opacity(ease(time, 0.6, 0.3))
+        .scaleEffect(motion ? pop(t, 0.6) : 1, anchor: .leading)
+        .opacity(ease(t, 0.6, 0.3))
       Text("Louder than the film.")
         .font(.system(size: 5.6 * unit, weight: .bold, design: .rounded))
-        .opacity(ease(time, 3.4))
+        .opacity(ease(t, 3.4))
       Text("Now with extra crunch for the quiet scenes.")
         .font(.system(size: 3.8 * unit, weight: .medium, design: .rounded))
-        .opacity(ease(time, 6.0))
+        .opacity(ease(t, 6.0))
       Text("Crunch responsibly.")
         .font(.system(size: 4.2 * unit, weight: .heavy, design: .rounded))
         .foregroundStyle(Color(red: 0.4, green: 0, blue: 0.05))
         .padding(.horizontal, 3 * unit).padding(.vertical, 1.2 * unit)
         .background(gold, in: Capsule())
-        .scaleEffect(motion ? max(0, pop(time, 10.6)) : 1, anchor: .leading)
-        .opacity(time >= 10.6 ? 1 : 0)
+        .scaleEffect(motion ? max(0, pop(t, 10.6)) : 1, anchor: .leading)
+        .opacity(t >= 10.6 ? 1 : 0)
         .padding(.top, 2 * unit)
     }
     .foregroundStyle(.white)
@@ -417,10 +423,12 @@ private struct PopcornAd: View {
 
 private struct PhonesAd: View {
   let time: Double
+  /// Where the ad's script is: the words come at a pace you can read, the motion stays lively.
+  private var t: Double { time / CinemaAd.pace }
   let motion: Bool
   let unit: CGFloat
 
-  private var off: Double { ease(time, CinemaPhones.silence, 0.25) }
+  private var off: Double { ease(t, CinemaPhones.silence, 0.25) }
 
   var body: some View {
     ZStack {
@@ -432,7 +440,7 @@ private struct PhonesAd: View {
       Text("A MESSAGE FROM YOUR CINEMA")
         .font(.system(size: 2.6 * unit, weight: .semibold)).tracking(0.7 * unit)
         .foregroundStyle(.white.opacity(0.55))
-        .opacity(shown(time, 0.3, 7.7))
+        .opacity(shown(t, 0.3, 7.7))
         .frame(maxHeight: .infinity, alignment: .top)
         .padding(.top, 10 * unit)
       HStack(alignment: .center, spacing: 12 * unit) {
@@ -448,8 +456,8 @@ private struct PhonesAd: View {
   }
 
   private var buzzing: Bool {
-    time < CinemaPhones.silence
-      && CinemaPhones.notifications.contains { time >= $0.time && time < $0.time + 0.8 }
+    t < CinemaPhones.silence
+      && CinemaPhones.notifications.contains { t >= $0.time && t < $0.time + 0.8 }
   }
 
   private var phone: some View {
@@ -476,7 +484,7 @@ private struct PhonesAd: View {
     VStack(alignment: .leading, spacing: 1.6 * unit) {
       ForEach(CinemaPhones.notifications.indices, id: \.self) { index in
         let message = CinemaPhones.notifications[index]
-        let appear = ease(time, message.time, 0.3)
+        let appear = ease(t, message.time, 0.3)
         VStack(alignment: .leading, spacing: 0.4 * unit) {
           Text(message.sender).font(.system(size: 2.6 * unit, weight: .bold))
           Text(message.text).font(.system(size: 2.6 * unit)).foregroundStyle(.white.opacity(0.8))
@@ -495,14 +503,14 @@ private struct PhonesAd: View {
     VStack(alignment: .leading, spacing: 2.4 * unit) {
       Text("Thank you.")
         .font(.system(size: 11 * unit, weight: .semibold, design: .serif))
-        .opacity(ease(time, 8.5, 0.7))
+        .opacity(ease(t, 8.5, 0.7))
       Text("Phones off. Yes, yours too.")
         .font(.system(size: 4.6 * unit, weight: .medium))
-        .opacity(ease(time, 9.9))
+        .opacity(ease(t, 9.9))
       Text("The group chat will survive. Probably.")
         .font(.system(size: 3 * unit))
         .foregroundStyle(.white.opacity(0.55))
-        .opacity(ease(time, 11.6))
+        .opacity(ease(t, 11.6))
     }
     .foregroundStyle(.white)
   }

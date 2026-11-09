@@ -27,11 +27,12 @@ versioned commit, so their skipped numbers are preserved.
 - Mac 2.2.0 (155): subtitles created from speech start when the words are said after a pause, instead of when the previous words ended.
 - Mac 2.3.1 (157): Cinema Mode's curtain opens onto the film itself: the film starts behind the curtain, which waits on the title until the picture moves and then gathers to the sides, instead of opening onto a dark stage. The curtain has velvet folds, a valance with tassels, a spotlight and a second fanfare.
 - Mac 2.3.1 (157): a trailer's film name stays on screen for the whole trailer, large for the first 20 seconds.
-- Mac 2.3.2 (158): Cinema Mode in Aurelia's own look: the curtain shows Aurelia's A with its light echo, "Aurelia Cinema Presents" and the film's name in the type of the detail pages; a trailer opens with a "Coming Up" card and keeps its film's name, year and genres in the lower left for the whole trailer.
+- Mac 2.3.2 (159): the ads run 21 seconds instead of 15, so every line can be read; the words come further apart while the motion keeps its speed.
+- Mac 2.3.2 (159): Cinema Mode in Aurelia's own look: the curtain shows Aurelia's A with its light echo, "Aurelia Cinema Presents" and the film's name in the type of the detail pages; a trailer opens with a "Coming Up" card and keeps its film's name, year and genres in the lower left for the whole trailer.
 
 ### Fixed
 
-- Mac 2.3.2 (158): the pointer hides during the ad, the trailers and the curtain like during the film, and shows again when the mouse moves.
+- Mac 2.3.2 (159): the pointer hides during the ad, the trailers and the curtain like during the film, and shows again when the mouse moves.
 - Mac 2.3.1 (157): the film's own trailers are left out of its pre-show on the Mac too, and the built-in server has the detail-page fix of Server 2.3.1.
 - Server 2.3.1 (152): opening a film or series no longer keeps loading. For a title with many pictures and a large cast, the server read every combination of picture and credit as one huge result, wrote gigabytes of temporary files and slowed the whole server down; it now reads pictures and cast separately.
 
