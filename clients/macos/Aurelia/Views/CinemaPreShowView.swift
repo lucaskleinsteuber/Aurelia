@@ -528,42 +528,155 @@ private struct CinemaTrailerScene: View {
   @ObservedObject var show: CinemaPreShow
   let trailer: CinemaTrailer
 
+  /// The title card stays at least this long, even when the trailer starts at once.
+  private static let titleCardSeconds = 2.5
+
+  private var year: String? { trailer.title.year.map(String.init) }
+
   var body: some View {
-    ZStack(alignment: .topLeading) {
-      CinemaVideoSurface(engine: show.engine)
-      if !show.trailerPlaying {
-        ZStack {
-          Color.black
-          VStack(spacing: 10) {
-            Text("Coming up").font(.system(size: 13, weight: .semibold)).tracking(1.2)
-              .foregroundStyle(.white.opacity(0.6))
-            Text(trailer.title.title).font(.system(size: 30, weight: .semibold, design: .serif))
-              .foregroundStyle(.white)
+    TimelineView(.periodic(from: .now, by: 0.25)) { context in
+      let age = context.date.timeIntervalSince(show.actStarted)
+      let card = !show.trailerPlaying || age < Self.titleCardSeconds
+      ZStack(alignment: .bottomLeading) {
+        CinemaVideoSurface(engine: show.engine)
+        // Who the trailer is for, the whole time it runs, like a title on its detail page.
+        LinearGradient(
+          colors: [.black.opacity(0.65), .black.opacity(0.25), .clear],
+          startPoint: .bottomLeading, endPoint: UnitPoint(x: 0.55, y: 0.45)
+        )
+        .allowsHitTesting(false)
+        VStack(alignment: .leading, spacing: 6) {
+          HStack(spacing: 7) {
+            AureliaMark().frame(width: 15, height: 15)
+            Text(["In Your Library", year].compactMap { $0 }.joined(separator: " · ").uppercased())
+              .font(.system(size: 12, weight: .bold)).tracking(1.1)
+              .foregroundStyle(.white.opacity(0.78))
+          }
+          Text(trailer.title.title)
+            .font(.system(size: 34, weight: .bold))
+            .foregroundStyle(.white)
+            .lineLimit(2)
+          if !trailer.title.genres.isEmpty {
+            Text(trailer.title.genres.prefix(2).joined(separator: " · "))
+              .font(.system(size: 14, weight: .semibold))
+              .foregroundStyle(.white.opacity(0.75))
           }
         }
-        .transition(.opacity)
-      }
-      TimelineView(.periodic(from: .now, by: 0.5)) { context in
-        // Large for the first 20 seconds, then small in the corner until the trailer ends.
-        let large = context.date.timeIntervalSince(show.actStarted) < 20
-        VStack(alignment: .leading, spacing: large ? 4 : 2) {
-          Text("In your library").font(.system(size: large ? 13 : 11, weight: .medium))
-            .foregroundStyle(.white.opacity(0.7))
-          Text(
-            [trailer.title.title, trailer.title.year.map(String.init)].compactMap { $0 }
-              .joined(separator: " · ")
-          )
-          .font(.system(size: large ? 26 : 16, weight: .semibold))
-          .foregroundStyle(.white)
+        .frame(maxWidth: 560, alignment: .leading)
+        .shadow(color: .black.opacity(0.5), radius: 10)
+        .padding(.leading, 40).padding(.bottom, 40)
+        .opacity(card ? 0 : 1)
+        if card {
+          CinemaComingUp(title: trailer.title.title, year: year)
+            .transition(.opacity)
         }
-        .shadow(color: .black.opacity(0.7), radius: 8)
-        .padding(.leading, 28).padding(.top, 70)
-        .opacity(show.trailerPlaying ? (large ? 1 : 0.85) : 0)
-        .animation(.easeInOut(duration: 0.6), value: large)
-        .animation(.easeInOut(duration: 0.6), value: show.trailerPlaying)
+      }
+      .animation(.easeInOut(duration: 0.5), value: card)
+    }
+  }
+}
+
+/// The card before a trailer: what is coming up, in Aurelia's own type.
+private struct CinemaComingUp: View {
+  let title: String
+  let year: String?
+
+  var body: some View {
+    ZStack {
+      AureliaBackdrop()
+      RadialGradient(
+        colors: [CinemaBrand.echoTop.opacity(0.22), .clear], center: .center, startRadius: 0,
+        endRadius: 520)
+      VStack(spacing: 14) {
+        AureliaMark().frame(width: 44, height: 44)
+        Text("COMING UP")
+          .font(.system(size: 13, weight: .bold)).tracking(1.6)
+          .foregroundStyle(.white.opacity(0.7))
+        Text(title)
+          .font(.system(size: 44, weight: .bold))
+          .foregroundStyle(.white)
+          .multilineTextAlignment(.center)
+          .lineLimit(2)
+        if let year {
+          Text(year).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+        }
+      }
+      .padding(.horizontal, 60)
+    }
+  }
+}
+
+/// Aurelia's colours: the white A and the blue-violet light echo behind it.
+enum CinemaBrand {
+  static let echoTop = Color(red: 0x8E / 255, green: 0xC5 / 255, blue: 1)
+  static let echoBottom = Color(red: 0x5B / 255, green: 0x4F / 255, blue: 0xE0 / 255)
+}
+
+/// The A of Aurelia's icon with its light echo, drawn from the icon's own outline.
+struct AureliaMark: View {
+  var body: some View {
+    ZStack {
+      AureliaLetter(echo: true)
+        .fill(
+          LinearGradient(
+            colors: [CinemaBrand.echoTop, CinemaBrand.echoBottom], startPoint: .top,
+            endPoint: .bottom),
+          style: FillStyle(eoFill: true))
+      AureliaLetter(echo: false)
+        .fill(
+          LinearGradient(
+            colors: [.white, Color(red: 0xE3 / 255, green: 0xE8 / 255, blue: 0xEE / 255)],
+            startPoint: .top, endPoint: .bottom),
+          style: FillStyle(eoFill: true))
+    }
+    .aspectRatio(1, contentMode: .fit)
+    .accessibilityHidden(true)
+  }
+}
+
+/// The A's outline, from the app icon (a 1024-unit square), cropped to the letter.
+struct AureliaLetter: Shape {
+  /// The light echo: the same A, 34 and 30 icon units to the lower right.
+  let echo: Bool
+
+  private static let outline = "M329.3 792.0 Q296.8 792.0 278.0 774.3 Q259.2 756.7 259.2 726.0 Q259.2 706.7 268.8 680.8 L402.9 312.8 Q417.9 271.2 443.8 251.6 Q469.6 232.0 510.0 232.0 Q552.8 232.0 579.0 251.1 Q605.2 270.2 620.7 312.7 L755.8 680.8 Q764.8 705.6 764.8 725.7 Q764.8 754.6 745.3 773.3 Q725.7 792.0 695.8 792.0 Q665.8 792.0 648.9 777.3 Q631.9 762.6 623.0 729.2 L604.5 669.2 L418.6 669.2 L400.1 727.2 Q390.3 761.7 373.7 776.9 Q357.1 792.0 329.3 792.0 Z M446.2 564.8 L574.3 564.8 L510.7 355.6 L507.9 355.6 Z"
+  /// The letter and its echo in icon units, so together they fill the frame.
+  private static let bounds = CGRect(x: 259.2, y: 232, width: 539.6, height: 590)
+
+  func path(in rect: CGRect) -> Path {
+    let scale = min(rect.width / Self.bounds.width, rect.height / Self.bounds.height)
+    let offset = CGPoint(
+      x: rect.midX - Self.bounds.midX * scale, y: rect.midY - Self.bounds.midY * scale)
+    func point(_ x: Double, _ y: Double) -> CGPoint {
+      CGPoint(x: offset.x + (x + (echo ? 34 : 0)) * scale, y: offset.y + (y + (echo ? 30 : 0)) * scale)
+    }
+    var path = Path()
+    var numbers: [Double] = []
+    var command: Character = "M"
+    func flush() {
+      switch command {
+      case "M" where numbers.count >= 2: path.move(to: point(numbers[0], numbers[1]))
+      case "L" where numbers.count >= 2: path.addLine(to: point(numbers[0], numbers[1]))
+      case "Q" where numbers.count >= 4:
+        path.addQuadCurve(
+          to: point(numbers[2], numbers[3]), control: point(numbers[0], numbers[1]))
+      default: break
+      }
+      numbers = []
+    }
+    for token in Self.outline.split(separator: " ") {
+      if let letter = token.first, letter.isLetter {
+        flush()
+        command = letter
+        if letter == "Z" { path.closeSubpath() }
+        let rest = token.dropFirst()
+        if let value = Double(rest) { numbers.append(value) }
+      } else if let value = Double(token) {
+        numbers.append(value)
       }
     }
-    .animation(.easeInOut(duration: 0.4), value: show.trailerPlaying)
+    flush()
+    return path
   }
 }
 
@@ -620,62 +733,31 @@ private struct CinemaCurtain: View {
     .accessibilityLabel("Feature presentation: \(title)")
   }
 
-  private func titleText(_ height: CGFloat) -> Text {
-    Text(title).font(.system(size: height * 0.072, weight: .semibold, design: .serif))
-  }
-
+  /// Aurelia presents: the A with its light echo, then the film's name in Aurelia's own type.
   private func titleCard(height: CGFloat) -> some View {
-    // A gleam across the title, again every few seconds while the film is starting.
-    let sweep = time < 1.8 ? 0 : ease((time - 1.8).truncatingRemainder(dividingBy: 5), 0, 1.4)
-    return VStack(spacing: height * 0.024) {
-      HStack(spacing: height * 0.022) {
-        CinemaOrnamentLine(reversed: false).frame(width: height * 0.11, height: 1)
-        Text("FEATURE PRESENTATION")
-          .font(.system(size: height * 0.025, weight: .medium, design: .serif))
-          .tracking(height * 0.009)
-          .foregroundStyle(CinemaStage.gold)
-        CinemaOrnamentLine(reversed: true).frame(width: height * 0.11, height: 1)
+    VStack(spacing: height * 0.022) {
+      ZStack {
+        RadialGradient(
+          colors: [CinemaBrand.echoBottom.opacity(0.45), .clear], center: .center, startRadius: 0,
+          endRadius: height * 0.12)
+          .frame(width: height * 0.3, height: height * 0.3)
+        AureliaMark().frame(width: height * 0.085, height: height * 0.085)
       }
-      titleText(height)
-        .foregroundStyle(
-          LinearGradient(
-            colors: [CinemaStage.ivory, CinemaStage.gold, CinemaStage.deepGold],
-            startPoint: .top, endPoint: .bottom)
-        )
+      .frame(height: height * 0.1)
+      Text("AURELIA CINEMA PRESENTS")
+        .font(.system(size: height * 0.021, weight: .bold))
+        .tracking(height * 0.0045)
+        .foregroundStyle(.white.opacity(0.78))
+      Text(title)
+        .font(.system(size: height * 0.075, weight: .bold))
+        .foregroundStyle(.white)
         .multilineTextAlignment(.center)
         .lineLimit(2)
         .minimumScaleFactor(0.5)
-        .overlay {
-          if motion, sweep > 0, sweep < 1 {
-            GeometryReader { proxy in
-              LinearGradient(
-                stops: [
-                  .init(color: .clear, location: 0), .init(color: .white.opacity(0.75), location: 0.5),
-                  .init(color: .clear, location: 1),
-                ], startPoint: .leading, endPoint: .trailing
-              )
-              .frame(width: proxy.size.width * 0.3)
-              .offset(x: (sweep * 1.3 - 0.3) * proxy.size.width)
-            }
-            .mask(titleText(height).multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.5))
-            .allowsHitTesting(false)
-          }
-        }
-      Text("◆").font(.system(size: height * 0.014)).foregroundStyle(CinemaStage.gold.opacity(0.8))
     }
-    .shadow(color: .black.opacity(0.85), radius: 14)
-    .scaleEffect(motion ? 0.965 + 0.035 * ease(time, 0.9, 2.6) : 1)
+    .shadow(color: .black.opacity(0.75), radius: 16)
+    .scaleEffect(motion ? 0.97 + 0.03 * ease(time, 0.9, 2.6) : 1)
     .opacity(shown(time, 0.9, timing.opening + 0.1, fade: 0.7))
-  }
-}
-
-private struct CinemaOrnamentLine: View {
-  let reversed: Bool
-
-  var body: some View {
-    LinearGradient(
-      colors: reversed ? [CinemaStage.gold, .clear] : [.clear, CinemaStage.gold],
-      startPoint: .leading, endPoint: .trailing)
   }
 }
 

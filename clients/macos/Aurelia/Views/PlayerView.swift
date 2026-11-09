@@ -98,6 +98,16 @@ struct PlayerView: View {
           CinemaPreShowView(show: preShow, reduceMotion: reduceMotion)
             .frame(width: viewport.width, height: viewport.height)
             .transition(.opacity)
+            // Moving the pointer shows it again over the pre-show, and it hides after a while.
+            .onContinuousHover { phase in
+              updateCursorEnvironment()
+              if case .active = phase {
+                cursor.pointer(inside: true, physicallyMoved: true)
+                revealControls()
+              } else {
+                cursor.pointer(inside: false, physicallyMoved: false)
+              }
+            }
         }
 
         if preShow == nil,
@@ -236,7 +246,7 @@ struct PlayerView: View {
     }
     .onChange(of: controller.isPlaying) {
       model.reportPlayerPlaying(controller.isPlaying)
-      if !controller.isPlaying { cursor.show() }
+      if !controller.isPlaying, preShow == nil { cursor.show() }
       advanceSceneNotes()
     }
     .onChange(of: controller.currentTimeMilliseconds) { advanceSceneNotes() }
@@ -1082,16 +1092,20 @@ struct PlayerView: View {
       try? await Task.sleep(for: .seconds(delay))
       guard !Task.isCancelled, canAutoHide,
         controlsPolicy.permitsHide(
-          generation, preparing: controller.isPreparing, error: controller.errorMessage != nil)
+          generation, preparing: filmPreparing, error: controller.errorMessage != nil)
       else { return }
       withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { controlsVisible = false }
       updateCursorEnvironment()
-      cursor.hideIfPermitted(playing: controller.isPlaying, blocked: !canAutoHide)
+      // An ad, a trailer or the curtain plays like the film itself.
+      cursor.hideIfPermitted(playing: controller.isPlaying || preShow != nil, blocked: !canAutoHide)
     }
   }
 
+  /// The film is loading in view; behind cinema mode's curtain it loads out of sight.
+  private var filmPreparing: Bool { controller.isPreparing && preShow == nil }
+
   private var canAutoHide: Bool {
-    !cursor.isRetired && !controller.isPreparing && controller.errorMessage == nil && !isScrubbing
+    !cursor.isRetired && !filmPreparing && controller.errorMessage == nil && !isScrubbing
       && !isAdjustingVolume
       && controlsPolicy.holds.isEmpty
   }
