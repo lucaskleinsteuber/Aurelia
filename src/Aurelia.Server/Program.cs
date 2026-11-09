@@ -137,6 +137,7 @@ builder.Services.AddScoped<LibraryMutationService>();
 builder.Services.AddHostedService<LibraryCleanupWorker>();
 builder.Services.AddSingleton<ServerConfigurationStore>();
 builder.Services.AddSingleton<CredentialAttemptGuard>();
+builder.Services.AddSingleton<PairingCodeAttemptGuard>();
 builder.Services.AddSingleton<ActiveStreamRegistry>();
 builder.Services.AddSingleton<LiveConversionService>();
 builder.Services.AddSingleton<ScrubPreviewService>();

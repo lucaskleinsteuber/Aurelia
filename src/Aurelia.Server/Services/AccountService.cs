@@ -16,7 +16,8 @@ public sealed class AccountService(
     ActiveStreamRegistry streams,
     ProfileSessionStore profiles,
     ProfileService profileService,
-    CatalogMutationGate mutations)
+    CatalogMutationGate mutations,
+    PairingCodeAttemptGuard pairingAttempts)
 {
     private static readonly TimeSpan PairingCodeLifetime = TimeSpan.FromMinutes(5);
 
@@ -189,6 +190,7 @@ public sealed class AccountService(
             ExpiresAt = expiresAt,
         });
         await database.SaveChangesAsync(cancellationToken);
+        pairingAttempts.CodeCreated();
         return new PairingCodeResponse(rawCode, expiresAt);
     }
 
@@ -215,6 +217,15 @@ public sealed class AccountService(
 
         if (code is null || code.ConsumedAt is not null || code.ExpiresAt <= now || !code.User.IsEnabled || code.User.Role != UserRole.Owner)
         {
+            // Too many wrong guesses, from however many addresses, end every waiting code.
+            if (pairingAttempts.RecordFailure())
+            {
+                var waiting = await database.PairingCodes.Where(candidate => candidate.ConsumedAt == null).ToListAsync(cancellationToken);
+                foreach (var candidate in waiting) candidate.ConsumedAt = now;
+                await database.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+
             throw InvalidPairingCode();
         }
 
