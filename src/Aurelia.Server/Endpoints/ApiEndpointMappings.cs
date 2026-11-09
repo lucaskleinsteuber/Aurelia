@@ -757,6 +757,7 @@ public static class ApiEndpointMappings
         var item = await database.MediaItems.AsNoTracking()
             .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Credits)
             .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(media => media.Id == mediaId, cancellationToken);
         return item is null ? Problem("media_not_found", "The media item was not found.", StatusCodes.Status404NotFound) : Results.Ok(MetadataPresentation.ToSummary(item));
     }

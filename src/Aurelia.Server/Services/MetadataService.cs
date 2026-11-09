@@ -143,6 +143,7 @@ public sealed class MetadataService(
         var item = await database.MediaItems.Include(media => media.Metadata)!
             .ThenInclude(metadata => metadata!.Artwork)
             .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Credits)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(media => media.Id == mediaId, cancellationToken)
             ?? throw NotFound("media_not_found", "The media item was not found.");
         if (item.Metadata is null)
@@ -172,6 +173,7 @@ public sealed class MetadataService(
         using var lease = await mutations.EnterAsync(cancellationToken);
         var item = await database.MediaItems.Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
             .Include(media => media.Metadata)!.ThenInclude(metadata => metadata!.Credits)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(media => media.Id == mediaId, cancellationToken)
             ?? throw NotFound("media_not_found", "The media item was not found.");
         if (item.Metadata is not null)
@@ -198,7 +200,8 @@ public sealed class MetadataService(
             or MediaCollectionRecord or MediaCollectionMember).ToArray())
             entry.State = EntityState.Detached;
         var fresh = await database.MediaItems.Include(media => media.Metadata)!.ThenInclude(meta => meta!.Credits)
-            .Include(media => media.Metadata)!.ThenInclude(meta => meta!.Artwork).SingleOrDefaultAsync(media => media.Id == item.Id, cancellationToken);
+            .Include(media => media.Metadata)!.ThenInclude(meta => meta!.Artwork).AsSplitQuery()
+            .SingleOrDefaultAsync(media => media.Id == item.Id, cancellationToken);
         if (fresh is null) return;
         var original = item;
         item = fresh;
@@ -378,6 +381,7 @@ public sealed class MetadataService(
     private async Task<MediaItem> RequireMatchableItemAsync(Guid id, CancellationToken cancellationToken) =>
         await database.MediaItems.Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Credits)
             .Include(item => item.Metadata)!.ThenInclude(metadata => metadata!.Artwork)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(item => item.Id == id && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series), cancellationToken)
             ?? throw NotFound("media_not_found", "A matchable movie or series was not found.");
 

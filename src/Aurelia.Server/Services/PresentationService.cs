@@ -48,6 +48,9 @@ public sealed class PresentationService(
     {
         var item = await BaseItems(userId)
             .Include(candidate => candidate.Metadata)!.ThenInclude(metadata => metadata!.Credits)
+            // One query would repeat every column, the full provider credits included, for each
+            // combination of artwork and credit: gigabytes for a film with a large cast.
+            .AsSplitQuery()
             .SingleOrDefaultAsync(candidate => candidate.Id == mediaId
                 && (candidate.Kind == MediaKind.Movie || candidate.Kind == MediaKind.Series), cancellationToken)
             ?? throw new MetadataException("media_not_found", "The movie or series was not found.", StatusCodes.Status404NotFound);

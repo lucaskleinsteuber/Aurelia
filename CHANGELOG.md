@@ -26,6 +26,10 @@ versioned commit, so their skipped numbers are preserved.
 
 - Mac 2.2.0 (155): subtitles created from speech start when the words are said after a pause, instead of when the previous words ended.
 
+### Fixed
+
+- Server 2.3.1 (152): opening a film or series no longer keeps loading. For a title with many pictures and a large cast, the server read every combination of picture and credit as one huge result, wrote gigabytes of temporary files and slowed the whole server down; it now reads pictures and cast separately.
+
 ## iPhone & iPad 2.1.0 (17) - 08.11.2026
 
 ### Added

@@ -16,6 +16,7 @@ public sealed class MediaEditorService(AureliaDbContext database, CatalogMutatio
         await database.MediaItems.Include(item => item.LibraryRoot)
             .Include(item => item.Metadata)!.ThenInclude(meta => meta!.Credits)
             .Include(item => item.Metadata)!.ThenInclude(meta => meta!.Artwork)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(item => item.Id == id, token)
         ?? throw new AccountException("media_not_found", "The title is unavailable or not shared with your account.", 404);
 

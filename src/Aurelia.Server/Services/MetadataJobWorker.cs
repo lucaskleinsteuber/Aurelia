@@ -187,6 +187,7 @@ public sealed partial class MetadataJobWorker(
         }
         var item = await database.MediaItems.Include(value => value.Metadata)!.ThenInclude(value => value!.Credits)
             .Include(value => value.Metadata)!.ThenInclude(value => value!.Artwork)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(value => value.Id == mediaId && (value.Kind == MediaKind.Movie || value.Kind == MediaKind.Series), token);
         if (item is null)
         {
