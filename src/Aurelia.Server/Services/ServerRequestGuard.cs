@@ -35,6 +35,20 @@ public sealed class ServerRequestGuard
         return PrivateNetworks.Any(network => network.Contains(ip))
             && (restrictions is not { Length: > 0 } || restrictions.Any(network => IPNetwork.Parse(network).Contains(ip)));
     }
+    /// <summary>
+    /// Plain HTTP is only served on the computer's own loopback address, so its requests name
+    /// that computer. A web page in a browser there can point its own name at 127.0.0.1 (DNS
+    /// rebinding); such requests carry the page's name and are refused. HTTPS is not affected:
+    /// a browser accepts the server's certificate for one address only.
+    /// </summary>
+    public static bool HostAllowed(HttpRequest request)
+    {
+        if (request.IsHttps || !request.Host.HasValue) return true;
+        var host = request.Host.Host;
+        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || (IPAddress.TryParse(host.Trim('[', ']'), out var address) && IPAddress.IsLoopback(address));
+    }
+
     public bool Admit(IPAddress? address, bool preview = false)
     {
         var key = (preview ? "preview:" : "") + (address?.ToString() ?? "local");

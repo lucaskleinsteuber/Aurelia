@@ -314,6 +314,14 @@ app.Use(async (context, next) =>
             "This device's network address is not allowed by the server's network settings."));
         return;
     }
+    if (!ServerRequestGuard.HostAllowed(context.Request))
+    {
+        context.Response.StatusCode = 403;
+        context.RequestServices.GetRequiredService<ServerDiagnosticsStore>().Record("host_rejected", "warning", status: 403);
+        await context.Response.WriteAsJsonAsync(new ApiProblem("host_not_allowed",
+            "Without HTTPS, Aurelia Server only answers on the server computer's own address."));
+        return;
+    }
     var backupUpload = HttpMethods.IsPut(context.Request.Method) && (context.Request.Path.Value ?? "").StartsWith("/api/v1/server/backups/uploads/", StringComparison.OrdinalIgnoreCase);
     var editorPath = (context.Request.Path.Value ?? "").Contains("/editor", StringComparison.Ordinal);
     var imageUpload = editorPath && HttpMethods.IsPost(context.Request.Method) && context.Request.Path.Value!.EndsWith("/uploads", StringComparison.Ordinal);
