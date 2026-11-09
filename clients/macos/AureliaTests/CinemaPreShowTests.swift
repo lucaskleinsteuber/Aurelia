@@ -91,15 +91,36 @@ struct CinemaPreShowTests {
       CinemaTrailer(trailer: item("Trailer", kind: .trailer), title: item($0, kind: .movie))
     }
     #expect(
-      CinemaPreShowPlan.acts(ad: .popcorn, trailers: trailers, title: "Arrival") == [
-        .ad(.popcorn), .trailer(trailers[0]), .trailer(trailers[1]), .feature(title: "Arrival"),
-      ])
+      CinemaPreShowPlan.acts(ad: .popcorn, trailers: trailers, film: film.mediaId, title: "Arrival")
+        == [
+          .ad(.popcorn), .trailer(trailers[0]), .trailer(trailers[1]), .feature(title: "Arrival"),
+        ])
     #expect(
-      CinemaPreShowPlan.acts(ad: nil, trailers: [trailers[0]], title: "Arrival") == [
-        .trailer(trailers[0]), .feature(title: "Arrival"),
-      ])
+      CinemaPreShowPlan.acts(ad: nil, trailers: [trailers[0]], film: film.mediaId, title: "Arrival")
+        == [.trailer(trailers[0]), .feature(title: "Arrival")])
     // Without an ad or a trailer there is no curtain on its own either.
-    #expect(CinemaPreShowPlan.acts(ad: nil, trailers: [], title: "Arrival").isEmpty)
+    #expect(
+      CinemaPreShowPlan.acts(ad: nil, trailers: [], film: film.mediaId, title: "Arrival").isEmpty)
+  }
+
+  @Test func theFilmsOwnTrailerNeverRunsBeforeIt() {
+    let own = CinemaTrailer(
+      trailer: item("Trailer", kind: .trailer),
+      title: CatalogItemSummary(
+        id: film.mediaId, kind: .movie, title: "Arrival", originalTitle: nil, year: 2016,
+        overview: nil, genres: [], poster: nil, backdrop: nil, availability: .available,
+        isFavorite: false, progress: nil, addedAt: "2026-11-09T00:00:00Z"))
+    var teaser = item("Teaser", kind: .trailer)
+    teaser.parentId = film.mediaId
+    let fromElsewhere = CinemaTrailer(trailer: teaser, title: item("Heat", kind: .movie))
+    let other = CinemaTrailer(trailer: item("Trailer", kind: .trailer), title: item("Heat", kind: .movie))
+    #expect(
+      CinemaPreShowPlan.acts(
+        ad: nil, trailers: [own, fromElsewhere, other], film: film.mediaId, title: "Arrival")
+        == [.trailer(other), .feature(title: "Arrival")])
+    #expect(
+      CinemaPreShowPlan.acts(ad: nil, trailers: [own], film: film.mediaId, title: "Arrival")
+        .isEmpty)
   }
 
   @Test func theAdsTakeTurns() {
@@ -157,15 +178,39 @@ struct CinemaPreShowTests {
       #expect(peak > 0.05 && peak <= 0.9 + 1e-6, "\(ad)")
       #expect(Double(samples.count) / CinemaSynth.sampleRate <= CinemaAd.duration + 1.5)
     }
+    // The call ends before the curtain can open; the answer before the curtain is gone.
     #expect(
-      CinemaTunes.fanfare.allSatisfy {
-        $0.time + $0.length <= CinemaPreShowPlan.featureSeconds - 1
+      CinemaTunes.fanfareCall.allSatisfy {
+        $0.time + $0.length <= CinemaPreShowPlan.curtainEarliestOpening
       })
-    #expect(CinemaSynth.samples(CinemaTunes.fanfare) == CinemaSynth.samples(CinemaTunes.fanfare))
+    #expect(
+      CinemaTunes.fanfareAnswer.allSatisfy {
+        $0.time + $0.length <= CinemaPreShowPlan.curtainOpeningSeconds - 0.5
+      })
+    #expect(
+      CinemaSynth.samples(CinemaTunes.fanfareCall) == CinemaSynth.samples(CinemaTunes.fanfareCall))
     #expect(
       CinemaPopcorn.kernels.count > 20
         && CinemaPopcorn.kernels.allSatisfy { $0.launch >= 1.6 && $0.launch < 10 })
     #expect(
       CinemaPhones.notifications.allSatisfy { $0.time + 0.8 <= CinemaPhones.silence })
+  }
+
+  @Test func theCurtainStaysClosedUntilTheFilmIsPlayingBehindIt() {
+    let waiting = CinemaCurtainTiming(opensAt: nil)
+    for time in [0.0, 3.3, 8, 30] {
+      #expect(waiting.open(time) == (0, 0) || waiting.open(time).top == 0)
+      #expect(waiting.revealed(time) == 0 && waiting.gone(time) == 0)
+    }
+    #expect(waiting.spot(2) == 1)
+
+    let playing = CinemaCurtainTiming(opensAt: 5)
+    #expect(playing.open(4.9).top == 0 && playing.revealed(5) == 0)
+    #expect(playing.open(8).top == 1 && playing.open(9).hem == 1)
+    #expect(playing.revealed(7) == 1 && playing.spot(7) == 0 && playing.dimmed(7) == 0)
+    // The house lights stay down while the film plays.
+    #expect(playing.lightsDown(7) == 1)
+    #expect(playing.gone(5 + CinemaPreShowPlan.curtainOpeningSeconds) == 1)
+    #expect(abs(playing.sway(5.1)) < 1e-9 && abs(playing.sway(12)) < 0.002)
   }
 }

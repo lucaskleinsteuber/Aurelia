@@ -1,5 +1,5 @@
-CURRENT_PROJECT_VERSION = 156
-MARKETING_VERSION = 2.3.0
+CURRENT_PROJECT_VERSION = 157
+MARKETING_VERSION = 2.3.1
 // The real app. AURELIA_TEST_EDITION=1 in build-macos-release.sh builds "Aurelia Test" with
 // com.lucas.aurelia.media.test, its own App Group and launch agents, beside the real app.
 AURELIA_BUNDLE_ID_BASE = com.lucas.aurelia.media

@@ -124,7 +124,9 @@ accents and people talking over each other come out less well.
 
 Settings › Playback › **Cinema Mode** turns a film into a night at the cinema. When a film starts
 from the beginning, the Mac first shows one of Aurelia's made-up ads (nothing is for sale), then
-trailers of films in your library you haven't watched yet, and opens the curtain for the film.
+trailers of films in your library you haven't watched yet (never one of the film itself), and then
+the curtain: the film starts behind it, and the curtain opens once its picture moves, waiting at
+most ten seconds.
 **Ads** and the number of **Trailers** (none to three) can be chosen there. **Skip** (→) jumps
 to the next part, **Start Film** (Return) straight to the film, and Esc closes the player.
 

@@ -190,6 +190,9 @@ struct PlayerView: View {
       guard !Task.isCancelled else { return }
       await controller.start()
     }
+    .onChange(of: controller.showsStartScreen) { _, waiting in
+      if !waiting { preShow?.filmStarted() }
+    }
     .onDisappear {
       preShow?.stop()
       hideTask?.cancel()
@@ -894,7 +897,8 @@ struct PlayerView: View {
     }
   }
 
-  /// Cinema mode: the ad and trailers before a film, when it gets them.
+  /// Cinema mode: the ad and trailers before a film, when it gets them. The film starts behind
+  /// the curtain, which opens once its picture moves.
   private func runPreShow() async {
     #if DEBUG
       if CinemaUITestFixture.playsSimulatedTitles { return }
@@ -906,9 +910,10 @@ struct PlayerView: View {
         watchingTogether: model.watchParty != nil),
       !Task.isCancelled
     else { return }
+    show.onFeature = { [controller] in Task { await controller.start() } }
     preShow = show
     await show.run()
-    preShow = nil
+    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { preShow = nil }
   }
 
   private var startScreenVisible: Bool {

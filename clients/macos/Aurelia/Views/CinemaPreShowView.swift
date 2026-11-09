@@ -8,7 +8,8 @@ struct CinemaPreShowView: View {
 
   var body: some View {
     ZStack {
-      Color.black
+      // Once the curtain opens, the film playing behind it shows through.
+      if !isFeature || show.curtainOpensAt == nil { Color.black }
       switch show.act {
       case .ad(let ad):
         TimelineView(.animation) { context in
@@ -25,7 +26,7 @@ struct CinemaPreShowView: View {
         TimelineView(.animation) { context in
           CinemaCurtain(
             title: title, time: context.date.timeIntervalSince(show.actStarted),
-            motion: !reduceMotion)
+            opensAt: show.curtainOpensAt, motion: !reduceMotion)
         }
         .transition(.opacity)
       case nil:
@@ -36,6 +37,10 @@ struct CinemaPreShowView: View {
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: show.act)
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("cinema-pre-show")
+  }
+
+  private var isFeature: Bool {
+    if case .feature = show.act { true } else { false }
   }
 
   private var label: String? {
@@ -539,21 +544,23 @@ private struct CinemaTrailerScene: View {
         .transition(.opacity)
       }
       TimelineView(.periodic(from: .now, by: 0.5)) { context in
-        let age = context.date.timeIntervalSince(show.actStarted)
-        VStack(alignment: .leading, spacing: 4) {
-          Text("In your library").font(.system(size: 12, weight: .medium))
+        // Large for the first 20 seconds, then small in the corner until the trailer ends.
+        let large = context.date.timeIntervalSince(show.actStarted) < 20
+        VStack(alignment: .leading, spacing: large ? 4 : 2) {
+          Text("In your library").font(.system(size: large ? 13 : 11, weight: .medium))
             .foregroundStyle(.white.opacity(0.7))
           Text(
             [trailer.title.title, trailer.title.year.map(String.init)].compactMap { $0 }
               .joined(separator: " · ")
           )
-          .font(.system(size: 22, weight: .semibold))
+          .font(.system(size: large ? 26 : 16, weight: .semibold))
           .foregroundStyle(.white)
         }
-        .shadow(color: .black.opacity(0.6), radius: 8)
+        .shadow(color: .black.opacity(0.7), radius: 8)
         .padding(.leading, 28).padding(.top, 70)
-        .opacity(show.trailerPlaying && age < 9 ? 1 : 0)
-        .animation(.easeInOut(duration: 0.6), value: show.trailerPlaying && age < 9)
+        .opacity(show.trailerPlaying ? (large ? 1 : 0.85) : 0)
+        .animation(.easeInOut(duration: 0.6), value: large)
+        .animation(.easeInOut(duration: 0.6), value: show.trailerPlaying)
       }
     }
     .animation(.easeInOut(duration: 0.4), value: show.trailerPlaying)
@@ -574,78 +581,371 @@ private struct CinemaVideoSurface: NSViewRepresentable {
 
 // MARK: Feature presentation
 
+/// The curtain before the film: the house lights go down, a spotlight finds the title on the
+/// velvet, then the curtain gathers to the sides, its hem swinging after, and the screen waits.
 private struct CinemaCurtain: View {
   let title: String
   let time: Double
+  /// When the curtain starts to open; nil while the film is still starting behind it.
+  let opensAt: Double?
   let motion: Bool
 
-  private let gold = Color(red: 0.93, green: 0.78, blue: 0.45)
+  private var timing: CinemaCurtainTiming { CinemaCurtainTiming(opensAt: opensAt) }
 
   var body: some View {
     GeometryReader { geometry in
-      let width = geometry.size.width
       let height = geometry.size.height
-      let open = ease(time, 2.6, 2.6)
+      let timing = timing
+      let open = timing.open(time).top
       ZStack {
-        RadialGradient(
-          colors: [gold.opacity(0.22), .clear], center: .center, startRadius: 0,
-          endRadius: height * 0.6)
-        HStack(spacing: 0) {
-          CinemaVelvet()
-            .frame(width: width / 2 + 2)
-            .scaleEffect(x: motion ? 1 - 0.75 * open : 1, anchor: .leading)
-          Spacer(minLength: 0)
-          CinemaVelvet()
-            .frame(width: width / 2 + 2)
-            .scaleEffect(x: motion ? 1 - 0.75 * open : 1, anchor: .trailing)
+        Canvas { context, size in
+          CinemaStage.drawBehind(&context, size: size, time: time, timing: timing)
+        }
+        Canvas { context, size in
+          CinemaStage.drawDrapes(&context, size: size, time: time, timing: timing, motion: motion)
         }
         .opacity(motion ? 1 : 1 - open)
-        VStack {
-          LinearGradient(
-            colors: [Color(red: 0.32, green: 0.02, blue: 0.05), Color(red: 0.5, green: 0.04, blue: 0.08)],
-            startPoint: .top, endPoint: .bottom
-          )
-          .frame(height: height * 0.11)
-          .overlay(alignment: .bottom) { gold.frame(height: max(2, height * 0.006)) }
-          Spacer()
+        Canvas { context, size in
+          CinemaStage.drawLights(&context, size: size, time: time, timing: timing, motion: motion)
+          CinemaStage.drawValance(&context, size: size)
         }
-        VStack(spacing: height * 0.02) {
-          Text("FEATURE PRESENTATION")
-            .font(.system(size: height * 0.03, weight: .medium, design: .serif))
-            .tracking(height * 0.008)
-            .foregroundStyle(gold)
-          Text(title)
-            .font(.system(size: height * 0.065, weight: .semibold, design: .serif))
-            .foregroundStyle(.white)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, width * 0.1)
-        }
-        .shadow(color: .black.opacity(0.7), radius: 12)
-        .opacity(shown(time, 0.4, 2.8, fade: 0.7))
+        titleCard(height: height)
+          .frame(maxWidth: geometry.size.width * 0.8)
       }
-      .frame(width: width, height: height)
-      .overlay(Color.black.opacity(ease(time, CinemaPreShowPlan.featureSeconds - 0.9, 0.9)))
+      .frame(width: geometry.size.width, height: height)
+      // The gathered curtain frames the film for a moment, then leaves it alone.
+      .opacity(1 - timing.gone(time))
     }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Feature presentation: \(title)")
   }
+
+  private func titleText(_ height: CGFloat) -> Text {
+    Text(title).font(.system(size: height * 0.072, weight: .semibold, design: .serif))
+  }
+
+  private func titleCard(height: CGFloat) -> some View {
+    // A gleam across the title, again every few seconds while the film is starting.
+    let sweep = time < 1.8 ? 0 : ease((time - 1.8).truncatingRemainder(dividingBy: 5), 0, 1.4)
+    return VStack(spacing: height * 0.024) {
+      HStack(spacing: height * 0.022) {
+        CinemaOrnamentLine(reversed: false).frame(width: height * 0.11, height: 1)
+        Text("FEATURE PRESENTATION")
+          .font(.system(size: height * 0.025, weight: .medium, design: .serif))
+          .tracking(height * 0.009)
+          .foregroundStyle(CinemaStage.gold)
+        CinemaOrnamentLine(reversed: true).frame(width: height * 0.11, height: 1)
+      }
+      titleText(height)
+        .foregroundStyle(
+          LinearGradient(
+            colors: [CinemaStage.ivory, CinemaStage.gold, CinemaStage.deepGold],
+            startPoint: .top, endPoint: .bottom)
+        )
+        .multilineTextAlignment(.center)
+        .lineLimit(2)
+        .minimumScaleFactor(0.5)
+        .overlay {
+          if motion, sweep > 0, sweep < 1 {
+            GeometryReader { proxy in
+              LinearGradient(
+                stops: [
+                  .init(color: .clear, location: 0), .init(color: .white.opacity(0.75), location: 0.5),
+                  .init(color: .clear, location: 1),
+                ], startPoint: .leading, endPoint: .trailing
+              )
+              .frame(width: proxy.size.width * 0.3)
+              .offset(x: (sweep * 1.3 - 0.3) * proxy.size.width)
+            }
+            .mask(titleText(height).multilineTextAlignment(.center).lineLimit(2).minimumScaleFactor(0.5))
+            .allowsHitTesting(false)
+          }
+        }
+      Text("◆").font(.system(size: height * 0.014)).foregroundStyle(CinemaStage.gold.opacity(0.8))
+    }
+    .shadow(color: .black.opacity(0.85), radius: 14)
+    .scaleEffect(motion ? 0.965 + 0.035 * ease(time, 0.9, 2.6) : 1)
+    .opacity(shown(time, 0.9, timing.opening + 0.1, fade: 0.7))
+  }
 }
 
-private struct CinemaVelvet: View {
+private struct CinemaOrnamentLine: View {
+  let reversed: Bool
+
   var body: some View {
-    HStack(spacing: 0) {
-      ForEach(0..<7, id: \.self) { _ in
-        LinearGradient(
-          colors: [
-            Color(red: 0.30, green: 0.01, blue: 0.04), Color(red: 0.62, green: 0.05, blue: 0.10),
-            Color(red: 0.42, green: 0.02, blue: 0.06), Color(red: 0.30, green: 0.01, blue: 0.04),
-          ],
-          startPoint: .leading, endPoint: .trailing)
-      }
-    }
-    .overlay(
-      LinearGradient(colors: [.clear, .black.opacity(0.45)], startPoint: .center, endPoint: .bottom))
+    LinearGradient(
+      colors: reversed ? [CinemaStage.gold, .clear] : [.clear, CinemaStage.gold],
+      startPoint: .leading, endPoint: .trailing)
   }
+}
+
+/// When the curtain moves, in seconds from its start.
+struct CinemaCurtainTiming {
+  /// When it starts to open; far away while the film is still starting behind it.
+  let opening: Double
+
+  init(opensAt: Double?) { opening = opensAt ?? 1_000_000 }
+
+  /// How far the curtain is open at the top and at the hem, which follows a little later.
+  func open(_ time: Double) -> (top: Double, hem: Double) {
+    (ease(time, opening, 2.6), ease(time, opening + 0.1, 2.6))
+  }
+
+  /// The hem swinging out a little further and back as the curtain gathers.
+  func sway(_ time: Double) -> Double {
+    let since = time - opening - 0.1
+    guard since > 0 else { return 0 }
+    return 0.03 * sin(since * 2 * .pi * 0.75) * exp(-since * 1.1) * ease(since, 0, 0.6)
+  }
+
+  /// The house lights going down.
+  func lightsDown(_ time: Double) -> Double { ease(time, 0.1, 1.2) }
+
+  /// The dark over the curtain, lifting as it opens so the film isn't dimmed.
+  func dimmed(_ time: Double) -> Double { lightsDown(time) * (1 - ease(time, opening, 1)) }
+
+  /// The spotlight on the title, gone once the curtain opens.
+  func spot(_ time: Double) -> Double { ease(time, 0.5, 0.8) * (1 - ease(time, opening + 0.2, 1)) }
+
+  /// The black behind the curtain giving way to the film.
+  func revealed(_ time: Double) -> Double { ease(time, opening + 0.3, 1.2) }
+
+  /// The whole curtain fading off the playing film.
+  func gone(_ time: Double) -> Double {
+    ease(time, opening + CinemaPreShowPlan.curtainOpeningSeconds - 0.9, 0.8)
+  }
+}
+
+/// The stage drawn with Core Graphics: screen, velvet, valance and light.
+private enum CinemaStage {
+  static let gold = Color(red: 0.95, green: 0.80, blue: 0.47)
+  static let deepGold = Color(red: 0.76, green: 0.56, blue: 0.26)
+  static let ivory = Color(red: 1, green: 0.96, blue: 0.86)
+  static let folds = 11
+
+  static func velvet(_ shade: Double) -> Color {
+    Color(red: 0.62 * shade, green: 0.05 * shade, blue: 0.09 * shade)
+  }
+
+  static func floor(_ size: CGSize) -> CGFloat { size.height * 0.93 }
+
+  /// The dark behind the closed curtain and the stage's edge, giving way to the film.
+  static func drawBehind(
+    _ context: inout GraphicsContext, size: CGSize, time: Double, timing: CinemaCurtainTiming
+  ) {
+    let dark = 1 - timing.revealed(time)
+    guard dark > 0 else { return }
+    context.opacity = dark
+    context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
+    let floor = floor(size)
+    context.fill(
+      Path(CGRect(x: 0, y: floor, width: size.width, height: size.height - floor)),
+      with: .linearGradient(
+        Gradient(colors: [
+          Color(red: 0.17, green: 0.09, blue: 0.05), Color(red: 0.05, green: 0.025, blue: 0.015),
+        ]), startPoint: CGPoint(x: 0, y: floor), endPoint: CGPoint(x: 0, y: size.height)))
+    context.fill(
+      Path(CGRect(x: 0, y: floor, width: size.width, height: max(1.5, size.height * 0.003))),
+      with: .color(deepGold.opacity(0.7)))
+  }
+
+  /// Both halves of the curtain, fold by fold, with a gold fringe on the hem.
+  static func drawDrapes(
+    _ context: inout GraphicsContext, size: CGSize, time: Double, timing: CinemaCurtainTiming,
+    motion: Bool
+  ) {
+    let half = size.width / 2
+    let floor = floor(size)
+    let open = motion ? timing.open(time) : (top: 0, hem: 0)
+    let sway = motion ? timing.sway(time) : 0
+    let gathered = 0.12
+    let topEdge = half * (1 - (1 - gathered) * open.top)
+    let hemEdge = half * (1 - (1 - gathered) * min(1.04, open.hem + sway))
+    // Gathered velvet folds deeper.
+    let depth = 0.4 + 0.45 * open.top
+    let stops: [Gradient.Stop] = [
+      .init(color: velvet(1 - 0.8 * depth), location: 0),
+      .init(color: velvet(0.85), location: 0.3),
+      .init(color: velvet(1.25), location: 0.55),
+      .init(color: velvet(0.8), location: 0.8),
+      .init(color: velvet(1 - 0.8 * depth), location: 1),
+    ]
+    let fringe = size.height * 0.022
+    for mirrored in [false, true] {
+      func x(_ value: Double) -> Double { mirrored ? size.width - value : value }
+      for fold in 0..<folds {
+        let a = Double(fold) / Double(folds)
+        let b = Double(fold + 1) / Double(folds)
+        let overlap = 0.6
+        let topLeft = x(topEdge * a - overlap)
+        let topRight = x(topEdge * b + overlap)
+        let hemLeft = x(hemEdge * a - overlap)
+        let hemRight = x(hemEdge * b + overlap)
+        var path = Path()
+        path.move(to: CGPoint(x: topLeft, y: 0))
+        path.addLine(to: CGPoint(x: topRight, y: 0))
+        path.addLine(to: CGPoint(x: hemRight, y: floor))
+        path.addQuadCurve(
+          to: CGPoint(x: hemLeft, y: floor),
+          control: CGPoint(x: (hemLeft + hemRight) / 2, y: floor + size.height * 0.01))
+        path.closeSubpath()
+        context.fill(
+          path,
+          with: .linearGradient(
+            Gradient(stops: stops),
+            startPoint: CGPoint(x: (topLeft + hemLeft) / 2, y: floor / 2),
+            endPoint: CGPoint(x: (topRight + hemRight) / 2, y: floor / 2)))
+      }
+      // Shadow high under the valance and low near the floor.
+      var outline = Path()
+      outline.move(to: CGPoint(x: x(0), y: 0))
+      outline.addLine(to: CGPoint(x: x(topEdge), y: 0))
+      outline.addLine(to: CGPoint(x: x(hemEdge), y: floor))
+      outline.addLine(to: CGPoint(x: x(0), y: floor))
+      outline.closeSubpath()
+      context.fill(
+        outline,
+        with: .linearGradient(
+          Gradient(stops: [
+            .init(color: .black.opacity(0.6), location: 0),
+            .init(color: .clear, location: 0.3),
+            .init(color: .clear, location: 0.7),
+            .init(color: .black.opacity(0.3), location: 1),
+          ]), startPoint: .zero, endPoint: CGPoint(x: 0, y: floor)))
+      // The gold fringe, leaning with the swing.
+      var threads = Path()
+      let lean = sway * size.height * 0.25 * (mirrored ? -1 : 1)
+      for position in stride(from: 0, through: hemEdge, by: 3.2) {
+        threads.move(to: CGPoint(x: x(position), y: floor))
+        threads.addLine(to: CGPoint(x: x(position) + lean, y: floor + fringe))
+      }
+      context.stroke(threads, with: .color(deepGold.opacity(0.85)), lineWidth: 1.2)
+      var band = Path()
+      band.move(to: CGPoint(x: x(0), y: floor))
+      band.addLine(to: CGPoint(x: x(hemEdge), y: floor))
+      context.stroke(band, with: .color(gold), lineWidth: max(2, size.height * 0.006))
+    }
+  }
+
+  /// House lights fading on the walls, then a spotlight with dust in its beam.
+  static func drawLights(
+    _ context: inout GraphicsContext, size: CGSize, time: Double, timing: CinemaCurtainTiming,
+    motion: Bool
+  ) {
+    let dimmed = timing.dimmed(time)
+    context.fill(
+      Path(CGRect(origin: .zero, size: size)), with: .color(.black.opacity(0.3 * dimmed)))
+    var light = context
+    light.blendMode = .plusLighter
+    for side in [0.05, 0.95] {
+      let center = CGPoint(x: size.width * side, y: size.height * 0.42)
+      let radius = size.height * 0.34
+      light.fill(
+        Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
+        with: .radialGradient(
+          Gradient(colors: [
+            Color(red: 1, green: 0.7, blue: 0.35).opacity(0.38 * (1 - timing.lightsDown(time))), .clear,
+          ]), center: center, startRadius: 0, endRadius: radius))
+    }
+    let spot = timing.spot(time)
+    guard spot > 0 else { return }
+    let center = CGPoint(x: size.width / 2, y: size.height * 0.48)
+    let radius = size.height * 0.44
+    light.fill(
+      Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
+      with: .radialGradient(
+        Gradient(stops: [
+          .init(color: Color(red: 1, green: 0.93, blue: 0.8).opacity(0.3 * spot), location: 0),
+          .init(color: Color(red: 1, green: 0.85, blue: 0.65).opacity(0.12 * spot), location: 0.6),
+          .init(color: .clear, location: 1),
+        ]), center: center, startRadius: 0, endRadius: radius))
+    guard motion else { return }
+    for index in 0..<44 {
+      let seed = Double(index)
+      let a = fraction(sin(seed * 12.9898) * 43_758.5453)
+      let b = fraction(sin(seed * 78.233) * 12_345.6789)
+      let c = fraction(sin(seed * 39.425) * 24_634.6345)
+      let point = CGPoint(
+        x: center.x + (a - 0.5) * radius * 1.5 + sin(time * 0.5 + seed) * 6,
+        y: size.height * (0.12 + 0.72 * fraction(b - time * 0.012 * (0.5 + c))))
+      let distance = hypot(point.x - center.x, point.y - center.y) / radius
+      guard distance < 1 else { continue }
+      let glow = spot * (1 - distance) * (0.55 + 0.45 * sin(time * 1.7 + seed * 1.3))
+      let dot = 0.8 + c * 1.8
+      light.fill(
+        Path(ellipseIn: CGRect(x: point.x - dot / 2, y: point.y - dot / 2, width: dot, height: dot)),
+        with: .color(Color(red: 1, green: 0.92, blue: 0.78).opacity(0.7 * glow)))
+    }
+  }
+
+  /// The valance across the top: velvet swags with folds, gold trim and tassels.
+  static func drawValance(_ context: inout GraphicsContext, size: CGSize) {
+    let depth = size.height * 0.11
+    let swags = max(3, Int((size.width / size.height * 3).rounded()))
+    let width = size.width / Double(swags)
+    // Its shadow on the curtain.
+    context.fill(
+      Path(CGRect(x: 0, y: 0, width: size.width, height: depth * 1.5)),
+      with: .linearGradient(
+        Gradient(colors: [.black.opacity(0.5), .clear]), startPoint: CGPoint(x: 0, y: depth * 0.6),
+        endPoint: CGPoint(x: 0, y: depth * 1.5)))
+    context.fill(
+      Path(CGRect(x: 0, y: 0, width: size.width, height: depth * 0.55)),
+      with: .color(velvet(0.55)))
+    let trim = max(2, size.height * 0.005)
+    for swag in 0..<swags {
+      let left = Double(swag) * width
+      let right = left + width
+      let middle = (left + right) / 2
+      var path = Path()
+      path.move(to: CGPoint(x: left, y: 0))
+      path.addLine(to: CGPoint(x: right, y: 0))
+      path.addLine(to: CGPoint(x: right, y: depth * 0.5))
+      path.addQuadCurve(
+        to: CGPoint(x: left, y: depth * 0.5), control: CGPoint(x: middle, y: depth * 1.5))
+      path.closeSubpath()
+      context.fill(
+        path,
+        with: .linearGradient(
+          Gradient(stops: [
+            .init(color: velvet(0.5), location: 0),
+            .init(color: velvet(1.2), location: 0.7),
+            .init(color: velvet(0.75), location: 1),
+          ]), startPoint: .zero, endPoint: CGPoint(x: 0, y: depth)))
+      for fold in 1...3 {
+        let share = Double(fold) / 4
+        var crease = Path()
+        crease.move(to: CGPoint(x: left, y: depth * 0.5 * share))
+        crease.addQuadCurve(
+          to: CGPoint(x: right, y: depth * 0.5 * share),
+          control: CGPoint(x: middle, y: depth * 1.5 * share))
+        context.stroke(crease, with: .color(velvet(0.45).opacity(0.8)), lineWidth: 2)
+        context.stroke(
+          crease.offsetBy(dx: 0, dy: 2), with: .color(velvet(1.4).opacity(0.35)), lineWidth: 1)
+      }
+      var hem = Path()
+      hem.move(to: CGPoint(x: left, y: depth * 0.5))
+      hem.addQuadCurve(
+        to: CGPoint(x: right, y: depth * 0.5), control: CGPoint(x: middle, y: depth * 1.5))
+      context.stroke(hem, with: .color(gold), lineWidth: trim)
+    }
+    // A tassel where two swags meet.
+    for join in 0...swags {
+      let x = Double(join) * width
+      var cord = Path()
+      cord.move(to: CGPoint(x: x, y: depth * 0.45))
+      cord.addLine(to: CGPoint(x: x, y: depth * 0.8))
+      context.stroke(cord, with: .color(deepGold), lineWidth: max(1, trim * 0.5))
+      let tassel = CGRect(x: x - depth * 0.06, y: depth * 0.78, width: depth * 0.12, height: depth * 0.3)
+      context.fill(
+        Path(roundedRect: tassel, cornerRadius: depth * 0.05),
+        with: .linearGradient(
+          Gradient(colors: [gold, deepGold]), startPoint: CGPoint(x: tassel.minX, y: 0),
+          endPoint: CGPoint(x: tassel.maxX, y: 0)))
+    }
+  }
+
+  private static func fraction(_ value: Double) -> Double { value - value.rounded(.down) }
 }
 
 // MARK: Shapes

@@ -18,7 +18,12 @@ enum CinemaAct: Equatable, Sendable {
 }
 
 enum CinemaPreShowPlan {
-  static let featureSeconds: Double = 6.5
+  /// The title stands on the closed curtain at least this long while the film starts behind it.
+  static let curtainEarliestOpening: Double = 3.3
+  /// A film that hasn't started by then gets the curtain opened anyway.
+  static let curtainLongestWait: Double = 10
+  /// From the curtain starting to open until the film is all there is.
+  static let curtainOpeningSeconds: Double = 4
   /// A trailer whose picture hasn't moved by then is left out.
   static let trailerStartSeconds: Double = 15
   /// Even a long trailer ends here.
@@ -47,9 +52,13 @@ enum CinemaPreShowPlan {
     return position == 0 || position < Int64(preferences.resumeThresholdSeconds) * 1_000
   }
 
-  static func acts(ad: CinemaAd?, trailers: [CinemaTrailer], title: String) -> [CinemaAct] {
+  /// The ad, the trailers that aren't for the film itself, then the curtain.
+  static func acts(ad: CinemaAd?, trailers: [CinemaTrailer], film: UUID, title: String)
+    -> [CinemaAct]
+  {
     var acts = ad.map { [CinemaAct.ad($0)] } ?? []
-    acts += trailers.map(CinemaAct.trailer)
+    acts += trailers.filter { $0.title.id != film && $0.trailer.parentId != film }
+      .map(CinemaAct.trailer)
     if !acts.isEmpty { acts.append(.feature(title: title)) }
     return acts
   }
@@ -71,6 +80,14 @@ final class CinemaPreShow: ObservableObject {
   @Published private(set) var actStarted = Date()
   /// The trailer's picture is moving.
   @Published private(set) var trailerPlaying = false
+  /// Seconds into the curtain at which it starts to open, once the film is playing behind it.
+  @Published private(set) var curtainOpensAt: Double?
+
+  /// Starts the film behind the curtain, so the curtain opens onto it.
+  var onFeature: (() -> Void)?
+  private var filmShowing = false
+  private var waitingForFilm = false
+  private var actSkipped = false
 
   let engine: VLCPlaybackEngine
   private let acts: [CinemaAct]
@@ -129,7 +146,8 @@ final class CinemaPreShow: ObservableObject {
       ad = CinemaPreShowPlan.ad(after: defaults.string(forKey: CinemaPreShowPlan.lastAdKey))
       defaults.set(ad?.rawValue, forKey: CinemaPreShowPlan.lastAdKey)
     }
-    let acts = CinemaPreShowPlan.acts(ad: ad, trailers: trailers, title: presentation.title)
+    let acts = CinemaPreShowPlan.acts(
+      ad: ad, trailers: trailers, film: presentation.mediaId, title: presentation.title)
     guard !acts.isEmpty else { return nil }
     return CinemaPreShow(acts: acts, profile: profile, volume: preferences.defaultVolume)
   }
@@ -142,6 +160,7 @@ final class CinemaPreShow: ObservableObject {
         self.act = act
         actStarted = Date()
         trailerPlaying = false
+        actSkipped = false
         switch act {
         case .ad(let ad):
           sound.play(CinemaTunes.notes(for: ad), volume: volume)
@@ -150,8 +169,7 @@ final class CinemaPreShow: ObservableObject {
           sound.stop()
           await play(trailer)
         case .feature:
-          sound.play(CinemaTunes.fanfare, volume: volume)
-          await waitForAct(seconds: CinemaPreShowPlan.featureSeconds)
+          await feature()
         }
       }
       sound.stop()
@@ -162,11 +180,41 @@ final class CinemaPreShow: ObservableObject {
   }
 
   /// On to the next part.
-  func skip() { endAct() }
+  func skip() {
+    actSkipped = true
+    endAct()
+  }
+
+  /// The film's picture is moving behind the curtain.
+  func filmStarted() {
+    filmShowing = true
+    if waitingForFilm { endAct() }
+  }
+
+  /// The title on the closed curtain while the film starts behind it, then the curtain opens
+  /// onto the playing film.
+  private func feature() async {
+    curtainOpensAt = nil
+    sound.play(CinemaTunes.fanfareCall, volume: volume)
+    onFeature?()
+    await waitForAct(seconds: CinemaPreShowPlan.curtainEarliestOpening)
+    guard !actSkipped, !finished else { return }
+    if !filmShowing {
+      waitingForFilm = true
+      await waitForAct(
+        seconds: CinemaPreShowPlan.curtainLongestWait - CinemaPreShowPlan.curtainEarliestOpening)
+      waitingForFilm = false
+      guard !actSkipped, !finished else { return }
+    }
+    curtainOpensAt = Date().timeIntervalSince(actStarted)
+    sound.play(CinemaTunes.fanfareAnswer, volume: volume)
+    await waitForAct(seconds: CinemaPreShowPlan.curtainOpeningSeconds)
+  }
 
   /// Straight to the film.
   func startFilm() {
     finished = true
+    actSkipped = true
     endAct()
   }
 
@@ -423,13 +471,30 @@ enum CinemaTunes {
     }
   }
 
-  static let fanfare: [CinemaNote] =
-    [(0.0, 67, 0.22), (0.28, 72, 0.22), (0.56, 76, 0.22), (0.84, 79, 1.9)].map {
-      CinemaNote(time: $0.0, frequency: hertz($0.1 - 12), length: $0.2, voice: .brass, level: 0.4)
+  /// A call as the title appears on the curtain.
+  static let fanfareCall = phrase(
+    at: 0.8, [(0.0, 67, 0.22), (0.28, 72, 0.22), (0.56, 76, 0.22), (0.84, 79, 1.6)],
+    chord: [60, 64, 67])
+
+  /// The answer as the curtain opens onto the film.
+  static let fanfareAnswer = phrase(
+    at: 0, [(0.0, 72, 0.2), (0.24, 76, 0.2), (0.48, 79, 0.2), (0.72, 84, 2.0)],
+    chord: [64, 67, 72])
+
+  private static func phrase(at start: Double, _ notes: [(Double, Int, Double)], chord: [Int])
+    -> [CinemaNote]
+  {
+    let last = notes[notes.count - 1]
+    return notes.map {
+      CinemaNote(
+        time: start + $0.0, frequency: hertz($0.1 - 12), length: $0.2, voice: .brass, level: 0.4)
     }
-    + [60, 64, 67].map {
-      CinemaNote(time: 0.84, frequency: hertz($0 - 12), length: 1.9, voice: .brass, level: 0.2)
-    }
+      + chord.map {
+        CinemaNote(
+          time: start + last.0, frequency: hertz($0 - 12), length: last.2, voice: .brass,
+          level: 0.2)
+      }
+  }
 }
 
 /// When the popcorn kernels go off and where they fly; shared by the picture and the sound.
