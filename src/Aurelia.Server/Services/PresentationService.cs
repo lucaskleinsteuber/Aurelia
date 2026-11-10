@@ -10,8 +10,14 @@ public sealed class PresentationService(
     AureliaDbContext database,
     TimeProvider timeProvider,
     MediaSearchIndexService searchIndex,
-    WatchlistService? watchlist = null)
+    WatchlistService? watchlist = null,
+    CatalogMutationGate? mutations = null)
 {
+    // A profile's changes run one after another: two requests that read the same state and
+    // then both write (a double tap, two devices) would otherwise fail in the database.
+    private async Task<IDisposable?> EnterMutationAsync(CancellationToken cancellationToken) =>
+        mutations is null ? null : await mutations.EnterAsync(cancellationToken);
+
     public async Task<PagedResponse<CatalogItemSummary>> CatalogAsync(
         Guid userId,
         MediaKind? kind,
@@ -445,6 +451,7 @@ public sealed class PresentationService(
 
     public async Task<bool> SetFavoriteAsync(Guid userId, Guid mediaId, bool isFavorite, CancellationToken cancellationToken)
     {
+        using var lease = await EnterMutationAsync(cancellationToken);
         if (!await database.MediaItems.AnyAsync(item => item.Id == mediaId && (item.Kind == MediaKind.Movie || item.Kind == MediaKind.Series), cancellationToken))
             throw new MetadataException("media_not_found", "The movie or series was not found.", StatusCodes.Status404NotFound);
         var existing = await database.UserFavorites.SingleOrDefaultAsync(value => value.UserId == userId && value.MediaItemId == mediaId, cancellationToken);
@@ -457,6 +464,7 @@ public sealed class PresentationService(
 
     public async Task<CollectionSummary> CreateCollectionAsync(Guid userId, SaveCollectionRequest request, CancellationToken cancellationToken)
     {
+        using var lease = await EnterMutationAsync(cancellationToken);
         var isAdmin = await IsAdminUserAsync(userId, cancellationToken);
         if (request.IsShared && !isAdmin)
             throw new MetadataException("forbidden", "Only administrators can create shared collections.", StatusCodes.Status403Forbidden);
@@ -477,6 +485,7 @@ public sealed class PresentationService(
 
     public async Task<CollectionSummary> UpdateCollectionAsync(Guid userId, Guid id, SaveCollectionRequest request, CancellationToken cancellationToken)
     {
+        using var lease = await EnterMutationAsync(cancellationToken);
         var collection = await database.MediaCollections.Include(value => value.Members)
             .SingleOrDefaultAsync(value => value.Id == id && (value.IsManual || value.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
@@ -497,6 +506,7 @@ public sealed class PresentationService(
 
     public async Task DeleteCollectionAsync(Guid userId, Guid id, CancellationToken cancellationToken)
     {
+        using var lease = await EnterMutationAsync(cancellationToken);
         var collection = await database.MediaCollections.SingleOrDefaultAsync(value => value.Id == id && (value.IsManual || value.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "The editable collection was not found.", StatusCodes.Status404NotFound);
 
@@ -511,6 +521,7 @@ public sealed class PresentationService(
 
     public async Task AddCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken)
     {
+        using var lease = await EnterMutationAsync(cancellationToken);
         var collection = await database.MediaCollections.Include(c => c.Members)
             .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);
@@ -538,6 +549,7 @@ public sealed class PresentationService(
 
     public async Task RemoveCollectionItemAsync(Guid userId, Guid collectionId, Guid mediaId, CancellationToken cancellationToken)
     {
+        using var lease = await EnterMutationAsync(cancellationToken);
         var collection = await database.MediaCollections.Include(c => c.Members)
             .SingleOrDefaultAsync(c => c.Id == collectionId && (c.IsManual || c.IsSmart), cancellationToken)
             ?? throw new MetadataException("collection_not_found", "Collection not found.", StatusCodes.Status404NotFound);

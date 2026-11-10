@@ -9,7 +9,7 @@ namespace Aurelia.Server.Services;
 /// A profile's own viewing history and statistics. Days, weekdays and hours are counted in the
 /// server's time zone, which is the household's, so an evening show is not filed under the night.
 /// </summary>
-public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider clock)
+public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider clock, CatalogMutationGate? mutations = null)
 {
     private DateTimeOffset Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, clock.LocalTimeZone);
 
@@ -70,6 +70,8 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         Guid eventId,
         CancellationToken cancellationToken)
     {
+        // One removal at a time: two requests for the same entries would both read them, and the later one fail.
+        using var lease = mutations is null ? null : await mutations.EnterAsync(cancellationToken);
         var item = await database.WatchEvents
             .SingleOrDefaultAsync(e => e.Id == eventId && e.UserId == userId, cancellationToken);
         if (item is not null)
@@ -83,6 +85,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
         Guid userId,
         CancellationToken cancellationToken)
     {
+        using var lease = mutations is null ? null : await mutations.EnterAsync(cancellationToken);
         // Clearing removes the profile's whole history, also for titles it cannot see right now.
         var items = await database.WatchEvents.IgnoreQueryFilters()
             .Where(e => e.UserId == userId)
