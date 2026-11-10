@@ -2002,6 +2002,16 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// What to say when the library could not be reloaded after a watched or Continue Watching
+  /// change. A newer reload that replaced this one, usually the sync the change itself caused,
+  /// shows the change anyway, so it is no failure.
+  nonisolated static func libraryStateRefreshFailure(_ error: Error, saved: Bool) -> String? {
+    if error is CancellationError || error as? APIClientError == .supersededSnapshot { return nil }
+    return saved
+      ? "The change was saved. Reload the library to see it. \(error.localizedDescription)"
+      : "The library changed. Reconnect and reload before trying again. \(error.localizedDescription)"
+  }
+
   private func refreshAfterLibraryStateChange(generation: UUID, saved: Bool) async {
     guard isCurrent(generation) else { return }
     if !saved {
@@ -2010,11 +2020,10 @@ final class AppModel: ObservableObject {
     }
     if libraryStateClientFactory == nil {
       do { try await refresh(requireCompleteSnapshot: true) } catch {
-        if isCurrent(generation) {
-          errorMessage =
-            saved
-            ? "The change was saved. Reload the library to see it. \(error.localizedDescription)"
-            : "The library changed. Reconnect and reload before trying again. \(error.localizedDescription)"
+        if isCurrent(generation),
+          let message = Self.libraryStateRefreshFailure(error, saved: saved)
+        {
+          errorMessage = message
         }
       }
     }

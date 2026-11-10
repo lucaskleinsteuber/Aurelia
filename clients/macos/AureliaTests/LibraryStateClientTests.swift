@@ -4,6 +4,15 @@ import Testing
 @testable import Aurelia
 
 @MainActor struct LibraryStateClientTests {
+  // Marking a title unwatched starts a sync that reloads the library; the reload the change asked
+  // for is then replaced by that newer one. That is no failure to report.
+  @Test func aReplacedReloadAfterAWatchedChangeIsNoFailure() {
+    #expect(AppModel.libraryStateRefreshFailure(APIClientError.supersededSnapshot, saved: true) == nil)
+    #expect(AppModel.libraryStateRefreshFailure(CancellationError(), saved: true) == nil)
+    let failure = AppModel.libraryStateRefreshFailure(URLError(.timedOut), saved: true)
+    #expect(failure?.hasPrefix("The change was saved. Reload the library to see it.") == true)
+  }
+
   @Test func olderCatalogPayloadKeepsPlaybackWithoutNewStateFields() throws {
     let json = """
       {"id":"10000000-0000-0000-0000-000000000001","kind":"movie","title":"Synthetic",
