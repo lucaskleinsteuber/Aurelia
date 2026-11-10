@@ -62,7 +62,7 @@ devices and backups, scrub previews, Server Health and the server's own updates.
 | --- | --- |
 | General | Start screen, poster size, watched titles in rows, Reduce Motion, window and rest behavior |
 | Sidebar | Which pages appear in the sidebar and in which order |
-| Activity | Your watch history and statistics |
+| Activity | Your watch history and statistics, and Wrapped: the year as slides (← → Space Esc) |
 | Playback | Audio and subtitles, Automatic Resume, Cinema Mode, Dialogue Boost, Volume Leveling |
 | Library | Storage folders, scans, Library Health, import previews |
 | Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
@@ -119,6 +119,13 @@ your server to your Mac and nowhere else, and is never stored. The first time fo
 macOS loads its speech model from Apple once. It needs macOS 26 on a Mac that supports it, a
 server 2.1.0 or newer (2.2.0 for syncing), and an administrator profile. Clear dialogue works best; songs, heavy
 accents and people talking over each other come out less well.
+
+## Movie Night
+
+Can't decide? **Movie Night** on Home lets everyone at home swipe through the same posters, on
+their phones, in a browser or here with the trackpad, the arrow keys or the buttons. The first
+title every voter likes shows as a ticket with **Play**. A Mac can also just show the lobby
+(**Just Watch on This Mac**). Closing the sheet leaves the night.
 
 ## Cinema mode
 

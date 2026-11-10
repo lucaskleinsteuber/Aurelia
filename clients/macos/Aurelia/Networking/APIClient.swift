@@ -697,6 +697,79 @@ struct APIClient: Sendable {
       path: "/api/v1/watch-together/\(id.uuidString.lowercased())/members/me", method: "DELETE")
   }
 
+  // MARK: Movie Night (see MovieNight.swift)
+
+  private struct MovieNightJoinBody: Encodable {
+    let deviceName: String
+    let isVoting: Bool
+  }
+
+  private struct MovieNightSettingsBody: Encodable {
+    let kinds: String
+    let genre: String?
+  }
+
+  private struct MovieNightRoleBody: Encodable { let isVoting: Bool }
+
+  private static func movieNightPath(_ id: UUID, _ tail: String = "") -> String {
+    "/api/v1/movie-night/\(id.uuidString.lowercased())\(tail)"
+  }
+
+  private func movieNightPost(_ path: String, _ body: some Encodable) async throws -> MovieNightState {
+    let data = try await perform(path: path, method: "POST", body: try JSONEncoder().encode(body))
+    return try Self.decode(MovieNightState.self, from: data)
+  }
+
+  func movieNights() async throws -> [MovieNightSummary] { try await get("/api/v1/movie-night") }
+
+  func createMovieNight(deviceName: String, voting: Bool) async throws -> MovieNightState {
+    try await movieNightPost("/api/v1/movie-night", MovieNightJoinBody(deviceName: deviceName, isVoting: voting))
+  }
+
+  func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> MovieNightState {
+    try await movieNightPost(
+      Self.movieNightPath(id, "/join"), MovieNightJoinBody(deviceName: deviceName, isVoting: voting))
+  }
+
+  /// The night once its revision is newer than `after`, or after up to `waitMilliseconds`.
+  func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
+    -> MovieNightState
+  {
+    var path = Self.movieNightPath(id)
+    if let after {
+      path += "?after=\(after)&waitMs=\(waitMilliseconds)"
+      if let deckVersion { path += "&deckVersion=\(deckVersion)" }
+    }
+    let data = try await perform(
+      path: path, method: "GET", timeout: TimeInterval(waitMilliseconds) / 1000 + 10)
+    return try Self.decode(MovieNightState.self, from: data)
+  }
+
+  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> MovieNightState {
+    try await movieNightPost(
+      Self.movieNightPath(id, "/settings"), MovieNightSettingsBody(kinds: kinds, genre: genre))
+  }
+
+  func dealMovieNight(id: UUID) async throws -> MovieNightState {
+    try await movieNightPost(Self.movieNightPath(id, "/deal"), [String: String]())
+  }
+
+  func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> MovieNightState {
+    try await movieNightPost(Self.movieNightPath(id, "/votes"), MovieNightVote(mediaId: mediaID, like: like))
+  }
+
+  func keepSwiping(id: UUID) async throws -> MovieNightState {
+    try await movieNightPost(Self.movieNightPath(id, "/keep-swiping"), [String: String]())
+  }
+
+  func movieNightRole(id: UUID, voting: Bool) async throws -> MovieNightState {
+    try await movieNightPost(Self.movieNightPath(id, "/role"), MovieNightRoleBody(isVoting: voting))
+  }
+
+  func leaveMovieNight(id: UUID) async throws {
+    _ = try await perform(path: Self.movieNightPath(id, "/members/me"), method: "DELETE")
+  }
+
   func subtitleProviderStatus() async throws -> SubtitleProviderStatus {
     try await get("/api/v1/metadata/subtitles")
   }
@@ -1006,6 +1079,10 @@ struct APIClient: Sendable {
 
   func yearInReview(year: Int) async throws -> YearInReview {
     try await get("/api/v1/statistics/year/\(year)")
+  }
+
+  func wrapped(year: Int) async throws -> YearWrapped {
+    try await get("/api/v1/statistics/year/\(year)/wrapped")
   }
 
   func healthDuplicates(offset: Int = 0, limit: Int = 50) async throws -> [DuplicateGroup] {

@@ -148,6 +148,11 @@ struct LibraryShellView: View {
     .sheet(isPresented: $model.showingCollectionEditor) {
       CollectionEditorSheet(collection: nil).environmentObject(model)
     }
+    .sheet(item: $model.movieNightLaunch) { launch in
+      if let api = model.profileClient() {
+        MovieNightSheet(api: api, joining: launch.joining).environmentObject(model)
+      }
+    }
     .onChange(of: scenePhase) {
       if scenePhase == .active { Task { await model.refreshHome() } }
     }
@@ -484,6 +489,7 @@ private struct HomePage: View {
           if let recommendation = model.home?.recommendation {
             HomeHero(item: recommendation) { onSelect(recommendation.id) }
           }
+          if model.supportsMovieNight { MovieNightHomeStrip() }
           landscapeRow(
             "Continue Watching",
             items: model.home?.continueWatching ?? [],

@@ -11,6 +11,8 @@ final class AppModel: ObservableObject {
   @Published var requestedPersonDetail: PersonSelection?
   @Published var preselectedCollectionItem: CatalogItemSummary?
   @Published var showingCollectionEditor = false
+  /// Movie Night shown over the library: a new night, or the one to join.
+  @Published var movieNightLaunch: MovieNightLaunch?
 
   func presentNewCollection(with item: CatalogItemSummary? = nil) {
     preselectedCollectionItem = item
@@ -499,6 +501,8 @@ final class AppModel: ObservableObject {
   var supportsAgeLimits: Bool {
     libraryCapabilities.contains(ServerFeatureNames.ageLimits)
   }
+  var supportsMovieNight: Bool { libraryCapabilities.contains(ServerFeatureNames.movieNight) }
+  var supportsWrapped: Bool { libraryCapabilities.contains(ServerFeatureNames.yearWrapped) }
 
   func start() async {
     guard !hasStarted else { return }
@@ -2807,6 +2811,31 @@ final class AppModel: ObservableObject {
           _ = try? await loader.image(for: poster, profile: profile, width: width)
         }
       }
+    }
+  }
+
+  // MARK: Movie Night
+
+  /// Nights others started on this server, to join from Home.
+  func movieNights() async -> [MovieNightSummary] {
+    guard supportsMovieNight, let profile, !requiresProfileSelection else { return [] }
+    return (try? await APIClient(profile: profile).movieNights()) ?? []
+  }
+
+  /// A client for the open profile, for Movie Night and Wrapped; nil without one.
+  func profileClient() -> APIClient? {
+    guard let profile, !requiresProfileSelection else { return nil }
+    return APIClient(profile: profile)
+  }
+
+  /// Plays the night's match the usual way: a show starts where its plan says.
+  func playMovieNightMatch(_ mediaId: UUID) {
+    movieNightLaunch = nil
+    Task { [weak self] in
+      // The sheet closes first, so the player opens over the library.
+      try? await Task.sleep(for: .milliseconds(400))
+      guard let self, let detail = try? await self.catalogDetail(id: mediaId) else { return }
+      self.startPlayback(item: detail.item)
     }
   }
 

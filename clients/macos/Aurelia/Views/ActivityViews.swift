@@ -40,6 +40,7 @@ struct ActivityStatisticsView: View {
   @State private var selectedYear: Int?
   @State private var review: YearInReview?
   @State private var selectedWeek: String?
+  @State private var wrappedYear: WrappedLaunch?
 
   /// Synthetic statistics can be passed in for rendering checks; a signed-in profile loads its own.
   init(stats: UserStatistics? = nil, review: YearInReview? = nil) {
@@ -81,6 +82,9 @@ struct ActivityStatisticsView: View {
       }
     }
     .task(id: model.profile?.sessionId) { await load() }
+    .sheet(item: $wrappedYear) { launch in
+      WrappedStoryView(year: launch.year).environmentObject(model)
+    }
     .accessibilityIdentifier("activity-statistics")
   }
 
@@ -246,6 +250,29 @@ struct ActivityStatisticsView: View {
           ForEach(years, id: \.self) { Text(String($0)).tag($0) }
         }
         .frame(width: 160)
+        if model.supportsWrapped {
+          let year = selectedYear ?? years[0]
+          Button {
+            wrappedYear = WrappedLaunch(year: year)
+          } label: {
+            HStack(spacing: 14) {
+              Text(String(year)).font(.system(size: 26, weight: .black)).tracking(-1)
+                .foregroundStyle(Color(wrappedHex: 0xFFD84D))
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Play your \(String(year)) Wrapped").font(.headline)
+                Text("Your year in slides, with commentary nobody asked for.").font(.callout).opacity(0.85)
+              }
+              Spacer()
+              Image(systemName: "play.fill")
+            }
+            .foregroundStyle(.white)
+            .padding(14)
+            .background(Color(wrappedHex: 0x6A4CFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+          }
+          .buttonStyle(.plain)
+          .accessibilityIdentifier("statistics-wrapped")
+        }
         if let review {
           LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
             card("Watch Time", value: WatchTime.text(hours: review.totalHours), symbol: "clock")
@@ -485,4 +512,10 @@ struct ActivityHistoryView: View {
       self.error = error.localizedDescription
     }
   }
+}
+
+/// Opens Wrapped for one year.
+struct WrappedLaunch: Identifiable {
+  let year: Int
+  var id: Int { year }
 }
