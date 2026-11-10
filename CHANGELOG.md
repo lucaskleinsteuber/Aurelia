@@ -35,6 +35,16 @@ versioned commit, so their skipped numbers are preserved.
 - Mac 2.3.2 (159): the pointer hides during the ad, the trailers and the curtain like during the film, and shows again when the mouse moves.
 - Mac 2.3.1 (157): the film's own trailers are left out of its pre-show on the Mac too, and the built-in server has the detail-page fix of Server 2.3.1.
 - Server 2.3.1 (152): opening a film or series no longer keeps loading. For a title with many pictures and a large cast, the server read every combination of picture and credit as one huge result, wrote gigabytes of temporary files and slowed the whole server down; it now reads pictures and cast separately.
+- Server (next version): watch history, statistics, Year in Review and smart lists read each title once instead of once per picture and play, which kept large libraries slow and used hundreds of megabytes.
+- Server (next version): two identical changes at the same moment (a double tap on Favorite, a collection edited on two devices, clearing the history) no longer end in a server error.
+- Server (next version): on a Linux server, power saving sleeps and wakes normally on the night the clocks go forward, also with awake hours from a time that night skips, and an update request left as a folder no longer restarts the update service again and again.
+
+### Security
+
+- Server (next version): Linux server updates, the one-line installer and the Docker build install only releases whose checksum list carries the owner's minisign signature, checked with openssl. Releases from build 153 on are signed when they are published.
+- Server (next version): children's and limited profiles see only their own titles in every part of a request; before, a part of a request that read titles a second time could count or list titles they may not see, and a shared collection showed its name even when none of its titles was visible.
+- Server (next version): a waiting pairing code ends after 100 wrong guesses in total, also when they come from many addresses, and plain HTTP answers only requests addressed to the server computer itself.
+- Server (next version): ffmpeg errors are logged without the media file's path, an administrator can no longer open Linux system folders by their path in the folder browser, and a device with thousands of addresses can no longer lock the server computer itself out.
 
 ## iPhone & iPad 2.1.0 (17) - 08.11.2026
 
