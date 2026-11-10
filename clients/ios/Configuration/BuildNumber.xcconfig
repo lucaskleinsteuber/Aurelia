@@ -1,6 +1,6 @@
 // The iOS client has its own release lifecycle, independent of Mac/server and tvOS.
-MARKETING_VERSION = 2.1.0
-CURRENT_PROJECT_VERSION = 17
+MARKETING_VERSION = 2.2.0
+CURRENT_PROJECT_VERSION = 18
 IPHONEOS_DEPLOYMENT_TARGET = 26.0
 MOBILEVLCKIT_ROOT = $(SRCROOT)/Dependencies
 // "Aurelia Test" for the separate test edition (AURELIA_TEST_EDITION=1 in the build scripts).

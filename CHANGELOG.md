@@ -15,10 +15,10 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
-- Server (next version): Movie Night. Everyone at home swipes through the same deck of films (or films and shows) from the library; the first title every voter likes is the match. A deck only holds titles every member's profile may open, nobody sees who said no, and the result comes with cheeky awards such as "Hardest to please" (friendly ones when a children's profile takes part).
-- Server (next version): Wrapped, a profile's year as slides: hours, series and movie of the year, favorite genre, the pet that goes with it, the latest press of play, the biggest binge and more, each with a cheeky line that stays the same for that year (friendly ones for children's profiles).
-- Mac, iPhone & iPad, Linux and browser (next versions): Movie Night from Home with a poster stack to swipe (touch, trackpad, arrow keys or buttons) and the match as a ticket with Play; Wrapped from Statistics as full-screen story slides.
-- Apple TV (next version): Movie Night on Home turns the TV into the shared screen: who joined, how far everyone swiped, and the match with Play already selected. The remote can swipe too.
+- Server 2.4.0 (153): Movie Night. Everyone at home swipes through the same deck of films (or films and shows) from the library; the first title every voter likes is the match. A deck only holds titles every member's profile may open, nobody sees who said no, and the result comes with cheeky awards such as "Hardest to please" (friendly ones when a children's profile takes part).
+- Server 2.4.0 (153): Wrapped, a profile's year as slides: hours, series and movie of the year, favorite genre, the pet that goes with it, the latest press of play, the biggest binge and more, each with a cheeky line that stays the same for that year (friendly ones for children's profiles).
+- Mac 2.4.0 (160), iPhone & iPad 2.2.0 (18), Linux 2.1.0 (26) and browser (Server 2.4.0): Movie Night from Home with a poster stack to swipe (touch, trackpad, arrow keys or buttons) and the match as a ticket with Play; Wrapped from Statistics as full-screen story slides.
+- Apple TV 2.1.0 (36): Movie Night on Home turns the TV into the shared screen: who joined, how far everyone swiped, and the match with Play already selected. The remote can swipe too.
 - Mac 2.3.0 (156): Cinema Mode in Settings › Playback. Before a film that starts from the beginning, the Mac shows one of three made-up ads (ice cream, popcorn, phones off) with its own little tune, then up to three trailers of films in your library you haven't watched yet, and opens a curtain for the film. Skip (→) and Start Film (Return) are always at hand.
 - Server 2.3.0 (151): trailers of films a profile hasn't started yet, one per film in random order, for the pre-show before a film.
 - Mac 2.2.0 (155): Sync to Speech in Edit Metadata › Subtitles moves subtitles that appear too early or too late so they fit the speech: any offset up to ten minutes, the frame-rate mix-ups between 23.976, 24 and 25 fps, and subtitles made for another cut, part by part. The result is saved as a synced copy beside the original; subtitles that already fit stay, and subtitles that fit nowhere are refused.
@@ -36,22 +36,22 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
-- Mac (next version): a sleeping server is woken only by Continue, Wake Server or opening something, not by any click on "Aurelia Is Resting" (such as closing the window) or by moving the mouse while Aurelia looks for the server.
-- Mac (next version): marking a title watched or unwatched no longer shows "Reload the library to see it" when the library is already reloading because of that change.
-- Mac (next version): Next Episode in the credits (the last tenth of an episode or while Up Next shows) marks the episode watched; earlier it keeps the position as before.
+- Mac 2.4.0 (160): a sleeping server is woken only by Continue, Wake Server or opening something, not by any click on "Aurelia Is Resting" (such as closing the window) or by moving the mouse while Aurelia looks for the server.
+- Mac 2.4.0 (160): marking a title watched or unwatched no longer shows "Reload the library to see it" when the library is already reloading because of that change.
+- Mac 2.4.0 (160): Next Episode in the credits (the last tenth of an episode or while Up Next shows) marks the episode watched; earlier it keeps the position as before.
 - Mac 2.3.2 (159): the pointer hides during the ad, the trailers and the curtain like during the film, and shows again when the mouse moves.
 - Mac 2.3.1 (157): the film's own trailers are left out of its pre-show on the Mac too, and the built-in server has the detail-page fix of Server 2.3.1.
 - Server 2.3.1 (152): opening a film or series no longer keeps loading. For a title with many pictures and a large cast, the server read every combination of picture and credit as one huge result, wrote gigabytes of temporary files and slowed the whole server down; it now reads pictures and cast separately.
-- Server (next version): watch history, statistics, Year in Review and smart lists read each title once instead of once per picture and play, which kept large libraries slow and used hundreds of megabytes.
-- Server (next version): two identical changes at the same moment (a double tap on Favorite, a collection edited on two devices, clearing the history) no longer end in a server error.
-- Server (next version): on a Linux server, power saving sleeps and wakes normally on the night the clocks go forward, also with awake hours from a time that night skips, and an update request left as a folder no longer restarts the update service again and again.
+- Server 2.4.0 (153): watch history, statistics, Year in Review and smart lists read each title once instead of once per picture and play, which kept large libraries slow and used hundreds of megabytes.
+- Server 2.4.0 (153): two identical changes at the same moment (a double tap on Favorite, a collection edited on two devices, clearing the history) no longer end in a server error.
+- Server 2.4.0 (153): on a Linux server, power saving sleeps and wakes normally on the night the clocks go forward, also with awake hours from a time that night skips, and an update request left as a folder no longer restarts the update service again and again.
 
 ### Security
 
-- Server (next version): Linux server updates, the one-line installer and the Docker build install only releases whose checksum list carries the owner's minisign signature, checked with openssl. Releases from build 153 on are signed when they are published.
-- Server (next version): children's and limited profiles see only their own titles in every part of a request; before, a part of a request that read titles a second time could count or list titles they may not see, and a shared collection showed its name even when none of its titles was visible.
-- Server (next version): a waiting pairing code ends after 100 wrong guesses in total, also when they come from many addresses, and plain HTTP answers only requests addressed to the server computer itself.
-- Server (next version): ffmpeg errors are logged without the media file's path, an administrator can no longer open Linux system folders by their path in the folder browser, and a device with thousands of addresses can no longer lock the server computer itself out.
+- Server 2.4.0 (153): Linux server updates, the one-line installer and the Docker build install only releases whose checksum list carries the owner's minisign signature, checked with openssl. Releases from build 153 on are signed when they are published.
+- Server 2.4.0 (153): children's and limited profiles see only their own titles in every part of a request; before, a part of a request that read titles a second time could count or list titles they may not see, and a shared collection showed its name even when none of its titles was visible.
+- Server 2.4.0 (153): a waiting pairing code ends after 100 wrong guesses in total, also when they come from many addresses, and plain HTTP answers only requests addressed to the server computer itself.
+- Server 2.4.0 (153): ffmpeg errors are logged without the media file's path, an administrator can no longer open Linux system folders by their path in the folder browser, and a device with thousands of addresses can no longer lock the server computer itself out.
 
 ## iPhone & iPad 2.1.0 (17) - 08.11.2026
 
