@@ -68,6 +68,76 @@ struct IOSYearInReview: Codable, Equatable, Sendable {
   let busiestDay: String?
 }
 
+/// The year as slides, chosen and written by the server; the app only shows them.
+struct IOSYearWrapped: Codable, Equatable, Sendable {
+  let year: Int
+  let profileName: String
+  let slides: [IOSWrappedSlide]
+}
+
+struct IOSWrappedFact: Codable, Equatable, Sendable {
+  let label: String
+  let value: String
+}
+
+struct IOSWrappedSlide: Codable, Equatable, Sendable {
+  let kind: String
+  let eyebrow: String
+  let headline: String
+  let bigNumber: String?
+  let unit: String?
+  let detail: String?
+  let quip: String
+  let accent: String
+  let mediaId: UUID?
+  let poster: IOSArtwork?
+  let posters: [IOSArtwork]?
+  let facts: [IOSWrappedFact]?
+}
+
+/// Wrapped's story rules: colors, counting up and moving between slides.
+enum IOSWrapped {
+  static let slideSeconds: Double = 6
+
+  /// A color field and the ink and sticker on it, as RGB hex.
+  struct Accent: Equatable, Sendable {
+    let field: UInt32
+    let ink: UInt32
+    let sticker: UInt32
+  }
+
+  static let accents: [String: Accent] = [
+    "night": Accent(field: 0x171A3A, ink: 0xF2F0FF, sticker: 0x5B7CFF),
+    "ember": Accent(field: 0xFF5A36, ink: 0x1C0600, sticker: 0x1C0600),
+    "violet": Accent(field: 0x6A4CFF, ink: 0xFFFFFF, sticker: 0xFFD84D),
+    "gold": Accent(field: 0xF6B92B, ink: 0x1E1400, sticker: 0x1E1400),
+    "rose": Accent(field: 0xFF4D88, ink: 0x22000F, sticker: 0x22000F),
+    "mint": Accent(field: 0x33D39A, ink: 0x00180E, sticker: 0x00180E),
+    "ocean": Accent(field: 0x1D8BFF, ink: 0xFFFFFF, sticker: 0x0B1A3A),
+    "lime": Accent(field: 0xC4EE34, ink: 0x131A00, sticker: 0x131A00),
+  ]
+
+  static func accent(_ name: String) -> Accent { accents[name] ?? accents["night"]! }
+
+  /// The number to count up to, when the big text is a plain number ("143", not "02:47").
+  static func countTarget(_ text: String?) -> Int? {
+    guard let text, !text.isEmpty, text.count <= 6, text.allSatisfy(\.isASCII), text.allSatisfy(\.isNumber)
+    else { return nil }
+    return Int(text)
+  }
+
+  /// The number `fraction` (0…1) into the count, easing out so it lands softly.
+  static func countValue(_ target: Int, fraction: Double) -> Int {
+    let t = min(1, max(0, fraction))
+    return Int((Double(target) * (1 - pow(1 - t, 3))).rounded())
+  }
+
+  /// The slide after a tap; nil past the last one, which closes the story.
+  static func step(from index: Int, count: Int, forward: Bool) -> Int? {
+    forward ? (index + 1 < count ? index + 1 : nil) : max(0, index - 1)
+  }
+}
+
 /// Watch time as people say it: "45 min", "2 h 5 min" or "3 days 4 h", never "0.8 h".
 /// The same wording as the Mac app's Activity settings.
 enum IOSWatchTime {

@@ -9,6 +9,8 @@ struct IOSHomeView: View {
   @State private var launching = false
   @State private var detailItem: IOSHomeDetail?
   @State private var unavailable: IOSCatalogItem?
+  @State private var movieNight: IOSMovieNightLaunch?
+  @State private var movieNights: [IOSMovieNightSummary] = []
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
@@ -28,6 +30,39 @@ struct IOSHomeView: View {
     }.padding(.horizontal, IOSDesign.margin)
   }
 
+  /// Starts a Movie Night, or joins one someone else started.
+  private var movieNightStrip: some View {
+    let open = movieNights.first
+    return Button {
+      movieNight = IOSMovieNightLaunch(joining: open)
+    } label: {
+      HStack(spacing: 14) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.30, blue: 0.35))
+            .frame(width: 22, height: 32).rotationEffect(.degrees(-12)).offset(x: -10)
+          RoundedRectangle(cornerRadius: 5).fill(IOSDesign.raised).frame(width: 22, height: 32)
+          RoundedRectangle(cornerRadius: 5).fill(Color(red: 1, green: 0.79, blue: 0.24))
+            .frame(width: 22, height: 32).rotationEffect(.degrees(12)).offset(x: 10)
+        }
+        .frame(width: 46, height: 40)
+        .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(open.map { "\($0.hostName)'s Movie Night is on" } ?? "Can't decide what to watch?")
+            .font(.body.weight(.semibold))
+          Text(open == nil ? "Start a Movie Night and let everyone swipe." : "Join and start swiping.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        Spacer()
+        Image(systemName: "chevron.right").foregroundStyle(.secondary)
+      }
+      .padding(14)
+      .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .padding(.horizontal, IOSDesign.margin)
+    .accessibilityIdentifier("home-movie-night")
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 28) {
@@ -39,6 +74,7 @@ struct IOSHomeView: View {
               .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
           }
           if !model.watchParties.isEmpty { watchTogether }
+          if model.supportsMovieNight { movieNightStrip }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
           if model.supportsWatchlist && !model.watchlistItems.isEmpty {
@@ -77,6 +113,9 @@ struct IOSHomeView: View {
       // Parties others start appear on Home within a few seconds.
       while !Task.isCancelled {
         await model.refreshWatchParties()
+        if model.supportsMovieNight, let api = model.client {
+          movieNights = (try? await api.movieNights()) ?? movieNights
+        }
         try? await Task.sleep(for: .seconds(15))
       }
     }
@@ -122,7 +161,22 @@ struct IOSHomeView: View {
         }
       }
     )
-    .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
+    .fullScreenCover(item: $movieNight) { launch in
+      if let api = model.client {
+        IOSMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) { mediaID in
+          guard let api = model.client else { return }
+          Task {
+            // The match plays the way Home plays anything: the plan picks the episode for a show.
+            if let item = try? await api.summary(id: mediaID) { play(item, fromMovieNight: true) }
+          }
+        }
+        .environmentObject(model)
+      }
+    }
+    .onChange(of: model.session?.sessionId) { _, _ in
+      playback = nil
+      movieNight = nil
+    }
     .onChange(of: model.remoteStopRequests) { _, _ in playback = nil }
     .onChange(of: model.remotePlaybackItem) { _, item in
       guard let item else { return }
@@ -155,9 +209,10 @@ struct IOSHomeView: View {
   }
 
   /// Continue Watching starts playback right away from the server's resume target.
-  private func play(_ item: IOSCatalogItem) {
-    // Offline titles stay reachable in Continue Watching; selecting one explains why.
-    guard item.isPlayable else {
+  private func play(_ item: IOSCatalogItem, fromMovieNight: Bool = false) {
+    // Offline titles stay reachable in Continue Watching; selecting one explains why. A show
+    // from Movie Night is not playable itself; its plan picks the episode.
+    guard item.isPlayable || (fromMovieNight && item.kind == .series) else {
       unavailable = item
       return
     }
@@ -569,4 +624,10 @@ private struct IOSHomePlayback: Identifiable {
   let queue: [IOSCatalogItem]
   let title: String
   var id: UUID { target.id }
+}
+
+/// Opens Movie Night: a new night, or the one to join.
+struct IOSMovieNightLaunch: Identifiable {
+  let id = UUID()
+  let joining: IOSMovieNightSummary?
 }

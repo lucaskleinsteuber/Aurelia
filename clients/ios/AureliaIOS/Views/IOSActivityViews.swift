@@ -159,6 +159,7 @@ struct IOSStatisticsView: View {
   @State private var stats: IOSUserStatistics?
   @State private var review: IOSYearInReview?
   @State private var year = Calendar.current.component(.year, from: Date())
+  @State private var wrappedYear: IOSWrappedLaunch?
   @State private var error: String?
 
   var body: some View {
@@ -205,6 +206,9 @@ struct IOSStatisticsView: View {
     .refreshable { await load() }
     .task { await load() }
     .task(id: year) { await loadReview() }
+    .fullScreenCover(item: $wrappedYear) { launch in
+      IOSWrappedView(year: launch.year).environmentObject(model)
+    }
   }
 
   private func tile(_ title: String, _ value: String, symbol: String) -> some View {
@@ -306,6 +310,29 @@ struct IOSStatisticsView: View {
           .tint(.white)
         }
         .padding(.horizontal, IOSDesign.margin)
+        if model.supportsWrapped {
+          Button {
+            wrappedYear = IOSWrappedLaunch(year: year)
+          } label: {
+            HStack(spacing: 14) {
+              Text(String(year)).font(.system(size: 28, weight: .black)).tracking(-1)
+                .foregroundStyle(Color(wrappedHex: 0xFFD84D))
+              VStack(alignment: .leading, spacing: 2) {
+                Text("Play your \(String(year)) Wrapped").font(.body.weight(.bold))
+                Text("Your year in slides, with commentary nobody asked for.").font(.caption)
+                  .opacity(0.85)
+              }
+              Spacer()
+              Image(systemName: "play.fill")
+            }
+            .foregroundStyle(.white)
+            .padding(14)
+            .background(Color(wrappedHex: 0x6A4CFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+          }
+          .buttonStyle(.plain)
+          .padding(.horizontal, IOSDesign.margin)
+          .accessibilityIdentifier("statistics-wrapped")
+        }
         if let review {
           LazyVGrid(
             columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
@@ -448,4 +475,10 @@ struct IOSProfilePINView: View {
       message = error.localizedDescription
     }
   }
+}
+
+/// Opens Wrapped for one year.
+struct IOSWrappedLaunch: Identifiable {
+  let year: Int
+  var id: Int { year }
 }

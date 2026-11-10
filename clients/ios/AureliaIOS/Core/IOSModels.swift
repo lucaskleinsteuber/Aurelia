@@ -191,6 +191,10 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
+  /// Movie Night: the household swipes one deck until everyone likes a title.
+  var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
+  /// The year as slides with the server's lines.
+  var supportsWrapped: Bool { capabilities?.contains("year-wrapped-v1") == true }
 }
 
 struct IOSUser: Codable, Equatable, Sendable {

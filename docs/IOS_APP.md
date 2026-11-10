@@ -32,9 +32,13 @@ its screens are its own:
 - **Settings** hold everything that belongs to the profile on this device and nothing that
   manages the server: Watch History (swipe to remove an entry, or clear it), Statistics with
   watch time in minutes, hours and days, the last weeks as a chart, top titles and genres and a
-  year in review, Playback, the profile's own PIN (set, change, or turn off for ordinary
+  year in review that also plays as Wrapped (full-screen slides: tap right or left, hold to
+  pause), Playback, the profile's own PIN (set, change, or turn off for ordinary
   profiles), the size of the stored artwork with a button to clear it, and the server's name,
   address and version.
+- **Movie Night** starts from Home, or joins a night someone else started there: everyone swipes
+  the same posters (right for yes, left for nope, or the buttons), and the first title all
+  voters like shows as a ticket with Play. Closing it leaves the night.
 
 ## Downloads and watching offline
 
