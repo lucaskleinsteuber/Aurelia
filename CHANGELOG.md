@@ -15,6 +15,10 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server (next version): Movie Night. Everyone at home swipes through the same deck of films (or films and shows) from the library; the first title every voter likes is the match. A deck only holds titles every member's profile may open, nobody sees who said no, and the result comes with cheeky awards such as "Hardest to please" (friendly ones when a children's profile takes part).
+- Server (next version): Wrapped, a profile's year as slides: hours, series and movie of the year, favorite genre, the pet that goes with it, the latest press of play, the biggest binge and more, each with a cheeky line that stays the same for that year (friendly ones for children's profiles).
+- Mac, iPhone & iPad, Linux and browser (next versions): Movie Night from Home with a poster stack to swipe (touch, trackpad, arrow keys or buttons) and the match as a ticket with Play; Wrapped from Statistics as full-screen story slides.
+- Apple TV (next version): Movie Night on Home turns the TV into the shared screen: who joined, how far everyone swiped, and the match with Play already selected. The remote can swipe too.
 - Mac 2.3.0 (156): Cinema Mode in Settings › Playback. Before a film that starts from the beginning, the Mac shows one of three made-up ads (ice cream, popcorn, phones off) with its own little tune, then up to three trailers of films in your library you haven't watched yet, and opens a curtain for the film. Skip (→) and Start Film (Return) are always at hand.
 - Server 2.3.0 (151): trailers of films a profile hasn't started yet, one per film in random order, for the pre-show before a film.
 - Mac 2.2.0 (155): Sync to Speech in Edit Metadata › Subtitles moves subtitles that appear too early or too late so they fit the speech: any offset up to ten minutes, the frame-rate mix-ups between 23.976, 24 and 25 fps, and subtitles made for another cut, part by part. The result is saved as a synced copy beside the original; subtitles that already fit stay, and subtitles that fit nowhere are refused.
