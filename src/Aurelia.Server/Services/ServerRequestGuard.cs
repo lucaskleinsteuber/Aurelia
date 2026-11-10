@@ -66,7 +66,10 @@ public sealed class ServerRequestGuard
             }
             else
             {
-                if (addresses.Count >= 4_096) return false;
+                // A full table refuses new addresses, but never the server computer itself: a device
+                // with thousands of addresses must not lock the owner out there too.
+                if (addresses.Count >= 4_096 && address is not null
+                    && !IPAddress.IsLoopback(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address)) return false;
                 addresses[key] = (1, now);
             }
             return true;
