@@ -7,8 +7,11 @@ ARG AURELIA_REPOSITORY=lucaskleinsteuber/Aurelia
 ARG AURELIA_BUILD=
 ARG TARGETARCH
 
+# With ffmpeg come the VA-API drivers for a video chip passed in with /dev/dri: AMD, and Intel on amd64.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl jq openssl libicu76 ffmpeg \
+    && apt-get install -y --no-install-recommends ca-certificates curl jq openssl libicu76 ffmpeg mesa-va-drivers \
+    && if [ "${TARGETARCH:-$(dpkg --print-architecture)}" = amd64 ]; then \
+         apt-get install -y --no-install-recommends intel-media-va-driver i965-va-driver; fi \
     && rm -rf /var/lib/apt/lists/*
 
 COPY fetch-server.sh /tmp/fetch-server.sh

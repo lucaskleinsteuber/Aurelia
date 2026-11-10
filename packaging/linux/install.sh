@@ -103,6 +103,28 @@ if ! id aurelia >/dev/null 2>&1; then
 fi
 install -d -o aurelia -g aurelia -m 0700 "$data_dir"
 
+# A video chip converts titles much faster than the processor. The server's user needs the render
+# and video groups to open it, and VA-API needs the driver for this computer's graphics.
+for group in render video; do
+  if getent group "$group" >/dev/null 2>&1 && ! id -nG aurelia | tr ' ' '\n' | grep -qx "$group"; then
+    usermod -aG "$group" aurelia || true
+  fi
+done
+if command -v apt-get >/dev/null 2>&1 && [ -d /sys/class/drm ]; then
+  vendors=$(cat /sys/class/drm/card*/device/vendor 2>/dev/null | sort -u || true)
+  drivers=""
+  # Intel from 2015 on uses intel-media-va-driver, older Intel i965-va-driver; libva picks the one that works.
+  case "$vendors" in *0x8086*) drivers="intel-media-va-driver i965-va-driver" ;; esac
+  case "$vendors" in *0x1002*) drivers="$drivers mesa-va-drivers" ;; esac
+  for driver in $drivers; do
+    dpkg -s "$driver" >/dev/null 2>&1 && continue
+    echo "Installing $driver, which lets the server convert titles on the video chip..."
+    apt-get install -y "$driver" >/dev/null 2>&1 \
+      || { apt-get update -qq >/dev/null 2>&1 && apt-get install -y "$driver" >/dev/null 2>&1; } \
+      || echo "$driver could not be installed. Titles convert on the processor until a video chip driver is: sudo apt install $driver" >&2
+  done
+fi
+
 updating=false
 [ -d "$install_root/server" ] && updating=true
 # A device connecting meanwhile must not start the program while it is replaced.

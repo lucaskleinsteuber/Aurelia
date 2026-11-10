@@ -7,7 +7,7 @@ import { ApiError } from "./api.js";
 import {
   MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
-  rateLabel, scrubPreviewUsageText, shownName
+  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
@@ -529,7 +529,7 @@ export function createSettings(app) {
   // MARK: Server Sections
 
   function serverSections(sections, refresh) {
-    const { status, health, scrubPreviews, power, backups, issues } = sections ?? {};
+    const { status, health, scrubPreviews, power, backups, issues, transcoding } = sections ?? {};
     const permissions = managementPermissions(state.profile);
 
     return [
@@ -587,7 +587,7 @@ export function createSettings(app) {
 
       permissions.owner && scrubPreviews ? scrubPreviewsSection(scrubPreviews, refresh) : null,
 
-      section("Live Conversion", "tv", "Live decoding, remuxing and streaming for browser playback.",
+      transcoding ? videoConversionSection(transcodingSummary(transcoding), transcoding.hint) : section("Live Conversion", "tv", "Live decoding, remuxing and streaming for browser playback.",
         row("Status", value(state.server?.capabilities?.includes("live-conversion-v1") ? "Active" : "Not available")),
         row("Active Live Conversions", value(health?.activeLiveConversions != null ? `${health.activeLiveConversions}` : "0"))),
 
@@ -597,6 +597,14 @@ export function createSettings(app) {
         (backups ?? []).slice(0, 3).map((backup) => row(new Date(backup.createdAt).toLocaleString(), value(`${capitalize(backup.kind)} · ${bytes(backup.bytes)}`))),
         h("div", { class: "button-row" }, button("Back Up Now", () => api.approved("/api/v1/server/backups/database"), "Backup created.", "secondary-button", refresh))) : null,
     ].filter(Boolean);
+  }
+
+  function videoConversionSection(summary, hint) {
+    return section("Video Conversion", "tv", "Converts titles for browsers and for apps set to a streaming quality, in memory only.",
+      row("Encoder", value(summary.encoder)),
+      hint ? row("Video Chip", value(hint)) : null,
+      row("Converting Now", value(summary.running)),
+      ...summary.sessions.map((session) => row(session.title, value(session.detail))));
   }
 
   function serverPage(sections, refresh) {

@@ -61,3 +61,24 @@ public sealed record SpeechAudioTrack(
 public sealed record SpeechAudioTracksResponse(
     double? DurationSeconds,
     IReadOnlyList<SpeechAudioTrack> Tracks);
+
+/// <summary>
+/// How the server converts video (GET /api/v1/server/transcoding, owner only): its encoder, the
+/// running HLS conversions and, when a video chip is there but unusable, what to do about it.
+/// </summary>
+/// <param name="Encoder">"nvenc", "qsv", "vaapi", "videotoolbox" or "libx264"; null without ffmpeg.</param>
+/// <param name="Hint">A plain next step when hardware encoding could work but doesn't, or null.</param>
+public sealed record TranscodingStatusResponse(
+    bool Available,
+    string? Encoder,
+    string EncoderName,
+    string? Device,
+    bool HardwareDecoding,
+    bool HardwareResting,
+    int RunningConversions,
+    int VideoLimit,
+    IReadOnlyList<TranscodingSessionStatus> Sessions,
+    string? Hint);
+
+/// <param name="Speed">ffmpeg's speed against real time, such as 3.5; null before it reported one.</param>
+public sealed record TranscodingSessionStatus(string Title, string Quality, string? Encoder, double? Speed, bool Converting);

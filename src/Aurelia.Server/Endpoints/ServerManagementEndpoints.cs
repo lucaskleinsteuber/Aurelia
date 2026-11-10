@@ -26,6 +26,8 @@ public static class ServerManagementEndpoints
         { await operations.ConfirmAsync(id, context.User.RequireSessionId(), context.RequestAborted); return Results.NoContent(); });
         server.MapGet("/diagnostics", (ServerDiagnosticsStore diagnostics) => diagnostics.Read());
         server.MapGet("/power", (ServerPowerSettingsStore power) => power.Read());
+        server.MapGet("/transcoding", (LiveConversionService live, Aurelia.Server.Services.Hls.HlsSessionManager sessions, IConfiguration configuration) =>
+            TranscodingStatus.ReadAsync(live, sessions, configuration["Aurelia:HardwareEncoding"]));
         server.MapGet("/updates", (ServerUpdateStore updates) => updates.Read());
         server.MapPost("/updates/check", (ServerUpdateStore updates) => updates.RequestCheck());
         server.MapPost("/updates/install", (ServerUpdateStore updates) => updates.RequestInstall());

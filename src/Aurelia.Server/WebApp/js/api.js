@@ -198,6 +198,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     serverUpdates: (options = {}) => request("/api/v1/server/updates", options),
     checkForUpdates: (options = {}) => request("/api/v1/server/updates/check", { ...options, method: "POST" }),
     serverPower: (options = {}) => request("/api/v1/server/power", options),
+    serverTranscoding: (options = {}) => request("/api/v1/server/transcoding", options),
     saveServerPower: (body) => request("/api/v1/server/power", { method: "PUT", body }),
     serverScrubPreviews: (options = {}) => request("/api/v1/server/scrub-previews", options),
     saveServerScrubPreviews: (body) => request("/api/v1/server/scrub-previews", { method: "PUT", body }),

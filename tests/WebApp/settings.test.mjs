@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   GENERAL_DEFAULTS, PLAYBACK_DEFAULTS, SETTINGS_PAGES, libraryPayload, loadManagementSections,
   managementPermissions, metadataPayload, normalizeGeneralPreferences, normalizePreferences,
-  profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, waitForLibraryOperation
+  profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation
 } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
@@ -301,4 +301,27 @@ test("settings pages include all 8 structured categories and account alias", () 
   for (const page of expected) {
     assert.ok(SETTINGS_PAGES.includes(page), `Page ${page} should be present in SETTINGS_PAGES`);
   }
+});
+
+test("video conversion reads the encoder, the hint and the running conversions for the owner", async () => {
+  const { api, calls } = sectionApi();
+  api.serverTranscoding = async () => { calls.push("serverTranscoding"); return { available: true }; };
+  const sections = await loadManagementSections(api, { role: "owner" });
+  assert.ok(calls.includes("serverTranscoding"));
+  assert.equal(sections.transcoding.available, true);
+
+  const summary = transcodingSummary({
+    available: true, encoderName: "VA-API", device: "/dev/dri/renderD128", hardwareDecoding: true, hardwareResting: false, videoLimit: 3,
+    sessions: [
+      { title: "Invented Film.mkv", quality: "720p", converting: true, speed: 4.25 },
+      { title: "Invented Show.mkv", quality: "480p", converting: false, speed: null },
+    ],
+  });
+  assert.equal(summary.encoder, "VA-API (renderD128) · decodes on the chip");
+  assert.equal(summary.running, "1 of 3 at once");
+  assert.deepEqual(summary.sessions.map((session) => session.detail), ["720p · 4.3× real time", "480p · ready"]);
+  assert.equal(transcodingSummary({ available: false, sessions: [] }).encoder, "Not available");
+  assert.equal(transcodingSummary({ available: true, encoderName: "Processor (x264)", hardwareResting: true, sessions: [], videoLimit: 1 }).encoder,
+    "Processor (x264) · the processor stands in after a chip error");
+  assert.equal(transcodingSummary(null).running, "None");
 });

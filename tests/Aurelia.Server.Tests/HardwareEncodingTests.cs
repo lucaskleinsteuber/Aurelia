@@ -249,6 +249,61 @@ public sealed class HardwareEncodingTests
         Assert.Equal("480p", StreamingLadder.Find(FullHd, null, "480p")!.Id);
     }
 
+    [Fact]
+    public void TheOwnerLearnsTheOneStepThatMakesAVideoChipUsable()
+    {
+        var software = new FfmpegTools("/f", "/p", LiveVideoEncoder.Libx264) { HasSoftwareEncoder = true };
+        string? Hint(IReadOnlyList<string> vendors, IReadOnlyList<string> nodes, bool open = true, string? setting = null, FfmpegTools? tools = null) =>
+            TranscodingStatus.Hint(tools ?? software, setting, isLinux: true, vendors, nodes, _ => open);
+        string[] node = ["/dev/dri/renderD128"];
+
+        Assert.Contains("i965-va-driver", Hint(["0x8086"], node), StringComparison.Ordinal);
+        Assert.Contains("mesa-va-drivers", Hint(["0x1002"], node), StringComparison.Ordinal);
+        Assert.Contains("Nvidia", Hint(["0x10de"], []), StringComparison.Ordinal);
+        Assert.Contains("usermod -aG render,video aurelia", Hint(["0x8086"], node, open: false), StringComparison.Ordinal);
+        Assert.Contains("/dev/dri to the container", Hint(["0x8086"], []), StringComparison.Ordinal);
+        Assert.Contains("turned off", Hint(["0x8086"], node, setting: "off"), StringComparison.Ordinal);
+        Assert.Null(Hint([], []));                                   // no chip: the processor is all there is
+        Assert.Null(Hint(["0x8086"], node, tools: software with { Hardware = new(LiveVideoEncoder.Vaapi, node[0], true) }));
+        Assert.Null(TranscodingStatus.Hint(new FfmpegTools("/f", "/p", LiveVideoEncoder.VideoToolbox), null, isLinux: false, [], [], _ => true));
+        Assert.Contains("sudo apt install ffmpeg", TranscodingStatus.Hint(null, null, isLinux: true, [], [], _ => true), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GraphicsVendorsComeFromTheCardsLinuxLists()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "aurelia-drm-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var (card, vendor) in new[] { ("card0", "0x8086\n"), ("card1", "0x10de"), ("card1-HDMI-A-1", null), ("renderD128", "0x8086") })
+            {
+                var device = Path.Combine(directory, card, "device");
+                Directory.CreateDirectory(device);
+                if (vendor is not null) File.WriteAllText(Path.Combine(device, "vendor"), vendor.Replace("\\n", "\n", StringComparison.Ordinal));
+            }
+            Assert.Equal(["0x10de", "0x8086"], TranscodingStatus.GraphicsVendors(directory).Order(StringComparer.Ordinal));
+            Assert.Empty(TranscodingStatus.GraphicsVendors(Path.Combine(directory, "missing")));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task OnlyTheOwnerReadsHowTheServerConverts()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        using var request = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/server/transcoding", owner.Token);
+        using var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var status = await ApiTestClient.ReadAsync<Aurelia.Contracts.TranscodingStatusResponse>(response);
+        Assert.Empty(status.Sessions);
+        Assert.Equal(0, status.RunningConversions);
+        Assert.InRange(status.VideoLimit, 1, 3);
+        using var anonymous = await client.GetAsync("/api/v1/server/transcoding");
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, anonymous.StatusCode);
+    }
+
     private sealed class ManualClock : TimeProvider
     {
         private DateTimeOffset now = new(2026, 11, 10, 20, 0, 0, TimeSpan.Zero);

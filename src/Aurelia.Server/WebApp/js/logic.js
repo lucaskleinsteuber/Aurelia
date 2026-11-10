@@ -30,6 +30,7 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
       users: () => api.serverUsers({ signal }), power: () => api.serverPower({ signal }), backups: () => api.serverBackups({ signal }),
     });
     if (typeof api.serverScrubPreviews === "function") readers.scrubPreviews = () => api.serverScrubPreviews({ signal });
+    if (typeof api.serverTranscoding === "function") readers.transcoding = () => api.serverTranscoding({ signal });
   }
   await Promise.all(Object.entries(readers).map(async ([name, read]) => {
     try { sections[name] = await read(); }
@@ -1122,4 +1123,29 @@ export function syncFailure(error, failures, offlineInRow) {
  */
 export function sessionRefused(status, code) {
   return status === 401 || (status === 403 && /session|profile|device/.test(String(code ?? "")));
+}
+
+/**
+ * The owner's lines about video conversion: the encoder ("Nvidia NVENC · decodes on the chip"),
+ * the running conversions and each one's quality and speed.
+ */
+export function transcodingSummary(status) {
+  if (!status) return { encoder: "Not available", running: "None", sessions: [] };
+  const encoder = !status.available
+    ? "Not available"
+    : [
+      status.encoderName + (status.device ? ` (${status.device.replace(/^\/dev\/dri\//, "")})` : ""),
+      status.hardwareDecoding ? "decodes on the chip" : null,
+      status.hardwareResting ? "the processor stands in after a chip error" : null,
+    ].filter(Boolean).join(" · ");
+  const sessions = (status.sessions ?? []).map((session) => ({
+    title: session.title,
+    detail: [session.quality, session.converting ? (session.speed ? `${session.speed.toFixed(1)}× real time` : "starting") : "ready"].join(" · "),
+  }));
+  const converting = (status.sessions ?? []).filter((session) => session.converting).length;
+  return {
+    encoder,
+    running: converting === 0 ? "None" : `${converting} of ${status.videoLimit} at once`,
+    sessions,
+  };
 }

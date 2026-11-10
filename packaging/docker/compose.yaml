@@ -14,6 +14,12 @@ services:
       - aurelia-data:/data
       # Your movies and shows, read-only. Change the left side to your folder.
       - /srv/media:/media:ro
+    # A video chip converts titles much faster. Intel or AMD: uncomment both, and put the number
+    # from `getent group render | cut -d: -f3` into group_add. Nvidia: see docs/DOCKER.md.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "993"
 
 volumes:
   aurelia-data:
