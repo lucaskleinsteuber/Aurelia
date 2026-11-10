@@ -154,6 +154,11 @@ its detail, playback plan and hero still. The profile-local cache holds at most 
 30 seconds, with two preparations at once; leaving or removing the card cancels its work. It opens
 no ticket or video stream. Ctrl+F opens the library search, Alt+Left goes back.
 
+**Movie Night** on Home opens a sheet where everyone at home swipes the same posters (drag, the
+buttons or the arrow keys; phones join from their own Aurelia or a browser), and the first title
+every voter likes shows as a ticket with Play. Statistics plays the year as **Wrapped** slides
+(click right or left, ← → Space, Esc closes). `Core/Playback/MovieNight.cs` holds the rules.
+
 ## Settings
 
 Settings open with Ctrl+, or the gear next to the profile, inside the main window over the
@@ -162,7 +167,7 @@ library (Done or Esc returns), with a search field (`Settings/SettingsView.cs`):
 - General: start screen, poster size, watched titles in rows, Reduce Motion, and "Let the Server
   Rest When Unused" with its minutes.
 - Sidebar: the pages, their order and visibility (one always stays), and the startup screen.
-- Activity: statistics and history.
+- Activity: statistics (with Wrapped) and history.
 - Playback: all twelve player settings with the Mac app's choices, "Forget Track Choices" and
   "Restore Playback Defaults".
 - Profiles and Devices: the open profile, switching profiles, and changing, turning on or removing

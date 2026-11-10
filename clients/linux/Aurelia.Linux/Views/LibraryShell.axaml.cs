@@ -265,6 +265,18 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
 
     public Task JoinWatchTogetherAsync(WatchPartySummary party) => Together?.JoinWatchTogetherAsync(party) ?? Task.CompletedTask;
 
+    public async Task ShowMovieNightAsync(MovieNightSummary? joining)
+    {
+        if (context is null) return;
+        using var sheet = new MovieNightSheet(context, Sheets, joining);
+        await Sheets.ShowAsync(sheet);
+        // Closing the sheet leaves the night; the match plays once it has closed.
+        await sheet.LeaveAsync();
+        if (sheet.PlayRequested is { } item) Play(item, fromLastPosition: false);
+    }
+
+    public Task ShowWrappedAsync(int year) => context is null ? Task.CompletedTask : Sheets.ShowAsync(new WrappedSheet(context, Sheets, year));
+
     public Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => Together?.Downloads;
 
     public void Download(CatalogItemSummary item) => Together?.Download(item);

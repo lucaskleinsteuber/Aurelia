@@ -37,6 +37,12 @@ public interface ILibraryNavigator
 
     Task JoinWatchTogetherAsync(WatchPartySummary party) => Task.CompletedTask;
 
+    /// <summary>Opens Movie Night: a new night, or <paramref name="joining"/>.</summary>
+    Task ShowMovieNightAsync(MovieNightSummary? joining) => Task.CompletedTask;
+
+    /// <summary>Plays the profile's year as Wrapped slides.</summary>
+    Task ShowWrappedAsync(int year) => Task.CompletedTask;
+
     /// <summary>Downloads on this computer, or null where downloads are not offered.</summary>
     Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => null;
 

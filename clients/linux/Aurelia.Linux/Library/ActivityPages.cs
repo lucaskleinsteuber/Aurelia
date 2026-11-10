@@ -349,15 +349,52 @@ public sealed class StatisticsPage : LibraryPageBase
             if (r.TopTitle is { } top) tiles.Children.Add(Tile("Most Watched", top));
             if (r.BusiestDay is { } day) tiles.Children.Add(Tile("Busiest Day", r.BusiestDayHours is { } hours ? $"{ActivityFormat.LongDay(day)} · {ActivityFormat.Hours(hours)}" : ActivityFormat.LongDay(day)));
         }
-        return new StackPanel
+        var section = new StackPanel
         {
             Spacing = 14,
             Margin = Inset(),
             Children =
             {
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { SectionTitle("Year in Review"), picker } },
-                tiles,
             },
         };
+        if (Context.Store.Client.SupportsWrapped && year is { } shown)
+        {
+            var wrapped = new Button
+            {
+                Classes = { "card" },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Content = new Border
+                {
+                    Background = new SolidColorBrush(Color.Parse("#6A4CFF")),
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(16, 12),
+                    Child = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 14,
+                        Children =
+                    {
+                        new TextBlock { Text = shown.ToString(CultureInfo.InvariantCulture), FontSize = 26, FontWeight = FontWeight.Black, Foreground = new SolidColorBrush(Color.Parse("#FFD84D")), VerticalAlignment = VerticalAlignment.Center },
+                        new StackPanel
+                        {
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Children =
+                            {
+                                new TextBlock { Text = $"Play your {shown.ToString(CultureInfo.InvariantCulture)} Wrapped", FontWeight = FontWeight.Bold, Foreground = Brushes.White },
+                                new TextBlock { Text = "Your year in slides, with commentary nobody asked for.", FontSize = 13, Foreground = Brushes.White, Opacity = 0.85 },
+                            },
+                        },
+                    },
+                    },
+                },
+            };
+            AutomationProperties.SetName(wrapped, $"Play your {shown.ToString(CultureInfo.InvariantCulture)} Wrapped");
+            wrapped.Click += (_, _) => _ = Context.Navigator.ShowWrappedAsync(shown);
+            section.Children.Add(wrapped);
+        }
+        section.Children.Add(tiles);
+        return section;
     }
 }

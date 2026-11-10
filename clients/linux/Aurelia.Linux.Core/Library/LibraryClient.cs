@@ -14,6 +14,7 @@ namespace Aurelia.Linux.Core.Library;
 /// profile's token over the pinned connection.
 /// </summary>
 public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSession profile, IReadOnlyCollection<string> capabilities)
+    : Aurelia.Linux.Core.Playback.IMovieNightApi
 {
     public const int DefaultPageSize = 100;
     public const int LargePageSize = 500;
@@ -27,6 +28,10 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public bool SupportsWatchlist => Supports("watchlist-people-v1");
 
     public bool SupportsArtworkVariants => Supports("artwork-variants-v1");
+
+    public bool SupportsMovieNight => Supports(ServerFeatures.MovieNight);
+
+    public bool SupportsWrapped => Supports(ServerFeatures.YearWrapped);
 
     public Task<HomeResponse> HomeAsync(CancellationToken cancellation) => Get<HomeResponse>("/api/v1/home", cancellation);
 
@@ -123,6 +128,9 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public Task<YearInReview> YearInReviewAsync(int year, CancellationToken cancellation) =>
         Get<YearInReview>($"/api/v1/statistics/year/{year}", cancellation);
 
+    public Task<YearWrapped> WrappedAsync(int year, CancellationToken cancellation) =>
+        Get<YearWrapped>($"/api/v1/statistics/year/{year}/wrapped", cancellation);
+
     /// <summary>GET /api/v1/sync/changes: waits up to <paramref name="waitSeconds"/> for the library to change after the cursor.</summary>
     public Task<SyncChangesResponse> ChangesAsync(long after, int waitSeconds, string? generation, CancellationToken cancellation)
     {
@@ -205,6 +213,41 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
 
     public Task LeaveWatchPartyAsync(Guid partyId, CancellationToken cancellation) =>
         Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/watch-together/{partyId}/members/me", null, cancellation);
+
+    // Movie Night.
+    public Task<IReadOnlyList<MovieNightSummary>> MovieNightsAsync(CancellationToken cancellation) =>
+        Get<IReadOnlyList<MovieNightSummary>>("/api/v1/movie-night", cancellation);
+
+    public Task<MovieNightState> CreateMovieNightAsync(CreateMovieNightRequest request, CancellationToken cancellation) =>
+        Send<MovieNightState>(HttpMethod.Post, "/api/v1/movie-night", request, cancellation);
+
+    public Task<MovieNightState> JoinMovieNightAsync(Guid nightId, JoinMovieNightRequest request, CancellationToken cancellation) =>
+        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/join", request, cancellation);
+
+    /// <summary>The night once its revision is newer than <paramref name="after"/>, or after the wait.</summary>
+    public Task<MovieNightState> MovieNightAsync(Guid nightId, long? after, int? deckVersion, int waitMilliseconds, CancellationToken cancellation) =>
+        Get<MovieNightState>(after is { } revision
+            ? $"/api/v1/movie-night/{nightId}?after={revision.ToString(CultureInfo.InvariantCulture)}&waitMs={waitMilliseconds.ToString(CultureInfo.InvariantCulture)}"
+              + (deckVersion is { } known ? "&deckVersion=" + known.ToString(CultureInfo.InvariantCulture) : "")
+            : $"/api/v1/movie-night/{nightId}", cancellation, TimeSpan.FromMilliseconds(waitMilliseconds + 10_000));
+
+    public Task<MovieNightState> MovieNightSettingsAsync(Guid nightId, MovieNightSettingsRequest request, CancellationToken cancellation) =>
+        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/settings", request, cancellation);
+
+    public Task<MovieNightState> DealMovieNightAsync(Guid nightId, CancellationToken cancellation) =>
+        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/deal", new { }, cancellation);
+
+    public Task<MovieNightState> VoteMovieNightAsync(Guid nightId, MovieNightVoteRequest request, CancellationToken cancellation) =>
+        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/votes", request, cancellation);
+
+    public Task<MovieNightState> KeepSwipingAsync(Guid nightId, CancellationToken cancellation) =>
+        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/keep-swiping", new { }, cancellation);
+
+    public Task<MovieNightState> MovieNightRoleAsync(Guid nightId, MovieNightRoleRequest request, CancellationToken cancellation) =>
+        Send<MovieNightState>(HttpMethod.Post, $"/api/v1/movie-night/{nightId}/role", request, cancellation);
+
+    public Task LeaveMovieNightAsync(Guid nightId, CancellationToken cancellation) =>
+        Send<AureliaApi.NoContent>(HttpMethod.Delete, $"/api/v1/movie-night/{nightId}/members/me", null, cancellation);
 
     private static string ScopeName(WatchStateScope scope) => scope switch
     {

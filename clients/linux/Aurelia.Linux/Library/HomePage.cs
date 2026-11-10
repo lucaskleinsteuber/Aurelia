@@ -14,6 +14,51 @@ namespace Aurelia.Linux.Library;
 /// </summary>
 public sealed class HomePage(LibraryContext context) : LibraryPageBase(context)
 {
+    /// <summary>Start a Movie Night, or join the one someone else started.</summary>
+    private Button MovieNightStrip()
+    {
+        var title = new TextBlock { Text = "Can't decide what to watch?", FontWeight = FontWeight.SemiBold, FontSize = 15 };
+        var detail = new TextBlock { Text = "Start a Movie Night and let everyone swipe on their phone.", Classes = { "subdued" }, FontSize = 13 };
+        MovieNightSummary? open = null;
+        var cards = new Canvas { Width = 46, Height = 40, Margin = new Thickness(0, 0, 14, 0) };
+        foreach (var (color, left, angle) in new[] { ("#FF4D5A", 0.0, -12.0), ("#3A3F44", 10.0, 0.0), ("#FFC93C", 20.0, 12.0) })
+        {
+            var card = new Border { Width = 22, Height = 32, CornerRadius = new CornerRadius(5), Background = new SolidColorBrush(Color.Parse(color)), RenderTransform = new RotateTransform(angle) };
+            Canvas.SetLeft(card, left);
+            Canvas.SetTop(card, 4);
+            cards.Children.Add(card);
+        }
+        var strip = new Button
+        {
+            Classes = { "card" },
+            Margin = Inset(),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = new Border
+            {
+                Background = new SolidColorBrush(Color.Parse("#282C2F")),
+                CornerRadius = new CornerRadius(14),
+                Padding = new Thickness(14),
+                Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { cards, new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, Children = { title, detail } } } },
+            },
+        };
+        Avalonia.Automation.AutomationProperties.SetName(strip, "Movie Night");
+        strip.Click += (_, _) => _ = Context.Navigator.ShowMovieNightAsync(open);
+        _ = Task.Run(async () =>
+        {
+            try { return await Context.Store.Client.MovieNightsAsync(CancellationToken.None); }
+            catch (Exception failure) when (failure is Aurelia.Linux.Core.Api.AureliaApiException or HttpRequestException or TaskCanceledException) { return []; }
+        }).ContinueWith(task => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (task.Result is not { Count: > 0 } nights) return;
+            var night = nights[0];
+            open = night;
+            title.Text = $"{night.HostName}'s Movie Night is on";
+            detail.Text = "Join and start swiping.";
+        }), TaskScheduler.Default);
+        return strip;
+    }
+
     public const double HeroHeight = 500;
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -58,6 +103,7 @@ public sealed class HomePage(LibraryContext context) : LibraryPageBase(context)
         }
         if (home.Recommendation is { } hero) page.Children.Add(Hero(hero));
         else page.Children.Add(new Panel { Height = 64 });
+        if (store.Client.SupportsMovieNight) page.Children.Add(MovieNightStrip());
         var posterWidth = prefs.PosterWidth;
         if (home.ContinueWatching.Count > 0)
         {
