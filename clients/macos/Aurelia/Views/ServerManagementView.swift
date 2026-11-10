@@ -116,6 +116,7 @@ struct ServerManagementView: View {
       }
       .id("essentials-\(configuration.stored.revision)")
       ServerScrubPreviewsEditor(client: client)
+      ServerVideoConversionCard(client: client)
     }
     ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {
       if let status { ServerDetailsBox(status: status) }

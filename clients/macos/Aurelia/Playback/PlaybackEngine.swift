@@ -129,6 +129,8 @@ final class VLCPlaybackEngine: PlaybackEngine {
   /// Prebuffering before the picture starts and after a seek. The local relay reads a server
   /// on this Mac fast enough for 300 ms; remote servers keep the default 500 ms.
   var networkCachingMilliseconds: Int?
+  /// Extra VLC options for the next media, such as the HLS quality limit.
+  var additionalMediaOptions: [String] = []
   var opensAtStartPosition: Bool { true }
 
   init(
@@ -310,9 +312,10 @@ final class VLCPlaybackEngine: PlaybackEngine {
     observeCurrentPlayer()
     let media = VLCMedia(url: url)
     media.addOption(":http-reconnect")
-    if let networkCachingMilliseconds {
+    if let networkCachingMilliseconds, !additionalMediaOptions.contains(where: { $0.hasPrefix(":network-caching=") }) {
       media.addOption(":network-caching=\(networkCachingMilliseconds)")
     }
+    for option in additionalMediaOptions { media.addOption(option) }
     if milliseconds > 0 {
       // Opening at the resume position avoids buffering the beginning only to seek away.
       media.addOption(":start-time=\(String(format: "%.3f", Double(milliseconds) / 1_000))")
@@ -519,6 +522,14 @@ final class PlaybackPreferencesStore: ObservableObject {
       if normalized != preferences { preferences = normalized }
       save(normalized)
     }
+  }
+
+  /// Whether the connected server streams in several qualities; not saved.
+  @Published var adaptiveStreamingAvailable = false
+
+  /// The streaming quality a new player uses: the setting while the server offers it, else the original.
+  var effectiveStreamingQuality: StreamingQuality {
+    preferences.streamingQuality.effective(serverSupports: adaptiveStreamingAvailable)
   }
 
   private let defaults: UserDefaults

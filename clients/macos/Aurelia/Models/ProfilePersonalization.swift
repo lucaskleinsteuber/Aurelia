@@ -141,4 +141,6 @@ enum ServerFeatureNames {
   /// The year as slides with the server's lines.
   static let yearWrapped = "year-wrapped-v1"
   static let monthlyWrapped = "monthly-wrapped-v1"
+  /// HLS in several qualities, converted live by the server.
+  static let adaptiveStreaming = StreamingQuality.feature
 }

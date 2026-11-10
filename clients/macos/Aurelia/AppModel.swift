@@ -106,7 +106,12 @@ final class AppModel: ObservableObject {
   @Published private(set) var watchParty: WatchTogetherSession?
   @Published private(set) var sceneNotesVersion: UInt64 = 0
   @Published private(set) var catalogVisibilityRevision: UInt64 = 0
-  @Published private(set) var libraryCapabilities: Set<String> = []
+  @Published private(set) var libraryCapabilities: Set<String> = [] {
+    didSet {
+      PlaybackPreferencesStore.shared.adaptiveStreamingAvailable =
+        libraryCapabilities.contains(ServerFeatureNames.adaptiveStreaming)
+    }
+  }
   var supportsLibraryState: Bool {
     #if DEBUG
       if LibraryStateUITestFixture.enabled { return true }
@@ -509,6 +514,9 @@ final class AppModel: ObservableObject {
   var supportsWrapped: Bool { libraryCapabilities.contains(ServerFeatureNames.yearWrapped) }
   var supportsMonthlyWrapped: Bool {
     libraryCapabilities.contains(ServerFeatureNames.monthlyWrapped)
+  }
+  var supportsAdaptiveStreaming: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.adaptiveStreaming)
   }
 
   func start() async {

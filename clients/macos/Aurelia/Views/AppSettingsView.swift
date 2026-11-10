@@ -698,6 +698,23 @@ struct AppSettingsView: View {
         Toggle("Automatic Resume", isOn: $playbackPreferences.preferences.automaticResume)
           .accessibilityIdentifier("playback-automatic-resume")
 
+        if model.supportsAdaptiveStreaming {
+          VStack(alignment: .leading, spacing: 2) {
+            LabeledContent("Streaming Quality") {
+              Picker("Streaming Quality", selection: $playbackPreferences.preferences.streamingQuality) {
+                ForEach(StreamingQuality.allCases) { quality in Text(quality.title).tag(quality) }
+              }
+              .labelsHidden()
+              .frame(width: 180)
+              .accessibilityIdentifier("playback-streaming-quality")
+            }
+            Text(
+              "Original plays the file itself. The other choices let the server convert the title while it plays, in the quality your connection carries, which helps away from home."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          }
+        }
+
         Toggle(
           "Automatically Play Next Episode",
           isOn: $playbackPreferences.preferences.automaticallyPlayNextEpisode

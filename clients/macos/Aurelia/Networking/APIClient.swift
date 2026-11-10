@@ -1675,6 +1675,10 @@ struct APIClient: Sendable {
     try Self.decode([ServerBackupSummary].self, from: await perform(path: "/api/v1/server/backups"))
   }
   func serverPower() async throws -> ServerPowerSettings { try await get("/api/v1/server/power") }
+  func serverTranscoding() async throws -> TranscodingStatus {
+    try await get("/api/v1/server/transcoding")
+  }
+
   func serverScrubPreviews() async throws -> ScrubPreviewSettings {
     try await get("/api/v1/server/scrub-previews")
   }

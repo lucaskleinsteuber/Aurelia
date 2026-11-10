@@ -24,6 +24,16 @@ struct RelayRequest: Equatable, Sendable {
   let range: String?
   let ifRange: String?
   var subtitleIndex: Int? = nil
+  /// A path and query of the server's HLS stream below the ticket, such as "hls/720p/3.m4s?audio=1".
+  var hlsPath: String? = nil
+
+  /// Only the server's HLS files are relayed: the master and a quality's playlist, init and segments,
+  /// with at most a sound track in the query.
+  static func isAllowedHLSPath(_ path: String) -> Bool {
+    path.range(
+      of: #"^hls/(master\.m3u8|[1-9][0-9]{2,3}p/(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s))(\?audio=[0-9]{1,4})?$"#,
+      options: .regularExpression) != nil
+  }
 }
 
 enum PlaybackStreamFailure: Equatable, Sendable {
@@ -185,13 +195,18 @@ final class LoopbackStreamRelay: @unchecked Sendable {
     let isStream = requestParts.count == 3 && requestParts[1] == Substring("/stream/\(secret)")
     let subPrefix = "/subtitles/\(secret)/"
     let isSubtitles = requestParts.count == 3 && requestParts[1].starts(with: subPrefix)
+    let hlsPrefix = "/stream/\(secret)/"
+    let isHLS =
+      requestParts.count == 3 && requestParts[1].starts(with: hlsPrefix)
+      && RelayRequest.isAllowedHLSPath(String(requestParts[1].dropFirst(hlsPrefix.count)))
     guard requestParts.count == 3,
       requestParts[2] == "HTTP/1.1",
       requestParts[0] == "GET" || requestParts[0] == "HEAD",
-      isStream || isSubtitles
+      isStream || isSubtitles || isHLS
     else {
       throw StreamRelayError.invalidRequest
     }
+    let hlsPath = isHLS ? String(requestParts[1].dropFirst(hlsPrefix.count)) : nil
 
     var subtitleIndex: Int? = nil
     if isSubtitles {
@@ -234,7 +249,19 @@ final class LoopbackStreamRelay: @unchecked Sendable {
       method: String(requestParts[0]),
       range: headers["range"],
       ifRange: headers["if-range"],
-      subtitleIndex: subtitleIndex)
+      subtitleIndex: subtitleIndex,
+      hlsPath: hlsPath)
+  }
+
+  /// The server address for an HLS path below the ticket's stream address.
+  static func hlsURL(_ path: String, below source: URL) -> URL? {
+    guard RelayRequest.isAllowedHLSPath(path),
+      var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
+    else { return nil }
+    let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
+    components.percentEncodedPath = components.percentEncodedPath + "/" + parts[0]
+    components.percentEncodedQuery = parts.count > 1 ? parts[1] : nil
+    return components.url
   }
 
   private func listenerChanged(_ state: NWListener.State) {
@@ -338,6 +365,13 @@ final class LoopbackStreamRelay: @unchecked Sendable {
         comps?.path = "/api/v1/streams/\(ticket)/subtitles/\(subIndex)"
       }
       url = comps?.url ?? baseSource
+    } else if let hlsPath = relayRequest.hlsPath {
+      let baseSource = lock.withLock { sourceURL }
+      guard let resolved = Self.hlsURL(hlsPath, below: baseSource) else {
+        reject(connection, id: id, status: 400, reason: "Bad Request")
+        return
+      }
+      url = resolved
     } else {
       url = lock.withLock { sourceURL }
     }

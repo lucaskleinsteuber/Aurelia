@@ -282,3 +282,42 @@ struct ServerHealthResponse: Decodable, Sendable {
   let recentIssues: [ServerHealthEvent]
   let backup: ServerHealthBackupSummary?
 }
+
+/// How the server converts video: its encoder, what converts now and, when a video chip is there
+/// but unusable, the one step that usually fixes it.
+struct TranscodingStatus: Decodable, Equatable, Sendable {
+  struct Session: Decodable, Equatable, Sendable {
+    let title: String
+    let quality: String
+    let encoder: String?
+    let speed: Double?
+    let converting: Bool
+  }
+
+  let available: Bool
+  let encoder: String?
+  let encoderName: String
+  let device: String?
+  let hardwareDecoding: Bool
+  let hardwareResting: Bool
+  let runningConversions: Int
+  let videoLimit: Int
+  let sessions: [Session]
+  let hint: String?
+
+  /// "Nvidia NVENC · decodes on the chip", or "Not available".
+  var encoderSummary: String {
+    guard available else { return "Not available" }
+    var parts = [encoderName + (device.map { " (\(($0 as NSString).lastPathComponent))" } ?? "")]
+    if hardwareDecoding { parts.append("decodes on the chip") }
+    if hardwareResting { parts.append("the processor stands in after a chip error") }
+    return parts.joined(separator: " · ")
+  }
+
+  static func sessionSummary(_ session: Session) -> String {
+    let state =
+      session.converting
+      ? session.speed.map { String(format: "%.1f× real time", $0) } ?? "starting" : "ready"
+    return "\(session.quality) · \(state)"
+  }
+}

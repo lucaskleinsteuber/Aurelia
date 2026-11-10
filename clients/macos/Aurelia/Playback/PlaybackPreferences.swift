@@ -110,6 +110,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var cinemaAds = true
   /// Trailers of films not watched yet that cinema mode plays (0…3).
   var cinemaTrailers = 2
+  /// The original file, or the server's live conversion in a quality the connection carries.
+  var streamingQuality: StreamingQuality = .original
 
   init(
     automaticResume: Bool,
@@ -174,7 +176,7 @@ extension PlaybackPreferences {
     case seekInterval, preventSleepDuringPlayback, automaticallyPlayNextEpisode, nightMode
     case upNextCountdownSeconds, resumeThresholdSeconds
     case defaultAudioLanguage, defaultSubtitleLanguage, dialogueBoost, volumeLeveling
-    case fillsScreen, cinemaMode, cinemaAds, cinemaTrailers
+    case fillsScreen, cinemaMode, cinemaAds, cinemaTrailers, streamingQuality
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -206,6 +208,8 @@ extension PlaybackPreferences {
       cinemaMode: try container.decodeIfPresent(Bool.self, forKey: .cinemaMode) ?? false,
       cinemaAds: try container.decodeIfPresent(Bool.self, forKey: .cinemaAds) ?? true,
       cinemaTrailers: try container.decodeIfPresent(Int.self, forKey: .cinemaTrailers) ?? 2)
+    streamingQuality =
+      (try? container.decodeIfPresent(StreamingQuality.self, forKey: .streamingQuality)) ?? .original
   }
   func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -227,6 +231,7 @@ extension PlaybackPreferences {
     try values.encode(cinemaMode, forKey: .cinemaMode)
     try values.encode(cinemaAds, forKey: .cinemaAds)
     try values.encode(cinemaTrailers, forKey: .cinemaTrailers)
+    try values.encode(streamingQuality, forKey: .streamingQuality)
   }
 
 }
@@ -238,5 +243,59 @@ enum VideoFill {
   static func cropGeometry(fills: Bool, size: CGSize) -> String? {
     guard fills, size.width >= 1, size.height >= 1 else { return nil }
     return "\(Int(size.width.rounded())):\(Int(size.height.rounded()))"
+  }
+}
+
+/// Which stream the player opens: the original file, or the server's adaptive HLS stream,
+/// converted live in memory, in the best quality the connection carries or up to a fixed size.
+enum StreamingQuality: String, Codable, CaseIterable, Identifiable, Sendable {
+  case original
+  case automatic = "auto"
+  case p1080 = "1080p"
+  case p720 = "720p"
+  case p480 = "480p"
+
+  static let feature = "adaptive-streaming-v1"
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .original: "Original"
+    case .automatic: "Automatic"
+    case .p1080: "Up to 1080p"
+    case .p720: "Up to 720p"
+    case .p480: "Up to 480p"
+    }
+  }
+
+  /// The tallest picture VLC may pick from the master playlist, or nil for any.
+  var maximumHeight: Int? {
+    switch self {
+    case .original, .automatic: nil
+    case .p1080: 1080
+    case .p720: 720
+    case .p480: 480
+    }
+  }
+
+  /// What plays when the server can or cannot stream adaptively.
+  func effective(serverSupports: Bool) -> StreamingQuality { serverSupports ? self : .original }
+
+  /// The address to play: the relay's stream itself, or its HLS master playlist below it.
+  func playbackURL(for stream: URL) -> URL {
+    guard self != .original else { return stream }
+    return stream.appendingPathComponent("hls").appendingPathComponent("master.m3u8")
+  }
+
+  /// VLC's options for the HLS stream: a fixed quality caps the size and keeps to the best below it.
+  var vlcOptions: [String] {
+    guard self != .original else { return [] }
+    var options = [":network-caching=1500"]
+    if let maximumHeight {
+      options.append(":adaptive-maxheight=\(maximumHeight)")
+      options.append(":adaptive-logic=highest")
+    }
+    return options
   }
 }

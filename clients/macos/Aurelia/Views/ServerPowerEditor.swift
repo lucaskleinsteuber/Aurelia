@@ -368,3 +368,58 @@ struct ServerScrubPreviewsEditor: View {
     return "Preparing previews… (\(stored.completedCount) of \(total))"
   }
 }
+
+/// The owner's view of video conversion: the encoder, a hint when a video chip could help but
+/// isn't usable, and what converts now. Older servers without the status show nothing.
+struct ServerVideoConversionCard: View {
+  @EnvironmentObject private var model: AppModel
+  let client: APIClient
+  @State private var status: TranscodingStatus?
+  @State private var message: String?
+
+  var body: some View {
+    Group {
+      if let status {
+        AureliaSettingsSection(
+          "Video Conversion",
+          symbol: "cpu",
+          description:
+            "Converts titles for web browsers and for apps set to a streaming quality, in memory only."
+        ) {
+          VStack(alignment: .leading, spacing: 10) {
+            LabeledContent("Encoder", value: status.encoderSummary)
+            if let hint = status.hint {
+              Label(hint, systemImage: "lightbulb")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            LabeledContent(
+              "Converting Now",
+              value: status.runningConversions == 0
+                ? "None" : "\(status.runningConversions) of \(status.videoLimit) at once")
+            ForEach(Array(status.sessions.enumerated()), id: \.offset) { _, session in
+              LabeledContent(session.title, value: TranscodingStatus.sessionSummary(session))
+                .font(.caption)
+            }
+            if let message { Text(message).font(.caption).foregroundStyle(.red) }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+    }
+    .task(id: model.administrationGeneration) { await load() }
+  }
+
+  private func load() async {
+    let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    do {
+      status = try await model.currentAdministration {
+        try await scope.request { try await client.serverTranscoding() }
+      }
+    } catch let failure as APIClientError where failure.httpStatus == 404 {
+      status = nil
+    } catch {
+      message = scope.message(for: error)
+    }
+  }
+}

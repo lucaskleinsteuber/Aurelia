@@ -180,6 +180,8 @@ final class PlaybackController: ObservableObject {
   private let client: any PlaybackClientProtocol
   private let engine: PlaybackEngine
   private let preferences: PlaybackPreferences
+  /// The original file, or the server's HLS stream in a quality the connection carries.
+  let streamingQuality: StreamingQuality
   private let relayFactory: (URL, String) throws -> any PlaybackRelayProtocol
   private let previewRelayFactory: ((URL, String) throws -> any PlaybackRelayProtocol)?
   private var relay: (any PlaybackRelayProtocol)? {
@@ -256,9 +258,11 @@ final class PlaybackController: ObservableObject {
     profile: StoredServerProfile,
     presentation: PlaybackPresentation,
     engine: PlaybackEngine = VLCPlaybackEngine(),
-    preferences: PlaybackPreferences = PlaybackPreferencesStore.shared.preferences
+    preferences: PlaybackPreferences = PlaybackPreferencesStore.shared.preferences,
+    streamingQuality: StreamingQuality = PlaybackPreferencesStore.shared.effectiveStreamingQuality
   ) {
     self.client = APIPlaybackClient(profile: profile)
+    self.streamingQuality = streamingQuality
     if let engine = engine as? VLCPlaybackEngine, Self.isLocalServer(profile.baseURL) {
       engine.networkCachingMilliseconds = 300
     }
@@ -312,9 +316,11 @@ final class PlaybackController: ObservableObject {
     },
     sleepTimerSleep: @escaping @MainActor (TimeInterval) async throws -> Void = { delay in
       try await Task.sleep(for: .seconds(delay))
-    }
+    },
+    streamingQuality: StreamingQuality = .original
   ) {
     self.client = client
+    self.streamingQuality = streamingQuality
     self.progressOutbox = progressOutbox ?? PlaybackProgressOutbox()
     self.presentation = presentation
     self.engine = engine
@@ -916,7 +922,8 @@ final class PlaybackController: ObservableObject {
     }
     hasPreparedCurrentItem = true
     engine.trackScope = presentation.trackScope
-    engine.load(url: localURL, startAt: resumePositionMilliseconds)
+    (engine as? VLCPlaybackEngine)?.additionalMediaOptions = streamingQuality.vlcOptions
+    engine.load(url: streamingQuality.playbackURL(for: localURL), startAt: resumePositionMilliseconds)
     openedAtResume = engine.opensAtStartPosition && resumePositionMilliseconds > 0
     playbackURL = localURL
     startPreviewRelay(from: sourceURL)
