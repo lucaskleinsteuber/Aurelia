@@ -26,6 +26,17 @@ struct IOSPlaybackSettingsView: View {
           "Emphasize speech and reduce differences between quiet and loud passages. Sleep applies stronger volume leveling."
         )
       }
+      if model.supportsAdaptiveStreaming {
+        Section {
+          Picker("Streaming Quality", selection: $value.streamingQuality) {
+            ForEach(IOSStreamingQuality.allCases) { Text($0.title).tag($0) }
+          }.accessibilityIdentifier("settings-streaming-quality")
+        } footer: {
+          Text(
+            "Original plays the file itself. The other choices let the server convert the title while it plays, in the quality your connection carries, which helps away from home."
+          )
+        }
+      }
       Section {
         Picker("Playback Rate", selection: $value.defaultPlaybackRate) {
           ForEach(IOSPlaybackPreferences.supportedRates, id: \.self) { rate in

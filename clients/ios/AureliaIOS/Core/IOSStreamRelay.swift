@@ -266,6 +266,12 @@ final class IOSStreamRelay: @unchecked Sendable {
           url = subURL
         }
       }
+    } else if let hlsPath = relayRequest.hlsPath {
+      guard let resolved = IOSRelayRequest.hlsURL(hlsPath, below: url) else {
+        reject(connection, id: id, status: 400, reason: "Bad Request")
+        return
+      }
+      url = resolved
     }
     guard url.scheme?.lowercased() == "https", let host = url.host else {
       reportFailure(.invalidResponse, connectionID: id)

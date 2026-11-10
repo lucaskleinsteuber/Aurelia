@@ -108,7 +108,7 @@ final class IOSVideoEngine: IOSPlaybackEngine {
     // The decoder sees only a random loopback route. All remote TLS and
     // authentication is performed by IOSStreamRelay, with no video disk cache.
     // Half a second of prebuffer keeps seeks quick on a local network.
-    media.addOption(":network-caching=500")
+    for option in preferences.streamingQuality.vlcOptions { media.addOption(option) }
     if resumeAt > 0 {
       // Opening at the resume position avoids buffering the beginning only to seek away.
       media.addOption(":start-time=\(String(format: "%.3f", Double(resumeAt) / 1_000))")

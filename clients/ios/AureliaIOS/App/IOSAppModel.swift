@@ -36,6 +36,7 @@ final class IOSAppModel: ObservableObject {
   var supportsMovieNight: Bool { capabilities?.supportsMovieNight ?? false }
   var supportsWrapped: Bool { capabilities?.supportsWrapped ?? false }
   var supportsMonthlyWrapped: Bool { capabilities?.supportsMonthlyWrapped ?? false }
+  var supportsAdaptiveStreaming: Bool { capabilities?.supportsAdaptiveStreaming ?? false }
   @Published private(set) var homeLoading = false
   @Published private(set) var homeError: String?
   @Published private(set) var libraryRefresh = UUID()
