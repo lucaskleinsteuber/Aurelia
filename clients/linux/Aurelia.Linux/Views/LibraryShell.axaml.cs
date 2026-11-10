@@ -269,13 +269,14 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     {
         if (context is null) return;
         using var sheet = new MovieNightSheet(context, Sheets, joining);
-        await Sheets.ShowAsync(sheet);
+        await Sheets.ShowAsync(sheet, fullWindow: true);
         // Closing the sheet leaves the night; the match plays once it has closed.
         await sheet.LeaveAsync();
         if (sheet.PlayRequested is { } item) Play(item, fromLastPosition: false);
     }
 
-    public Task ShowWrappedAsync(int year) => context is null ? Task.CompletedTask : Sheets.ShowAsync(new WrappedSheet(context, Sheets, year));
+    public Task ShowWrappedAsync(int year, int? month = null) =>
+        context is null ? Task.CompletedTask : Sheets.ShowAsync(new WrappedSheet(context, Sheets, year, month), fullWindow: true);
 
     public Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => Together?.Downloads;
 

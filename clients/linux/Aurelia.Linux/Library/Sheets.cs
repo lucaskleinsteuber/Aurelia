@@ -39,21 +39,25 @@ public sealed class SheetHost : Panel
 
     internal Control? Current => open.Count > 0 ? open.Peek().Frame : null;
 
-    public Task<bool> ShowAsync(Control sheet)
+    /// <param name="fullWindow">Covers the whole window instead of floating as a card, for Movie
+    /// Night and Wrapped.</param>
+    public Task<bool> ShowAsync(Control sheet, bool fullWindow = false)
     {
         if (open.Count > 0) open.Peek().Frame.IsVisible = false;
-        var frame = new Border
-        {
-            Classes = { "sheet" },
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = sheet,
-        };
+        var frame = fullWindow
+            ? new Border { Child = sheet }
+            : new Border
+            {
+                Classes = { "sheet" },
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = sheet,
+            };
         var result = new TaskCompletionSource<bool>();
         open.Push((frame, result));
         Children.Add(frame);
         IsVisible = true;
-        Aurelia.Linux.Controls.Motion.Appear(frame, rise: 12, fromScale: 0.98);
+        Aurelia.Linux.Controls.Motion.Appear(frame, rise: fullWindow ? 0 : 12, fromScale: fullWindow ? 1.02 : 0.98);
         Avalonia.Threading.Dispatcher.UIThread.Post(() => sheet.GetVisualDescendantsOfType<TextBox>().FirstOrDefault()?.Focus());
         return result.Task;
     }

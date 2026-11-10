@@ -229,6 +229,7 @@ public sealed class StatisticsPage : LibraryPageBase
             LineSpacing = 24,
             Children = { Ranking("Most Watched", stats.TopTitles.Take(5)), Ranking("Favorite Genres", stats.TopGenres.Take(5)) },
         });
+        if (Context.Store.Client.SupportsMonthlyWrapped) page.Children.Add(MonthlyWrappedButton.Create(Context, Inset()));
         if (stats.YearsAvailable.Count > 0) page.Children.Add(YearInReview(stats));
         return page;
     }

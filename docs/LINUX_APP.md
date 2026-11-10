@@ -154,10 +154,11 @@ its detail, playback plan and hero still. The profile-local cache holds at most 
 30 seconds, with two preparations at once; leaving or removing the card cancels its work. It opens
 no ticket or video stream. Ctrl+F opens the library search, Alt+Left goes back.
 
-**Movie Night** on Home opens a sheet where everyone at home swipes the same posters (drag, the
+**Movie Night** on Home covers the window while everyone at home swipes the same posters (drag, the
 buttons or the arrow keys; phones join from their own Aurelia or a browser), and the first title
 every voter likes shows as a ticket with Play. Statistics plays the year as **Wrapped** slides
-(click right or left, ← → Space, Esc closes). `Core/Playback/MovieNight.cs` holds the rules.
+over the whole window (click right or left, ← → Space, Esc closes), and from the 2nd of a month
+last month's Wrapped, also on Home in that first week. `Core/Playback/MovieNight.cs` holds the rules.
 
 ## Settings
 

@@ -33,6 +33,8 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
 
     public bool SupportsWrapped => Supports(ServerFeatures.YearWrapped);
 
+    public bool SupportsMonthlyWrapped => Supports(ServerFeatures.MonthlyWrapped);
+
     public Task<HomeResponse> HomeAsync(CancellationToken cancellation) => Get<HomeResponse>("/api/v1/home", cancellation);
 
     /// <summary>
@@ -128,8 +130,9 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public Task<YearInReview> YearInReviewAsync(int year, CancellationToken cancellation) =>
         Get<YearInReview>($"/api/v1/statistics/year/{year}", cancellation);
 
-    public Task<YearWrapped> WrappedAsync(int year, CancellationToken cancellation) =>
-        Get<YearWrapped>($"/api/v1/statistics/year/{year}/wrapped", cancellation);
+    /// <summary>A year's Wrapped, or with <paramref name="month"/> one month's.</summary>
+    public Task<YearWrapped> WrappedAsync(int year, int? month, CancellationToken cancellation) =>
+        Get<YearWrapped>(month is { } m ? $"/api/v1/statistics/year/{year}/month/{m}/wrapped" : $"/api/v1/statistics/year/{year}/wrapped", cancellation);
 
     /// <summary>GET /api/v1/sync/changes: waits up to <paramref name="waitSeconds"/> for the library to change after the cursor.</summary>
     public Task<SyncChangesResponse> ChangesAsync(long after, int waitSeconds, string? generation, CancellationToken cancellation)

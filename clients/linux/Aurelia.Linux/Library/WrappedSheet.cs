@@ -23,9 +23,10 @@ public sealed class WrappedSheet : UserControl
     private readonly LibraryContext context;
     private readonly SheetHost host;
     private readonly int year;
+    private readonly int? month;
     private readonly bool reduceMotion;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(50) };
-    private readonly Grid frame = new() { Width = 420, Height = 760, ClipToBounds = true };
+    private readonly Grid frame = new() { ClipToBounds = true };
     private IReadOnlyList<WrappedSlide> slides = [];
     private int index;
     private double progress;
@@ -34,11 +35,12 @@ public sealed class WrappedSheet : UserControl
     private TextBlock? number;
     private ProgressBar[] bars = [];
 
-    public WrappedSheet(LibraryContext context, SheetHost host, int year)
+    public WrappedSheet(LibraryContext context, SheetHost host, int year, int? month = null)
     {
         this.context = context;
         this.host = host;
         this.year = year;
+        this.month = month;
         reduceMotion = context.Store.Preferences.ReduceMotion;
         Focusable = true;
         Content = frame;
@@ -57,7 +59,7 @@ public sealed class WrappedSheet : UserControl
     {
         try
         {
-            slides = (await context.Store.Client.WrappedAsync(year, CancellationToken.None)).Slides;
+            slides = (await context.Store.Client.WrappedAsync(year, month, CancellationToken.None)).Slides;
         }
         catch (Exception failure) when (failure is AureliaApiException or HttpRequestException or TaskCanceledException)
         {
@@ -136,8 +138,16 @@ public sealed class WrappedSheet : UserControl
         if (slide.Poster is { } backdrop)
             frame.Children.Add(new ArtworkImage(context.Store, backdrop, 320) { Opacity = 0.25, Effect = new BlurEffect { Radius = 40 } });
 
-        var content = new StackPanel { Spacing = 12, Margin = new Thickness(28, 70, 28, 40), VerticalAlignment = VerticalAlignment.Center };
-        content.Children.Add(new TextBlock { Text = slide.Eyebrow, Foreground = ink, FontSize = 16, FontWeight = FontWeight.Bold, Opacity = 0.8 });
+        // A column in the middle of the whole window; the colour fills the rest.
+        var content = new StackPanel
+        {
+            Spacing = 14,
+            Margin = new Thickness(40, 70, 40, 40),
+            MaxWidth = 820,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        content.Children.Add(new TextBlock { Text = slide.Eyebrow, Foreground = ink, FontSize = 19, FontWeight = FontWeight.Bold, Opacity = 0.8 });
         if (slide.Kind != "summary" && slide.Poster is { } poster)
         {
             content.Children.Add(new Border
@@ -151,7 +161,7 @@ public sealed class WrappedSheet : UserControl
                 Child = new ArtworkImage(context.Store, poster, 130),
             });
         }
-        content.Children.Add(new TextBlock { Text = slide.Headline, Foreground = ink, FontSize = 34, FontWeight = FontWeight.Black, TextWrapping = TextWrapping.Wrap, LetterSpacing = -1 });
+        content.Children.Add(new TextBlock { Text = slide.Headline, Foreground = ink, FontSize = 46, FontWeight = FontWeight.Black, TextWrapping = TextWrapping.Wrap, LetterSpacing = -1 });
         if (slide.Kind == "summary")
         {
             if (slide.Posters is { Count: > 0 } posters)
@@ -178,7 +188,7 @@ public sealed class WrappedSheet : UserControl
         number = null;
         if (slide.BigNumber is { } big)
         {
-            var shown = new TextBlock { Text = big, Foreground = ink, FontSize = 132, FontWeight = FontWeight.Black, LetterSpacing = -8, Margin = new Thickness(-4, -10, 0, -14) };
+            var shown = new TextBlock { Text = big, Foreground = ink, FontSize = 170, FontWeight = FontWeight.Black, LetterSpacing = -9, Margin = new Thickness(-4, -10, 0, -14) };
             AutomationProperties.SetName(shown, slide.Unit is { } u ? $"{big} {u}" : big);
             content.Children.Add(shown);
             if (!reduceMotion && WrappedStory.CountTarget(big) is > 1)
@@ -189,7 +199,7 @@ public sealed class WrappedSheet : UserControl
             }
             if (slide.Unit is { } unit) content.Children.Add(new TextBlock { Text = unit, Foreground = ink, FontSize = 24, FontWeight = FontWeight.Heavy });
         }
-        if (slide.Detail is { } detail) content.Children.Add(new TextBlock { Text = detail, Foreground = ink, FontSize = 17, TextWrapping = TextWrapping.Wrap });
+        if (slide.Detail is { } detail) content.Children.Add(new TextBlock { Text = detail, Foreground = ink, FontSize = 21, TextWrapping = TextWrapping.Wrap });
         content.Children.Add(new Border
         {
             Background = new SolidColorBrush(Color.Parse(accent.Sticker)),
@@ -198,7 +208,7 @@ public sealed class WrappedSheet : UserControl
             Margin = new Thickness(0, 8, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
             RenderTransform = new RotateTransform(-2.5),
-            Child = new TextBlock { Text = slide.Quip, Foreground = field, FontSize = 17, FontWeight = FontWeight.Heavy, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 },
+            Child = new TextBlock { Text = slide.Quip, Foreground = field, FontSize = 21, FontWeight = FontWeight.Heavy, TextWrapping = TextWrapping.Wrap, MaxWidth = 640 },
         });
         frame.Children.Add(content);
 
@@ -234,5 +244,49 @@ public sealed class WrappedSheet : UserControl
         foreach (var bar in bars) barRow.Children.Add(bar);
         top.Children.Add(barRow);
         frame.Children.Add(top);
+    }
+}
+
+/// <summary>"Your October Wrapped is here": the newest ready month, in Statistics and, in its first week, on Home.</summary>
+public static class MonthlyWrappedButton
+{
+    public static Button Create(LibraryContext context, Thickness margin)
+    {
+        var ready = WrappedStory.ReadyMonth(DateTime.Now);
+        var ink = new SolidColorBrush(Color.Parse("#22000F"));
+        var button = new Button
+        {
+            Classes = { "card" },
+            Margin = margin,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = new Border
+            {
+                Background = new SolidColorBrush(Color.Parse("#FF4D88")),
+                CornerRadius = new CornerRadius(14),
+                Padding = new Thickness(16, 12),
+                Child = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 14,
+                    Children =
+                    {
+                        new TextBlock { Text = ready.Name[..3], FontSize = 26, FontWeight = FontWeight.Black, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center },
+                        new StackPanel
+                        {
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Children =
+                            {
+                                new TextBlock { Text = $"Your {ready.Name} Wrapped is here", FontWeight = FontWeight.Bold, Foreground = ink },
+                                new TextBlock { Text = "Last month in slides. It's worse than you think.", FontSize = 13, Foreground = ink, Opacity = 0.85 },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+        AutomationProperties.SetName(button, $"Your {ready.Name} Wrapped");
+        button.Click += (_, _) => _ = context.Navigator.ShowWrappedAsync(ready.Year, ready.Month);
+        return button;
     }
 }

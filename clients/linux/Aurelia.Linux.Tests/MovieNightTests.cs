@@ -102,6 +102,18 @@ public sealed class MovieNightTests
         Assert.Equal(WrappedStory.Accents["night"], WrappedStory.For("invented"));
     }
 
+    [Fact]
+    public void AMonthIsReadyFromTheSecondAndNewOnHomeForAWeek()
+    {
+        Assert.Equal((2026, 10, "October"), WrappedStory.ReadyMonth(new DateTime(2026, 11, 2)));
+        Assert.Equal((2026, 9, "September"), WrappedStory.ReadyMonth(new DateTime(2026, 11, 1)));
+        Assert.Equal((2026, 12, "December"), WrappedStory.ReadyMonth(new DateTime(2027, 1, 5)));
+        Assert.Equal((2026, 11, "November"), WrappedStory.ReadyMonth(new DateTime(2027, 1, 1)));
+        Assert.False(WrappedStory.MonthIsNew(new DateTime(2026, 11, 1)));
+        Assert.True(WrappedStory.MonthIsNew(new DateTime(2026, 11, 8)));
+        Assert.False(WrappedStory.MonthIsNew(new DateTime(2026, 11, 9)));
+    }
+
     private sealed class FakeMovieNightApi(params MovieNightState[] answers) : IMovieNightApi
     {
         private readonly Queue<MovieNightState> answers = new(answers);

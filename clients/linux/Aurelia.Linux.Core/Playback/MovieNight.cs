@@ -264,6 +264,16 @@ public static class WrappedStory
 {
     public static readonly TimeSpan SlideTime = TimeSpan.FromSeconds(6);
 
+    /// <summary>The newest month whose Wrapped is ready: last month from the 2nd on, else the one before.</summary>
+    public static (int Year, int Month, string Name) ReadyMonth(DateTime today)
+    {
+        var first = new DateTime(today.Year, today.Month, 1).AddMonths(today.Day >= 2 ? -1 : -2);
+        return (first.Year, first.Month, CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(first.Month));
+    }
+
+    /// <summary>Home shows the new month in its first week, from the 2nd to the 8th.</summary>
+    public static bool MonthIsNew(DateTime today) => today.Day is >= 2 and <= 8;
+
     /// <summary>A color field and the ink and sticker on it, as #RRGGBB.</summary>
     public sealed record Accent(string Field, string Ink, string Sticker);
 

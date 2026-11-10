@@ -39,25 +39,35 @@ public sealed class MovieNightSheet : UserControl, IDisposable
         session = new MovieNightSession(context.Store.Client, Environment.MachineName is { Length: > 0 } name ? name : "Linux PC",
             action => Dispatcher.UIThread.Post(action));
         session.PropertyChanged += (_, _) => Refresh();
-        Width = 600;
-        Height = 760;
+        // The whole window: the room's attention belongs to the posters.
         Focusable = true;
-        var leave = new Button { Content = "Leave", Classes = { "chip" } };
+        Background = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0.5, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(0.5, 1, RelativeUnit.Relative),
+            GradientStops = { new GradientStop(Color.Parse("#2A2D33"), 0), new GradientStop(Color.Parse("#202326"), 0.6) },
+        };
+        var leave = new Button
+        {
+            Content = "✕",
+            Classes = { "chip" },
+            Width = 38,
+            Height = 38,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 16, 20, 0),
+        };
+        Avalonia.Automation.AutomationProperties.SetName(leave, "Leave Movie Night");
         leave.Click += (_, _) => host.Close(false);
-        Content = new DockPanel
+        body.MaxWidth = 720;
+        body.Margin = new Thickness(32, 64, 32, 40);
+        Content = new Grid
         {
             Children =
             {
-                Docked(new DockPanel
-                {
-                    Margin = new Thickness(0, 0, 0, 16),
-                    Children =
-                    {
-                        Docked(leave, Dock.Right),
-                        new TextBlock { Text = "Movie Night", FontSize = 15, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center },
-                    },
-                }, Dock.Top),
                 new ScrollViewer { Content = body },
+                leave,
             },
         };
         KeyDown += OnKeyDown;

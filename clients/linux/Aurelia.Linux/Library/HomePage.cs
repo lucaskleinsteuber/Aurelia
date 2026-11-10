@@ -1,6 +1,7 @@
 using Aurelia.Contracts;
 using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core.Library;
+using Aurelia.Linux.Core.Playback;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -103,6 +104,8 @@ public sealed class HomePage(LibraryContext context) : LibraryPageBase(context)
         }
         if (home.Recommendation is { } hero) page.Children.Add(Hero(hero));
         else page.Children.Add(new Panel { Height = 64 });
+        if (store.Client.SupportsMonthlyWrapped && WrappedStory.MonthIsNew(DateTime.Now))
+            page.Children.Add(MonthlyWrappedButton.Create(Context, Inset()));
         if (store.Client.SupportsMovieNight) page.Children.Add(MovieNightStrip());
         var posterWidth = prefs.PosterWidth;
         if (home.ContinueWatching.Count > 0)

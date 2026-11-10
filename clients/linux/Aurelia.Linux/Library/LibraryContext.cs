@@ -41,7 +41,7 @@ public interface ILibraryNavigator
     Task ShowMovieNightAsync(MovieNightSummary? joining) => Task.CompletedTask;
 
     /// <summary>Plays the profile's year as Wrapped slides.</summary>
-    Task ShowWrappedAsync(int year) => Task.CompletedTask;
+    Task ShowWrappedAsync(int year, int? month = null) => Task.CompletedTask;
 
     /// <summary>Downloads on this computer, or null where downloads are not offered.</summary>
     Aurelia.Linux.Core.Playback.OfflineDownloads? Downloads => null;
