@@ -195,6 +195,8 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
   var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
   /// The year as slides with the server's lines.
   var supportsWrapped: Bool { capabilities?.contains("year-wrapped-v1") == true }
+  /// One month as slides, from the 2nd of the following month.
+  var supportsMonthlyWrapped: Bool { capabilities?.contains("monthly-wrapped-v1") == true }
 }
 
 struct IOSUser: Codable, Equatable, Sendable {

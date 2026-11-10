@@ -181,6 +181,9 @@ struct IOSStatisticsView: View {
               symbol: "checkmark.circle")
           }
           .padding(.horizontal, IOSDesign.margin)
+          if model.supportsMonthlyWrapped {
+            IOSMonthlyWrappedButton { wrappedYear = $0 }.padding(.horizontal, IOSDesign.margin)
+          }
           weeks(stats.hoursByWeek ?? [])
           ranking("Top Titles", stats.topTitles ?? [])
           ranking("Top Genres", stats.topGenres ?? [])
@@ -207,7 +210,7 @@ struct IOSStatisticsView: View {
     .task { await load() }
     .task(id: year) { await loadReview() }
     .fullScreenCover(item: $wrappedYear) { launch in
-      IOSWrappedView(year: launch.year).environmentObject(model)
+      IOSWrappedView(launch: launch).environmentObject(model)
     }
   }
 
@@ -477,8 +480,39 @@ struct IOSProfilePINView: View {
   }
 }
 
-/// Opens Wrapped for one year.
-struct IOSWrappedLaunch: Identifiable {
+/// Opens Wrapped for a year, or with `month` for one month.
+struct IOSWrappedLaunch: Identifiable, Equatable {
   let year: Int
-  var id: Int { year }
+  var month: Int? = nil
+  var id: String { "\(year)-\(month ?? 0)" }
+}
+
+/// "Your October Wrapped is here": the newest ready month, in Statistics and, in its first week,
+/// on Home.
+struct IOSMonthlyWrappedButton: View {
+  let open: (IOSWrappedLaunch) -> Void
+
+  var body: some View {
+    let ready = IOSWrapped.readyMonth()
+    Button {
+      open(IOSWrappedLaunch(year: ready.year, month: ready.month))
+    } label: {
+      HStack(spacing: 14) {
+        Text(String(ready.name.prefix(3))).font(.system(size: 24, weight: .black)).tracking(-1)
+          .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Your \(ready.name) Wrapped is here").font(.body.weight(.bold))
+          Text("Last month in slides. It's worse than you think.").font(.caption).opacity(0.85)
+        }
+        Spacer()
+        Image(systemName: "play.fill")
+      }
+      .foregroundStyle(Color(wrappedHex: 0x22000F))
+      .padding(14)
+      .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("monthly-wrapped")
+  }
 }

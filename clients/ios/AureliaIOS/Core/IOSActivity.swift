@@ -73,6 +73,8 @@ struct IOSYearWrapped: Codable, Equatable, Sendable {
   let year: Int
   let profileName: String
   let slides: [IOSWrappedSlide]
+  /// Set for one month's Wrapped.
+  var month: Int?
 }
 
 struct IOSWrappedFact: Codable, Equatable, Sendable {
@@ -98,6 +100,31 @@ struct IOSWrappedSlide: Codable, Equatable, Sendable {
 /// Wrapped's story rules: colors, counting up and moving between slides.
 enum IOSWrapped {
   static let slideSeconds: Double = 6
+
+  /// The newest month whose Wrapped is ready: last month from the 2nd on, else the one before.
+  static func readyMonth(
+    today: Date = Date(), calendar: Calendar = .current
+  ) -> (year: Int, month: Int, name: String) {
+    let back = calendar.component(.day, from: today) >= 2 ? -1 : -2
+    let start = calendar.date(from: calendar.dateComponents([.year, .month], from: today))!
+    let month = calendar.date(byAdding: .month, value: back, to: start)!
+    let number = calendar.component(.month, from: month)
+    return (calendar.component(.year, from: month), number, monthName(number))
+  }
+
+  /// Home shows the new month in its first week, from the 2nd to the 8th.
+  static func monthIsNew(today: Date = Date(), calendar: Calendar = .current) -> Bool {
+    (2...8).contains(calendar.component(.day, from: today))
+  }
+
+  /// English month names; the app's text stays English.
+  static func monthName(_ month: Int) -> String {
+    let names = [
+      "January", "February", "March", "April", "May", "June", "July", "August", "September",
+      "October", "November", "December",
+    ]
+    return names[max(0, min(11, month - 1))]
+  }
 
   /// A color field and the ink and sticker on it, as RGB hex.
   struct Accent: Equatable, Sendable {

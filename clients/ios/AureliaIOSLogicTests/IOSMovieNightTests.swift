@@ -80,6 +80,22 @@ struct IOSMovieNightTests {
     #expect(session.state == nil)
   }
 
+  @Test func aMonthIsReadyFromTheSecondAndNewOnHomeForAWeek() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    func day(_ year: Int, _ month: Int, _ day: Int) -> Date {
+      calendar.date(from: DateComponents(year: year, month: month, day: day, hour: 12))!
+    }
+    let second = IOSWrapped.readyMonth(today: day(2026, 11, 2), calendar: calendar)
+    #expect(second.year == 2026 && second.month == 10 && second.name == "October")
+    #expect(IOSWrapped.readyMonth(today: day(2026, 11, 1), calendar: calendar).month == 9)
+    let january = IOSWrapped.readyMonth(today: day(2027, 1, 5), calendar: calendar)
+    #expect(january.year == 2026 && january.month == 12)
+    #expect(!IOSWrapped.monthIsNew(today: day(2026, 11, 1), calendar: calendar))
+    #expect(IOSWrapped.monthIsNew(today: day(2026, 11, 8), calendar: calendar))
+    #expect(!IOSWrapped.monthIsNew(today: day(2026, 11, 9), calendar: calendar))
+  }
+
   @Test func wrappedCountsPlainNumbersAndClosesAfterTheLastSlide() {
     #expect(IOSWrapped.countTarget("143") == 143)
     #expect(IOSWrapped.countTarget("02:47") == nil)

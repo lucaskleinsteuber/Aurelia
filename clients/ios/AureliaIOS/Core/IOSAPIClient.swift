@@ -254,8 +254,9 @@ struct IOSAPIClient: Sendable {
   func yearInReview(year: Int) async throws -> IOSYearInReview {
     try await get("/api/v1/statistics/year/\(year)")
   }
-  func wrapped(year: Int) async throws -> IOSYearWrapped {
-    try await get("/api/v1/statistics/year/\(year)/wrapped")
+  func wrapped(year: Int, month: Int? = nil) async throws -> IOSYearWrapped {
+    if let month { return try await get("/api/v1/statistics/year/\(year)/month/\(month)/wrapped") }
+    return try await get("/api/v1/statistics/year/\(year)/wrapped")
   }
   /// Sets a new PIN for the signed-in profile; the current one is needed when it has a PIN.
   func changeProfilePIN(current: String?, new: String) async throws {

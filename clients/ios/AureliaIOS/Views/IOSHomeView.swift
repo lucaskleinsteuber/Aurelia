@@ -11,6 +11,7 @@ struct IOSHomeView: View {
   @State private var unavailable: IOSCatalogItem?
   @State private var movieNight: IOSMovieNightLaunch?
   @State private var movieNights: [IOSMovieNightSummary] = []
+  @State private var monthlyWrapped: IOSWrappedLaunch?
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
@@ -74,6 +75,9 @@ struct IOSHomeView: View {
               .padding(.horizontal, IOSDesign.margin).padding(.top, 60)
           }
           if !model.watchParties.isEmpty { watchTogether }
+          if model.supportsMonthlyWrapped, IOSWrapped.monthIsNew() {
+            IOSMonthlyWrappedButton { monthlyWrapped = $0 }.padding(.horizontal, IOSDesign.margin)
+          }
           if model.supportsMovieNight { movieNightStrip }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
@@ -161,6 +165,9 @@ struct IOSHomeView: View {
         }
       }
     )
+    .fullScreenCover(item: $monthlyWrapped) { launch in
+      IOSWrappedView(launch: launch).environmentObject(model)
+    }
     .fullScreenCover(item: $movieNight) { launch in
       if let api = model.client {
         IOSMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) { mediaID in

@@ -16,7 +16,7 @@ struct IOSWrappedView: View {
   @EnvironmentObject private var model: IOSAppModel
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  let year: Int
+  let launch: IOSWrappedLaunch
   @State private var wrapped: IOSYearWrapped?
   @State private var error: String?
   @State private var index = 0
@@ -200,7 +200,7 @@ struct IOSWrappedView: View {
   private func load() async {
     guard wrapped == nil, let client = model.client else { return }
     do {
-      wrapped = try await client.wrapped(year: year)
+      wrapped = try await client.wrapped(year: launch.year, month: launch.month)
     } catch {
       self.error = error.localizedDescription
     }
