@@ -10,7 +10,9 @@ endpoint or a client can be checked against it.
   the computer itself); an owner can narrow that further to chosen networks.
 - **Encrypted connections.** Clients connect over HTTPS with the server's own certificate and
   pin its fingerprint, which the owner confirms when pairing. Plain HTTP works only on the
-  server computer's loopback address.
+  server computer's loopback address, for requests addressed to `localhost`, `127.0.0.1` or
+  `[::1]`. The server treats every caller on that port as someone at the server computer, so
+  never put a reverse proxy, a tunnel or a port forwarding in front of it.
 - **Paired devices.** A Mac, Linux PC, Apple TV, iPhone, iPad or browser gets access only with
   a one-time 8-digit code that the owner creates on the main device (*Create Code*, or
   `aurelia pair` on a Linux server); a code works once and for five minutes. Each device has its
@@ -21,7 +23,8 @@ endpoint or a client can be checked against it.
   cannot read, and every change must carry the `X-Aurelia-Web` header, which another web page
   cannot add. The page's content policy loads nothing from the internet.
 - **Rate limits** slow down guessing of passwords, PINs and pairing codes and cap requests
-  per address.
+  per address. Waiting pairing codes also end after 100 wrong guesses in total, from any
+  address.
 - **Media is only read.** No request changes, moves or deletes a file in a media folder.
   Removing a title from the library removes its catalog entry; the file stays.
 - **Diagnostics are redacted.** Tokens, passwords, PINs and full paths do not appear in
@@ -65,6 +68,11 @@ owner, and lets the confirmed request run exactly once:
 - restoring a backup;
 - changing the server password or another profile's password;
 - changing a profile's role, and removing an owner or administrator profile.
+
+Removing a storage location (`DELETE /api/v1/libraries/{id}`) and removing a title whose file
+is missing from Library Health (`DELETE /api/v1/library/health/entries/{id}`) also take titles
+out of the catalog, but do not ask for the password yet: the apps send no approval for them, so
+asking would break them. Until they do, an administrator can remove these without it.
 
 The client asks for the password in a sheet that says what will happen, then gets a one-time
 approval with `POST /api/v1/management/approval` (or the older `/api/v1/server/approval`)
