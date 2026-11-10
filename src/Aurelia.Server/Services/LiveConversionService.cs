@@ -108,8 +108,10 @@ public sealed partial class LiveConversionService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(tools);
         if (tools.Hardware is { } chip && (!chipResting || !tools.HasSoftwareEncoder)) return (chip.Kind, chip);
-        if (tools.HasSoftwareEncoder) return (LiveVideoEncoder.Libx264, null);
-        return tools.Encoder is { } other && other is LiveVideoEncoder.VideoToolbox or LiveVideoEncoder.Libx264 ? (other, null) : null;
+        // The Mac keeps Apple's encoder, which falls back to software inside ffmpeg itself.
+        if (tools.Encoder == LiveVideoEncoder.VideoToolbox) return (LiveVideoEncoder.VideoToolbox, null);
+        if (tools.HasSoftwareEncoder || tools.Encoder == LiveVideoEncoder.Libx264) return (LiveVideoEncoder.Libx264, null);
+        return null;
     }
 
     /// <summary>The encoder for the next conversion with this server's tools and chip health.</summary>
@@ -126,6 +128,9 @@ public sealed partial class LiveConversionService : IDisposable
         : 0;
 
     public async Task<bool> IsAvailableAsync() => await tools is not null;
+
+    /// <summary>Whether pictures can be encoded, which adaptive streaming needs.</summary>
+    public async Task<bool> CanEncodeVideoAsync() => await tools is { } found && ChooseEncoder(found) is not null;
 
     /// <summary>Whether sound tracks can be read for subtitles from speech.</summary>
     public async Task<bool> SpeechAudioAvailableAsync() => (await tools)?.Speech is SpeechAudioSupport.Plain or SpeechAudioSupport.CenterMix;

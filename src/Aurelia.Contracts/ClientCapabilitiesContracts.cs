@@ -90,13 +90,21 @@ public static class ServerFeatures
     /// </summary>
     public const string SubtitleSync = "subtitle-sync-v1";
 
+    /// <summary>
+    /// A title can be streamed over HLS in several qualities, converted live and kept in memory
+    /// only (docs/CLIENT_PROTOCOL.md). Reported when the server's ffmpeg can encode pictures.
+    /// </summary>
+    public const string AdaptiveStreaming = "adaptive-streaming-v1";
+
     /// <summary>The features this server reports: <see cref="All"/> and those its host provides.</summary>
-    public static IReadOnlyList<string> Reported(bool liveConversion, bool speechAudio = false) =>
-        liveConversion
-            ? Array.AsReadOnly<string>(speechAudio
-                ? [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews, SpeechSubtitles, SubtitleSync]
-                : [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews])
-            : Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback]);
+    public static IReadOnlyList<string> Reported(bool liveConversion, bool speechAudio = false, bool adaptiveStreaming = false)
+    {
+        if (!liveConversion) return Array.AsReadOnly([.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback]);
+        List<string> features = [.. All, WatchlistAndPeople, CollectionsV2, RemotePlayback, LiveConversion, ScrubPreviews];
+        if (speechAudio) features.AddRange([SpeechSubtitles, SubtitleSync]);
+        if (adaptiveStreaming) features.Add(AdaptiveStreaming);
+        return features.AsReadOnly();
+    }
 }
 
 public sealed record ClientCapabilitiesResponse(

@@ -41,16 +41,54 @@ public sealed class ActiveStreamRegistry(TimeProvider? clock = null)
         }
     }
 
-    public void RevokeUser(Guid userId) => Cancel(stream => stream.UserId == userId);
-    public void RevokeSession(Guid sessionId) => Cancel(stream => stream.SessionId == sessionId);
-    public void RevokeMedia(IReadOnlyCollection<Guid> ids) => Cancel(stream => stream.MediaId is { } id && ids.Contains(id));
+    public void RevokeUser(Guid userId) => Cancel(stream => stream.UserId == userId, watch => watch.UserId == userId);
+    public void RevokeSession(Guid sessionId) => Cancel(stream => stream.SessionId == sessionId, watch => watch.SessionId == sessionId);
+    public void RevokeMedia(IReadOnlyCollection<Guid> ids) =>
+        Cancel(stream => stream.MediaId is { } id && ids.Contains(id), watch => ids.Contains(watch.MediaId));
 
-    private void Cancel(Func<Lease, bool> predicate)
+    private readonly HashSet<Watcher> watchers = [];
+
+    /// <summary>
+    /// Something that plays beyond single requests, such as an HLS session's conversion, ends
+    /// with the user, profile session or title like a running read. It does not count as a stream.
+    /// </summary>
+    public IDisposable Watch(Guid userId, Guid sessionId, Guid mediaId, Action cancel)
+    {
+        var watcher = new Watcher(this, userId, sessionId, mediaId, cancel);
+        lock (gate) watchers.Add(watcher);
+        return watcher;
+    }
+
+    private void Cancel(Func<Lease, bool> predicate, Func<Watcher, bool> watched)
     {
         // Cancel outside the lock: cancellation callbacks may dispose a stream lease.
         Lease[] affected;
-        lock (gate) affected = streams.Where(predicate).ToArray();
+        Watcher[] ending;
+        lock (gate)
+        {
+            affected = streams.Where(predicate).ToArray();
+            ending = watchers.Where(watched).ToArray();
+        }
         foreach (var lease in affected) lease.Cancel();
+        foreach (var watcher in ending) watcher.Cancel();
+    }
+
+    private sealed class Watcher(ActiveStreamRegistry registry, Guid userId, Guid sessionId, Guid mediaId, Action cancel) : IDisposable
+    {
+        public Guid UserId { get; } = userId;
+        public Guid SessionId { get; } = sessionId;
+        public Guid MediaId { get; } = mediaId;
+
+        public void Cancel()
+        {
+            Dispose();
+            cancel();
+        }
+
+        public void Dispose()
+        {
+            lock (registry.gate) registry.watchers.Remove(this);
+        }
     }
 
     public sealed class Lease : IDisposable
