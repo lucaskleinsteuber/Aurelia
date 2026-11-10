@@ -73,7 +73,9 @@
       "profile-personalization-v1",
       "age-limits-v1",
       "web-pairing-code-v1",
-      "cinema-trailers-v1"
+      "cinema-trailers-v1",
+      "movie-night-v1",
+      "year-wrapped-v1"
     ]
   },
   "problem": {

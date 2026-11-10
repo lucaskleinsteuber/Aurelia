@@ -35,8 +35,10 @@ public sealed class ServerUseClock(ServerRuntimeOptions runtime, TimeProvider cl
         var path = context.Request.Path;
         foreach (var background in Background)
             if (path.Equals(background, StringComparison.OrdinalIgnoreCase)) return false;
-        // A Watch Together player asks for the party while it waits; playing itself counts.
-        if (HttpMethods.IsGet(context.Request.Method) && path.StartsWithSegments("/api/v1/watch-together")
+        // A Watch Together player asks for the party while it waits, and a Movie Night screen for
+        // the night; playing, swiping and dealing count.
+        if (HttpMethods.IsGet(context.Request.Method)
+            && (path.StartsWithSegments("/api/v1/watch-together") || path.StartsWithSegments("/api/v1/movie-night"))
             && context.Request.Query.ContainsKey("after")) return false;
         if (context.User.Identity?.IsAuthenticated == true) return true;
         return HttpMethods.IsPost(context.Request.Method)

@@ -37,7 +37,9 @@ endpoint or a client can be checked against it.
 Watching and everything that belongs to the profile itself: browsing, playback and progress,
 favorites, the Watchlist, watched and unwatched, scene notes, remembered sound and subtitle
 choices, the profile's own collections and smart lists, its watch history and statistics,
-"Play on…" between the profile's own players, and changing its own PIN.
+"Play on…" between the profile's own players, Watch Together and Movie Night with the
+household, and changing its own PIN. In a shared Movie Night deck every member's title limits
+apply, and nobody sees how another member voted.
 
 A profile limited to selected titles sees and plays only those in lists, search and
 collections.

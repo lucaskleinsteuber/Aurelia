@@ -9,7 +9,7 @@ namespace Aurelia.Server.Services;
 /// A profile's own viewing history and statistics. Days, weekdays and hours are counted in the
 /// server's time zone, which is the household's, so an evening show is not filed under the night.
 /// </summary>
-public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider clock, CatalogMutationGate? mutations = null)
+public sealed partial class WatchHistoryService(AureliaDbContext database, TimeProvider clock, CatalogMutationGate? mutations = null)
 {
     private DateTimeOffset Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value, clock.LocalTimeZone);
 
@@ -315,7 +315,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
             busiestDayHours);
     }
 
-    private sealed record Watched(Guid Id, Guid MediaItemId, MediaItem MediaItem, DateTimeOffset Timestamp,
+    internal sealed record Watched(Guid Id, Guid MediaItemId, MediaItem MediaItem, DateTimeOffset Timestamp,
         long PositionMilliseconds, long DurationMilliseconds, long SecondsWatched, bool IsCompleted);
 
     /// <summary>
@@ -323,7 +323,7 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
     /// events name it: read together with the events, a year of episodes repeated the series'
     /// whole description, full cast included, for every event and every picture.
     /// </summary>
-    private async Task<List<Watched>> WatchedAsync(IQueryable<WatchEvent> query, bool artwork, CancellationToken cancellationToken)
+    internal async Task<List<Watched>> WatchedAsync(IQueryable<WatchEvent> query, bool artwork, CancellationToken cancellationToken)
     {
         var events = await query.Select(e => new
         {
@@ -358,10 +358,10 @@ public sealed class WatchHistoryService(AureliaDbContext database, TimeProvider 
     private static double Hours(long seconds) => Math.Round(seconds / 3600.0, 4);
 
     /// <summary>Episodes count for their series, so a binge shows up as the show, not one episode.</summary>
-    private static string DisplayTitle(MediaItem item) =>
+    internal static string DisplayTitle(MediaItem item) =>
         MetadataPresentation.ToSummary(item.Kind == MediaKind.Episode && item.Parent is { } series ? series : item).Title;
 
-    private static (int CurrentStreak, int LongestStreak) CalculateStreaks(List<DateTime> distinctDays, DateTime today)
+    internal static (int CurrentStreak, int LongestStreak) CalculateStreaks(List<DateTime> distinctDays, DateTime today)
     {
         if (distinctDays.Count == 0) return (0, 0);
 

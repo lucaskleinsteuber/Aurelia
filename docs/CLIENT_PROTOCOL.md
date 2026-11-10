@@ -302,6 +302,37 @@ The Mac, Linux, Apple TV, iPhone, iPad and browser players follow the party: the
 than 1.5 seconds apart (0.5 seconds while paused), and send their own play, pause, seek and
 title changes as commands. Answers that arrive out of order never undo a newer revision.
 
+## Movie Night
+
+Everyone at home swipes through the same deck of films (and, if the host wants, shows); the
+first title every voter liked is the match. The server keeps each night in memory. A member
+is one profile on one device and either votes or, with `isVoting: false`, is a screen that
+only shows the lobby, everyone's progress and the result (the Apple TV starts as one).
+
+Each member brings the films and shows its profile may open; a deck only holds titles every
+member may open, so a children's profile in the night limits it for everyone. Nobody learns
+how another member voted, only how many cards each has swiped. A night with a children's
+profile (one with an age limit) gets the friendly lines.
+
+- `GET /api/v1/movie-night` lists open nights: `{id, hostName, hostDevice, memberCount, phase}`.
+- `POST /api/v1/movie-night` with `{deviceName, isVoting}` starts one; `POST …/{id}/join` with
+  the same body joins. A profile session is in at most one night.
+- `GET …/{id}?after={revision}&deckVersion={n}&waitMs=20000` is the long poll (at most 25 s;
+  ask at least every 40 s to stay in). `deck` is null when `deckVersion` is the current one.
+  These polls do not keep a power-saving server awake.
+- `POST …/{id}/settings` with `{kinds: "movies"|"all", genre}`: the host only; `genre` is one of
+  `genreOptions` or null.
+- `POST …/{id}/deal` deals up to 40 titles in one order for everyone (films the dealer has
+  finished are left out, and nothing dealt before comes again). It starts the night and deals
+  again later; everyone's votes start over. `409 movie_night_empty` when nothing is left.
+- `POST …/{id}/votes` with `{mediaId, like}`; `POST …/{id}/keep-swiping` sets a match aside;
+  `POST …/{id}/role` with `{isVoting}` switches between voting and watching.
+- `DELETE …/{id}/members/me` leaves; the last member ends the night.
+
+`phase` is `lobby`, `voting`, `match` or `no-match`. With every card swiped and no match,
+`result` holds the title most voters liked (`card` is null when nobody liked anything). The
+result also carries a `headline`, a cheeky `line` and `awards` such as "Hardest to please".
+
 ## Offline downloads
 
 A person may download a movie or episode to their own Mac or Linux computer. The app streams
@@ -352,6 +383,13 @@ time counts only while the position advances, so a pause adds nothing).
   viewing. Days, weekdays and hours are counted in the server's time zone. Watch times are
   hours to the second (`totalHoursWatched`, `hoursPast7Days`, `hoursByWeek` with ISO weeks such
   as `2026-W43`, and `hours` beside each top genre and title), so clients can show minutes.
+- `GET /api/v1/statistics/year/{year}/wrapped` (capability `year-wrapped-v1`) is the year as
+  slides, like a story: `{ year, profileName, slides }`. Each slide has `kind`, `eyebrow`,
+  `headline`, an already formatted `bigNumber` with its `unit`, `detail`, a cheeky `quip`, an
+  `accent` color name (`night`, `ember`, `violet`, `gold`, `rose`, `mint`, `ocean`, `lime`) and
+  optionally `mediaId`, `poster`, `posters` and `facts` (the summary slide). The server picks
+  which slides to show and their lines, the same each time for a profile and year; a children's
+  profile gets friendly lines. Clients show unknown kinds like any other slide.
 
 History and statistics belong to the profile alone; no other profile, administrators
 included, can read them. Entries older than three years are pruned.
