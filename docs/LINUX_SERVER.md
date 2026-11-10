@@ -26,7 +26,8 @@ curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/pack
 ```
 
 It picks the newest stable server release for this computer (x64 or arm64), checks the
-download against the release's `SHA256SUMS` and runs the package's installer described below.
+download against the release's `SHA256SUMS` and its signature (see
+[LINUX_UPDATE_SIGNING.md](LINUX_UPDATE_SIGNING.md)) and runs the package's installer described below.
 Run again, it updates an existing installation and asks nothing.
 
 To do the same by hand, unpack the download on the server and run its installer:
@@ -74,9 +75,11 @@ it and runs `aurelia update` as root, which reports back in `/var/lib/aurelia/up
 Restart Server in the app works too: the service ends and systemd starts it again.
 
 It picks the published release with the highest build that has a package for this computer,
-checks the download against the release's `SHA256SUMS` and runs the package's installer, so
-accounts, library, progress and settings stay. It never installs an older version. When power
-saving has stopped Aurelia, the update starts it again; power saving then continues as set.
+checks the download against the release's `SHA256SUMS`, which must carry the owner's minisign
+signature (checked with openssl, see [LINUX_UPDATE_SIGNING.md](LINUX_UPDATE_SIGNING.md)), and runs
+the package's installer, so accounts, library, progress and settings stay. It never installs an
+older version. When power saving has stopped Aurelia, the update starts it again; power saving
+then continues as set.
 
 For public repositories, updates download directly without requiring any API token.
 If a private fork or mirror is used, a read-only token can be configured. On GitHub, open

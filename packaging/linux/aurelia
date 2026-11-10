@@ -38,6 +38,31 @@ channel_file=/etc/aurelia/update-channel
 update_api=${AURELIA_UPDATE_API:-https://api.github.com}
 update_repository=${AURELIA_UPDATE_REPOSITORY:-$(cat "$install_root/REPOSITORY" 2>/dev/null || true)}
 update_token=""
+# The owner's minisign key, the same that signs Aurelia for Linux (docs/LINUX_UPDATE_SIGNING.md).
+# A release's SHA256SUMS must carry its signature, so a changed GitHub release installs nothing.
+# Builds before first_signed_build were published without one. Tests with a stand-in for GitHub
+# sign with their own key.
+signing_public_key=RWT0nYptHNjXQSXnVurY9XXdPF2Ssq5sUlSP+WoBwjA5GPXWnugBc7lE
+first_signed_build=153
+[ -n "${AURELIA_UPDATE_API:-}" ] && signing_public_key=${AURELIA_UPDATE_SIGNING_KEY:-$signing_public_key}
+
+# Succeeds when $2 is a minisign signature of $1 made with signing_public_key, checked with
+# openssl so that no further program is needed. Only the prehashed form that minisign writes is
+# accepted. $3 is an empty folder for the intermediate files.
+signature_valid() {
+  local file=$1 signature=$2 scratch=$3
+  base64 -d <<<"$signing_public_key" > "$scratch/key.bin" 2>/dev/null || return 1
+  sed -n 2p "$signature" | base64 -d > "$scratch/signature.bin" 2>/dev/null || return 1
+  [ "$(wc -c < "$scratch/key.bin")" -eq 42 ] && [ "$(wc -c < "$scratch/signature.bin")" -eq 74 ] || return 1
+  [ "$(head -c 2 "$scratch/key.bin")" = Ed ] && [ "$(head -c 2 "$scratch/signature.bin")" = ED ] || return 1
+  [ "$(head -c 10 "$scratch/key.bin" | tail -c 8 | od -An -tx1)" \
+    = "$(head -c 10 "$scratch/signature.bin" | tail -c 8 | od -An -tx1)" ] || return 1
+  { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; tail -c 32 "$scratch/key.bin"; } > "$scratch/key.der"
+  tail -c 64 "$scratch/signature.bin" > "$scratch/signature.raw"
+  openssl dgst -blake2b512 -binary "$file" > "$scratch/hash" 2>/dev/null || return 1
+  openssl pkeyutl -verify -pubin -keyform DER -inkey "$scratch/key.der" -rawin -in "$scratch/hash" \
+    -sigfile "$scratch/signature.raw" >/dev/null 2>&1
+}
 
 # Saves a GitHub address to a file and prints the HTTP status. The token reaches curl through its
 # standard input, so it never shows up in the process list, and curl drops it when GitHub
@@ -94,15 +119,17 @@ github_failed() {
 }
 
 # The published release with the highest build that has a package for this computer ($arch) and
-# a checksum list, as build, version, file name, file and checksum addresses; drafts are skipped,
-# and pre-releases unless the beta channel is on. Prints nothing when there is none.
+# a checksum list, as build, version, file name, file, checksum and signature addresses (the last
+# empty without a signature); drafts are skipped, and pre-releases unless the beta channel is on.
+# Prints nothing when there is none.
 newest_package() {
   jq -r --arg arch "$arch" --argjson beta "${beta_updates:-false}" '
     [ .[] | select((.draft | not) and ($beta or (.prerelease | not)))
       | first(.assets[] | select(.name == "SHA256SUMS") | .url) as $sums
+      | (first(.assets[] | select(.name == "SHA256SUMS.minisig") | .url) // "") as $signature
       | .assets[]
       | (.name | capture("^Aurelia-Server-(?<version>[0-9][0-9.]*)-(?<build>[0-9]+)-linux-" + $arch + "\\.tar\\.gz$")) as $found
-      | [($found.build | tonumber), $found.version, .name, .url, $sums] ]
+      | [($found.build | tonumber), $found.version, .name, .url, $sums, $signature] ]
     | max_by(.[0]) // empty | .[0] |= tostring | join("\t")' "$1"
 }
 
@@ -350,6 +377,10 @@ case "$command" in
       command -v apt-get >/dev/null 2>&1 || { echo "Updating needs jq. Install it with your package manager first." >&2; exit 1; }
       apt-get install -y jq >/dev/null
     fi
+    if ! command -v openssl >/dev/null 2>&1; then
+      command -v apt-get >/dev/null 2>&1 || { echo "Updating needs openssl. Install it with your package manager first." >&2; exit 1; }
+      apt-get install -y openssl >/dev/null
+    fi
     work=$(mktemp -d /var/tmp/aurelia-update.XXXXXX)
     trap 'rm -rf "$work"' EXIT
     releases="$update_api/repos/$update_repository/releases"
@@ -411,7 +442,7 @@ case "$command" in
       write_update_status idle
       exit 0
     fi
-    IFS=$'\t' read -r build version name url sums_url <<<"$newest"
+    IFS=$'\t' read -r build version name url sums_url signature_url <<<"$newest"
     status_newest_version=$version status_newest_build=$build
     installed=$(cat "$install_root/VERSION" 2>/dev/null || echo unknown)
     installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' <<<"$installed")
@@ -444,6 +475,22 @@ case "$command" in
     echo "Downloading $name..."
     status=$(github_fetch "$sums_url" "$work/SHA256SUMS" application/octet-stream)
     [ "$status" = 200 ] || github_failed "$status" SHA256SUMS
+    if [ "$build" -ge "$first_signed_build" ]; then
+      unsigned="The release is not signed by the owner of Aurelia; nothing was installed."
+      if [ -z "$signature_url" ]; then
+        echo "$unsigned" >&2
+        write_update_status failed "$unsigned"
+        exit 1
+      fi
+      status=$(github_fetch "$signature_url" "$work/SHA256SUMS.minisig" application/octet-stream)
+      [ "$status" = 200 ] || github_failed "$status" SHA256SUMS.minisig
+      mkdir "$work/signature"
+      if ! signature_valid "$work/SHA256SUMS" "$work/SHA256SUMS.minisig" "$work/signature"; then
+        echo "$unsigned" >&2
+        write_update_status failed "$unsigned"
+        exit 1
+      fi
+    fi
     status=$(github_fetch "$url" "$work/$name" application/octet-stream)
     [ "$status" = 200 ] || github_failed "$status" "$name"
     expected=$(awk -v name="$name" '{ file = $2; sub(/^\*/, "", file); sub(/^\.\//, "", file); if (file == name) print $1 }' \

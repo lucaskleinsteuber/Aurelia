@@ -5,7 +5,7 @@ For a NAS or a computer that already runs Docker. On a plain Ubuntu or Debian PC
 updates from the app.
 
 The image is built on your own computer from the newest stable server release on GitHub; the
-download is checked against the release's `SHA256SUMS`. ffmpeg, which lets browsers play MKV and
+download is checked against the release's `SHA256SUMS` and its minisign signature. ffmpeg, which lets browsers play MKV and
 other files, comes from Debian. Intel/AMD (amd64) and ARM (arm64) are supported.
 
 ## Start

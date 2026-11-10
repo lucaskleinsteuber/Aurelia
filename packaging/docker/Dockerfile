@@ -1,5 +1,5 @@
 # Aurelia Server in a container. Built on your own computer from the newest stable server release
-# on GitHub (checked against its SHA256SUMS); ffmpeg comes from Debian. See docs/DOCKER.md.
+# on GitHub (checked against its signed SHA256SUMS); ffmpeg comes from Debian. See docs/DOCKER.md.
 FROM docker.io/library/debian:trixie-slim
 
 ARG AURELIA_REPOSITORY=lucaskleinsteuber/Aurelia
@@ -8,7 +8,7 @@ ARG AURELIA_BUILD=
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl jq libicu76 ffmpeg \
+    && apt-get install -y --no-install-recommends ca-certificates curl jq openssl libicu76 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY fetch-server.sh /tmp/fetch-server.sh

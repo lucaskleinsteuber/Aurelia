@@ -1,4 +1,4 @@
-# Signing Linux app updates
+# Signing Linux updates
 
 Aurelia for Linux installs an update through the distribution's package manager, which runs as
 root. A SHA-256 list published next to the package only proves that the download arrived intact:
@@ -40,3 +40,17 @@ but never installed.
 Versions before this change do not check signatures and still install the next release normally.
 The first version that contains the public key must reach each computer that way (or by hand);
 from then on every update needs the signature.
+
+## Linux server
+
+The Linux server is updated by `sudo aurelia update` (also when the Mac app asks for it), installed
+by the one-line `get-aurelia.sh` and built into the Docker image by `packaging/docker/fetch-server.sh`.
+All three run as root and use the same key: `scripts/publish-release.sh --server` signs the server
+release's `SHA256SUMS` the same way, checks the signature against `signing_public_key` in
+`packaging/linux/aurelia` and uploads `SHA256SUMS.minisig` with the packages. The three scripts
+check it with openssl, so servers need no minisign. They carry the same key and the same check;
+`scripts/test-server-update-signature.sh` makes sure of that and that the key is the Linux app's.
+
+Server builds before `first_signed_build` (153) were published without a signature and stay
+installable by build number; every later build needs one. Servers with an older `aurelia` command
+install the first signed version the old way and check signatures from then on.

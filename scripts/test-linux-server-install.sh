@@ -194,6 +194,13 @@ release=$media/release
 arch=$(cat "$package/ARCHITECTURE")
 installed_build=$(sed -n 's/.*(\([0-9][0-9]*\)).*/\1/p' /opt/aurelia/VERSION)
 next_build=$((installed_build + 1))
+# The stand-in release is signed with a throwaway key, at a build that needs a signature.
+first_signed_build=$(sed -n 's/^first_signed_build=//p' /usr/local/bin/aurelia)
+[ "$next_build" -ge "$first_signed_build" ] || next_build=$first_signed_build
+. "$(dirname -- "$0")/synthetic-signing.sh"
+mkdir -p "$release/key"
+signing_key=$(synthetic_signing_key "$release/key")
+sign_sums() { synthetic_sign "$release/key" "$release/files/SHA256SUMS" "Aurelia Server 9.9.9 ($next_build)"; }
 folder="Aurelia-Server-9.9.9-linux-$arch"
 archive="Aurelia-Server-9.9.9-$next_build-linux-$arch.tar.gz"
 mkdir -p "$release/files" "$release/repos/test/aurelia"
@@ -201,19 +208,28 @@ cp -R "$package" "$release/$folder"
 echo "9.9.9 ($next_build)" > "$release/$folder/VERSION"
 tar -czf "$release/files/$archive" -C "$release" "$folder"
 rm -rf "${release:?}/$folder"
-# Like GitHub's list: a draft with a higher build must be ignored.
+# Like GitHub's list: a draft with a higher build must be ignored. $2 = unsigned leaves the
+# signature out.
 offer() {
   jq -n --arg files http://127.0.0.1:43180/files --arg name "$1" --arg draft "Aurelia-Server-9.9.9-$((next_build + 5))-linux-$arch.tar.gz" '
     [ { draft: true, prerelease: false, assets: [ { name: $draft, url: "\($files)/\($draft)" },
         { name: "SHA256SUMS", url: "\($files)/SHA256SUMS" } ] },
       { draft: false, prerelease: false, assets: [ { name: $name, url: "\($files)/\($name)" },
-        { name: "SHA256SUMS", url: "\($files)/SHA256SUMS" } ] } ]' > "$release/repos/test/aurelia/releases"
+        { name: "SHA256SUMS", url: "\($files)/SHA256SUMS" },
+        { name: "SHA256SUMS.minisig", url: "\($files)/SHA256SUMS.minisig" } ] } ]' > "$release/repos/test/aurelia/releases"
+  if [ "${2:-}" = unsigned ]; then
+    jq '(.[1].assets) |= map(select(.name != "SHA256SUMS.minisig"))' "$release/repos/test/aurelia/releases" \
+      > "$release/releases.unsigned" && mv "$release/releases.unsigned" "$release/repos/test/aurelia/releases"
+  fi
 }
 offer "$archive"
 python3 -I -m http.server 43180 --bind 127.0.0.1 --directory "$release" >/dev/null 2>&1 &
 release_server=$!
 for _ in $(seq 1 20); do curl -fs http://127.0.0.1:43180/files/ >/dev/null && break; sleep 0.5; done
-update() { AURELIA_UPDATE_API=http://127.0.0.1:43180 AURELIA_UPDATE_REPOSITORY=test/aurelia aurelia update "$@"; }
+update() {
+  AURELIA_UPDATE_API=http://127.0.0.1:43180 AURELIA_UPDATE_REPOSITORY=test/aurelia AURELIA_UPDATE_SIGNING_KEY="$signing_key" \
+    aurelia update "$@"
+}
 before=$(cat /opt/aurelia/VERSION)
 status=/var/lib/aurelia/update-status
 systemctl is-enabled --quiet aurelia-update-request.path && systemctl is-enabled --quiet aurelia-update-check.timer \
@@ -223,12 +239,21 @@ systemctl stop aurelia-update-request.path
 
 printf '0%.0s' $(seq 1 64) > "$release/files/SHA256SUMS"
 printf '  ./%s\n' "$archive" >> "$release/files/SHA256SUMS"
+sign_sums
 { update --yes 2>&1 || true; } | has 'does not match its checksum' || fail "a download with a wrong checksum was not refused"
 [ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "a refused download changed the installation"
 grep -Fx 'STATE=failed' "$status" >/dev/null && grep -F 'MESSAGE=The download does not match' "$status" >/dev/null \
   || fail "the app is not told why the update failed"
 [ "$(stat -c %U:%a "$status")" = aurelia:600 ] || fail "the server must own the update status"
 (cd "$release/files" && sha256sum "./$archive" > SHA256SUMS)
+# A correct checksum list counts only with the owner's signature.
+{ update --yes 2>&1 || true; } | has 'not signed by the owner' || fail "a release with a stale signature was installed"
+offer "$archive" unsigned
+{ update --yes 2>&1 || true; } | has 'not signed by the owner' || fail "a release without a signature was installed"
+[ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "an unsigned release changed the installation"
+grep -F 'MESSAGE=The release is not signed' "$status" >/dev/null || fail "the app is not told that the release is unsigned"
+offer "$archive"
+sign_sums
 
 touch /var/lib/aurelia/update-check-requested
 update --from-app >/dev/null

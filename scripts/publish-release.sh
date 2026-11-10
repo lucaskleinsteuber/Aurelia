@@ -42,6 +42,23 @@ if [ "$product" = Server ]; then
     [ -s "$file" ] || { echo "Missing $file; run scripts/build-linux-server.sh first." >&2; exit 1; }
   done
   (cd "$output" && shasum -a 256 -c SHA256SUMS >/dev/null)
+  # `aurelia update`, the one-line installer and the Docker build install nothing whose SHA256SUMS
+  # lacks the owner's minisign signature (docs/LINUX_UPDATE_SIGNING.md). The secret key stays on
+  # this Mac and never goes to GitHub.
+  command -v minisign >/dev/null \
+    || { echo "Install minisign (brew install minisign) to sign the release." >&2; exit 1; }
+  signing_key="${AURELIA_MINISIGN_SECRET_KEY:-$HOME/.minisign/aurelia-linux.key}"
+  [ -s "$signing_key" ] \
+    || { echo "Missing the minisign secret key $signing_key; see docs/LINUX_UPDATE_SIGNING.md." >&2; exit 1; }
+  public_key=$(sed -n 's/^signing_public_key=\([A-Za-z0-9+\/=]*\)$/\1/p' "$repository_root/packaging/linux/aurelia")
+  [ -n "$public_key" ] || { echo "packaging/linux/aurelia names no signing key." >&2; exit 1; }
+  rm -f "$output/SHA256SUMS.minisig"
+  minisign -S -s "$signing_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" \
+    -t "Aurelia Server $version ($build)"
+  # Check with the exact key the installed servers carry, before anything is uploaded.
+  minisign -V -P "$public_key" -m "$output/SHA256SUMS" -x "$output/SHA256SUMS.minisig" >/dev/null \
+    || { echo "The signature does not match the servers' public key; nothing was uploaded." >&2; exit 1; }
+  files+=("$output/SHA256SUMS.minisig")
   title="Aurelia Server $version ($build)"
   downloads="- **Linux server:** Download the x64 or arm64 package. Existing installations can use \`sudo aurelia update\` or Settings › Updates › Server Updates in Aurelia for Mac."
 else

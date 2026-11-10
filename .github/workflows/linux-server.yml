@@ -10,7 +10,11 @@ on:
       - "src/**"
       - "tests/**"
       - "packaging/linux/**"
+      - "packaging/docker/fetch-server.sh"
       - "scripts/test-linux-server-install.sh"
+      - "scripts/test-server-update-signature.sh"
+      - "scripts/test-get-aurelia.sh"
+      - "scripts/synthetic-signing.sh"
       - ".github/workflows/linux-server.yml"
       - "Directory.Build.props"
       - "Directory.Packages.props"
@@ -46,6 +50,10 @@ jobs:
           dotnet test Aurelia.slnx --configuration Release --no-build
       - name: Test the browser app's logic
         run: node --test "tests/WebApp/*.test.mjs"
+      - name: Check update signatures and the one-line installer
+        run: |
+          bash scripts/test-server-update-signature.sh
+          bash scripts/test-get-aurelia.sh
       - name: Build the linux-x64 package
         run: |
           stage="$RUNNER_TEMP/Aurelia-Server-linux-x64"
