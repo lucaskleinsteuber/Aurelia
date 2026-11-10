@@ -43,6 +43,15 @@ fi
 
 minutes() { echo $(( 10#${1%%:*} * 60 + 10#${1##*:} )); }
 
+# AWAKE_FROM on day $1 (today or tomorrow) in seconds. On the night the clocks go forward its
+# time may not exist (02:30 in Europe); it then counts in the day's earlier offset, which is the
+# same moment the clock shows an hour later. Prints nothing when even that fails.
+wake_time() {
+  date -d "$1 $AWAKE_FROM" +%s 2>/dev/null \
+    || date -d "$1 $AWAKE_FROM $(date -d "$1 00:00" +%z 2>/dev/null)" +%s 2>/dev/null \
+    || true
+}
+
 save_power() {
   if [ "$MODE" = stop ]; then
     if [ "$dry_run" = 1 ]; then echo "stop Aurelia until a device connects: $1"; exit 0; fi
@@ -59,9 +68,9 @@ save_power() {
   fi
   local wake="" until="a Wake-on-LAN call"
   if [ -n "$AWAKE_FROM" ]; then
-    wake=$(date -d "today $AWAKE_FROM" +%s)
-    (( wake <= now )) && wake=$(date -d "tomorrow $AWAKE_FROM" +%s)
-    until="$(date -d "@$wake" '+%a %H:%M') or a Wake-on-LAN call"
+    wake=$(wake_time today)
+    if [ -z "$wake" ] || (( wake <= now )); then wake=$(wake_time tomorrow); fi
+    [ -z "$wake" ] || until="$(date -d "@$wake" '+%a %H:%M') or a Wake-on-LAN call"
   fi
   if [ "$dry_run" = 1 ]; then echo "sleep until $until: $1"; exit 0; fi
   rm -f "$ready"

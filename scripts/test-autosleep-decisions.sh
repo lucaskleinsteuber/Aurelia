@@ -35,4 +35,23 @@ for unit in aurelia-update-request.service aurelia-update-check.service; do
   decide "$unit" | grep -Fx 'awake: updating' >/dev/null || fail "an ended sleep timer must not interrupt $unit"
 done
 [ -e "$work/data/sleep-ready" ] || fail "the sleep timer's signal must wait for the next check"
+
+# The night the clocks go forward: 02:30 does not exist in Berlin on 28.03.2027. A stand-in for
+# date makes it 00:30 that night; the computer must still sleep and wake at 03:30.
+real_date=$(command -v date)
+mkdir -p "$work/dst"
+cat > "$work/dst/date" <<STUB
+#!/bin/bash
+[ "\$*" = +%s ] && exec "$real_date" -d '2027-03-28 00:30' +%s
+arguments=()
+for argument in "\$@"; do argument=\${argument//today/2027-03-28}; arguments+=("\${argument//tomorrow/2027-03-29}"); done
+exec "$real_date" "\${arguments[@]}"
+STUB
+chmod +x "$work/dst/date"
+printf 'MODE=sleep\nIDLE_MINUTES=15\nAWAKE_FROM=02:30\nAWAKE_UNTIL=06:00\n' > "$work/data/sleep-settings"
+TZ=Europe/Berlin touch -d '2027-03-28 00:25' "$work/data/sleep-ready"
+spring=$(PATH="$work/dst:$PATH" TZ=Europe/Berlin LC_ALL=C decide "") \
+  || fail "the night the clocks go forward must not end the check with an error"
+grep -F 'sleep until Sun 03:30 or a Wake-on-LAN call' <<<"$spring" >/dev/null \
+  || fail "the night the clocks go forward must wake at 03:30, not: $spring"
 echo "aurelia-autosleep decisions: all checks passed."
