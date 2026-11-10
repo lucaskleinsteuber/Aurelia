@@ -14,6 +14,14 @@ internal sealed class SimulatedEngine : IVideoEngine
 
     public Uri? OpenedUrl { get; private set; }
 
+    public IReadOnlyList<string> OpenedOptions { get; private set; } = [];
+
+    public void Open(Uri url, long startMilliseconds, bool paused, IReadOnlyList<string> options)
+    {
+        OpenedOptions = options;
+        ((IVideoEngine)this).Open(url, startMilliseconds, paused);
+    }
+
     public long OpenedAt { get; private set; } = -1;
 
     public List<Uri> AddedSubtitles { get; } = [];

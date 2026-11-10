@@ -31,6 +31,9 @@ public interface IVideoEngine : IDisposable
         if (paused) Pause();
     }
 
+    /// <summary>Opens with extra decoder options, such as the HLS quality limit.</summary>
+    void Open(Uri url, long startMilliseconds, bool paused, IReadOnlyList<string> options) => Open(url, startMilliseconds, paused);
+
     AudioChangeResult TrySetDialogueBoost(DialogueBoost mode) => AudioChangeResult.Unavailable;
 
     void Play();

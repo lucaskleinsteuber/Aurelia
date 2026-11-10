@@ -552,6 +552,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
                 ? progress.PositionMilliseconds
                 : 0);
             Uri url;
+            var quality = StreamingQuality.Original;
             if (offline is { } file)
             {
                 url = new Uri(file.Store.FileOf(file.Title));
@@ -560,7 +561,8 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             {
                 relay = new LoopbackStreamRelay(client.StreamConnection, client.StreamToken, client.StreamUri(ticket!));
                 relay.Failed += status => post(() => _ = RecoverAsync($"The stream stopped ({status})."));
-                url = relay.Start();
+                quality = StreamingQualities.Effective(Preferences.StreamingQuality, client.Library.SupportsAdaptiveStreaming);
+                url = StreamingQualities.PlaybackUrl(quality, relay.Start());
             }
             engine = engines.Create(Preferences.AudioProcessing);
             OnPropertyChanged(nameof(Engine));
@@ -569,7 +571,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             engine.Rate = Rate;
             engine.Volume = (int)Math.Round(Volume * 100);
             engine.Muted = Muted;
-            engine.Open(url, resumeAt, paused: pauseAfterReopen);
+            engine.Open(url, resumeAt, pauseAfterReopen, StreamingQualities.VlcOptions(quality));
             Position = resumeAt;
             Duration = progress.DurationMilliseconds;
             openedAt = time.GetUtcNow();

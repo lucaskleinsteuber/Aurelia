@@ -31,6 +31,8 @@ public sealed partial class ManagementClient
 
     public Task<ServerUpdateStatus> InstallUpdateAsync() => SendAsync<ServerUpdateStatus>(HttpMethod.Post, "/api/v1/server/updates/install", null);
 
+    public Task<TranscodingStatusResponse> TranscodingAsync() => GetAsync<TranscodingStatusResponse>("/api/v1/server/transcoding");
+
     public Task<ScrubPreviewSettingsResponse> ScrubPreviewsAsync() => GetAsync<ScrubPreviewSettingsResponse>("/api/v1/server/scrub-previews");
 
     public Task<ScrubPreviewSettingsResponse> SaveScrubPreviewsAsync(UpdateScrubPreviewSettingsRequest request) =>

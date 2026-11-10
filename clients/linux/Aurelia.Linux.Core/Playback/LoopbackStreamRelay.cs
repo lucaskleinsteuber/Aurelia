@@ -12,7 +12,7 @@ namespace Aurelia.Linux.Core.Playback;
 /// HTTP to a random port on 127.0.0.1 with a secret path; each request is forwarded with its byte
 /// range over the pinned HTTPS connection and the profile's token. Nothing is cached or written.
 /// </summary>
-public sealed class LoopbackStreamRelay : IAsyncDisposable
+public sealed partial class LoopbackStreamRelay : IAsyncDisposable
 {
     private static readonly string[] ForwardedHeaders =
         ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"];
@@ -96,13 +96,18 @@ public sealed class LoopbackStreamRelay : IAsyncDisposable
             try
             {
                 var head = await ReadHeadAsync(network, lifetime.Token);
-                if (head is null || !TryParse(head, out var method, out var range, out var ifRange, out var subtitle))
+                if (head is null || !TryParse(head, out var method, out var range, out var ifRange, out var subtitle, out var hls))
                 {
                     await WriteStatusAsync(network, 400, "Bad Request");
                     return;
                 }
                 Uri address;
-                lock (gate) address = subtitle is { } index ? new Uri(source, source.AbsolutePath.TrimEnd('/') + "/subtitles/" + index.ToString(CultureInfo.InvariantCulture)) : source;
+                lock (gate)
+                {
+                    address = subtitle is { } index
+                        ? new Uri(source, source.AbsolutePath.TrimEnd('/') + "/subtitles/" + index.ToString(CultureInfo.InvariantCulture))
+                        : hls is not null ? HlsUrl(hls, source)! : source;
+                }
                 using var request = new HttpRequestMessage(method == "HEAD" ? HttpMethod.Head : HttpMethod.Get, address);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 request.Headers.AcceptEncoding.Add(new StringWithQualityHeaderValue("identity"));
@@ -154,12 +159,31 @@ public sealed class LoopbackStreamRelay : IAsyncDisposable
         return total;
     }
 
-    private bool TryParse(string head, out string method, out string? range, out string? ifRange, out int? subtitle)
+    /// <summary>
+    /// Only the server's HLS files are relayed: the master and a quality's playlist, init and
+    /// segments, with at most a sound track in the query.
+    /// </summary>
+    public static bool IsAllowedHlsPath(string path) => AllowedHls().IsMatch(path);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^hls/(master\.m3u8|[1-9][0-9]{2,3}p/(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s))(\?audio=[0-9]{1,4})?$")]
+    private static partial System.Text.RegularExpressions.Regex AllowedHls();
+
+    /// <summary>The server address for an HLS path below the ticket's stream address.</summary>
+    public static Uri? HlsUrl(string path, Uri source)
+    {
+        if (!IsAllowedHlsPath(path)) return null;
+        var parts = path.Split('?', 2);
+        var builder = new UriBuilder(source) { Path = source.AbsolutePath.TrimEnd('/') + "/" + parts[0], Query = parts.Length > 1 ? parts[1] : string.Empty };
+        return builder.Uri;
+    }
+
+    internal bool TryParse(string head, out string method, out string? range, out string? ifRange, out int? subtitle, out string? hls)
     {
         method = "";
         range = null;
         ifRange = null;
         subtitle = null;
+        hls = null;
         var lines = head.Split("\r\n");
         var parts = lines[0].Split(' ');
         if (parts.Length != 3 || parts[2] != "HTTP/1.1" || parts[0] is not ("GET" or "HEAD")) return false;
@@ -168,6 +192,11 @@ public sealed class LoopbackStreamRelay : IAsyncDisposable
             && int.TryParse(parts[1][subtitlePrefix.Length..], NumberStyles.None, CultureInfo.InvariantCulture, out var track))
         {
             subtitle = track;
+        }
+        else if (parts[1].StartsWith("/stream/" + secret + "/", StringComparison.Ordinal)
+                 && IsAllowedHlsPath(parts[1][("/stream/" + secret + "/").Length..]))
+        {
+            hls = parts[1][("/stream/" + secret + "/").Length..];
         }
         else if (parts[1] != "/stream/" + secret)
         {

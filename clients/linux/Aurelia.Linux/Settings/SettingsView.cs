@@ -531,6 +531,13 @@ public sealed class SettingsView : UserControl
             Choice("Up Next Countdown", null, [.. PlaybackPreferences.Countdowns.Select(s => (s, $"{s} Seconds"))],
                 current.UpNextCountdownSeconds, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextCountdownSeconds = value })),
             Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value }))));
+        if (shell?.Client?.SupportsAdaptiveStreaming == true)
+        {
+            page.Children.Add(Section("Streaming",
+                Choice("Streaming Quality", "Original plays the file itself. The other choices let the server convert the title while it plays, in the quality your connection carries, which helps away from home.",
+                    [.. StreamingQualities.All.Select(value => (value, StreamingQualities.Title(value)))],
+                    current.StreamingQuality, value => Save(PlaybackPreferences.Load(Prefs.Store) with { StreamingQuality = value }))));
+        }
         var volume = new Slider { Minimum = 0, Maximum = 1, Value = current.DefaultVolume, Width = 200 };
         volume.PropertyChanged += (_, e) =>
         {

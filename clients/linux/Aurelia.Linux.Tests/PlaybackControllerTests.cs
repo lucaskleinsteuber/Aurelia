@@ -43,14 +43,14 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
         api.Dispose();
     }
 
-    private PlaybackController Controller(PlaybackPreferences? preferences = null)
+    private PlaybackController Controller(PlaybackPreferences? preferences = null, params string[] features)
     {
         (preferences ?? new PlaybackPreferences()).Save(settings);
         var stored = new StoredServer(FakeServer.ServerId, "Living Room Server", new Uri("https://192.168.1.20:43111"), FakeServer.Fingerprint,
             "device-token-synthetic-0000000000000000000001", Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(30));
         var profile = new ProfileSession(new UserSummary(FakeLibrary.OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow), Guid.NewGuid(),
             "profile-token-synthetic-0000000000000000001", DateTimeOffset.UtcNow.AddHours(12));
-        var library = new LibraryClient(api, stored, profile, ["library-state-v1"]);
+        var library = new LibraryClient(api, stored, profile, ["library-state-v1", .. features]);
         controller = new PlaybackController(new PlaybackClient(api, library), engines, settings, new ProgressOutbox(null), time, action => action());
         controller.Closed += () => closed++;
         return controller;
@@ -87,6 +87,27 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
         var sidecar = Assert.Single(engine.AddedSubtitles);
         Assert.EndsWith("/2", sidecar.AbsolutePath, StringComparison.Ordinal);
         Assert.StartsWith("/subtitles/", sidecar.AbsolutePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AStreamingQualityPlaysTheServersHlsStreamThroughTheRelayWhenTheServerOffersIt()
+    {
+        var player = Controller(new PlaybackPreferences(StreamingQuality: StreamingQuality.UpTo720p), ServerFeatures.AdaptiveStreaming);
+        await player.StartAsync(Item(Movie), resume: true);
+        await Settle();
+        var engine = engines.Last;
+        Assert.Equal("127.0.0.1", engine.OpenedUrl!.Host);
+        Assert.Matches("^/stream/[0-9a-f]+/hls/master\\.m3u8$", engine.OpenedUrl.AbsolutePath);
+        Assert.Equal([":network-caching=1500", ":adaptive-maxheight=720", ":adaptive-logic=highest"], engine.OpenedOptions);
+        Assert.Equal(600_000, engine.OpenedAt);
+        await player.CloseAsync();
+
+        // A server without adaptive streaming plays the original, whatever the setting.
+        var original = Controller(new PlaybackPreferences(StreamingQuality: StreamingQuality.Automatic));
+        await original.StartAsync(Item(Movie), resume: true);
+        await Settle();
+        Assert.Matches("^/stream/[0-9a-f]+$", engines.Last.OpenedUrl!.AbsolutePath);
+        Assert.Empty(engines.Last.OpenedOptions);
     }
 
     [Fact]

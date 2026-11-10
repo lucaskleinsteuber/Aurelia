@@ -90,6 +90,7 @@ public sealed class ServerPage : StackPanel
         }
         Children.Add(await EssentialsAsync());
         Children.Add(await ScrubPreviewsAsync());
+        if (await VideoConversionAsync() is { } conversion) Children.Add(conversion);
         var advanced = new Expander { Header = "Advanced Settings", IsExpanded = showsAdvanced, HorizontalAlignment = HorizontalAlignment.Stretch };
         var advancedContent = new StackPanel { Spacing = 22, Margin = new Thickness(0, 12, 0, 0) };
         advanced.Content = advancedContent;
@@ -412,6 +413,21 @@ public sealed class ServerPage : StackPanel
         var saved = await scope.RunAsync(async () => configuration = await Client.SaveSettingsAsync(settings), note);
         if (saved && reload) await ReloadAsync();
         return saved;
+    }
+
+    /// <summary>How the server converts video; older servers without the status show nothing.</summary>
+    private async Task<Control?> VideoConversionAsync()
+    {
+        TranscodingStatusResponse status;
+        try { status = await Client.TranscodingAsync(); }
+        catch (Exception error) when (error is AureliaApiException or HttpRequestException or TaskCanceledException) { return null; }
+        var grid = new UniformGrid { Columns = 2 };
+        grid.Children.Add(Fact("Encoder", TranscodingText.Encoder(status), small: true));
+        grid.Children.Add(Fact("Converting Now", TranscodingText.Running(status), small: true));
+        foreach (var session in status.Sessions) grid.Children.Add(Fact(session.Title, TranscodingText.Session(session), small: true));
+        var panel = Block(Note("Converts titles for web browsers and for apps set to a streaming quality, in memory only."), grid);
+        if (status.Hint is { } hint) panel.Children.Add(Note(hint));
+        return Section("Video Conversion", panel);
     }
 
     private async Task<Control> ScrubPreviewsAsync()

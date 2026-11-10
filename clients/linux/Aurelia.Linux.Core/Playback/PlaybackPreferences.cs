@@ -20,7 +20,8 @@ public sealed record PlaybackPreferences(
     string DefaultSubtitleLanguage = "off",
     DialogueBoost DialogueBoost = DialogueBoost.Off,
     VolumeLeveling? VolumeLeveling = null,
-    bool FillsScreen = false)
+    bool FillsScreen = false,
+    StreamingQuality StreamingQuality = StreamingQuality.Original)
 {
     [JsonIgnore]
     public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);
@@ -40,6 +41,7 @@ public sealed record PlaybackPreferences(
         return this with
         {
             DialogueBoost = Enum.IsDefined(DialogueBoost) ? DialogueBoost : Playback.DialogueBoost.Off,
+            StreamingQuality = Enum.IsDefined(StreamingQuality) ? StreamingQuality : Playback.StreamingQuality.Original,
             VolumeLeveling = Enum.IsDefined(EffectiveLeveling) ? EffectiveLeveling : Playback.VolumeLeveling.Off,
             NightMode = Enum.IsDefined(EffectiveLeveling) && EffectiveLeveling != Playback.VolumeLeveling.Off,
             UpNextCountdownSeconds = Countdowns.Contains(UpNextCountdownSeconds) ? UpNextCountdownSeconds : defaults.UpNextCountdownSeconds,

@@ -41,6 +41,9 @@ public sealed partial class LibraryShell : UserControl, ILibraryNavigator
     private double leadingInset;
     private AppSession? session;
     private LibraryContext? context;
+
+    /// <summary>The connected server's library client, for settings that depend on what the server offers.</summary>
+    public LibraryClient? Client => context?.Store.Client;
     private bool restoring;
     private RemotePlayback? remote;
 

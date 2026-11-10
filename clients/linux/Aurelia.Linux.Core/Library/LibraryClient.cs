@@ -34,6 +34,8 @@ public sealed class LibraryClient(AureliaApi api, StoredServer server, ProfileSe
     public bool SupportsWrapped => Supports(ServerFeatures.YearWrapped);
 
     public bool SupportsMonthlyWrapped => Supports(ServerFeatures.MonthlyWrapped);
+    /// <summary>HLS in several qualities, converted live by the server.</summary>
+    public bool SupportsAdaptiveStreaming => Supports(ServerFeatures.AdaptiveStreaming);
 
     public Task<HomeResponse> HomeAsync(CancellationToken cancellation) => Get<HomeResponse>("/api/v1/home", cancellation);
 

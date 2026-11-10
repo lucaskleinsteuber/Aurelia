@@ -159,7 +159,9 @@ public sealed partial class VlcVideoEngine : IVideoEngine
 
     public void Open(Uri url, long startMilliseconds) => Open(url, startMilliseconds, paused: false);
 
-    public void Open(Uri url, long startMilliseconds, bool paused)
+    public void Open(Uri url, long startMilliseconds, bool paused) => Open(url, startMilliseconds, paused, []);
+
+    public void Open(Uri url, long startMilliseconds, bool paused, IReadOnlyList<string> options)
     {
         chapterDescriptions = [];
         media?.Dispose();
@@ -167,7 +169,9 @@ public sealed partial class VlcVideoEngine : IVideoEngine
         if (paused) media.AddOption(":start-paused");
         media.AddOption(":http-reconnect");
         media.AddOption(":avcodec-hw=vaapi_drm");
-        if (url.IsLoopback) media.AddOption(":network-caching=300");
+        if (url.IsLoopback && !options.Any(option => option.StartsWith(":network-caching=", StringComparison.Ordinal)))
+            media.AddOption(":network-caching=300");
+        foreach (var option in options) media.AddOption(option);
         if (startMilliseconds > 0) media.AddOption(":start-time=" + (startMilliseconds / 1000.0).ToString("0.000", CultureInfo.InvariantCulture));
         player.Play(media);
     }
