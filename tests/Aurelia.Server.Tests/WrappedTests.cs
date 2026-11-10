@@ -12,7 +12,7 @@ namespace Aurelia.Server.Tests;
 public sealed class WrappedTests
 {
     [Fact]
-    public async Task AYearBecomesSlidesWithTheTopSeriesTheRewatchedFilmAndAPet()
+    public async Task AYearBecomesSlidesWithTheTopSeriesAndTheRewatchedFilm()
     {
         await using var home = await Home.CreateAsync();
         var lucas = home.Person("Lucas");
@@ -37,7 +37,7 @@ public sealed class WrappedTests
         var wrapped = await home.History.GetWrappedAsync(lucas.Id, 2026, default);
 
         Assert.Equal("Lucas", wrapped.ProfileName);
-        Assert.Equal(["intro", "hours", "top-series", "top-movie", "genre", "pet", "night-owl", "binge", "rhythm", "summary"],
+        Assert.Equal(["intro", "hours", "top-series", "top-movie", "genre", "night-owl", "binge", "rhythm", "summary"],
             wrapped.Slides.Select(slide => slide.Kind));
         var hours = wrapped.Slides.Single(slide => slide.Kind == "hours");
         Assert.Equal("8", hours.BigNumber);
@@ -50,7 +50,6 @@ public sealed class WrappedTests
         Assert.Equal("On repeat", movie.Eyebrow);
         Assert.Equal("2", movie.BigNumber);
         Assert.Equal("Horror", wrapped.Slides.Single(slide => slide.Kind == "genre").Headline);
-        Assert.Equal("A black cat", wrapped.Slides.Single(slide => slide.Kind == "pet").Headline);
         var owl = wrapped.Slides.Single(slide => slide.Kind == "night-owl");
         Assert.Equal("03:42", owl.BigNumber);
         Assert.Contains("Monday in March", owl.Detail, StringComparison.Ordinal);
@@ -59,7 +58,8 @@ public sealed class WrappedTests
         Assert.Contains("14 March", binge.Detail, StringComparison.Ordinal);
         var summary = wrapped.Slides.Single(slide => slide.Kind == "summary");
         Assert.Equal(2, summary.Posters!.Count);
-        Assert.Contains(summary.Facts!, fact => fact.Label == "Pet" && fact.Value == "A black cat");
+        Assert.Contains(summary.Facts!, fact => fact.Label == "Genre" && fact.Value == "Horror");
+        Assert.DoesNotContain(wrapped.Slides, slide => slide.Quip.Contains('{', StringComparison.Ordinal));
 
         // The lines are the cheeky ones and stay the same when the year is opened again.
         Assert.Contains(wrapped.Slides[0].Quip, WrappedLines.Intro);
@@ -83,10 +83,8 @@ public sealed class WrappedTests
 
         Assert.DoesNotContain(wrapped.Slides, slide => slide.Headline.Contains("Thriller", StringComparison.Ordinal));
         Assert.Equal("Invented Cartoon", wrapped.Slides.Single(slide => slide.Kind == "top-movie").Headline);
-        Assert.Equal("A hamster", wrapped.Slides.Single(slide => slide.Kind == "pet").Headline);
-        Assert.Equal("Tiny, fluffy, and always running.", wrapped.Slides.Single(slide => slide.Kind == "pet").Detail);
         var gentle = WrappedLines.IntroGentle.Concat(WrappedLines.HoursGentle).Concat(WrappedLines.TopMovieGentle).Concat(WrappedLines.GenreGentle)
-            .Concat(WrappedLines.PetGentle).Concat(WrappedLines.SummaryGentle).ToHashSet();
+            .Concat(WrappedLines.SummaryGentle).Select(line => line.Replace("{period}", "year", StringComparison.Ordinal)).ToHashSet();
         Assert.All(wrapped.Slides, slide => Assert.Contains(slide.Quip, gentle));
     }
 
@@ -102,18 +100,51 @@ public sealed class WrappedTests
         await Assert.ThrowsAsync<MetadataException>(() => home.History.GetWrappedAsync(lucas.Id, 1999, default));
     }
 
-    [Theory]
-    [InlineData("Horror", "A black cat")]
-    [InlineData("Science Fiction", "A robot vacuum")]
-    [InlineData("Sci-Fi & Fantasy", "A robot vacuum")]
-    [InlineData("Komödie", "A golden retriever")]
-    [InlineData("Dokumentarfilm", "A tortoise")]
-    [InlineData("Action & Adventure", "A pit bull in sunglasses")]
-    [InlineData("Kriegsfilm", "A bulldog")]
-    [InlineData("Drama", "A cat")]
-    [InlineData("Something Invented", "A cat")]
-    [InlineData(null, "A cat")]
-    public void EveryGenreHasAPet(string? genre, string pet) => Assert.Equal(pet, WrappedPets.For(genre).Name);
+    [Fact]
+    public async Task AMonthIsWrappedFromTheSecondOfTheNextMonth()
+    {
+        await using var home = await Home.CreateAsync(new DateTimeOffset(2026, 4, 2, 0, 0, 0, TimeSpan.Zero));
+        var lucas = home.Person("Lucas");
+        var saga = home.Title(MediaKind.Series, "Invented Saga", null, "Horror");
+        for (var episode = 0; episode < 6; episode++)
+        {
+            var item = home.Title(MediaKind.Episode, $"Chapter {episode}", saga, null);
+            home.Watched(lucas, item, new DateTimeOffset(2026, 3, 14, 20, 0, 0, TimeSpan.Zero).AddMinutes(episode * 30), minutes: 30, completed: true);
+        }
+        var late = home.Title(MediaKind.Episode, "Chapter Late", saga, null);
+        home.Watched(lucas, late, new DateTimeOffset(2026, 3, 15, 2, 10, 0, TimeSpan.Zero), minutes: 30, completed: true);
+        // April does not count for March.
+        var film = home.Title(MediaKind.Movie, "Invented Heist", null, "Crime");
+        home.Watched(lucas, film, new DateTimeOffset(2026, 4, 1, 21, 0, 0, TimeSpan.Zero), minutes: 120, completed: true);
+        await home.SaveAsync();
+
+        var march = await home.History.GetWrappedAsync(lucas.Id, 2026, 3, default);
+
+        Assert.Equal(3, march.Month);
+        Assert.Equal(["intro", "hours", "top-series", "genre", "night-owl", "binge", "rhythm", "summary"], march.Slides.Select(slide => slide.Kind));
+        Assert.Equal("March Wrapped", march.Slides[0].Eyebrow);
+        Assert.Equal("Your series of the month", march.Slides.Single(slide => slide.Kind == "top-series").Eyebrow);
+        Assert.Contains("Sunday, 15 March", march.Slides.Single(slide => slide.Kind == "night-owl").Detail, StringComparison.Ordinal);
+        Assert.Equal("Saturdays were your thing", march.Slides.Single(slide => slide.Kind == "rhythm").Headline);
+        Assert.Equal("March 2026 in Aurelia", march.Slides[^1].Eyebrow);
+        Assert.DoesNotContain(march.Slides, slide => slide.Quip.Contains('{', StringComparison.Ordinal));
+
+        // April is not ready until 2 May; a month that does not exist is refused.
+        var early = await Assert.ThrowsAsync<MetadataException>(() => home.History.GetWrappedAsync(lucas.Id, 2026, 4, default));
+        Assert.Equal("wrapped_not_ready", early.Code);
+        Assert.Contains("2 May", early.Message, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<MetadataException>(() => home.History.GetWrappedAsync(lucas.Id, 2026, 13, default));
+    }
+
+    [Fact]
+    public async Task AMonthIsNotReadyOnTheFirst()
+    {
+        await using var home = await Home.CreateAsync(new DateTimeOffset(2026, 4, 1, 23, 59, 0, TimeSpan.Zero));
+        var lucas = home.Person("Lucas");
+        await home.SaveAsync();
+        await Assert.ThrowsAsync<MetadataException>(() => home.History.GetWrappedAsync(lucas.Id, 2026, 3, default));
+        Assert.Equal("empty", Assert.Single((await home.History.GetWrappedAsync(lucas.Id, 2026, 2, default)).Slides).Kind);
+    }
 
     [Fact]
     public async Task TheApiAnswersWithTheProfilesOwnYear()
@@ -130,13 +161,20 @@ public sealed class WrappedTests
         using var wrong = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/statistics/year/1999/wrapped", owner.Token);
         using var refused = await ApiTestClient.SendAsync(client, wrong);
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        using var month = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/statistics/year/2025/month/12/wrapped", owner.Token);
+        using var monthly = await ApiTestClient.SendAsync(client, month);
+        Assert.Equal(HttpStatusCode.OK, monthly.StatusCode);
+        Assert.Equal(12, (await ApiTestClient.ReadAsync<YearWrapped>(monthly)).Month);
+        using var future = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/statistics/year/9000/month/1/wrapped", owner.Token);
+        using var notReady = await ApiTestClient.SendAsync(client, future);
+        Assert.Equal(HttpStatusCode.NotFound, notReady.StatusCode);
     }
 
-    private sealed class Home(string root, SqliteConnection connection, AureliaDbContext database, LibraryRoot storage) : IAsyncDisposable
+    private sealed class Home(string root, SqliteConnection connection, AureliaDbContext database, LibraryRoot storage, DateTimeOffset? now) : IAsyncDisposable
     {
-        public WatchHistoryService History { get; } = new(database, new UtcClock());
+        public WatchHistoryService History { get; } = new(database, new UtcClock(now));
 
-        public static async Task<Home> CreateAsync()
+        public static async Task<Home> CreateAsync(DateTimeOffset? now = null)
         {
             var root = TestPaths.CreateDataDirectory();
             Directory.CreateDirectory(root);
@@ -146,7 +184,7 @@ public sealed class WrappedTests
             await database.Database.MigrateAsync();
             var storage = new LibraryRoot { Id = Guid.NewGuid(), Name = "Invented", Path = root, NormalizedPath = root, MonitoringEnabled = false, Availability = LibraryAvailability.Available };
             database.LibraryRoots.Add(storage);
-            return new Home(root, connection, database, storage);
+            return new Home(root, connection, database, storage, now);
         }
 
         public ServerUser Person(string name, int? ageLimit = null)
@@ -233,8 +271,11 @@ public sealed class WrappedTests
         }
     }
 
-    private sealed class UtcClock : TimeProvider
+    /// <summary>The server's clock in UTC, stopped at <paramref name="now"/> when one is given.</summary>
+    private sealed class UtcClock(DateTimeOffset? now) : TimeProvider
     {
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+
+        public override DateTimeOffset GetUtcNow() => now ?? base.GetUtcNow();
     }
 }

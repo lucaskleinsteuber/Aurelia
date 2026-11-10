@@ -704,16 +704,17 @@ public sealed record YearInReview(
     double? BusiestDayHours);
 
 /// <summary>
-/// A profile's year as slides, like a story: the server chooses what to show and the lines, so
-/// every app shows the same. <see cref="WrappedSlide.Accent"/> names one of the Wrapped colors:
-/// <c>night</c>, <c>ember</c>, <c>violet</c>, <c>gold</c>, <c>rose</c>, <c>mint</c>,
-/// <c>ocean</c> or <c>lime</c>.
+/// A profile's year, or with <see cref="Month"/> one month, as slides, like a story: the server
+/// chooses what to show and the lines, so every app shows the same.
+/// <see cref="WrappedSlide.Accent"/> names one of the Wrapped colors: <c>night</c>,
+/// <c>ember</c>, <c>violet</c>, <c>gold</c>, <c>rose</c>, <c>mint</c>, <c>ocean</c> or
+/// <c>lime</c>.
 /// </summary>
-public sealed record YearWrapped(int Year, string ProfileName, IReadOnlyList<WrappedSlide> Slides);
+public sealed record YearWrapped(int Year, string ProfileName, IReadOnlyList<WrappedSlide> Slides, int? Month = null);
 
 /// <summary>
 /// One slide. <see cref="Kind"/> is <c>intro</c>, <c>hours</c>, <c>top-series</c>,
-/// <c>top-movie</c>, <c>genre</c>, <c>pet</c>, <c>night-owl</c>, <c>early-bird</c>,
+/// <c>top-movie</c>, <c>genre</c>, <c>night-owl</c>, <c>early-bird</c>,
 /// <c>binge</c>, <c>rhythm</c>, <c>summary</c> or <c>empty</c>; a client that does not know a
 /// kind shows it like any other. <see cref="BigNumber"/> is already formatted ("143", "02:47").
 /// </summary>

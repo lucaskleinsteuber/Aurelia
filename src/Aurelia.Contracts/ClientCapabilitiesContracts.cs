@@ -9,7 +9,7 @@ public static class ServerFeatures
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
-        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped,
+        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped,
     });
 
     /// <summary>Movie Night: the household swipes through one deck until everyone likes a title ("movie-night-v1").</summary>
@@ -17,6 +17,12 @@ public static class ServerFeatures
 
     /// <summary>A profile's year as slides with cheeky lines ("year-wrapped-v1", docs/CLIENT_PROTOCOL.md).</summary>
     public const string YearWrapped = "year-wrapped-v1";
+
+    /// <summary>
+    /// Wrapped for one month, ready from the 2nd of the following month ("monthly-wrapped-v1",
+    /// docs/CLIENT_PROTOCOL.md).
+    /// </summary>
+    public const string MonthlyWrapped = "monthly-wrapped-v1";
 
     /// <summary>
     /// The browser app signs in with the pairing code from the main device, like every other

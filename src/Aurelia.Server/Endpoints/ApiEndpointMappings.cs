@@ -102,6 +102,7 @@ public static class ApiEndpointMappings
         statistics.MapGet(string.Empty, GetUserStatisticsAsync);
         statistics.MapGet("/year/{year:int}", GetYearInReviewAsync);
         statistics.MapGet("/year/{year:int}/wrapped", GetWrappedAsync);
+        statistics.MapGet("/year/{year:int}/month/{month:int}/wrapped", GetMonthlyWrappedAsync);
 
         var health = api.MapGroup("/library/health").RequireAuthorization("Administrator");
         health.MapGet("/duplicates", GetHealthDuplicatesAsync);
@@ -680,6 +681,9 @@ public static class ApiEndpointMappings
 
     private static Task<IResult> GetWrappedAsync(HttpContext context, int year, WatchHistoryService history, CancellationToken cancellationToken) =>
         ExecuteAsync(() => history.GetWrappedAsync(context.User.RequireUserId(), year, cancellationToken));
+
+    private static Task<IResult> GetMonthlyWrappedAsync(HttpContext context, int year, int month, WatchHistoryService history, CancellationToken cancellationToken) =>
+        ExecuteAsync(() => history.GetWrappedAsync(context.User.RequireUserId(), year, month, cancellationToken));
 
     private static Task<IResult> GetHealthDuplicatesAsync(int? offset, int? limit, LibraryHealthService health, CancellationToken cancellationToken) =>
         ExecuteAsync(() => health.GetDuplicatesAsync(offset ?? 0, limit ?? 50, cancellationToken));

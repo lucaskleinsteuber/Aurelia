@@ -390,6 +390,11 @@ time counts only while the position advances, so a pause adds nothing).
   optionally `mediaId`, `poster`, `posters` and `facts` (the summary slide). The server picks
   which slides to show and their lines, the same each time for a profile and year; a children's
   profile gets friendly lines. Clients show unknown kinds like any other slide.
+- `GET /api/v1/statistics/year/{year}/month/{month}/wrapped` (capability `monthly-wrapped-v1`)
+  is the same for one month, with `month` set in the answer. A month is ready from the 2nd of
+  the following month in the server's time zone; before that the server answers 404
+  `wrapped_not_ready`. Clients offer the newest ready month: the previous month from the 2nd on,
+  otherwise the month before it.
 
 History and statistics belong to the profile alone; no other profile, administrators
 included, can read them. Entries older than three years are pruned.
