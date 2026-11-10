@@ -9,7 +9,6 @@ struct MediaManagerView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      Divider()
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
           if model.canManageStorage {
@@ -87,7 +86,7 @@ struct MediaManagerView: View {
               } label: {
                 Image(systemName: "minus.circle.fill")
               }
-              .buttonStyle(.plain)
+              .buttonStyle(AureliaPressableButtonStyle())
               .accessibilityLabel("Remove \(draft.suggestedName)")
             }
             HStack {
@@ -375,7 +374,7 @@ private struct LibraryLocationRow: View {
             .frame(
               width: AureliaDesign.minimumControlSize, height: AureliaDesign.minimumControlSize)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
         .accessibilityLabel("Remove \(library.name)")
       }
     }

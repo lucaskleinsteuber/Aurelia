@@ -88,7 +88,6 @@ struct ServerProfileEditor: View {
         }
         Spacer()
       }.padding(24)
-      Divider()
       ScrollView {
         VStack(alignment: .leading, spacing: 18) {
           if !creating, snapshot == nil {

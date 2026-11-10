@@ -7,6 +7,21 @@ struct RootView: View {
 
   private var guide: SetupGuide { model.setupGuide }
 
+  /// Which of the screens below is showing; a change fades from one to the next.
+  private var phase: String {
+    if model.isImportPreviewUITest { return "fixture" }
+    if model.offlineMode != nil { return "offline" }
+    if model.isStarting { return "starting" }
+    if model.operatingMode == nil { return guide.introSeen ? "mode" : "intro" }
+    if model.operatingMode == .host && model.profile == nil { return "host-setup" }
+    if model.isSwitchingProfile { return "switching" }
+    if model.requiresProfileSelection { return "profiles" }
+    if model.needsInitialLibrarySetup, model.canManageStorage { return "first-library" }
+    if model.profile == nil { return "connect" }
+    if guide.isGuiding { return "finish" }
+    return "library"
+  }
+
   var body: some View {
     ZStack {
       AureliaBackdrop()
@@ -63,7 +78,12 @@ struct RootView: View {
           LibraryShellView()
         }
       }
-      .accessibilityHidden(model.playback != nil || model.isSettingsPresented)
+      // Moving between starting, choosing a profile and the library fades instead of cutting.
+      .id(phase)
+      .transition(.opacity)
+      .accessibilityHidden(
+        model.playback != nil || model.isSettingsPresented || model.movieNightLaunch != nil
+          || model.wrappedLaunch != nil)
 
       if let replay = introductionReplay {
         SetupIntroductionView(guide: guide, replay: true) { introductionReplay = nil }
@@ -82,6 +102,20 @@ struct RootView: View {
           // Opened while a title plays (⌘, or the menu), Settings cover the player too; Done or
           // Esc returns to it. Below the player they were invisible until it closed.
           .zIndex(model.playback == nil ? 5 : 11)
+      }
+
+      // Movie Night and Wrapped take the whole window, over the library and Settings.
+      if model.playback == nil, let launch = model.movieNightLaunch, let api = model.profileClient() {
+        MovieNightView(api: api, joining: launch.joining)
+          .id(launch.id)
+          .transition(.opacity)
+          .zIndex(8)
+      }
+      if model.playback == nil, let launch = model.wrappedLaunch {
+        WrappedStoryView(launch: launch)
+          .id(launch.id)
+          .transition(.opacity)
+          .zIndex(9)
       }
 
       if let profile = model.profile, let playback = model.playback {
@@ -109,6 +143,9 @@ struct RootView: View {
       }
     }
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: model.isResting)
+    .aureliaAnimation(AureliaMotion.page, value: model.movieNightLaunch)
+    .aureliaAnimation(AureliaMotion.page, value: model.wrappedLaunch)
+    .aureliaAnimation(AureliaMotion.standard, value: phase)
     .preferredColorScheme(.dark)
     // While playing, the window may shrink to a 16:9 picture-in-picture size; a library minimum
     // combined with the 16:9 ratio would leave macOS no valid size when the edge is dragged.

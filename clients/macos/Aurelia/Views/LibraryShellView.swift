@@ -99,7 +99,9 @@ struct LibraryShellView: View {
     }
     .background(AureliaDesign.canvas)
     .background {
-      LibraryFindShortcut(isBlocked: { model.playback != nil }) {
+      LibraryFindShortcut(isBlocked: {
+        model.playback != nil || model.movieNightLaunch != nil || model.wrappedLaunch != nil
+      }) {
         let leaving = destination == .home || selection != nil
         if leaving {
           selection = nil
@@ -147,11 +149,6 @@ struct LibraryShellView: View {
     }
     .sheet(isPresented: $model.showingCollectionEditor) {
       CollectionEditorSheet(collection: nil).environmentObject(model)
-    }
-    .sheet(item: $model.movieNightLaunch) { launch in
-      if let api = model.profileClient() {
-        MovieNightSheet(api: api, joining: launch.joining).environmentObject(model)
-      }
     }
     .onChange(of: scenePhase) {
       if scenePhase == .active { Task { await model.refreshHome() } }
@@ -306,7 +303,7 @@ struct LibraryShellView: View {
         .frame(width: 34, height: 34)
         .background(.ultraThinMaterial, in: Circle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(AureliaPressableButtonStyle())
     .accessibilityLabel(sidebarVisible ? "Hide Sidebar" : "Show Sidebar")
     .accessibilityIdentifier("toggle-sidebar")
     .keyboardShortcut("s", modifiers: [.command, .control])
@@ -330,7 +327,7 @@ struct LibraryShellView: View {
       .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
       .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(AureliaPressableButtonStyle())
     .tag(item)
     .accessibilityIdentifier("sidebar-\(item.rawValue)")
   }
@@ -488,6 +485,9 @@ private struct HomePage: View {
         LazyVStack(alignment: .leading, spacing: 34) {
           if let recommendation = model.home?.recommendation {
             HomeHero(item: recommendation) { onSelect(recommendation.id) }
+          }
+          if model.supportsMonthlyWrapped, WrappedStory.monthIsNew() {
+            MonthlyWrappedButton().padding(.horizontal, AureliaDesign.pagePadding)
           }
           if model.supportsMovieNight { MovieNightHomeStrip() }
           landscapeRow(
@@ -898,7 +898,7 @@ private struct LibraryPage: View {
         } label: {
           Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
         .accessibilityLabel("Clear Search")
       }
     }
@@ -1264,6 +1264,7 @@ private struct WatchlistPage: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 26) {
         AureliaSectionHeading(title: "Watchlist", count: model.watchlistItems.count)
+          .aureliaRiseIn(0)
         if model.watchlistItems.isEmpty {
           ContentUnavailableView(
             "Your Watchlist Is Empty",
@@ -1273,8 +1274,10 @@ private struct WatchlistPage: View {
             )
           )
           .frame(maxWidth: .infinity, minHeight: 330)
+          .aureliaRiseIn(1)
         } else {
           posterGrid(model.watchlistItems, onSelect: onSelect)
+            .aureliaRiseIn(1)
         }
       }
       .padding(AureliaDesign.pagePadding)
@@ -1395,6 +1398,7 @@ private struct CollectionsPage: View {
           .buttonStyle(.bordered)
           .accessibilityIdentifier("new-collection-button")
         }
+        .aureliaRiseIn(0)
 
         if model.collections.isEmpty {
           ContentUnavailableView(
@@ -1403,6 +1407,7 @@ private struct CollectionsPage: View {
             description: Text("Create manual collections or rule-based smart lists.")
           )
           .frame(maxWidth: .infinity, minHeight: 280)
+          .aureliaRiseIn(1)
         } else {
           LazyVGrid(
             columns: [GridItem(.adaptive(minimum: 210, maximum: 240), spacing: 22)],
@@ -1419,10 +1424,11 @@ private struct CollectionsPage: View {
               .accessibilityIdentifier("collection-\(collection.id.uuidString.lowercased())")
             }
           }
+          .aureliaListMotion(model.collections.map(\.id))
+          .aureliaRiseIn(1)
         }
 
         if !franchises.isEmpty {
-          Divider().padding(.top, 16)
           VStack(alignment: .leading, spacing: 14) {
             Text("Franchises in Library")
               .font(AureliaDesign.sectionTitle)
@@ -1469,10 +1475,13 @@ private struct CollectionsPage: View {
               }
             }
           }
+          .padding(.top, 16)
+          .transition(.opacity.combined(with: .offset(y: 8)))
         }
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.top, 22)
+      .aureliaAnimation(AureliaMotion.standard, value: franchises.map(\.id))
     }
     .scrollClipDisabled()
     .aureliaOverlayScrollbars()
@@ -1523,7 +1532,9 @@ private struct ActivityPageScroll<Content: View>: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 26) {
         AureliaSectionHeading(title: title)
+          .aureliaRiseIn(0)
         content.frame(maxWidth: 980, alignment: .leading)
+          .aureliaRiseIn(1)
       }
       .padding(AureliaDesign.pagePadding)
       .padding(.top, 22)
@@ -1563,7 +1574,7 @@ struct MacMiniRemoteView: View {
           Image(systemName: "gobackward.10")
             .font(.system(size: 14))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
 
         Button {
           model.sendRemotePlaybackCommand(action: model.isRemotePlaying ? "pause" : "resume")
@@ -1571,7 +1582,7 @@ struct MacMiniRemoteView: View {
           Image(systemName: model.isRemotePlaying ? "pause.fill" : "play.fill")
             .font(.system(size: 18))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
 
         Button {
           model.sendRemotePlaybackCommand(action: "skip", skipSeconds: 10)
@@ -1579,7 +1590,7 @@ struct MacMiniRemoteView: View {
           Image(systemName: "goforward.10")
             .font(.system(size: 14))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
       }
 
       if model.remotePlaybackDuration > 0 {
@@ -1600,7 +1611,7 @@ struct MacMiniRemoteView: View {
           .font(.system(size: 16))
           .foregroundStyle(.secondary)
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .accessibilityLabel("Stop remote playback")
     }
     .padding(.horizontal, 20)

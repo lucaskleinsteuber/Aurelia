@@ -155,7 +155,7 @@ private struct OfflineProfileChooser: View {
             .frame(width: 36, height: 36)
             .background(Circle().fill(pin.isEmpty ? Color.white.opacity(0.12) : Color.white))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
         .disabled(pin.isEmpty)
         .accessibilityLabel("Open Profile")
       }
@@ -301,7 +301,7 @@ private struct OfflineLibraryView: View {
         }
       }
       .menuStyle(.button)
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .fixedSize()
       .accessibilityIdentifier("offline-profile-menu")
       Button("Connect to Server") { Task { await model.leaveOfflineMode() } }

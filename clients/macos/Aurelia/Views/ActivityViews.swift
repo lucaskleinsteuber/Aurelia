@@ -20,11 +20,16 @@ struct SettingsActivityView: View {
       .labelsHidden()
       .frame(width: 240)
       .accessibilityIdentifier("activity-page")
-      switch page {
-      case .statistics: ActivityStatisticsView()
-      case .history: ActivityHistoryView()
+      Group {
+        switch page {
+        case .statistics: ActivityStatisticsView()
+        case .history: ActivityHistoryView()
+        }
       }
+      .id(page)
+      .transition(.opacity.combined(with: .offset(y: 8)))
     }
+    .aureliaAnimation(AureliaMotion.page, value: page)
   }
 }
 
@@ -40,7 +45,6 @@ struct ActivityStatisticsView: View {
   @State private var selectedYear: Int?
   @State private var review: YearInReview?
   @State private var selectedWeek: String?
-  @State private var wrappedYear: WrappedLaunch?
 
   /// Synthetic statistics can be passed in for rendering checks; a signed-in profile loads its own.
   init(stats: UserStatistics? = nil, review: YearInReview? = nil) {
@@ -65,6 +69,7 @@ struct ActivityStatisticsView: View {
           empty
         } else {
           summary(stats)
+          if model.supportsMonthlyWrapped { MonthlyWrappedButton() }
           highlights(stats)
           if !stats.weeklyHours.isEmpty { weeks(WatchTime.lastWeeks(stats.weeklyHours)) }
           if let titles = stats.topTitles, !titles.isEmpty {
@@ -81,10 +86,9 @@ struct ActivityStatisticsView: View {
         }
       }
     }
+    .aureliaAnimation(AureliaMotion.standard, value: stats == nil)
+    .aureliaAnimation(AureliaMotion.standard, value: review?.year)
     .task(id: model.profile?.sessionId) { await load() }
-    .sheet(item: $wrappedYear) { launch in
-      WrappedStoryView(year: launch.year).environmentObject(model)
-    }
     .accessibilityIdentifier("activity-statistics")
   }
 
@@ -253,7 +257,7 @@ struct ActivityStatisticsView: View {
         if model.supportsWrapped {
           let year = selectedYear ?? years[0]
           Button {
-            wrappedYear = WrappedLaunch(year: year)
+            model.wrappedLaunch = WrappedLaunch(year: year)
           } label: {
             HStack(spacing: 14) {
               Text(String(year)).font(.system(size: 26, weight: .black)).tracking(-1)
@@ -270,7 +274,7 @@ struct ActivityStatisticsView: View {
             .background(Color(wrappedHex: 0x6A4CFF), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
           }
-          .buttonStyle(.plain)
+          .buttonStyle(AureliaPressableButtonStyle())
           .accessibilityIdentifier("statistics-wrapped")
         }
         if let review {
@@ -411,6 +415,7 @@ struct ActivityHistoryView: View {
         }
       }
     }
+    .aureliaAnimation(AureliaMotion.standard, value: items.map(\.id))
     .task(id: model.profile?.sessionId) { await load(offset: 0) }
     .confirmationDialog(
       "Clear your watch history?", isPresented: $confirmClear, titleVisibility: .visible
@@ -461,7 +466,7 @@ struct ActivityHistoryView: View {
         } label: {
           Image(systemName: "chevron.right.circle.fill").font(.title3)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
         .help("Open Title")
       }
       Button {
@@ -469,7 +474,7 @@ struct ActivityHistoryView: View {
       } label: {
         Image(systemName: "xmark.circle").foregroundStyle(.secondary)
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .help("Remove from History")
       .accessibilityLabel("Remove \(item.title) from History")
     }
@@ -514,8 +519,9 @@ struct ActivityHistoryView: View {
   }
 }
 
-/// Opens Wrapped for one year.
-struct WrappedLaunch: Identifiable {
+/// Opens Wrapped for a year, or with `month` for one month.
+struct WrappedLaunch: Identifiable, Equatable {
   let year: Int
-  var id: Int { year }
+  var month: Int? = nil
+  var id: String { "\(year)-\(month ?? 0)" }
 }

@@ -84,7 +84,7 @@ struct ConnectionView: View {
             }
             .contentShape(Rectangle())
           }
-          .buttonStyle(.plain)
+          .buttonStyle(AureliaPressableButtonStyle())
           .accessibilityIdentifier("discovered-server-\(server.id)")
         }
       }
@@ -111,7 +111,7 @@ struct ConnectionView: View {
         }
         .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .frame(minHeight: AureliaDesign.minimumControlSize)
       .accessibilityIdentifier("connection-set-up-this-mac")
 
@@ -129,7 +129,7 @@ struct ConnectionView: View {
         }
         .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .accessibilityIdentifier("connection-advanced")
 
       if showsAdvancedConnection {
@@ -173,7 +173,7 @@ struct ConnectionView: View {
         } label: {
           Label("Back", systemImage: "chevron.left")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
         Spacer()
         Label("Encrypted", systemImage: "lock.fill")
           .font(.caption.weight(.medium))

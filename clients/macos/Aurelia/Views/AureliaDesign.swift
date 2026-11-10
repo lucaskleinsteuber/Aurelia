@@ -34,7 +34,54 @@ enum AureliaDesign {
   static let selection = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
   static let subduedText = Color(nsColor: .secondaryLabelColor)
 
-  static let responsiveSpring = Animation.spring(response: 0.3, dampingFraction: 1)
+  static let responsiveSpring = AureliaMotion.quick
+}
+
+/// Aurelia's motion: a handful of curves for everything that moves, so the whole app moves
+/// alike. `press` for a button or card under the pointer, `quick` for hover and small toggles,
+/// `standard` for content that changes in place (lists, sections, something that finished
+/// loading), `page` for pages and full-window layers, `emphasis` for a moment worth celebrating.
+/// With Reduce Motion every one of them becomes the same short fade (`reduced`).
+enum AureliaMotion {
+  static let press = Animation.spring(response: 0.22, dampingFraction: 0.72)
+  static let quick = Animation.spring(response: 0.3, dampingFraction: 1)
+  static let standard = Animation.smooth(duration: 0.32)
+  static let page = Animation.spring(response: 0.42, dampingFraction: 0.86)
+  static let emphasis = Animation.spring(response: 0.5, dampingFraction: 0.72)
+  static let reduced = Animation.easeOut(duration: 0.15)
+
+  static func resolved(_ animation: Animation, reduceMotion: Bool) -> Animation {
+    reduceMotion ? reduced : animation
+  }
+
+  /// Content arriving in place: a fade with a short rise; with Reduce Motion only the fade.
+  static func arrival(reduceMotion: Bool) -> AnyTransition {
+    reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8))
+  }
+}
+
+/// Animates changes of `value` with one of Aurelia's curves, honoring Reduce Motion.
+struct AureliaAnimated<Value: Equatable>: ViewModifier {
+  let animation: Animation
+  let value: Value
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+
+  func body(content: Content) -> some View {
+    content.animation(AureliaMotion.resolved(animation, reduceMotion: reduceMotion), value: value)
+  }
+}
+
+/// For buttons that draw their own look: they give way a little under the pointer, like cards,
+/// instead of doing nothing (the plain style) or dimming.
+struct AureliaPressableButtonStyle: ButtonStyle {
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .opacity(configuration.isPressed ? 0.8 : 1)
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+      .animation(reduceMotion ? nil : AureliaMotion.press, value: configuration.isPressed)
+  }
 }
 
 /// A dark, blurred panel like the Apple TV app's sidebar: artwork and rails that pass beneath it
@@ -552,7 +599,7 @@ struct AureliaPrimaryActionButtonStyle: ButtonStyle {
       .frame(minHeight: AureliaDesign.minimumControlSize)
       .background(.white.opacity(isEnabled ? 0.96 : 0.38), in: Capsule())
       .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
-      .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
+      .animation(reduceMotion ? nil : AureliaMotion.press, value: configuration.isPressed)
   }
 }
 
@@ -685,11 +732,14 @@ struct AureliaListMotion<ID: Equatable>: ViewModifier {
   @Environment(\.aureliaReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
-    content.animation(reduceMotion ? nil : .smooth(duration: 0.32), value: ids)
+    content.animation(reduceMotion ? nil : AureliaMotion.standard, value: ids)
   }
 }
 
 extension View {
+  func aureliaAnimation<Value: Equatable>(_ animation: Animation, value: Value) -> some View {
+    modifier(AureliaAnimated(animation: animation, value: value))
+  }
   func aureliaRiseIn(_ order: Int = 0) -> some View { modifier(AureliaRiseIn(order: order)) }
   func aureliaHeroSettle() -> some View { modifier(AureliaHeroSettle()) }
   func aureliaListMotion<ID: Equatable>(_ ids: ID) -> some View {
@@ -722,9 +772,7 @@ struct AureliaCardButtonStyle: ButtonStyle {
     configuration.label
       .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
       .brightness(configuration.isPressed ? -0.03 : 0)
-      .animation(
-        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.72),
-        value: configuration.isPressed)
+      .animation(reduceMotion ? nil : AureliaMotion.press, value: configuration.isPressed)
   }
 }
 

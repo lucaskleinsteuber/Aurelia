@@ -43,7 +43,7 @@ struct OperatingModeView: View {
             symbol: "macstudio.fill",
             primary: true)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
         .accessibilityIdentifier("choose-host")
 
         Button {
@@ -55,7 +55,7 @@ struct OperatingModeView: View {
             symbol: "network",
             primary: false)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AureliaPressableButtonStyle())
         .accessibilityIdentifier("choose-client")
       }
       .frame(maxWidth: 560)
@@ -210,7 +210,7 @@ struct NativeHostSetupView: View {
         }
         .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .accessibilityIdentifier("host-advanced")
 
       if showsAdvancedSetup {
@@ -346,7 +346,7 @@ struct StorageLocationList: View {
           } label: {
             Image(systemName: "minus.circle.fill")
           }
-          .buttonStyle(.plain)
+          .buttonStyle(AureliaPressableButtonStyle())
         }
         .padding(14)
         .background(

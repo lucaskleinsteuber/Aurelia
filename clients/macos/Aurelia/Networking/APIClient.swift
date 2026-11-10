@@ -1081,8 +1081,9 @@ struct APIClient: Sendable {
     try await get("/api/v1/statistics/year/\(year)")
   }
 
-  func wrapped(year: Int) async throws -> YearWrapped {
-    try await get("/api/v1/statistics/year/\(year)/wrapped")
+  func wrapped(year: Int, month: Int? = nil) async throws -> YearWrapped {
+    if let month { return try await get("/api/v1/statistics/year/\(year)/month/\(month)/wrapped") }
+    return try await get("/api/v1/statistics/year/\(year)/wrapped")
   }
 
   func healthDuplicates(offset: Int = 0, limit: Int = 50) async throws -> [DuplicateGroup] {

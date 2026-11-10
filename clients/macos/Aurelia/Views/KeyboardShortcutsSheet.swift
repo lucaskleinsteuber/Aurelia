@@ -6,7 +6,6 @@ struct KeyboardShortcutsSheet: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      Divider()
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
           section(title: "Playback") {

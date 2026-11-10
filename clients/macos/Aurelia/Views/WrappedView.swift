@@ -9,14 +9,14 @@ extension Color {
   }
 }
 
-/// Wrapped: the year as full-screen slides, like a story. Each slide runs for six seconds; a tap
-/// on the right or the right arrow moves on, on the left goes back, holding or Space pauses, and
-/// Escape closes. With Reduce Motion the slides wait for a click and numbers do not count up.
+/// Wrapped: a year, or one month, as slides over the whole window, like a story. Each slide runs
+/// for six seconds; a click on the right or the right arrow moves on, on the left goes back,
+/// holding or Space pauses, and Escape closes. In a wide window the poster stands beside the
+/// words. With Reduce Motion the slides wait for a click and numbers do not count up.
 struct WrappedStoryView: View {
   @EnvironmentObject private var model: AppModel
-  @Environment(\.dismiss) private var dismiss
   @Environment(\.aureliaReduceMotion) private var reduceMotion
-  let year: Int
+  let launch: WrappedLaunch
   @State private var wrapped: YearWrapped?
   @State private var error: String?
   @State private var index = 0
@@ -28,32 +28,37 @@ struct WrappedStoryView: View {
   var body: some View {
     let slide = wrapped?.slides.indices.contains(index) == true ? wrapped?.slides[index] : nil
     let accent = WrappedStory.accent(slide?.accent ?? "night")
-    ZStack {
-      Color(wrappedHex: accent.field).ignoresSafeArea()
-      if let poster = slide?.poster {
-        AuthenticatedArtwork(artwork: poster, symbol: "photo")
-          .blur(radius: 40)
-          .opacity(0.3)
-          .ignoresSafeArea()
-          .allowsHitTesting(false)
-      }
-      if let slide {
-        content(slide, accent: accent)
-        controls(count: wrapped?.slides.count ?? 0, accent: accent)
-      } else if let error {
-        VStack(spacing: 16) {
-          Text("Wrapped didn't load.").font(.title.weight(.black))
-          Text(error).multilineTextAlignment(.center)
-          Button("Close") { dismiss() }.buttonStyle(AureliaPrimaryActionButtonStyle())
+    GeometryReader { geometry in
+      ZStack {
+        Color(wrappedHex: accent.field)
+        if let poster = slide?.poster {
+          AuthenticatedArtwork(artwork: poster, symbol: "photo")
+            .blur(radius: 60)
+            .opacity(0.28)
+            .allowsHitTesting(false)
+            .id("backdrop-\(index)")
+            .transition(.opacity)
         }
-        .padding(28)
-      } else {
-        ProgressView().tint(.white)
+        if let slide {
+          content(slide, accent: accent, size: geometry.size)
+          controls(count: wrapped?.slides.count ?? 0, accent: accent)
+        } else if let error {
+          VStack(spacing: 16) {
+            Text("Wrapped didn't load.").font(.largeTitle.weight(.black))
+            Text(error).multilineTextAlignment(.center)
+            Button("Close") { close() }.buttonStyle(AureliaPrimaryActionButtonStyle())
+          }
+          .padding(28)
+        } else {
+          ProgressView().controlSize(.large).tint(.white)
+        }
       }
+      .frame(width: geometry.size.width, height: geometry.size.height)
     }
+    .ignoresSafeArea()
     .foregroundStyle(Color(wrappedHex: accent.ink))
-    .animation(.easeInOut(duration: 0.3), value: index)
-    .frame(width: 440, height: 800)
+    .aureliaAnimation(AureliaMotion.page, value: index)
+    .aureliaAnimation(AureliaMotion.standard, value: wrapped != nil)
     .focusable()
     .focusEffectDisabled()
     .focused($focused)
@@ -65,71 +70,102 @@ struct WrappedStoryView: View {
     .task(id: "\(index)-\(held)-\(wrapped != nil)") { await run() }
   }
 
-  private func content(_ slide: WrappedSlide, accent: WrappedStory.Accent) -> some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Spacer(minLength: 60)
-      Text(slide.eyebrow).font(.headline.weight(.bold)).opacity(0.8)
-      if slide.kind == "summary" {
-        Text(slide.headline).font(.system(size: 40, weight: .black)).tracking(-1)
-        if let posters = slide.posters, !posters.isEmpty {
-          LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-            ForEach(Array(posters.prefix(4).enumerated()), id: \.offset) { _, poster in
-              AuthenticatedArtwork(artwork: poster, symbol: "film")
-                .aspectRatio(2 / 3, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
-          }
-          .frame(maxWidth: 240)
-        }
-        if let facts = slide.facts {
-          Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-            ForEach(facts, id: \.label) { fact in
-              GridRow {
-                Text(fact.label).opacity(0.72)
-                Text(fact.value).fontWeight(.heavy)
+  private func content(_ slide: WrappedSlide, accent: WrappedStory.Accent, size: CGSize) -> some View {
+    let wide = size.width >= 900
+    // Type grows with the window, within limits that keep a slide on one screen.
+    let scale = min(max(size.height / 800, 0.85), 1.5)
+    let poster = slide.kind == "summary" ? nil : slide.poster
+    return HStack(alignment: .center, spacing: 56) {
+      VStack(alignment: .leading, spacing: 14 * scale) {
+        Text(slide.eyebrow).font(.system(size: 17 * scale, weight: .bold)).opacity(0.8)
+        if slide.kind == "summary" {
+          Text(slide.headline).font(.system(size: 44 * scale, weight: .black)).tracking(-1)
+          if !wide { posterGrid(slide, width: 240) }
+          if let facts = slide.facts {
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+              ForEach(facts, id: \.label) { fact in
+                GridRow {
+                  Text(fact.label).opacity(0.72)
+                  Text(fact.value).fontWeight(.heavy)
+                }
               }
             }
+            .font(.system(size: 17 * scale))
           }
-        }
-      } else {
-        if let poster = slide.poster {
-          AuthenticatedArtwork(artwork: poster, symbol: "film")
-            .frame(width: 140, height: 210)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .rotationEffect(.degrees(-3))
-            .shadow(color: .black.opacity(0.35), radius: 18, y: 12)
-        }
-        Text(slide.headline).font(.system(size: 38, weight: .black)).tracking(-1).lineLimit(3)
-          .minimumScaleFactor(0.6)
-        if let number = slide.bigNumber {
-          VStack(alignment: .leading, spacing: 0) {
-            Text(shownNumber ?? number)
-              .font(.system(size: 150, weight: .black).monospacedDigit())
-              .tracking(-8)
-              .minimumScaleFactor(0.4)
-              .lineLimit(1)
-            if let unit = slide.unit { Text(unit).font(.title.weight(.heavy)) }
+        } else {
+          if !wide, let poster {
+            posterView(poster, width: 140)
           }
-          .accessibilityElement(children: .ignore)
-          .accessibilityLabel([number, slide.unit].compactMap { $0 }.joined(separator: " "))
+          Text(slide.headline).font(.system(size: 40 * scale, weight: .black)).tracking(-1).lineLimit(3)
+            .minimumScaleFactor(0.6)
+          if let number = slide.bigNumber {
+            VStack(alignment: .leading, spacing: 0) {
+              Text(shownNumber ?? number)
+                .font(.system(size: 160 * scale, weight: .black).monospacedDigit())
+                .tracking(-8 * scale)
+                .minimumScaleFactor(0.4)
+                .lineLimit(1)
+              if let unit = slide.unit { Text(unit).font(.system(size: 28 * scale, weight: .heavy)) }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel([number, slide.unit].compactMap { $0 }.joined(separator: " "))
+          }
+          if let detail = slide.detail { Text(detail).font(.system(size: 20 * scale)) }
         }
-        if let detail = slide.detail { Text(detail).font(.title3) }
+        Text(slide.quip)
+          .font(.system(size: 20 * scale, weight: .heavy))
+          .foregroundStyle(Color(wrappedHex: accent.field))
+          .padding(.horizontal, 16 * scale)
+          .padding(.vertical, 10 * scale)
+          .background(Color(wrappedHex: accent.sticker), in: RoundedRectangle(cornerRadius: 6))
+          .rotationEffect(.degrees(-2.5))
+          .padding(.top, 8)
       }
-      Text(slide.quip)
-        .font(.title3.weight(.heavy))
-        .foregroundStyle(Color(wrappedHex: accent.field))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color(wrappedHex: accent.sticker), in: RoundedRectangle(cornerRadius: 6))
-        .rotationEffect(.degrees(-2.5))
-        .padding(.top, 8)
-      Spacer(minLength: 40)
+      .frame(maxWidth: wide ? 640 : 480, alignment: .leading)
+      if wide {
+        if slide.kind == "summary" {
+          posterGrid(slide, width: min(size.width * 0.3, 420)).rotationEffect(.degrees(2))
+        } else if let poster {
+          posterView(poster, width: min(size.width * 0.26, size.height * 0.42, 380))
+            .rotationEffect(.degrees(3))
+        }
+      }
     }
-    .frame(maxWidth: 480, alignment: .leading)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 28)
+    .padding(.horizontal, wide ? 72 : 28)
+    .padding(.vertical, 60)
+    .frame(maxWidth: wide ? 1240 : .infinity, alignment: .leading)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .id(index)
-    .transition(.opacity)
+    .transition(
+      reduceMotion
+        ? .opacity
+        : .asymmetric(
+          insertion: .opacity.combined(with: .offset(x: 28)),
+          removal: .opacity.combined(with: .offset(x: -18))))
+  }
+
+  private func posterView(_ poster: ArtworkSummary, width: CGFloat) -> some View {
+    AuthenticatedArtwork(artwork: poster, symbol: "film")
+      .frame(width: width, height: width * 1.5)
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .shadow(color: .black.opacity(0.35), radius: 24, y: 16)
+  }
+
+  @ViewBuilder
+  private func posterGrid(_ slide: WrappedSlide, width: CGFloat) -> some View {
+    if let posters = slide.posters, !posters.isEmpty {
+      LazyVGrid(
+        columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: posters.count == 1 ? 1 : 2),
+        spacing: 10
+      ) {
+        ForEach(Array(posters.prefix(4).enumerated()), id: \.offset) { _, poster in
+          AuthenticatedArtwork(artwork: poster, symbol: "film")
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+      }
+      .frame(maxWidth: posters.count == 1 ? width * 0.6 : width)
+    }
   }
 
   private func controls(count: Int, accent: WrappedStory.Accent) -> some View {
@@ -145,18 +181,17 @@ struct WrappedStoryView: View {
           }
           .frame(height: 3)
         }
+        Button { close() } label: {
+          Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(AureliaPressableButtonStyle())
+        .keyboardShortcut(.cancelAction)
+        .accessibilityLabel("Close Wrapped")
       }
-      .padding(.horizontal, 16)
-      .padding(.top, 8)
-      .accessibilityHidden(true)
-      HStack {
-        Spacer()
-        Button { dismiss() } label: { Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44) }
-          .buttonStyle(.plain)
-          .keyboardShortcut(.cancelAction)
-          .accessibilityLabel("Close Wrapped")
-      }
-      .padding(.horizontal, 8)
+      // Room on the left for the window's own buttons.
+      .padding(.leading, 84)
+      .padding(.trailing, 10)
+      .padding(.top, 4)
       HStack(spacing: 0) {
         Color.clear.contentShape(Rectangle())
           .onTapGesture { go(forward: false) }
@@ -177,9 +212,13 @@ struct WrappedStoryView: View {
     }
   }
 
+  private func close() {
+    model.wrappedLaunch = nil
+  }
+
   private func go(forward: Bool) {
     guard let count = wrapped?.slides.count else { return }
-    guard let next = WrappedStory.step(from: index, count: count, forward: forward) else { return dismiss() }
+    guard let next = WrappedStory.step(from: index, count: count, forward: forward) else { return close() }
     progress = 0
     index = next
   }
@@ -210,9 +249,39 @@ struct WrappedStoryView: View {
   private func load() async {
     guard wrapped == nil, let client = model.profileClient() else { return }
     do {
-      wrapped = try await client.wrapped(year: year)
+      wrapped = try await client.wrapped(year: launch.year, month: launch.month)
     } catch {
       self.error = error.localizedDescription
     }
+  }
+}
+
+/// "Your October Wrapped is here": the newest ready month, in Statistics and, in its first week,
+/// on Home.
+struct MonthlyWrappedButton: View {
+  @EnvironmentObject private var model: AppModel
+
+  var body: some View {
+    let ready = WrappedStory.readyMonth()
+    Button {
+      model.wrappedLaunch = WrappedLaunch(year: ready.year, month: ready.month)
+    } label: {
+      HStack(spacing: 14) {
+        Text(String(ready.name.prefix(3))).font(.system(size: 26, weight: .black)).tracking(-1)
+          .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Your \(ready.name) Wrapped is here").font(.headline)
+          Text("Last month in slides. It's worse than you think.").font(.callout).opacity(0.85)
+        }
+        Spacer()
+        Image(systemName: "play.fill")
+      }
+      .foregroundStyle(Color(wrappedHex: 0x22000F))
+      .padding(14)
+      .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+    .buttonStyle(AureliaPressableButtonStyle())
+    .accessibilityIdentifier("monthly-wrapped")
   }
 }

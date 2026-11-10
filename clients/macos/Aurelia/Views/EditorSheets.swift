@@ -37,7 +37,6 @@ struct MetadataMatchSheet: View {
   var body: some View {
     VStack(spacing: 0) {
       sheetHeader("Find Metadata Match", subtitle: mediaTitle, symbol: "magnifyingglass")
-      Divider()
       VStack(spacing: 16) {
         HStack {
           TextField("Search title", text: $query).textFieldStyle(.roundedBorder)
@@ -187,7 +186,6 @@ struct CollectionEditorSheet: View {
           ? "Define automatic rules for this smart list."
           : "Choose at least two movies or TV shows.",
         symbol: isSmart ? "sparkles.rectangle.stack" : "rectangle.stack.badge.plus")
-      Divider()
       VStack(alignment: .leading, spacing: 14) {
         TextField("Collection Name", text: $name).textFieldStyle(.roundedBorder)
 
@@ -455,7 +453,6 @@ struct MetadataReviewQueueSheet: View {
     VStack(spacing: 0) {
       sheetHeader(
         "Review Queue", subtitle: "Resolve uncertain metadata matches.", symbol: "checklist")
-      Divider()
       if reviews.isEmpty {
         ContentUnavailableView(
           "Nothing to Review", systemImage: "checkmark.circle",

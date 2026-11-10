@@ -46,7 +46,6 @@ import SwiftUI
         Text(roundPreview ? "1:1" : ratio < 1 ? "2:3" : "16:9")
           .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
       }.padding(20)
-      Divider()
       HStack(alignment: .top, spacing: 16) {
         canvas
           .frame(minWidth: 390, minHeight: 330)

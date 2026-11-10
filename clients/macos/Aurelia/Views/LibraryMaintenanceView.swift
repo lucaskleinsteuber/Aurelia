@@ -64,8 +64,6 @@ struct LibraryHealthView: View {
       .padding(.horizontal, 20)
       .padding(.bottom, 16)
 
-      Divider()
-
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
           switch selectedTab {

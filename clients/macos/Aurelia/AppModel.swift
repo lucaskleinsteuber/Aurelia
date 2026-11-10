@@ -11,8 +11,12 @@ final class AppModel: ObservableObject {
   @Published var requestedPersonDetail: PersonSelection?
   @Published var preselectedCollectionItem: CatalogItemSummary?
   @Published var showingCollectionEditor = false
-  /// Movie Night shown over the library: a new night, or the one to join.
+  /// Movie Night over the whole window: a new night, or the one to join.
   @Published var movieNightLaunch: MovieNightLaunch?
+  /// Wrapped over the whole window: a year, or one month.
+  @Published var wrappedLaunch: WrappedLaunch?
+
+  func closeMovieNight() { movieNightLaunch = nil }
 
   func presentNewCollection(with item: CatalogItemSummary? = nil) {
     preselectedCollectionItem = item
@@ -503,6 +507,9 @@ final class AppModel: ObservableObject {
   }
   var supportsMovieNight: Bool { libraryCapabilities.contains(ServerFeatureNames.movieNight) }
   var supportsWrapped: Bool { libraryCapabilities.contains(ServerFeatureNames.yearWrapped) }
+  var supportsMonthlyWrapped: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.monthlyWrapped)
+  }
 
   func start() async {
     guard !hasStarted else { return }
@@ -2832,7 +2839,7 @@ final class AppModel: ObservableObject {
   func playMovieNightMatch(_ mediaId: UUID) {
     movieNightLaunch = nil
     Task { [weak self] in
-      // The sheet closes first, so the player opens over the library.
+      // Movie Night fades out first, so the player opens over the library.
       try? await Task.sleep(for: .milliseconds(400))
       guard let self, let detail = try? await self.catalogDetail(id: mediaId) else { return }
       self.startPlayback(item: detail.item)

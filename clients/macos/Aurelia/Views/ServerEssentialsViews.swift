@@ -319,7 +319,7 @@ struct ServerAdvancedDisclosure<Content: View>: View {
         .padding(20)
         .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .background(
         AureliaDesign.surface,
         in: RoundedRectangle(cornerRadius: AureliaDesign.cardRadius, style: .continuous)

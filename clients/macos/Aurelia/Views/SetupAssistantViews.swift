@@ -174,7 +174,7 @@ struct SetupIntroductionView: View {
               )
               .contentShape(Capsule())
           }
-          .buttonStyle(.plain)
+          .buttonStyle(AureliaPressableButtonStyle())
           .accessibilityAddTraits(selected ? .isSelected : [])
           .accessibilityIdentifier("setup-device-\(entry.device.rawValue)")
         }
@@ -277,7 +277,7 @@ struct SetupIntroductionView: View {
       }
       .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(AureliaPressableButtonStyle())
   }
 }
 

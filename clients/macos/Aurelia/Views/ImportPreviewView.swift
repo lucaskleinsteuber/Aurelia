@@ -100,7 +100,6 @@ struct ImportPreviewView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      Divider()
       if let summary {
         counts(summary.counts)
         controls

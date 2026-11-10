@@ -140,4 +140,5 @@ enum ServerFeatureNames {
   static let movieNight = "movie-night-v1"
   /// The year as slides with the server's lines.
   static let yearWrapped = "year-wrapped-v1"
+  static let monthlyWrapped = "monthly-wrapped-v1"
 }

@@ -62,7 +62,7 @@ devices and backups, scrub previews, Server Health and the server's own updates.
 | --- | --- |
 | General | Start screen, poster size, watched titles in rows, Reduce Motion, window and rest behavior |
 | Sidebar | Which pages appear in the sidebar and in which order |
-| Activity | Your watch history and statistics, and Wrapped: the year as slides (← → Space Esc) |
+| Activity | Your watch history and statistics, and Wrapped: the year, or last month from the 2nd, as slides over the whole window (← → Space Esc) |
 | Playback | Audio and subtitles, Automatic Resume, Cinema Mode, Dialogue Boost, Volume Leveling |
 | Library | Storage folders, scans, Library Health, import previews |
 | Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
@@ -125,7 +125,11 @@ accents and people talking over each other come out less well.
 Can't decide? **Movie Night** on Home lets everyone at home swipe through the same posters, on
 their phones, in a browser or here with the trackpad, the arrow keys or the buttons. The first
 title every voter likes shows as a ticket with **Play**. A Mac can also just show the lobby
-(**Just Watch on This Mac**). Closing the sheet leaves the night.
+(**Just Watch on This Mac**). Movie Night covers the whole window; ✕ or Esc leaves the night.
+
+Motion follows one set of curves (`AureliaMotion` in `Views/AureliaDesign.swift`): `press` for
+buttons and cards, `quick` for hover, `standard` for content that changes in place, `page` for
+pages and full-window layers. Reduce Motion turns each into a short fade.
 
 ## Cinema mode
 

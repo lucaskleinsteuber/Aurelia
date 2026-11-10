@@ -310,11 +310,14 @@ struct AppSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
       }
       .id(selectedCategory)
+      .transition(.opacity.combined(with: .offset(y: 10)))
       .scrollContentBackground(.hidden)
       .onChange(of: selectedCategory) {
         proxy.scrollTo("settings-top", anchor: .top)
       }
     }
+    .aureliaAnimation(AureliaMotion.page, value: selectedCategory)
+    .aureliaAnimation(AureliaMotion.standard, value: searchText.isEmpty)
   }
 
   @ViewBuilder

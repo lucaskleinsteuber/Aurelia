@@ -77,7 +77,7 @@ struct ProfilePicturePicker: View {
               .frame(width: 32, height: 32)
               .contentShape(Circle())
           }
-          .buttonStyle(.plain)
+          .buttonStyle(AureliaPressableButtonStyle())
           .help(symbol.capitalized)
           .accessibilityLabel("Picture \(symbol)")
           .accessibilityIdentifier("profile-picture-\(symbol)")
@@ -102,7 +102,7 @@ struct ProfilePicturePicker: View {
               .frame(width: 22, height: 22)
               .contentShape(Circle())
           }
-          .buttonStyle(.plain)
+          .buttonStyle(AureliaPressableButtonStyle())
           .help(candidate.capitalized)
           .accessibilityLabel("Color \(candidate)")
           .accessibilityIdentifier("profile-picture-color-\(candidate)")

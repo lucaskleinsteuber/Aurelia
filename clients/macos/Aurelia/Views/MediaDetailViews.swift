@@ -894,7 +894,7 @@ private struct DetailHero: View {
               .background(.ultraThinMaterial, in: Circle())
               .overlay { Circle().stroke(AureliaDesign.hairline, lineWidth: 1) }
           }
-          .buttonStyle(.plain).accessibilityLabel("Back")
+          .buttonStyle(AureliaPressableButtonStyle()).accessibilityLabel("Back")
           Spacer()
           HStack(spacing: 10) {
             AureliaIconMenu(symbol: "ellipsis", label: "More Actions") {

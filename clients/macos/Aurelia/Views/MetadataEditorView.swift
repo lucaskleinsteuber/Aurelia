@@ -123,7 +123,6 @@ struct MetadataEditorSheet: View {
   var body: some View {
     VStack(spacing: 0) {
       editorHeader
-      Divider()
       if draft.document != nil {
         ScrollView {
           editorSections

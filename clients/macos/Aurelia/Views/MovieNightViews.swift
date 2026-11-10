@@ -48,7 +48,7 @@ struct MovieNightHomeStrip: View {
       .background(AureliaDesign.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
       .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(AureliaPressableButtonStyle())
     .padding(.horizontal, AureliaDesign.pagePadding)
     .accessibilityIdentifier("home-movie-night")
     .task {
@@ -60,11 +60,11 @@ struct MovieNightHomeStrip: View {
   }
 }
 
-/// Movie Night in a sheet over the library: the lobby, the stack of posters to swipe with the
-/// trackpad, the arrow keys or the buttons, and the ticket for the match. Closing leaves the night.
-struct MovieNightSheet: View {
+/// Movie Night over the whole window: the lobby, the stack of posters to swipe with the
+/// trackpad, the arrow keys or the buttons, and the ticket for the match. Closing (✕ or Escape)
+/// leaves the night.
+struct MovieNightView: View {
   @EnvironmentObject private var model: AppModel
-  @Environment(\.dismiss) private var dismiss
   @StateObject private var session: MovieNightSession
   let joining: MovieNightSummary?
   @State private var started = false
@@ -76,21 +76,12 @@ struct MovieNightSheet: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      HStack {
-        Text("Movie Night").font(.headline)
-        Spacer()
-        Button("Leave") {
-          Task {
-            await session.leave()
-            dismiss()
-          }
-        }
-        .keyboardShortcut(.cancelAction)
-      }
-      .padding(.horizontal, 24)
-      .padding(.vertical, 14)
-      Divider()
+    ZStack(alignment: .topTrailing) {
+      RadialGradient(
+        colors: [Color(red: 0.17, green: 0.18, blue: 0.21), AureliaDesign.canvas],
+        center: .top, startRadius: 0, endRadius: 900
+      )
+      .ignoresSafeArea()
       ScrollView {
         VStack(alignment: .leading, spacing: 22) {
           if let error = session.errorText {
@@ -98,18 +89,41 @@ struct MovieNightSheet: View {
               Text(error)
               Spacer()
               Button { session.errorText = nil } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain).accessibilityLabel("Dismiss")
+                .buttonStyle(AureliaPressableButtonStyle()).accessibilityLabel("Dismiss")
             }
             .padding(12)
             .background(MovieNightPalette.nope.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
+            .transition(.move(edge: .top).combined(with: .opacity))
           }
           content
+            .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97)), removal: .opacity))
         }
-        .padding(28)
+        .aureliaAnimation(AureliaMotion.page, value: session.screen)
+        .frame(maxWidth: 760, alignment: .leading)
+        .padding(.horizontal, 48)
+        .padding(.top, 72)
+        .padding(.bottom, 48)
+        .frame(maxWidth: .infinity)
       }
+      .scrollIndicators(.hidden)
+      Button {
+        Task {
+          await session.leave()
+          model.closeMovieNight()
+        }
+      } label: {
+        Image(systemName: "xmark")
+          .font(.system(size: 15, weight: .bold))
+          .frame(width: 36, height: 36)
+          .background(.white.opacity(0.1), in: Circle())
+          .contentShape(Circle())
+      }
+      .buttonStyle(AureliaPressableButtonStyle())
+      .keyboardShortcut(.cancelAction)
+      .accessibilityLabel("Leave Movie Night")
+      .padding(.top, 18)
+      .padding(.trailing, 22)
     }
-    .frame(width: 620, height: 780)
-    .background(AureliaDesign.canvas)
     .task {
       guard !started else { return }
       started = true
@@ -145,7 +159,7 @@ struct MovieNightSheet: View {
   }
 
   private func people(_ state: MovieNightState, deckSize: Int = 0) -> some View {
-    VStack(spacing: 0) {
+    VStack(spacing: 8) {
       ForEach(state.members) { member in
         HStack(spacing: 12) {
           Text(String(member.name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
@@ -166,9 +180,12 @@ struct MovieNightSheet: View {
           }
         }
         .padding(.vertical, 9)
-        .overlay(alignment: .top) { Divider() }
+        .padding(.horizontal, 12)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .transition(.move(edge: .leading).combined(with: .opacity))
       }
     }
+    .aureliaAnimation(AureliaMotion.standard, value: state.members.map(\.id))
   }
 
   @ViewBuilder
@@ -363,7 +380,7 @@ private struct MovieNightStack: View {
         .overlay(Circle().stroke(lineWidth: 2))
         .contentShape(Circle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(AureliaPressableButtonStyle())
     .foregroundStyle(choice == .like ? MovieNightPalette.yes : MovieNightPalette.nope)
     .accessibilityLabel(choice == .like ? "Yes" : "Nope")
     .disabled(card == nil || flying)

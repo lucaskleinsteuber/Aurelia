@@ -14,7 +14,6 @@ struct ServerFolderPicker: View {
   var body: some View {
     VStack(spacing: 0) {
       header
-      Divider()
       folders
       Divider()
       HStack {
@@ -55,7 +54,7 @@ struct ServerFolderPicker: View {
         Image(systemName: "chevron.left")
           .frame(width: 24, height: 24)
       }
-      .buttonStyle(.plain)
+      .buttonStyle(AureliaPressableButtonStyle())
       .disabled(listing?.path == nil || isLoading)
       .accessibilityLabel("Up")
       .accessibilityIdentifier("server-folder-up")
@@ -115,7 +114,7 @@ struct ServerFolderPicker: View {
               .frame(minHeight: AureliaDesign.minimumControlSize)
               .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AureliaPressableButtonStyle())
             .disabled(isLoading)
             .accessibilityIdentifier("server-folder-\(folder.name)")
             Divider().padding(.leading, 50)
