@@ -16,6 +16,20 @@ public static class ServerFolderBrowser
         ["/proc", "/sys", "/dev", "/run", "/boot", "/etc", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/usr", "/var",
             "/tmp", "/snap", "/lost+found", "/opt", "/root", "/cdrom"];
 
+    // Of those, the ones that cannot be opened by typing their path either. /run keeps
+    // /run/media, where Arch and Fedora mount removable drives.
+    private static readonly string[] ClosedLinuxFolders =
+        ["/proc", "/sys", "/dev", "/boot", "/etc", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/usr", "/lost+found", "/root"];
+
+    /// <summary>Whether <paramref name="fullPath"/> is in a Linux system folder that never holds media.</summary>
+    internal static bool IsLinuxSystemFolder(string fullPath)
+    {
+        static bool Within(string path, string folder) =>
+            path == folder || path.StartsWith(folder + "/", StringComparison.Ordinal);
+        if (Within(fullPath, "/run")) return !Within(fullPath, "/run/media");
+        return ClosedLinuxFolders.Any(folder => Within(fullPath, folder));
+    }
+
     public static ServerFolderListing List(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return new(null, null, Places());
@@ -23,7 +37,7 @@ public static class ServerFolderBrowser
             throw new LibraryException("folder_path_invalid", "Choose a folder by its full path on the server.", StatusCodes.Status400BadRequest);
         var full = System.IO.Path.GetFullPath(path);
         var directory = new DirectoryInfo(full);
-        if (!directory.Exists || directory.LinkTarget is not null)
+        if (!directory.Exists || directory.LinkTarget is not null || (OperatingSystem.IsLinux() && IsLinuxSystemFolder(full)))
             throw new LibraryException("folder_not_found", "This folder is not available on the server.", StatusCodes.Status404NotFound);
         try
         {

@@ -6,6 +6,26 @@ namespace Aurelia.Server.Tests;
 
 public sealed class ServerFolderTests
 {
+    // The list under / leaves Linux's system folders out; typing their path must not open them
+    // either. Removable drives under /run/media stay reachable.
+    [Theory]
+    [InlineData("/etc", true)]
+    [InlineData("/etc/ssh", true)]
+    [InlineData("/proc/1", true)]
+    [InlineData("/sys", true)]
+    [InlineData("/root", true)]
+    [InlineData("/boot/efi", true)]
+    [InlineData("/usr/share", true)]
+    [InlineData("/run/user/1000", true)]
+    [InlineData("/run/media/viewer/Synthetic Drive", false)]
+    [InlineData("/run/media", false)]
+    [InlineData("/etcetera", false)]
+    [InlineData("/mnt/media", false)]
+    [InlineData("/srv/films", false)]
+    [InlineData("/", false)]
+    public void LinuxSystemFoldersCannotBeOpenedByTheirPath(string path, bool closed) =>
+        Assert.Equal(closed, Aurelia.Server.Services.ServerFolderBrowser.IsLinuxSystemFolder(path));
+
     [Fact]
     public async Task OwnersBrowseServerFoldersButNeverFilesLinksOrHiddenFolders()
     {
