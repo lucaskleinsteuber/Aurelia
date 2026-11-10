@@ -131,6 +131,7 @@ struct TVHomeView: View {
               queue: request.queue,
               seriesID: request.target.kind == .episode ? request.target.parentId : nil,
               preferencesStore: model.environment.preferences,
+              adaptiveStreaming: model.supportsAdaptiveStreaming,
               onClose: { playback = nil },
               onSessionFailure: { failure in
                 guard model.session?.sessionId == session.sessionId else { return }

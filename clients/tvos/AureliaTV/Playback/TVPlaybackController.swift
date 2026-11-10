@@ -60,6 +60,8 @@ final class TVPlaybackController: ObservableObject {
   private let seriesID: UUID?
   private var queue: [TVCatalogItem]
   private var preferences: TVPlaybackPreferences
+  /// Whether the server streams in several qualities, so the streaming quality setting applies.
+  private let adaptiveStreaming: Bool
   private let preferencesStore: TVPlaybackPreferencesStore
   private var sleepTask: Task<Void, Never>?
   private var advanceTask: Task<Void, Never>?
@@ -105,10 +107,12 @@ final class TVPlaybackController: ObservableObject {
     queue: [TVCatalogItem] = [], seriesID: UUID? = nil,
     preferences: TVPlaybackPreferences? = nil,
     preferencesStore: TVPlaybackPreferencesStore? = nil,
+    adaptiveStreaming: Bool = false,
     onClose: @escaping @MainActor () -> Void,
     onSessionFailure: @escaping @MainActor (Error) -> Void = { _ in },
     startOver: Bool = false
   ) {
+    self.adaptiveStreaming = adaptiveStreaming
     self.connection = connection
     self.session = session
     self.mediaID = mediaID
@@ -344,11 +348,13 @@ final class TVPlaybackController: ObservableObject {
 
   /// The profile's preferences with this series' own track choices.
   private var effectivePreferences: TVPlaybackPreferences {
-    preferences.applying(
+    var value = preferences.applying(
       seriesID.flatMap {
         preferencesStore.seriesChoice(
           seriesID: $0, serverID: connection.serverID, profileID: session.user.id)
       })
+    value.streamingQuality = value.streamingQuality.effective(serverSupports: adaptiveStreaming)
+    return value
   }
 
   private func persistPreferences() {
@@ -543,9 +549,12 @@ final class TVPlaybackController: ObservableObject {
         progressMessage = "Progress changed on another device. Its newer position has been kept."
       }
       let desiredRate = playbackRate
-      engine.applyPreferences(effectivePreferences)
+      let playing = effectivePreferences
+      engine.applyPreferences(playing)
       engine.playbackRate = desiredRate
-      engine.load(url: localURL, resumeAt: resumeAt ?? resumePosition, paused: !wantsPlayback)
+      engine.load(
+        url: playing.streamingQuality.playbackURL(for: localURL), resumeAt: resumeAt ?? resumePosition,
+        paused: !wantsPlayback)
       if let error = engine.audioProcessingError {
         fail(error)
         return

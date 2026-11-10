@@ -34,6 +34,11 @@ struct TVPlaybackSettingsView: View {
             value.volumeLeveling = Self.next(
               after: value.volumeLeveling, in: VolumeLeveling.allCases)
           }
+          if model.supportsAdaptiveStreaming {
+            row("Streaming Quality", value: value.streamingQuality.title, id: "settings-streaming-quality") {
+              value.streamingQuality = Self.next(after: value.streamingQuality, in: TVStreamingQuality.allCases)
+            }
+          }
           Spacer().frame(height: 18)
           row(
             "Default Playback Rate", value: String(format: "%gx", value.defaultPlaybackRate),

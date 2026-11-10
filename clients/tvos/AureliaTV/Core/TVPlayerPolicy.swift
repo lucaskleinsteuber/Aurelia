@@ -154,6 +154,27 @@ struct TVRelayRequest: Equatable, Sendable {
   let range: String?
   let ifRange: String?
 
+  /// A path and query of the server's HLS stream below the ticket, such as "hls/720p/3.m4s?audio=1".
+  var hlsPath: String? = nil
+
+  /// Only the server's HLS files are relayed: the master and a quality's playlist, init and segments,
+  /// with at most a sound track in the query.
+  static func isAllowedHLSPath(_ path: String) -> Bool {
+    path.range(
+      of: #"^hls/(master\.m3u8|[1-9][0-9]{2,3}p/(index\.m3u8|init\.mp4|[0-9]{1,6}\.m4s))(\?audio=[0-9]{1,4})?$"#,
+      options: .regularExpression) != nil
+  }
+
+  /// The server address for an HLS path below the ticket's stream address.
+  static func hlsURL(_ path: String, below source: URL) -> URL? {
+    guard isAllowedHLSPath(path), var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
+    else { return nil }
+    let parts = path.split(separator: "?", maxSplits: 1).map(String.init)
+    components.percentEncodedPath = components.percentEncodedPath + "/" + parts[0]
+    components.percentEncodedQuery = parts.count > 1 ? parts[1] : nil
+    return components.url
+  }
+
   static func parse(_ data: Data, secret: String) throws -> Self {
     guard data.count <= 32_768, let text = String(data: data, encoding: .utf8),
       text.hasSuffix("\r\n\r\n")
@@ -167,8 +188,13 @@ struct TVRelayRequest: Equatable, Sendable {
     let streamPrefix = "/stream/\(secret)"
     let subtitlePrefix = "/subtitles/\(secret)/"
     var subtitleIndex: Int?
+    var hlsPath: String?
     if parts[1] == Substring(streamPrefix) {
       subtitleIndex = nil
+    } else if parts[1].hasPrefix(streamPrefix + "/"),
+      isAllowedHLSPath(String(parts[1].dropFirst(streamPrefix.count + 1)))
+    {
+      hlsPath = String(parts[1].dropFirst(streamPrefix.count + 1))
     } else if parts[1].hasPrefix(subtitlePrefix) {
       let suffix = parts[1].dropFirst(subtitlePrefix.count)
       guard digits(suffix), let idx = Int(suffix) else { throw TVRelayRequestError.invalidRequest }
@@ -192,7 +218,7 @@ struct TVRelayRequest: Equatable, Sendable {
     else { throw TVRelayRequestError.invalidRequest }
     return Self(
       method: String(parts[0]), subtitleIndex: subtitleIndex, range: headers["range"],
-      ifRange: headers["if-range"])
+      ifRange: headers["if-range"], hlsPath: hlsPath)
   }
 
   private static func digits(_ value: Substring) -> Bool {

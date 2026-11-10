@@ -50,6 +50,8 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
   /// Softens loud scenes and lifts quiet dialogue.
   var dialogueBoost: DialogueBoost = .off
   var volumeLeveling: VolumeLeveling = .off
+  /// The original file, or the server's live conversion in a quality the connection carries.
+  var streamingQuality: TVStreamingQuality = .original
   /// Compatibility accessor for older code and the persisted Night Mode key.
   var nightMode: Bool {
     get { volumeLeveling != .off }
@@ -75,7 +77,7 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case automaticResume, automaticallyPlayNextEpisode, defaultPlaybackRate, controlsDelay
     case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode, dialogueBoost,
-      volumeLeveling
+      volumeLeveling, streamingQuality
   }
 
   init(from decoder: Decoder) throws {
@@ -95,6 +97,8 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
       try values.decodeIfPresent(VolumeLeveling.self, forKey: .volumeLeveling)
       ?? (legacy ? .standard : .off)
     dialogueBoost = try values.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost) ?? .off
+    streamingQuality =
+      (try? values.decodeIfPresent(TVStreamingQuality.self, forKey: .streamingQuality)) ?? .original
   }
 
   func encode(to encoder: Encoder) throws {
@@ -109,6 +113,7 @@ struct TVPlaybackPreferences: Codable, Equatable, Sendable {
     try values.encode(nightMode, forKey: .nightMode)
     try values.encode(dialogueBoost, forKey: .dialogueBoost)
     try values.encode(volumeLeveling, forKey: .volumeLeveling)
+    try values.encode(streamingQuality, forKey: .streamingQuality)
   }
 
   /// These preferences with a series' own track choices, where it has them.
@@ -198,5 +203,55 @@ final class TVPlaybackPreferencesStore {
 
   private func seriesKey(serverID: UUID, profileID: UUID) -> String {
     "tv.playback.seriesTracks.v1.\(serverID.uuidString).\(profileID.uuidString)"
+  }
+}
+
+/// Which stream the player opens: the original file, or the server's adaptive HLS stream,
+/// converted live in memory, in the best quality the connection carries or up to a fixed size.
+enum TVStreamingQuality: String, Codable, CaseIterable, Identifiable, Sendable {
+  case original
+  case automatic = "auto"
+  case p1080 = "1080p"
+  case p720 = "720p"
+  case p480 = "480p"
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .original: "Original"
+    case .automatic: "Automatic"
+    case .p1080: "Up to 1080p"
+    case .p720: "Up to 720p"
+    case .p480: "Up to 480p"
+    }
+  }
+
+  var maximumHeight: Int? {
+    switch self {
+    case .original, .automatic: nil
+    case .p1080: 1080
+    case .p720: 720
+    case .p480: 480
+    }
+  }
+
+  func effective(serverSupports: Bool) -> Self { serverSupports ? self : .original }
+
+  /// The relay's stream itself, or its HLS master playlist below it.
+  func playbackURL(for stream: URL) -> URL {
+    guard self != .original else { return stream }
+    return stream.appendingPathComponent("hls").appendingPathComponent("master.m3u8")
+  }
+
+  /// VLC's options: more buffer for HLS, and a fixed quality caps the size and keeps to the best below it.
+  var vlcOptions: [String] {
+    guard self != .original else { return [":network-caching=500"] }
+    var options = [":network-caching=1500"]
+    if let maximumHeight {
+      options.append(":adaptive-maxheight=\(maximumHeight)")
+      options.append(":adaptive-logic=highest")
+    }
+    return options
   }
 }

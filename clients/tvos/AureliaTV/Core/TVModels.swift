@@ -191,6 +191,8 @@ struct TVCapabilities: Codable, Equatable, Sendable {
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.
   var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
+  /// HLS in several qualities, converted live by the server.
+  var supportsAdaptiveStreaming: Bool { capabilities?.contains("adaptive-streaming-v1") == true }
 }
 
 struct TVUser: Codable, Equatable, Sendable {
