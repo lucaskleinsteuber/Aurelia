@@ -163,6 +163,13 @@ enum UpNextPolicy {
     return duration - position <= lead
   }
 
+  /// Next Episode in the credits counts the episode as watched: while the Up Next card shows or
+  /// in its last tenth. Earlier, skipping on keeps the position, so the episode can be resumed.
+  static func nextFinishesCurrent(position: Int64, duration: Int64, upNextShown: Bool) -> Bool {
+    guard duration > 0, position >= 0 else { return false }
+    return upNextShown || position >= duration - duration / 10
+  }
+
   static func seconds(position: Int64, duration: Int64) -> Int {
     Int((max(0, duration - position) + 999) / 1_000)
   }

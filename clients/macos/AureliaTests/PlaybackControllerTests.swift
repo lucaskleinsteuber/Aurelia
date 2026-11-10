@@ -777,10 +777,34 @@ final class PlaybackControllerTests: XCTestCase {
       try await Task.sleep(for: .milliseconds(5))
     }
     XCTAssertEqual(controller.presentation.mediaId, nextID)
-    // Manual navigation preserves the position; only the actual end marks an episode watched.
-    XCTAssertFalse(client.updates.contains { $0.finished })
+    // Next Episode in the credits counts the episode as watched, like its real end.
+    XCTAssertEqual(client.updates.last?.finished, true)
     XCTAssertEqual(client.updates.last?.position, 2_685_000)
     await controller.shutdown()
+  }
+
+  func testNextEpisodeEarlyKeepsThePositionAndInTheCreditsMarksItWatched() async throws {
+    for (position, watched) in [(Int64(1_350_000), false), (Int64(2_500_000), true)] {
+      let source = Self.source(position: 0, completed: false)
+      let nextID = UUID()
+      let client = FakePlaybackClient(source: source)
+      let engine = FakePlaybackEngine()
+      let controller = upNextController(engine: engine, client: client, nextID: nextID)
+      await controller.start()
+      // Halfway, or in the last tenth before the Up Next card shows.
+      engine.currentTimeMilliseconds = position
+      engine.onUpdate?()
+      XCTAssertNil(controller.upNext)
+      controller.playNextNow()
+      let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+      while controller.presentation.mediaId != nextID && ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(5))
+      }
+      XCTAssertEqual(controller.presentation.mediaId, nextID)
+      XCTAssertEqual(client.updates.last?.finished, watched)
+      XCTAssertEqual(client.updates.last?.position, position)
+      await controller.shutdown()
+    }
   }
 
   func testCancellingUpNextStopsAtTheEnd() async throws {

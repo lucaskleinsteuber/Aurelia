@@ -32,6 +32,9 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Mac (next version): a sleeping server is woken only by Continue, Wake Server or opening something, not by any click on "Aurelia Is Resting" (such as closing the window) or by moving the mouse while Aurelia looks for the server.
+- Mac (next version): marking a title watched or unwatched no longer shows "Reload the library to see it" when the library is already reloading because of that change.
+- Mac (next version): Next Episode in the credits (the last tenth of an episode or while Up Next shows) marks the episode watched; earlier it keeps the position as before.
 - Mac 2.3.2 (159): the pointer hides during the ad, the trailers and the curtain like during the film, and shows again when the mouse moves.
 - Mac 2.3.1 (157): the film's own trailers are left out of its pre-show on the Mac too, and the built-in server has the detail-page fix of Server 2.3.1.
 - Server 2.3.1 (152): opening a film or series no longer keeps loading. For a title with many pictures and a large cast, the server read every combination of picture and credit as one huge result, wrote gigabytes of temporary files and slowed the whole server down; it now reads pictures and cast separately.

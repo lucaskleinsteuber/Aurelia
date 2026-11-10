@@ -1075,7 +1075,8 @@ final class PlaybackController: ObservableObject {
     nextItemTask = Task { [weak self] in await self?.advance(to: next) }
   }
 
-  /// Manual navigation keeps the position being left; only a real input end marks it watched.
+  /// Manual navigation keeps the position being left, except Next Episode in the credits, which
+  /// marks the episode watched like its real end (see UpNextPolicy.nextFinishesCurrent).
   func playNextNow() {
     guard canPlayNext, let next = queuedItems.first else { return }
     navigateNow(to: next, backwards: false)
@@ -1092,6 +1093,10 @@ final class PlaybackController: ObservableObject {
   private func navigateNow(
     to item: PlaybackQueueItem, backwards: Bool, intent: PlaybackStartIntent = .play
   ) {
+    let finished =
+      !backwards
+      && UpNextPolicy.nextFinishesCurrent(
+        position: currentTimeMilliseconds, duration: durationMilliseconds, upNextShown: upNext != nil)
     naturalEndReached = false
     endHandled = true
     loadID = UUID()
@@ -1100,7 +1105,7 @@ final class PlaybackController: ObservableObject {
     isPlaying = false
     upNext = nil
     record(.ended)
-    enqueueProgressSave(isFinished: false)
+    enqueueProgressSave(isFinished: finished)
     nextItemTask = Task { [weak self] in
       await self?.advance(to: item, backwards: backwards, intent: intent)
     }
