@@ -131,6 +131,37 @@ public sealed class ProfilePersonalizationTests
             .AnyAsync(metadata => database.MediaMetadata.Any(other => other.MediaItemId == adult.Id)));
     }
 
+    // A shared collection's name tells what is in it. A profile that may see none of its titles
+    // does not see the collection either.
+    [Fact]
+    public async Task SharedCollectionsWithoutAVisibleTitleStayHiddenFromChildren()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var library = await LibraryAsync(factory);
+        var kids = await SeedAsync(factory, library, MediaKind.Movie, "Bright Meadow", "FSK 0");
+        var adult = await SeedAsync(factory, library, MediaKind.Movie, "Night Cellar", "FSK 18");
+        foreach (var (name, titles) in new[] { ("Cellar Marathon", new[] { adult.Id }), ("Family Evening", new[] { kids.Id, adult.Id }),
+                     ("Planned Evening", Array.Empty<Guid>()) })
+        {
+            using var created = await SendAsync(client, owner.Token, HttpMethod.Post, "/api/v1/collections",
+                new SaveCollectionRequest(name, titles, IsShared: true));
+            created.EnsureSuccessStatusCode();
+        }
+        var child = await CreateAsync(client, owner.Token, new CreateUserRequest("Mia", null, UserRole.User, ApiTestClient.TestPin, AgeLimit: 6));
+        var session = await ChildSessionAsync(client, child.Id);
+
+        var seen = await ReadAsync<List<CollectionSummary>>(await SendAsync(client, session, HttpMethod.Get, "/api/v1/catalog/collections"));
+        Assert.Equal(["Family Evening"], seen.Select(collection => collection.Name));
+        var family = seen[0];
+        Assert.Equal([kids.Id], family.Items.Select(item => item.Id));
+
+        // Whoever manages the collections still sees them all, also an empty one to fill.
+        var managed = await ReadAsync<List<CollectionSummary>>(await SendAsync(client, owner.Token, HttpMethod.Get, "/api/v1/catalog/collections"));
+        Assert.Equal(["Cellar Marathon", "Family Evening", "Planned Evening"], managed.Select(collection => collection.Name));
+    }
+
     [Fact]
     public async Task AgeLimitsAreValidatedAndReservedForViewingProfiles()
     {

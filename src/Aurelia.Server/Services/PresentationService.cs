@@ -385,10 +385,16 @@ public sealed class PresentationService(
     private async Task<IReadOnlyList<CollectionSummary>> CollectionsAsync(Guid userId, int offset, int limit, Guid? onlyId, CancellationToken cancellationToken)
     {
         ValidatePage(offset, limit);
-        var collections = await database.MediaCollections.AsNoTracking()
+        // A shared collection's name tells what is in it, so a profile that may see none of its
+        // titles (a children's profile, for example) does not get it. Administrators keep all of
+        // them to manage, also empty ones.
+        var candidates = database.MediaCollections.AsNoTracking()
             .Where(collection => (collection.UserId == null || collection.UserId == userId)
                 && (onlyId == null || collection.Id == onlyId)
-                && (collection.IsManual || collection.IsSmart || collection.Members.Count >= 2))
+                && (collection.IsManual || collection.IsSmart || collection.Members.Count >= 2));
+        if (!await IsAdminUserAsync(userId, cancellationToken))
+            candidates = candidates.Where(collection => collection.UserId != null || collection.IsSmart || collection.Members.Any());
+        var collections = await candidates
             .OrderBy(collection => collection.Name).ThenBy(collection => collection.Id).Skip(offset).Take(limit)
             .Select(collection => new
             {
