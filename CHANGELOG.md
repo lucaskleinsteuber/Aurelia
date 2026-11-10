@@ -28,6 +28,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Mac 2.4.1 (161): an update shows what it is doing. After Install and Restart, an "Updating Aurelia" window shows the download with its size and percentage and a Cancel button, then that Aurelia closes and reopens by itself; Settings › Updates shows the same bar and offers Install and Restart once an update is found.
 - Mac 2.2.0 (155): subtitles created from speech start when the words are said after a pause, instead of when the previous words ended.
 - Mac 2.3.1 (157): Cinema Mode's curtain opens onto the film itself: the film starts behind the curtain, which waits on the title until the picture moves and then gathers to the sides, instead of opening onto a dark stage. The curtain has velvet folds, a valance with tassels, a spotlight and a second fanfare.
 - Mac 2.3.1 (157): a trailer's film name stays on screen for the whole trailer, large for the first 20 seconds.

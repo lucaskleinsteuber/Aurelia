@@ -22,6 +22,10 @@ final class AppUpdater: ObservableObject {
   private static let logger = Logger(subsystem: "com.lucas.aurelia.media", category: "updates")
 
   @Published private(set) var state: State = .idle
+  /// The release being downloaded or installed, and how far its download is.
+  @Published private(set) var installingRelease: AppRelease?
+  @Published private(set) var progress: AppUpdateProgress?
+  private var installTask: Task<Void, Never>?
   /// "owner/name" baked in by build-macos-release.sh; builds from Xcode have none.
   let repository: String?
   let currentVersion: String
@@ -53,6 +57,29 @@ final class AppUpdater: ObservableObject {
 
   var canCheck: Bool { repository != nil }
 
+  var isBusy: Bool { state == .checking || state == .downloading || state == .installing }
+
+  /// Starts downloading and installing `release` and shows its progress window.
+  func startInstall(_ release: AppRelease) {
+    guard !isBusy else {
+      showProgress()
+      return
+    }
+    installTask = Task { await install(release) }
+  }
+
+  /// Stops the download; nothing is installed and the offer stays in Settings.
+  func cancelInstall() {
+    guard state == .downloading else { return }
+    installTask?.cancel()
+  }
+
+  /// Brings the "Updating Aurelia" window back while an update downloads or installs.
+  func showProgress() {
+    guard state == .downloading || state == .installing else { return }
+    AppUpdateProgressWindow.shared.show(updater: self)
+  }
+
   /// At launch, at most once a day; it speaks up only when there is news.
   func checkInBackgroundIfDue() {
     guard canCheck, AppUpdatePreferences.backgroundCheckIsDue(in: defaults, repository: repository)
@@ -62,7 +89,9 @@ final class AppUpdater: ObservableObject {
 
   /// Looks for a newer release; a check the user asked for always answers.
   func check(userInitiated: Bool) async {
-    guard state != .checking, state != .downloading, state != .installing else { return }
+    // Asking again while an update downloads shows how far it is instead of doing nothing.
+    if userInitiated { showProgress() }
+    guard !isBusy else { return }
     guard userInitiated || AppUpdatePreferences.checksAutomatically(in: defaults) else { return }
     guard let repository else {
       if userInitiated {
@@ -123,7 +152,7 @@ final class AppUpdater: ObservableObject {
     alert.addButton(withTitle: "Skip This Version")
     switch alert.runModal() {
     case .alertFirstButtonReturn:
-      Task { await install(release) }
+      startInstall(release)
     case .alertThirdButtonReturn:
       AppUpdatePreferences.skip(version: release.version, in: defaults)
     default:
@@ -133,16 +162,26 @@ final class AppUpdater: ObservableObject {
 
   /// Downloads and checks the release, then lets the helper replace the app after it quits.
   func install(_ release: AppRelease) async {
-    guard state != .checking, state != .downloading, state != .installing else { return }
+    guard !isBusy else { return }
     guard let repository else { return }
+    installingRelease = release
+    progress = AppUpdateProgress(received: 0, expected: release.downloadBytes)
     state = .downloading
+    AppUpdateProgressWindow.shared.show(updater: self)
     var downloadedImage: URL?
     var pendingRequest: MacUpdateInstallRequest?
     do {
       let folder = try Self.updatesDirectory()
+      let size = release.downloadBytes
       let destination = try await client.download(
-        release, repository: repository, currentBuild: currentBuild, folder: folder)
+        release, repository: repository, currentBuild: currentBuild, folder: folder,
+        progress: { received, expected in
+          Task { @MainActor in
+            AppUpdater.shared.reportDownload(received: received, expected: expected ?? size)
+          }
+        })
       downloadedImage = destination
+      try Task.checkCancellation()
 
       state = .installing
       let helper = Bundle.main.bundleURL
@@ -174,12 +213,26 @@ final class AppUpdater: ObservableObject {
       if let downloadedImage {
         try? FileManager.default.removeItem(at: downloadedImage.deletingLastPathComponent())
       }
+      AppUpdateProgressWindow.shared.close()
+      progress = nil
+      installingRelease = nil
+      // Cancel was pressed: the download is gone and the update is still on offer.
+      if Task.isCancelled || error is CancellationError {
+        state = .available(release)
+        return
+      }
       let message =
         (error as? AppUpdateError)?.message
         ?? "The update installer did not acknowledge the request. Aurelia has stayed open; try again."
       state = .failed(message)
       alert("Couldn't Install the Update", message)
     }
+  }
+
+  /// A later report never moves the bar backwards; reports after the download are ignored.
+  private func reportDownload(received: Int64, expected: Int64?) {
+    guard state == .downloading, received >= progress?.received ?? 0 else { return }
+    progress = AppUpdateProgress(received: received, expected: expected)
   }
 
   /// A folder the helper can read too: the App Group shared with it.

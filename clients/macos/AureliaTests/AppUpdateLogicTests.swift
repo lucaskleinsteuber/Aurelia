@@ -5,6 +5,49 @@ import Testing
 @testable import Aurelia
 
 struct AppUpdateLogicTests {
+  @Test func downloadProgressReadsAsSizeAndFraction() {
+    let half = AppUpdateProgress(received: 50_000_000, expected: 100_000_000)
+    #expect(half.fraction == 0.5)
+    #expect(half.text.contains(" of "))
+    let unknown = AppUpdateProgress(received: 5_000_000, expected: nil)
+    #expect(unknown.fraction == nil)
+    #expect(!unknown.text.contains(" of "))
+    #expect(AppUpdateProgress(received: 120, expected: 100).fraction == 1)
+  }
+
+  @Test func progressIsReportedInStepsAndAlwaysAtTheEnd() {
+    let size: Int64 = 100_000_000
+    #expect(!AppUpdateProgress.shouldReport(received: 100_000, lastReported: 0, expected: size))
+    #expect(AppUpdateProgress.shouldReport(received: 500_000, lastReported: 0, expected: size))
+    #expect(AppUpdateProgress.shouldReport(received: size, lastReported: size - 1, expected: size))
+    #expect(!AppUpdateProgress.shouldReport(received: size, lastReported: size, expected: size))
+    #expect(!AppUpdateProgress.shouldReport(received: 900_000, lastReported: 0, expected: nil))
+    #expect(AppUpdateProgress.shouldReport(received: 1_048_576, lastReported: 0, expected: nil))
+  }
+
+  @Test func theDownloadTellsHowMuchArrivedUpToTheLastByte() throws {
+    let size = 50_000_003
+    let reports = ReportedProgress()
+    var accumulator = try AppUpdateTransferAccumulator(
+      response: response(length: size), maximumBytes: Int64(size), write: { _ in },
+      progress: { received, expected in reports.add(received, expected) })
+    let chunk = Data(count: 65_536)
+    var sent = 0
+    while sent < size {
+      let part = chunk.prefix(min(chunk.count, size - sent))
+      try accumulator.consume(Data(part))
+      sent += part.count
+    }
+    _ = try accumulator.finish()
+    let values = reports.values
+    #expect(values.last?.received == Int64(size))
+    #expect(values.allSatisfy { $0.expected == Int64(size) })
+    #expect(values.map(\.received) == values.map(\.received).sorted())
+    // Every half percent at most, not every chunk.
+    #expect(values.count <= 201)
+    #expect(values.count < size / chunk.count)
+  }
+
   @Test func cachedNewReleaseRemainsAvailableAfter304() async throws {
     let transport = StubUpdateTransport(steps: [
       .tagged(releaseData(), "release-100"), .partialFailure(.notModified),
@@ -612,6 +655,18 @@ struct AppUpdateLogicTests {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     return root
   }
+}
+
+/// Collects progress reports; the accumulator calls it synchronously on the test's thread.
+private final class ReportedProgress: @unchecked Sendable {
+  private let lock = NSLock()
+  private var stored: [(received: Int64, expected: Int64?)] = []
+
+  func add(_ received: Int64, _ expected: Int64?) {
+    lock.withLock { stored.append((received, expected)) }
+  }
+
+  var values: [(received: Int64, expected: Int64?)] { lock.withLock { stored } }
 }
 
 private actor StubUpdateTransport: AppUpdateTransport {

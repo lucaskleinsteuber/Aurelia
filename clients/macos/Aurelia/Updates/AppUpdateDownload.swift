@@ -82,6 +82,20 @@ struct AppUpdateTransfer: Sendable {
 protocol AppUpdateTransport: Sendable {
   func transfer(_ request: URLRequest, maximumBytes: Int64, destination: URL?) async throws
     -> AppUpdateTransfer
+  /// The same, telling `progress` how much arrived; transports without progress just transfer.
+  func transfer(
+    _ request: URLRequest, maximumBytes: Int64, destination: URL?,
+    progress: AppUpdateProgressHandler?
+  ) async throws -> AppUpdateTransfer
+}
+
+extension AppUpdateTransport {
+  func transfer(
+    _ request: URLRequest, maximumBytes: Int64, destination: URL?,
+    progress: AppUpdateProgressHandler?
+  ) async throws -> AppUpdateTransfer {
+    try await transfer(request, maximumBytes: maximumBytes, destination: destination)
+  }
 }
 
 /// Holds at most one network chunk for a disk image; small JSON/checksum responses stay in memory.
@@ -95,8 +109,13 @@ struct AppUpdateTransferAccumulator {
   private var count: Int64 = 0
   private var prefix = Data()
   private let etag: String?
+  private let progress: AppUpdateProgressHandler?
+  private var reported: Int64 = 0
 
-  init(response: URLResponse, maximumBytes: Int64, write: ((Data) throws -> Void)? = nil) throws {
+  init(
+    response: URLResponse, maximumBytes: Int64, write: ((Data) throws -> Void)? = nil,
+    progress: AppUpdateProgressHandler? = nil
+  ) throws {
     guard let http = response as? HTTPURLResponse else { throw AppUpdateError.invalidResponse }
     if http.statusCode == 304 { throw AppUpdateError.notModified }
     if http.statusCode == 429
@@ -114,6 +133,7 @@ struct AppUpdateTransferAccumulator {
       response.expectedContentLength >= 0 && (encoding == nil || encoding == "identity")
       ? response.expectedContentLength : nil
     self.write = write
+    self.progress = progress
     self.etag = http.value(forHTTPHeaderField: "ETag")
   }
 
@@ -132,6 +152,12 @@ struct AppUpdateTransferAccumulator {
     }
     digest.update(data: chunk)
     if let write { try write(chunk) } else { data.append(chunk) }
+    if let progress,
+      AppUpdateProgress.shouldReport(received: count, lastReported: reported, expected: expectedBytes)
+    {
+      reported = count
+      progress(count, expectedBytes)
+    }
   }
 
   mutating func finish() throws -> AppUpdateTransfer {
@@ -174,6 +200,13 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
   func transfer(_ request: URLRequest, maximumBytes: Int64, destination: URL?) async throws
     -> AppUpdateTransfer
   {
+    try await transfer(request, maximumBytes: maximumBytes, destination: destination, progress: nil)
+  }
+
+  func transfer(
+    _ request: URLRequest, maximumBytes: Int64, destination: URL?,
+    progress: AppUpdateProgressHandler?
+  ) async throws -> AppUpdateTransfer {
     let configuration =
       sessionConfiguration
       ?? {
@@ -207,7 +240,7 @@ struct AppUpdateURLSessionTransport: AppUpdateTransport {
       let output = handle
       var accumulator = try AppUpdateTransferAccumulator(
         response: response, maximumBytes: maximumBytes,
-        write: output.map { file in { try file.write(contentsOf: $0) } })
+        write: output.map { file in { try file.write(contentsOf: $0) } }, progress: progress)
       var chunk = Data()
       chunk.reserveCapacity(65_536)
       for try await byte in bytes {
@@ -304,7 +337,8 @@ struct AppUpdateClient: Sendable {
   }
 
   func download(
-    _ release: AppRelease, repository: String, currentBuild: Int, folder: URL
+    _ release: AppRelease, repository: String, currentBuild: Int, folder: URL,
+    progress: AppUpdateProgressHandler? = nil
   ) async throws -> URL {
     guard let tag = AppUpdateLogic.parseTag(release.tag), tag.build == release.build,
       tag.version == release.version,
@@ -329,7 +363,7 @@ struct AppUpdateClient: Sendable {
       let destination = directory.appendingPathComponent(release.diskImageName)
       let image = try await transfer(
         release.diskImageURL, maximumBytes: 2 * 1_024 * 1_024 * 1_024,
-        destination: destination)
+        destination: destination, progress: progress)
       guard image.sha256 == expected else { throw AppUpdateError.checksumMismatch }
       complete = true
       return destination
@@ -340,7 +374,7 @@ struct AppUpdateClient: Sendable {
 
   private func transfer(
     _ url: URL, ifNoneMatch: String? = nil, maximumBytes: Int64,
-    destination: URL? = nil
+    destination: URL? = nil, progress: AppUpdateProgressHandler? = nil
   ) async throws -> AppUpdateTransfer {
     var request = URLRequest(
       url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
@@ -361,7 +395,7 @@ struct AppUpdateClient: Sendable {
     }
     do {
       return try await transport.transfer(
-        request, maximumBytes: maximumBytes, destination: destination)
+        request, maximumBytes: maximumBytes, destination: destination, progress: progress)
     } catch is CancellationError { throw CancellationError() } catch {
       throw AppUpdateError.classify(error)
     }

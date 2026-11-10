@@ -1163,6 +1163,21 @@ struct AppSettingsView: View {
           "Installed Version", value: "\(updater.currentVersion) (\(updater.currentBuild))")
         LabeledContent("Status", value: updateStatusText)
 
+        if updater.state == .downloading || updater.state == .installing {
+          AppUpdateProgressBar(updater: updater)
+          HStack {
+            Button("Show Progress Window") { updater.showProgress() }
+            if updater.state == .downloading {
+              Button("Cancel Download") { updater.cancelInstall() }
+                .accessibilityIdentifier("updates-cancel")
+            }
+          }
+        } else if case .available(let release) = updater.state {
+          Button("Install \(release.version) and Restart") { updater.startInstall(release) }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("updates-install")
+        }
+
         Toggle("Check for updates automatically", isOn: $automaticUpdateChecks)
           .accessibilityIdentifier("updates-automatic")
 
@@ -1177,10 +1192,7 @@ struct AppSettingsView: View {
         Button("Check for Updates…") {
           Task { await updater.check(userInitiated: true) }
         }
-        .disabled(
-          updater.state == .checking || updater.state == .downloading
-            || updater.state == .installing
-        )
+        .disabled(updater.isBusy)
         .accessibilityIdentifier("updates-check")
       }
       .toggleStyle(.switch)
@@ -1204,8 +1216,9 @@ struct AppSettingsView: View {
     case .checking: "Checking for updates…"
     case .upToDate: "Up to date"
     case .available(let release): "\(release.version) (\(release.build)) is available"
-    case .downloading: "Downloading update…"
-    case .installing: "Installing update…"
+    case .downloading:
+      "Downloading \(updater.installingRelease.map { "\($0.version) (\($0.build))" } ?? "update")…"
+    case .installing: "Installing… Aurelia will reopen by itself."
     case .failed(let message): message
     }
   }

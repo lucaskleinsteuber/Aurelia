@@ -54,6 +54,38 @@ struct AppUpdateCatalogCache: Codable, Sendable {
 }
 
 /// A GitHub release of this app that is newer than the one running.
+/// Told how many bytes of the disk image arrived and how many are expected (nil: unknown).
+typealias AppUpdateProgressHandler = @Sendable (_ received: Int64, _ expected: Int64?) -> Void
+
+/// How far an update download is, for the "Updating Aurelia" window and Settings › Updates.
+struct AppUpdateProgress: Equatable, Sendable {
+  let received: Int64
+  let expected: Int64?
+
+  /// 0…1, or nil when the size is unknown and the bar can only show that something happens.
+  var fraction: Double? {
+    guard let expected, expected > 0 else { return nil }
+    return min(1, max(0, Double(received) / Double(expected)))
+  }
+
+  /// "34.2 MB of 120.5 MB", or only what arrived when the size is unknown.
+  var text: String {
+    let arrived = ByteCountFormatter.string(fromByteCount: received, countStyle: .file)
+    guard let expected, expected > 0 else { return arrived }
+    return "\(arrived) of \(ByteCountFormatter.string(fromByteCount: expected, countStyle: .file))"
+  }
+
+  /// Whether a new amount is worth showing: every half percent (every megabyte without a size)
+  /// and always the last byte, so a fast download doesn't flood the main thread.
+  static func shouldReport(received: Int64, lastReported: Int64, expected: Int64?) -> Bool {
+    guard received > lastReported else { return false }
+    if let expected, expected > 0 {
+      return received >= expected || received - lastReported >= max(expected / 200, 65_536)
+    }
+    return received - lastReported >= 1_048_576
+  }
+}
+
 struct AppRelease: Equatable, Sendable {
   let tag: String
   let version: String

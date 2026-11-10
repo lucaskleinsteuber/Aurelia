@@ -140,6 +140,12 @@ also looks at launch when at least 24 hours have passed since its last successfu
 *Settings › Updates › Check for updates automatically* is on by default; turning it off stops
 background checks. *Check for Updates…* continues to work manually.
 
+Once an update is chosen (*Install and Restart* in the offer, or *Install … and Restart* in
+*Settings › Updates*), a small *Updating Aurelia* window shows the download with its size and
+percentage and a Cancel button, then that Aurelia closes and reopens by itself. Closing the
+window only hides it; *Check for Updates…* and Settings bring it back, and Settings shows the
+same bar.
+
 To protect GitHub's anonymous rate limit (60 requests per hour per IP), checks send the HTTP
 `If-None-Match` header with the cached release `ETag`. When no newer release is published,
 GitHub answers with `304 Not Modified`, which consumes minimal quota and completes instantly.
