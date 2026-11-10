@@ -290,10 +290,13 @@ party. The rules live in `js/watch-together.js` and are tested in
 
 **Movie Night** (`/movie-night`, from Home or the profile menu) lets anyone at home swipe on a
 phone, Android included: right for yes, left for nope, or the buttons and arrow keys. The match
-shows as a ticket with **Play**. A browser can also start a night as the lobby screen without
+shows as a ticket with **Play**. The page covers the whole window; ✕ returns to Home and keeps
+the browser in the night. A browser can also start a night as the lobby screen without
 swiping. The rules live in `js/movie-night.js`, the page in `js/movie-night-view.js`, tested in
 `tests/WebApp/movie-night.test.mjs`; see [Movie Night](CLIENT_PROTOCOL.md#movie-night).
 
-**Wrapped** starts from **Statistics › Year in Review**: the year as full-screen slides. Tapping
+**Wrapped** starts from **Statistics › Year in Review**: the year as full-screen slides; on a
+wide screen the poster stands beside the words. From the 2nd of a month, **Your October Wrapped
+is here** in Statistics (and on Home in that first week) plays last month the same way. Tapping
 the right or left side moves on or back, holding pauses, Escape closes, and with Reduce Motion
 the slides wait for a tap. `js/wrapped.js`, tested in `tests/WebApp/wrapped.test.mjs`.

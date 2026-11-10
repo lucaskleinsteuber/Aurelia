@@ -1309,10 +1309,16 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
   --mn-nope: #ff4d5a;
   --mn-paper: #f4ead3;
   --mn-ink: #2b1d12;
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 32px var(--gutter) 64px;
+  /* The whole window, over the sidebar: the room's attention belongs to the posters. */
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  overflow-y: auto;
+  background: radial-gradient(120% 80% at 50% 0%, #2a2d33 0%, var(--canvas) 60%);
 }
+.mn-inner { max-width: 720px; margin: 0 auto; padding: 72px var(--gutter) 64px; }
+.mn-close { position: fixed; z-index: 2; top: 16px; left: 16px; display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.mn-close:hover { background: rgba(255, 255, 255, 0.16); }
 .mn-heading h1 { font-size: clamp(30px, 6vw, 44px); font-weight: 800; letter-spacing: -0.02em; }
 .mn-heading p { margin-top: 8px; max-width: 34em; font-size: 16px; }
 .movie-night .button-row { margin-top: 24px; flex-wrap: wrap; }
@@ -1428,6 +1434,9 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .wrapped-launch:hover { transform: scale(1.01); }
 .wrapped-launch > span:nth-child(2) { display: flex; flex-direction: column; flex: 1; }
 .wrapped-launch-year { font-size: 30px; font-weight: 900; letter-spacing: -0.04em; color: #ffd84d; }
+.wrapped-launch.month { background: #ff4d88; color: #22000f; }
+.wrapped-launch.month .wrapped-launch-year { color: #fff; }
+.wrapped-launch.home { width: auto; margin: 0 var(--gutter) 16px; }
 
 .wrapped { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(0, 0, 0, 0.82); }
 .wrapped-frame {
@@ -1437,14 +1446,13 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(100vw, 460px);
-  height: min(100dvh, 860px);
+  width: 100vw;
+  height: 100dvh;
   overflow: hidden;
   background: var(--field);
   color: var(--ink);
   transition: background 0.35s ease;
 }
-@media (min-width: 520px) { .wrapped-frame { border-radius: 26px; } }
 .wrapped-frame > .spinner { margin: auto; }
 .wrapped-frame:focus { outline: none; }
 .wrapped-backdrop { position: absolute; inset: -40px; background-size: cover; background-position: center; filter: blur(40px) saturate(1.3); opacity: 0.32; mix-blend-mode: luminosity; }
@@ -1456,7 +1464,8 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .wrapped.held .wrapped-bars .now i { animation-play-state: paused; }
 @keyframes wrapped-run { to { width: 100%; } }
 .wrapped-close { position: absolute; z-index: 3; top: 26px; right: 12px; display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); }
-.wrapped-slide { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: center; flex: 1; gap: 14px; padding: 40px 28px 56px; }
+.wrapped-slide { position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: center; flex: 1; gap: 14px; width: 100%; max-width: 860px; margin: 0 auto; padding: 40px 28px 56px; }
+}
 .wrapped-eyebrow { font-size: 17px; font-weight: 700; opacity: 0.8; }
 .wrapped-headline { font-size: clamp(30px, 8.5vw, 44px); font-weight: 900; line-height: 1.02; letter-spacing: -0.03em; overflow-wrap: anywhere; }
 .wrapped-big { display: flex; flex-direction: column; }
@@ -1490,6 +1499,21 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .wrapped-tap.forward { flex: 2; }
 .wrapped-tap:focus-visible { outline-offset: -6px; }
 .wrapped-slide { pointer-events: none; }
+@media (min-width: 900px) {
+  .wrapped-slide { max-width: 1240px; padding: 48px 72px 72px; gap: 18px; }
+  /* The poster stands beside the words instead of above them. */
+  .wrapped-slide:has(.wrapped-poster) { padding-right: calc(120px + min(28vw, 360px)); }
+  .wrapped-eyebrow { font-size: 22px; }
+  .wrapped-headline { font-size: clamp(44px, 5.4vw, 76px); }
+  .wrapped-number { font-size: clamp(160px, 24vh, 280px); }
+  .wrapped-unit { font-size: 34px; }
+  .wrapped-detail { font-size: 22px; }
+  .wrapped-sticker { font-size: 24px; padding: 14px 22px; }
+  .wrapped-poster { position: absolute; top: 50%; right: 72px; width: min(28vw, 360px); transform: translateY(-50%) rotate(3deg); }
+  .wrapped-slide:has(.wrapped-posters) { padding-right: calc(120px + min(30vw, 400px)); }
+  .wrapped-posters { position: absolute; top: 50%; right: 72px; width: min(30vw, 400px); transform: translateY(-50%) rotate(2deg); }
+  .wrapped-posters.count-1 { width: min(22vw, 300px); }
+  .wrapped-facts { font-size: 20px; gap: 10px 24px; }
 
 @media (prefers-reduced-motion: reduce) {
   .mn-card, .wrapped-frame { transition: none; }

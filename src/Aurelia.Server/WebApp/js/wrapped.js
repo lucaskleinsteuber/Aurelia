@@ -39,12 +39,29 @@ export function stepFrom(index, count, forward) {
   return Math.max(0, index - 1);
 }
 
-/** Opens the year over the page. `artworkUrl(image, width)` makes picture addresses. */
-export async function openWrapped({ api, year, artworkUrl }) {
+export const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+  "September", "October", "November", "December"];
+
+/** The newest month whose Wrapped is ready: last month from the 2nd on, else the one before. */
+export function readyMonth(today = new Date()) {
+  const first = new Date(today.getFullYear(), today.getMonth() - (today.getDate() >= 2 ? 1 : 2), 1);
+  return { year: first.getFullYear(), month: first.getMonth() + 1, name: MONTHS[first.getMonth()] };
+}
+
+/** Home shows the new month in its first week, from the 2nd to the 8th. */
+export function monthIsNew(today = new Date()) {
+  return today.getDate() >= 2 && today.getDate() <= 8;
+}
+
+/**
+ * Opens a year, or with `month` one month, over the whole window. `artworkUrl(image, width)`
+ * makes picture addresses.
+ */
+export async function openWrapped({ api, year, month = null, artworkUrl }) {
   const reduce = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
   const opener = document.activeElement;
   const frame = h("div", { class: "wrapped-frame" }, h("div", { class: "spinner visible" }));
-  const overlay = h("div", { class: "wrapped", role: "dialog", "aria-modal": "true", "aria-label": `Your ${year} Wrapped` }, frame);
+  const overlay = h("div", { class: "wrapped", role: "dialog", "aria-modal": "true", "aria-label": month ? `Your ${MONTHS[month - 1]} Wrapped` : `Your ${year} Wrapped` }, frame);
   document.body.append(overlay);
   document.body.classList.add("playing");
 
@@ -77,7 +94,7 @@ export async function openWrapped({ api, year, artworkUrl }) {
   overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
 
   try {
-    slides = (await api.wrapped(year))?.slides ?? [];
+    slides = (await api.wrapped(year, month))?.slides ?? [];
   } catch (error) {
     clear(frame);
     frame.append(h("div", { class: "wrapped-slide" },

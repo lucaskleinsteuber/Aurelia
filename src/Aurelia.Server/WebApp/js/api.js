@@ -138,7 +138,9 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
     clearHistory: () => request("/api/v1/history", { method: "DELETE" }),
     statistics: (options = {}) => request("/api/v1/statistics", options),
     yearInReview: (year, options = {}) => request(`/api/v1/statistics/year/${id(year)}`, options),
-    wrapped: (year, options = {}) => request(`/api/v1/statistics/year/${id(year)}/wrapped`, options),
+    wrapped: (year, month = null, options = {}) => request(month
+      ? `/api/v1/statistics/year/${id(year)}/month/${id(month)}/wrapped`
+      : `/api/v1/statistics/year/${id(year)}/wrapped`, options),
     healthDuplicates: (parameters = { offset: 0, limit: 50 }, options = {}) => request(`/api/v1/library/health/duplicates?${new URLSearchParams(parameters)}`, options),
     healthOffline: (parameters = { days: 30, offset: 0, limit: 50 }, options = {}) => request(`/api/v1/library/health/offline?${new URLSearchParams(parameters)}`, options),
     healthUnmatched: (parameters = { offset: 0, limit: 50 }, options = {}) => request(`/api/v1/library/health/unmatched?${new URLSearchParams(parameters)}`, options),

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ACCENTS, accentFor, countTarget, countValue, stepFrom } from "../../src/Aurelia.Server/WebApp/js/wrapped.js";
+import { ACCENTS, accentFor, countTarget, countValue, stepFrom, readyMonth, monthIsNew } from "../../src/Aurelia.Server/WebApp/js/wrapped.js";
 
 // Wrapped's rules in the browser; the slides themselves come from the server.
 test("every color the server names has a field and readable ink", () => {
@@ -25,4 +25,15 @@ test("tapping moves through the slides and past the last one closes", () => {
   assert.equal(stepFrom(2, 3, true), null);
   assert.equal(stepFrom(0, 3, false), 0);
   assert.equal(stepFrom(2, 3, false), 1);
+});
+
+test("a month is ready from the 2nd of the next month, and new on Home for a week", () => {
+  assert.deepEqual(readyMonth(new Date(2026, 10, 2)), { year: 2026, month: 10, name: "October" });
+  assert.deepEqual(readyMonth(new Date(2026, 10, 1)), { year: 2026, month: 9, name: "September" });
+  assert.deepEqual(readyMonth(new Date(2027, 0, 5)), { year: 2026, month: 12, name: "December" });
+  assert.deepEqual(readyMonth(new Date(2027, 0, 1)), { year: 2026, month: 11, name: "November" });
+  assert.equal(monthIsNew(new Date(2026, 10, 1)), false);
+  assert.equal(monthIsNew(new Date(2026, 10, 2)), true);
+  assert.equal(monthIsNew(new Date(2026, 10, 8)), true);
+  assert.equal(monthIsNew(new Date(2026, 10, 9)), false);
 });

@@ -8,7 +8,7 @@ import * as logic from "./logic.js";
 import { PROFILE_SYMBOL_PATHS } from "./profile-symbols.js";
 import { createWatchTogether } from "./watch-together.js";
 import { createMovieNightView } from "./movie-night-view.js";
-import { openWrapped } from "./wrapped.js";
+import { openWrapped, readyMonth, monthIsNew } from "./wrapped.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { createSettings } from "./settings.js";
@@ -731,7 +731,7 @@ async function homeScreen() {
   if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
   if (!hero && sections.length === 0)
     return emptyState("search", "Nothing Here Yet", "Your library is empty or this profile has no titles. Add a library folder in Aurelia on your Mac.");
-  return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, movieNight.homeStrip(), sections));
+  return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, monthIsNew() ? monthlyWrappedLaunch({ compact: true }) : null, movieNight.homeStrip(), sections));
 }
 
 function heroBanner(item) {
@@ -1375,12 +1375,22 @@ async function statisticsScreen() {
 
   container.append(
     summary,
+    monthlyWrappedLaunch(),
     highlights,
     weeklySection ?? "",
     ranking("Most Watched", "Series count with all their episodes.", stats.topTitles) ?? "",
     ranking("Favorite Genres", "By the time you spent with them.", stats.topGenres) ?? "",
     yearSection ?? "");
   return container;
+}
+
+/** "Play your October Wrapped": the newest ready month, in Statistics and in its first week on Home. */
+function monthlyWrappedLaunch({ compact = false } = {}) {
+  const ready = readyMonth();
+  return h("button", { class: `wrapped-launch month${compact ? " home" : ""}`, onclick: () => openWrapped({ api, year: ready.year, month: ready.month, artworkUrl: logic.artworkUrl }) },
+    h("span", { class: "wrapped-launch-year" }, ready.name.slice(0, 3)),
+    h("span", {}, h("strong", {}, `Your ${ready.name} Wrapped is here`), h("span", { class: "small" }, "Last month in slides. It's worse than you think.")),
+    icon("play", { size: 18 }));
 }
 
 function aboutSection(detail) {

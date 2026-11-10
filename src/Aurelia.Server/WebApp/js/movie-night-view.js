@@ -36,12 +36,16 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
     clear(root);
     const current = ensureSession();
     const state = current.state;
+    // The page covers the whole window; closing it keeps this browser in the night.
+    root.append(h("button", { class: "mn-close", "aria-label": "Close Movie Night", onclick: () => navigate({ name: "home" }) }, icon("close", { size: 18 })));
+    const inner = h("div", { class: "mn-inner" });
+    root.append(inner);
     if (current.error) {
-      root.append(h("div", { class: "mn-error", role: "alert" }, h("span", {}, current.error),
+      inner.append(h("div", { class: "mn-error", role: "alert" }, h("span", {}, current.error),
         h("button", { class: "icon-button", "aria-label": "Dismiss", onclick: () => current.clearError() }, icon("close", { size: 16 }))));
     }
     const view = screenOf(state, current.remaining.length);
-    root.append({
+    inner.append({
       intro, lobby, swipe, waiting, match: result, "no-match": result,
     }[view](current, state));
   }
