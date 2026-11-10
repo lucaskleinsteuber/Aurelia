@@ -69,3 +69,22 @@ public sealed class MediaItem
 
     public List<MediaCollectionMember> CollectionMemberships { get; set; } = [];
 }
+
+/// <summary>
+/// Where a title sits in the catalog, read from the MediaItems table without the access filter.
+/// Only the access filters use it (see AureliaDbContext); it is mapped as a view and changes no table.
+/// </summary>
+public sealed class MediaItemPlacement
+{
+    public Guid Id { get; set; }
+    public Guid? ParentId { get; set; }
+    public Guid LibraryRootId { get; set; }
+}
+
+/// <summary>A title's age ratings from the MediaMetadata table, without the access filter, for the access filters.</summary>
+public sealed class MediaItemRating
+{
+    public Guid MediaItemId { get; set; }
+    public string? ManualContentRating { get; set; }
+    public string? ProviderContentRating { get; set; }
+}

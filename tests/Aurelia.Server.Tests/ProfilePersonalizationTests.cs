@@ -105,6 +105,32 @@ public sealed class ProfilePersonalizationTests
             Assert.Equal(HttpStatusCode.OK, unlimited.StatusCode);
     }
 
+    // The access filters themselves read titles without filtering. That must not switch off the
+    // filtering of the titles, progress or collection members a query reads after the first one.
+    [Fact]
+    public async Task EveryPartOfAQueryIsLimitedToTheProfilesTitles()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var library = await LibraryAsync(factory);
+        var kids = await SeedAsync(factory, library, MediaKind.Movie, "Bright Meadow", "FSK 0");
+        var adult = await SeedAsync(factory, library, MediaKind.Movie, "Night Cellar", "FSK 18");
+        var child = await CreateAsync(client, owner.Token, new CreateUserRequest("Mia", null, UserRole.User, ApiTestClient.TestPin, AgeLimit: 6));
+        using var scope = factory.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        database.AccessUserId = child.Id;
+        database.AccessMode = ProfileAccessMode.EntireLibrary;
+        database.AccessAgeLimit = 6;
+
+        Assert.Equal([1], await database.MediaItems.Where(item => item.Id == kids.Id)
+            .Select(item => database.MediaItems.Count()).ToListAsync());
+        Assert.Equal([0], await database.MediaItems.Where(item => item.Id == kids.Id)
+            .Select(item => database.MediaItems.Count(other => other.Id == adult.Id)).ToListAsync());
+        Assert.False(await database.MediaMetadata.Where(metadata => metadata.MediaItemId == kids.Id)
+            .AnyAsync(metadata => database.MediaMetadata.Any(other => other.MediaItemId == adult.Id)));
+    }
+
     [Fact]
     public async Task AgeLimitsAreValidatedAndReservedForViewingProfiles()
     {

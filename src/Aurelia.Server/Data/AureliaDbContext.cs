@@ -61,6 +61,9 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
 
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
+    // Read only by the access filters below, which must see titles without filtering them.
+    private DbSet<MediaItemPlacement> MediaItemPlacements => Set<MediaItemPlacement>();
+    private DbSet<MediaItemRating> MediaItemRatings => Set<MediaItemRating>();
     public DbSet<MediaCredit> MediaCredits => Set<MediaCredit>();
     public DbSet<ArtworkAsset> ArtworkAssets => Set<ArtworkAsset>();
     public DbSet<MetadataReview> MetadataReviews => Set<MetadataReview>();
@@ -275,23 +278,37 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.Property(item => item.State).HasMaxLength(32);
             entity.Property(item => item.Error).HasMaxLength(512);
         });
+        // The filters read titles through MediaItemPlacements and MediaItemRatings, which have no
+        // filter of their own. IgnoreQueryFilters would do the same, but EF Core then drops every
+        // filter for the rest of the query, also where the query reads titles a second time.
+        modelBuilder.Entity<MediaItemPlacement>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView("MediaItems");
+        });
+        modelBuilder.Entity<MediaItemRating>(entity =>
+        {
+            entity.HasNoKey();
+            entity.ToView("MediaMetadata");
+        });
         modelBuilder.Entity<LibraryRoot>().HasQueryFilter(library => AccessUserId == null || AccessAllLibraries
             || (AccessMode == ProfileAccessMode.LegacyLibraries && UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == library.Id))
-            || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId && grant.MediaItem.LibraryRootId == library.Id)));
+            || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId
+                && MediaItemPlacements.Any(granted => granted.Id == grant.MediaItemId && granted.LibraryRootId == library.Id))));
         modelBuilder.Entity<MediaItem>().HasQueryFilter(item => AccessUserId == null || AccessWholeCatalog
             || (AccessMode == ProfileAccessMode.LegacyLibraries && UserLibraryGrants.Any(grant => grant.UserId == AccessUserId && grant.LibraryRootId == item.LibraryRootId))
             || (AccessMode == ProfileAccessMode.SelectedTitles && UserTitleGrants.Any(grant => grant.UserId == AccessUserId
                 && (grant.MediaItemId == item.Id || grant.MediaItemId == item.ParentId
-                    || MediaItems.IgnoreQueryFilters().Any(parent => parent.Id == item.ParentId
-                        && (parent.ParentId == grant.MediaItemId || MediaItems.IgnoreQueryFilters().Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId))))))
+                    || MediaItemPlacements.Any(parent => parent.Id == item.ParentId
+                        && (parent.ParentId == grant.MediaItemId || MediaItemPlacements.Any(grandparent => grandparent.Id == parent.ParentId && grandparent.ParentId == grant.MediaItemId))))))
             // A children's profile: its film or series (episodes and seasons follow it) is allowed anyway, or not
             // hidden and rated for the profile's age. Titles without a rating stay hidden.
-            || (AccessAgeLimited && MediaItems.IgnoreQueryFilters().Any(top => top.ParentId == null
+            || (AccessAgeLimited && MediaItemPlacements.Any(top => top.ParentId == null
                 && (top.Id == item.Id || top.Id == item.ParentId
-                    || MediaItems.IgnoreQueryFilters().Any(parent => parent.Id == item.ParentId && parent.ParentId == top.Id))
+                    || MediaItemPlacements.Any(parent => parent.Id == item.ParentId && parent.ParentId == top.Id))
                 && (UserTitleRules.Any(rule => rule.UserId == AccessUserId && rule.MediaItemId == top.Id && rule.Allowed)
                     || (!UserTitleRules.Any(rule => rule.UserId == AccessUserId && rule.MediaItemId == top.Id && !rule.Allowed)
-                        && MediaMetadata.IgnoreQueryFilters().Any(metadata => metadata.MediaItemId == top.Id
+                        && MediaItemRatings.Any(metadata => metadata.MediaItemId == top.Id
                             && AccessAllowedRatings.Contains(metadata.ManualContentRating ?? metadata.ProviderContentRating)))))));
         modelBuilder.Entity<LibraryScan>().HasQueryFilter(scan => AccessUserId == null || AccessWholeCatalog
             || LibraryRoots.Any(root => root.Id == scan.LibraryRootId));
