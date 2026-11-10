@@ -11,6 +11,7 @@ import { createMovieNightView } from "./movie-night-view.js";
 import { openWrapped, readyMonth, monthIsNew } from "./wrapped.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
+import { ADAPTIVE_FEATURE } from "./hls-logic.js";
 import { createSettings } from "./settings.js";
 import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
 
@@ -1568,6 +1569,7 @@ async function playTitle(item, seasons, { intent = "play" } = {}) {
       seasons, onGoToSeries: (id) => { closePlayer(); navigate({ name: "title", id }); },
     })),
     canConvert: Boolean(state.server?.capabilities?.includes(LIVE_FEATURE)),
+    canStreamAdaptive: Boolean(state.server?.capabilities?.includes(ADAPTIVE_FEATURE)),
     canScrubPreview: Boolean(state.server?.capabilities?.includes("scrub-previews-v1") || state.server?.capabilities?.includes(LIVE_FEATURE)),
     together: { session: () => state.watchParty, start: (current) => startWatchTogether(current), leave: () => leaveWatchTogether() },
   });

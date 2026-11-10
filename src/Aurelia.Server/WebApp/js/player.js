@@ -16,6 +16,8 @@ import {
 import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
+import { HlsSource } from "./hls.js";
+import { QUALITY_KEY, normalizeQuality, qualityLabel } from "./hls-logic.js";
 import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtitleLabel, subtitleUrl, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
 
 const SAVE_INTERVAL = 10_000;
@@ -88,8 +90,9 @@ export class Player {
    * @param {(error: ApiError) => void} [options.onSessionEnded]
    * @param {string} [options.preferenceScope] server/profile identity for private track choices
    * @param {boolean} [options.canConvert]  the server reports live conversion
+   * @param {boolean} [options.canStreamAdaptive]  the server streams in several qualities over HLS
    */
-  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, canConvert = false, canScrubPreview = canConvert, preferenceScope, together }) {
+  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
     this.api = api;
     // Watch Together: { session(), start(player), leave() } from the app, or undefined.
     this.together = together;
@@ -104,6 +107,8 @@ export class Player {
     this.onClose = onClose;
     this.onSessionEnded = onSessionEnded;
     this.canConvert = canConvert && liveSupported();
+    this.canStreamAdaptive = this.canConvert && Boolean(canStreamAdaptive);
+    this.quality = this.canStreamAdaptive ? readQuality() : "original";
     this.canScrubPreview = Boolean(canScrubPreview);
     this.preferences = loadPreferences();
     this.trackChoices = createTrackChoices({ scope: preferenceScope, item });
@@ -141,9 +146,11 @@ export class Player {
     this.sleepButton = this.menuButton("Sleep Timer", icon("moon", { size: 18 }), () => this.sleepMenu());
     this.notesButton = this.menuButton("Scene Notes", icon("bookmark", { size: 18 }), () => this.notesPanel());
     this.togetherButton = this.menuButton("Watch Together", icon("people", { size: 18 }), () => this.togetherMenu());
+    this.qualityLabel = h("span", { class: "rate-label" }, this.quality === "original" ? "Orig" : this.quality === "auto" ? "Auto" : this.quality);
+    this.qualityButton = this.menuButton("Streaming Quality", this.qualityLabel, () => this.qualityMenu());
     this.top = h("div", { class: "player-top" }, this.backButton,
-      h("div", { class: "player-menus glass" }, this.rateButton, this.audioButton, this.subtitleButton, this.sleepButton, this.notesButton,
-        this.together ? this.togetherButton : null));
+      h("div", { class: "player-menus glass" }, this.rateButton, this.canStreamAdaptive ? this.qualityButton : null, this.audioButton,
+        this.subtitleButton, this.sleepButton, this.notesButton, this.together ? this.togetherButton : null));
 
     // Middle: back, play and forward in one capsule.
     this.playButton = h("button", { class: "transport-play", "aria-label": "Play", onclick: () => this.toggle() }, icon("play", { size: 22 }));
@@ -246,7 +253,7 @@ export class Player {
     this.scheduleRenewal();
     this.loadNotes();
     void this.updateEpisodeButtons();
-    if (this.canConvert && !triesDirectPlay(this.source.contentType)) {
+    if (this.canConvert && (!triesDirectPlay(this.source.contentType) || this.quality !== "original")) {
       const at = this.resumeAt;
       this.resumeAt = 0;
       await this.startLive(at);
@@ -323,6 +330,30 @@ export class Player {
       return;
     }
     this.embeddedSubtitles = plan.subtitleTracks ?? [];
+    // A picture the server has to encode anyway comes in the quality the connection carries.
+    if (this.canStreamAdaptive && (this.quality !== "original" || plan.video === "h264")) {
+      this.live = new HlsSource({
+        video: this.video,
+        plan,
+        streamPath: this.source.streamPath,
+        audio: track?.index ?? null,
+        quality: this.quality === "original" ? "auto" : this.quality,
+        onFailure: (status, code) => this.liveFailed(status, code),
+        onVariant: (variants, current) => this.showVariant(variants, current),
+      });
+      try {
+        await this.live.open(at);
+        if (this.closed) return;
+        this.restoreTrackChoices();
+        await this.play();
+        return;
+      } catch {
+        // The server or this browser can't stream qualities after all: the plain live stream plays.
+        this.live.destroy();
+        this.live = null;
+        if (this.closed) return;
+      }
+    }
     this.live = new LiveSource({
       video: this.video,
       plan,
@@ -759,6 +790,47 @@ export class Player {
         },
       }, h("span", { class: "check-mark" }, option.selected ? icon("check", { size: 15 }) : null), option.title);
     });
+  }
+
+  showVariant(variants, current) {
+    this.variants = variants;
+    if (this.quality === "original" || this.quality === "auto") this.qualityLabel.textContent = current ? `Auto ${current.id}` : "Auto";
+    else this.qualityLabel.textContent = this.quality;
+  }
+
+  qualityMenu() {
+    const variants = this.variants ?? [];
+    const choices = ["original", "auto", ...variants.map((variant) => variant.id)];
+    this.openPopover(this.qualityButton, this.menuItems(choices.map((choice) => ({
+      title: choice === "original" ? "Original (no conversion when possible)" : qualityLabel(choice, variants),
+      selected: this.quality === choice,
+      action: () => this.chooseQuality(choice),
+    }))));
+  }
+
+  async chooseQuality(quality) {
+    if (quality === this.quality || this.closed) return;
+    const previous = this.quality;
+    this.quality = quality;
+    writeQuality(quality);
+    this.qualityLabel.textContent = quality === "original" ? "Orig" : quality === "auto" ? "Auto" : quality;
+    // Within adaptive streaming the next segment changes; to or from the original, playback starts again here.
+    if (this.live instanceof HlsSource && quality !== "original") {
+      this.live.setQuality(quality);
+      return;
+    }
+    if (previous === quality || !this.source) return;
+    const position = this.video.currentTime;
+    const paused = this.video.paused;
+    this.live?.destroy();
+    this.live = null;
+    if (quality === "original" && triesDirectPlay(this.source.contentType)) {
+      this.video.src = this.source.streamPath;
+      this.video.addEventListener("loadedmetadata", () => { this.video.currentTime = position; }, { once: true });
+    } else {
+      await this.startLive(position);
+    }
+    if (!paused && !this.closed) await this.play();
   }
 
   rateMenu() {
@@ -1226,5 +1298,21 @@ export class Player {
     this.element.remove();
     document.body.classList.remove("playing");
     this.onClose?.();
+  }
+}
+
+function readQuality() {
+  try {
+    return normalizeQuality(globalThis.localStorage?.getItem(QUALITY_KEY));
+  } catch {
+    return "original";
+  }
+}
+
+function writeQuality(quality) {
+  try {
+    globalThis.localStorage?.setItem(QUALITY_KEY, quality);
+  } catch {
+    // Without storage the choice lasts for this title.
   }
 }
