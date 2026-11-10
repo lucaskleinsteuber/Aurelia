@@ -47,6 +47,10 @@ third installs it. Reinstalling later replaces only the app; its server connecti
    (on a Linux server: `aurelia pair`) and type the 8-digit code on the Apple TV.
 4. Choose your profile and enter its PIN.
 
+Settings › Playback › **Streaming Quality** (shown when the server offers adaptive streaming)
+plays the server's live conversion in the quality the connection carries instead of the original
+file, for a slow network. Original stays the default.
+
 ## Using the remote
 
 | Press | Does |

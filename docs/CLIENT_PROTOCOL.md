@@ -200,8 +200,9 @@ segment and no temporary file.
    the key frame at or before that point). To seek outside what has arrived, close the stream
    and open a new one at the target. A stream counts against the device's stream limit like a
    direct one and ends with its ticket, session or profile. The server runs at most three
-   conversions at once, at most one of them re-encoding the picture, and answers
-   `429 conversion_busy` with `Retry-After` beyond that.
+   conversions at once, at most one of them re-encoding the picture on the processor (three
+   on a video chip, see [Video chips](#video-chips)), and answers `429 conversion_busy` with
+   `Retry-After` beyond that.
 3. An embedded or sidecar text track is read with `GET {streamPath}/subtitles/{index}` under the same
    ticket, session and profile rules. Track indices `0..999` refer to embedded subtitle tracks; indices
    `1000+` refer to sidecar subtitle tracks discovered next to the video or in `Subs/` or `Subtitles/`
@@ -219,6 +220,52 @@ The server detects a usable mapper when discovering ffmpeg: native perceptual `s
 in FFmpeg 9, or the older `zscale` plus `tonemap` filters. If neither is present, a request that
 needs HDR picture re-encoding returns `422 hdr_conversion_unavailable`; original picture
 copying remains available. Picture conversion beyond 1080p is not part of `live-conversion-v1`.
+
+### Video chips
+
+On Linux the server looks for a video chip when it finds ffmpeg, in this order: Nvidia
+(`h264_nvenc`), Intel Quick Sync (`h264_qsv`) and VA-API (`h264_vaapi`, Intel and AMD) on the
+render nodes `/dev/dri/renderD128` onwards. A chip counts only when ffmpeg lists its encoder and
+a one-second encode of an invented test picture to ffmpeg's null output succeeds; it then also
+decodes when ffmpeg offers its decoder (`cuda` or `vaapi`) and falls back to the processor per
+title by itself. When a chip fails before the first byte of a conversion, that title is
+converted with `libx264` instead and the chip rests for ten minutes. `Aurelia:HardwareEncoding`
+is `auto` (default), `off`, `nvenc`, `qsv` or `vaapi`; `Aurelia:MaximumVideoConversions`
+overrides the limit of one picture encode at a time on the processor and three on a chip. The
+Mac app's server uses Apple's VideoToolbox as before.
+
+`GET /api/v1/server/transcoding` (owner) reports `available`, `encoder` (`nvenc`, `qsv`,
+`vaapi`, `videotoolbox` or `libx264`), `encoderName`, `device`, `hardwareDecoding`,
+`hardwareResting`, `runningConversions`, `videoLimit`, the running HLS `sessions` (`title`,
+`quality`, `encoder`, `speed` against real time, `converting`) and a `hint`: one plain next
+step when the computer has a chip the server cannot use (a missing VA-API driver, the `render`
+group, `/dev/dri` not passed into a container, Nvidia's driver).
+
+## Adaptive streaming (HLS)
+
+Servers that report `adaptive-streaming-v1` (only when their ffmpeg can encode pictures) also
+stream a title over HLS in several qualities, converted live. Every request carries a playback
+ticket like a direct stream and is checked against its session and profile; the segments are
+kept in memory only, for as long as someone plays them, and are never written anywhere.
+
+- `GET {streamPath}/hls/master.m3u8?audio=<index>` lists the qualities, best first, each with
+  `BANDWIDTH` (peak), `AVERAGE-BANDWIDTH`, `RESOLUTION` and `CODECS`. They are 1080p (8 Mbit/s),
+  720p (4), 480p (1.8) and 360p (0.9), never larger than the original, the best one at most
+  about the original's bitrate; a smaller original is offered once at its own size. Sound is
+  stereo AAC of the chosen track (default: the file's default track). Addresses are relative.
+- `GET {streamPath}/hls/<quality>/index.m3u8` is a video-on-demand playlist of 4-second segments
+  over the whole title (`#EXT-X-PLAYLIST-TYPE:VOD`, `#EXT-X-MAP` to `init.mp4`).
+- `GET {streamPath}/hls/<quality>/init.mp4` and `…/<n>.m4s` are the fragmented MP4 init segment
+  and media segments. Segment `n` starts with a key frame at `4n` seconds of title time and
+  keeps the title's own timestamps, so qualities can be switched between any two segments.
+
+A session per profile session, title, quality and sound track runs one ffmpeg that converts
+ahead of the player (up to 15 segments or 96 MB) and pauses there. A segment it has not reached
+starts it again at that segment (a seek). Another quality of the same title makes the first one
+stop converting. A session ends a minute after its last request, or at once with its user,
+profile session or title; at most six run at a time (`429 conversion_busy` beyond that). A
+title without a known length answers `422 stream_length_unknown`, a quality the title does not
+have `404 stream_quality_not_found`.
 
 ## Subtitle downloads
 

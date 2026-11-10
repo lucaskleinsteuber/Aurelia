@@ -5,6 +5,11 @@ holiday, connect your device to home through a **VPN** (a private, encrypted tun
 needs no change for this: with the VPN on, the apps reach the server at the same address as at home
 and still check its fingerprint.
 
+**Tip:** a home upload is often slower than a film's bitrate. With a server that converts live,
+set **Streaming Quality** to Automatic in the app's playback settings (or pick a quality in the
+browser player's quality menu) while you are away; the server then sends the quality your
+connection carries, and Original plays the file itself again at home.
+
 ## Why a VPN and not an open port
 
 **Do not open Aurelia's port in your router.** The server answers only devices from home networks

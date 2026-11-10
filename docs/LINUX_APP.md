@@ -296,7 +296,10 @@ applies (the series' own first, then the last choice, then the default language)
 sidecar subtitle files are added. Progress is saved every 15 seconds and at every pause, seek, end
 and close, with the revision it builds on (`Playback/ProgressOutbox.cs`; saves that could not be
 sent wait in `$XDG_STATE_HOME/aurelia-desktop/pending-progress.json`). A conflict offers to keep
-this computer's position. Other behavior:
+this computer's position. With **Settings › Playback › Streaming Quality** set to Automatic or a
+cap such as "Up to 720p" (shown when the server offers adaptive streaming), VLC plays the server's
+HLS stream through the same relay instead of the original file; the relay passes only the
+server's playlists and segments. Server management shows the server's **Video Conversion**. Other behavior:
 
 - Up Next appears for titles of at least five minutes in the last seconds of the countdown, and
   the next episode starts at the natural end unless the card was cancelled.

@@ -40,6 +40,13 @@ its screens are its own:
   the same posters (right for yes, left for nope, or the buttons), and the first title all
   voters like shows as a ticket with Play. Closing it leaves the night.
 
+## Streaming quality
+
+**Settings › Playback › Streaming Quality** (shown when the server offers adaptive streaming)
+plays the server's live conversion instead of the original file: Automatic picks the best
+quality the connection carries, "Up to 720p" and the like cap it. That helps on mobile data over
+a VPN. The original stays the default; the stream goes through the same local relay.
+
 ## Downloads and watching offline
 
 For a train ride or a holiday, keep titles on the iPhone or iPad and watch them without the

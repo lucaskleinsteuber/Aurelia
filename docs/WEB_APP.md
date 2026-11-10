@@ -66,6 +66,12 @@ little computing time. Only what the browser can't decode is converted:
 - **Picture** is only re-encoded when the browser can't show it at all, for example HEVC in
   Firefox or an old AVI. It then becomes H.264 at up to 1080p, one title at a time.
 
+With a server that reports adaptive streaming, a picture that has to be re-encoded comes over
+HLS in the quality the connection carries (1080p down to 360p), switching between segments as
+the measured speed changes. The **quality menu** in the player (next to the rate) offers
+Original, Automatic and each quality; anything but Original also converts files the browser
+could open itself, which helps on a slow connection. The choice is remembered in the browser.
+
 HDR pictures (PQ or HLG) that need re-encoding are mapped to SDR BT.709 so their brightness
 and colors fit the browser's output. A picture the browser can already decode stays unchanged;
 SDR pictures do not incur HDR conversion work. The server keeps the output within 1080p and

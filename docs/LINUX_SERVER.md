@@ -14,6 +14,13 @@ network. Media files are only read, never changed.
   to play MKV, AVI and other files the server converts live (see
   [Aurelia in a web browser](WEB_APP.md#watching)). Without it the server works as before and
   browsers play only files they open themselves.
+- Optional: a video chip. Converting for browsers and for apps set to a streaming quality is much
+  faster on Nvidia (NVENC), Intel (Quick Sync or VA-API) or AMD (VA-API) graphics. The installer
+  adds the server's user to the `render` and `video` groups and, with `apt`, the VA-API driver
+  for Intel or AMD graphics (`intel-media-va-driver`, `i965-va-driver` for Intel before 2015,
+  `mesa-va-drivers`); Nvidia needs its own driver. The server finds the chip by itself;
+  **Settings › Server › Video Conversion** shows which one it uses or what is missing.
+  `Aurelia:HardwareEncoding=off` in the server's settings turns it off.
 - A network cable is recommended for the server.
 
 ## Installing and updating

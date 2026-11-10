@@ -27,6 +27,13 @@ endpoint or a client can be checked against it.
   address.
 - **Media is only read.** No request changes, moves or deletes a file in a media folder.
   Removing a title from the library removes its catalog entry; the file stays.
+- **Converted video stays in memory.** Live conversion and adaptive streaming (HLS) run ffmpeg
+  without a shell on the file the server checked and opened; it writes only to its standard
+  output. HLS segments live in the server's memory, capped per session, for as long as someone
+  plays them. Every playlist and segment request checks its playback ticket, session and
+  profile, and a session ends with its user, profile session or title. A video chip is opened
+  only through `/dev/dri` render nodes (or Nvidia's driver) after a test encode of an invented
+  picture.
 - **Diagnostics are redacted.** Tokens, passwords, PINs and full paths do not appear in
   logs, Server Health or exported diagnostics.
 

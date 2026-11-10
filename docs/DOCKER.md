@@ -51,4 +51,10 @@ stay in the `aurelia-data` volume. `--build-arg AURELIA_BUILD=135` builds a part
   settings in the Mac app are for the Linux package. Stop the container to save power.
 - **Not as root.** The container starts as root only to hand the data folder to the user
   `aurelia`; the server itself always runs as `aurelia`.
+- **Video chip.** Converting for browsers and for apps set to a streaming quality is much faster on
+  a video chip. For Intel or AMD graphics, uncomment `devices` and `group_add` in `compose.yaml`
+  and put in the number `getent group render | cut -d: -f3` prints; the image already has the
+  VA-API drivers. For an Nvidia card, install the NVIDIA Container Toolkit and add
+  `gpus: all` to the service. **Settings → Server → Video Conversion** in the browser app shows
+  which encoder the server uses and, if a chip isn't usable, what is missing.
 - **Away from home**, see [Watching away from home](REMOTE_ACCESS.md).
