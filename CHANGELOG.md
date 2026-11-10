@@ -15,6 +15,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server 2.5.0 (154): Wrapped for each month, ready on the 2nd of the following month, with slides and lines made for a month.
+- Mac 2.5.0 (162), iPhone & iPad 2.3.0 (19), Linux 2.1.0 (26) and browser (Server 2.5.0): "Your October Wrapped is here" in Statistics plays last month as slides, and shows on Home in the first week of a month.
 - Server 2.4.0 (153): Movie Night. Everyone at home swipes through the same deck of films (or films and shows) from the library; the first title every voter likes is the match. A deck only holds titles every member's profile may open, nobody sees who said no, and the result comes with cheeky awards such as "Hardest to please" (friendly ones when a children's profile takes part).
 - Server 2.4.0 (153): Wrapped, a profile's year as slides: hours, series and movie of the year, favorite genre, the pet that goes with it, the latest press of play, the biggest binge and more, each with a cheeky line that stays the same for that year (friendly ones for children's profiles).
 - Mac 2.4.0 (160), iPhone & iPad 2.2.0 (18), Linux 2.1.0 (26) and browser (Server 2.4.0): Movie Night from Home with a poster stack to swipe (touch, trackpad, arrow keys or buttons) and the match as a ticket with Play; Wrapped from Statistics as full-screen story slides.
@@ -28,6 +30,9 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Server 2.5.0 (154): Wrapped drops the pet slide, its lines are cheekier, and the genre slide says what share of the time it took.
+- Mac 2.5.0 (162), Linux 2.1.0 (26) and browser (Server 2.5.0): Movie Night and Wrapped cover the whole window instead of a sheet or a phone-sized frame; in a wide window Wrapped puts the poster beside the words.
+- Mac 2.5.0 (162): one set of motion curves everywhere. Settings pages, the activity tabs, Watchlist, Collections, History and Statistics glide in, buttons with their own look give way under the pointer, and the app fades between starting, profiles and the library. Sheets lose the line under their heading.
 - Mac 2.4.1 (161): an update shows what it is doing. After Install and Restart, an "Updating Aurelia" window shows the download with its size and percentage and a Cancel button, then that Aurelia closes and reopens by itself; Settings › Updates shows the same bar and offers Install and Restart once an update is found.
 - Mac 2.2.0 (155): subtitles created from speech start when the words are said after a pause, instead of when the previous words ended.
 - Mac 2.3.1 (157): Cinema Mode's curtain opens onto the film itself: the film starts behind the curtain, which waits on the title until the picture moves and then gathers to the sides, instead of opening onto a dark stage. The curtain has velvet folds, a valance with tassels, a spotlight and a second fanfare.
