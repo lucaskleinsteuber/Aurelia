@@ -7,6 +7,8 @@ import { createCatalogView } from "./catalog-view.js";
 import * as logic from "./logic.js";
 import { PROFILE_SYMBOL_PATHS } from "./profile-symbols.js";
 import { createWatchTogether } from "./watch-together.js";
+import { createMovieNightView } from "./movie-night-view.js";
+import { openWrapped } from "./wrapped.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { createSettings } from "./settings.js";
@@ -100,6 +102,14 @@ const catalog = createCatalogView({ api, navigate, posterCard, collectionCard, e
   replaceRoute: (route) => { state.route = route; history.replaceState(null, "", logic.routePath(route)); },
   onChanged: () => renderRoute({ quiet: true }),
   showsTitle: (item) => visibleTitles([item], loadGeneral(), { keepWatched: true }).length > 0,
+});
+
+const movieNight = createMovieNightView({
+  api,
+  artwork: (...args) => artwork(...args),
+  playTitle: (item) => playTitle(item),
+  navigate: (route) => navigate(route),
+  deviceName: logic.deviceName(navigator.userAgent, navigator.maxTouchPoints),
 });
 
 function settingsScreen(route) {
@@ -423,6 +433,7 @@ async function signOut() {
   settings.closeEditors();
   stopSync();
   closePlayer();
+  await movieNight.leave();
   try {
     await api.signOut();
   } catch {
@@ -437,6 +448,7 @@ async function switchProfile() {
   settings.closeEditors();
   stopSync();
   closePlayer();
+  await movieNight.leave();
   try {
     await api.endProfile();
   } catch {
@@ -521,6 +533,7 @@ function shell(content) {
     h("div", { class: "menu-header" }, profilePicture(state.profile), h("span", {}, logic.shownName(state.profile))),
     h("a", { class: "menu-item", href: "/history", "data-route": true }, "Watch History"),
     h("a", { class: "menu-item", href: "/statistics", "data-route": true }, "Statistics"),
+    h("a", { class: "menu-item", href: "/movie-night", "data-route": true }, "Movie Night"),
     h("a", { class: "menu-item", href: "/settings", "data-route": true }, "Settings…"),
     h("button", { class: "menu-item", onclick: () => showShortcutsDialog() }, "Keyboard Shortcuts"),
     h("button", { class: "menu-item", onclick: () => switchProfile() }, "Switch Profile"),
@@ -582,7 +595,7 @@ async function renderRoute({ quiet = false, restoreScroll = false } = {}) {
   }
   isRenderingRoute = false;
   if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
-  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings" }[route.name];
+  const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night" }[route.name];
   if (label) document.title = `${label} · Aurelia`;
 }
 
@@ -695,6 +708,8 @@ function screenFor(route, token) {
       return historyScreen();
     case "statistics":
       return statisticsScreen();
+    case "movie-night":
+      return movieNight.screen();
     default:
       return homeScreen();
   }
@@ -716,7 +731,7 @@ async function homeScreen() {
   if (home.collections?.length) sections.push(rail("Collections", home.collections.map((collection) => collectionCard(collection)), "poster", "/collections"));
   if (!hero && sections.length === 0)
     return emptyState("search", "Nothing Here Yet", "Your library is empty or this profile has no titles. Add a library folder in Aurelia on your Mac.");
-  return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, sections));
+  return h("div", { class: "home" }, hero ? heroBanner(hero) : null, h("div", { class: "sections" }, movieNight.homeStrip(), sections));
 }
 
 function heroBanner(item) {
@@ -1335,6 +1350,10 @@ async function statisticsScreen() {
         ? new Date(`${review.busiestDay}T12:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
         : null;
       yearContainer.append(
+        h("button", { class: "wrapped-launch", onclick: () => openWrapped({ api, year, artworkUrl: logic.artworkUrl }) },
+          h("span", { class: "wrapped-launch-year" }, String(year)),
+          h("span", {}, h("strong", {}, `Play your ${year} Wrapped`), h("span", { class: "small" }, "Your year in slides, with commentary nobody asked for.")),
+          icon("play", { size: 18 })),
         h("div", { class: "stat-cards-grid" },
           statCard("Watch Time", logic.watchHours(review.totalHoursWatched)),
           statCard("Titles", String(review.titlesWatched ?? 0)),

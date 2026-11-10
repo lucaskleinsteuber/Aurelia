@@ -285,3 +285,15 @@ for parties others started for it or one of its episodes. Play, pause, jumps and
 then apply to everyone, a short notice says who did what, and closing the player leaves the
 party. The rules live in `js/watch-together.js` and are tested in
 `tests/WebApp/watch-together.test.mjs`; see [Watch Together](CLIENT_PROTOCOL.md#watch-together).
+
+## Movie Night and Wrapped
+
+**Movie Night** (`/movie-night`, from Home or the profile menu) lets anyone at home swipe on a
+phone, Android included: right for yes, left for nope, or the buttons and arrow keys. The match
+shows as a ticket with **Play**. A browser can also start a night as the lobby screen without
+swiping. The rules live in `js/movie-night.js`, the page in `js/movie-night-view.js`, tested in
+`tests/WebApp/movie-night.test.mjs`; see [Movie Night](CLIENT_PROTOCOL.md#movie-night).
+
+**Wrapped** starts from **Statistics › Year in Review**: the year as full-screen slides. Tapping
+the right or left side moves on or back, holding pauses, Escape closes, and with Reduce Motion
+the slides wait for a tap. `js/wrapped.js`, tested in `tests/WebApp/wrapped.test.mjs`.
