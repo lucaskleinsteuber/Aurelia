@@ -258,6 +258,9 @@ sign_sums
 touch /var/lib/aurelia/update-check-requested
 update --from-app >/dev/null
 [ ! -e /var/lib/aurelia/update-check-requested ] || fail "the check request from the app stayed"
+mkdir /var/lib/aurelia/update-check-requested
+update --from-app >/dev/null
+[ ! -e /var/lib/aurelia/update-check-requested ] || fail "a check request left as a folder stayed"
 grep -Fx 'STATE=idle' "$status" >/dev/null && grep -Fx "NEWEST_BUILD=$next_build" "$status" >/dev/null \
   || fail "the app is not told about the newer release"
 [ "$(cat /opt/aurelia/VERSION)" = "$before" ] || fail "a check requested in the app changed the installation"
