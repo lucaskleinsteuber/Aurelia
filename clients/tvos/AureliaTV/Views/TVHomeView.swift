@@ -9,6 +9,8 @@ struct TVHomeView: View {
   @State private var launching = false
   @State private var detailItem: TVHomeDetail?
   @State private var unavailable: TVCatalogItem?
+  @State private var movieNight: TVMovieNightLaunch?
+  @State private var movieNights: [TVMovieNightSummary] = []
   /// The server returns at most this many items in Home's catalog shelves.
   private static let shelfLimit = 30
 
@@ -29,6 +31,30 @@ struct TVHomeView: View {
     }.padding(.horizontal, TVDesign.pagePadding)
   }
 
+  /// Movie Night: this Apple TV becomes the screen everyone looks at while the phones swipe.
+  private var movieNightRow: some View {
+    VStack(alignment: .leading, spacing: 20) {
+      Text("Movie Night").font(.system(size: 34, weight: .bold))
+      HStack(spacing: 26) {
+        Button {
+          movieNight = TVMovieNightLaunch(joining: nil)
+        } label: {
+          Label("Can't Decide? Start Movie Night", systemImage: "rectangle.stack.fill")
+        }
+        .buttonStyle(TVButtonStyle())
+        .accessibilityIdentifier("home-movie-night")
+        ForEach(movieNights) { night in
+          Button {
+            movieNight = TVMovieNightLaunch(joining: night)
+          } label: {
+            Label("Show \(night.hostName)'s Movie Night", systemImage: "person.3.fill")
+          }
+          .buttonStyle(TVButtonStyle())
+        }
+      }.focusSection()
+    }.padding(.horizontal, TVDesign.pagePadding)
+  }
+
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 54) {
@@ -40,6 +66,7 @@ struct TVHomeView: View {
               .padding(.horizontal, TVDesign.pagePadding).padding(.top, 170)
           }
           if !model.watchParties.isEmpty { watchTogether }
+          if model.supportsMovieNight { movieNightRow }
           // Same order as the Mac Home page.
           shelf("Continue Watching", items: home.continueWatching, section: .continueWatching)
           if model.supportsWatchlist && !model.watchlistItems.isEmpty {
@@ -73,6 +100,9 @@ struct TVHomeView: View {
       // Parties others start appear on Home within a few seconds.
       while !Task.isCancelled {
         await model.refreshWatchParties()
+        if model.supportsMovieNight, let api = model.client {
+          movieNights = (try? await api.movieNights()) ?? movieNights
+        }
         try? await Task.sleep(for: .seconds(15))
       }
     }
@@ -111,7 +141,22 @@ struct TVHomeView: View {
         }
       }
     )
-    .onChange(of: model.session?.sessionId) { _, _ in playback = nil }
+    .fullScreenCover(item: $movieNight) { launch in
+      if let api = model.client {
+        TVMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) { mediaID in
+          Task {
+            // The match plays the way Home plays anything, once Movie Night has closed.
+            try? await Task.sleep(for: .milliseconds(700))
+            if let item = try? await model.client?.summary(id: mediaID) { play(item, fromMovieNight: true) }
+          }
+        }
+        .environmentObject(model)
+      }
+    }
+    .onChange(of: model.session?.sessionId) { _, _ in
+      playback = nil
+      movieNight = nil
+    }
     .onChange(of: model.remoteStopRequests) { _, _ in playback = nil }
     .onChange(of: model.remotePlaybackItem) { _, item in
       guard let item else { return }
@@ -144,9 +189,10 @@ struct TVHomeView: View {
   }
 
   /// Continue Watching starts playback right away from the server's resume target.
-  private func play(_ item: TVCatalogItem) {
-    // Offline titles stay reachable in Continue Watching; selecting one explains why.
-    guard item.isPlayable else {
+  private func play(_ item: TVCatalogItem, fromMovieNight: Bool = false) {
+    // Offline titles stay reachable in Continue Watching; selecting one explains why. A show
+    // from Movie Night is not playable itself; its plan picks the episode.
+    guard item.isPlayable || (fromMovieNight && item.kind == .series) else {
       unavailable = item
       return
     }
@@ -593,4 +639,10 @@ private struct TVHomePlayback: Identifiable {
   let queue: [TVCatalogItem]
   let title: String
   var id: UUID { target.id }
+}
+
+/// Opens Movie Night: a new night, or the one to show.
+struct TVMovieNightLaunch: Identifiable {
+  let id = UUID()
+  let joining: TVMovieNightSummary?
 }

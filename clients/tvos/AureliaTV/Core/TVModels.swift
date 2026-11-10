@@ -189,6 +189,8 @@ struct TVCapabilities: Codable, Equatable, Sendable {
   }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
+  /// Movie Night: the household swipes one deck until everyone likes a title.
+  var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }
 }
 
 struct TVUser: Codable, Equatable, Sendable {

@@ -62,6 +62,11 @@ third installs it. Reinstalling later replaces only the app; its server connecti
 The player remembers audio and subtitle choices for each series and offers Up Next, a sleep
 timer, Dialogue Boost and Volume Leveling.
 
+**Movie Night** on Home turns the Apple TV into the screen everyone looks at: it shows who
+joined from their phones, how far each has swiped, and the match as a ticket with Play already
+selected, so one click starts it. The remote can swipe too (**Swipe with the Remote**). Back
+leaves the night.
+
 ## When the server is off
 
 The Apple TV shows *The Server Is Off* and sends a Wake-on-LAN packet to the server's last

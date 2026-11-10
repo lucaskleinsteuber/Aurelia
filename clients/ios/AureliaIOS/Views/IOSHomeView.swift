@@ -164,10 +164,11 @@ struct IOSHomeView: View {
     .fullScreenCover(item: $movieNight) { launch in
       if let api = model.client {
         IOSMovieNightView(api: api, deviceName: model.deviceName, joining: launch.joining) { mediaID in
-          guard let api = model.client else { return }
           Task {
-            // The match plays the way Home plays anything: the plan picks the episode for a show.
-            if let item = try? await api.summary(id: mediaID) { play(item, fromMovieNight: true) }
+            // The match plays the way Home plays anything, once Movie Night has closed: the plan
+            // picks the episode for a show.
+            try? await Task.sleep(for: .milliseconds(700))
+            if let item = try? await model.client?.summary(id: mediaID) { play(item, fromMovieNight: true) }
           }
         }
         .environmentObject(model)
