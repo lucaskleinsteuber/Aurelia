@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Covers the window while Aurelia rests. Any click or key continues: the server is woken and
-/// what was showing loads again.
+/// Covers the window while Aurelia rests. Only Continue (or Return) goes on: that wakes the server
+/// and loads what was showing again. Other clicks, such as closing the window, leave it asleep.
 struct AureliaRestView: View {
   @EnvironmentObject private var model: AppModel
   @State private var monitor: Any?
@@ -31,7 +31,7 @@ struct AureliaRestView: View {
             )
             .font(.callout)
             .foregroundStyle(.secondary)
-            Text("Click anywhere or press a key to continue.")
+            Text("Click Continue or press Return to connect again.")
               .font(.callout)
               .foregroundStyle(.secondary)
           }
@@ -45,16 +45,15 @@ struct AureliaRestView: View {
       .padding(40)
     }
     .contentShape(Rectangle())
-    .onTapGesture { resume() }
     .accessibilityIdentifier("aurelia-rest")
     .onAppear {
-      // Keys and clicks only wake Aurelia; they do not reach the library beneath.
-      monitor = NSEvent.addLocalMonitorForEvents(
-        matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel]
-      ) { event in
+      // Keys do not reach the library beneath, and only Return continues. Clicks stay with the
+      // window, so closing it or clicking beside Continue does not wake the server.
+      monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
         guard model.isResting else { return event }
-        resume()
-        return event.modifierFlags.contains(.command) ? event : nil
+        if event.modifierFlags.contains(.command) { return event }
+        if AureliaRestView.continueKeys.contains(event.keyCode) { resume() }
+        return nil
       }
     }
     .onDisappear {
@@ -62,6 +61,9 @@ struct AureliaRestView: View {
       monitor = nil
     }
   }
+
+  /// Return and the keypad's Enter.
+  static let continueKeys: Set<UInt16> = [36, 76]
 
   private var serverName: String? { model.deviceConnection?.name ?? model.profile?.name }
 

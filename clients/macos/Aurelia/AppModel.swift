@@ -3599,7 +3599,9 @@ final class AppModel: ObservableObject {
           _ = await self.ensureServerAwake(self.deviceConnection ?? current)
           guard self.isCurrent(generation), !Task.isCancelled else { return }
         }
-        let inspected = try await self.reconnectCoordinator.reconnect(current)
+        // Only looks for it from here: a server that stayed asleep is woken by Wake Server, not
+        // by someone who merely moves the mouse or closes the window.
+        let inspected = try await self.reconnectCoordinator.reconnect(current, wakes: false)
         guard self.isCurrent(generation) else { return }
         let device = self.deviceConnection ?? current
         guard !device.isViewingSession else { throw APIClientError.invalidResponse }

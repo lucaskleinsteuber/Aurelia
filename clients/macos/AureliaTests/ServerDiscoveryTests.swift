@@ -86,6 +86,22 @@ struct ServerDiscoveryTests {
     #expect(wakes == [stored.serverId, stored.serverId])
   }
 
+  @Test func theBackgroundSearchLooksForTheServerWithoutWakingIt() async throws {
+    let stored = profile()
+    var wakes: [UUID] = []
+    var attempts = 0
+    let coordinator = ServerReconnectCoordinator(
+      browser: SyntheticDiscovery(servers: []),
+      inspect: { url in
+        attempts += 1
+        if attempts < 3 { throw URLError(.cannotConnectToHost) }
+        return inspected(stored, at: url)
+      }, delay: { _ in }, wake: { serverId, _ in wakes.append(serverId) })
+    _ = try await coordinator.reconnect(stored, wakes: false)
+    #expect(attempts == 3)
+    #expect(wakes.isEmpty)
+  }
+
   @Test func wakeAddressesAreRememberedPerServerAndFormMagicPackets() throws {
     let suite = "AureliaWakeOnLanTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
