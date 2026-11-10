@@ -53,7 +53,7 @@ public static partial class LiveConversionEndpoints
             await using var stream = file.Stream;
             var probe = await live.ProbeAsync(tools, file, Path.GetFullPath(media.SourcePath), media.Id, cancellationToken);
             var sidecars = SidecarSubtitles.Discover(Path.GetFullPath(media.SourcePath));
-            return LiveConversionPlanner.Plan(probe, request, tools.Encoder is not null, () => tools.ToneMapping, sidecars) is { } plan
+            return LiveConversionPlanner.Plan(probe, request, live.ChooseEncoder(tools) is not null, () => tools.ToneMapping, sidecars) is { } plan
                 ? Results.Ok(plan)
                 : NotPossible();
         }
@@ -136,7 +136,8 @@ public static partial class LiveConversionEndpoints
         }
 
         if (probe.Video is not { } picture) return NotPossible();
-        if (encodeVideo.Value ? tools.Encoder is null : !LiveConversionPlanner.CopyableVideo.Contains(picture.Codec))
+        var chosen = encodeVideo.Value ? live.ChooseEncoder(tools) : null;
+        if (encodeVideo.Value ? chosen is null : !LiveConversionPlanner.CopyableVideo.Contains(picture.Codec))
             return NotPossible();
         var toneMapping = encodeVideo.Value && picture.IsHdr ? tools.ToneMapping : HdrToneMapping.Unavailable;
         if (encodeVideo.Value && picture.IsHdr && toneMapping == HdrToneMapping.Unavailable)
@@ -160,16 +161,33 @@ public static partial class LiveConversionEndpoints
             return Problem("conversion_busy", "The server is converting as many titles as it can. Try again shortly.", StatusCodes.Status429TooManyRequests);
         }
 
-        var options = new LiveStreamOptions(startSeconds, picture, encodeVideo.Value ? tools.Encoder : null, sound, copyAudio.Value, toneMapping);
-        using var process = live.Start(tools.Ffmpeg, LiveConversionPlanner.Arguments(LiveConversionService.InputPath(file, source.SourcePath), options));
+        var options = new LiveStreamOptions(startSeconds, picture, chosen?.Kind, sound, copyAudio.Value, toneMapping, chosen?.Chip);
+        var process = live.Start(tools.Ffmpeg, LiveConversionPlanner.Arguments(LiveConversionService.InputPath(file, source.SourcePath), options));
         var errors = LiveConversionService.ReadTailAsync(process.StandardError);
         var output = process.StandardOutput.BaseStream;
         // A pipe read may not notice a closed connection; ending ffmpeg ends the read at once.
-        using var stopOnAbort = cancellationToken.Register(() => LiveConversionService.Kill(process));
+        var stopOnAbort = cancellationToken.Register(() => LiveConversionService.Kill(process));
         try
         {
             var buffer = new byte[64 * 1024];
             var read = await output.ReadAsync(buffer, cancellationToken);
+            if (read == 0 && chosen?.Chip is not null && tools.HasSoftwareEncoder)
+            {
+                // The chip failed before the first byte: the processor converts this title instead,
+                // and the next conversions too for a while.
+                await process.WaitForExitAsync(cancellationToken);
+                LiveConversionService.LogFailed(logger, "ffmpeg " + HardwareEncoding.EncoderName(chosen.Value.Kind), process.ExitCode, await errors, source.SourcePath);
+                live.Health.ReportFailure();
+                await stopOnAbort.DisposeAsync();
+                LiveConversionService.Stop(process);
+                process.Dispose();
+                options = options with { Encoder = LiveVideoEncoder.Libx264, Hardware = null };
+                process = live.Start(tools.Ffmpeg, LiveConversionPlanner.Arguments(LiveConversionService.InputPath(file, source.SourcePath), options));
+                errors = LiveConversionService.ReadTailAsync(process.StandardError);
+                output = process.StandardOutput.BaseStream;
+                stopOnAbort = cancellationToken.Register(() => LiveConversionService.Kill(process));
+                read = await output.ReadAsync(buffer, cancellationToken);
+            }
             if (read == 0)
             {
                 await process.WaitForExitAsync(cancellationToken);
@@ -199,7 +217,9 @@ public static partial class LiveConversionEndpoints
         }
         finally
         {
+            await stopOnAbort.DisposeAsync();
             LiveConversionService.Stop(process);
+            process.Dispose();
         }
         return Results.Empty;
     }

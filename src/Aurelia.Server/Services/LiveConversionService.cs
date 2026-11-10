@@ -7,9 +7,18 @@ namespace Aurelia.Server.Services;
 
 /// <param name="Ffmpeg">The converter.</param>
 /// <param name="Ffprobe">The header reader next to it.</param>
-/// <param name="Encoder">The H.264 encoder for pictures a player cannot decode, or null.</param>
+/// <param name="Encoder">The preferred H.264 encoder for pictures a player cannot decode, or null.</param>
 public sealed record FfmpegTools(string Ffmpeg, string Ffprobe, LiveVideoEncoder? Encoder)
 {
+    /// <summary>The video chip that passed its trial encode, or null to encode on the processor.</summary>
+    public HardwareEncoder? Hardware { get; init; }
+
+    /// <summary>Whether libx264 is there to fall back on when the chip fails.</summary>
+    public bool HasSoftwareEncoder { get; init; }
+
+    /// <summary>Whether encoding uses a video chip: a Linux chip or Apple's VideoToolbox.</summary>
+    public bool EncodesOnChip => Hardware is not null || Encoder == LiveVideoEncoder.VideoToolbox;
+
     /// <summary>Whether this ffmpeg can hand out a sound track as plain PCM for speech subtitles.</summary>
     public SpeechAudioSupport Speech { get; init; }
 
@@ -44,7 +53,9 @@ public enum SpeechAudioSupport
 public sealed partial class LiveConversionService : IDisposable
 {
     public const int MaximumConversions = 3;
+    /// <summary>Picture encodes at a time on the processor; a video chip takes <see cref="MaximumChipConversions"/>.</summary>
     public const int MaximumVideoConversions = 1;
+    public const int MaximumChipConversions = 3;
     private const int ProbeCacheSize = 256;
     private const int ErrorTailCharacters = 4096;
     private const int MaximumProbeBytes = 256 * 1024;
@@ -55,8 +66,11 @@ public sealed partial class LiveConversionService : IDisposable
     private readonly ILogger<LiveConversionService> logger;
     private readonly Task<FfmpegTools?> tools;
     private readonly string quietDirectory;
-    private readonly SemaphoreSlim conversions = new(MaximumConversions, MaximumConversions);
-    private readonly SemaphoreSlim videoConversions = new(MaximumVideoConversions, MaximumVideoConversions);
+    private readonly string? hardwareSetting;
+    private readonly int? configuredVideoLimit;
+    private readonly Lazy<Task<Slots>> slots;
+
+    private sealed record Slots(SemaphoreSlim All, int AllLimit, SemaphoreSlim Video, int VideoLimit);
     private readonly SemaphoreSlim probes = new(2, 2);
     private readonly ConcurrentDictionary<string, MediaProbeResult> probeCache = new(StringComparer.Ordinal);
 
@@ -65,13 +79,51 @@ public sealed partial class LiveConversionService : IDisposable
         this.logger = logger;
         quietDirectory = Path.Combine(runtime.DataDirectory, "Converter");
         var configured = configuration["Aurelia:Ffmpeg"];
+        hardwareSetting = configuration["Aurelia:HardwareEncoding"];
+        configuredVideoLimit = int.TryParse(configuration["Aurelia:MaximumVideoConversions"], System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var limit) && limit is > 0 and <= 16 ? limit : null;
         tools = Task.Run(() => Discover(configured));
+        slots = new(async () =>
+        {
+            var video = VideoConversionLimit(await tools, configuredVideoLimit);
+            var all = Math.Max(MaximumConversions, video + 2);
+            return new Slots(new SemaphoreSlim(all, all), all, new SemaphoreSlim(video, video), video);
+        }, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public Task<FfmpegTools?> ToolsAsync() => tools;
 
+    /// <summary>Remembers a chip that failed during a conversion, so the next ones use the processor for a while.</summary>
+    public HardwareHealth Health { get; } = new();
+
+    /// <summary>How many pictures may be encoded at once: one on the processor, three on a chip, or the owner's number.</summary>
+    public static int VideoConversionLimit(FfmpegTools? tools, int? configured = null) =>
+        configured ?? (tools?.EncodesOnChip == true ? MaximumChipConversions : MaximumVideoConversions);
+
+    /// <summary>
+    /// The encoder for the next conversion: the chip unless it failed lately and x264 can step in,
+    /// then x264, then whatever the server has. Null when it cannot encode pictures at all.
+    /// </summary>
+    public static (LiveVideoEncoder Kind, HardwareEncoder? Chip)? ChooseEncoder(FfmpegTools tools, bool chipResting)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        if (tools.Hardware is { } chip && (!chipResting || !tools.HasSoftwareEncoder)) return (chip.Kind, chip);
+        if (tools.HasSoftwareEncoder) return (LiveVideoEncoder.Libx264, null);
+        return tools.Encoder is { } other && other is LiveVideoEncoder.VideoToolbox or LiveVideoEncoder.Libx264 ? (other, null) : null;
+    }
+
+    /// <summary>The encoder for the next conversion with this server's tools and chip health.</summary>
+    public (LiveVideoEncoder Kind, HardwareEncoder? Chip)? ChooseEncoder(FfmpegTools tools) => ChooseEncoder(tools, Health.IsResting);
+
     /// <summary>Conversions running now.</summary>
-    public int Running => MaximumConversions - conversions.CurrentCount;
+    public int Running => slots.IsValueCreated && slots.Value.IsCompletedSuccessfully
+        ? slots.Value.Result.AllLimit - slots.Value.Result.All.CurrentCount
+        : 0;
+
+    /// <summary>Picture encodes running now.</summary>
+    public int RunningVideo => slots.IsValueCreated && slots.Value.IsCompletedSuccessfully
+        ? slots.Value.Result.VideoLimit - slots.Value.Result.Video.CurrentCount
+        : 0;
 
     public async Task<bool> IsAvailableAsync() => await tools is not null;
 
@@ -106,10 +158,18 @@ public sealed partial class LiveConversionService : IDisposable
                 // Sound always becomes AAC when a player cannot decode it, so that encoder is required.
                 if (encoders is null || !HasEncoder(encoders, "aac")) continue;
                 RunForOutput(ffprobe, ["-hide_banner", "-version"], TimeSpan.FromSeconds(10));
-                LiveVideoEncoder? encoder = OperatingSystem.IsMacOS() && HasEncoder(encoders, "h264_videotoolbox")
+                HardwareEncoder? hardware = null;
+                if (OperatingSystem.IsLinux())
+                {
+                    var accelerations = RunForOutput(ffmpeg, ["-hide_banner", "-hwaccels"], TimeSpan.FromSeconds(10));
+                    hardware = HardwareEncoding.Detect(arguments => RunForOutput(ffmpeg, arguments, TimeSpan.FromSeconds(15)),
+                        encoders, accelerations, hardwareSetting, HardwareEncoding.RenderDevices());
+                }
+                var software = HasEncoder(encoders, "libx264");
+                LiveVideoEncoder? encoder = hardware?.Kind ?? (OperatingSystem.IsMacOS() && HasEncoder(encoders, "h264_videotoolbox")
                     ? LiveVideoEncoder.VideoToolbox
-                    : HasEncoder(encoders, "libx264") ? LiveVideoEncoder.Libx264 : null;
-                LogFound(logger, ffmpeg, encoder is { } found ? found.ToString() : "none");
+                    : software ? LiveVideoEncoder.Libx264 : null);
+                LogFound(logger, ffmpeg, encoder is { } found ? HardwareEncoding.DisplayName(found) + (hardware?.Device is { } device ? " on " + device : "") : "none");
                 var speech = SpeechAudioSupport.None;
                 if (HasEncoder(encoders, "pcm_s16le")
                     && RunForOutput(ffmpeg, ["-hide_banner", "-muxers"], TimeSpan.FromSeconds(10)) is { } muxers && HasEncoder(muxers, "s16le"))
@@ -119,7 +179,12 @@ public sealed partial class LiveConversionService : IDisposable
                 }
                 // Mapper discovery starts only when HDR picture encoding actually needs it.
                 // Startup, direct delivery, repackaging and SDR conversion pay no extra process cost.
-                return new FfmpegTools(ffmpeg, ffprobe, encoder, () => DiscoverToneMapping(ffmpeg)) { Speech = speech };
+                return new FfmpegTools(ffmpeg, ffprobe, encoder, () => DiscoverToneMapping(ffmpeg))
+                {
+                    Speech = speech,
+                    Hardware = hardware,
+                    HasSoftwareEncoder = software,
+                };
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
                                                   or InvalidOperationException or System.ComponentModel.Win32Exception)
@@ -282,34 +347,35 @@ public sealed partial class LiveConversionService : IDisposable
     /// </summary>
     public async Task<IDisposable?> EnterAsync(bool encodesVideo, CancellationToken cancellationToken)
     {
-        if (!await conversions.WaitAsync(SlotWait, cancellationToken)) return null;
-        if (encodesVideo && !await WaitOrRelease(videoConversions, cancellationToken)) return null;
-        return new Slot(this, encodesVideo);
+        var limits = await slots.Value;
+        if (!await limits.All.WaitAsync(SlotWait, cancellationToken)) return null;
+        if (encodesVideo && !await WaitOrRelease(limits, cancellationToken)) return null;
+        return new Slot(limits, encodesVideo);
     }
 
-    private async Task<bool> WaitOrRelease(SemaphoreSlim semaphore, CancellationToken cancellationToken)
+    private static async Task<bool> WaitOrRelease(Slots limits, CancellationToken cancellationToken)
     {
         try
         {
-            if (await semaphore.WaitAsync(SlotWait, cancellationToken)) return true;
+            if (await limits.Video.WaitAsync(SlotWait, cancellationToken)) return true;
         }
         catch (OperationCanceledException)
         {
-            conversions.Release();
+            limits.All.Release();
             throw;
         }
-        conversions.Release();
+        limits.All.Release();
         return false;
     }
 
-    private sealed class Slot(LiveConversionService owner, bool encodesVideo) : IDisposable
+    private sealed class Slot(Slots limits, bool encodesVideo) : IDisposable
     {
         private int released;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref released, 1) != 0) return;
-            if (encodesVideo) owner.videoConversions.Release();
-            owner.conversions.Release();
+            if (encodesVideo) limits.Video.Release();
+            limits.All.Release();
         }
     }
 
@@ -381,6 +447,52 @@ public sealed partial class LiveConversionService : IDisposable
         return tail.ToString().Trim();
     }
 
+    /// <summary>
+    /// Reads ffmpeg's messages line by line when it also writes -progress to them: the progress
+    /// lines report the speed against real time, everything else is kept as the failure tail.
+    /// Lines are cut at 1024 characters, so a long message cannot grow memory.
+    /// </summary>
+    public static async Task<string> ReadDiagnosticsAsync(StreamReader reader, Action<double>? speed)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        var tail = new StringBuilder();
+        var line = new StringBuilder();
+        var buffer = new char[1024];
+        void Finish()
+        {
+            var text = line.ToString().Trim();
+            line.Clear();
+            if (text.Length == 0) return;
+            if (ProgressLine().Match(text) is { Success: true } progress)
+            {
+                if (progress.Groups[1].Value == "speed" && double.TryParse(progress.Groups[2].Value.TrimEnd('x'),
+                        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
+                    && double.IsFinite(value) && value >= 0) speed?.Invoke(value);
+                return;
+            }
+            tail.Append(text).Append('\n');
+            if (tail.Length > ErrorTailCharacters) tail.Remove(0, tail.Length - ErrorTailCharacters);
+        }
+        try
+        {
+            int read;
+            while ((read = await reader.ReadAsync(buffer)) > 0)
+            {
+                foreach (var character in buffer.AsSpan(0, read))
+                {
+                    if (character == '\n') Finish();
+                    else if (line.Length < 1024) line.Append(character);
+                }
+            }
+            Finish();
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException) { }
+        return tail.ToString().Trim();
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(frame|fps|stream_\d+_\d+_q|bitrate|total_size|out_time_us|out_time_ms|out_time|dup_frames|drop_frames|speed|progress)=(.*)$")]
+    private static partial System.Text.RegularExpressions.Regex ProgressLine();
+
     private string? RunForOutput(string program, IReadOnlyList<string> arguments, TimeSpan timeout)
     {
         using var process = Start(program, arguments, lowPriority: false);
@@ -411,8 +523,11 @@ public sealed partial class LiveConversionService : IDisposable
 
     public void Dispose()
     {
-        conversions.Dispose();
-        videoConversions.Dispose();
+        if (slots.IsValueCreated && slots.Value.IsCompletedSuccessfully)
+        {
+            slots.Value.Result.All.Dispose();
+            slots.Value.Result.Video.Dispose();
+        }
         probes.Dispose();
     }
 }

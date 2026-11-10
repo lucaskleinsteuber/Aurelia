@@ -46,7 +46,8 @@ public sealed record MediaProbeResult(
     double? DurationSeconds,
     ProbedVideo? Video,
     IReadOnlyList<ProbedAudio> Audio,
-    IReadOnlyList<ProbedSubtitle>? Subtitles = null);
+    IReadOnlyList<ProbedSubtitle>? Subtitles = null,
+    long? BitRate = null);
 
 /// <summary>Reads a file's header with ffprobe; only the header is read, never the whole file.</summary>
 public static class MediaProbe
@@ -67,7 +68,7 @@ public static class MediaProbe
     [
         "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "file",
         "-show_entries", "stream=index,codec_name,codec_type,profile,level,width,height,pix_fmt,bits_per_raw_sample,channels,duration,color_transfer,color_primaries,color_space,color_range"
-            + ":stream_disposition=attached_pic,default,forced:stream_tags=language,title:format=format_name,duration,start_time",
+            + ":stream_disposition=attached_pic,default,forced:stream_tags=language,title:format=format_name,duration,start_time,bit_rate",
         "-of", "json", "file:" + input,
     ];
 
@@ -125,7 +126,8 @@ public static class MediaProbe
             duration is > 0 ? duration : null,
             video,
             audio,
-            subtitles);
+            subtitles,
+            Number(format, "bit_rate") is > 0 and var rate ? (long)Math.Min(rate, long.MaxValue / 2) : null);
     }
 
     private static int BitDepth(JsonElement stream, string? pixelFormat)

@@ -9,17 +9,29 @@ public enum LiveVideoEncoder
     Libx264,
     /// <summary>Apple's hardware encoder in the Mac app's own ffmpeg.</summary>
     VideoToolbox,
+    /// <summary>An Nvidia graphics card's encoder.</summary>
+    Nvenc,
+    /// <summary>Intel Quick Sync through oneVPL.</summary>
+    Qsv,
+    /// <summary>The VA-API encoder of Intel and AMD graphics on Linux.</summary>
+    Vaapi,
 }
 
 /// <param name="Start">Seconds into the title; the output keeps the title's own timestamps.</param>
 /// <param name="Encoder">Null repackages the picture unchanged.</param>
+/// <param name="Hardware">The chip for a hardware <paramref name="Encoder"/>: its device and whether it decodes too.</param>
+/// <param name="Step">The size and bitrate to convert to; null keeps the 1080p limit of a plain live stream.</param>
+/// <param name="SegmentSeconds">Forces a key frame every so many seconds of title time, for segments of that length.</param>
 public sealed record LiveStreamOptions(
     double Start,
     ProbedVideo Video,
     LiveVideoEncoder? Encoder,
     ProbedAudio? Audio,
     bool CopyAudio,
-    HdrToneMapping ToneMapping = HdrToneMapping.Unavailable);
+    HdrToneMapping ToneMapping = HdrToneMapping.Unavailable,
+    HardwareEncoder? Hardware = null,
+    StreamingStep? Step = null,
+    int? SegmentSeconds = null);
 
 /// <summary>
 /// Decides how a title reaches a player that cannot open the original: the picture is only
@@ -104,9 +116,12 @@ public static class LiveConversionPlanner
         CopyableAudio.Contains(audio.Codec) && playerCodecs.Contains(audio.Codec);
 
     /// <summary>The largest size within 1920 × 1080 with the same shape, in even numbers.</summary>
-    public static (int Width, int Height) Fit(int width, int height)
+    public static (int Width, int Height) Fit(int width, int height) => Fit(width, height, MaximumWidth, MaximumHeight);
+
+    /// <summary>The largest size within the box with the same shape, in even numbers; never larger than the original.</summary>
+    public static (int Width, int Height) Fit(int width, int height, int maximumWidth, int maximumHeight)
     {
-        var scale = Math.Min(1.0, Math.Min((double)MaximumWidth / width, (double)MaximumHeight / height));
+        var scale = Math.Min(1.0, Math.Min((double)maximumWidth / width, (double)maximumHeight / height));
         return (Math.Max(2, (int)Math.Round(width * scale / 2) * 2), Math.Max(2, (int)Math.Round(height * scale / 2) * 2));
     }
 
@@ -164,6 +179,13 @@ public static class LiveConversionPlanner
         {
             "-hide_banner", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file",
         };
+        if (options.Encoder is { } chosen && HardwareEncoding.IsHardware(chosen) && chosen != LiveVideoEncoder.VideoToolbox)
+        {
+            var hardware = options.Hardware is { } chip && chip.Kind == chosen
+                ? chip
+                : throw new InvalidOperationException("A hardware encoder needs its chip.");
+            arguments.AddRange(HardwareEncoding.DeviceArguments(hardware, decode: true));
+        }
         if (options.Start > 0) arguments.AddRange(["-ss", Seconds(options.Start)]);
         // The output keeps the file's own timestamps, so a stream started at a later point still
         // reports the real position in the title.
@@ -180,16 +202,12 @@ public static class LiveConversionPlanner
                 // Safari only plays HEVC in MP4 under the hvc1 name.
                 if (options.Video.Codec == "hevc") arguments.AddRange(["-tag:v", "hvc1"]);
                 break;
-            case LiveVideoEncoder.Libx264:
-                arguments.AddRange([
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-maxrate", "8M", "-bufsize", "16M",
-                    "-profile:v", "high", "-level:v", "4.1",
-                ]);
-                AddPicture(arguments, options);
-                break;
-            case LiveVideoEncoder.VideoToolbox:
-                arguments.AddRange(["-c:v", "h264_videotoolbox", "-allow_sw", "1", "-b:v", "6M", "-profile:v", "high"]);
-                AddPicture(arguments, options);
+            case { } kind:
+                // A plain live stream keeps its former rates: x264 up to 8 Mbit/s, a chip at 6 Mbit/s.
+                var kilobits = options.Step?.VideoKilobits ?? (kind == LiveVideoEncoder.Libx264 ? 8000 : 6000);
+                arguments.AddRange(HardwareEncoding.EncoderArguments(kind, kilobits));
+                if (kind == LiveVideoEncoder.Libx264) arguments.AddRange(["-level:v", options.Step?.LevelName ?? "4.1"]);
+                AddPicture(arguments, options, kind);
                 break;
         }
 
@@ -200,7 +218,7 @@ public static class LiveConversionPlanner
                 arguments.AddRange(["-c:a", "copy"]);
                 if (track.Codec is "opus" or "flac") arguments.AddRange(["-strict", "experimental"]);
             }
-            else arguments.AddRange(["-c:a", "aac", "-ac", "2", "-b:a", "192k"]);
+            else arguments.AddRange(["-c:a", "aac", "-ac", "2", "-b:a", ((options.Step?.AudioKilobits ?? 192) + "k")]);
         }
 
         // A stream from a later point marks its first fragment as discontinuous, so the fragment
@@ -215,13 +233,23 @@ public static class LiveConversionPlanner
         return arguments;
     }
 
-    private static void AddPicture(List<string> arguments, LiveStreamOptions options)
+    private static void AddPicture(List<string> arguments, LiveStreamOptions options, LiveVideoEncoder kind)
     {
-        arguments.AddRange([
-        "-vf", LiveHdr.PictureFilter(options.Video, options.ToneMapping),
+        var (width, height) = options.Step is { } step ? (step.Width, step.Height) : (MaximumWidth, MaximumHeight);
+        arguments.AddRange(["-vf", HardwareEncoding.UploadFilter(kind, LiveHdr.PictureFilter(options.Video, options.ToneMapping, width, height))]);
+        if (options.SegmentSeconds is { } seconds and > 0)
+        {
+            // A key frame exactly where each segment of title time begins; -copyts keeps t in title
+            // time, so a stream started at a segment's start counts on from there.
+            var start = Seconds(options.Start);
+            arguments.AddRange([
+                "-force_key_frames", $"expr:gte(t,{start}+n_forced*{seconds.ToString(CultureInfo.InvariantCulture)})",
+                "-g", "600",
+            ]);
+            if (kind == LiveVideoEncoder.Libx264) arguments.AddRange(["-sc_threshold", "0"]);
+        }
         // A key frame every two seconds or so keeps fragments small, so playback starts soon.
-        "-g", "48",
-        ]);
+        else arguments.AddRange(["-g", "48"]);
         if (options.Video.IsHdr) arguments.AddRange([
             "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
         ]);

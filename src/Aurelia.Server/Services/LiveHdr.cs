@@ -61,9 +61,13 @@ public static class LiveHdr
         "This server's ffmpeg cannot convert HDR pictures to SDR. Use a player that supports the original picture, or install an ffmpeg build with HDR conversion support.",
         StatusCodes.Status422UnprocessableEntity);
 
-    public static string PictureFilter(ProbedVideo video, HdrToneMapping method)
+    public static string PictureFilter(ProbedVideo video, HdrToneMapping method) =>
+        PictureFilter(video, method, LiveConversionPlanner.MaximumWidth, LiveConversionPlanner.MaximumHeight);
+
+    /// <summary>The picture filter that fits the picture into the box, mapping HDR to SDR on the way.</summary>
+    public static string PictureFilter(ProbedVideo video, HdrToneMapping method, int maximumWidth, int maximumHeight)
     {
-        var resize = $"scale='min({LiveConversionPlanner.MaximumWidth},iw)':'min({LiveConversionPlanner.MaximumHeight},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2";
+        var resize = $"scale='min({maximumWidth},iw)':'min({maximumHeight},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2";
         if (!video.IsHdr) return resize + ",format=yuv420p";
         // Only missing/unknown tags get HDR defaults. Real P3, 709, matrix and full-range tags
         // remain authoritative. Values come from fixed allowlists, never filter text from a file.
@@ -74,7 +78,7 @@ public static class LiveHdr
         var resizedMatrix = matrix == 0 ? 9 : matrix;
         var transfer = video.ColorTransfer == "smpte2084" ? 16 : 18;
         var peak = video.ColorTransfer == "smpte2084" ? 100 : 10;
-        var (width, height) = LiveConversionPlanner.Fit(video.Width, video.Height);
+        var (width, height) = LiveConversionPlanner.Fit(video.Width, video.Height, maximumWidth, maximumHeight);
         return method switch
         {
             HdrToneMapping.PerceptualScale => resize
