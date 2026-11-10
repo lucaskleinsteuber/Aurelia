@@ -173,7 +173,7 @@ public static partial class LiveConversionEndpoints
             if (read == 0)
             {
                 await process.WaitForExitAsync(cancellationToken);
-                LiveConversionService.LogFailed(logger, "ffmpeg", process.ExitCode, await errors);
+                LiveConversionService.LogFailed(logger, "ffmpeg", process.ExitCode, await errors, source.SourcePath);
                 return Problem("conversion_failed", "The server couldn’t convert this title.", StatusCodes.Status500InternalServerError);
             }
 
@@ -191,7 +191,7 @@ public static partial class LiveConversionEndpoints
             while ((read = await output.ReadAsync(buffer, cancellationToken)) > 0);
             await process.WaitForExitAsync(cancellationToken);
             if (process.ExitCode != 0)
-                LiveConversionService.LogFailed(logger, "ffmpeg", process.ExitCode, await errors);
+                LiveConversionService.LogFailed(logger, "ffmpeg", process.ExitCode, await errors, source.SourcePath);
         }
         catch (Exception exception) when (exception is OperationCanceledException or IOException)
         {

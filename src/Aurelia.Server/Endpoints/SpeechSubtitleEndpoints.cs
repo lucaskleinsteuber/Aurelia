@@ -106,7 +106,7 @@ public static class SpeechSubtitleEndpoints
             if (read == 0)
             {
                 await process.WaitForExitAsync(cancellationToken);
-                LiveConversionService.LogFailed(logger, "ffmpeg speech audio", process.ExitCode, await errors);
+                LiveConversionService.LogFailed(logger, "ffmpeg speech audio", process.ExitCode, await errors, source.SourcePath);
                 return Problem("conversion_failed", "The server couldn’t read this title’s sound.", StatusCodes.Status500InternalServerError);
             }
             context.Response.StatusCode = StatusCodes.Status200OK;
@@ -125,7 +125,7 @@ public static class SpeechSubtitleEndpoints
             while ((read = await output.ReadAsync(buffer, cancellationToken)) > 0);
             await process.WaitForExitAsync(cancellationToken);
             if (process.ExitCode != 0)
-                LiveConversionService.LogFailed(logger, "ffmpeg speech audio", process.ExitCode, await errors);
+                LiveConversionService.LogFailed(logger, "ffmpeg speech audio", process.ExitCode, await errors, source.SourcePath);
         }
         catch (Exception exception) when (exception is OperationCanceledException or IOException)
         {

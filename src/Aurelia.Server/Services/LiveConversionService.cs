@@ -217,7 +217,7 @@ public sealed partial class LiveConversionService : IDisposable
             finally { Stop(process); }
             if (process.ExitCode != 0)
             {
-                LogFailed(logger, "ffprobe", process.ExitCode, await errors);
+                LogFailed(logger, "ffprobe", process.ExitCode, await errors, checkedPath);
                 throw new PlaybackException("media_probe_failed", "The server couldn’t read this title’s format.", StatusCodes.Status422UnprocessableEntity);
             }
             MediaProbeResult result;
@@ -247,7 +247,7 @@ public sealed partial class LiveConversionService : IDisposable
             await process.WaitForExitAsync(timeout.Token);
             EnsureInputMatchesHandle(file.Stream.SafeFileHandle, checkedPath);
             if (process.ExitCode == 0 && output.AsSpan().StartsWith("WEBVTT"u8)) return output;
-            LogFailed(logger, "ffmpeg subtitles", process.ExitCode, await errors);
+            LogFailed(logger, "ffmpeg subtitles", process.ExitCode, await errors, checkedPath);
             throw new PlaybackException("subtitle_conversion_failed", "The server couldn’t read this subtitle track.", StatusCodes.Status422UnprocessableEntity);
         }
         catch (InvalidDataException)
@@ -400,8 +400,14 @@ public sealed partial class LiveConversionService : IDisposable
     [LoggerMessage(LogLevel.Warning, "ffmpeg at {Path} could not be used: {Message}")]
     private static partial void LogUnusable(ILogger logger, string path, string message);
 
+    /// <summary>Logs ffmpeg's last messages after a failure. They name the input, which on a Mac is the
+    /// media file's full path, so it is replaced: full media paths stay out of logs.</summary>
+    public static void LogFailed(ILogger logger, string program, int code, string detail, string inputPath) =>
+        LogFailedMessage(logger, program, code,
+            inputPath.Length == 0 ? detail : detail.Replace(inputPath, "<media>", StringComparison.Ordinal));
+
     [LoggerMessage(LogLevel.Warning, "{Program} ended with status {Code}: {Detail}")]
-    public static partial void LogFailed(ILogger logger, string program, int code, string detail);
+    private static partial void LogFailedMessage(ILogger logger, string program, int code, string detail);
 
     public void Dispose()
     {
