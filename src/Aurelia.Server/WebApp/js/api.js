@@ -321,7 +321,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     uploadBackup: (uploadId, file, options = {}) => send(`/api/v1/server/backups/uploads/${id(uploadId)}`, file, { ...options, method: "PUT", contentType: "application/octet-stream" }),
     prepareRestore: (body) => approved("/api/v1/server/backups/restore/prepare", { body }),
     applyRestore: (restoreId) => approved(`/api/v1/server/backups/restore/${id(restoreId)}/apply`),
-    cinemaTrailers: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/cinema-trailers`, options),
+    cinemaTrailers: (mediaId, count, options = {}) => request(`/api/v1/media/${id(mediaId)}/cinema-trailers?${new URLSearchParams({ count })}`, options),
     changes: (after, generation, signal) =>
       request(`/api/v1/sync/changes?${new URLSearchParams(generation ? { after, waitSeconds: 25, generation } : { after, waitSeconds: 25 })}`, { signal }),
   };

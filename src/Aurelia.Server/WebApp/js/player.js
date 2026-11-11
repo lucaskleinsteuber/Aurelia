@@ -92,7 +92,7 @@ export class Player {
    * @param {boolean} [options.canConvert]  the server reports live conversion
    * @param {boolean} [options.canStreamAdaptive]  the server streams in several qualities over HLS
    */
-  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
+  constructor({ api, item, next, previous, intent = "play", onPlayNext, onMediaMenu, onShowShortcuts, onClose, onSessionEnded, onFinished, canConvert = false, canScrubPreview = canConvert, canStreamAdaptive = false, preferenceScope, together }) {
     this.api = api;
     // Watch Together: { session(), start(player), leave() } from the app, or undefined.
     this.together = together;
@@ -105,6 +105,8 @@ export class Player {
     this.onMediaMenu = onMediaMenu;
     this.onShowShortcuts = onShowShortcuts;
     this.onClose = onClose;
+    // Cinema mode's trailers: the end hands over to the next part instead of Up Next.
+    this.onFinished = onFinished;
     this.onSessionEnded = onSessionEnded;
     this.canConvert = canConvert && liveSupported();
     this.canStreamAdaptive = this.canConvert && Boolean(canStreamAdaptive);
@@ -1118,6 +1120,13 @@ export class Player {
     const video = this.video;
     if (this.saver && Number.isFinite(video.duration)) await this.saver.save(video.duration * 1000, video.duration * 1000, true);
     if (this.closed) return;
+    if (this.onFinished) {
+      const finished = this.onFinished;
+      this.onFinished = null;
+      this.close();
+      finished();
+      return;
+    }
     const next = this.sleep.mode === "end" || this.upNextDismissed || !this.preferences.automaticallyPlayNextEpisode
       ? null
       : this.upNextItem ?? (this.next ? await this.next().catch(() => null) : null);

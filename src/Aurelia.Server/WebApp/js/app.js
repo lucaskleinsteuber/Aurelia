@@ -13,6 +13,8 @@ import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { ADAPTIVE_FEATURE } from "./hls-logic.js";
 import { createSettings } from "./settings.js";
+import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
+import { loadPreferences } from "./player.js";
 import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
 
 // Pages seen before show at once from what the server said last time; anything this browser
@@ -1665,7 +1667,7 @@ function showMiniRemote(device, target) {
 
 // MARK: Playing
 
-async function playTitle(item, seasons, { intent = "play" } = {}) {
+async function playTitle(item, seasons, { intent = "play", skipCinema = false, onFinished } = {}) {
   let target = item;
   try {
     // A show starts where its plan says: the next or the started episode.
@@ -1681,9 +1683,13 @@ async function playTitle(item, seasons, { intent = "play" } = {}) {
     return;
   }
   closePlayer();
+  if (!skipCinema && !onFinished && cinemaWanted({ item: target, intent, preferences: loadPreferences(),
+    capabilities: state.server?.capabilities ?? [], watchingTogether: Boolean(state.watchParty) })) {
+    if (await runCinema(target, seasons, intent)) return;
+  }
   const player = new Player({
     api,
-    item: target, intent,
+    item: target, intent, onFinished,
     preferenceScope: `${state.server?.serverId ?? location.origin}:${state.profile?.id ?? ""}`,
     next: async () => (target.kind === "episode" ? logic.nextEpisode(seasons, target.id) : null),
     previous: async () => (target.kind === "episode" ? logic.previousEpisode(seasons, target.id) : null),
@@ -1717,6 +1723,120 @@ async function playTitle(item, seasons, { intent = "play" } = {}) {
   player.open(document.body);
   // A party this browser is in follows into the new player.
   state.watchParty?.attach(player.partyPlayer);
+}
+
+// MARK: Cinema mode
+
+let cinema = null;
+
+/**
+ * The pre-show before a film: an ad, trailers, then the curtain over the starting film. Returns
+ * false when there is nothing to show, so the film simply starts. Skip (→ during the ad) moves on,
+ * Start Film (Return) goes straight to the film, Esc ends everything.
+ */
+async function runCinema(film, seasons, intent) {
+  const preferences = loadPreferences();
+  let trailers = [];
+  if (preferences.cinemaTrailers > 0) {
+    try { trailers = (await api.cinemaTrailers(film.id, preferences.cinemaTrailers))?.trailers ?? []; }
+    catch { trailers = []; }
+  }
+  let ad = null;
+  if (preferences.cinemaAds) {
+    try { ad = nextAd(localStorage.getItem(LAST_AD_KEY)); localStorage.setItem(LAST_AD_KEY, ad); }
+    catch { ad = nextAd(null); }
+  }
+  const acts = cinemaActs({ ad, trailers, film });
+  if (!acts.length) return false;
+
+  cinema?.end();
+  const stage = h("div", { class: "cinema-stage" });
+  const skip = h("button", { class: "secondary-button", onclick: () => current.skip?.() }, "Skip");
+  const start = h("button", { class: "primary-button", onclick: () => current.startFilm() }, "Start Film");
+  const close = h("button", { class: "icon-button cinema-close", "aria-label": "Close", onclick: () => current.end() }, icon("close", { size: 18 }));
+  const bar = h("div", { class: "cinema-bar" }, skip, start);
+  const layer = h("div", { class: "cinema-layer", role: "dialog", "aria-label": "Cinema" }, stage, close, bar);
+  let ended = false;
+  let trailerPlayer = null;
+  let wake = () => {};
+  const waitFor = (seconds) => new Promise((resolve) => {
+    const timer = setTimeout(resolve, seconds * 1000);
+    wake = () => { clearTimeout(timer); resolve(); };
+  });
+  const current = {
+    skip: () => wake(),
+    startFilm: () => { current.jump = true; trailerPlayer?.close(); wake(); },
+    end: () => {
+      ended = true;
+      trailerPlayer?.close();
+      layer.remove();
+      document.removeEventListener("keydown", keys, true);
+      wake();
+      if (cinema === current) cinema = null;
+    },
+  };
+  const keys = (event) => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); current.end(); }
+    else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); current.startFilm(); }
+    else if (event.key === "ArrowRight" && !trailerPlayer) { event.preventDefault(); current.skip(); }
+  };
+  cinema = current;
+  document.addEventListener("keydown", keys, true);
+  document.body.append(layer);
+
+  for (const act of acts) {
+    if (ended) return true;
+    if (current.jump && act.kind !== "feature") continue;
+    if (act.kind === "ad") {
+      stage.replaceChildren(adScene(act.ad));
+      await waitFor(AD_SECONDS);
+    } else if (act.kind === "trailer") {
+      stage.replaceChildren(comingUp());
+      await waitFor(1.6);
+      if (ended || current.jump) continue;
+      stage.replaceChildren();
+      layer.classList.add("watching");
+      // A trailer that never starts, or runs very long, gives way to the next part.
+      await new Promise((resolve) => {
+        let finished = false;
+        const done = () => { if (!finished) { finished = true; clearInterval(check); resolve(); } };
+        wake = () => { trailerPlayer?.close(); done(); };
+        const opened = Date.now();
+        const check = setInterval(() => {
+          const time = trailerPlayer?.video?.currentTime ?? 0;
+          if ((time === 0 && Date.now() - opened > TRAILER_START_SECONDS * 1000) || time > TRAILER_LONGEST_SECONDS) wake();
+        }, 1000);
+        playTitle(act.trailer, null, { intent: "play", skipCinema: true, onFinished: done }).then(() => {
+          trailerPlayer = state.player;
+          const closeTrailer = trailerPlayer?.onClose;
+          if (trailerPlayer) trailerPlayer.onClose = () => { closeTrailer?.(); done(); };
+        });
+      });
+      trailerPlayer = null;
+      layer.classList.remove("watching");
+    } else {
+      // The film starts behind the closed curtain, which opens once its picture moves.
+      const drape = curtain(act.title);
+      stage.replaceChildren(drape);
+      skip.hidden = true;
+      start.hidden = true;
+      const began = Date.now();
+      await playTitle(film, seasons, { intent, skipCinema: true });
+      if (ended) return true;
+      const video = state.player?.video;
+      await new Promise((resolve) => {
+        const check = setInterval(() => {
+          const waited = (Date.now() - began) / 1000;
+          if (ended || (waited >= CURTAIN_EARLIEST && (video?.currentTime ?? 0) > 0.2) || waited >= CURTAIN_LONGEST_WAIT) { clearInterval(check); resolve(); }
+        }, 200);
+      });
+      drape.classList.add("open");
+      layer.classList.add("opening");
+      await waitFor(CURTAIN_OPENING);
+      current.end();
+    }
+  }
+  return true;
 }
 
 // MARK: Watch Together

@@ -353,6 +353,13 @@ export function createSettings(app) {
         row("Volume Leveling", select(VOLUME_LEVELING_CHOICES, preferences.volumeLeveling, (choice) => save({ volumeLeveling: choice }), "Volume Leveling"),
           "Softens loud explosions and lifts quiet scenes. Sleep evens them out the most.")),
 
+      section("Cinema Mode", "play", "A night at the cinema: before a film that starts from the beginning comes a made-up ad, trailers of films you haven’t watched, and the curtain.",
+        row("Cinema Mode", toggle(preferences.cinemaMode, (on) => save({ cinemaMode: on }), "Cinema Mode"),
+          state.server?.capabilities?.includes("cinema-trailers-v1") ? null : "Needs server 2.3.0 or newer."),
+        row("Ads", toggle(preferences.cinemaAds, (on) => save({ cinemaAds: on }), "Ads"), "Aurelia’s own made-up ads. Nothing is for sale."),
+        row("Trailers", select([[0, "None"], [1, "1 trailer"], [2, "2 trailers"], [3, "3 trailers"]], preferences.cinemaTrailers,
+          (count) => save({ cinemaTrailers: Number(count) }), "Trailers"), "From the trailer files in your film folders.")),
+
       section("Audio & Subtitles", "captions", "Preferred spoken language, subtitles and appearance.",
         row("Default Audio Language", select([
           ["original", "Original Audio"],

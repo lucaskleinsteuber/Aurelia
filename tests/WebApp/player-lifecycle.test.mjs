@@ -174,3 +174,28 @@ test("returning to the tab takes the screen wake lock again while a title plays"
   video.paused = true; doc.dispatchEvent(new Event("visibilitychange"));
   assert.deepEqual(awake, [true]);
 });
+
+test("cinema mode plans an ad, the other films' trailers and the curtain, only for a film from its start", async () => {
+  const { cinemaActs, cinemaWanted, nextAd } = await import("../../src/Aurelia.Server/WebApp/js/cinema.js");
+  assert.equal(nextAd(null), "iceCream");
+  assert.equal(nextAd("iceCream"), "popcorn");
+  assert.equal(nextAd("phones"), "iceCream");
+  const film = { id: "film", kind: "movie", title: "Invented Film" };
+  const preferences = { cinemaMode: true, cinemaAds: true, cinemaTrailers: 2, resumeThresholdSeconds: 0 };
+  const capabilities = ["cinema-trailers-v1"];
+  assert.equal(cinemaWanted({ item: film, intent: "play", preferences, capabilities }), true);
+  assert.equal(cinemaWanted({ item: { ...film, kind: "episode" }, intent: "play", preferences, capabilities }), false);
+  assert.equal(cinemaWanted({ item: film, intent: "play", preferences, capabilities, watchingTogether: true }), false);
+  assert.equal(cinemaWanted({ item: film, intent: "play", preferences, capabilities: [] }), false);
+  assert.equal(cinemaWanted({ item: film, intent: "play", preferences: { ...preferences, cinemaMode: false }, capabilities }), false);
+  assert.equal(cinemaWanted({ item: film, intent: "play", preferences: { ...preferences, cinemaAds: false, cinemaTrailers: 0 }, capabilities }), false);
+  const started = { ...film, progress: { positionMilliseconds: 600000 } };
+  assert.equal(cinemaWanted({ item: started, intent: "resume", preferences, capabilities }), false, "a film picked up in the middle starts at once");
+  assert.equal(cinemaWanted({ item: started, intent: "play", preferences, capabilities }), true);
+  const trailers = [
+    { trailer: { id: "t1", kind: "trailer", parentId: "other" }, title: { id: "other" } },
+    { trailer: { id: "t2", kind: "trailer", parentId: "film" }, title: { id: "film" } },
+  ];
+  assert.deepEqual(cinemaActs({ ad: "popcorn", trailers, film }).map((act) => act.kind), ["ad", "trailer", "feature"]);
+  assert.deepEqual(cinemaActs({ ad: null, trailers: [trailers[1]], film }), [], "only the film's own trailer: nothing to show");
+});
