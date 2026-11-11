@@ -253,7 +253,7 @@ public sealed class HostingScreenTests
         window.Session.OpenProfile(new ProfileSession(new UserSummary(FakeLibrary.OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow),
             Guid.NewGuid(), "synthetic-profile-token-00000000000000000001", DateTimeOffset.UtcNow.AddHours(12)));
         FakeLibrary.Pump(() => window.Shell is not null);
-        var settings = window.OpenSettings(SettingsCategory.Server);
+        var settings = window.OpenSettings(SettingsCategory.Power);
         FakeLibrary.Pump(() => settings.Page?.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == "When the Server Runs") == true);
         Assert.True(Shows(settings, "When the Server Runs"));
         var login = Visible<ToggleSwitch>(settings).Single(t => AutomationProperties.GetName(t) == "Start Automatically When You Log In");
@@ -315,7 +315,7 @@ public sealed class HostingScreenTests
         window.Session.OpenProfile(new ProfileSession(new UserSummary(FakeLibrary.OwnerId, "Lucas", UserRole.Owner, DateTimeOffset.UtcNow),
             Guid.NewGuid(), "synthetic-profile-token-00000000000000000001", DateTimeOffset.UtcNow.AddHours(12)));
         FakeLibrary.Pump(() => window.Shell is not null);
-        var settings = window.OpenSettings(SettingsCategory.Server);
+        var settings = window.OpenSettings(SettingsCategory.Power);
         FakeLibrary.Pump(() => Shows(settings, "When the Server Runs"));
         Visible<ComboBox>(settings).Single(c => AutomationProperties.GetName(c) == "Run the Server").SelectedIndex = 1;
         FakeLibrary.Pump(() => Shows(settings, "Permission denied by the synthetic desktop."));

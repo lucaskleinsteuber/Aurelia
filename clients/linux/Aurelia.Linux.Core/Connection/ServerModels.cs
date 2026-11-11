@@ -22,7 +22,12 @@ public sealed record StoredServer(
     DateTimeOffset ExpiresAt,
     UserSummary? User = null,
     bool LocallyManaged = false,
-    IReadOnlyList<string>? WakeOnLanAddresses = null);
+    IReadOnlyList<string>? WakeOnLanAddresses = null,
+    string? Hosting = null)
+{
+    /// <summary>"macApp" or "linuxApp": the Aurelia app hosts it on a desktop or laptop, which its owner starts, never Wake-on-LAN.</summary>
+    public bool HostedByApp => Hosting is "macApp" or "linuxApp";
+}
 
 /// <summary>An open watching profile. It lives in memory only and ends after at most twelve hours.</summary>
 public sealed record ProfileSession(UserSummary User, Guid SessionId, string Token, DateTimeOffset ExpiresAt)

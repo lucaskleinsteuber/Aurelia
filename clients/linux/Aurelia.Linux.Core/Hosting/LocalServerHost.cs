@@ -22,6 +22,9 @@ public enum LocalServerState
 
     /// <summary>Another Aurelia Server already answers on this computer's ports, such as the Linux package's service.</summary>
     PortInUse,
+
+    /// <summary>The server stopped itself after the unused minutes of its power settings; opening Aurelia starts it again.</summary>
+    Idle,
 }
 
 /// <summary>Whether the hosted server keeps running with the window closed, starts at login and keeps the computer awake.</summary>
@@ -147,6 +150,9 @@ public sealed class LocalServerHost : ILocalServerHost
             }
         }
     }
+
+    /// <summary>The status Aurelia Server ends with when its power settings stopped it for being unused.</summary>
+    public const int IdleExitCode = 76;
 
     public async Task StartAsync()
     {
@@ -328,7 +334,7 @@ public sealed class LocalServerHost : ILocalServerHost
         var deadline = DateTimeOffset.UtcNow + ReadyTimeout;
         while (State != LocalServerState.Running)
         {
-            if (State is LocalServerState.Failed or LocalServerState.Stopped)
+            if (State is LocalServerState.Failed or LocalServerState.Stopped or LocalServerState.Idle)
                 throw new AureliaApiException(503, "server_unavailable", Message ?? "Aurelia Server is not running.");
             if (DateTimeOffset.UtcNow > deadline) throw new AureliaApiException(503, "server_unavailable", "Aurelia Server did not become ready.");
             await Task.Delay(100, cancellation);
@@ -528,7 +534,14 @@ public sealed class LocalServerHost : ILocalServerHost
                 if (exited != generation || stopping || !ReferenceEquals(process, child)) return;
                 process = null;
             }
+            var code = ExitCode(child);
             child.Dispose();
+            if (code == IdleExitCode)
+            {
+                log?.Write("Aurelia Server stopped because nobody used it.");
+                Update(LocalServerState.Idle, "Aurelia Server stopped because nobody used it. It starts again when you open Aurelia.");
+                return;
+            }
             await RecoverAsync("Aurelia Server stopped unexpectedly. Restarting…");
         }
         finally { lifecycle.Release(); }

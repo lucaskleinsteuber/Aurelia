@@ -64,12 +64,13 @@ public sealed class SettingsViewTests
         Assert.Equal(
             [SettingsCategory.General, SettingsCategory.Sidebar, SettingsCategory.Activity, SettingsCategory.Playback,
              SettingsCategory.Library, SettingsCategory.Metadata, SettingsCategory.ProfilesAndDevices, SettingsCategory.Server,
-             SettingsCategory.Updates, SettingsCategory.Advanced, SettingsCategory.About],
+             SettingsCategory.Power, SettingsCategory.Updates, SettingsCategory.Advanced, SettingsCategory.About],
             settings.VisibleCategories);
         Snapshot(settings, "settings-general");
         Assert.Equal([SettingsCategory.Playback], SettingsView.Matching("subtitle"));
         Assert.Contains(SettingsCategory.Advanced, SettingsView.Matching("fingerprint"));
-        Assert.Equal(11, SettingsView.Matching(" ").Count);
+        Assert.Equal(12, SettingsView.Matching(" ").Count);
+        Assert.Contains(SettingsCategory.Power, SettingsView.Matching("wake"));
     }
 
     [AvaloniaFact]

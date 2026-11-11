@@ -83,7 +83,12 @@ public sealed partial class MainWindow : Window, IPlayOnTarget, IWatchTogetherHo
         AddHandler(PointerMovedEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerPressedEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(KeyDownEvent, (_, _) => NoteUse(), Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
-        Activated += (_, _) => NoteUse();
+        Activated += (_, _) =>
+        {
+            NoteUse();
+            // A server this PC hosts that stopped for being unused starts again when Aurelia is opened.
+            if (hosting?.Host is { State: LocalServerState.Idle } idle) _ = idle.StartAsync();
+        };
         Deactivated += (_, _) => lastUse = services.Time.GetUtcNow();
         restCheck = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         restCheck.Tick += (_, _) =>

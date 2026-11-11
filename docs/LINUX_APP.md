@@ -206,12 +206,18 @@ the user's data, settings and keyring entries in place.
 
 Owners and administrators manage the server from Settings, as in the Mac app
 (`Aurelia.Linux.Core/Management`, `Aurelia.Linux/Management`). Library appears for owners and for
-administrators with the whole library, Metadata for both, and Server only for the owner, because
+administrators with the whole library, Metadata for both, and Server and Power only for the owner, because
 the server accepts its requests only from the owner; the Mac app shows them to administrators too
 and they fail.
 
+- Power: when the server this PC hosts runs (with Aurelia open or also when it is closed, at sign-in,
+  keeping the PC awake) and what a server does when nobody uses Aurelia. A Linux package server
+  can stop only Aurelia, sleep or shut down its computer and wake when a device connects; a server
+  inside Aurelia on a Mac or Linux PC only keeps running or stops after the unused minutes (exit
+  status 76) and starts again when Aurelia's window is opened. Other devices then show "Start
+  Aurelia on Your Linux PC" instead of trying Wake-on-LAN.
 - Server: summary with state, facts and Restart Server; health; for a Linux package server its
-  updates and power saving; new devices and automatic backups with Back Up Now; scrub previews; and
+  updates; new devices and automatic backups with Back Up Now; scrub previews; and
   under Advanced Settings the details, network (a reversible trial for desktop-hosted servers;
   a standalone Linux server is set up with `sudo aurelia setup`), sign-in and streaming limits, library maintenance and job queue, backups
   (retention, verify, encrypted export, restore with a passphrase) and diagnostics. Server settings

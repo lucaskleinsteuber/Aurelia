@@ -23,6 +23,7 @@ public sealed class ServerUnreachableView : UserControl
         };
         confirm.Click += async (_, _) => await session.DisconnectAsync();
         var wakeable = session.Server?.WakeOnLanAddresses is { Count: > 0 };
+        var appHost = session.Server is { HostedByApp: true } server ? (server.Hosting == "linuxApp" ? "Linux PC" : "Mac") : null;
         // As on the Mac: the downloads on this computer, without the server.
         var watchOffline = new Button { Content = "Watch Downloads Offline", Classes = { "chip" }, HorizontalAlignment = HorizontalAlignment.Center, IsVisible = offline is not null };
         watchOffline.Click += (_, _) => offline?.Invoke();
@@ -33,11 +34,13 @@ public sealed class ServerUnreachableView : UserControl
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                ScreenParts.Symbol("IconServer", 46),
-                ScreenParts.Title("Server Not Answering"),
-                ScreenParts.Detail(session.Message ?? (wakeable
-                    ? $"{name} did not wake up. Check that it is plugged in and connected to your network."
-                    : $"{name} did not respond. Check that it is turned on and connected to your network.")),
+                ScreenParts.Symbol(appHost is null ? "IconServer" : "IconComputer", 46),
+                ScreenParts.Title(appHost is null ? "Server Not Answering" : $"Start Aurelia on Your {appHost}"),
+                ScreenParts.Detail(appHost is not null
+                    ? $"{name} runs inside the Aurelia app on a {appHost}. Open Aurelia there, or wake the {appHost}, then choose Try Again."
+                    : session.Message ?? (wakeable
+                        ? $"{name} did not wake up. Check that it is plugged in and connected to your network."
+                        : $"{name} did not respond. Check that it is turned on and connected to your network.")),
                 tryAgain,
                 watchOffline,
                 forget,

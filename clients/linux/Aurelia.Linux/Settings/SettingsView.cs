@@ -35,6 +35,7 @@ public enum SettingsCategory
     Metadata,
     ProfilesAndDevices,
     Server,
+    Power,
     Updates,
     Advanced,
     About,
@@ -44,7 +45,7 @@ public enum SettingsCategory
 /// Aurelia's settings, shown inside the main window over the library (not in a window of its
 /// own): a list of categories with a search field and the chosen category beside it. Done, Esc or
 /// Ctrl+W return to the library. Library and Metadata appear for owners and administrators,
-/// Server only for the owner, whose requests alone the server accepts there.
+/// Server and Power only for the owner, whose requests alone the server accepts there.
 /// </summary>
 public sealed class SettingsView : UserControl
 {
@@ -57,7 +58,8 @@ public sealed class SettingsView : UserControl
         [SettingsCategory.Library] = ["storage", "location", "folder", "scan", "import", "health", "duplicate", "offline", "reset", "monitor"],
         [SettingsCategory.Metadata] = ["tmdb", "metadata", "artwork", "match", "review", "enrich", "token"],
         [SettingsCategory.ProfilesAndDevices] = ["profile", "pin", "lock", "switch", "device", "pair", "code", "apple tv", "browser", "revoke"],
-        [SettingsCategory.Server] = ["server", "health", "backup", "restore", "power", "update", "restart", "diagnostics", "network", "limits", "scrub", "preview", "maintenance"],
+        [SettingsCategory.Server] = ["server", "health", "backup", "restore", "update", "restart", "diagnostics", "network", "limits", "scrub", "preview", "maintenance"],
+        [SettingsCategory.Power] = ["power", "sleep", "shut down", "turn off", "wake", "lan", "unused", "idle", "awake", "energy", "keep running", "login"],
         [SettingsCategory.Updates] = ["update", "version", "release"],
         [SettingsCategory.Advanced] = ["server", "address", "fingerprint", "connection", "disconnect", "pair"],
         [SettingsCategory.About] = ["about", "version", "build", "license", "legal", "copyright", "github", "what's new", "changes", "introduction", "tour", "assistant", "getting started"],
@@ -178,6 +180,7 @@ public sealed class SettingsView : UserControl
         SettingsCategory.Metadata => "IconSparkle",
         SettingsCategory.ProfilesAndDevices => "IconPerson",
         SettingsCategory.Server => "IconServer",
+        SettingsCategory.Power => "IconSleep",
         SettingsCategory.Updates => "IconDownload",
         SettingsCategory.About => "IconAurelia",
         _ => "IconSliders",
@@ -235,7 +238,8 @@ public sealed class SettingsView : UserControl
             case SettingsCategory.Library: page.Children.Add(new LibraryPage(Admin(), Prefs, Refresh)); break;
             case SettingsCategory.Metadata: page.Children.Add(new MetadataPage(Admin())); break;
             case SettingsCategory.ProfilesAndDevices: Profiles(page); break;
-            case SettingsCategory.Server: page.Children.Add(new ServerPage(Admin(), session.Server is { LocallyManaged: true } ? LocalHosting() : null)); break;
+            case SettingsCategory.Server: page.Children.Add(new ServerPage(Admin())); break;
+            case SettingsCategory.Power: page.Children.Add(new ServerPage(Admin(), session.Server is { LocallyManaged: true } ? LocalHosting() : null, powerOnly: true)); break;
             case SettingsCategory.Updates: Updates(page); break;
             case SettingsCategory.About: About(page); break;
             default: Advanced(page); break;
@@ -261,7 +265,7 @@ public sealed class SettingsView : UserControl
         {
             SettingsCategory.Library => manages && (user!.Role == UserRole.Owner || user.AccessMode != ProfileAccessMode.SelectedTitles),
             SettingsCategory.Metadata => manages,
-            SettingsCategory.Server => manages && user!.Role == UserRole.Owner,
+            SettingsCategory.Server or SettingsCategory.Power => manages && user!.Role == UserRole.Owner,
             _ => true,
         };
     }

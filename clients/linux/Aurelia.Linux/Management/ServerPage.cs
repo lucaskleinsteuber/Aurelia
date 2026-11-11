@@ -36,11 +36,15 @@ public sealed class ServerPage : StackPanel
 
     private readonly Control? localHosting;
 
+    private readonly bool powerOnly;
+
     /// <param name="localHosting">When this computer hosts the server: when it runs, set here.</param>
-    public ServerPage(AdminScope scope, Control? localHosting = null)
+    /// <param name="powerOnly">Settings › Power: only when the server runs and what it does when unused.</param>
+    public ServerPage(AdminScope scope, Control? localHosting = null, bool powerOnly = false)
     {
         this.scope = scope;
         this.localHosting = localHosting;
+        this.powerOnly = powerOnly;
         Spacing = 22;
         Children.Add(new TextBlock { Text = "Loading server settings…", Classes = { "subdued" } });
         _ = ReloadAsync();
@@ -72,22 +76,19 @@ public sealed class ServerPage : StackPanel
         Children.Clear();
         Children.Add(message);
         if (!loaded && status is null) return;
+        if (powerOnly)
+        {
+            if (localHosting is not null) Children.Add(localHosting);
+            else if (Hosting is ServerHosting.MacApp or ServerHosting.DesktopApp)
+                Children.Add(Section("When the Server Runs", Block(Note("This server runs in Aurelia on another computer. Whether it keeps running when Aurelia is closed is chosen in Aurelia on that computer."))));
+            if (await PowerAsync() is { } unused) Children.Add(unused);
+            else if (localHosting is null)
+                Children.Add(Section("When Nobody Uses Aurelia", Block(Note("This server can't save power from Aurelia: it follows its computer's own energy settings."))));
+            return;
+        }
         Children.Add(Summary());
         Children.Add(Health());
-        if (Hosting == ServerHosting.LinuxPackage)
-        {
-            Children.Add(await UpdatesAsync());
-            var power = await PowerAsync();
-            if (power is not null) Children.Add(power);
-        }
-        else if (localHosting is not null)
-        {
-            Children.Add(localHosting);
-        }
-        else if (Hosting is ServerHosting.MacApp or ServerHosting.DesktopApp)
-        {
-            Children.Add(Section("Hosting", Block(Note("This server runs in Aurelia on another computer. Whether it keeps running when Aurelia is closed is chosen in Aurelia on that computer."))));
-        }
+        if (Hosting == ServerHosting.LinuxPackage) Children.Add(await UpdatesAsync());
         Children.Add(await EssentialsAsync());
         Children.Add(await ScrubPreviewsAsync());
         if (await VideoConversionAsync() is { } conversion) Children.Add(conversion);
@@ -308,24 +309,27 @@ public sealed class ServerPage : StackPanel
         string? from = power.AwakeFrom;
         string? until = power.AwakeUntil;
         var wakeOnAccess = power.WakeOnAccess;
+        var afterSleepTimer = power.AfterSleepTimer;
+        var byApp = HostedByApp(power.Hosting);
+        var computer = power.Hosting == "macApp" ? "the Mac" : power.Hosting == "linuxApp" ? "the Linux PC" : "the server computer";
         var panel = Block();
         void Build()
         {
             panel.Children.Clear();
-            panel.Children.Add(Note("What the server computer does while nobody watches."));
-            panel.Children.Add(Choice("When Unused", null, [("off", "Keep Running"), ("stop", "Stop Aurelia Server"), ("sleep", "Put the Computer to Sleep"), ("shutdown", "Shut Down the Computer")], mode, value => { mode = value; Build(); }).Also(r => r.Margin = new Thickness(0)));
-            panel.Children.Add(Note(mode switch
-            {
-                "stop" => "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when a device connects.",
-                "sleep" => "The whole computer sleeps and uses only a few watts. Aurelia on a computer wakes it when you open it; an Apple TV cannot, so open Aurelia on a computer first.",
-                "shutdown" => "The computer turns off and uses almost nothing. Aurelia on a computer starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off.",
-                _ => "Aurelia Server keeps running all the time.",
-            }));
+            panel.Children.Add(Note(byApp
+                ? $"Aurelia Server runs inside the Aurelia app on {computer}. It can stop when nobody uses it, so the computer may sleep."
+                : "What the server computer does while nobody watches, browses or changes anything."));
+            panel.Children.Add(Choice("When Unused", null, [.. PowerModes(byApp).Select(value => (value, PowerModeLabel(value, byApp)))], mode,
+                value => { mode = value; Build(); }).Also(r => r.Margin = new Thickness(0)));
+            panel.Children.Add(Note(PowerExplanation(mode, byApp, computer)));
             if (mode != "off")
             {
                 var choices = IdleChoices.Contains(idle) ? IdleChoices : [.. IdleChoices.Append(idle).Order()];
-                panel.Children.Add(Choice("After", "without a device using it. When a player's sleep timer ends, this happens after five minutes.",
+                panel.Children.Add(Choice("After", "Without anyone watching, browsing or changing settings on any device. An app that is only open doesn't count, and nothing happens while a title plays.",
                     [.. choices.Select(m => (m, IdleLabel(m)))], idle, value => idle = value).Also(r => r.Margin = new Thickness(0)));
+                panel.Children.Add(Toggle("Also After a Sleep Timer Ends",
+                    "When a player's sleep timer ends and nothing plays for five more minutes, it happens right away, at any time of day.",
+                    afterSleepTimer, enabled => afterSleepTimer = enabled).Also(r => r.Margin = new Thickness(0)));
                 panel.Children.Add(Toggle("Keep Running at Set Hours", null, from is not null, enabled =>
                 {
                     from = enabled ? "17:00" : null;
@@ -366,13 +370,36 @@ public sealed class ServerPage : StackPanel
                     return;
                 }
                 await scope.RunAsync(async () => power = await Client.SavePowerAsync(new UpdateServerPowerSettingsRequest(mode, idle, from, until,
-                    (power.WakeSupport ?? "").Contains('u', StringComparison.Ordinal) ? wakeOnAccess : null)), note);
+                    !byApp && (power.WakeSupport ?? "").Contains('u', StringComparison.Ordinal) ? wakeOnAccess : null, afterSleepTimer)), note);
             }, "primary"));
             panel.Children.Add(note);
         }
         Build();
-        return Section("Power Saving", panel);
+        return Section("When Nobody Uses Aurelia", panel);
     }
+
+    /// <summary>A server the Aurelia app hosts on a Mac or Linux PC only keeps running or stops.</summary>
+    internal static bool HostedByApp(string? hosting) => hosting is "macApp" or "linuxApp";
+
+    internal static string[] PowerModes(bool byApp) => byApp ? ["off", "stop"] : ["off", "stop", "sleep", "shutdown"];
+
+    internal static string PowerModeLabel(string mode, bool byApp) => mode switch
+    {
+        "stop" => byApp ? "Stop Aurelia Server" : "Stop Only Aurelia Server",
+        "sleep" => "Put the Computer to Sleep",
+        "shutdown" => "Shut Down the Computer",
+        _ => "Keep Running",
+    };
+
+    internal static string PowerExplanation(string mode, bool byApp, string computer) => (mode, byApp) switch
+    {
+        ("stop", true) => $"Aurelia Server stops, and {computer} may sleep as usual. Other devices then show “Start Aurelia on {computer}”; opening Aurelia there starts it again. Nothing can wake it over the network.",
+        ("stop", false) => "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when any device connects, a browser too.",
+        ("sleep", _) => "The whole computer sleeps and uses only a few watts. Aurelia on a computer wakes it when you open it, and so can a router such as a FRITZ!Box (Wake-on-LAN); an Apple TV can't, so open Aurelia on a computer first. Waking takes a few seconds.",
+        ("shutdown", _) => "The computer turns off and uses almost nothing. Aurelia on a computer starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off (often called “Wake on LAN from S5”).",
+        (_, true) => $"Aurelia Server runs as long as the Aurelia app does. While the computer sleeps or is turned off, other devices show “Start Aurelia on {computer}”.",
+        _ => "Aurelia Server and the computer keep running: ready at any moment, using the most power.",
+    };
 
     /// <summary>Waking on a direct connection matters only while the computer sleeps or is off, on a card that can.</summary>
     internal static bool OffersWakeOnAccess(string mode, string? wakeSupport) =>

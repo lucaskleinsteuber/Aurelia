@@ -438,6 +438,16 @@ public sealed class ManagementScreenTests
         Assert.False(ServerPage.OffersWakeOnAccess("stop", "pumbg"));
         Assert.False(ServerPage.OffersWakeOnAccess("sleep", "g"));
         Assert.False(ServerPage.OffersWakeOnAccess("sleep", null));
+        Assert.Equal(["off", "stop"], ServerPage.PowerModes(byApp: true));
+        Assert.Equal(["off", "stop", "sleep", "shutdown"], ServerPage.PowerModes(byApp: false));
+        Assert.True(ServerPage.HostedByApp("linuxApp"));
+        Assert.False(ServerPage.HostedByApp("linuxServer"));
+        Assert.Contains("Start Aurelia on the Mac", ServerPage.PowerExplanation("stop", true, "the Mac"), StringComparison.Ordinal);
+        Assert.Contains("BIOS", ServerPage.PowerExplanation("shutdown", false, "the server computer"), StringComparison.Ordinal);
+        var laptop = new Aurelia.Linux.Core.Connection.StoredServer(Guid.NewGuid(), "Invented", new Uri("https://192.0.2.4:43111"), "fp", "t", Guid.NewGuid(),
+            DateTimeOffset.UtcNow, Hosting: "macApp");
+        Assert.True(laptop.HostedByApp);
+        Assert.False((laptop with { Hosting = "linuxServer" }).HostedByApp);
         Assert.Equal("2 GB", ServerPage.FormatCap(2000));
         Assert.Equal("250 MB", ServerPage.FormatCap(250));
         Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", ManagementClient.PayloadHash([]));

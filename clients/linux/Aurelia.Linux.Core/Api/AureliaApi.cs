@@ -74,7 +74,8 @@ public sealed partial class AureliaApi : IDisposable
             "/api/v1/auth/pair", null, new RedeemPairingCodeRequest(digits, name), inspecting: false, cancellation);
         if (!IsValidSecret(credential.Token)) throw AureliaApiException.InvalidResponse();
         return new StoredServer(server.Info.ServerId, server.Info.Name, server.Address, server.Fingerprint, credential.Token,
-            credential.SessionId, credential.ExpiresAt, credential.User, WakeOnLanAddresses: server.Info.WakeOnLanAddresses);
+            credential.SessionId, credential.ExpiresAt, credential.User, WakeOnLanAddresses: server.Info.WakeOnLanAddresses,
+            Hosting: server.Info.Hosting);
     }
 
     /// <summary>GET /api/v1/profiles with the device credential.</summary>

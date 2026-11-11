@@ -34,7 +34,8 @@ public sealed class ServerWakeUp(AureliaApi api, IWakeOnLan wakeOnLan, Func<IRea
     {
         report(ConnectionStatus.Connecting);
         if (await ProbeAsync(server, cancellation) is { } reached) return reached;
-        var addresses = server.WakeOnLanAddresses ?? [];
+        // A server inside Aurelia on a desktop or laptop is started by its owner, not woken.
+        var addresses = server.HostedByApp ? [] : server.WakeOnLanAddresses ?? [];
         var limit = addresses.Count > 0 ? WakeLimit : WaitLimit;
         if (addresses.Count > 0) report(ConnectionStatus.Waking);
         var started = time.GetUtcNow();
@@ -64,7 +65,10 @@ public sealed class ServerWakeUp(AureliaApi api, IWakeOnLan wakeOnLan, Func<IRea
             {
                 var at = server with { Address = address };
                 var info = await api.ServerInfoAsync(at, cancellation, ProbeTimeout);
-                return new ReachedServer(at with { WakeOnLanAddresses = info.WakeOnLanAddresses is { Count: > 0 } known ? known : server.WakeOnLanAddresses }, info);
+                var hosting = info.Hosting ?? server.Hosting;
+                var wake = hosting is "macApp" or "linuxApp" ? null
+                    : info.WakeOnLanAddresses is { Count: > 0 } known ? known : server.WakeOnLanAddresses;
+                return new ReachedServer(at with { WakeOnLanAddresses = wake, Hosting = hosting }, info);
             }
             catch (AureliaApiException error) when (error.IsUnreachable)
             {
