@@ -1715,10 +1715,23 @@ struct APIClient: Sendable {
   func serverMediaSegments() async throws -> MediaSegmentSettings {
     try await get("/api/v1/server/media-segments")
   }
-  func saveServerMediaSegments(enabled: Bool) async throws -> MediaSegmentSettings {
+  func saveServerMediaSegments(enabled: Bool, usePictures: Bool? = nil) async throws
+    -> MediaSegmentSettings
+  {
+    var body = ["enabled": enabled]
+    if let usePictures { body["usePictures"] = usePictures }
     let data = try await perform(
-      path: "/api/v1/server/media-segments", method: "PUT",
-      body: try JSONEncoder().encode(["enabled": enabled]))
+      path: "/api/v1/server/media-segments", method: "PUT", body: try JSONEncoder().encode(body))
+    return try Self.decode(MediaSegmentSettings.self, from: data)
+  }
+  /// Each series with how many episodes have an intro and credits and how many are still to examine.
+  func mediaSegmentSeries() async throws -> [MediaSegmentSeriesStatus] {
+    try await get("/api/v1/server/media-segments/series")
+  }
+  func reanalyzeMediaSegments(seriesId: UUID) async throws -> MediaSegmentSettings {
+    let data = try await perform(
+      path: "/api/v1/server/media-segments/reanalyze", method: "POST",
+      body: try JSONEncoder().encode(["seriesId": seriesId.uuidString.lowercased()]))
     return try Self.decode(MediaSegmentSettings.self, from: data)
   }
   func reanalyzeAllMediaSegments() async throws -> MediaSegmentSettings {

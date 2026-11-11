@@ -116,13 +116,42 @@ struct GeneralPreferencesTests {
         dismissed: false, lead: lead5s))
   }
 
-  @Test func skipIntrosAutomaticallyIsSavedAndStartsOff() throws {
+  @Test func introAndCreditsChoicesAreSavedAndStartAtTheButton() throws {
     var value = PlaybackPreferences.defaultValue
-    #expect(!value.skipIntrosAutomatically)
-    value.skipIntrosAutomatically = true
+    #expect(value.introSkipping == .button)
+    #expect(value.upNextAtCredits)
+    value.introSkipping = .off
+    value.upNextAtCredits = false
     let restored = try JSONDecoder().decode(
       PlaybackPreferences.self, from: JSONEncoder().encode(value))
-    #expect(restored.skipIntrosAutomatically)
+    #expect(restored.introSkipping == .off)
+    #expect(!restored.upNextAtCredits)
+
+    // 2.8 and 2.9 saved a single switch; "on" becomes Skip Automatically.
+    var old = try JSONSerialization.jsonObject(with: JSONEncoder().encode(PlaybackPreferences.defaultValue))
+      as! [String: Any]
+    old.removeValue(forKey: "introSkipping")
+    old.removeValue(forKey: "upNextAtCredits")
+    old["skipIntrosAutomatically"] = true
+    let migrated = try JSONDecoder().decode(
+      PlaybackPreferences.self, from: JSONSerialization.data(withJSONObject: old))
+    #expect(migrated.introSkipping == .automatic)
+    #expect(migrated.upNextAtCredits)
+  }
+
+  @Test func serverProgressReadsOlderServersAndShowsTimeLeft() throws {
+    let older = Data(
+      """
+      {"available":true,"enabled":true,"pendingCount":2,"analyzedCount":6,"noResultCount":2,
+      "running":true,"pausedForPlayback":false}
+      """.utf8)
+    let settings = try JSONDecoder().decode(MediaSegmentSettings.self, from: older)
+    #expect(settings.usePictures == nil)
+    #expect(settings.progress == 0.8)
+    #expect(ServerMediaSegmentsEditor.remaining(30) == "1 minute")
+    #expect(ServerMediaSegmentsEditor.remaining(45 * 60) == "45 minutes")
+    #expect(ServerMediaSegmentsEditor.remaining(5 * 3_600) == "5 hours")
+    #expect(ServerMediaSegmentsEditor.remaining(50 * 3_600) == "2 days 2 hours")
   }
 
   @Test func introAndCreditsPoliciesKeepTheirWindows() {
@@ -174,6 +203,22 @@ struct GeneralPreferencesTests {
     #expect(
       !UpNextPolicy.nextFinishesCurrent(
         position: 1_340_000, duration: duration, upNextShown: false))
+  }
+
+  @Test func trimEditorShowsTheRightStretchAndKeepsHandlesApart() {
+    // A 45-minute episode: the intro strip covers its first 12 minutes, or a minute past a late intro.
+    let duration: Int64 = 2_700_000
+    #expect(SegmentTrimRange.span(part: .intro, duration: duration, start: 255_000, end: 271_000) == 0...720_000)
+    #expect(SegmentTrimRange.span(part: .intro, duration: duration, start: 700_000, end: 760_000) == 0...820_000)
+    // The credits strip covers the last ten minutes, or a minute before credits found earlier.
+    #expect(SegmentTrimRange.span(part: .credits, duration: duration, start: 2_400_000, end: nil) == 2_100_000...2_700_000)
+    #expect(SegmentTrimRange.span(part: .credits, duration: duration, start: 1_900_000, end: nil) == 1_840_000...2_700_000)
+    let span: ClosedRange<Int64> = 0...720_000
+    #expect(SegmentTrimRange.initial(part: .intro, span: span) == (0, 30_000))
+    #expect(SegmentTrimRange.clamp(start: 50_000, end: 40_000, span: span) == (39_000, 40_000))
+    #expect(SegmentTrimRange.clamp(start: -5, end: 900_000, span: span) == (0, 720_000))
+    #expect(SegmentTrimRange.label(255_340) == "4:15.3")
+    #expect(SegmentTrimRange.label(3_725_000) == "1:02:05.0")
   }
 
   @Test func segmentTimeFieldsReadMinutesAndSeconds() {

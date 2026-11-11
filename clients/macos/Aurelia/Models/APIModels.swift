@@ -1125,6 +1125,30 @@ struct MediaSegmentSettings: Codable, Equatable, Sendable {
   var noResultCount: Int
   var running: Bool
   var pausedForPlayback: Bool
+  // Servers before 2.10.0 send none of these.
+  var usePictures: Bool? = nil
+  var totalCount: Int? = nil
+  var currentTitle: String? = nil
+  var currentStep: String? = nil
+  var estimatedSecondsRemaining: Int? = nil
+
+  /// Share of the episodes examined, 0 to 1.
+  var progress: Double {
+    let total = max(totalCount ?? 0, pendingCount + analyzedCount + noResultCount)
+    return total == 0 ? 1 : Double(total - pendingCount) / Double(total)
+  }
+}
+
+/// One series in the server's overview of intros and credits.
+struct MediaSegmentSeriesStatus: Codable, Equatable, Sendable, Identifiable {
+  let seriesId: UUID
+  let title: String
+  let episodeCount: Int
+  let withIntro: Int
+  let withCredits: Int
+  let pendingCount: Int
+
+  var id: UUID { seriesId }
 }
 
 struct MetadataProviderStatus: Codable, Equatable, Sendable {

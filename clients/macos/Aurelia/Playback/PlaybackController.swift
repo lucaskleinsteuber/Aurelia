@@ -1118,7 +1118,7 @@ final class PlaybackController: ObservableObject {
       !backwards
       && UpNextPolicy.nextFinishesCurrent(
         position: currentTimeMilliseconds, duration: durationMilliseconds, upNextShown: upNext != nil,
-        creditsStart: currentSegments?.creditsStartMilliseconds)
+        creditsStart: preferences.upNextAtCredits ? currentSegments?.creditsStartMilliseconds : nil)
     naturalEndReached = false
     endHandled = true
     loadID = UUID()
@@ -1159,7 +1159,8 @@ final class PlaybackController: ObservableObject {
   }
 
   private func updateSkipIntro() {
-    guard let intro = currentSegments?.intro, appliedResumePosition, !endHandled,
+    guard preferences.introSkipping != .off, let intro = currentSegments?.intro,
+      appliedResumePosition, !endHandled,
       durationMilliseconds <= 0 || intro.end <= durationMilliseconds
     else {
       assignIfChanged(&showsSkipIntro, false)
@@ -1183,7 +1184,7 @@ final class PlaybackController: ObservableObject {
   private func updateUpNext() {
     let next = queuedItems.first
     let leadMs = Int64(preferences.upNextCountdownSeconds) * 1_000
-    let creditsStart = currentSegments?.creditsStartMilliseconds
+    let creditsStart = preferences.upNextAtCredits ? currentSegments?.creditsStartMilliseconds : nil
     let shown = UpNextPolicy.shows(
       position: currentTimeMilliseconds, duration: durationMilliseconds, hasNext: next != nil,
       autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,

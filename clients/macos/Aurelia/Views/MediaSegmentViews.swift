@@ -47,9 +47,30 @@ struct MediaSegmentsPanel: View {
   @State private var working = false
   @State private var message: String?
   @State private var errorText: String?
+  @State private var editing: SegmentTrimPart?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
+      if !isSeries, let times {
+        HStack(spacing: 10) {
+          Button("Edit Intro…") { editing = .intro }
+            .help("Opens the episode's beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save.")
+            .accessibilityIdentifier("segments-edit-intro")
+          Button("Edit Credits…") { editing = .credits }
+            .help("Opens the episode's ending with a film strip: drag the handle to where the credits begin, play it to check, then save.")
+            .accessibilityIdentifier("segments-edit-credits")
+        }
+        .disabled(working || model.profile == nil)
+        .sheet(item: $editing) { part in
+          if let profile = model.profile {
+            SegmentTrimEditor(profile: profile, mediaId: mediaId, part: part, times: times) { saved in
+              apply(saved)
+              message = "Saved. These times are used the next time the episode starts."
+            }
+            .environmentObject(model)
+          }
+        }
+      }
       if isSeries {
         Text(
           "The server compares the sound of a season's episodes to find the intro and the credits. Times set by hand stay."
@@ -58,7 +79,7 @@ struct MediaSegmentsPanel: View {
         .fixedSize(horizontal: false, vertical: true)
       } else {
         Text(
-          "Times as minutes:seconds, for example 1:24. Leave a field empty when there is nothing to skip."
+          "Or type the times as minutes:seconds, for example 1:24. Leave a field empty when there is nothing to skip."
         )
         .font(.callout).foregroundStyle(.secondary)
         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
@@ -98,16 +119,18 @@ struct MediaSegmentsPanel: View {
         if !isSeries {
           Button("Save Times") { Task { await save() } }
             .disabled(!hasChanges)
+            .help("Saves the typed times as corrections; detection never replaces them.")
             .accessibilityIdentifier("segments-save")
           Button("Reset to Detected") { Task { await reset() } }
             .disabled(times?.hasManualPart != true)
-            .help("Removes the times set by hand; the server examines the episode again")
+            .help("Removes the times set by hand; the server examines the episode again and fills in what it finds.")
             .accessibilityIdentifier("segments-reset")
         }
         if isSeries || times?.canAnalyze == true {
           Button(isSeries ? "Re-analyze All Seasons" : "Re-analyze Season") {
             Task { await reanalyze() }
           }
+          .help("Has the server compare this season's episodes again in the background. Times set by hand stay.")
           .accessibilityIdentifier("segments-reanalyze")
         }
         if working { ProgressView().controlSize(.small) }
@@ -209,11 +232,13 @@ struct MediaSegmentsPanel: View {
   }
 }
 
-/// Server settings: whether the server finds intros and credits, and how far it is.
+/// Server settings: whether the server finds intros and credits, how far it is, and each series.
 struct ServerMediaSegmentsEditor: View {
   @EnvironmentObject private var model: AppModel
   let client: APIClient
   @State private var stored: MediaSegmentSettings?
+  @State private var series: [MediaSegmentSeriesStatus] = []
+  @State private var showsSeries = false
   @State private var working = false
   @State private var message: String?
 
@@ -224,7 +249,7 @@ struct ServerMediaSegmentsEditor: View {
           "Intros and Credits",
           symbol: "forward.end",
           description:
-            "The server compares the sound of a season's episodes to find the intro and the credits. Only the times are stored."
+            "The server compares the sound and pictures of a season's episodes to find the intro and the credits. Only the times are stored; it waits while someone is watching."
         ) {
           VStack(alignment: .leading, spacing: 12) {
             if !stored.available {
@@ -236,16 +261,36 @@ struct ServerMediaSegmentsEditor: View {
               isOn: Binding(get: { stored.enabled }, set: { save(enabled: $0) })
             )
             .accessibilityIdentifier("server-media-segments-enabled")
-            Text(Self.summary(stored))
-              .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-              .accessibilityIdentifier("server-media-segments-status")
+            if stored.usePictures != nil {
+              VStack(alignment: .leading, spacing: 2) {
+                Toggle(
+                  "Also Look at Pictures for Credits",
+                  isOn: Binding(
+                    get: { stored.usePictures ?? true },
+                    set: { save(enabled: stored.enabled, usePictures: $0) })
+                )
+                .disabled(!stored.enabled)
+                .accessibilityIdentifier("server-media-segments-pictures")
+                Text(
+                  "Finds credits whose music differs in every episode, such as names on black. It reads the last minutes of each episode's picture, which takes a few minutes per episode on a small server, but only once."
+                )
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+              }
+            }
+            progress(stored)
             HStack(spacing: 10) {
-              Button("Re-analyze Everything") { reanalyze() }
+              Button("Re-analyze Everything") { reanalyze(nil) }
                 .disabled(!stored.enabled || !stored.available)
                 .help("Examines every episode again; times set by hand stay")
                 .accessibilityIdentifier("server-media-segments-reanalyze")
               if working { ProgressView().controlSize(.small) }
+            }
+            if !series.isEmpty {
+              DisclosureGroup("Series (\(series.count))", isExpanded: $showsSeries) {
+                seriesList
+              }
+              .accessibilityIdentifier("server-media-segments-series")
             }
             if let message { Text(message).font(.caption).foregroundStyle(.orange) }
           }
@@ -254,7 +299,58 @@ struct ServerMediaSegmentsEditor: View {
         .accessibilityIdentifier("server-media-segments")
       }
     }
-    .task(id: model.administrationGeneration) { await load() }
+    .task(id: model.administrationGeneration) { await refreshWhileWorking() }
+  }
+
+  @ViewBuilder
+  private func progress(_ settings: MediaSegmentSettings) -> some View {
+    let total = max(settings.totalCount ?? 0, settings.pendingCount + settings.analyzedCount + settings.noResultCount)
+    VStack(alignment: .leading, spacing: 6) {
+      if total > 0 {
+        ProgressView(value: settings.progress) {
+          Text("\(total - settings.pendingCount) of \(total) episodes examined")
+            .font(.callout.monospacedDigit())
+        }
+        .accessibilityIdentifier("server-media-segments-progress")
+      }
+      Text(Self.summary(settings))
+        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("server-media-segments-status")
+      if settings.running, let title = settings.currentTitle {
+        Label(
+          [title, settings.currentStep].compactMap { $0 }.joined(separator: " · "),
+          systemImage: "waveform")
+          .font(.caption).foregroundStyle(.secondary)
+          .accessibilityIdentifier("server-media-segments-current")
+      }
+    }
+  }
+
+  private var seriesList: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      ForEach(series) { item in
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+          Text(item.title).lineLimit(1)
+          Spacer()
+          Text(Self.seriesSummary(item))
+            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+          Button("Re-analyze") { reanalyze(item.seriesId) }
+            .controlSize(.small)
+            .disabled(stored?.enabled != true)
+            .accessibilityLabel("Re-analyze \(item.title)")
+        }
+        .padding(.vertical, 5)
+        Divider()
+      }
+    }
+    .padding(.top, 6)
+  }
+
+  static func seriesSummary(_ item: MediaSegmentSeriesStatus) -> String {
+    var text = "Intro \(item.withIntro)/\(item.episodeCount) · Credits \(item.withCredits)/\(item.episodeCount)"
+    if item.pendingCount > 0 { text += " · \(item.pendingCount) to examine" }
+    return text
   }
 
   static func summary(_ settings: MediaSegmentSettings) -> String {
@@ -268,10 +364,35 @@ struct ServerMediaSegmentsEditor: View {
       text += ". Turned off: only times set by hand are used."
     } else if settings.pausedForPlayback {
       text += ". Waiting while someone is watching."
+    } else if settings.pendingCount > 0, let seconds = settings.estimatedSecondsRemaining {
+      text += ". About \(remaining(seconds)) left."
     } else if settings.running {
       text += ". Working in the background."
     }
     return text
+  }
+
+  /// "40 minutes", "3 hours", "1 day 4 hours".
+  static func remaining(_ seconds: Int) -> String {
+    let minutes = max(1, (seconds + 59) / 60)
+    if minutes < 90 { return minutes == 1 ? "1 minute" : "\(minutes) minutes" }
+    let hours = (minutes + 30) / 60
+    if hours < 36 { return "\(hours) hours" }
+    let days = hours / 24
+    let rest = hours % 24
+    return (days == 1 ? "1 day" : "\(days) days") + (rest > 0 ? " \(rest) hours" : "")
+  }
+
+  /// Loads now, then refreshes every few seconds while the server is still examining episodes.
+  private func refreshWhileWorking() async {
+    await load()
+    while !Task.isCancelled, let current = stored, current.enabled,
+      current.pendingCount > 0 || current.running
+    {
+      try? await Task.sleep(for: .seconds(5))
+      guard !Task.isCancelled else { return }
+      await load()
+    }
   }
 
   private func load() async {
@@ -279,6 +400,11 @@ struct ServerMediaSegmentsEditor: View {
     do {
       stored = try await model.currentAdministration {
         try await scope.request { try await client.serverMediaSegments() }
+      }
+      if stored?.usePictures != nil {
+        series = try await model.currentAdministration {
+          try await scope.request { try await client.mediaSegmentSeries() }
+        }
       }
     } catch let failure as APIClientError where failure.httpStatus == 404 {
       // A server before 2.8.0 has no detection.
@@ -288,12 +414,16 @@ struct ServerMediaSegmentsEditor: View {
     }
   }
 
-  private func save(enabled: Bool) {
-    run { try await client.saveServerMediaSegments(enabled: enabled) }
+  private func save(enabled: Bool, usePictures: Bool? = nil) {
+    run { try await client.saveServerMediaSegments(enabled: enabled, usePictures: usePictures) }
   }
 
-  private func reanalyze() {
-    run { try await client.reanalyzeAllMediaSegments() }
+  private func reanalyze(_ seriesId: UUID?) {
+    if let seriesId {
+      run { try await client.reanalyzeMediaSegments(seriesId: seriesId) }
+    } else {
+      run { try await client.reanalyzeAllMediaSegments() }
+    }
   }
 
   private func run(_ action: @escaping @Sendable () async throws -> MediaSegmentSettings) {
@@ -304,6 +434,7 @@ struct ServerMediaSegmentsEditor: View {
       defer { working = false }
       do {
         stored = try await model.currentAdministration { try await scope.request(action) }
+        await refreshWhileWorking()
       } catch {
         message = scope.message(for: error)
       }

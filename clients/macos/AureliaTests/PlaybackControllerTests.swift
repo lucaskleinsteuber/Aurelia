@@ -1011,6 +1011,37 @@ final class PlaybackControllerTests: XCTestCase {
     await controller.shutdown(saveProgress: false)
   }
 
+  func testChoicesTurnSkipIntroAndTheCreditsCardOff() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.segments = Self.segments
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    preferences.introSkipping = .off
+    preferences.upNextAtCredits = false
+    let relay = FakePlaybackRelay()
+    engine.durationMilliseconds = 2_700_000
+    let controller = PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: source.mediaId, title: "Episode 1", subtitle: nil,
+        queue: [PlaybackQueueItem(mediaId: UUID(), title: "Episode 2", subtitle: nil)]),
+      engine: engine, preferences: preferences, relayFactory: { _, _ in relay })
+    await controller.start()
+    engine.currentTimeMilliseconds = 100_000
+    engine.onUpdate?()
+    XCTAssertFalse(controller.showsSkipIntro)
+    // Credits known but turned off: the card waits for the last seconds.
+    engine.currentTimeMilliseconds = 2_450_000
+    engine.onUpdate?()
+    XCTAssertNil(controller.upNext)
+    engine.currentTimeMilliseconds = 2_685_000
+    engine.onUpdate?()
+    XCTAssertEqual(controller.upNext?.duringCredits, false)
+    await controller.shutdown(saveProgress: false)
+  }
+
   func testWithoutANextEpisodeOrWithoutTimesNothingChanges() async throws {
     // The last episode gets no card in its credits.
     var last = Self.source(position: 0, completed: false)

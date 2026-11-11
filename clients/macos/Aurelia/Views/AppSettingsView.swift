@@ -748,13 +748,29 @@ struct AppSettingsView: View {
 
         if model.supportsMediaSegments {
           VStack(alignment: .leading, spacing: 2) {
-            Toggle(
-              "Skip Intros Automatically",
-              isOn: $playbackPreferences.preferences.skipIntrosAutomatically
-            )
-            .accessibilityIdentifier("playback-skip-intros")
+            LabeledContent("Intros") {
+              Picker("Intros", selection: $playbackPreferences.preferences.introSkipping) {
+                ForEach(IntroSkipping.allCases) { choice in Text(choice.title).tag(choice) }
+              }
+              .labelsHidden()
+              .frame(width: 180)
+              .accessibilityIdentifier("playback-skip-intros")
+            }
             Text(
-              "When the server knows where an episode's intro is, the player offers Skip Intro. Turn this on to skip it without asking. When the credits begin, the next episode is offered with the countdown above."
+              "Your server finds where an episode's intro is. Show Skip Intro offers a button while it plays (Return or S); Skip Automatically jumps past it once per episode, but never when you go back into it yourself."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
+          VStack(alignment: .leading, spacing: 2) {
+            Toggle(
+              "Offer Next Episode When Credits Begin",
+              isOn: $playbackPreferences.preferences.upNextAtCredits
+            )
+            .disabled(!playbackPreferences.preferences.automaticallyPlayNextEpisode)
+            .accessibilityIdentifier("playback-up-next-credits")
+            Text(
+              "Up Next appears when the credits begin, with the countdown above and Watch Credits. Turned off, or for episodes without known credits, it appears in the last seconds."
             )
             .font(.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

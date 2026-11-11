@@ -63,7 +63,7 @@ devices and backups, scrub previews, Server Health and the server's own updates.
 | General | Start screen, poster size, watched titles in rows, Reduce Motion, window and rest behavior |
 | Sidebar | Which pages appear in the sidebar and in which order |
 | Activity | Your watch history and statistics, and Wrapped: the year, or last month from the 2nd, as slides over the whole window (← → Space Esc) |
-| Playback | Audio and subtitles, Automatic Resume, Streaming Quality, Skip Intros Automatically, Cinema Mode, Dialogue Boost, Volume Leveling |
+| Playback | Audio and subtitles, Automatic Resume, Streaming Quality, Intros, Next Episode at Credits, Cinema Mode, Dialogue Boost, Volume Leveling |
 | Library | Storage folders, scans, Library Health, import previews |
 | Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
 | Profiles and Devices | Profiles, PINs, age limits, devices, **Create Code** for a new device, the browser address |
@@ -150,12 +150,18 @@ pages and full-window layers. Reduce Motion turns each into a short fade.
 ## Skip Intro and credits
 
 With a server from 2.8.0, the player offers **Skip Intro** while an episode's intro plays
-(Return or S skips too). Settings › Playback › **Skip Intros Automatically** skips it without
-asking: once per episode, and not when you move into the intro yourself. When the credits
-begin, Up Next appears with its countdown; **Watch Credits** plays them to the end, and then
-the next episode starts as usual. The server finds the times
+(Return or S skips too). Settings › Playback › **Intros** chooses Don't Offer, Show Skip Intro or
+Skip Automatically (once per episode, and not when you move into the intro yourself). When the
+credits begin, Up Next appears with its countdown; **Watch Credits** plays them to the end, and
+then the next episode starts as usual. **Offer Next Episode When Credits Begin** turned off keeps
+Up Next to the last seconds. The server settings show how far detection is, with a progress bar,
+the episode it is on and each series' results. The server finds the times
 ([Organizing your media](MEDIA_LIBRARY.md#intros-and-credits)); without a time no button
-appears. Edit Metadata › Intro and Credits corrects an episode's times.
+appears. Edit Metadata › Intro and Credits corrects an episode's times: **Edit Intro…** and
+**Edit Credits…** open the episode's picture over a film strip; drag the yellow handles to where
+the part begins (and, for the intro, ends), check it with **Play Selection** (Space; Mute plays
+it silently) and save. **No Intro** or **No Credits** records that an episode has none. Times
+can also be typed. A correction is never replaced by detection.
 
 ## Cinema mode
 

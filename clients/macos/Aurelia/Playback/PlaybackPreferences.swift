@@ -112,8 +112,16 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var cinemaTrailers = 2
   /// The original file, or the server's live conversion in a quality the connection carries.
   var streamingQuality: StreamingQuality = .original
-  /// Jumps past an intro the server found, instead of only offering Skip Intro.
-  var skipIntrosAutomatically = false
+  /// What the player does with an intro the server found.
+  var introSkipping: IntroSkipping = .button
+  /// The next episode is offered when the credits begin, not only in the last seconds.
+  var upNextAtCredits = true
+
+  /// Kept for code and settings from 2.8 and 2.9, where this was a single switch.
+  var skipIntrosAutomatically: Bool {
+    get { introSkipping == .automatic }
+    set { introSkipping = newValue ? .automatic : .button }
+  }
 
   init(
     automaticResume: Bool,
@@ -179,7 +187,7 @@ extension PlaybackPreferences {
     case upNextCountdownSeconds, resumeThresholdSeconds
     case defaultAudioLanguage, defaultSubtitleLanguage, dialogueBoost, volumeLeveling
     case fillsScreen, cinemaMode, cinemaAds, cinemaTrailers, streamingQuality
-    case skipIntrosAutomatically
+    case skipIntrosAutomatically, introSkipping, upNextAtCredits
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -213,8 +221,11 @@ extension PlaybackPreferences {
       cinemaTrailers: try container.decodeIfPresent(Int.self, forKey: .cinemaTrailers) ?? 2)
     streamingQuality =
       (try? container.decodeIfPresent(StreamingQuality.self, forKey: .streamingQuality)) ?? .original
-    skipIntrosAutomatically =
-      try container.decodeIfPresent(Bool.self, forKey: .skipIntrosAutomatically) ?? false
+    let automatic = try container.decodeIfPresent(Bool.self, forKey: .skipIntrosAutomatically) ?? false
+    introSkipping =
+      (try? container.decodeIfPresent(IntroSkipping.self, forKey: .introSkipping))
+      ?? (automatic ? .automatic : .button)
+    upNextAtCredits = try container.decodeIfPresent(Bool.self, forKey: .upNextAtCredits) ?? true
   }
   func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -238,8 +249,30 @@ extension PlaybackPreferences {
     try values.encode(cinemaTrailers, forKey: .cinemaTrailers)
     try values.encode(streamingQuality, forKey: .streamingQuality)
     try values.encode(skipIntrosAutomatically, forKey: .skipIntrosAutomatically)
+    try values.encode(introSkipping, forKey: .introSkipping)
+    try values.encode(upNextAtCredits, forKey: .upNextAtCredits)
   }
 
+}
+
+/// What the player does when an episode's intro plays.
+enum IntroSkipping: String, Codable, CaseIterable, Identifiable, Sendable {
+  /// Nothing is offered; the intro plays.
+  case off
+  /// A Skip Intro button is offered while the intro plays.
+  case button
+  /// The intro is skipped without asking, once per episode.
+  case automatic
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .off: "Don't Offer"
+    case .button: "Show Skip Intro"
+    case .automatic: "Skip Automatically"
+    }
+  }
 }
 
 /// How the picture fills the player when black bars are not wanted.
