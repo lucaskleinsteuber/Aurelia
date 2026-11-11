@@ -17,7 +17,7 @@ public sealed class ServerPowerSettingsTests
         var saved = fixture.Store.Update(new("sleep", 20, "17:00", "23:30"));
         Assert.Equal(new ServerPowerSettings(true, "sleep", 20, "17:00", "23:30"), saved);
         Assert.Equal(
-            ["MODE=sleep", "IDLE_MINUTES=20", "AWAKE_FROM=17:00", "AWAKE_UNTIL=23:30"],
+            ["MODE=sleep", "IDLE_MINUTES=20", "AWAKE_FROM=17:00", "AWAKE_UNTIL=23:30", "WAKE_ON_ACCESS=off"],
             File.ReadAllLines(fixture.SettingsPath).Where(line => !line.StartsWith('#')));
 
         var withoutHours = fixture.Store.Update(new("stop", 15, null, null));
@@ -40,6 +40,35 @@ public sealed class ServerPowerSettingsTests
         var error = Assert.Throws<AccountException>(() => fixture.Store.Update(new(mode, idle, from, until)));
         Assert.Equal(400, error.StatusCode);
         Assert.False(File.Exists(fixture.SettingsPath));
+    }
+
+    [Fact]
+    public void ShutDownModeAndWakeOnAccessAreKeptWhereTheCardAllowsIt()
+    {
+        using var fixture = new Fixture(available: true);
+        var refused = Assert.Throws<AccountException>(() => fixture.Store.Update(new("shutdown", 30, null, null, WakeOnAccess: true)));
+        Assert.Equal("wake_on_access_unavailable", refused.Code);
+        Assert.False(File.Exists(fixture.SettingsPath));
+
+        File.WriteAllText(fixture.WakeSupportPath, "pumbg\n");
+        var saved = fixture.Store.Update(new("shutdown", 30, "18:00", "23:00", WakeOnAccess: true));
+        Assert.Equal(new ServerPowerSettings(true, "shutdown", 30, "18:00", "23:00", true, "pumbg"), saved);
+        Assert.Contains("WAKE_ON_ACCESS=on", File.ReadAllLines(fixture.SettingsPath));
+
+        // An app that doesn't know the choice sends none; it stays as it was.
+        var older = fixture.Store.Update(new("sleep", 30, null, null));
+        Assert.True(older.WakeOnAccess);
+        Assert.False(fixture.Store.Update(new("sleep", 30, null, null, WakeOnAccess: false)).WakeOnAccess);
+    }
+
+    [Fact]
+    public void OnlyWakeLettersAreReadFromTheSupportFile()
+    {
+        using var fixture = new Fixture(available: true);
+        File.WriteAllText(fixture.WakeSupportPath, "u; rm -rf /\nMODE=sleep");
+        Assert.Equal("umfsp", fixture.Store.Read().WakeSupport);
+        File.WriteAllText(fixture.WakeSupportPath, new string('u', 65));
+        Assert.Equal("", fixture.Store.Read().WakeSupport);
     }
 
     [Fact]
@@ -83,6 +112,7 @@ public sealed class ServerPowerSettingsTests
         private readonly DirectoryInfo root = Directory.CreateTempSubdirectory("aurelia-power-");
         public ServerPowerSettingsStore Store { get; }
         public string SettingsPath => Path.Combine(root.FullName, ServerPowerSettingsStore.FileName);
+        public string WakeSupportPath => Path.Combine(root.FullName, ServerPowerSettingsStore.WakeSupportFileName);
 
         public Fixture(bool available)
         {

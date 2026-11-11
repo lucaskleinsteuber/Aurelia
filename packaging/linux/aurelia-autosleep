@@ -1,12 +1,15 @@
 #!/bin/bash
 # Saves power when nobody uses this Aurelia server. Depending on MODE it either stops only Aurelia
 # Server ("stop"; systemd starts it again as soon as a device connects, through
-# aurelia-start.socket) or puts the whole computer to sleep ("sleep", suspend to RAM; Wake-on-LAN
-# wakes it, which Aurelia on a Mac sends). Either happens:
+# aurelia-start.socket), puts the whole computer to sleep ("sleep", suspend to RAM) or turns it
+# off ("shutdown"). Wake-on-LAN, which Aurelia's apps send, wakes or starts it again. Either happens:
 # - five minutes after a player's sleep timer ended, if nothing played since (Aurelia Server
 #   leaves its sleep-ready file then), at any time of day;
 # - otherwise after IDLE_MINUTES without a connected device, outside AWAKE_FROM-AWAKE_UNTIL when
-#   those hours are set. With awake hours a sleeping computer also wakes itself at AWAKE_FROM.
+#   those hours are set. With awake hours a sleeping or turned off computer also wakes itself at
+#   AWAKE_FROM.
+# - after waking (WAKE_ON_ACCESS can wake it on any direct packet, also a stray one), five minutes
+#   after that wake when nobody has used Aurelia since.
 #   An app left open with nobody using it does not count as a connected device.
 # Settings: sleep-settings in the server's data folder, changed in the app's server settings or
 # with `sudo aurelia sleep`. Run every five minutes by aurelia-autosleep.timer; it does nothing
@@ -22,7 +25,11 @@ ready=$data/sleep-ready
 
 mkdir -p "$state"
 now=$(date +%s)
-[ -f "$state/last-active" ] || echo "$now" > "$state/last-active"
+if [ ! -f "$state/last-active" ]; then
+  echo "$now" > "$state/last-active"
+  # A computer that turns off starts with an empty /run: this start is its wake.
+  [ "$MODE" = shutdown ] && echo "$now" > "$state/woke"
+fi
 
 say() { if [ "$dry_run" = 1 ]; then echo "$1"; fi; }
 
@@ -66,14 +73,27 @@ save_power() {
     fi
     exit 0
   fi
-  local wake="" until="a Wake-on-LAN call"
+  local wake="" until="a Wake-on-LAN call" verb=sleep
+  [ "$MODE" = shutdown ] && verb="turn off"
   if [ -n "$AWAKE_FROM" ]; then
     wake=$(wake_time today)
     if [ -z "$wake" ] || (( wake <= now )); then wake=$(wake_time tomorrow); fi
     [ -z "$wake" ] || until="$(date -d "@$wake" '+%a %H:%M') or a Wake-on-LAN call"
   fi
-  if [ "$dry_run" = 1 ]; then echo "sleep until $until: $1"; exit 0; fi
-  rm -f "$ready"
+  if [ "$dry_run" = 1 ]; then echo "$verb until $until: $1"; exit 0; fi
+  rm -f "$ready" "$state/woke"
+  # The settings may have changed in the app since the start: the card wakes as they say now.
+  "${AURELIA_WAKE_ON_LAN:-/opt/aurelia/aurelia-wake-on-lan}" >/dev/null 2>&1 || true
+  if [ "$MODE" = shutdown ]; then
+    logger -t aurelia-autosleep "$1: turning off until $until."
+    if [ -n "$wake" ]; then
+      rtcwake -m no -t "$wake" >/dev/null || true
+    else
+      rtcwake -m disable >/dev/null 2>&1 || true
+    fi
+    systemctl poweroff
+    exit 0
+  fi
   logger -t aurelia-autosleep "$1: sleeping until $until."
   # After waking, devices get a fresh idle period to connect.
   echo "$now" > "$state/last-active"
@@ -85,11 +105,12 @@ save_power() {
     echo mem > /sys/power/state
   fi
   date +%s > "$state/last-active"
+  date +%s > "$state/woke"
   exit 0
 }
 
 # Someone signed in over SSH is working on the computer: never put it to sleep under them.
-if [ "$MODE" = sleep ] && ss -Htn state established '( sport = :22 )' | grep -q .; then
+if [ "$MODE" != stop ] && ss -Htn state established '( sport = :22 )' | grep -q .; then
   echo "$now" > "$state/last-active"
   say "awake: signed in over SSH"
   exit 0
@@ -145,6 +166,15 @@ if [ -n "$AWAKE_FROM" ] && [ -n "$AWAKE_UNTIL" ]; then
 fi
 
 last=$(cat "$state/last-active")
+# Woken, but nobody used Aurelia since: a stray packet or a device that left again.
+if [ -f "$state/woke" ]; then
+  woke=$(head -c 20 "$state/woke")
+  if [[ "$woke" =~ ^[0-9]+$ ]] && (( last <= woke )); then
+    (( now - woke >= 300 )) && save_power "Woken but unused for 5 minutes"
+  else
+    [ "$dry_run" = 1 ] || rm -f "$state/woke"
+  fi
+fi
 if (( now - last < IDLE_MINUTES * 60 )); then
   say "awake: used $(( (now - last) / 60 )) minutes ago"
   exit 0

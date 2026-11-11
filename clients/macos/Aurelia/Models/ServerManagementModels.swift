@@ -209,6 +209,16 @@ struct ServerPowerSettings: Codable, Equatable, Sendable {
   var idleMinutes: Int
   var awakeFrom: String?
   var awakeUntil: String?
+  /// From server 2.8.0: the network card also wakes the computer when a device connects directly.
+  var wakeOnAccess: Bool? = nil
+  /// The card's ethtool wake letters; "u" allows `wakeOnAccess`. Empty or missing when unknown.
+  var wakeSupport: String? = nil
+
+  /// Wake When a Device Connects matters only while the computer sleeps or is off, and only on a
+  /// card that can wake on a direct packet.
+  var offersWakeOnAccess: Bool {
+    (mode == "sleep" || mode == "shutdown") && (wakeSupport ?? "").contains("u")
+  }
 }
 
 struct ScrubPreviewSettings: Codable, Equatable, Sendable {

@@ -9,12 +9,19 @@ public sealed record AdministrationApprovalResponse(string Token, DateTimeOffset
 
 /// <summary>
 /// What a Linux server installed from the package does when nobody uses it: Mode is "off" (keeps
-/// running), "stop" (stops only Aurelia Server, which starts again when a device connects) or
-/// "sleep" (the computer sleeps until Wake-on-LAN). Available is false where the operating system
-/// cannot act on it; times are 24-hour HH:MM and both empty when there are no awake hours.
+/// running), "stop" (stops only Aurelia Server, which starts again when a device connects),
+/// "sleep" (the computer sleeps until Wake-on-LAN) or "shutdown" (the computer turns off until
+/// Wake-on-LAN starts it; from server 2.8.0). Available is false where the operating system
+/// cannot act on it, such as a server hosted by the Mac or Linux app; times are 24-hour HH:MM and
+/// both empty when there are no awake hours. WakeOnAccess: the network card also wakes the
+/// computer when a device sends it anything directly, such as a browser opening the address.
+/// WakeSupport holds the card's ethtool wake letters ("u" allows WakeOnAccess), empty when unknown.
 /// </summary>
-public sealed record ServerPowerSettings(bool Available, string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil);
-public sealed record UpdateServerPowerSettingsRequest(string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil);
+public sealed record ServerPowerSettings(bool Available, string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil,
+    bool WakeOnAccess = false, string WakeSupport = "");
+/// <summary>WakeOnAccess null keeps the stored choice, so clients that don't know it never change it.</summary>
+public sealed record UpdateServerPowerSettingsRequest(string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil,
+    bool? WakeOnAccess = null);
 
 /// <summary>
 /// Optional timeline scrub-preview settings and status. Small JPEG stills are kept in memory when

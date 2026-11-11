@@ -36,6 +36,24 @@ for unit in aurelia-update-request.service aurelia-update-check.service; do
 done
 [ -e "$work/data/sleep-ready" ] || fail "the sleep timer's signal must wait for the next check"
 
+# Shut-down mode turns the computer off where sleep mode would put it to sleep.
+printf 'MODE=shutdown\nIDLE_MINUTES=15\nWAKE_ON_ACCESS=on\n' > "$work/data/sleep-settings"
+date +%s > "$work/data/sleep-ready"
+decide "" | grep -F 'turn off until a Wake-on-LAN call: A sleep timer ended' >/dev/null \
+  || fail "shut-down mode must turn the computer off after an ended sleep timer"
+rm -f "$work/data/sleep-ready"
+
+# Woken (by a stray packet, perhaps) and nobody used Aurelia since: it sleeps again after five
+# minutes instead of a whole idle period; once someone used it, the idle period counts again.
+printf 'MODE=sleep\nIDLE_MINUTES=60\n' > "$work/data/sleep-settings"
+woken=$(( $(date +%s) - 400 ))
+echo "$woken" > "$work/state/last-active"
+echo "$woken" > "$work/state/woke"
+decide "" | grep -F 'Woken but unused for 5 minutes' >/dev/null || fail "an unused wake must end after five minutes"
+echo $(( woken + 60 )) > "$work/data/last-use"
+decide "" | grep -F 'awake: used' >/dev/null || fail "a wake someone used must keep the idle period"
+rm -f "$work/data/last-use" "$work/state/woke"
+
 # The night the clocks go forward: 02:30 does not exist in Berlin on 28.03.2027. A stand-in for
 # date makes it 00:30 that night; the computer must still sleep and wake at 03:30.
 real_date=$(command -v date)

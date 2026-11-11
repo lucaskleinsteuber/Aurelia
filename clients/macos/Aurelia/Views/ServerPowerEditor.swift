@@ -24,6 +24,7 @@ struct ServerPowerEditor: View {
               Text("Keep Running").tag("off")
               Text("Stop Aurelia Server").tag("stop")
               Text("Put the Computer to Sleep").tag("sleep")
+              Text("Shut Down the Computer").tag("shutdown")
             }
             .pickerStyle(.radioGroup)
             .accessibilityIdentifier("server-power-mode")
@@ -52,11 +53,20 @@ struct ServerPowerEditor: View {
                 }
                 .fixedSize()
                 Text(
-                  draft.mode == "sleep"
-                    ? "It never sleeps during these hours and wakes itself at their start, so an Apple TV finds it then."
-                    : "Aurelia Server never stops during these hours."
+                  draft.mode == "stop"
+                    ? "Aurelia Server never stops during these hours."
+                    : "It never powers down during these hours and wakes itself at their start, so an Apple TV finds it then."
                 )
                 .font(.caption).foregroundStyle(.secondary)
+              }
+              if draft.offersWakeOnAccess {
+                Toggle("Wake When a Device Connects", isOn: wakeOnAccess)
+                  .accessibilityIdentifier("server-power-wake-on-access")
+                Text(
+                  "Opening Aurelia in a browser wakes the server too, from a device that reached it within the last minutes. Other devices still use Wake-on-LAN. Stray network traffic can wake it now and then; it powers down again after five unused minutes."
+                )
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
               }
             }
             HStack {
@@ -117,6 +127,10 @@ struct ServerPowerEditor: View {
       set: { draft?[keyPath: keyPath] = $0 })
   }
 
+  private var wakeOnAccess: Binding<Bool> {
+    Binding(get: { draft?.wakeOnAccess ?? false }, set: { draft?.wakeOnAccess = $0 })
+  }
+
   private var awakeHoursEnabled: Binding<Bool> {
     Binding(
       get: { draft?.awakeFrom != nil },
@@ -159,6 +173,8 @@ struct ServerPowerEditor: View {
       "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when a Mac or Apple TV connects."
     case "sleep":
       "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it; an Apple TV cannot, so open Aurelia on a Mac first."
+    case "shutdown":
+      "The computer turns off and uses almost nothing. Aurelia on a Mac starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off."
     default:
       "Aurelia Server keeps running all the time."
     }

@@ -154,15 +154,20 @@ renamed or moved on such a drive is added again rather than followed.
 
 ## Saving power
 
-When nobody uses Aurelia, the server can save power. Choose it in Aurelia on a Mac under
-Settings › Server › Power, or over SSH:
+When nobody uses Aurelia, the server can save power. Choose it in a browser under
+Settings › Power, in Aurelia on a Mac or Linux under Settings › Server › Power Saving, or over SSH:
 
 ```sh
 sudo aurelia sleep server --idle 15   # stop only Aurelia Server; the computer stays on
 sudo aurelia sleep on --idle 15       # put the whole computer to sleep
+sudo aurelia sleep shutdown --idle 30 # turn the computer off
 sudo aurelia sleep off                # keep running (the default)
 sudo aurelia sleep status
 ```
+
+These options exist only on a server installed from the Linux package. A server that Aurelia for
+Mac or Aurelia for Linux hosts on a desktop or laptop follows that computer's own energy settings,
+so the apps and the browser don't show them there.
 
 - **Stop Aurelia Server** suits a computer that also does other work, such as a NAS. Aurelia
   Server stops and systemd listens on its port instead (`aurelia-start.socket`). When a Mac or
@@ -172,6 +177,18 @@ sudo aurelia sleep status
   when you open it (Wake-on-LAN). An Apple TV
   cannot send Wake-on-LAN packets: open Aurelia on a Mac first. Someone signed in over SSH keeps
   the computer awake.
+- **Shut down the computer** turns it off and uses almost nothing. Wake-on-LAN starts it again,
+  which takes about a minute, and only when the BIOS allows Wake-on-LAN while the computer is off
+  (often "Wake on LAN from S5", with "ErP" off). With awake hours the BIOS clock starts it at
+  their start, if the computer supports that.
+- **Wake when a device connects** (`--wake-on-access on`, or the switch of the same name) lets the
+  network card also wake the computer when a device sends it anything directly
+  (`ethtool wol ug`). A browser that opens the server's address then wakes it, and the page loads
+  after a few seconds; the asleep page keeps knocking by itself. It works from a device that
+  reached the server within roughly the last minutes, because only that device still knows the
+  card's network address; others still need Wake-on-LAN. Stray traffic can wake the computer now
+  and then; after any wake it powers down again once five minutes pass without anyone using
+  Aurelia. The switch appears only when the card supports it.
 - Either happens after `--idle` minutes (15 by default) in which nobody used Aurelia (browsing,
   playing, saving progress or changing settings on any device; an app that is merely open does
   not count), and five

@@ -1,12 +1,36 @@
 #!/bin/bash
 # Allows the wired network card that leads to the home network to wake this computer with a
-# Wake-on-LAN packet. Run at every start by aurelia-wake-on-lan.service (`sudo aurelia sleep on`).
+# Wake-on-LAN packet. With WAKE_ON_ACCESS=on in the power settings it also wakes when a device
+# sends the card anything directly (ethtool "u"), for example a browser opening the server's
+# address. Run at every start by aurelia-wake-on-lan.service and by aurelia-autosleep before the
+# computer sleeps or turns off, so a change made in the app counts at once.
+# It leaves the card's wake abilities in wake-on-lan-support in the server's data folder, so the
+# app can offer only what the card can do.
 set -euo pipefail
+data=${AURELIA_DATA_DIR:-/var/lib/aurelia}
+. "${AURELIA_SLEEP_SETTINGS_LIBRARY:-/opt/aurelia/aurelia-sleep-settings}"
+read_sleep_settings "$data/sleep-settings"
+
 device=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
 [ -n "$device" ] || { echo "No network connection found." >&2; exit 1; }
-if ! ethtool "$device" 2>/dev/null | grep -E 'Supports Wake-on: .*g' >/dev/null; then
+supports=$( { ethtool "$device" 2>/dev/null || true; } | awk -F': ' '/Supports Wake-on/ { print $2; exit }' | tr -cd 'pumbagsf')
+
+# Written as the server's own user: root never creates or replaces a file in that user's folder.
+if [ -d "$data" ] && id aurelia >/dev/null 2>&1; then
+  printf '%s\n' "$supports" \
+    | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$data/wake-on-lan-support" \
+    || true
+fi
+
+if [[ "$supports" != *g* ]]; then
   echo "The network card $device cannot be woken over the network." >&2
   exit 0
 fi
-ethtool -s "$device" wol g
-echo "Wake-on-LAN is on for $device ($(cat "/sys/class/net/$device/address"))."
+wake=g
+if [ "$WAKE_ON_ACCESS" = on ] && [[ "$supports" == *u* ]]; then wake=ug; fi
+ethtool -s "$device" wol "$wake"
+if [ "$wake" = ug ]; then
+  echo "Wake-on-LAN is on for $device ($(cat "/sys/class/net/$device/address")), also when a device connects directly."
+else
+  echo "Wake-on-LAN is on for $device ($(cat "/sys/class/net/$device/address"))."
+fi

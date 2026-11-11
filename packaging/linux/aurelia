@@ -149,6 +149,10 @@ Aurelia Server
   sudo aurelia sleep on [--idle MINUTES] [--awake 17:00-23:30|off]
                                               Computer sleeps when unused; Wake-on-LAN wakes it
   sudo aurelia sleep server [--idle MINUTES] [--awake ...]
+  sudo aurelia sleep shutdown [--idle MINUTES] [--awake ...]
+                                              Computer turns off when unused; Wake-on-LAN starts it
+                                              (on and shutdown: --wake-on-access on|off also wakes it
+                                              when a device such as a browser connects directly)
                                               Only Aurelia stops; a device starts it again
   sudo aurelia sleep off | status             Also in Aurelia's server settings on a Mac
   aurelia logs                                Follow the server log (Ctrl+C ends)
@@ -259,7 +263,7 @@ case "$command" in
       1|always) "$0" sleep off ;;
       *) echo "Unknown choice; Aurelia stays always on." >&2; "$0" sleep off ;;
     esac
-    echo "Change this any time in Aurelia on a Mac (Settings › Server › Power) or with: sudo aurelia sleep"
+    echo "Change this any time in a browser (Settings › Power), in Aurelia on a Mac or with: sudo aurelia sleep"
     echo
     echo "Next, connect your devices. The first one also asks for the owner's new viewing PIN."
     echo "  Run here: aurelia pair, then type the code in Aurelia on the new device"
@@ -291,10 +295,13 @@ case "$command" in
     . "$install_root/aurelia-sleep-settings"
     read_sleep_settings "$settings"
     case "$action" in
-      on|server)
+      on|server|shutdown)
         while [ $# -gt 0 ]; do
           case "$1" in
             --idle) IDLE_MINUTES=${2:-}; shift 2 ;;
+            --wake-on-access)
+              case "${2:-}" in on|off) WAKE_ON_ACCESS=$2 ;; *) echo "--wake-on-access needs on or off." >&2; exit 2 ;; esac
+              shift 2 ;;
             --awake)
               if [ "${2:-}" = off ]; then AWAKE_FROM="" AWAKE_UNTIL=""; else AWAKE_FROM=${2%%-*} AWAKE_UNTIL=${2##*-}; fi
               shift 2 ;;
@@ -309,7 +316,7 @@ case "$command" in
           done
           [ "$AWAKE_FROM" != "$AWAKE_UNTIL" ] || { echo "--awake needs a different start and end." >&2; exit 2; }
         fi
-        if [ "$action" = server ]; then MODE=stop; else MODE=sleep; fi
+        case "$action" in server) MODE=stop ;; shutdown) MODE=shutdown ;; *) MODE=sleep ;; esac
         write_sleep_settings "$settings"
         systemctl enable --now aurelia-autosleep.timer >/dev/null
         if [ "$MODE" = stop ]; then
@@ -326,14 +333,25 @@ case "$command" in
           apt-get install -y ethtool >/dev/null
         fi
         systemctl enable --now aurelia-wake-on-lan.service >/dev/null 2>&1 || echo "Wake-on-LAN could not be turned on; see: journalctl -u aurelia-wake-on-lan" >&2
-        echo "Sleep mode is on. The server sleeps five minutes after a player's sleep timer ends, and after"
+        if [ "$MODE" = shutdown ]; then
+          echo "Shut-down mode is on. The computer turns off five minutes after a player's sleep timer ends, and after"
+        else
+          echo "Sleep mode is on. The server sleeps five minutes after a player's sleep timer ends, and after"
+        fi
         if [ -n "$AWAKE_FROM" ]; then
           echo "$IDLE_MINUTES unused minutes outside $AWAKE_FROM-$AWAKE_UNTIL. It wakes itself at $AWAKE_FROM; Aurelia on a"
         else
           echo "$IDLE_MINUTES unused minutes, at any time of day. Aurelia on a"
         fi
         echo "Mac wakes it when you open it, and a router such as a Fritzbox can wake it too (Wake-on-LAN)."
-        echo "Some computers also need Wake-on-LAN allowed in the BIOS."
+        if [ "$WAKE_ON_ACCESS" = on ]; then
+          echo "It also wakes when a device that reached it shortly before connects directly, such as a browser."
+        fi
+        if [ "$MODE" = shutdown ]; then
+          echo "Starting takes about a minute, and the BIOS must allow Wake-on-LAN while the computer is off."
+        else
+          echo "Some computers also need Wake-on-LAN allowed in the BIOS."
+        fi
         ;;
       off)
         MODE=off
@@ -348,7 +366,9 @@ case "$command" in
           [ -n "$AWAKE_FROM" ] && hours=" outside $AWAKE_FROM-$AWAKE_UNTIL"
           what="the computer sleeps"
           [ "$MODE" = stop ] && what="only Aurelia stops"
+          [ "$MODE" = shutdown ] && what="the computer turns off"
           echo "Power saving: $what (5 minutes after a sleep timer; after $IDLE_MINUTES unused minutes$hours)"
+          [ "$MODE" != stop ] && [ "$WAKE_ON_ACCESS" = on ] && echo "Wakes when a device connects directly: on"
           scratch=$(mktemp -d)
           [ -r /run/aurelia-autosleep/last-active ] && cp /run/aurelia-autosleep/last-active "$scratch/"
           echo "Right now: $(AURELIA_AUTOSLEEP_DRY_RUN=1 AURELIA_AUTOSLEEP_STATE="$scratch" "$install_root/aurelia-autosleep" 2>/dev/null || echo "unknown")"
@@ -359,7 +379,7 @@ case "$command" in
         device=$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
         [ -n "$device" ] && echo "Wake address: $(cat "/sys/class/net/$device/address") ($device)"
         ;;
-      *) echo "Use: sudo aurelia sleep on | server | off | status" >&2; exit 2 ;;
+      *) echo "Use: sudo aurelia sleep on | server | shutdown | off | status" >&2; exit 2 ;;
     esac
     ;;
   status)

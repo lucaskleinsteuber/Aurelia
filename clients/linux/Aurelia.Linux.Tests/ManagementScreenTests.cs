@@ -433,6 +433,11 @@ public sealed class ManagementScreenTests
         Assert.False(ServerPage.IsTime("7:30"));
         Assert.Equal("2 hours", ServerPage.IdleLabel(120));
         Assert.Equal("45 minutes", ServerPage.IdleLabel(45));
+        Assert.True(ServerPage.OffersWakeOnAccess("shutdown", "pumbg"));
+        Assert.True(ServerPage.OffersWakeOnAccess("sleep", "ug"));
+        Assert.False(ServerPage.OffersWakeOnAccess("stop", "pumbg"));
+        Assert.False(ServerPage.OffersWakeOnAccess("sleep", "g"));
+        Assert.False(ServerPage.OffersWakeOnAccess("sleep", null));
         Assert.Equal("2 GB", ServerPage.FormatCap(2000));
         Assert.Equal("250 MB", ServerPage.FormatCap(250));
         Assert.Equal("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", ManagementClient.PayloadHash([]));

@@ -307,16 +307,18 @@ public sealed class ServerPage : StackPanel
         var idle = power.IdleMinutes;
         string? from = power.AwakeFrom;
         string? until = power.AwakeUntil;
+        var wakeOnAccess = power.WakeOnAccess;
         var panel = Block();
         void Build()
         {
             panel.Children.Clear();
             panel.Children.Add(Note("What the server computer does while nobody watches."));
-            panel.Children.Add(Choice("When Unused", null, [("off", "Keep Running"), ("stop", "Stop Aurelia Server"), ("sleep", "Put the Computer to Sleep")], mode, value => { mode = value; Build(); }).Also(r => r.Margin = new Thickness(0)));
+            panel.Children.Add(Choice("When Unused", null, [("off", "Keep Running"), ("stop", "Stop Aurelia Server"), ("sleep", "Put the Computer to Sleep"), ("shutdown", "Shut Down the Computer")], mode, value => { mode = value; Build(); }).Also(r => r.Margin = new Thickness(0)));
             panel.Children.Add(Note(mode switch
             {
                 "stop" => "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when a device connects.",
                 "sleep" => "The whole computer sleeps and uses only a few watts. Aurelia on a computer wakes it when you open it; an Apple TV cannot, so open Aurelia on a computer first.",
+                "shutdown" => "The computer turns off and uses almost nothing. Aurelia on a computer starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off.",
                 _ => "Aurelia Server keeps running all the time.",
             }));
             if (mode != "off")
@@ -344,9 +346,15 @@ public sealed class ServerPage : StackPanel
                         Spacing = 10,
                         Children = { new TextBlock { Text = "From", VerticalAlignment = VerticalAlignment.Center }, fromBox, new TextBlock { Text = "Until", VerticalAlignment = VerticalAlignment.Center }, untilBox },
                     });
-                    panel.Children.Add(Note(mode == "sleep"
-                        ? "It never sleeps during these hours and wakes itself at their start, so an Apple TV finds it then."
-                        : "Aurelia Server never stops during these hours."));
+                    panel.Children.Add(Note(mode == "stop"
+                        ? "Aurelia Server never stops during these hours."
+                        : "It never powers down during these hours and wakes itself at their start, so an Apple TV finds it then."));
+                }
+                if (OffersWakeOnAccess(mode, power.WakeSupport))
+                {
+                    panel.Children.Add(Toggle("Wake When a Device Connects",
+                        "Opening Aurelia in a browser wakes the server too, from a device that reached it within the last minutes. Other devices still use Wake-on-LAN. Stray network traffic can wake it now and then; it powers down again after five unused minutes.",
+                        wakeOnAccess, enabled => wakeOnAccess = enabled).Also(r => r.Margin = new Thickness(0)));
                 }
             }
             panel.Children.Add(Button("Save Power Settings", async () =>
@@ -357,13 +365,18 @@ public sealed class ServerPage : StackPanel
                     note.IsVisible = true;
                     return;
                 }
-                await scope.RunAsync(async () => power = await Client.SavePowerAsync(new UpdateServerPowerSettingsRequest(mode, idle, from, until)), note);
+                await scope.RunAsync(async () => power = await Client.SavePowerAsync(new UpdateServerPowerSettingsRequest(mode, idle, from, until,
+                    (power.WakeSupport ?? "").Contains('u', StringComparison.Ordinal) ? wakeOnAccess : null)), note);
             }, "primary"));
             panel.Children.Add(note);
         }
         Build();
         return Section("Power Saving", panel);
     }
+
+    /// <summary>Waking on a direct connection matters only while the computer sleeps or is off, on a card that can.</summary>
+    internal static bool OffersWakeOnAccess(string mode, string? wakeSupport) =>
+        mode is "sleep" or "shutdown" && (wakeSupport ?? "").Contains('u', StringComparison.Ordinal);
 
     internal static bool IsTime(string? text) =>
         text is { Length: 5 } && TimeOnly.TryParseExact(text, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
