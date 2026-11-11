@@ -64,6 +64,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Browser: About in Settings opens again, a page change animates once instead of twice, and returning to the window no longer replays the page animation.
 - Browser (Server 2.7.0): the tour's ring sits on the first title it explains instead of beside it and off the window; Home's picture fills the whole width on wide windows; a person's page keeps its back button and heading off the edge; menu icons line up with their text.
 - Mac 2.4.0 (160): a sleeping server is woken only by Continue, Wake Server or opening something, not by any click on "Aurelia Is Resting" (such as closing the window) or by moving the mouse while Aurelia looks for the server.
 - Mac 2.4.0 (160): marking a title watched or unwatched no longer shows "Reload the library to see it" when the library is already reloading because of that change.

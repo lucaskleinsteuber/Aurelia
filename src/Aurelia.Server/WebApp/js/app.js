@@ -712,7 +712,21 @@ function motionAllowed() {
  * Replaces the page. With motion, the browser blends the old page into the new one (a poster
  * that was clicked grows into the title's picture); without, the page simply changes.
  */
-function swapPage(update, { animate, direction }) {
+/**
+ * Replaces the page. One animation at most: a page change plays as a view transition (the page's
+ * own rise is taken off then, or it would play again when the transition ends), and a quiet
+ * refresh, for example on returning to the window, doesn't move at all. Only a browser without
+ * view transitions lets the page rise by itself.
+ */
+function swapPage(update, { animate, direction, still = false }) {
+  const settled = () => {
+    update();
+    for (const element of root.querySelectorAll(".page-enter")) element.classList.remove("page-enter");
+  };
+  if (still) {
+    settled();
+    return;
+  }
   if (!animate || typeof document.startViewTransition !== "function" || !motionAllowed()) {
     update();
     return;
@@ -720,7 +734,7 @@ function swapPage(update, { animate, direction }) {
   document.documentElement.dataset.navigation = direction;
   document.documentElement.classList.add("page-transition");
   try {
-    const transition = document.startViewTransition(update);
+    const transition = document.startViewTransition(settled);
     transition.finished.catch(() => {}).finally(() => {
       document.documentElement.classList.remove("page-transition");
       document.querySelectorAll("[data-morph]").forEach((element) => { element.style.viewTransitionName = ""; delete element.dataset.morph; });
@@ -782,7 +796,7 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
     } else if (resetScroll) {
       window.scrollTo(0, 0);
     }
-  }, { animate: !quiet && !root.querySelector(".page-skeleton"), direction });
+  }, { animate: !quiet && !root.querySelector(".page-skeleton"), direction, still: quiet });
   revealInstantly = false;
   isRenderingRoute = false;
   if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
