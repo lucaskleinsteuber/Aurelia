@@ -906,7 +906,28 @@ export const GENERAL_DEFAULTS = Object.freeze({
   showWatchlistInSidebar: true,
   showCollectionsInSidebar: true,
   hideOfflineTitles: false,
+  sectionOrder: null,
 });
+
+/** The top bar's sections after Home, in the Mac sidebar's default order. */
+export const TOP_BAR_SECTIONS = Object.freeze([["library", "Library"], ["watchlist", "Watchlist"], ["recent", "Recently Added"], ["shows", "TV Shows"], ["movies", "Movies"], ["collections", "Collections"]]);
+
+/** A saved order with every known section once: unknown names drop out, missing ones go last. */
+export function sectionOrder(saved) {
+  const known = TOP_BAR_SECTIONS.map(([name]) => name);
+  const chosen = Array.isArray(saved) ? [...new Set(saved.filter((name) => known.includes(name)))] : [];
+  return [...chosen, ...known.filter((name) => !chosen.includes(name))];
+}
+
+/** The order after moving `name` one place earlier (-1) or later (+1). */
+export function moveSection(order, name, offset) {
+  const list = sectionOrder(order);
+  const index = list.indexOf(name);
+  const target = index + offset;
+  if (index < 0 || target < 0 || target >= list.length) return list;
+  [list[index], list[target]] = [list[target], list[index]];
+  return list;
+}
 
 export function normalizeGeneralPreferences(value) {
   const merged = { ...GENERAL_DEFAULTS, ...(value && typeof value === "object" ? value : {}) };
@@ -920,6 +941,7 @@ export function normalizeGeneralPreferences(value) {
     showWatchlistInSidebar: merged.showWatchlistInSidebar !== false,
     showCollectionsInSidebar: merged.showCollectionsInSidebar !== false,
     hideOfflineTitles: merged.hideOfflineTitles === true,
+    sectionOrder: sectionOrder(merged.sectionOrder),
   };
 }
 

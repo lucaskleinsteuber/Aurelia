@@ -7,7 +7,8 @@ import { ApiError } from "./api.js";
 import {
   MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
-  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES
+  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
+  TOP_BAR_SECTIONS, moveSection
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
@@ -281,11 +282,15 @@ export function createSettings(app) {
         row("Reduce Motion", toggle(general.reduceHeroMotion, (on) => saveG({ reduceHeroMotion: on }), "Reduce Motion"),
           "Turns off the moving background and the cards sliding in, as the system setting does.")),
 
-      section("Sidebar Navigation", "gear", "Choose which library categories appear in the navigation rail.",
-        row("Movies", toggle(general.showMoviesInSidebar, (on) => saveG({ showMoviesInSidebar: on }), "Show Movies")),
-        row("TV Shows", toggle(general.showSeriesInSidebar, (on) => saveG({ showSeriesInSidebar: on }), "Show TV Shows")),
-        row("Watchlist", toggle(general.showWatchlistInSidebar, (on) => saveG({ showWatchlistInSidebar: on }), "Show Watchlist")),
-        row("Collections", toggle(general.showCollectionsInSidebar, (on) => saveG({ showCollectionsInSidebar: on }), "Show Collections"))),
+      section("Top Bar", "gear", "Which sections the top bar shows after Home, and in which order.",
+        ...general.sectionOrder.map((name, index, order) => {
+          const label = Object.fromEntries(TOP_BAR_SECTIONS)[name];
+          const key = { movies: "showMoviesInSidebar", shows: "showSeriesInSidebar", watchlist: "showWatchlistInSidebar", collections: "showCollectionsInSidebar" }[name];
+          return row(label, h("div", { class: "inline-control" },
+            h("button", { type: "button", class: "icon-button", "aria-label": `Move ${label} earlier`, disabled: index === 0, onclick: () => saveG({ sectionOrder: moveSection(order, name, -1) }) }, "↑"),
+            h("button", { type: "button", class: "icon-button", "aria-label": `Move ${label} later`, disabled: index === order.length - 1, onclick: () => saveG({ sectionOrder: moveSection(order, name, 1) }) }, "↓"),
+            key ? toggle(general[key], (on) => saveG({ [key]: on }), `Show ${label}`) : null));
+        })),
 
       section("Aurelia in This Browser", "gear", "The browser app comes from your Aurelia Server, so it always has the server's version.",
         row("Version", value(server.version ? `${server.version}` : "—"), "The same as the server's version."),

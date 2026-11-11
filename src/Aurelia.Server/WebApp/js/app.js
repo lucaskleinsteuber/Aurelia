@@ -579,15 +579,10 @@ function revealWhenSeen(element) {
 
 function shell(content) {
   // The Mac app's sidebar: Home, then the library's sections.
-  const tabs = [
-    ["home", "Home", "/"],
-    ["library", "Library", "/library"],
-    ["watchlist", "Watchlist", "/watchlist"],
-    ["recent", "Recently Added", "/recent"],
-    ["shows", "TV Shows", "/shows"],
-    ["movies", "Movies", "/movies"],
-    ["collections", "Collections", "/collections"],
-  ].filter(([name]) => sidebarShows(name));
+  // Home first, then the sections in the order chosen in Settings › General.
+  const labels = Object.fromEntries(logic.TOP_BAR_SECTIONS);
+  const tabs = [["home", "Home", "/"], ...loadGeneral().sectionOrder.map((name) => [name, labels[name], `/${name}`])]
+    .filter(([name]) => sidebarShows(name));
   const current = state.route.name;
   const menu = h("div", { class: "profile-menu", hidden: true },
     h("div", { class: "menu-header" }, profilePicture(state.profile), h("span", {}, logic.shownName(state.profile))),

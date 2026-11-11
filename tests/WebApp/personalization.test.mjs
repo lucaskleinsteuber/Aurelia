@@ -72,3 +72,11 @@ test("Continue Watching is offered only for titles that are in the row or were h
   assert.equal(logic.continueWatchingChoice({ kind: "collection", watchState: "inProgress" }), null);
   assert.equal(logic.continueWatchingChoice(null), null);
 });
+
+test("the top bar keeps every section once in the chosen order", () => {
+  assert.deepEqual(logic.sectionOrder(null), ["library", "watchlist", "recent", "shows", "movies", "collections"]);
+  assert.deepEqual(logic.sectionOrder(["movies", "movies", "nonsense", "shows"]), ["movies", "shows", "library", "watchlist", "recent", "collections"]);
+  assert.deepEqual(logic.moveSection(null, "movies", -1), ["library", "watchlist", "recent", "movies", "shows", "collections"]);
+  assert.deepEqual(logic.moveSection(null, "library", -1), ["library", "watchlist", "recent", "shows", "movies", "collections"]);
+  assert.deepEqual(logic.normalizeGeneralPreferences({ sectionOrder: ["collections"] }).sectionOrder[0], "collections");
+});
