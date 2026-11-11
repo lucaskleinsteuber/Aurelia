@@ -7,6 +7,12 @@ public enum SegmentKind
 {
     Intro,
     Credits,
+
+    /// <summary>
+    /// The rest of the first half after the intro window, searched only when no intro was found
+    /// there: some episodes run a long story before their titles.
+    /// </summary>
+    LateIntro,
 }
 
 /// <summary>
@@ -62,6 +68,16 @@ public static partial class SegmentRules
 
     public static bool IsPlausibleIntro(double start, double end, double duration) =>
         start >= 0 && end - start is >= MinimumIntroSeconds and <= MaximumIntroSeconds && end <= IntroWindowSeconds(duration) + SnapSeconds;
+
+    /// <summary>Where the later search for an intro begins: shortly before the end of the first window.</summary>
+    public static double LateIntroStartSeconds(double duration) => Math.Max(0, IntroWindowSeconds(duration) - 30);
+
+    /// <summary>The later search covers the episode up to its middle.</summary>
+    public static double LateIntroLengthSeconds(double duration) => Math.Max(0, duration / 2 - LateIntroStartSeconds(duration));
+
+    /// <summary>A late intro: as long as an intro and before the middle of the episode.</summary>
+    public static bool IsPlausibleLateIntro(double start, double end, double duration) =>
+        start >= 0 && end - start is >= MinimumIntroSeconds and <= MaximumIntroSeconds && end <= duration / 2 + SnapSeconds;
 
     /// <summary>
     /// Credits may end well before the file does (a scene after them); they only have to begin in
@@ -218,12 +234,14 @@ public static class SegmentConsensus
 /// </summary>
 public sealed class SeasonSegmentAnalyzer(
     IReadOnlyList<SegmentEpisode> episodes,
-    Func<int, SegmentKind, CancellationToken, Task<SegmentWindow?>> load)
+    Func<int, SegmentKind, CancellationToken, Task<SegmentWindow?>> load,
+    Func<int, double, double, CancellationToken, Task<PictureWindow?>>? loadPictures = null)
 {
     public const int MaximumPartners = 4;
     private const int MaximumDistance = 8;
 
     private readonly Dictionary<(int Index, SegmentKind Kind), SegmentWindow?> windows = [];
+    private readonly Dictionary<(int Index, long Start), PictureWindow?> pictures = [];
     private readonly Dictionary<(int Low, int High, SegmentKind Kind), IReadOnlyList<SegmentMatcher.Match>> pairs = [];
 
     public async Task<DetectedSegments> AnalyzeAsync(int index, CancellationToken cancellationToken)
@@ -231,6 +249,7 @@ public sealed class SeasonSegmentAnalyzer(
         ArgumentOutOfRangeException.ThrowIfNegative(index);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, episodes.Count);
         foreach (var key in windows.Keys.Where(key => Math.Abs(key.Index - index) > MaximumDistance).ToArray()) windows.Remove(key);
+        foreach (var key in pictures.Keys.Where(key => Math.Abs(key.Index - index) > MaximumDistance).ToArray()) pictures.Remove(key);
         foreach (var key in pairs.Keys.Where(key => Math.Abs(key.Low - index) > MaximumDistance * 2).ToArray()) pairs.Remove(key);
 
         var episode = episodes[index];
@@ -249,18 +268,165 @@ public sealed class SeasonSegmentAnalyzer(
         {
             (introStart, introEnd, introSource, introConfidence) = (intro.Start, intro.End, MediaSegmentSource.Detected, intro.Confidence);
         }
+        else if (await LateIntroAsync(index, cancellationToken) is { } late
+            && SegmentRules.IsPlausibleLateIntro(late.Start, late.End, episode.DurationSeconds))
+        {
+            (introStart, introEnd, introSource, introConfidence) = (late.Start, late.End, MediaSegmentSource.Detected, late.Confidence);
+        }
+        else if (await PictureIntroAsync(index, cancellationToken) is { } seen
+            && SegmentRules.IsPlausibleIntro(seen.Start, seen.End, episode.DurationSeconds))
+        {
+            (introStart, introEnd, introSource, introConfidence) = (seen.Start, seen.End, MediaSegmentSource.Detected, seen.Confidence);
+        }
 
         if (SegmentRules.CreditsChapter(episode) is { } creditsChapter)
         {
             (creditsStart, creditsSource, creditsConfidence) = (creditsChapter, MediaSegmentSource.Chapters, 1);
         }
-        else if (await DetectAsync(index, SegmentKind.Credits, cancellationToken) is { } credits
-            && SegmentRules.IsPlausibleCredits(credits.Start, credits.End, episode.DurationSeconds))
+        else
         {
-            (creditsStart, creditsSource, creditsConfidence) = (credits.Start, MediaSegmentSource.Detected, credits.Confidence);
+            var heard = await DetectAsync(index, SegmentKind.Credits, cancellationToken) is { } sound
+                && SegmentRules.IsPlausibleCredits(sound.Start, sound.End, episode.DurationSeconds)
+                ? sound : ((double, double, double)?)null;
+            var seen = await PictureCreditsAsync(index, cancellationToken) is { } picture
+                && SegmentRules.IsPlausibleCredits(picture.Start, picture.End, episode.DurationSeconds)
+                ? (picture.Start, picture.End, picture.Confidence) : ((double, double, double)?)null;
+            if (ChooseCredits(heard, seen) is { } credits)
+            {
+                (creditsStart, creditsSource, creditsConfidence) = (credits.Start, MediaSegmentSource.Detected, credits.Confidence);
+            }
         }
 
         return new DetectedSegments(introStart, introEnd, introSource, introConfidence, creditsStart, creditsSource, creditsConfidence);
+    }
+
+    /// <summary>
+    /// Credits found in sound and in pictures. Pictures miss names over moving footage, sound misses
+    /// credits whose music differs per episode or that begin in silence, so the earlier start wins,
+    /// as long as both describe the same credits: credits seen in pictures last to the end, and
+    /// shared music only counts when it reaches the pictures' credits.
+    /// </summary>
+    public static (double Start, double End, double Confidence)? ChooseCredits(
+        (double Start, double End, double Confidence)? heard, (double Start, double End, double Confidence)? seen)
+    {
+        if (heard is not { } sound) return seen;
+        if (seen is not { } picture) return sound;
+        if (picture.Start <= sound.Start) return (picture.Start, picture.End, Math.Max(picture.Confidence, sound.Confidence));
+        return sound.End >= picture.Start - 15
+            ? (sound.Start, picture.End, Math.Max(picture.Confidence, sound.Confidence))
+            : picture;
+    }
+
+    private async Task<CreditsPictures.Result?> PictureCreditsAsync(int index, CancellationToken cancellationToken)
+    {
+        if (loadPictures is null || await EndingAsync(index, cancellationToken) is not { Kinds.Length: > 0 } own) return null;
+        var partners = new List<PictureWindow>();
+        for (var distance = 1; distance <= MaximumDistance && partners.Count < MaximumPartners; distance++)
+        {
+            foreach (var partner in new[] { index - distance, index + distance })
+            {
+                if (partner < 0 || partner >= episodes.Count || partners.Count >= MaximumPartners) continue;
+                if (await EndingAsync(partner, cancellationToken) is { Kinds.Length: > 0 } other) partners.Add(other);
+            }
+        }
+        return CreditsPictures.Find(own, CreditsPictures.Shared(own, partners), episodes[index].DurationSeconds);
+    }
+
+    private Task<PictureWindow?> EndingAsync(int index, CancellationToken cancellationToken)
+    {
+        var duration = episodes[index].DurationSeconds;
+        var length = CreditsPictures.WindowSeconds(duration);
+        return PicturesAsync(index, Math.Max(0, duration - length), length, cancellationToken);
+    }
+
+    private async Task<PictureWindow?> PicturesAsync(int index, double start, double length, CancellationToken cancellationToken)
+    {
+        var key = (index, (long)Math.Round(start * 10));
+        if (pictures.TryGetValue(key, out var cached)) return cached;
+        var window = await loadPictures!(index, start, length, cancellationToken);
+        pictures[key] = window;
+        return window;
+    }
+
+    /// <summary>
+    /// The intro found in pictures, for an episode whose intro has other sound (someone speaks
+    /// over it, a different mix): the beginning's pictures are compared with the intros the other
+    /// episodes have by sound. Two of them must show the same pictures at the same place. Only
+    /// such episodes have their beginning decoded, so this costs time only where it helps.
+    /// </summary>
+    private async Task<(double Start, double End, double Confidence)?> PictureIntroAsync(int index, CancellationToken cancellationToken)
+    {
+        if (loadPictures is null) return null;
+        var references = new List<(int Index, double Start, double End)>();
+        for (var distance = 1; distance <= MaximumDistance && references.Count < MaximumPartners; distance++)
+        {
+            foreach (var partner in new[] { index - distance, index + distance })
+            {
+                if (partner < 0 || partner >= episodes.Count || references.Count >= MaximumPartners) continue;
+                if (SegmentRules.IntroChapter(episodes[partner]) is { } chapter)
+                {
+                    references.Add((partner, chapter.Start, chapter.End));
+                }
+                else if (await DetectAsync(partner, SegmentKind.Intro, cancellationToken) is { } intro
+                    && SegmentRules.IsPlausibleIntro(intro.Start, intro.End, episodes[partner].DurationSeconds))
+                {
+                    references.Add((partner, intro.Start, intro.End));
+                }
+            }
+        }
+        if (references.Count < 2) return null;
+        var duration = episodes[index].DurationSeconds;
+        if (await PicturesAsync(index, 0, SegmentRules.IntroWindowSeconds(duration), cancellationToken) is not { Kinds.Length: > 0 } own) return null;
+
+        var candidates = new List<SegmentConsensus.Candidate>();
+        foreach (var (partner, start, end) in references)
+        {
+            if (await PicturesAsync(partner, start, end - start, cancellationToken) is not { Kinds.Length: > 0 } theirs) continue;
+            if (CreditsPictures.Align(own, theirs) is { Share: >= 0.6 } alignment)
+            {
+                candidates.Add(new(partner, start + alignment.Offset, end + alignment.Offset, alignment.Share, 0));
+            }
+        }
+        if (SegmentConsensus.Choose(candidates) is not { Partners: >= 2 } agreement) return null;
+        var confidence = Math.Round(Math.Min(1, (double)agreement.Partners / references.Count) * Math.Min(1, agreement.Density / 0.6), 3);
+        return confidence < SegmentRules.MinimumConfidence ? null : (Math.Max(0, agreement.Start), agreement.End, confidence);
+    }
+
+    /// <summary>
+    /// The intro further into an episode: the other episodes' intros, as found in their own first
+    /// minutes, searched up to this episode's middle. Searching longer finds more music that recurs
+    /// by chance, so three other episodes must agree (or every other one in a small season), and
+    /// clearly.
+    /// </summary>
+    private async Task<(double Start, double End, double Confidence)?> LateIntroAsync(int index, CancellationToken cancellationToken)
+    {
+        if (SegmentRules.LateIntroLengthSeconds(episodes[index].DurationSeconds) < SegmentRules.MinimumIntroSeconds * 2) return null;
+        var partners = new List<(int Index, SegmentWindow Window)>();
+        for (var distance = 1; distance <= MaximumDistance && partners.Count < MaximumPartners; distance++)
+        {
+            foreach (var partner in new[] { index - distance, index + distance })
+            {
+                if (partner < 0 || partner >= episodes.Count || partners.Count >= MaximumPartners) continue;
+                if (await WindowAsync(partner, SegmentKind.Intro, cancellationToken) is { Fingerprint.Length: > 0 } other) partners.Add((partner, other));
+            }
+        }
+        var needed = Math.Min(3, partners.Count);
+        if (needed < 2) return null;
+        if (await WindowAsync(index, SegmentKind.LateIntro, cancellationToken) is not { Fingerprint.Length: > 0 } own) return null;
+
+        var candidates = new List<SegmentConsensus.Candidate>();
+        foreach (var (partner, other) in partners)
+        {
+            foreach (var match in SegmentMatcher.CommonPassages(own.Fingerprint, other.Fingerprint,
+                         SegmentRules.MinimumIntroSeconds, SegmentRules.MaximumIntroSeconds + 2 * SegmentRules.SnapSeconds))
+            {
+                candidates.Add(new(partner, own.StartSeconds + match.FirstStart, own.StartSeconds + match.FirstEnd, match.Density, match.Votes));
+            }
+        }
+        if (SegmentConsensus.Choose(candidates) is not { } agreement || agreement.Partners < needed || agreement.Density < 0.6) return null;
+        var confidence = Math.Round(Math.Min(1, (double)agreement.Partners / partners.Count) * Math.Min(1, agreement.Density / 0.5), 3);
+        if (confidence < SegmentRules.MinimumConfidence) return null;
+        return (Math.Max(0, SegmentRules.SnapToSilence(own, agreement.Start)), SegmentRules.SnapToSilence(own, agreement.End), confidence);
     }
 
     private async Task<(double Start, double End, double Confidence)?> DetectAsync(int index, SegmentKind kind, CancellationToken cancellationToken)

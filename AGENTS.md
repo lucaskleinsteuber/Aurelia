@@ -48,9 +48,10 @@ These rules apply to every task in this repository.
   on the user's computer from a verified server release and Debian's ffmpeg; do not
   publish a built image.
 - Intro and credits detection (owner, 11.11.2026): The server may decode and compare the audio
-  track of episodes of a season in the background. Audio and fingerprints exist only in memory.
-  Only the timestamps are stored, in the database, never audio, images, fingerprints or files.
-  The media file is only read.
+  track of episodes of a season in the background, and, for credits, small grey pictures of an
+  episode's last minutes (owner, 11.11.2026). Audio, pictures and fingerprints exist only in
+  memory. Only the timestamps are stored, in the database, never audio, images, fingerprints or
+  files. The media file is only read.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,

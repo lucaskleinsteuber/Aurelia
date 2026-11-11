@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using Aurelia.Contracts;
 using Aurelia.Server.Data;
@@ -18,7 +19,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
     public const string SettingsFileName = "media-segment-settings.json";
 
     /// <summary>Raised whenever thresholds or rules change, so every episode is examined again.</summary>
-    public const int AnalysisVersion = 1;
+    /// <remarks>2: credits are also found in pictures (text on black, pictures episodes share).</remarks>
+    public const int AnalysisVersion = 2;
 
     /// <summary>Shorter episodes have too little sound outside intro and credits to compare.</summary>
     public const double MinimumEpisodeSeconds = 180;
@@ -48,7 +50,13 @@ public sealed partial class SegmentDetectionService : BackgroundService
     private int rescanRequested;
     private (DateTimeOffset At, int Pending, int Analyzed, int NoResult)? status;
 
-    private sealed record StoredSettings(bool Enabled);
+    private sealed record StoredSettings(bool Enabled, bool Pictures = true);
+
+    /// <summary>What the job is doing now, for the owner's progress display.</summary>
+    private sealed record Activity(string Title, string Step);
+
+    private Activity? activity;
+    private double? secondsPerEpisode;
 
     private sealed record EpisodeState(Guid Id, Guid Series, int Season, long? FileSize, DateTimeOffset? FileModifiedAt);
 
@@ -63,6 +71,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
         public long Length { get; set; }
         public DateTimeOffset LastModified { get; set; }
         public ProbedAudio? Track { get; set; }
+        public int? VideoIndex { get; set; }
+        public string Label { get; set; } = string.Empty;
         public IReadOnlyList<SegmentChapter> Chapters { get; set; } = [];
     }
 
@@ -100,6 +110,12 @@ public sealed partial class SegmentDetectionService : BackgroundService
         get { lock (settingsGate) return settings.Enabled; }
     }
 
+    /// <summary>Whether credits are also looked for in pictures, which takes much longer.</summary>
+    public bool UsesPictures
+    {
+        get { lock (settingsGate) return settings.Pictures; }
+    }
+
     /// <summary>Whether a stored row still describes this file under the current rules.</summary>
     public static bool IsCurrent(MediaSegment row, long? fileSize, DateTimeOffset? fileModifiedAt)
     {
@@ -129,6 +145,8 @@ public sealed partial class SegmentDetectionService : BackgroundService
         var tools = await live.ToolsAsync();
         var counts = await CountsAsync(cancellationToken);
         var active = Volatile.Read(ref running) > 0;
+        var current = activity;
+        var estimate = secondsPerEpisode is { } each && counts.Pending > 0 ? (int?)Math.Ceiling(each * counts.Pending) : null;
         return new MediaSegmentSettingsResponse(
             tools is { Speech: not SpeechAudioSupport.None },
             IsEnabled,
@@ -136,13 +154,20 @@ public sealed partial class SegmentDetectionService : BackgroundService
             counts.Analyzed,
             counts.NoResult,
             active,
-            Volatile.Read(ref pausedForPlayback) > 0);
+            Volatile.Read(ref pausedForPlayback) > 0,
+            UsesPictures,
+            counts.Pending + counts.Analyzed + counts.NoResult,
+            active ? current?.Title : null,
+            active ? current?.Step : null,
+            estimate);
     }
 
     public async Task<MediaSegmentSettingsResponse> UpdateSettingsAsync(UpdateMediaSegmentSettingsRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var updated = new StoredSettings(request.Enabled);
+        StoredSettings previous;
+        lock (settingsGate) previous = settings;
+        var updated = new StoredSettings(request.Enabled, request.UsePictures ?? previous.Pictures);
         lock (settingsGate)
         {
             PrivateFilePermissions.CreatePrivateDirectory(runtime.DataDirectory);
@@ -159,6 +184,11 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 settings = updated;
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
+        if (updated.Enabled && updated.Pictures && !previous.Pictures)
+        {
+            // Episodes examined without pictures are examined again with them.
+            await MarkAllForAnalysisAsync(cancellationToken);
         }
         if (updated.Enabled)
         {
@@ -195,6 +225,51 @@ public sealed partial class SegmentDetectionService : BackgroundService
         Signal();
         return await ReadSettingsAsync(cancellationToken);
     }
+
+    private async Task MarkAllForAnalysisAsync(CancellationToken cancellationToken)
+    {
+        using (await mutations.EnterAsync(cancellationToken))
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            await database.MediaSegments.IgnoreQueryFilters()
+                .ExecuteUpdateAsync(update => update.SetProperty(segment => segment.AnalysisVersion, 0), cancellationToken);
+        }
+        status = null;
+    }
+
+    /// <summary>For each series: its episodes, how many have an intro or credits, and how many are still to examine.</summary>
+    public async Task<IReadOnlyList<MediaSegmentSeriesStatus>> SeriesStatusAsync(CancellationToken cancellationToken)
+    {
+        var (episodes, rows) = await LoadStateAsync(cancellationToken);
+        Dictionary<Guid, string> titles;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            var ids = episodes.Select(episode => episode.Series).Distinct().ToArray();
+            titles = await TitlesAsync(database, ids, cancellationToken);
+        }
+        var comparable = episodes.GroupBy(episode => (episode.Series, episode.Season)).Where(season => season.Count() >= 2)
+            .SelectMany(season => season).Select(episode => episode.Id).ToHashSet();
+        return [.. episodes.GroupBy(episode => episode.Series).Select(series => new MediaSegmentSeriesStatus(
+                series.Key,
+                titles.GetValueOrDefault(series.Key, string.Empty),
+                series.Count(),
+                series.Count(episode => !Needs(rows, episode) && rows[episode.Id].IntroSource != MediaSegmentSource.None),
+                series.Count(episode => !Needs(rows, episode) && rows[episode.Id].CreditsSource != MediaSegmentSource.None),
+                series.Count(episode => Needs(rows, episode) && comparable.Contains(episode.Id))))
+            .OrderBy(series => series.Title, StringComparer.CurrentCultureIgnoreCase)];
+    }
+
+    private static async Task<Dictionary<Guid, string>> TitlesAsync(AureliaDbContext database, Guid[] ids, CancellationToken cancellationToken) =>
+        await database.MediaItems.IgnoreQueryFilters().AsNoTracking().Where(item => ids.Contains(item.Id))
+            .Select(item => new
+            {
+                item.Id,
+                Title = database.MediaMetadata.Where(metadata => metadata.MediaItemId == item.Id)
+                    .Select(metadata => metadata.ManualTitle ?? metadata.ProviderTitle).FirstOrDefault() ?? item.OverrideTitle ?? item.DetectedTitle,
+            })
+            .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
 
     /// <summary>Queues every season with an episode that was not examined in its current file version.</summary>
     public async Task<int> QueuePendingSeasonsAsync(CancellationToken cancellationToken)
@@ -281,9 +356,23 @@ public sealed partial class SegmentDetectionService : BackgroundService
             infos[index] = await DescribeAsync(tools, episodes[involved[index]], cancellationToken);
         }
 
+        string seriesTitle;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            seriesTitle = (await TitlesAsync(database, [seriesId], cancellationToken)).GetValueOrDefault(seriesId, string.Empty);
+        }
+        foreach (var info in infos)
+        {
+            info.Label = string.Create(CultureInfo.InvariantCulture,
+                $"{seriesTitle} · S{seasonNumber:00}E{info.Media.EpisodeNumber ?? 0:00}");
+        }
+
+        var pictures = UsesPictures;
         var analyzer = new SeasonSegmentAnalyzer(
             [.. infos.Select(info => new SegmentEpisode(info.Duration, info.Chapters))],
-            (index, kind, token) => LoadWindowAsync(tools, infos[index], kind, token));
+            (index, kind, token) => LoadWindowAsync(tools, infos[index], kind, token),
+            pictures ? (index, start, length, token) => LoadPicturesAsync(tools, infos[index], start, length, token) : null);
         var analyzed = 0;
         for (var index = 0; index < involved.Length; index++)
         {
@@ -291,12 +380,19 @@ public sealed partial class SegmentDetectionService : BackgroundService
             if (!IsEnabled) break;
             var info = infos[index];
             if (!NeedsAnalysis(info.Media) || info.Offline) continue;
+            var started = clock.GetTimestamp();
+            activity = new Activity(info.Label, "Comparing with other episodes");
             var result = info.Duration >= MinimumEpisodeSeconds
                 ? await analyzer.AnalyzeAsync(index, cancellationToken)
                 : DetectedSegments.Nothing;
             await SaveAsync(info.Media, result, cancellationToken);
             analyzed++;
+            status = null;
+            // A running average, so the estimate follows this server's speed and the library's mix.
+            var seconds = clock.GetElapsedTime(started).TotalSeconds;
+            secondsPerEpisode = secondsPerEpisode is { } average ? average * 0.8 + seconds * 0.2 : seconds;
         }
+        activity = null;
         return analyzed;
     }
 
@@ -346,6 +442,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
             var probe = await live.ProbeAsync(tools, file, Path.GetFullPath(media.SourcePath), media.Id, cancellationToken);
             info.Duration = probe.DurationSeconds ?? 0;
             info.Track = LiveSpeechAudio.Choose(probe.Audio, null);
+            info.VideoIndex = probe.Video?.Index;
             info.Chapters = [.. (probe.Chapters ?? []).Select(chapter => new SegmentChapter(chapter.StartSeconds, chapter.EndSeconds, chapter.Title))];
         }
         catch (PlaybackException)
@@ -362,9 +459,20 @@ public sealed partial class SegmentDetectionService : BackgroundService
     private async Task<SegmentWindow?> LoadWindowAsync(FfmpegTools tools, EpisodeInfo info, SegmentKind kind, CancellationToken cancellationToken)
     {
         if (info.Offline || info.Track is not { } track || info.Duration < MinimumEpisodeSeconds) return null;
-        var length = kind == SegmentKind.Intro ? SegmentRules.IntroWindowSeconds(info.Duration) : SegmentRules.CreditsWindowSeconds(info.Duration);
-        var start = kind == SegmentKind.Intro ? 0 : Math.Max(0, info.Duration - length);
+        var (start, length) = kind switch
+        {
+            SegmentKind.Intro => (0, SegmentRules.IntroWindowSeconds(info.Duration)),
+            SegmentKind.LateIntro => (SegmentRules.LateIntroStartSeconds(info.Duration), SegmentRules.LateIntroLengthSeconds(info.Duration)),
+            _ => (Math.Max(0, info.Duration - SegmentRules.CreditsWindowSeconds(info.Duration)), SegmentRules.CreditsWindowSeconds(info.Duration)),
+        };
+        if (length <= 0) return null;
 
+        activity = new Activity(info.Label, kind switch
+        {
+            SegmentKind.Intro => "Listening to the beginning",
+            SegmentKind.LateIntro => "Listening further for a late intro",
+            _ => "Listening to the ending",
+        });
         IDisposable? slot = null;
         while (slot is null)
         {
@@ -393,6 +501,68 @@ public sealed partial class SegmentDetectionService : BackgroundService
         }
         if (samples is null || samples.Length < AudioFingerprint.SampleRate * 30) return null;
         return await FingerprintAsync(samples, start);
+    }
+
+    /// <summary>
+    /// Pictures of the episode, two a second. Decoding them is the slowest part, so it
+    /// stops as soon as someone starts watching and begins again once they are done.
+    /// </summary>
+    private async Task<PictureWindow?> LoadPicturesAsync(FfmpegTools tools, EpisodeInfo info, double start, double length, CancellationToken cancellationToken)
+    {
+        if (info.Offline || info.VideoIndex is not { } video || info.Duration < MinimumEpisodeSeconds || length <= 0) return null;
+        var step = start < info.Duration / 2 ? "Looking at the beginning's pictures" : "Looking at the ending's pictures";
+        while (true)
+        {
+            activity = new Activity(info.Label, step);
+            await WaitWhilePlaybackBusyAsync(cancellationToken);
+            using var slot = await live.EnterAsync(encodesVideo: false, cancellationToken);
+            if (slot is null) continue;
+            OpenMediaFile file;
+            try
+            {
+                file = MediaFileAccess.OpenRead(info.Media);
+            }
+            catch (PlaybackException)
+            {
+                return null;
+            }
+            await using var stream = file.Stream;
+            if (file.Length != info.Length || file.LastModified != info.LastModified) return null;
+            using var interrupt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var watcher = WatchForPlaybackAsync(interrupt);
+            PictureWindow? window = null;
+            try
+            {
+                window = await reader.ReadPicturesAsync(tools, file, Path.GetFullPath(info.Media.SourcePath), video, start, length, interrupt.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Someone started watching; the pictures are read again later.
+            }
+            var interrupted = interrupt.IsCancellationRequested;
+            await interrupt.CancelAsync();
+            await watcher;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!interrupted) return window;
+        }
+    }
+
+    /// <summary>Cancels <paramref name="interrupt"/> when someone starts watching.</summary>
+    private async Task WatchForPlaybackAsync(CancellationTokenSource interrupt)
+    {
+        try
+        {
+            while (!interrupt.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), interrupt.Token);
+                if (IsBusyWithPlayback())
+                {
+                    await interrupt.CancelAsync();
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     /// <summary>Fingerprints on its own low-priority thread, so requests are never kept waiting.</summary>

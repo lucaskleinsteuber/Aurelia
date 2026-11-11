@@ -66,15 +66,27 @@ scan, one short read at a time, and waits while anyone is watching.
   minutes (at most 25 %) for the credits. Music that at least two other episodes share at a
   believable length is the intro (10 to 150 seconds) or the credits (at least 15 seconds); a
   recap that only one other episode shares is not. Boundaries move to a quiet moment nearby.
+- An episode that has no intro there is searched up to its middle, but then three other
+  episodes must share the music. When someone speaks over an episode's intro, so its sound
+  differs, the server compares the pictures of its first minutes with the other episodes'
+  intros instead; two of them must show the same pictures.
+- For credits it also looks at the pictures of each episode's last six minutes, two a second:
+  names on a black screen, or a card the other episodes of the season show too (names over the
+  same drawing). Such credits must last until shortly before the end. When sound and pictures
+  both find credits, the earlier start counts as long as both describe the same credits. This
+  is the slow part: on an older server a few minutes per episode, once. The owner can turn it
+  off and keep detection from sound only.
 - When it is not sure, it stores nothing and no button appears. A season needs at least two
   episodes; movies are not examined.
 - Someone who may edit the library can correct the times of an episode in Edit Metadata. A
   correction is never replaced; "Reset to detected" removes it.
 
-The media file is only read. Sound and the fingerprints made from it exist only in the
-server's memory while a season is compared; only the timestamps are stored, in the server's
-database. No sound, picture, fingerprint or other file is written anywhere. The owner can turn
-detection off under the server settings; times set by hand keep working then.
+The media file is only read. Sound, pictures and the fingerprints made from them exist only in
+the server's memory while a season is compared; only the timestamps are stored, in the server's
+database. No sound, picture, fingerprint or other file is written anywhere. The server settings
+show how far it is (episodes examined, the episode it is on, the time left) and each series'
+results; there the owner turns detection or the pictures off and has a series examined again.
+Times set by hand keep working when detection is off.
 
 ## Extras and trailers
 

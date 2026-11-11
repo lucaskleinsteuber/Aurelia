@@ -48,6 +48,11 @@ public sealed record SetMediaSegmentsRequest(
 /// <param name="PendingCount">Episodes still to be examined.</param>
 /// <param name="AnalyzedCount">Episodes with an intro or credits time.</param>
 /// <param name="NoResultCount">Episodes examined without a certain result.</param>
+/// <param name="UsePictures">Whether credits are also looked for in pictures (since 2.10.0).</param>
+/// <param name="TotalCount">Episodes the server can compare: examined or still to examine.</param>
+/// <param name="CurrentTitle">The episode being examined now, such as "Series · S01E02".</param>
+/// <param name="CurrentStep">What is being done with it now.</param>
+/// <param name="EstimatedSecondsRemaining">Time left at this server's recent speed, once it is known.</param>
 public sealed record MediaSegmentSettingsResponse(
     bool Available,
     bool Enabled,
@@ -55,9 +60,24 @@ public sealed record MediaSegmentSettingsResponse(
     int AnalyzedCount,
     int NoResultCount,
     bool Running,
-    bool PausedForPlayback);
+    bool PausedForPlayback,
+    bool UsePictures = true,
+    int TotalCount = 0,
+    string? CurrentTitle = null,
+    string? CurrentStep = null,
+    int? EstimatedSecondsRemaining = null);
 
-public sealed record UpdateMediaSegmentSettingsRequest(bool Enabled);
+/// <param name="UsePictures">Null keeps the current choice.</param>
+public sealed record UpdateMediaSegmentSettingsRequest(bool Enabled, bool? UsePictures = null);
+
+/// <summary>One series' detection state for the owner's overview.</summary>
+public sealed record MediaSegmentSeriesStatus(
+    Guid SeriesId,
+    string Title,
+    int EpisodeCount,
+    int WithIntro,
+    int WithCredits,
+    int PendingCount);
 
 /// <summary>Examines a series, one of its seasons, or with no series the whole library again.</summary>
 public sealed record ReanalyzeMediaSegmentsRequest(Guid? SeriesId = null, int? SeasonNumber = null);

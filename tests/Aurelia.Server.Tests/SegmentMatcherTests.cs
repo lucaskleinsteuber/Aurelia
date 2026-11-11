@@ -249,6 +249,41 @@ public sealed class SegmentMatcherTests
     }
 
     [Fact]
+    public async Task ALateIntroIsFoundWhenFourOtherEpisodesHaveItButNotWhenOnlyTwoShareTheMusic()
+    {
+        // 25-minute episodes: the first window is 10 minutes, the late search goes to 12:30.
+        var intro = SyntheticAudio.Music(seed: 21, seconds: 30);
+        var recap = SyntheticAudio.Music(seed: 22, seconds: 30);
+        short[] Episode(int index, double introAt, bool recapLate = false) => SyntheticAudio.Join(
+            SyntheticAudio.Music(seed: 2700 + index, seconds: introAt), intro,
+            SyntheticAudio.Music(seed: 2800 + index, seconds: recapLate ? 700 - introAt - 30 : 750 - introAt - 30),
+            recapLate ? SyntheticAudio.Join(recap, SyntheticAudio.Music(seed: 2900 + index, seconds: 20)) : []);
+        var sound = new[] { Episode(0, 40), Episode(1, 680), Episode(2, 25), Episode(3, 60), Episode(4, 35) };
+        var result = await LateAnalyzer(sound).AnalyzeAsync(1, CancellationToken.None);
+        Assert.Equal(MediaSegmentSource.Detected, result.IntroSource);
+        Assert.InRange(result.IntroStart!.Value, 679.5, 680.5);
+        Assert.InRange(result.IntroEnd!.Value, 709.5, 710.5);
+
+        // Music shared late by only two episodes (a recap) is no intro.
+        var recapSeason = Enumerable.Range(0, 5).Select(index => index is 1 or 2
+            ? SyntheticAudio.Join(SyntheticAudio.Music(seed: 3000 + index, seconds: 700), recap, SyntheticAudio.Music(seed: 3100 + index, seconds: 20))
+            : SyntheticAudio.Music(seed: 3000 + index, seconds: 750)).ToArray();
+        Assert.Equal(DetectedSegments.Nothing, await LateAnalyzer(recapSeason).AnalyzeAsync(1, CancellationToken.None));
+    }
+
+    /// <summary>Episodes of 1 500 s whose given sound covers their first half.</summary>
+    private static SeasonSegmentAnalyzer LateAnalyzer(short[][] sound) => new(
+        [.. sound.Select(_ => new SegmentEpisode(EpisodeSeconds, []))],
+        (index, kind, _) =>
+        {
+            if (kind == SegmentKind.Credits) return Task.FromResult<SegmentWindow?>(null);
+            var start = kind == SegmentKind.Intro ? 0 : SegmentRules.LateIntroStartSeconds(EpisodeSeconds);
+            var length = kind == SegmentKind.Intro ? SegmentRules.IntroWindowSeconds(EpisodeSeconds) : SegmentRules.LateIntroLengthSeconds(EpisodeSeconds);
+            var samples = sound[index].Skip((int)(start * Rate)).Take((int)(length * Rate)).ToArray();
+            return Task.FromResult<SegmentWindow?>(SegmentWindow.FromPcm(samples, start));
+        });
+
+    [Fact]
     public async Task ASeasonOfOneEpisodeHasNothingToCompare()
     {
         var analyzer = Analyzer([SyntheticAudio.Music(seed: 13, seconds: 60)], SegmentKind.Intro);

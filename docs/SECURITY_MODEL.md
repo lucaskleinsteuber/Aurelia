@@ -35,8 +35,8 @@ endpoint or a client can be checked against it.
   only through `/dev/dri` render nodes (or Nvidia's driver) after a test encode of an invented
   picture.
 - **Intro detection keeps only timestamps.** To find intros and credits the server decodes
-  short stretches of an episode's sound the same way (ffmpeg without a shell, the checked and
-  opened file, standard output only). Sound and fingerprints stay in memory while a season is
+  short stretches of an episode's sound, and small grey pictures of its last minutes, the same way (ffmpeg without a shell, the checked and
+  opened file, standard output only). Sound, pictures and fingerprints stay in memory while a season is
   compared; only the times are stored, in the database.
 - **Diagnostics are redacted.** Tokens, passwords, PINs and full paths do not appear in
   logs, Server Health or exported diagnostics.

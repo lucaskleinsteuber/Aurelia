@@ -215,6 +215,104 @@ public sealed class SegmentDetectionTests
     }
 
     [Fact]
+    public async Task CreditsWithoutSharedMusicAreFoundInPicturesWithoutWritingFiles()
+    {
+        if (Installed() is not { } maker) return;
+        var ffmpeg = Tools() ?? maker;
+        var parent = TestPaths.CreateDataDirectory();
+        var root = Path.Combine(parent, "Invented Pictures");
+        Directory.CreateDirectory(root);
+        try
+        {
+            // Four episodes of 200 s: own scenes and own noise as sound, then 25 s of names on black
+            // and 5 s of a logo. Nothing is shared in the sound, so only pictures can find the credits.
+            var paths = new string[4];
+            for (var index = 0; index < paths.Length; index++)
+            {
+                paths[index] = Path.Combine(root, $"Invented Pictures S01E0{index + 1}.mkv");
+                await EncodePicturesAsync(maker, paths[index], seed: index);
+            }
+            var before = paths.Select(path => (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length)).ToArray();
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var (_, episodes) = await AddSeasonAsync(factory, root, paths);
+            var detection = factory.Services.GetRequiredService<SegmentDetectionService>();
+            var dataFiles = Files(factory.DataDirectory);
+            var temporaryFiles = TemporaryVideoFiles();
+
+            await detection.QueuePendingSeasonsAsync(CancellationToken.None);
+            Assert.Equal(4, await detection.ProcessPendingAsync(CancellationToken.None));
+
+            foreach (var episode in episodes)
+            {
+                var times = await SegmentsAsync(client, owner.Token, episode);
+                Assert.Equal(MediaSegmentSource.Detected, times.CreditsSource);
+                Assert.InRange(times.CreditsStartMilliseconds!.Value, 169_000, 171_000);
+                Assert.Equal(MediaSegmentSource.None, times.IntroSource);
+            }
+            using (var request = ApiTestClient.Authorized(HttpMethod.Get, "/api/v1/server/media-segments/series", owner.Token))
+            using (var response = await client.SendAsync(request))
+            {
+                response.EnsureSuccessStatusCode();
+                var series = Assert.Single(await ApiTestClient.ReadAsync<MediaSegmentSeriesStatus[]>(response));
+                Assert.Equal(("Invented Series", 4, 0, 4, 0), (series.Title, series.EpisodeCount, series.WithIntro, series.WithCredits, series.PendingCount));
+            }
+            var settings = await SettingsAsync(client, owner.Token);
+            Assert.True(settings is { UsePictures: true, TotalCount: 4, PendingCount: 0, Running: false });
+
+            // Without pictures the same season has no credits.
+            using (var off = ApiTestClient.Authorized(HttpMethod.Put, "/api/v1/server/media-segments", owner.Token,
+                       new UpdateMediaSegmentSettingsRequest(true, UsePictures: false)))
+            using (var saved = await ApiTestClient.SendAsync(client, off))
+            {
+                saved.EnsureSuccessStatusCode();
+                Assert.False((await ApiTestClient.ReadAsync<MediaSegmentSettingsResponse>(saved)).UsePictures);
+            }
+            await detection.ReanalyzeAsync(null, null, CancellationToken.None);
+            await detection.QueuePendingSeasonsAsync(CancellationToken.None);
+            Assert.Equal(4, await detection.ProcessPendingAsync(CancellationToken.None));
+            Assert.Equal(MediaSegmentSource.None, (await SegmentsAsync(client, owner.Token, episodes[0])).CreditsSource);
+
+            var newDataFiles = Files(factory.DataDirectory).Except(dataFiles).Where(file => !ServerBookkeeping(factory.DataDirectory, file)).ToList();
+            Assert.True(newDataFiles.Count == 0, string.Join(", ", newDataFiles));
+            Assert.Empty(TemporaryVideoFiles().Except(temporaryFiles));
+            Assert.Equal(paths.Order(StringComparer.Ordinal), Directory.GetFiles(root).Order(StringComparer.Ordinal));
+            Assert.Equal(before, paths.Select(path => (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length)).ToArray());
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    /// <summary>200 s of invented picture at two pictures a second and noise as sound.</summary>
+    private static async Task EncodePicturesAsync(string ffmpeg, string path, int seed)
+    {
+        var start = new ProcessStartInfo(ffmpeg) { RedirectStandardInput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in new[]
+        {
+            "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "gray", "-s", "320x180", "-r", "2", "-i", "pipe:0",
+            "-f", "lavfi", "-i", string.Create(System.Globalization.CultureInfo.InvariantCulture, $"anoisesrc=d=200:c=pink:seed={seed + 7}:a=0.1"),
+            "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "8", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-shortest", path,
+        }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var errors = process.StandardError.ReadToEndAsync();
+        for (var picture = 0; picture < 400; picture++)
+        {
+            var second = picture / 2;
+            var frame = second < 170 ? SyntheticPictures.Scene(seed * 10_000 + second)
+                : second < 195 ? (picture % 8 == 7 ? new byte[CreditsPictures.FrameBytes] : SyntheticPictures.Credits(seed * 100 + picture / 8))
+                : SyntheticPictures.Scene(424_242);
+            await process.StandardInput.BaseStream.WriteAsync(frame);
+        }
+        process.StandardInput.Close();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, await errors);
+    }
+
+    [Fact]
     public void TheReaderAsksForOneShortStretchOfSoundOnStandardOutput()
     {
         var arguments = SegmentAudioReader.Arguments("/invented/episode.mkv", new ProbedAudio(2, "aac", null, 6, "eng", null, true), 1_200.5, 300);
@@ -403,7 +501,7 @@ public sealed class SegmentDetectionTests
         return relative.StartsWith("Backups" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             || relative.StartsWith("DataProtectionKeys" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             || relative.StartsWith("aurelia.db", StringComparison.Ordinal)
-            || relative is "server-events.json" or "server.lock";
+            || relative is "server-events.json" or "server.lock" or SegmentDetectionService.SettingsFileName;
     }
 
     private static HashSet<string> TemporaryVideoFiles() =>

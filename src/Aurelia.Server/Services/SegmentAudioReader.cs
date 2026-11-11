@@ -4,9 +4,10 @@ using System.Runtime.InteropServices;
 namespace Aurelia.Server.Services;
 
 /// <summary>
-/// Reads a short stretch of one sound track as mono 16-bit PCM for intro and credits detection.
-/// ffmpeg reads only the file the server checked and opened and writes only to its standard
-/// output; the sound stays in memory until it is fingerprinted and is never stored.
+/// Reads a short stretch of one sound track as mono 16-bit PCM, or of the picture as small grey
+/// pictures, for intro and credits detection. ffmpeg reads only the file the server checked and
+/// opened and writes only to its standard output; sound and pictures stay in memory until they
+/// are reduced to fingerprints and are never stored.
 /// </summary>
 public sealed class SegmentAudioReader(LiveConversionService live, ILogger<SegmentAudioReader> logger)
 {
@@ -32,6 +33,76 @@ public sealed class SegmentAudioReader(LiveConversionService live, ILogger<Segme
             "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1",
         ]);
         return arguments;
+    }
+
+    /// <summary>
+    /// ffmpeg arguments for <paramref name="length"/> seconds of the picture from
+    /// <paramref name="start"/>, as two 320 × 180 grey pictures a second.
+    /// </summary>
+    public static IReadOnlyList<string> PictureArguments(string input, int videoIndex, double start, double length)
+    {
+        var arguments = new List<string> { "-hide_banner", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file", "-threads", "2" };
+        if (start > 0) arguments.AddRange(["-ss", start.ToString("0.###", CultureInfo.InvariantCulture)]);
+        arguments.AddRange([
+            "-t", length.ToString("0.###", CultureInfo.InvariantCulture),
+            "-i", "file:" + input, "-map", string.Create(CultureInfo.InvariantCulture, $"0:{videoIndex}"),
+            "-map_metadata", "-1", "-map_chapters", "-1", "-an", "-sn", "-dn",
+            "-vf", string.Create(CultureInfo.InvariantCulture,
+                $"fps={Segments.CreditsPictures.FramesPerSecond},scale={Segments.CreditsPictures.Width}:{Segments.CreditsPictures.Height}:flags=area,format=gray"),
+            "-f", "rawvideo", "pipe:1",
+        ]);
+        return arguments;
+    }
+
+    /// <summary>
+    /// The pictures of a stretch reduced to what credits detection needs, or null when ffmpeg could
+    /// not read it. Each picture is measured as it arrives and then dropped.
+    /// </summary>
+    public async Task<Segments.PictureWindow?> ReadPicturesAsync(
+        FfmpegTools tools, OpenMediaFile file, string checkedPath, int videoIndex, double start, double length, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        ArgumentNullException.ThrowIfNull(file);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        // Decoding the picture is slow on small servers; an hour covers six minutes of 4K.
+        timeout.CancelAfter(TimeSpan.FromHours(1));
+        using var process = live.Start(tools.Ffmpeg, PictureArguments(LiveConversionService.InputPath(file.Stream, checkedPath), videoIndex, start, length), lowPriority: true);
+        try { process.PriorityClass = System.Diagnostics.ProcessPriorityClass.Idle; }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+        var errors = LiveConversionService.ReadTailAsync(process.StandardError);
+        using var stopOnAbort = timeout.Token.Register(() => LiveConversionService.Kill(process));
+        var builder = new Segments.CreditsPictures.Builder(start);
+        var limit = (int)Math.Ceiling(length * Segments.CreditsPictures.FramesPerSecond) + 4;
+        var buffer = new byte[Segments.CreditsPictures.FrameBytes];
+        try
+        {
+            var output = process.StandardOutput.BaseStream;
+            while (await output.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, timeout.Token) == buffer.Length)
+            {
+                if (builder.Count >= limit) return null;
+                builder.Add(buffer);
+            }
+            await process.WaitForExitAsync(timeout.Token);
+            LiveConversionService.EnsureInputMatchesHandle(file.Stream.SafeFileHandle, checkedPath);
+            if (process.ExitCode != 0)
+            {
+                LiveConversionService.LogFailed(logger, "ffmpeg segment pictures", process.ExitCode, await errors, checkedPath);
+                return null;
+            }
+            return builder.Build();
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        finally
+        {
+            LiveConversionService.Stop(process);
+        }
     }
 
     /// <summary>The samples, or null when ffmpeg could not read this stretch.</summary>

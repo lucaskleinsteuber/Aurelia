@@ -357,8 +357,11 @@ time to a wrong one.
   has the episode examined again; `POST .../segments/reanalyze` examines the episode's season
   (or, for a series id, all its seasons) again.
 - The owner reads the state with `GET /api/v1/server/media-segments` (`available`, `enabled`,
-  `pendingCount`, `analyzedCount`, `noResultCount`, `running`, `pausedForPlayback`), turns
-  detection on or off with `PUT {enabled}` and starts over with
+  `pendingCount`, `analyzedCount`, `noResultCount`, `running`, `pausedForPlayback`; from 2.10.0
+  also `usePictures`, `totalCount`, `currentTitle`, `currentStep` and
+  `estimatedSecondsRemaining`), turns detection or the pictures on or off with
+  `PUT {enabled, usePictures?}`, lists each series with `GET /api/v1/server/media-segments/series`
+  (`seriesId`, `title`, `episodeCount`, `withIntro`, `withCredits`, `pendingCount`) and starts over with
   `POST /api/v1/server/media-segments/reanalyze` (`{seriesId?, seasonNumber?}`). While it is off,
   tickets carry only times set by hand.
 
