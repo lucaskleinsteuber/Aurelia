@@ -89,6 +89,28 @@ public static class MovieNightRules
         state.Members.Where(member => member.IsVoting && member.Swiped < deckSize).OrderBy(member => member.Swiped).ToList();
 }
 
+/// <summary>Tonight's program: what the host lets the server deal, and how it reads.</summary>
+public static class MovieNightProgram
+{
+    public static readonly IReadOnlyList<(string Key, string Label)> Kinds = [("movies", "Movies"), ("all", "Movies and Shows")];
+    public static readonly IReadOnlyList<(string Key, string Label)> Eras =
+        [("any", "Any Time"), ("2020s", "2020s"), ("2010s", "2010s"), ("2000s", "2000s"), ("older", "Older")];
+    public static readonly IReadOnlyList<(string Key, string Label)> Lengths =
+        [("any", "Any Length"), ("short", "Short, up to 1h 40m"), ("standard", "Up to 2h 10m")];
+
+    public static MovieNightSettingsRequest Current(MovieNightState state) =>
+        new(state.Kinds, state.Genre, state.Era, state.Length);
+
+    /// <summary>"Movies · Comedy · 2010s · Short".</summary>
+    public static string Summary(MovieNightSettingsRequest program) => string.Join(" · ", new[]
+    {
+        program.Kinds == "all" ? "Movies and Shows" : "Movies",
+        program.Genre,
+        program.Era is null or "any" ? null : Eras.FirstOrDefault(era => era.Key == program.Era).Label,
+        program.Length switch { "short" => "Short", "standard" => "Up to 2h 10m", _ => null },
+    }.Where(part => !string.IsNullOrEmpty(part)));
+}
+
 /// <summary>
 /// The night this computer is in. A swipe counts here at once and is sent behind; the deck is kept
 /// between polls, which only carry it again when it changed. <paramref name="post"/> runs a change
@@ -125,8 +147,9 @@ public sealed class MovieNightSession(IMovieNightApi api, string deviceName, Act
     public Task JoinAsync(Guid nightId, bool voting = true) =>
         RunAsync(token => api.JoinMovieNightAsync(nightId, new JoinMovieNightRequest(deviceName, voting), token));
 
-    public Task SettingsAsync(string kinds, string? genre) => state is { } current
-        ? RunAsync(token => api.MovieNightSettingsAsync(current.Id, new MovieNightSettingsRequest(kinds, genre), token)) : Task.CompletedTask;
+    /// <summary>Changes one part of tonight's program; the other choices stay.</summary>
+    public Task SettingsAsync(Func<MovieNightSettingsRequest, MovieNightSettingsRequest> change) => state is { } current
+        ? RunAsync(token => api.MovieNightSettingsAsync(current.Id, change(MovieNightProgram.Current(current)), token)) : Task.CompletedTask;
 
     public Task DealAsync() => state is { } current ? RunAsync(token => api.DealMovieNightAsync(current.Id, token)) : Task.CompletedTask;
 

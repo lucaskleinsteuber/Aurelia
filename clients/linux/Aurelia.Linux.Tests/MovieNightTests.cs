@@ -32,6 +32,21 @@ public sealed class MovieNightTests
     }
 
     [Fact]
+    public async Task TonightsProgramChangesOneChoiceAndKeepsTheOthers()
+    {
+        var lobby = Night("lobby") with { Genre = "Comedy", Era = "2010s", Length = "short" };
+        var api = new FakeMovieNightApi(lobby, lobby);
+        using var session = new MovieNightSession(api, "Invented PC", action => action());
+        await session.StartAsync();
+        await session.SettingsAsync(program => program with { Era = "older" });
+        Assert.Equal(new MovieNightSettingsRequest("movies", "Comedy", "older", "short"), Assert.Single(api.Programs));
+        Assert.Equal("Movies · Comedy · 2010s · Short", MovieNightProgram.Summary(MovieNightProgram.Current(lobby)));
+        Assert.Equal("Movies and Shows · Up to 2h 10m", MovieNightProgram.Summary(new MovieNightSettingsRequest("all", null, "any", "standard")));
+        // A server before eras and lengths leaves them at "any".
+        Assert.Equal(("any", "any"), (Night("lobby").Era, Night("lobby").Length));
+    }
+
+    [Fact]
     public void TheScreenFollowsTheNight()
     {
         Assert.Equal(MovieNightScreen.Intro, MovieNightRules.Screen(null, 0));
@@ -137,7 +152,13 @@ public sealed class MovieNightTests
             throw new OperationCanceledException(cancellation);
         }
 
-        public Task<MovieNightState> MovieNightSettingsAsync(Guid nightId, MovieNightSettingsRequest request, CancellationToken cancellation) => Next();
+        public List<MovieNightSettingsRequest> Programs { get; } = [];
+
+        public Task<MovieNightState> MovieNightSettingsAsync(Guid nightId, MovieNightSettingsRequest request, CancellationToken cancellation)
+        {
+            Programs.Add(request);
+            return Next();
+        }
 
         public Task<MovieNightState> DealMovieNightAsync(Guid nightId, CancellationToken cancellation) => Next();
 

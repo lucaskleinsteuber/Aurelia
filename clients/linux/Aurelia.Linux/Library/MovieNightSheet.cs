@@ -3,11 +3,14 @@ using Aurelia.Linux.Controls;
 using Aurelia.Linux.Core.Api;
 using Aurelia.Linux.Core.Playback;
 using Avalonia;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Transformation;
 using Avalonia.Threading;
 
 namespace Aurelia.Linux.Library;
@@ -106,6 +109,7 @@ public sealed class MovieNightSheet : UserControl, IDisposable
     private void Render()
     {
         dirty = false;
+        body.MaxWidth = session.Screen == MovieNightScreen.Lobby ? 1000 : 720;
         var page = new StackPanel { Spacing = 18 };
         if (session.Error is { } error)
         {
@@ -191,40 +195,112 @@ public sealed class MovieNightSheet : UserControl, IDisposable
     {
         var voters = state.Members.Count(member => member.IsVoting);
         var me = state.Members.FirstOrDefault(member => member.IsYou);
-        var host = state.Members.FirstOrDefault(member => member.IsHost);
-        var page = new StackPanel { Spacing = 18 };
-        page.Children.Add(Heading("Who's in?", voters == 0
+        var page = new StackPanel { Spacing = 22 };
+        page.Children.Add(Heading("Movie Night", voters == 0
             ? "Nobody is swiping yet. Open Aurelia on a phone and join this night."
-            : $"{(voters == 1 ? "1 person is" : $"{voters} people are")} ready to swipe. Anyone else at home can join from Aurelia on their phone, in a browser or on the Apple TV."));
-        page.Children.Add(People(state));
-        if (me?.IsHost == true)
+            : "Pick tonight's program, deal the cards, and let everyone swipe."));
+        var program = Program(state, me?.IsHost == true);
+        var crowd = Crowd(state);
+        // Side by side on a wide window, one under the other on a narrow one.
+        var columns = new Grid { ColumnDefinitions = new ColumnDefinitions("*,20,270") };
+        Grid.SetColumn(crowd, 2);
+        columns.Children.Add(program);
+        columns.Children.Add(crowd);
+        page.Children.Add(columns);
+        page.Children.Add(Row(Action(me?.IsVoting == true ? "Just Watch on This PC" : "Swipe Here Too", () => session.SetVotingAsync(!(me?.IsVoting ?? false)))));
+        return page;
+    }
+
+    /// <summary>Tonight's program on a card: what, genre, era and length, then the deal. Only the host changes it.</summary>
+    private Border Program(MovieNightState state, bool hosting)
+    {
+        var current = MovieNightProgram.Current(state);
+        var host = state.Members.FirstOrDefault(member => member.IsHost);
+        var card = new StackPanel { Spacing = 16 };
+        var head = new DockPanel();
+        head.Children.Add(Docked(new TextBlock
         {
-            Button Chip(string label, bool selected, Func<Task> action)
+            Text = hosting ? "You choose what gets dealt." : $"{host?.Name ?? "The host"} chooses what gets dealt.",
+            Classes = { "subdued" },
+            FontSize = 13,
+            VerticalAlignment = VerticalAlignment.Center,
+        }, Dock.Right));
+        head.Children.Add(new TextBlock { Text = "Tonight's Program", FontSize = 18, FontWeight = FontWeight.Bold });
+        card.Children.Add(head);
+        Control ProgramRow(string label, IEnumerable<(string Key, string Label)> choices, string selected, Func<string, Func<MovieNightSettingsRequest, MovieNightSettingsRequest>> change)
+        {
+            var chips = new WrapPanel { ItemSpacing = 8, LineSpacing = 8 };
+            foreach (var (key, title) in choices)
             {
-                var chip = Action(label, action);
-                if (selected) chip.Classes.Add("selected");
-                return chip;
+                var chip = Action(title, () => session.SettingsAsync(change(key)));
+                if (key == selected) chip.Classes.Add("selected");
+                chip.IsEnabled = hosting;
+                if (!hosting && key != selected) chip.Opacity = 0.45;
+                chips.Children.Add(chip);
             }
-            page.Children.Add(Row(
-                Chip("Movies", state.Kinds != "all", () => session.SettingsAsync("movies", state.Genre)),
-                Chip("Movies and Shows", state.Kinds == "all", () => session.SettingsAsync("all", state.Genre))));
-            if (state.GenreOptions.Count > 0)
-            {
-                var genres = Row(Chip("Any Genre", state.Genre is null, () => session.SettingsAsync(state.Kinds, null)));
-                foreach (var genre in state.GenreOptions)
-                    genres.Children.Add(Chip(genre, state.Genre == genre, () => session.SettingsAsync(state.Kinds, genre)));
-                page.Children.Add(genres);
-            }
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("72,*") };
+            row.Children.Add(new TextBlock { Text = label, Classes = { "subdued" }, FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 7, 0, 0) });
+            Grid.SetColumn(chips, 1);
+            row.Children.Add(chips);
+            return row;
+        }
+        card.Children.Add(ProgramRow("What", MovieNightProgram.Kinds, current.Kinds ?? "movies", key => program => program with { Kinds = key }));
+        if (state.GenreOptions.Count > 0)
+            card.Children.Add(ProgramRow("Genre", new[] { ("", "Any Genre") }.Concat(state.GenreOptions.Select(genre => (genre, genre))),
+                current.Genre ?? "", key => program => program with { Genre = key.Length == 0 ? null : key }));
+        card.Children.Add(ProgramRow("When", MovieNightProgram.Eras, current.Era ?? "any", key => program => program with { Era = key }));
+        card.Children.Add(ProgramRow("Length", MovieNightProgram.Lengths, current.Length ?? "any", key => program => program with { Length = key }));
+        card.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.Parse("#2EFFFFFF")) });
+        var foot = new DockPanel();
+        if (hosting)
+        {
             var deal = Action("Deal the Cards", session.DealAsync, primary: true);
-            deal.IsEnabled = voters > 0;
-            page.Children.Add(Row(deal, Action(me.IsVoting ? "Just Watch on This PC" : "Swipe Here Too", () => session.SetVotingAsync(!me.IsVoting))));
+            deal.IsEnabled = state.Members.Any(member => member.IsVoting);
+            foot.Children.Add(Docked(deal, Dock.Right));
         }
         else
         {
-            page.Children.Add(new TextBlock { Text = $"Waiting for {host?.Name ?? "the host"} to deal.", Classes = { "subdued" } });
-            page.Children.Add(Row(Action(me?.IsVoting == true ? "Just Watch on This PC" : "Swipe Here Too", () => session.SetVotingAsync(!(me?.IsVoting ?? false)))));
+            foot.Children.Add(Docked(new TextBlock { Text = $"Waiting for {host?.Name ?? "the host"} to deal.", Classes = { "subdued" }, VerticalAlignment = VerticalAlignment.Center }, Dock.Right));
         }
-        return page;
+        foot.Children.Add(new TextBlock { Text = MovieNightProgram.Summary(current), Foreground = Yes, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
+        card.Children.Add(foot);
+        return new Border
+        {
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(22),
+            BorderBrush = new SolidColorBrush(Color.Parse("#14FFFFFF")),
+            BorderThickness = new Thickness(1),
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+                GradientStops = { new GradientStop(Color.Parse("#2C3036"), 0), new GradientStop(Color.Parse("#24272C"), 1) },
+            },
+            Child = card,
+        };
+    }
+
+    private static Border Crowd(MovieNightState state)
+    {
+        var voters = state.Members.Count(member => member.IsVoting);
+        return new Border
+        {
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(18),
+            BorderBrush = new SolidColorBrush(Color.Parse("#14FFFFFF")),
+            BorderThickness = new Thickness(1),
+            Background = new SolidColorBrush(Color.Parse("#0AFFFFFF")),
+            Child = new StackPanel
+            {
+                Spacing = 10,
+                Children =
+                {
+                    new TextBlock { Text = voters == 1 ? "1 swiping" : $"{voters} swiping", FontSize = 18, FontWeight = FontWeight.Bold },
+                    People(state),
+                    new TextBlock { Text = "Anyone at home joins from Aurelia on a phone, tablet, computer or in a browser: Movie Night › Join.", Classes = { "subdued" }, FontSize = 13, TextWrapping = TextWrapping.Wrap },
+                },
+            },
+        };
     }
 
     private StackPanel Swipe(MovieNightState state)
@@ -525,6 +601,26 @@ public sealed class MovieNightSheet : UserControl, IDisposable
                 },
             });
         }
-        return new Border { Background = Paper, CornerRadius = new CornerRadius(18), ClipToBounds = true, Child = ticket };
+        var border = new Border
+        {
+            Background = Paper,
+            CornerRadius = new CornerRadius(18),
+            ClipToBounds = true,
+            Child = ticket,
+            // The ticket drops in from above, as if handed over the counter.
+            Opacity = 0,
+            RenderTransform = TransformOperations.Parse("translateY(-48px) scale(0.96)"),
+            Transitions =
+            [
+                new DoubleTransition { Property = Visual.OpacityProperty, Duration = TimeSpan.FromMilliseconds(320) },
+                new TransformOperationsTransition { Property = Visual.RenderTransformProperty, Duration = TimeSpan.FromMilliseconds(520), Easing = new BackEaseOut() },
+            ],
+        };
+        border.AttachedToVisualTree += (_, _) => Dispatcher.UIThread.Post(() =>
+        {
+            border.Opacity = 1;
+            border.RenderTransform = TransformOperations.Parse("none");
+        }, DispatcherPriority.Background);
+        return border;
     }
 }
