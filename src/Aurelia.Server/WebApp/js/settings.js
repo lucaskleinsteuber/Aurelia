@@ -1,5 +1,6 @@
-// Settings, with the Mac app's 8 structured categories: General, Playback, Library,
-// Metadata, Profiles and Devices, Server, Updates, and Advanced (with Danger Zone).
+// Settings, with the Mac app's structured categories: General, Playback, Library, Metadata,
+// Profiles and Devices, Server, Power (only on a Linux package server), Updates, and Advanced
+// (with Danger Zone).
 // A search field filters settings across categories in real time.
 
 import { h, icon, clear } from "./dom.js";
@@ -8,13 +9,14 @@ import {
   MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
   rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
-  TOP_BAR_SECTIONS, moveSection
+  TOP_BAR_SECTIONS, moveSection, POWER_MODES, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
 import { createManagementEditors } from "./settings-editors.js";
 import { createServerUpdates } from "./server-updates.js";
 import { createAdminTools } from "./settings-admin.js";
+import { createImportPreview } from "./import-preview.js";
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -23,6 +25,7 @@ const CATEGORIES = [
   { id: "metadata", label: "Metadata", symbol: "star", adminOnly: true },
   { id: "profiles", label: "Profiles and Devices", symbol: "lock", adminOnly: false },
   { id: "server", label: "Server", symbol: "tv", adminOnly: true },
+  { id: "power", label: "Power", symbol: "power", adminOnly: true, ownerOnly: true, needsPower: true },
   { id: "updates", label: "Updates", symbol: "arrow", adminOnly: false },
   { id: "advanced", label: "Advanced", symbol: "gear", adminOnly: true },
   { id: "about", label: "About", symbol: "star", adminOnly: false },
@@ -36,11 +39,15 @@ export function createSettings(app) {
   const { api, state } = app;
   const canManage = () => state.profile?.role === "owner" || state.profile?.role === "admin";
   const editors = createManagementEditors({ ...app, onSaved: () => app.navigate(state.route, { replace: true }),
-    chooseServerFolder: (onPick, start) => admin.chooseServerFolder(onPick, start) });
+    chooseServerFolder: (onPick, start) => admin.chooseServerFolder(onPick, start),
+    reviewImport: (library) => importPreview.open(library, { onDone: () => app.navigate(state.route, { replace: true }) }) });
   const admin = createAdminTools({ api, app, editors });
+  const importPreview = createImportPreview({ api, app, kit: editors.kit });
   let updatesView;
   let serverRead = new AbortController();
   let searchQuery = "";
+  // Whether this server has power options (a Linux package server); unknown until first read.
+  let powerAvailable = null;
 
   function closeUpdates() {
     updatesView?.close();
@@ -53,11 +60,12 @@ export function createSettings(app) {
     closeUpdates();
     let page = route.page ?? "general";
     if (page === "account") page = "profiles";
-    if (["library", "metadata", "server", "advanced"].includes(page) && !canManage()) {
+    const owner = state.profile?.role === "owner";
+    if (["library", "metadata", "server", "power", "advanced"].includes(page) && !canManage()) {
       page = "general";
     }
+    if (page === "power" && !owner) page = "server";
 
-    const availableCategories = CATEGORIES.filter((c) => !c.adminOnly || canManage());
     let sections = null;
     const needsManagement = canManage() && (["library", "metadata", "server", "advanced", "updates", "profiles"].includes(page) || searchQuery !== "");
     if (needsManagement) {
@@ -70,6 +78,26 @@ export function createSettings(app) {
         }
       }
     }
+
+    // The Power page needs only its own read.
+    if (page === "power" && !needsManagement) {
+      try {
+        sections = { power: await api.serverPower({ signal: serverRead.signal }) };
+      } catch (error) {
+        if (serverRead.signal.aborted) throw new DOMException("Cancelled", "AbortError");
+        if (error instanceof ApiError && (error.code === "management_locked" || error.status === 403)) {
+          return unlockPage(error.code === "management_locked");
+        }
+      }
+    }
+    if (owner && sections?.power) powerAvailable = Boolean(sections.power?.available);
+    else if (owner && powerAvailable === null) {
+      try { powerAvailable = Boolean((await api.serverPower({ signal: serverRead.signal }))?.available); }
+      catch { powerAvailable = false; }
+    }
+    if (page === "power" && !powerAvailable) page = "general";
+    const availableCategories = CATEGORIES.filter((c) => (!c.adminOnly || canManage()) && (!c.ownerOnly || owner)
+      && (!c.needsPower || powerAvailable));
 
     const refresh = () => app.navigate(state.route, { replace: true });
 
@@ -215,6 +243,7 @@ export function createSettings(app) {
       case "metadata": return metadataPage(sections, refresh);
       case "profiles": return profilesPage(sections, refresh);
       case "server": return serverPage(sections, refresh);
+      case "power": return h("div", { class: "settings-stack" }, ...powerSections(sections, refresh));
       case "updates": return updatesPage(sections, refresh);
       case "advanced": return advancedPage(sections, refresh);
       case "about": return h("div", { class: "settings-stack" }, ...aboutSections());
@@ -230,6 +259,7 @@ export function createSettings(app) {
       ...(canManage() && sections ? metadataSections(sections, refresh) : []),
       ...profilesSections(sections, refresh),
       ...(canManage() && sections ? serverSections(sections, refresh) : []),
+      ...(canManage() && sections ? powerSections(sections, refresh) : []),
       ...updatesSections(sections, refresh),
       ...(canManage() && sections ? advancedSections(sections, refresh) : []),
       ...aboutSections(),
@@ -450,14 +480,17 @@ export function createSettings(app) {
             h("div", { class: "muted small mono" }, library.path),
             h("div", { class: "muted small" }, [
               library.availability === "available" ? "Connected" : "Offline",
+              library.importPreviewRequired ? "waiting for its import to be reviewed" : null,
               library.lastScanCompletedAt ? `last scanned ${new Date(library.lastScanCompletedAt).toLocaleString()}` : "not scanned yet",
-            ].join(" · "))),
+            ].filter(Boolean).join(" · "))),
           h("div", { class: "settings-card-actions" },
             h("label", { class: "inline-control small" }, toggle(library.monitoringEnabled, async (on) => {
               try { await api.setLibraryMonitoring(library.id, on); }
               catch (err) { if (!app.handleError(err)) app.toast(err.message); }
             }, `Watch ${library.name} for changes`), "Watch for Changes"),
-            button("Scan Now", () => api.scanLibrary(library.id), `Scanning ${library.name}…`, "secondary-button", refresh),
+            library.importPreviewRequired
+              ? openButton("Review Import…", () => importPreview.open(library, { onDone: refresh }), "primary-button")
+              : button("Scan Now", () => api.scanLibrary(library.id), `Scanning ${library.name}…`, "secondary-button", refresh),
             openButton("Left Out…", () => admin.exclusions(library, refresh)),
             permissions.owner ? openButton("Remove…", () => editors.removeStorage(library), "secondary-button danger") : null)))
           : h("p", { class: "muted" }, "No storage locations configured."),
@@ -570,7 +603,7 @@ export function createSettings(app) {
   // MARK: Server Sections
 
   function serverSections(sections, refresh) {
-    const { status, health, scrubPreviews, power, backups, issues, transcoding } = sections ?? {};
+    const { status, health, scrubPreviews, backups, issues, transcoding } = sections ?? {};
     const permissions = managementPermissions(state.profile);
 
     return [
@@ -632,17 +665,16 @@ export function createSettings(app) {
         row("Status", value(state.server?.capabilities?.includes("live-conversion-v1") ? "Active" : "Not available")),
         row("Active Live Conversions", value(health?.activeLiveConversions != null ? `${health.activeLiveConversions}` : "0"))),
 
-      power?.available ? powerSection(power, refresh) : null,
-
       permissions.owner ? section("Backups", "library", "The server backs up its database every day. An encrypted backup also keeps accounts and settings and can move a server to another computer.",
         (backups ?? []).slice(0, 5).map((backup) => row(new Date(backup.createdAt).toLocaleString(),
           h("div", { class: "inline-control" }, value(`${capitalize(backup.kind)} · ${bytes(backup.bytes)}`), openButton("Check", () => admin.verifyBackup(backup))))),
         h("div", { class: "button-row" },
           button("Back Up Now", () => api.approved("/api/v1/server/backups/database"), "Backup created.", "secondary-button", refresh),
           sections?.capabilities?.encryptedBackups !== false ? openButton("Save Encrypted Backup…", () => admin.exportBackup()) : null,
-          sections?.capabilities?.nativeHostOperations ? openButton("Restore from Backup…", () => admin.restoreBackup(), "secondary-button danger") : null),
-        sections?.capabilities && !sections.capabilities.nativeHostOperations
-          ? h("p", { class: "muted small" }, "Restoring swaps the server’s data while it runs, which only a server hosted by Aurelia for Mac can do. Encrypted backups from here can be restored there.") : null) : null,
+          sections?.capabilities?.nativeHostOperations || sections?.capabilities?.linuxPackage
+            ? openButton("Restore from Backup…", () => admin.restoreBackup(), "secondary-button danger") : null),
+        sections?.capabilities && !sections.capabilities.nativeHostOperations && !sections.capabilities.linuxPackage
+          ? h("p", { class: "muted small" }, "Restoring swaps the server’s data, which a server hosted by Aurelia for Mac or installed from the Linux package can do. Encrypted backups from here can be restored there.") : null) : null,
 
       permissions.owner ? section("Maintenance", "gear", "Restart the server or save a report of recent events for troubleshooting. The report holds no passwords, tokens or media paths.",
         h("div", { class: "button-row" },
@@ -693,18 +725,51 @@ export function createSettings(app) {
       h("div", { class: "button-row" }, saveBtn, clearButton));
   }
 
-  function powerSection(power, refresh) {
-    const mode = select([["off", "Keep Running"], ["stop", "Stop Aurelia Server"], ["sleep", "Sleep the Computer"]], power.mode, () => {}, "When Unused");
-    const choices = [...new Set([5, 10, 15, 30, 60, 120, power.idleMinutes])].sort((a, b) => a - b);
-    const minutes = select(choices.map((v) => [v, `${v} minutes`]), power.idleMinutes, () => {}, "After");
-    const saveBtn = h("button", { class: "secondary-button" }, "Save");
-    saveBtn.addEventListener("click", () => act(saveBtn, () => api.saveServerPower({
-      mode: mode.value, idleMinutes: Number(minutes.value), awakeFrom: power.awakeFrom, awakeUntil: power.awakeUntil,
-    }), "Power settings saved.", refresh));
-    return section("Power", "power", "What the server computer does when nobody uses it.",
-      row("When Unused", mode),
-      row("After", minutes),
-      h("div", { class: "button-row" }, saveBtn));
+  // MARK: Power
+
+  /** Settings › Power: what a Linux package server does when nobody uses it. Other servers show nothing. */
+  function powerSections(sections, refresh) {
+    const power = sections?.power;
+    if (!power?.available) return [];
+    rememberWakeOnAccess(power);
+    const draft = { ...power, awakeHours: Boolean(power.awakeFrom) };
+    const explanation = h("p", { class: "muted small power-explanation" });
+    const mode = select(POWER_MODES.map((choice) => [choice.id, choice.label]), draft.mode, (chosen) => { draft.mode = chosen; update(); }, "When Unused");
+    const minutes = select([...new Set([...POWER_IDLE_CHOICES, draft.idleMinutes])].sort((a, b) => a - b)
+      .map((count) => [count, count < 60 || count % 60 ? `${count} minutes` : `${count / 60} hour${count === 60 ? "" : "s"}`]),
+    draft.idleMinutes, (chosen) => { draft.idleMinutes = Number(chosen); }, "After");
+    const time = (key, label) => {
+      const input = h("input", { type: "time", class: "text-field time-field", value: draft[key] ?? "", "aria-label": label });
+      input.addEventListener("input", () => { draft[key] = input.value; });
+      return input;
+    };
+    const from = time("awakeFrom", "Awake From");
+    const until = time("awakeUntil", "Awake Until");
+    const hoursRow = row("Hours", h("div", { class: "inline-control" }, from, h("span", { class: "muted" }, "to"), until),
+      "It never powers down in these hours and wakes itself at their start, so every device finds it then.");
+    const awakeToggle = toggle(draft.awakeHours, (on) => {
+      draft.awakeHours = on;
+      if (on && !draft.awakeFrom) { draft.awakeFrom = from.value = "17:00"; draft.awakeUntil = until.value = "23:30"; }
+      update();
+    }, "Keep Running at Set Hours");
+    const wakeRow = row("Wake When a Device Connects", toggle(Boolean(draft.wakeOnAccess), (on) => { draft.wakeOnAccess = on; }, "Wake When a Device Connects"),
+      "Opening Aurelia in a browser wakes the server too, from a device that reached it within the last minutes. Other devices still use Wake-on-LAN. Stray network traffic can wake it now and then; it powers down again after five unused minutes.");
+    const unused = [row("After", minutes, "Without anyone watching or browsing. It also powers down five minutes after a sleep timer ends."),
+      row("Keep Running at Set Hours", awakeToggle), hoursRow];
+    function update() {
+      explanation.textContent = POWER_MODES.find((choice) => choice.id === draft.mode)?.explanation ?? "";
+      for (const element of unused) element.hidden = draft.mode === "off";
+      hoursRow.hidden = draft.mode === "off" || !draft.awakeHours;
+      wakeRow.hidden = !wakeOnAccessOffered(power, draft.mode);
+    }
+    update();
+    const save = h("button", { class: "primary-button" }, "Save");
+    save.addEventListener("click", () => act(save, () => api.saveServerPower(powerPayload(draft, power)), "Power settings saved.", refresh));
+    return [
+      section("When Unused", "power", "What the server computer does when nobody uses Aurelia.",
+        row("When Unused", mode), explanation, ...unused, wakeRow,
+        h("div", { class: "button-row" }, save)),
+    ];
   }
 
   // MARK: Updates Sections
@@ -1131,8 +1196,8 @@ export function createSettings(app) {
         : "A free token from The Movie Database (TMDB) gives your titles posters, descriptions and cast. Optional.",
         Boolean(provider?.hasToken),
         h("button", { class: "secondary-button", onclick: () => admin.metadataService(refresh) }, provider?.hasToken ? "TMDB Settings…" : "Set Up TMDB…")),
-      power?.available ? step(3, "Choose how the server saves power", "Always on, sleeping when nobody watches, or stopping only Aurelia. Settings › Server › Power.", false,
-        h("a", { class: "secondary-button", href: "/settings/server", "data-route": true }, "Power Settings")) : null,
+      power?.available ? step(3, "Choose how the server saves power", "Always on, sleeping when nobody watches, or stopping only Aurelia. Settings › Power.", false,
+        h("a", { class: "secondary-button", href: "/settings/power", "data-route": true }, "Power Settings")) : null,
       h("div", { class: "welcome-finish" },
         button("Scan and Open Home", async () => {
           if (libraries.length) await api.scanAllLibraries();

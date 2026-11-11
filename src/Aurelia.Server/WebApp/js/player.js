@@ -17,7 +17,7 @@ import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
 import { LiveSource, MediaSourceType, isTypeSupported, liveSupported } from "./live.js";
 import { HlsSource } from "./hls.js";
-import { QUALITY_KEY, normalizeQuality, qualityLabel } from "./hls-logic.js";
+import { QUALITY_KEY, normalizeQuality, qualityLabel, startsAdaptive, stallsCallForAdaptive } from "./hls-logic.js";
 import { codecSupport, liveProblem, mimeType, selectSubtitle, startTrack, subtitleLabel, subtitleUrl, trackLabel, triesDirectPlay, videoFamily } from "./live-logic.js";
 
 const SAVE_INTERVAL = 10_000;
@@ -333,7 +333,7 @@ export class Player {
     }
     this.embeddedSubtitles = plan.subtitleTracks ?? [];
     // A picture the server has to encode anyway comes in the quality the connection carries.
-    if (this.canStreamAdaptive && (this.quality !== "original" || plan.video === "h264")) {
+    if (this.canStreamAdaptive && startsAdaptive({ quality: this.quality, video: plan.video, stalled: this.adaptiveAfterStalls })) {
       this.live = new HlsSource({
         video: this.video,
         plan,
@@ -373,6 +373,44 @@ export class Player {
     if (this.closed) return;
     this.restoreTrackChoices();
     await this.play();
+  }
+
+  /** Automatic quality watches the repackaged stream for real stalls (not starts or seeks). */
+  watchesStalls() {
+    return this.canStreamAdaptive && this.quality === "auto" && !this.adaptiveAfterStalls
+      && this.live instanceof LiveSource && this.startScreen.hidden && !this.video.seeking;
+  }
+
+  beginStall() {
+    if (!this.watchesStalls() || this.waitingSince != null) return;
+    this.waitingSince = Date.now();
+    clearTimeout(this.stallTimer);
+    // A stall that goes on long enough decides by itself.
+    this.stallTimer = setTimeout(() => this.endStall(true), 8_000);
+  }
+
+  endStall(stillWaiting = false) {
+    if (this.waitingSince == null) return;
+    const now = Date.now();
+    this.stalls = [...(this.stalls ?? []), { start: this.waitingSince, end: now }];
+    this.waitingSince = stillWaiting ? now : null;
+    clearTimeout(this.stallTimer);
+    if (stillWaiting) this.stallTimer = setTimeout(() => this.endStall(true), 8_000);
+    if (stallsCallForAdaptive(this.stalls, now)) void this.stepUpToAdaptive();
+  }
+
+  /** The connection doesn't carry the original picture: once, playback continues in qualities. */
+  async stepUpToAdaptive() {
+    if (this.closed || this.adaptiveAfterStalls || !(this.live instanceof LiveSource)) return;
+    this.adaptiveAfterStalls = true;
+    clearTimeout(this.stallTimer);
+    this.waitingSince = null;
+    const at = this.video.currentTime;
+    const paused = this.video.paused;
+    this.live.destroy();
+    this.live = null;
+    await this.startLive(at);
+    if (!paused && !this.closed) await this.play();
   }
 
   liveFailed(status, code) {
@@ -422,12 +460,14 @@ export class Player {
     on(video, "playing", () => {
       this.startScreen.hidden = true;
       this.element.classList.remove("waiting");
+      this.endStall();
       this.checkAudio();
       this.together?.session()?.playerChanged();
     });
     on(video, "canplay", () => this.together?.session()?.playerChanged());
     on(video, "waiting", () => {
       this.element.classList.add("waiting");
+      this.beginStall();
       this.together?.session()?.playerChanged();
     });
     on(this.timeline, "change", () => this.reportToParty("seek"));
@@ -1314,6 +1354,7 @@ export class Player {
     }
     clearTimeout(this.hideTimer);
     clearTimeout(this.previewDebounce);
+    clearTimeout(this.stallTimer);
     this.previewImg?.removeAttribute("src");
     this.listeners.forEach((remove) => remove());
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

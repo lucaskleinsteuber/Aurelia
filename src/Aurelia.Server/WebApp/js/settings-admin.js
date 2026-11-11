@@ -344,7 +344,7 @@ export function createAdminTools({ api, app, editors }) {
     context.ready();
   }
 
-  /** Puts an encrypted backup back; only a server hosted by the Mac app can swap its data while running. */
+  /** Puts an encrypted backup back: the Mac app swaps the data, a Linux package server at its restart. */
   function restoreBackup() {
     const file = h("input", { type: "file", accept: ".aureliabackup,application/octet-stream", class: "file-field" });
     const passphrase = input("", { type: "password", autocomplete: "off" });

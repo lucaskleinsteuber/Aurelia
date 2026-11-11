@@ -166,6 +166,9 @@ img { display: block; }
 .center-stack.narrow { max-width: 460px; }
 .center-stack h1 { font-size: clamp(26px, 5vw, 34px); font-weight: 700; letter-spacing: -0.01em; }
 .status-icon { display: grid; place-items: center; width: 72px; height: 72px; border-radius: 50%; background: rgba(255, 255, 255, 0.1); }
+.status-icon.waking { animation: waking-pulse 2.4s var(--ease-out, ease-out) infinite; }
+@keyframes waking-pulse { 0% { box-shadow: 0 0 0 0 rgba(91, 124, 255, 0.45); } 70%, 100% { box-shadow: 0 0 0 22px rgba(91, 124, 255, 0); } }
+@media (prefers-reduced-motion: reduce) { .status-icon.waking { animation: none; } }
 .brand-mark { width: 72px; height: 72px; border-radius: 18px; }
 .error-text { min-height: 1.45em; color: var(--warning); }
 
@@ -831,6 +834,8 @@ body[data-subtitle-background="solid"] video::cue { background-color: #000; }
 .tag { padding: 2px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.12); font-size: 11px; font-weight: 600; color: var(--muted); }
 .inline-control { display: inline-flex; align-items: center; gap: 8px; }
 .inline-control.small { font-size: 13px; color: var(--muted); }
+.text-field.time-field { flex: 0 0 auto; min-width: 0; width: 112px; height: 38px; padding: 0 10px; }
+.settings-rows > .power-explanation { margin: -4px 0 6px; max-width: 62ch; }
 .settings-slider { width: 180px; }
 .stepper { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--hairline); background: var(--raised); color: var(--text); font-size: 18px; line-height: 1; }
 .secondary-button.danger { color: var(--danger); }
@@ -1180,6 +1185,35 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .folder-entry:hover, .folder-entry:focus-visible { background: rgba(255, 255, 255, 0.08); }
 .folder-entry.up { color: var(--muted); }
 .folder-icon { width: 18px; height: 14px; flex: none; border-radius: 3px; background: linear-gradient(#7d9cff, #5b7cff); box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.25); }
+.settings-editor.import-preview-sheet { width: min(980px, calc(100vw - 32px)); max-width: 980px; }
+.import-head { display: grid; gap: 2px; }
+.import-counts { word-spacing: 2px; }
+.import-counts.attention { color: var(--warning, #f5b14c); }
+.import-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.import-controls .text-field { min-width: 220px; height: 38px; }
+.import-list { list-style: none; margin: 0; padding: 4px; max-height: 52vh; overflow-y: auto; border: 1px solid var(--hairline); border-radius: var(--compact-radius); background: rgba(0, 0, 0, 0.16); }
+.import-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 8px 4px calc(8px + var(--depth, 0) * 18px); border-radius: 8px; }
+.import-row:hover { background: rgba(255, 255, 255, 0.05); }
+.import-row.folder .import-title { font-weight: 600; }
+.import-glyph { width: 14px; height: 14px; flex: none; border-radius: 3px; background: rgba(255, 255, 255, 0.28); }
+.import-glyph.folder { width: 18px; background: linear-gradient(#7d9cff, #5b7cff); box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.25); }
+.import-glyph.movie { background: #c99a5b; }
+.import-glyph.episode, .import-glyph.series { background: #5bb6c9; }
+.import-glyph.extra, .import-glyph.trailer { background: #9a8bd6; border-radius: 50%; }
+.import-name { display: grid; min-width: 0; flex: 1; }
+.import-title, .import-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-number { font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+.import-kind { font-size: 12px; color: var(--muted); min-width: 72px; text-align: right; }
+.import-kind.attention { color: var(--warning, #f5b14c); }
+.import-empty { padding: 14px; }
+.import-issues summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.import-issues ul { margin: 6px 0 0; padding-left: 18px; max-height: 120px; overflow: auto; }
+.editor-toggle { align-items: flex-start; }
+.muted.block { display: block; margin-top: 2px; }
+@media (max-width: 640px) {
+  .import-row { flex-wrap: wrap; padding-left: calc(8px + min(var(--depth, 0), 3) * 12px); }
+  .import-kind { min-width: 0; }
+}
 .review-list { display: grid; gap: 22px; max-height: 60vh; overflow-y: auto; }
 .review-item h3 { font-size: 16px; }
 .review-candidates { display: grid; gap: 8px; margin-top: 8px; }

@@ -50,13 +50,150 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
   return sections;
 }
 
-export function libraryPayload({ name = "", path = "", kind = "automatic" }) {
+/**
+ * What a Linux package server does when unused, as Settings › Power offers it. A server hosted by
+ * the Mac or Linux app reports power as unavailable and never shows these.
+ */
+export const POWER_MODES = Object.freeze([
+  { id: "off", label: "Keep Running", explanation: "Aurelia and the computer keep running: ready at any moment, using the most power." },
+  { id: "stop", label: "Stop Aurelia Server", explanation: "Only Aurelia stops. The computer stays on, and Aurelia starts again within seconds when any device connects, a browser too." },
+  { id: "sleep", label: "Put the Computer to Sleep", explanation: "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it, and a router such as a FRITZ!Box can wake it too (Wake-on-LAN)." },
+  { id: "shutdown", label: "Shut Down the Computer", explanation: "The computer turns off and uses almost nothing. Wake-on-LAN starts it again, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off." },
+]);
+export const POWER_IDLE_CHOICES = Object.freeze([5, 10, 15, 30, 45, 60, 90, 120, 180]);
+
+/** Whether the network card can wake the computer when a device connects directly, in a mode where that matters. */
+export function wakeOnAccessOffered(power, mode = power?.mode) {
+  return (mode === "sleep" || mode === "shutdown") && String(power?.wakeSupport ?? "").includes("u");
+}
+
+/** The request for Settings › Power, or an error naming what to fix. */
+export function powerPayload(draft, power = draft) {
+  if (!POWER_MODES.some((mode) => mode.id === draft.mode)) throw new Error("Choose what the server does when unused.");
+  const idleMinutes = Number(draft.idleMinutes);
+  if (!Number.isInteger(idleMinutes) || idleMinutes < 5 || idleMinutes > 1440) throw new Error("Choose between 5 and 1440 minutes.");
+  const time = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+  let awakeFrom = null;
+  let awakeUntil = null;
+  if (draft.awakeHours) {
+    awakeFrom = String(draft.awakeFrom ?? "").slice(0, 5);
+    awakeUntil = String(draft.awakeUntil ?? "").slice(0, 5);
+    if (!time.test(awakeFrom) || !time.test(awakeUntil)) throw new Error("Enter both times of the awake hours.");
+    if (awakeFrom === awakeUntil) throw new Error("The awake hours need a different start and end.");
+  }
+  const payload = { mode: draft.mode, idleMinutes, awakeFrom, awakeUntil };
+  // A card that can't do it never gets asked; null keeps the server's stored choice.
+  if (String(power?.wakeSupport ?? "").includes("u")) payload.wakeOnAccess = Boolean(draft.wakeOnAccess);
+  return payload;
+}
+
+const WAKE_ON_ACCESS_KEY = "aurelia.wakeOnAccess";
+
+/** Remembers in this browser whether the server wakes on a direct connection, for its asleep page. */
+export function rememberWakeOnAccess(power, storage = globalThis.localStorage) {
+  if (!power?.available) return;
+  try { storage?.setItem(WAKE_ON_ACCESS_KEY, power.wakeOnAccess && power.mode !== "off" && power.mode !== "stop" ? "1" : "0"); } catch {}
+}
+
+export function remembersWakeOnAccess(storage = globalThis.localStorage) {
+  try { return storage?.getItem(WAKE_ON_ACCESS_KEY) === "1"; } catch { return false; }
+}
+
+/** How long the asleep page waits before knocking again: often for two minutes, then calmly. */
+export function wakeRetryDelay(offSince, now) {
+  return now - offSince < 120_000 ? 3_000 : 20_000;
+}
+
+// MARK: Import preview (a new storage location reviewed before anything is imported)
+
+export const IMPORT_FILTERS = Object.freeze([["all", "All"], ["pending", "Needs Review"], ["ignored", "Ignored"], ["error", "Errors"], ["saved", "Manual"]]);
+export const IMPORT_CHOICES = Object.freeze([["movie", "Movie"], ["series", "TV Show · Force Import"], ["episode", "Episode"],
+  ["extra", "Extra"], ["trailer", "Trailer"], ["ignore", "Ignore"]]);
+
+/** Whether a saved rule covers an item: its own, or one of a folder above it (the root covers all). */
+function assignedManually(item, assignments) {
+  return assignments.some((rule) => rule.relativePath === item.relativePath
+    || (rule.isDirectory && (rule.relativePath === "" || item.relativePath.startsWith(`${rule.relativePath}/`))));
+}
+
+/** The preview's rows in folder order, each with its depth, as the search and filter leave them. */
+export function importPreviewRows(items, { search = "", filter = "all", assignments = [] } = {}) {
+  const query = search.trim().toLocaleLowerCase();
+  return items
+    .filter((item) => !query || item.title.toLocaleLowerCase().includes(query) || item.relativePath.toLocaleLowerCase().includes(query))
+    .filter((item) => filter === "all" || (filter === "saved" ? assignedManually(item, assignments) : item.status === filter))
+    .map((item) => ({ item, depth: item.relativePath ? item.relativePath.split("/").length - 1 : 0 }))
+    .sort((a, b) => a.item.relativePath.localeCompare(b.item.relativePath));
+}
+
+/** What the selected rows can become: a TV show only for folders, an episode only for one file. */
+export function importChoicesFor(items) {
+  const folders = items.length > 0 && items.every((item) => item.isDirectory);
+  const oneFile = items.length === 1 && !items[0].isDirectory;
+  return IMPORT_CHOICES.filter(([value]) => (value !== "series" || folders) && (value !== "episode" || oneFile));
+}
+
+/** The editor's first choice for the selected rows. */
+export function importEditorStart(items) {
+  const first = items[0];
+  return {
+    choice: IMPORT_CHOICES.some(([value]) => value === first?.kind) ? first.kind : "extra",
+    parentPath: first?.parentRelativePath ?? "",
+    entireSeries: first?.seasonNumber == null,
+    season: String(first?.seasonNumber ?? 1),
+    episode: String(first?.episodeNumber ?? 1),
+    category: first?.category ?? "",
+    title: items.length === 1 && !first?.isDirectory ? first?.title ?? "" : "",
+  };
+}
+
+/** The assignment changes for the selected rows, or an error naming what's missing. */
+export function importAssignmentChanges(items, form, targets) {
+  const needsParent = ["episode", "extra", "trailer"].includes(form.choice);
+  const parent = needsParent ? targets.find((target) => target.relativePath === form.parentPath) : null;
+  if (needsParent && !parent) throw new Error("Choose the movie or series this belongs to.");
+  const whole = (text) => (/^\d{1,3}$/.test(String(text).trim()) ? Number(text) : NaN);
+  const season = whole(form.season);
+  const episode = whole(form.episode);
+  const bySeason = form.choice === "episode" || (parent?.kind === "series" && !form.entireSeries);
+  if (form.choice === "episode") {
+    if (parent?.kind !== "series") throw new Error("An episode belongs to a series.");
+    if (items.length !== 1 || items[0].isDirectory) throw new Error("Choose one file for an episode.");
+    if (!(episode >= 1 && episode <= 999)) throw new Error("Enter an episode number from 1 to 999.");
+  }
+  if (bySeason && !(season >= 0 && season <= 99)) throw new Error("Enter a season number from 0 to 99.");
+  const oneFile = items.length === 1 && !items[0].isDirectory;
+  return items.map((item) => ({
+    relativePath: item.relativePath,
+    isDirectory: Boolean(item.isDirectory),
+    kind: form.choice === "ignore" ? null : form.choice,
+    parentRelativePath: needsParent ? form.parentPath : null,
+    seasonNumber: bySeason ? season : null,
+    episodeNumber: form.choice === "episode" ? episode : null,
+    category: needsParent && form.category.trim() ? form.category.trim() : null,
+    title: oneFile && form.title.trim() ? form.title.trim() : null,
+  }));
+}
+
+/** Reads every page of a preview; a preview that changed meanwhile has to be analyzed again. */
+export async function loadImportPreview(api, libraryId, summary, { signal } = {}) {
+  const items = [];
+  for (;;) {
+    const page = await api.importPreviewItems(libraryId, summary.previewId, items.length, { signal });
+    if (page.summary?.revision !== summary.revision) throw new Error("The preview changed. Analyze the location again.");
+    items.push(...(page.items ?? []));
+    if (items.length >= page.totalCount) return items;
+    if (!page.items?.length) throw new Error("The server returned an incomplete preview.");
+  }
+}
+
+export function libraryPayload({ name = "", path = "", kind = "automatic", review = false }) {
   // Filesystem existence, permissions, symlinks and overlap are checked by the server.
   if (!path || path.includes("\0") || !(/^(\/|[a-z]:[\\/]|\\\\)/i.test(path)))
     throw new Error("Enter an absolute folder path on the server.");
   if (!["automatic", "movies", "tvShows"].includes(kind)) throw new Error("Choose a valid storage type.");
   if (name.trim().length > 128 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("Use a storage location name of up to 128 visible characters.");
-  return { name: name.trim() || null, path, kind, combineExisting: false, requireImportPreview: false };
+  return { name: name.trim() || null, path, kind, combineExisting: false, requireImportPreview: Boolean(review) };
 }
 
 function abortableDelay(milliseconds, signal) {
@@ -496,7 +633,7 @@ export function scrubPreviewUsageText(settings) {
 }
 
 const BROWSE_SECTIONS = ["library", "recent", "movies", "shows"];
-export const SETTINGS_PAGES = ["general", "playback", "library", "metadata", "profiles", "server", "updates", "advanced", "account"];
+export const SETTINGS_PAGES = ["general", "playback", "library", "metadata", "profiles", "server", "power", "updates", "advanced", "account"];
 
 /** Library filters from an address's query, without the defaults. */
 function parseFilters(query) {

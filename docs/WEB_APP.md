@@ -20,8 +20,10 @@ Web Browser*.
   a browser on that Mac. Its loopback address is shown then.
 - **When the server is off or asleep**, the browser cannot load the page at all, because
   the server serves it. If the server stops while the page is open, Aurelia says so and
-  connects again by itself once the server is back. A browser cannot wake a sleeping server
-  with Wake-on-LAN. Open Aurelia on the Mac or the Apple TV to wake it.
+  connects again by itself once the server is back. A browser cannot send Wake-on-LAN. On a
+  Linux server with **Wake When a Device Connects** on (Settings › Power), opening the address
+  or keeping the asleep page open wakes it, from a device that reached it shortly before;
+  otherwise open Aurelia on the Mac to wake it.
 
 ## Setting up a new server
 
@@ -88,8 +90,11 @@ little computing time. Only what the browser can't decode is converted:
 With a server that reports adaptive streaming, a picture that has to be re-encoded comes over
 HLS in the quality the connection carries (1080p down to 360p), switching between segments as
 the measured speed changes. The **quality menu** in the player (next to the rate) offers
-Original, Automatic and each quality; anything but Original also converts files the browser
-could open itself, which helps on a slow connection. The choice is remembered in the browser.
+Original, Automatic and each quality. A chosen quality also converts files the browser could open
+itself, which helps on a slow connection. Automatic first plays a picture that can be copied
+without converting it, so a weak server does no work; only after real stalls (three in a minute,
+or eight seconds of waiting) does it switch once to the qualities the connection carries. The
+choice is remembered in the browser.
 
 HDR pictures (PQ or HLG) that need re-encoding are mapped to SDR BT.709 so their brightness
 and colors fit the browser's output. A picture the browser can already decode stays unchanged;
@@ -200,11 +205,16 @@ administrator, shared collections; movie pages offer their TMDB franchise as a c
   They cover storage locations (picked in a browser of the server's folders), files a scan leaves
   out, Library Health (duplicates, missing titles and titles without details), the TMDB token,
   Review Matches, OpenSubtitles, codes for new devices (*Create Code*, *Enter Code from Device*),
-  profiles with their access, devices and passwords, power saving, Video Conversion, backups
-  (checking them, encrypted backups to download, and restoring on a server hosted by the Mac app),
+  profiles with their access, devices and passwords, Power (on a Linux package server only: keep
+  running, stop Aurelia, sleep or shut down after unused minutes, awake hours and waking when a
+  device connects), Video Conversion, backups
+  (checking them, encrypted backups to download, and restoring on a server hosted by the Mac app
+  or installed from the Linux package, which restores at its restart), an Import Preview for a
+  new storage location (*Review Before Importing*: what each folder and file becomes, corrected
+  before anything is imported),
   restart, a diagnostics report, Server Health and server updates.
 - Not in a browser: subtitles written from speech (macOS speech recognition), offline downloads
-  and waking a sleeping server with Wake-on-LAN.
+  and sending Wake-on-LAN (see Wake When a Device Connects above).
 - A few changes that cannot be undone ask for the server password once more, exactly as on the
   Mac: resetting the library, removing a title, restoring a backup, changing the server
   password and changing or removing the owner or an administrator. See

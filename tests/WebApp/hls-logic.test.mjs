@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   initialVariant, masterUrl, nextVariant, normalizeQuality, parseMaster, parseMedia, qualityLabel, segmentAt, smoothed,
+  startsAdaptive, stallsCallForAdaptive,
 } from "../../src/Aurelia.Server/WebApp/js/hls-logic.js";
 
 const MASTER = `#EXTM3U
@@ -99,4 +100,19 @@ test("speed measurements are smoothed and choices are read safely", () => {
   assert.equal(qualityLabel("720p", parseMaster(MASTER)), "720p · 4.2 Mbit/s");
   assert.equal(qualityLabel("auto"), "Automatic");
   assert.equal(qualityLabel("original"), "Original");
+});
+
+test("Automatic starts with the repackaged picture and streams qualities only when the server encodes or playback stalls", () => {
+  assert.equal(startsAdaptive({ quality: "auto", video: "copy" }), false, "a picture that can be copied costs a weak server nothing");
+  assert.equal(startsAdaptive({ quality: "auto", video: "copy", stalled: true }), true);
+  assert.equal(startsAdaptive({ quality: "auto", video: "h264" }), true);
+  assert.equal(startsAdaptive({ quality: "720p", video: "copy" }), true, "a chosen quality is honored");
+  assert.equal(startsAdaptive({ quality: "original", video: "copy" }), false);
+  assert.equal(startsAdaptive({ quality: "original", video: "h264" }), true);
+  const now = 100_000;
+  assert.equal(stallsCallForAdaptive([{ start: now - 5_000, end: now - 3_000 }], now), false, "one short stall is a hiccup");
+  assert.equal(stallsCallForAdaptive([{ start: 1, end: 2 }, { start: 3, end: 4 }, { start: now - 2_000, end: now - 1_000 }], now), false,
+    "stalls older than a minute are forgotten");
+  assert.equal(stallsCallForAdaptive([0, 1, 2].map((index) => ({ start: now - 10_000 + index * 2_000, end: now - 9_500 + index * 2_000 })), now), true);
+  assert.equal(stallsCallForAdaptive([{ start: now - 9_000, end: now }], now), true, "eight seconds of waiting");
 });

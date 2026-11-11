@@ -15,6 +15,11 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server (next), browser, Mac and Linux: power options get a fourth choice, Shut Down the Computer, and Wake When a Device Connects, which lets the network card wake a sleeping or turned off Linux server when a browser opens its address. After any wake it powers down again once five minutes pass unused. `sudo aurelia sleep shutdown` and `--wake-on-access on|off` do the same over SSH.
+- Browser: Review Before Importing when adding a storage location opens the Import Preview, as on the Mac: what each folder and file becomes, searchable and filtered, with assignments corrected one by one or several at once before the recognized items are imported.
+- Server (next) and browser: a Linux package server restores an encrypted backup chosen in a browser at its next start, before its database opens; a restore that fails rolls back and the server starts as before.
+- Browser: Settings › Power on its own page with awake hours; it appears only on a Linux package server, never when the Mac or Linux app hosts the server. The asleep page keeps knocking quietly so a server that wakes on access comes back without a click.
+
 - Server 2.8.0 (157): the server finds the intro and the credits of episodes itself, in the background, and sends the times with every playback start. Chapters named like "Intro" or "Credits" are used as they are; otherwise each episode's sound is compared with up to four others of its season, and only music that at least two of them share at a believable length counts. When it is not sure it stores nothing. Only timestamps are stored, never sound or fingerprints; administrators can correct the times, and the owner can turn detection off or start it over.
 - Mac 2.8.0 (165): Skip Intro appears while an episode's intro plays (also with Return or S), and Settings › Playback has Skip Intros Automatically. When the credits begin, Up Next appears with its countdown and Watch Credits, which plays them to the end before the next episode starts.
 - Mac 2.8.0 (165): Edit Metadata has Intro and Credits for an episode, with where each time came from, corrections by hand, Reset to Detected and Re-analyze Season; the server settings show how many episodes have times and turn detection on or off.
@@ -41,6 +46,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Browser: Automatic quality plays a picture that can be copied without converting it and switches to adaptive streaming only after real stalls, so a weak server converts nothing while the connection keeps up.
 - Browser (Server 2.7.0): pages open faster. The app's files carry their version in their address and come compressed, so the browser keeps them; pictures carry their revision; pages seen before show at once, a poster's page loads while pointing at it, and slower pages show their shape while loading.
 - Browser (Server 2.7.0): pages blend into each other, a clicked poster grows into the title's picture, menus, sheets and rails move with the Mac's curves, and Reduce Motion keeps everything still.
 - Browser (Server 2.7.0): each menu offers only what fits its own title. An episode marks the episode, a show the whole show, the season selector the season, and Continue Watching appears only for titles in that row.

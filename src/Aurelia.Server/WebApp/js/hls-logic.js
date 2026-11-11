@@ -131,6 +131,26 @@ export function nextVariant({ variants, current, quality, throughput, bufferAhea
   return current;
 }
 
+/**
+ * Whether playback starts as adaptive streaming. Automatic starts with the cheap repackaged
+ * stream when the picture can be copied, so a weak server converts nothing; it streams qualities
+ * when the server encodes the picture anyway or after real stalls. A fixed quality always does;
+ * Original only for a picture the server has to encode to H.264 anyway.
+ */
+export function startsAdaptive({ quality, video, stalled = false }) {
+  if (quality === "original") return video === "h264";
+  if (quality === "auto") return video !== "copy" || stalled;
+  return true;
+}
+
+export const STALL_WINDOW_MS = 60_000;
+
+/** Real stalls of the repackaged stream ({start, end} in ms): three in a minute, or eight seconds of waiting. */
+export function stallsCallForAdaptive(stalls, now) {
+  const recent = stalls.filter((stall) => now - stall.end <= STALL_WINDOW_MS);
+  return recent.length >= 3 || recent.reduce((total, stall) => total + (stall.end - stall.start), 0) >= 8_000;
+}
+
 /** A smoothed speed: each new measurement counts for a third. */
 export function smoothed(previous, sample, weight = 1 / 3) {
   if (!(sample > 0)) return previous ?? null;

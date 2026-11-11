@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   GENERAL_DEFAULTS, PLAYBACK_DEFAULTS, SETTINGS_PAGES, libraryPayload, loadManagementSections,
   managementPermissions, metadataPayload, cropFrame, normalizeGeneralPreferences, normalizePreferences,
-  profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation
+  profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation,
+  POWER_MODES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess, remembersWakeOnAccess, wakeRetryDelay
 } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
@@ -325,7 +326,7 @@ test("playback settings choose the start position, Up Next lead and default lang
 });
 
 test("settings pages include all 8 structured categories and account alias", () => {
-  const expected = ["general", "playback", "library", "metadata", "profiles", "server", "updates", "advanced", "account"];
+  const expected = ["general", "playback", "library", "metadata", "profiles", "server", "power", "updates", "advanced", "account"];
   for (const page of expected) {
     assert.ok(SETTINGS_PAGES.includes(page), `Page ${page} should be present in SETTINGS_PAGES`);
   }
@@ -368,4 +369,36 @@ test("Dialogue Boost and Volume Leveling follow the other apps' presets and keep
   assert.equal(standard.preampDb, -3);
   assert.equal(standard.equalizer.find((band) => band.frequency === 3000).gain, 3);
   assert.equal(standard.compressor.ratio, 4);
+});
+
+test("Settings › Power sends what the server can act on and only asks a card that can wake on access", () => {
+  assert.deepEqual(POWER_MODES.map((mode) => mode.id), ["off", "stop", "sleep", "shutdown"]);
+  const card = { wakeSupport: "pumbg" };
+  assert.deepEqual(powerPayload({ mode: "shutdown", idleMinutes: "30", awakeHours: true, awakeFrom: "17:00", awakeUntil: "23:30:00", wakeOnAccess: true }, card),
+    { mode: "shutdown", idleMinutes: 30, awakeFrom: "17:00", awakeUntil: "23:30", wakeOnAccess: true });
+  // Hours turned off are sent as none; a card without "u" is never asked, so the server keeps its choice.
+  assert.deepEqual(powerPayload({ mode: "sleep", idleMinutes: 15, awakeHours: false, awakeFrom: "17:00", wakeOnAccess: true }, { wakeSupport: "g" }),
+    { mode: "sleep", idleMinutes: 15, awakeFrom: null, awakeUntil: null });
+  assert.throws(() => powerPayload({ mode: "hibernate", idleMinutes: 15 }), /Choose what/);
+  assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 4 }), /between 5 and 1440/);
+  assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 15, awakeHours: true, awakeFrom: "17:00", awakeUntil: "" }), /both times/);
+  assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 15, awakeHours: true, awakeFrom: "17:00", awakeUntil: "17:00" }), /different start/);
+  assert.equal(wakeOnAccessOffered(card, "sleep"), true);
+  assert.equal(wakeOnAccessOffered(card, "shutdown"), true);
+  assert.equal(wakeOnAccessOffered(card, "stop"), false, "a stopped Aurelia already starts on any connection");
+  assert.equal(wakeOnAccessOffered({ wakeSupport: "g" }, "sleep"), false);
+});
+
+test("the asleep page knocks often for two minutes, then calmly, and knows whether knocking wakes the server", () => {
+  assert.equal(wakeRetryDelay(0, 119_000), 3_000);
+  assert.equal(wakeRetryDelay(0, 121_000), 20_000);
+  const values = new Map();
+  const storage = { setItem: (key, value) => values.set(key, value), getItem: (key) => values.get(key) ?? null };
+  rememberWakeOnAccess({ available: true, mode: "sleep", wakeOnAccess: true }, storage);
+  assert.equal(remembersWakeOnAccess(storage), true);
+  rememberWakeOnAccess({ available: true, mode: "stop", wakeOnAccess: true }, storage);
+  assert.equal(remembersWakeOnAccess(storage), false);
+  rememberWakeOnAccess({ available: false }, storage);
+  assert.equal(remembersWakeOnAccess(storage), false, "a Mac or Linux app host changes nothing");
+  assert.equal(remembersWakeOnAccess({ getItem: () => { throw new Error("blocked"); } }), false);
 });

@@ -109,7 +109,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
 
   return {
     request,
-    serverInfo: () => request("/api/v1/server/info", { as: "device" }),
+    serverInfo: (options = {}) => request("/api/v1/server/info", { as: "device", ...options }),
 
     /** Signs this browser in with the code from the main device; the credential stays in a cookie. */
     webSetupStatus: () => request("/api/v1/web/setup", { as: "device" }),
@@ -308,6 +308,14 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     serverFolders: (path, options = {}) => request(`/api/v1/libraries/folders${path ? `?${new URLSearchParams({ path })}` : ""}`, options),
     libraryExclusions: (libraryId, options = {}) => request(`/api/v1/libraries/${id(libraryId)}/exclusions`, options),
     restoreExclusion: (libraryId, exclusionId) => request(`/api/v1/libraries/${id(libraryId)}/exclusions/${id(exclusionId)}`, { method: "DELETE" }),
+    analyzeImport: (libraryId, options = {}) => request(`/api/v1/libraries/${id(libraryId)}/import-preview`, { ...options, method: "POST" }),
+    importPreviewItems: (libraryId, previewId, offset = 0, options = {}) =>
+      request(`/api/v1/libraries/${id(libraryId)}/import-preview/${id(previewId)}/items?${new URLSearchParams({ offset: String(offset), limit: "500" })}`, options),
+    importAssignments: (libraryId, options = {}) => request(`/api/v1/libraries/${id(libraryId)}/import-assignments`, options),
+    updateImportPreview: (libraryId, previewId, revision, assignments, options = {}) =>
+      request(`/api/v1/libraries/${id(libraryId)}/import-preview/${id(previewId)}/assignments`, { ...options, method: "PUT", body: { revision, assignments } }),
+    confirmImportPreview: (libraryId, previewId, revision, options = {}) =>
+      request(`/api/v1/libraries/${id(libraryId)}/import-preview/${id(previewId)}/confirm`, { ...options, method: "POST", body: { revision } }),
 
     // Server
     serverCapabilities: (options = {}) => request("/api/v1/server/capabilities", options),

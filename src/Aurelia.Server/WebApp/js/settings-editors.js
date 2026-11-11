@@ -119,6 +119,7 @@ export function createManagementEditors(app) {
       ready: () => { ready = true; save.disabled = busy || !valid; },
       setValid: (value) => { valid = value; save.disabled = busy || !ready || !valid; },
       clean: () => { dirty = false; },
+      markChanged: () => { dirty = true; },
     };
     return context;
   }
@@ -128,8 +129,14 @@ export function createManagementEditors(app) {
     const name = input("", { maxlength: 128, placeholder: "Optional name" });
     const path = input("", { required: true, spellcheck: false, placeholder: "/path/on/the/server", autocomplete: "off" });
     const kind = choice([["automatic", "Automatic"], ["movies", "Movies"], ["tvShows", "TV Shows"]], "automatic");
+    const review = h("input", { type: "checkbox", class: "switch", "aria-label": "Review Before Importing" });
     const context = editor("Add Storage Location", "Add Storage Location", async ({ signal }) => {
-      await api.addLibrary(libraryPayload({ name: name.value, path: path.value, kind: kind.value }), { signal });
+      const library = await api.addLibrary(libraryPayload({ name: name.value, path: path.value, kind: kind.value, review: review.checked }), { signal });
+      if (review.checked && library?.id && app.reviewImport) {
+        // The sheet closes first; the preview opens over the settings.
+        setTimeout(() => app.reviewImport(library), 0);
+        return;
+      }
       app.toast("Storage location added. Choose Scan Now to read its media.");
     });
     const browse = app.chooseServerFolder ? button("Browse…", () => app.chooseServerFolder((chosen) => {
@@ -139,7 +146,9 @@ export function createManagementEditors(app) {
     }, path.value.trim() || null)) : null;
     context.body.append(field("Name", name),
       h("div", { class: "editor-path-row" }, field("Server Folder Path", path, "A folder on the server computer. Browse shows the server’s folders; Aurelia only reads your media."), browse),
-      field("Content", kind));
+      field("Content", kind),
+      app.reviewImport ? h("label", { class: "inline-control editor-toggle" }, review,
+        h("span", {}, "Review Before Importing", h("span", { class: "muted small block" }, "See what each folder and file becomes and correct it before anything is imported."))) : null);
     context.ready();
     path.focus();
   }
