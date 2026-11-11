@@ -108,3 +108,13 @@ export function icon(name, { size = 20, label } = {}) {
 export function clear(element) {
   while (element.firstChild) element.firstChild.remove();
 }
+
+/** Hands a file the server made (a backup, a report) to the browser's download. */
+export function saveBlob(blob, name) {
+  const address = URL.createObjectURL(blob);
+  const link = h("a", { href: address, download: name, hidden: true });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(address), 60_000);
+}

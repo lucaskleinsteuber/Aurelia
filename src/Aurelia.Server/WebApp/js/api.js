@@ -59,6 +59,41 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
 
   const id = (value) => encodeURIComponent(value);
 
+  /** Sends a file as it is (a picture or an encrypted backup); the answer is JSON or nothing. */
+  async function send(path, blob, { method = "POST", contentType = blob?.type || "application/octet-stream", signal } = {}) {
+    onChange?.(path, method);
+    let response;
+    try {
+      response = await fetchImpl(path, { method, body: blob, headers: { Accept: "application/json", "Content-Type": contentType, "X-Aurelia-Web": "profile" },
+        credentials: "same-origin", cache: "no-store", signal });
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw new ApiError(0, "offline", "The server isn’t answering.");
+    }
+    const text = response.status === 204 ? "" : await response.text();
+    let value = null;
+    try { value = text ? JSON.parse(text) : null; } catch { /* A plain answer has no details. */ }
+    if (!response.ok) throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
+    return value;
+  }
+
+  /** Reads a file from the server, such as a backup or a diagnostics report, as a Blob. */
+  async function receive(path, { signal } = {}) {
+    let response;
+    try {
+      response = await fetchImpl(path, { headers: { "X-Aurelia-Web": "profile" }, credentials: "same-origin", cache: "no-store", signal });
+    } catch (error) {
+      if (error?.name === "AbortError") throw error;
+      throw new ApiError(0, "offline", "The server isn’t answering.");
+    }
+    if (!response.ok) {
+      let value = null;
+      try { value = JSON.parse(await response.text()); } catch { /* No details. */ }
+      throw new ApiError(response.status, value?.code ?? `http_${response.status}`, value?.message ?? defaultMessage(response.status));
+    }
+    return response.blob();
+  }
+
   /**
    * A guarded server change: while server management is unlocked, the
    * server issues a one-time approval for exactly this method, address and body.
@@ -231,6 +266,62 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     metadataJobs: (options = {}) => request("/api/v1/metadata/jobs", options),
     startMetadataJob: (body) => request("/api/v1/metadata/jobs", { method: "POST", body }),
     devices: (options = {}) => request("/api/v1/auth/sessions", options),
+
+    // Devices and people (Settings › Profiles and Devices)
+    createPairingCode: () => request("/api/v1/auth/pairings", { method: "POST" }),
+    lookupDevicePairing: (code, options = {}) => request("/api/v1/server/device-pairings/lookup", { ...options, method: "POST", body: { code } }),
+    approveDevicePairing: (pairingId) => request(`/api/v1/server/device-pairings/${id(pairingId)}/approve`, { method: "POST" }),
+    denyDevicePairing: (pairingId) => request(`/api/v1/server/device-pairings/${id(pairingId)}/deny`, { method: "POST" }),
+    userSessions: (userId, options = {}) => request(`/api/v1/server/sessions/${id(userId)}`, options),
+    revokeUserSession: (sessionId) => request(`/api/v1/server/sessions/${id(sessionId)}`, { method: "DELETE" }),
+    revokeAllUserSessions: (userId) => request(`/api/v1/users/${id(userId)}/sessions`, { method: "DELETE" }),
+    resetUserPassword: (userId, password) => approved(`/api/v1/users/${id(userId)}/password`, { method: "PUT", body: { password } }),
+    updateUserAccess: (userId, body) => request(`/api/v1/users/${id(userId)}/access`, { method: "PUT", body }),
+
+    // Metadata services
+    metadataProvider: (options = {}) => request("/api/v1/metadata/provider", options),
+    saveMetadataProvider: (body) => request("/api/v1/metadata/provider", { method: "PUT", body }),
+    removeMetadataToken: () => request("/api/v1/metadata/provider/token", { method: "DELETE" }),
+    subtitleProvider: (options = {}) => request("/api/v1/metadata/subtitles", options),
+    saveSubtitleProvider: (body) => request("/api/v1/metadata/subtitles", { method: "PUT", body }),
+    removeSubtitleKey: () => request("/api/v1/metadata/subtitles/key", { method: "DELETE" }),
+    removeSubtitleAccount: () => request("/api/v1/metadata/subtitles/account", { method: "DELETE" }),
+    metadataReviews: (options = {}) => request("/api/v1/metadata/reviews", options),
+    pruneArtwork: () => request("/api/v1/metadata/artwork/prune", { method: "POST" }),
+    rebuildSearch: () => request("/api/v1/catalog/search/rebuild", { method: "POST" }),
+
+    // A title's subtitles from OpenSubtitles
+    downloadedSubtitles: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/subtitles`, options),
+    searchSubtitles: (mediaId, language, options = {}) => request(`/api/v1/media/${id(mediaId)}/subtitles/search?${new URLSearchParams({ language })}`, options),
+    downloadSubtitle: (mediaId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/subtitles`, { ...options, method: "POST", body }),
+    removeSubtitle: (mediaId, subtitleId) => request(`/api/v1/media/${id(mediaId)}/subtitles/${id(subtitleId)}`, { method: "DELETE" }),
+
+    // Edit Metadata: pictures and files
+    uploadEditorImage: (mediaId, file, options = {}) => send(`/api/v1/media/${id(mediaId)}/editor/uploads`, file, options),
+    discardEditorImage: (mediaId, uploadId) => request(`/api/v1/media/${id(mediaId)}/editor/uploads/${id(uploadId)}`, { method: "DELETE" }),
+    editorFiles: (mediaId, path, options = {}) => request(`/api/v1/media/${id(mediaId)}/editor/files?${new URLSearchParams({ path })}`, options),
+    removeTitle: (mediaId) => approved(`/api/v1/media/${id(mediaId)}`, { method: "DELETE" }),
+
+    // Library
+    serverFolders: (path, options = {}) => request(`/api/v1/libraries/folders${path ? `?${new URLSearchParams({ path })}` : ""}`, options),
+    libraryExclusions: (libraryId, options = {}) => request(`/api/v1/libraries/${id(libraryId)}/exclusions`, options),
+    restoreExclusion: (libraryId, exclusionId) => request(`/api/v1/libraries/${id(libraryId)}/exclusions/${id(exclusionId)}`, { method: "DELETE" }),
+
+    // Server
+    serverCapabilities: (options = {}) => request("/api/v1/server/capabilities", options),
+    restartServer: () => request("/api/v1/server/operations/restart", { method: "POST" }),
+    hosting: (options = {}) => request("/api/v1/server/hosting", options),
+    changeHosting: (body) => request("/api/v1/server/operations/hosting", { method: "POST", body }),
+    confirmOperation: (operationId) => request(`/api/v1/server/operations/${id(operationId)}/confirm`, { method: "POST" }),
+    diagnosticsReport: (options = {}) => receive("/api/v1/server/diagnostics/export", options),
+    verifyBackup: (name) => request(`/api/v1/server/backups/${id(name)}/verify`, { method: "POST" }),
+    exportBackup: (passphrase) => request("/api/v1/server/backups/export", { method: "POST", body: { passphrase } }),
+    backupTransfer: (transferId, options = {}) => receive(`/api/v1/server/backups/transfers/${id(transferId)}`, options),
+    discardBackupTransfer: (transferId) => request(`/api/v1/server/backups/transfers/${id(transferId)}`, { method: "DELETE" }),
+    uploadBackup: (uploadId, file, options = {}) => send(`/api/v1/server/backups/uploads/${id(uploadId)}`, file, { ...options, method: "PUT", contentType: "application/octet-stream" }),
+    prepareRestore: (body) => approved("/api/v1/server/backups/restore/prepare", { body }),
+    applyRestore: (restoreId) => approved(`/api/v1/server/backups/restore/${id(restoreId)}/apply`),
+    cinemaTrailers: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/cinema-trailers`, options),
     changes: (after, generation, signal) =>
       request(`/api/v1/sync/changes?${new URLSearchParams(generation ? { after, waitSeconds: 25, generation } : { after, waitSeconds: 25 })}`, { signal }),
   };

@@ -130,7 +130,13 @@ export function createManagementEditors(app) {
       await api.addLibrary(libraryPayload({ name: name.value, path: path.value, kind: kind.value }), { signal });
       app.toast("Storage location added. Choose Scan Now to read its media.");
     });
-    context.body.append(field("Name", name), field("Server Folder Path", path, "Enter an existing folder on the server computer. Aurelia validates the folder and only reads your media."),
+    const browse = app.chooseServerFolder ? button("Browse…", () => app.chooseServerFolder((chosen) => {
+      path.value = chosen;
+      path.dispatchEvent(new Event("input", { bubbles: true }));
+      if (!name.value.trim()) name.value = chosen.split(/[\\/]/).filter(Boolean).pop() ?? "";
+    }, path.value.trim() || null)) : null;
+    context.body.append(field("Name", name),
+      h("div", { class: "editor-path-row" }, field("Server Folder Path", path, "A folder on the server computer. Browse shows the server’s folders; Aurelia only reads your media."), browse),
       field("Content", kind));
     context.ready();
     path.focus();
@@ -381,5 +387,6 @@ export function createManagementEditors(app) {
     return h("section", { class: "editor-section settings-section metadata-section" }, h("h3", {}, "Match with TMDB"), field("Title", query), h("div", { class: "button-row" }, button("Search", search), remove), results);
   }
 
-  return { addStorage, removeStorage, editProfile, editMetadata, metadataPicker, close: () => { for (const dialog of [...dialogs]) dialog.close(); } };
+  return { addStorage, removeStorage, editProfile, editMetadata, metadataPicker, kit: { editor, input, field, choice, button },
+    close: () => { for (const dialog of [...dialogs]) dialog.close(); } };
 }

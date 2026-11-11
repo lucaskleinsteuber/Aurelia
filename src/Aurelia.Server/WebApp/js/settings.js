@@ -13,6 +13,7 @@ import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
 import { createManagementEditors } from "./settings-editors.js";
 import { createServerUpdates } from "./server-updates.js";
+import { createAdminTools } from "./settings-admin.js";
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -33,7 +34,9 @@ const CATEGORIES = [
 export function createSettings(app) {
   const { api, state } = app;
   const canManage = () => state.profile?.role === "owner" || state.profile?.role === "admin";
-  const editors = createManagementEditors({ ...app, onSaved: () => app.navigate(state.route, { replace: true }) });
+  const editors = createManagementEditors({ ...app, onSaved: () => app.navigate(state.route, { replace: true }),
+    chooseServerFolder: (onPick, start) => admin.chooseServerFolder(onPick, start) });
+  const admin = createAdminTools({ api, app, editors });
   let updatesView;
   let serverRead = new AbortController();
   let searchQuery = "";
@@ -441,6 +444,7 @@ export function createSettings(app) {
               catch (err) { if (!app.handleError(err)) app.toast(err.message); }
             }, `Watch ${library.name} for changes`), "Watch for Changes"),
             button("Scan Now", () => api.scanLibrary(library.id), `Scanning ${library.name}…`, "secondary-button", refresh),
+            openButton("Left Out…", () => admin.exclusions(library, refresh)),
             permissions.owner ? openButton("Remove…", () => editors.removeStorage(library), "secondary-button danger") : null)))
           : h("p", { class: "muted" }, "No storage locations configured."),
         h("div", { class: "button-row" },
@@ -466,23 +470,38 @@ export function createSettings(app) {
   function metadataSections(sections, refresh) {
     const permissions = managementPermissions(state.profile);
     const jobs = sections?.jobs ?? [];
+    const provider = sections?.metadataProvider;
+    const subtitles = sections?.subtitleProvider;
+    const reviewCount = jobs.reduce((sum, job) => sum + (job.itemsNeedingReview ?? 0), 0);
 
     return [
-      section("Movie & TV Info", "star", "Titles, artwork and episode details from The Movie Database.",
-        row("Metadata Service", value("TMDB Connected")),
+      section("Movie & TV Info", "star", "Titles, artwork and episode details from The Movie Database (TMDB).",
+        row("Metadata Service", value(!provider ? "Unknown" : !provider.hasToken ? "Not set up" : provider.enabled ? "TMDB connected" : "Turned off"),
+          provider && !provider.hasToken ? "Add a free TMDB token so titles get their details and artwork." : null),
+        provider ? row("Artwork Storage", value(`${bytes(provider.artworkBytes)} of ${bytes(provider.artworkLimitBytes)}`)) : null,
         row("Recent Jobs", value(jobs.length ? `${jobs.length} jobs recorded` : "Idle")),
         jobs.slice(0, 3).map((job) => row(`${capitalize(job.mode)} · ${new Date(job.createdAt).toLocaleString()}`,
           value(`${capitalize(job.state)} · ${job.itemsProcessed}/${job.itemsTotal}${job.itemsNeedingReview ? ` · ${job.itemsNeedingReview} to review` : ""}`))),
         h("div", { class: "button-row" },
+          permissions.owner ? openButton(provider?.hasToken ? "TMDB Settings…" : "Set Up TMDB…", () => admin.metadataService(refresh), provider?.hasToken ? "secondary-button" : "primary-button") : null,
           openButton("Edit Metadata…", () => editors.metadataPicker()),
           button("Find Missing Info", () => api.startMetadataJob({ mode: "incremental" }), "Looking up missing movie info…", "secondary-button", refresh),
           permissions.owner ? button("Refresh All Info", () => api.startMetadataJob({ mode: "fullRefresh" }), "Refreshing all movie info…", "secondary-button", refresh) : null)),
 
-      section("Artwork & Cache", "star", "Pruning and review queue management.",
-        row("Review Queue", value(jobs.some((j) => j.itemsNeedingReview > 0) ? "Items to review" : "Empty")),
+      section("Review Matches", "star", "Titles whose match the server wasn’t sure about. Pick the right one.",
+        row("Waiting for Review", value(reviewCount ? `${reviewCount} title${reviewCount === 1 ? "" : "s"}` : "None")),
+        h("div", { class: "button-row" }, openButton("Review Matches…", () => admin.reviewMatches(refresh), reviewCount ? "primary-button" : "secondary-button"))),
+
+      permissions.owner ? section("Subtitles", "star", "Find subtitles for titles that have none, from OpenSubtitles.",
+        row("OpenSubtitles", value(!subtitles ? "Unknown" : !subtitles.hasApiKey ? "Not set up" : subtitles.enabled ? `On · ${(subtitles.languages ?? []).join(", ") || "no languages"}` : "Turned off")),
+        h("div", { class: "button-row" }, openButton("Subtitle Settings…", () => admin.subtitleService(refresh))),
+        h("p", { class: "muted small" }, "Subtitles written from speech are made by Aurelia for Mac, which listens with macOS speech recognition. A browser can’t do that.")) : null,
+
+      permissions.owner ? section("Artwork & Search", "star", "Housekeeping for pictures and the search index.",
         h("div", { class: "button-row" },
-          button("Prune Unused Artwork", async () => { app.toast("Unused artwork pruned."); }, "Unused artwork pruned.", "secondary-button", refresh))),
-    ];
+          button("Remove Unused Artwork", () => api.pruneArtwork(), "Unused artwork removed.", "secondary-button", refresh),
+          button("Rebuild Search", () => api.rebuildSearch(), "The search index is being rebuilt.", "secondary-button", refresh))) : null,
+    ].filter(Boolean);
   }
 
   function metadataPage(sections, refresh) {
@@ -507,6 +526,11 @@ export function createSettings(app) {
 
       nameAndPicture(profile),
 
+      permissions.owner ? section("Add a Device", "lock", "Connect a phone, tablet, Apple TV, computer or another browser to this server.",
+        h("div", { class: "button-row" },
+          openButton("Create Code…", () => admin.createCode(), "primary-button"),
+          openButton("Enter Code from Device…", () => admin.enterCode()))) : null,
+
       section("Signed-In Devices", "lock", "Devices and browsers signed in to this account.",
         (devices ?? []).filter((device) => !device.revokedAt).map((device) => h("div", { class: "settings-card" },
           h("div", { class: "settings-card-main" },
@@ -517,7 +541,10 @@ export function createSettings(app) {
 
       permissions.owner ? section("User Accounts", "lock", "Choose who can watch and what they can see.",
         users.map((entry) => row(h("span", { class: "inline-control" }, app.profilePicture(entry.user), shownName(entry.user)),
-          h("div", { class: "inline-control" }, value(`${ageLimitSummary(entry.user.ageLimit) ?? roleTitle(entry.user.role)}${entry.isEnabled ? "" : " · Disabled"}`), openButton("Edit…", () => editors.editProfile(entry))))),
+          h("div", { class: "inline-control" }, value(`${ageLimitSummary(entry.user.ageLimit) ?? roleTitle(entry.user.role)}${entry.isEnabled ? "" : " · Disabled"}`),
+            openButton("Edit…", () => editors.editProfile(entry)),
+            openButton("Devices…", () => admin.userSessions(entry)),
+            openButton("Password…", () => admin.resetPassword(entry))))),
         h("div", { class: "button-row" }, openButton("Create Profile…", () => editors.editProfile()))) : null,
     ].filter(Boolean);
   }
@@ -593,9 +620,20 @@ export function createSettings(app) {
 
       power?.available ? powerSection(power, refresh) : null,
 
-      permissions.owner ? section("Backups", "library", "The server backs up its database every day.",
-        (backups ?? []).slice(0, 3).map((backup) => row(new Date(backup.createdAt).toLocaleString(), value(`${capitalize(backup.kind)} · ${bytes(backup.bytes)}`))),
-        h("div", { class: "button-row" }, button("Back Up Now", () => api.approved("/api/v1/server/backups/database"), "Backup created.", "secondary-button", refresh))) : null,
+      permissions.owner ? section("Backups", "library", "The server backs up its database every day. An encrypted backup also keeps accounts and settings and can move a server to another computer.",
+        (backups ?? []).slice(0, 5).map((backup) => row(new Date(backup.createdAt).toLocaleString(),
+          h("div", { class: "inline-control" }, value(`${capitalize(backup.kind)} · ${bytes(backup.bytes)}`), openButton("Check", () => admin.verifyBackup(backup))))),
+        h("div", { class: "button-row" },
+          button("Back Up Now", () => api.approved("/api/v1/server/backups/database"), "Backup created.", "secondary-button", refresh),
+          sections?.capabilities?.encryptedBackups !== false ? openButton("Save Encrypted Backup…", () => admin.exportBackup()) : null,
+          sections?.capabilities?.nativeHostOperations ? openButton("Restore from Backup…", () => admin.restoreBackup(), "secondary-button danger") : null),
+        sections?.capabilities && !sections.capabilities.nativeHostOperations
+          ? h("p", { class: "muted small" }, "Restoring swaps the server’s data while it runs, which only a server hosted by Aurelia for Mac can do. Encrypted backups from here can be restored there.") : null) : null,
+
+      permissions.owner ? section("Maintenance", "gear", "Restart the server or save a report of recent events for troubleshooting. The report holds no passwords, tokens or media paths.",
+        h("div", { class: "button-row" },
+          openButton("Restart Server…", () => admin.restart(refresh)),
+          openButton("Download Diagnostics", () => admin.downloadDiagnostics()))) : null,
     ].filter(Boolean);
   }
 

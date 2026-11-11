@@ -31,6 +31,14 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
     });
     if (typeof api.serverScrubPreviews === "function") readers.scrubPreviews = () => api.serverScrubPreviews({ signal });
     if (typeof api.serverTranscoding === "function") readers.transcoding = () => api.serverTranscoding({ signal });
+    // Optional extras: an older server without them still shows the rest.
+    const optional = (read) => () => read().catch((error) => {
+      if (error?.name === "AbortError" || error?.status === 401 || error?.code === "management_locked") throw error;
+      return null;
+    });
+    if (typeof api.metadataProvider === "function") readers.metadataProvider = optional(() => api.metadataProvider({ signal }));
+    if (typeof api.subtitleProvider === "function") readers.subtitleProvider = optional(() => api.subtitleProvider({ signal }));
+    if (typeof api.serverCapabilities === "function") readers.capabilities = optional(() => api.serverCapabilities({ signal }));
   }
   await Promise.all(Object.entries(readers).map(async ([name, read]) => {
     try { sections[name] = await read(); }
@@ -1253,4 +1261,36 @@ export function createPrefetcher({ limit = 2 } = {}) {
       return true;
     },
   };
+}
+
+// MARK: Administration
+
+/** "4:59 left" until a pairing code expires, or null once it has. */
+export function codeCountdown(expiresAt, now = Date.now()) {
+  const left = Math.floor((new Date(expiresAt).getTime() - now) / 1000);
+  if (!(left > 0)) return null;
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} left`;
+}
+
+/** The folders on the way to `path`, for the server folder picker: "/", "/mnt", "/mnt/media". */
+export function folderCrumbs(path) {
+  if (!path) return [];
+  const windows = /^[a-z]:[\\/]/i.test(path);
+  const separator = windows ? "\\" : "/";
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  const crumbs = [];
+  let built = "";
+  for (const [index, part] of parts.entries()) {
+    built = windows ? (index === 0 ? `${part}${separator}` : `${built}${built.endsWith(separator) ? "" : separator}${part}`) : `${built}/${part}`;
+    crumbs.push({ name: part, path: built });
+  }
+  return windows ? crumbs : [{ name: "/", path: "/" }, ...crumbs];
+}
+
+export const SUBTITLE_LANGUAGE_CHOICES = Object.freeze(["en", "de", "fr", "es", "it", "nl", "pt", "pl", "sv", "da", "no", "fi", "tr", "ru", "ja", "ko", "zh", "ar"]);
+
+/** "en, DE ,fr,en" → ["en", "de", "fr"]: two-letter codes, once each, at most ten. */
+export function subtitleLanguages(text) {
+  const codes = String(text ?? "").toLowerCase().split(/[\s,;]+/).filter((code) => /^[a-z]{2}$/.test(code));
+  return [...new Set(codes)].slice(0, 10);
 }
