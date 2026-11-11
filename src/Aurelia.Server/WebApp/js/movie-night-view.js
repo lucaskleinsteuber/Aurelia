@@ -2,13 +2,16 @@
 // The session lives here, outside the page, so moving around the app keeps this browser in it.
 
 import { h, icon, clear } from "./dom.js";
-import { createMovieNight, swipeChoice, cardMeta, slowpokes, screenOf, isHost, SWIPE_DISTANCE } from "./movie-night.js";
+import { createMovieNight, swipeChoice, cardMeta, slowpokes, screenOf, isHost, SWIPE_DISTANCE, PROGRAM, programChoices, programSummary, flingDuration } from "./movie-night.js";
 
 export function createMovieNightView({ api, artwork, playTitle, navigate, deviceName }) {
   let session = null;
   let root = null;
   let dragging = false;
   let dirty = false;
+  // The cards on top last time, so the next one can come forward from the stack.
+  let shownTop = null;
+  let seenMembers = new Set();
 
   function ensureSession() {
     session ??= createMovieNight({ api, deviceName, onChange: () => refresh() });
@@ -74,8 +77,10 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
   }
 
   function people(state, deckSize = 0) {
-    return h("ul", { class: "mn-people" }, state.members.map((member) => h("li", {},
-      h("span", { class: "mn-initial", "aria-hidden": "true" }, (member.name.trim()[0] ?? "?").toUpperCase()),
+    const arrived = new Set(seenMembers);
+    seenMembers = new Set(state.members.map((member) => member.id));
+    return h("ul", { class: "mn-people" }, state.members.map((member, index) => h("li", { class: arrived.has(member.id) ? "" : "joined", style: { "--order": index } },
+      h("span", { class: `mn-initial tone-${index % 4}`, "aria-hidden": "true" }, (member.name.trim()[0] ?? "?").toUpperCase()),
       h("span", { class: "mn-person" },
         h("strong", {}, member.isYou ? `${member.name} (you)` : member.name),
         h("span", { class: "muted small" }, [member.deviceName, member.isHost ? "started it" : null, member.isVoting ? null : "only watches"].filter(Boolean).join(" · "))),
@@ -85,23 +90,39 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
   function lobby(current, state) {
     const host = state.members.find((member) => member.isHost);
     const me = state.members.find((member) => member.isYou);
-    const chip = (label, selected, action) => h("button", { class: `chip ${selected ? "selected" : ""}`, "aria-pressed": selected ? "true" : "false", onclick: action }, label);
+    const hosting = isHost(state);
+    const choice = programChoices(state);
     const voters = state.members.filter((member) => member.isVoting).length;
-    return h("section", { class: "mn-lobby" },
-      heading("Movie Night", voters ? `${voters === 1 ? "1 person is" : `${voters} people are`} ready to swipe. Anyone else at home can join from Aurelia on their phone or Mac.`
-        : "Nobody is swiping yet. Open Aurelia on a phone and join this night."),
+    const chip = (label, selected, change) => h("button", {
+      class: `chip ${selected ? "selected" : ""}`, "aria-pressed": selected ? "true" : "false", disabled: !hosting,
+      onclick: () => current.settings(change),
+    }, label);
+    const row = (label, chips, scroll = false) => h("div", { class: "mn-program-row" },
+      h("span", { class: "mn-program-label" }, label),
+      h("div", { class: `mn-option-row ${scroll ? "scrolls" : ""}`, role: "group", "aria-label": label }, chips));
+    const genres = state.genreOptions ?? [];
+    const program = h("section", { class: "mn-program", "aria-label": "Tonight’s program" },
+      h("div", { class: "mn-program-head" },
+        h("h2", {}, "Tonight’s program"),
+        h("span", { class: "muted small" }, hosting ? "You choose what gets dealt." : `${host?.name ?? "The host"} chooses what gets dealt.`)),
+      row("What", PROGRAM.kinds.map(([key, label]) => chip(label, choice.kinds === key, { kinds: key }))),
+      genres.length ? row("Genre", [chip("Any genre", !choice.genre, { genre: null }), ...genres.map((genre) => chip(genre, choice.genre === genre, { genre }))], true) : null,
+      "era" in state ? row("When", PROGRAM.era.map(([key, label]) => chip(label, choice.era === key, { era: key }))) : null,
+      "length" in state ? row("Length", PROGRAM.length.map(([key, label]) => chip(label, choice.length === key, { length: key }))) : null,
+      h("div", { class: "mn-program-foot" },
+        h("span", { class: "mn-program-summary" }, programSummary(state)),
+        hosting
+          ? h("button", { class: "primary-button large mn-deal", disabled: voters === 0, onclick: () => current.deal() }, icon("play", { size: 15 }), "Deal the Cards")
+          : h("span", { class: "muted" }, `Waiting for ${host?.name ?? "the host"} to deal.`)));
+    const crowd = h("aside", { class: "mn-crowd" },
+      h("h2", {}, voters === 1 ? "1 swiping" : `${voters} swiping`),
       people(state),
-      isHost(state) ? h("div", { class: "mn-options" },
-        h("div", { class: "mn-option-row", role: "group", "aria-label": "What to deal" },
-          chip("Movies", state.kinds !== "all", () => current.settings("movies", state.genre)),
-          chip("Movies and shows", state.kinds === "all", () => current.settings("all", state.genre))),
-        state.genreOptions?.length ? h("div", { class: "mn-option-row", role: "group", "aria-label": "Genre" },
-          chip("Any genre", !state.genre, () => current.settings(state.kinds, null)),
-          state.genreOptions.map((genre) => chip(genre, state.genre === genre, () => current.settings(state.kinds, genre)))) : null) : null,
+      h("p", { class: "muted small mn-join-hint" }, "Anyone at home joins from Aurelia on a phone, tablet or computer: Movie Night › Join."));
+    return h("section", { class: "mn-lobby" },
+      heading("Movie Night", voters ? "Pick tonight’s program, deal the cards, and let everyone swipe."
+        : "Nobody is swiping yet. Open Aurelia on a phone and join this night."),
+      h("div", { class: "mn-lobby-grid" }, program, crowd),
       h("div", { class: "button-row" },
-        isHost(state)
-          ? h("button", { class: "primary-button large", disabled: voters === 0, onclick: () => current.deal() }, "Deal the Cards")
-          : h("p", { class: "muted" }, `Waiting for ${host?.name ?? "the host"} to deal.`),
         h("button", { class: "secondary-button", onclick: () => current.setVoting(!me?.isVoting) }, me?.isVoting ? "Just Watch on This Screen" : "Swipe Here Too"),
         h("button", { class: "secondary-button", onclick: () => current.leave() }, "Leave")));
   }
@@ -111,7 +132,10 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
     const total = current.deck.length;
     const stack = h("div", { class: "mn-stack" }, cards.slice().reverse().map((card, index, all) => cardElement(card, all.length - 1 - index)));
     const top = stack.lastElementChild;
-    const fling = (choice) => flyOut(top, choice, () => current.vote(cards[0].mediaId, choice === "like"));
+    // After a vote the next cards move up one place instead of appearing.
+    if (shownTop && shownTop !== cards[0]?.mediaId) stack.classList.add("advanced");
+    shownTop = cards[0]?.mediaId ?? null;
+    const fling = (choice, velocity) => flyOut(top, choice, velocity, () => current.vote(cards[0].mediaId, choice === "like"));
     attachDrag(top, fling);
     const keys = (event) => {
       if (!root?.isConnected || !top.isConnected) return document.removeEventListener("keydown", keys);
@@ -170,10 +194,11 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
     const release = (event) => {
       if (!start) return;
       const dx = event.clientX - start.x;
-      const choice = swipeChoice(dx, start.velocity ?? 0, card.getBoundingClientRect().width);
+      const velocity = start.velocity ?? 0;
+      const choice = swipeChoice(dx, velocity, card.getBoundingClientRect().width);
       start = null;
       card.classList.remove("dragging");
-      if (choice) return fling(choice);
+      if (choice) return fling(choice, velocity);
       dragging = false;
       move(0, 0);
       if (dirty) render();
@@ -182,17 +207,19 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
     card.addEventListener("pointercancel", release);
   }
 
-  function flyOut(card, choice, done) {
+  function flyOut(card, choice, velocity, done) {
     if (!card || card.classList.contains("gone")) return;
     dragging = true;
     card.classList.add("gone");
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    const duration = flingDuration(velocity);
+    card.style.setProperty("--fling", `${duration}ms`);
     card.style.setProperty(choice === "like" ? "--like" : "--nope", "1");
-    card.style.setProperty("transform", `translate(${choice === "like" ? 140 : -140}vw, 8vh) rotate(${choice === "like" ? 30 : -30}deg)`);
+    card.style.setProperty("transform", `translate(${choice === "like" ? 130 : -130}vw, 10vh) rotate(${choice === "like" ? 28 : -28}deg)`);
     setTimeout(() => {
       dragging = false;
       done();
-    }, reduce ? 0 : 260);
+    }, reduce ? 0 : duration - 40);
   }
 
   function waiting(current, state) {
@@ -227,6 +254,7 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
       h("p", { class: "mn-ticket-headline" }, outcome?.headline ?? "No match."),
       h("p", { class: "mn-line" }, outcome?.line ?? ""));
     return h("section", { class: "mn-result" },
+      card ? confetti() : null,
       ticket,
       outcome?.awards?.length ? h("ul", { class: "mn-awards" }, outcome.awards.map((award) =>
         h("li", {}, h("strong", {}, award.title), h("span", {}, award.line)))) : null,
@@ -237,6 +265,19 @@ export function createMovieNightView({ api, artwork, playTitle, navigate, device
         state.phase === "match" ? h("button", { class: "secondary-button", onclick: () => current.keepSwiping() }, "Keep Swiping") : null,
         h("button", { class: "secondary-button", onclick: () => current.deal() }, "Deal New Cards"),
         h("button", { class: "secondary-button", onclick: () => current.leave() }, "Leave")));
+  }
+
+  /** A short burst of paper in the night's colors over the ticket; Reduce Motion leaves it out. */
+  function confetti() {
+    const colors = ["var(--mn-yes)", "var(--mn-nope)", "var(--mn-paper)", "#7aa2ff"];
+    return h("div", { class: "mn-confetti", "aria-hidden": "true" }, Array.from({ length: 28 }, (_, index) => h("i", { style: {
+      "--x": `${Math.round(Math.random() * 100)}%`,
+      "--drift": `${Math.round((Math.random() - 0.5) * 160)}px`,
+      "--spin": `${Math.round(Math.random() * 720 - 360)}deg`,
+      "--delay": `${Math.round(Math.random() * 260)}ms`,
+      "--fall": `${900 + Math.round(Math.random() * 700)}ms`,
+      background: colors[index % colors.length],
+    } })));
   }
 
   /** A line on Home: back to this browser's night, a night to join, or a way to start one. */

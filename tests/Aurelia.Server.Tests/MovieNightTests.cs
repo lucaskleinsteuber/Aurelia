@@ -180,10 +180,30 @@ public sealed class MovieNightTests
         var changed = service.Settings(night.Id, Couch, "all", "comedy");
         Assert.Equal("all", changed.Kinds);
         Assert.Equal("Comedy", changed.Genre);
+        Assert.Equal("any", changed.Era);
+        var narrowed = service.Settings(night.Id, Couch, "movies", null, "2010S", "short");
+        Assert.Equal(("2010s", "short"), (narrowed.Era, narrowed.Length));
+        Assert.Throws<PlaybackException>(() => service.Settings(night.Id, Couch, "movies", null, "1890s", null));
+        Assert.Throws<PlaybackException>(() => service.Settings(night.Id, Couch, "movies", null, null, "epic"));
+        // An app that doesn't know eras and lengths leaves them open again.
+        Assert.Equal(("any", "any"), (service.Settings(night.Id, Couch, "movies", null).Era, service.Settings(night.Id, Couch, "movies", null).Length));
         for (var member = 2; member < MovieNightService.MaximumMembers; member++)
             service.Join(night.Id, Guid.NewGuid(), "Invented Guest", null, voting: true, gentle: false, Everything);
         Assert.Throws<PlaybackException>(() => service.Join(night.Id, Guid.NewGuid(), "One Too Many", null, voting: true, gentle: false, Everything));
     }
+
+    [Theory]
+    [InlineData(MediaKind.Movie, 2015, 95, "2010s", "short", true)]
+    [InlineData(MediaKind.Movie, 2015, 125, "2010s", "short", false)]
+    [InlineData(MediaKind.Movie, 2015, 125, "any", "standard", true)]
+    [InlineData(MediaKind.Movie, 2009, 90, "2010s", "any", false)]
+    [InlineData(MediaKind.Movie, 2020, 90, "2020s", "any", true)]
+    [InlineData(MediaKind.Movie, 1999, 90, "older", "any", true)]
+    [InlineData(MediaKind.Movie, null, 90, "older", "any", false)]
+    [InlineData(MediaKind.Movie, 2001, null, "2000s", "short", true)]
+    [InlineData(MediaKind.Series, 2012, 300, "2010s", "short", true)]
+    public void ErasAndLengthsKeepOnlyFittingTitles(MediaKind kind, int? year, int? runtime, string era, string length, bool expected) =>
+        Assert.Equal(expected, MovieNightFilters.Matches(kind, year, runtime, era, length));
 
     [Fact]
     public async Task AChildsPhoneOnlyGetsTitlesItsProfileMayOpenThroughTheApi()
@@ -257,6 +277,40 @@ public sealed class MovieNightTests
     }
 
     [Fact]
+    public async Task TheDealHoldsOnlyTitlesOfTheChosenEraAndLength()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var fitting = await AddMovieAsync(factory, "Invented Short Film", "Comedy", "2015-05-01", 92);
+        await AddMovieAsync(factory, "Invented Long Film", "Comedy", "2016-05-01", 170);
+        await AddMovieAsync(factory, "Invented Old Film", "Comedy", "1994-05-01", 90);
+        MovieNightState night;
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, "/api/v1/movie-night", owner.Token, new CreateMovieNightRequest("Invented Laptop")))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+            night = await ApiTestClient.ReadAsync<MovieNightState>(response);
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/movie-night/{night.Id}/settings", owner.Token,
+                   new MovieNightSettingsRequest("movies", null, "2010s", "short")))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+        {
+            var state = await ApiTestClient.ReadAsync<MovieNightState>(response);
+            Assert.Equal(("2010s", "short"), (state.Era, state.Length));
+        }
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/movie-night/{night.Id}/deal", owner.Token))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(fitting, Assert.Single((await ApiTestClient.ReadAsync<MovieNightState>(response)).Deck!).MediaId);
+        }
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/movie-night/{night.Id}/settings", owner.Token,
+                   new MovieNightSettingsRequest("movies", null, "2020s", null)))
+        using (await ApiTestClient.SendAsync(client, request)) { }
+        using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/movie-night/{night.Id}/deal", owner.Token))
+        using (var response = await ApiTestClient.SendAsync(client, request))
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
     public void WaitingForTheNightDoesNotKeepTheServerAwake()
     {
         var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
@@ -273,7 +327,7 @@ public sealed class MovieNightTests
     private static List<MovieNightCard> Cards() =>
         Titles.Select((id, index) => new MovieNightCard(id, MediaKind.Movie, $"Invented Film {index + 1}", 2020 + index, null, ["Comedy"], 95, null, null)).ToList();
 
-    private static async Task<Guid> AddMovieAsync(AureliaServerFactory factory, string title, string genre)
+    private static async Task<Guid> AddMovieAsync(AureliaServerFactory factory, string title, string genre, string? releaseDate = null, int? runtime = null)
     {
         using var scope = factory.Services.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
@@ -313,6 +367,8 @@ public sealed class MovieNightTests
             MediaItemId = media.Id,
             MediaItem = media,
             ProviderGenresJson = MetadataPresentation.SerializeList([genre]),
+            ProviderReleaseDate = releaseDate,
+            ProviderRuntimeMinutes = runtime,
         });
         await database.SaveChangesAsync();
         return media.Id;

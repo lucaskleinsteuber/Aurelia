@@ -39,7 +39,7 @@ public static class MovieNightEndpoints
         }));
 
         nights.MapPost("/{nightId:guid}/settings", (HttpContext context, Guid nightId, MovieNightSettingsRequest request, MovieNightService service) =>
-            Run(() => Task.FromResult(service.Settings(nightId, context.User.RequireProfileSessionId(), request.Kinds, request.Genre))));
+            Run(() => Task.FromResult(service.Settings(nightId, context.User.RequireProfileSessionId(), request.Kinds, request.Genre, request.Era, request.Length))));
 
         // Starting and dealing again are the same: a fresh deck for everyone.
         nights.MapPost("/{nightId:guid}/deal", (HttpContext context, Guid nightId, MovieNightService service, AureliaDbContext database,
@@ -107,12 +107,23 @@ public static class MovieNightEndpoints
                 && !item.PlaybackProgress.Any(progress => progress.UserId == userId && progress.IsCompleted))
             .Select(item => new { item.Id, Genres = item.Metadata == null ? null : item.Metadata.ManualGenresJson ?? item.Metadata.ProviderGenresJson })
             .ToListAsync(token);
-        var picked = candidates
+        var genreFits = candidates
             .Where(candidate => plan.Genre is null || MetadataPresentation.ParseList(candidate.Genres)
                 .Any(genre => string.Equals(genre.Trim(), plan.Genre, StringComparison.OrdinalIgnoreCase)))
             .Select(candidate => candidate.Id)
-            .OrderBy(id => id)
-            .ToArray();
+            .ToList();
+        if (plan.Era != "any" || plan.Length != "any")
+        {
+            // Year and running time follow the same manual-over-automatic rules as everywhere else.
+            var details = await database.MediaItems.AsNoTracking().Include(item => item.Metadata)
+                .Where(item => genreFits.Contains(item.Id)).ToListAsync(token);
+            genreFits = details.Where(item =>
+            {
+                var summary = MetadataPresentation.ToSummary(item);
+                return MovieNightFilters.Matches(item.Kind, summary.Year, summary.RuntimeMinutes, plan.Era, plan.Length);
+            }).Select(item => item.Id).ToList();
+        }
+        var picked = genreFits.OrderBy(id => id).ToArray();
         new Random(plan.Seed).Shuffle(picked);
         var ids = picked.Take(MovieNightService.DeckSize).ToList();
         if (ids.Count == 0) return [];

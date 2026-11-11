@@ -653,7 +653,8 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   const targetScroll = restoreScroll ? scrollMemory.recall(path) : null;
   const scroll = quiet ? window.scrollY : (targetScroll ?? 0);
   revealInstantly = quiet;
-  const loading = screenFor(route, token).then((content) => ({ content }), (error) => ({ error }));
+  // Some screens are built at once, others load first; both count the same here.
+  const loading = Promise.resolve().then(() => screenFor(route, token)).then((content) => ({ content }), (error) => ({ error }));
   // A page that answers quickly (remembered or near) replaces the old one directly; a slower one
   // shows its shape first.
   let outcome = quiet ? await loading : await Promise.race([loading, new Promise((resolve) => setTimeout(resolve, 140))]);

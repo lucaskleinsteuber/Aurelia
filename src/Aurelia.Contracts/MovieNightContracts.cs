@@ -70,15 +70,22 @@ public sealed record MovieNightState(
     IReadOnlyList<MovieNightVote> YourVotes,
     MovieNightResult? Result,
     string? LastAction,
-    string? LastActionBy);
+    string? LastActionBy,
+    string Era = "any",
+    string Length = "any");
 
 /// <summary><see cref="IsVoting"/> false joins as a screen that only watches.</summary>
 public sealed record CreateMovieNightRequest(string? DeviceName, bool IsVoting = true);
 
 public sealed record JoinMovieNightRequest(string? DeviceName, bool IsVoting = true);
 
-/// <summary><see cref="Kinds"/> is <c>movies</c> or <c>all</c> (movies and shows); a null genre means any.</summary>
-public sealed record MovieNightSettingsRequest(string? Kinds, string? Genre);
+/// <summary>
+/// <see cref="Kinds"/> is <c>movies</c> or <c>all</c> (movies and shows); a null genre means any.
+/// <see cref="Era"/> is <c>any</c>, <c>2020s</c>, <c>2010s</c>, <c>2000s</c> or <c>older</c>;
+/// <see cref="Length"/> is <c>any</c>, <c>short</c> (films up to 100 minutes) or <c>standard</c>
+/// (up to 130). Null means any, so older apps that don't know them leave every era and length in.
+/// </summary>
+public sealed record MovieNightSettingsRequest(string? Kinds, string? Genre, string? Era = null, string? Length = null);
 
 public sealed record MovieNightVoteRequest(Guid MediaId, bool Like);
 

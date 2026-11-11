@@ -98,3 +98,19 @@ test("a swipe the server refused can be swiped again", async () => {
   assert.equal(session.error, "That title is not in tonight’s deck.");
   await session.leave();
 });
+
+test("tonight's program changes one choice and keeps the others", async () => {
+  const { programChoices, programSummary, flingDuration } = await import("../../src/Aurelia.Server/WebApp/js/movie-night.js");
+  const state = { kinds: "all", genre: "Comedy", era: "2010s", length: "short" };
+  assert.deepEqual(programChoices(state, { era: "older" }), { kinds: "all", genre: "Comedy", era: "older", length: "short" });
+  assert.deepEqual(programChoices(state, { genre: null }), { kinds: "all", genre: null, era: "2010s", length: "short" });
+  // A server without eras and lengths: the request names "any", which every server accepts.
+  assert.deepEqual(programChoices({ kinds: "movies", genre: null }, { kinds: "all" }), { kinds: "all", genre: null, era: "any", length: "any" });
+  assert.equal(programSummary(state), "Movies and shows · Comedy · 2010s · Short");
+  assert.equal(programSummary({ kinds: "movies" }), "Movies");
+  assert.equal(programSummary({ kinds: "movies", length: "standard" }), "Movies · Up to 2h 10m");
+  // A flick leaves faster than a push, within bounds.
+  assert.equal(flingDuration(0), 420);
+  assert.equal(flingDuration(-1), 280);
+  assert.equal(flingDuration(5), 180);
+});

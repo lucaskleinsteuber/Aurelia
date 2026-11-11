@@ -47,6 +47,36 @@ export function screenOf(state, remaining) {
   return me?.isVoting && remaining > 0 ? "swipe" : "waiting";
 }
 
+/** The choices the host can make before a deal, in the order the lobby shows them. */
+export const PROGRAM = Object.freeze({
+  kinds: [["movies", "Movies"], ["all", "Movies and shows"]],
+  era: [["any", "Any time"], ["2020s", "2020s"], ["2010s", "2010s"], ["2000s", "2000s"], ["older", "Older"]],
+  length: [["any", "Any length"], ["short", "Short, up to 1h 40m"], ["standard", "Up to 2h 10m"]],
+});
+
+/** Tonight's choices with one of them changed; a server without eras and lengths keeps them out. */
+export function programChoices(state, change = {}) {
+  const choices = { kinds: state?.kinds ?? "movies", genre: state?.genre ?? null, era: state?.era ?? "any", length: state?.length ?? "any", ...change };
+  return { kinds: choices.kinds, genre: choices.genre || null, era: choices.era, length: choices.length };
+}
+
+/** "Movies · Comedy · 2010s · Short" for what the host chose. */
+export function programSummary(state) {
+  const choice = programChoices(state);
+  const label = (list, value) => list.find(([key]) => key === value)?.[1];
+  return [
+    choice.kinds === "all" ? "Movies and shows" : "Movies",
+    choice.genre,
+    choice.era !== "any" ? label(PROGRAM.era, choice.era) : null,
+    choice.length === "short" ? "Short" : choice.length === "standard" ? "Up to 2h 10m" : null,
+  ].filter(Boolean).join(" · ");
+}
+
+/** How long a card flies off: a fast flick leaves quicker than a slow push, never instantly. */
+export function flingDuration(velocity = 0) {
+  return Math.round(Math.min(420, Math.max(180, 420 - Math.abs(velocity) * 140)));
+}
+
 export function isHost(state) {
   return Boolean(state?.members?.find((member) => member.isYou)?.isHost);
 }
@@ -128,7 +158,8 @@ export function createMovieNight({ api, deviceName, onChange = () => {}, sleep =
     clearError() { error = null; changed(); },
     start: (isVoting = true) => run(() => api.createMovieNight({ deviceName, isVoting })),
     join: (nightId, isVoting = true) => run(() => api.joinMovieNight(nightId, { deviceName, isVoting })),
-    settings: (kinds, genre) => state && run(() => api.movieNightSettings(state.id, { kinds, genre })),
+    /** Changes tonight's program: kinds, genre, era or length; the others stay as they are. */
+    settings: (change) => state && run(() => api.movieNightSettings(state.id, programChoices(state, change))),
     deal: () => state && run(() => api.dealMovieNight(state.id)),
     keepSwiping: () => state && run(() => api.keepSwiping(state.id)),
     setVoting: (isVoting) => state && run(() => api.movieNightRole(state.id, { isVoting })),

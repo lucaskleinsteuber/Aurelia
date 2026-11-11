@@ -122,8 +122,8 @@ public sealed class MovieNightService(TimeProvider clock)
         }
     }
 
-    /// <summary>The host picks movies or also shows, and a genre, before the first deal.</summary>
-    public MovieNightState Settings(Guid nightId, Guid profileSession, string? kinds, string? genre)
+    /// <summary>The host picks movies or also shows, a genre, an era and a length before a deal.</summary>
+    public MovieNightState Settings(Guid nightId, Guid profileSession, string? kinds, string? genre, string? era = null, string? length = null)
     {
         lock (gate)
         {
@@ -137,6 +137,8 @@ public sealed class MovieNightService(TimeProvider clock)
             night.Genre = string.IsNullOrWhiteSpace(genre) ? null
                 : night.GenreOptions.FirstOrDefault(option => string.Equals(option, genre.Trim(), StringComparison.OrdinalIgnoreCase))
                   ?? throw new PlaybackException("invalid_genre", "Choose one of the genres in the list.", StatusCodes.Status400BadRequest);
+            night.Era = MovieNightFilters.Era(era);
+            night.Length = MovieNightFilters.Length(length);
             Changed(night, "settings", member.Name);
             return Describe(night, profileSession, null);
         }
@@ -158,7 +160,8 @@ public sealed class MovieNightService(TimeProvider clock)
             }
             allowed ??= [];
             allowed.ExceptWith(night.Dealt);
-            return new DealPlan(allowed, night.Kinds, night.Genre, BitConverter.ToInt32(night.Id.ToByteArray(), 0) ^ (night.Round + 1) * 7919);
+            return new DealPlan(allowed, night.Kinds, night.Genre, BitConverter.ToInt32(night.Id.ToByteArray(), 0) ^ (night.Round + 1) * 7919,
+                night.Era, night.Length);
         }
     }
 
@@ -177,9 +180,9 @@ public sealed class MovieNightService(TimeProvider clock)
             var deck = cards.Where(card => night.Members.All(each => each.Shelf.Contains(card.MediaId)))
                 .DistinctBy(card => card.MediaId).Take(DeckSize).ToList();
             if (deck.Count == 0)
-                throw new PlaybackException("movie_night_empty", night.Genre is null
+                throw new PlaybackException("movie_night_empty", night.Genre is null && night.Era == "any" && night.Length == "any"
                     ? "Nothing left in the library that everyone here may watch. Try movies and shows."
-                    : $"Nothing left in {night.Genre} that everyone here may watch. Try another genre.", StatusCodes.Status409Conflict);
+                    : "Nothing left that fits these choices and everyone here may watch. Try another genre, era or length.", StatusCodes.Status409Conflict);
             night.Deck.Clear();
             night.Deck.AddRange(deck);
             night.Dealt.UnionWith(deck.Select(card => card.MediaId));
@@ -409,7 +412,9 @@ public sealed class MovieNightService(TimeProvider clock)
                 .Select(card => new MovieNightVote(card.MediaId, you.Votes[card.MediaId])).ToList(),
             night.Result,
             night.LastAction,
-            night.LastActionBy);
+            night.LastActionBy,
+            night.Era,
+            night.Length);
     }
 
     private static Member Host(Night night) => night.Members.FirstOrDefault(member => member.Id == night.HostId) ?? night.Members[0];
@@ -429,7 +434,7 @@ public sealed class MovieNightService(TimeProvider clock)
     }
 
     /// <summary>The titles a deal may use, the host's choices, and a seed so everyone gets one order.</summary>
-    public sealed record DealPlan(IReadOnlySet<Guid> Allowed, string Kinds, string? Genre, int Seed);
+    public sealed record DealPlan(IReadOnlySet<Guid> Allowed, string Kinds, string? Genre, int Seed, string Era = "any", string Length = "any");
 
     private sealed class Night(Guid id, Guid hostId, DateTimeOffset createdAt)
     {
@@ -440,6 +445,8 @@ public sealed class MovieNightService(TimeProvider clock)
         public string Phase { get; set; } = Lobby;
         public string Kinds { get; set; } = "movies";
         public string? Genre { get; set; }
+        public string Era { get; set; } = "any";
+        public string Length { get; set; } = "any";
         public List<string> GenreOptions { get; set; } = [];
         public List<MovieNightCard> Deck { get; } = [];
         public HashSet<Guid> Dealt { get; } = [];
