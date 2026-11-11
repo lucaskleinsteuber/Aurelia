@@ -630,23 +630,33 @@ function startTour() {
     h("div", { class: "tour-actions" }, counter,
       h("button", { class: "link-button", onclick: () => endTour() }, "Skip Tour"), next));
   const layer = h("div", { class: "tour-layer" }, ring, bubble);
-  const place = () => {
-    const stop = logic.TOUR_STOPS[index];
-    const target = document.querySelector(stop.target);
+  // Measures the target after the page has scrolled to it; the fixed ring follows scrolling.
+  let target = null;
+  const measure = () => {
     const viewport = { width: window.innerWidth, height: window.innerHeight };
-    let hole = null;
-    if (target) {
-      target.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-      const rect = target.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        hole = { left: rect.left - 8, top: rect.top - 8, right: rect.right + 8, bottom: rect.bottom + 8 };
-      }
-    }
+    const hole = target ? logic.tourHole(target.getBoundingClientRect(), viewport) : null;
     ring.hidden = !hole;
     layer.classList.toggle("dimmed", !hole);
     if (hole) Object.assign(ring.style, { left: `${hole.left}px`, top: `${hole.top}px`, width: `${hole.right - hole.left}px`, height: `${hole.bottom - hole.top}px` });
     const position = logic.tourBubblePosition(hole, viewport, { width: Math.min(320, viewport.width - 32), height: bubble.offsetHeight || 170 });
     Object.assign(bubble.style, { left: `${position.x}px`, top: `${position.y}px` });
+  };
+  const place = () => {
+    const stop = logic.TOUR_STOPS[index];
+    const candidates = [...document.querySelectorAll(stop.target)];
+    const topInset = document.querySelector(".top-bar")?.getBoundingClientRect().bottom ?? 0;
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    target = candidates[logic.visibleTourTarget(candidates.map((element) => element.getBoundingClientRect()), viewport, topInset)] ?? null;
+    if (target) {
+      const rect = target.getBoundingClientRect();
+      if (rect.top < topInset || rect.bottom > viewport.height) target.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
+    }
+    requestAnimationFrame(measure);
+  };
+  let pending = 0;
+  const follow = () => {
+    if (pending) return;
+    pending = requestAnimationFrame(() => { pending = 0; measure(); });
   };
   const show = () => {
     const stop = logic.TOUR_STOPS[index];
@@ -670,9 +680,12 @@ function startTour() {
   };
   document.addEventListener("keydown", keys);
   window.addEventListener("resize", place);
+  window.addEventListener("scroll", follow, { passive: true, capture: true });
   tour = { layer, close: () => {
     document.removeEventListener("keydown", keys);
     window.removeEventListener("resize", place);
+    window.removeEventListener("scroll", follow, { capture: true });
+    if (pending) cancelAnimationFrame(pending);
     layer.remove();
   } };
   document.body.append(layer);
@@ -1075,18 +1088,12 @@ function seasonsSection(item, seasons, target) {
       ...seasons.map((season) => menuOption(logic.seasonTitle(season.number), season === current, () => show(season, true))),
       h("div", { class: "menu-divider" }),
       ...watchMenu(item, "season", current.number),
-      h("div", { class: "menu-divider" }),
-      ...watchMenu(item, "series", undefined, { includeContinueWatching: false, labelScope: true }),
     ]);
   });
   titleButton.addEventListener("contextmenu", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    openMenu(titleButton, [
-      ...watchMenu(item, "season", current.number),
-      h("div", { class: "menu-divider" }),
-      ...watchMenu(item, "series", undefined, { includeContinueWatching: false, labelScope: true }),
-    ]);
+    openMenu(titleButton, watchMenu(item, "season", current.number));
   });
   show(current, false);
   return h("section", { class: "detail-section" },

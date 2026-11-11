@@ -1,7 +1,7 @@
 // Viewer library screens and actions. Each route owns its reads and dialogs; navigation closes
 // them before another profile can use the page. Lists request one bounded page per action.
 import { h, icon, clear } from "./dom.js";
-import { browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS, readSmartRules, smartRulesJson } from "./logic.js";
+import { browseQuery, browseFacets, BROWSE_SORTS, WATCH_FILTERS, readSmartRules, smartRulesJson, continueWatchingChoice } from "./logic.js";
 
 const TITLES = { library: "Library", recent: "Recently Added", movies: "Movies", shows: "TV Shows" };
 const PAGE_SIZE = 100;
@@ -461,9 +461,10 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     return actions;
   }
   function continueWatchingMenu(item) {
-    if (!["movie", "series", "episode"].includes(item.kind)) return [];
+    const choice = continueWatchingChoice(item);
+    if (!choice) return [];
     const signal = current();
-    const intendedHidden = !item.continueWatchingHidden;
+    const intendedHidden = choice === "remove";
     return [h("button", { class: "menu-item", onclick: async () => {
       if (actionWorking || signal.aborted) return;
       actionWorking = true;
@@ -477,7 +478,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     } }, icon(intendedHidden ? "hide" : "eye", { size: 16 }), intendedHidden ? "Remove from Continue Watching" : "Show in Continue Watching")];
   }
 
-  function mediaMenu(item, { seasons, seasonNumber, onGoToSeries } = {}) {
+  function mediaMenu(item, { seasons, onGoToSeries } = {}) {
     const signal = current();
     const option = (label, symbol, action, disabled = false) => h("button", {
       class: "menu-item", disabled, onclick: () => { if (!signal.aborted) action(); },
@@ -488,31 +489,18 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       actions.push(option("Resume", "play", () => play?.(item, seasons, { intent: "resume" }), !available));
     if (item.kind === "episode" && item.parentId)
       actions.push(option("Go to Series", "tv", () => onGoToSeries ? onGoToSeries(item.parentId) : navigate({ name: "title", id: item.parentId })));
+    // Each menu offers the watch state of its own title only: an episode marks the episode, a show
+    // the whole show. A season is marked from the season selector above its episodes.
     if (["movie", "series", "episode"].includes(item.kind)) {
       actions.push(h("div", { class: "menu-divider" }));
-      if (item.kind === "episode" && item.parentId && (seasons?.length || seasonNumber != null)) {
-        actions.push(...watchMenu(item, "title", undefined, { includeContinueWatching: false }));
-        const resolvedSeason = item.seasonNumber ?? seasonNumber ?? (seasons?.[0]?.number);
-        const seriesItem = { id: item.parentId, kind: "series" };
-        if (resolvedSeason != null) {
-          actions.push(...watchMenu(seriesItem, "season", resolvedSeason, { includeContinueWatching: false, labelScope: true }));
-        }
-        actions.push(...watchMenu(seriesItem, "series", undefined, { includeContinueWatching: false, labelScope: true }));
-      } else {
-        if (item.kind === "series" && (seasonNumber != null || seasons?.length)) {
-          const resolvedSeason = seasonNumber ?? (seasons?.[0]?.number);
-          if (resolvedSeason != null) {
-            actions.push(...watchMenu(item, "season", resolvedSeason, { includeContinueWatching: false, labelScope: true }));
-          }
-        }
-        actions.push(...watchMenu(item, item.kind === "series" ? "series" : "title", undefined, {
-          includeContinueWatching: false,
-          labelScope: Boolean(item.kind === "series" && (seasonNumber != null || seasons?.length)),
-        }));
-      }
+      actions.push(...watchMenu(item, item.kind === "series" ? "series" : "title", undefined, {
+        includeContinueWatching: false,
+        labelScope: item.kind === "series",
+      }));
     }
     // The server supports favorites for movies and series. Episode identity is never sent to that endpoint.
     if (["movie", "series"].includes(item.kind)) {
+      actions.push(h("div", { class: "menu-divider" }));
       actions.push(option("Add to Collection…", "plus", () => openAddToCollectionDialog(item)));
       actions.push(option(item.isFavorite ? "Remove from Favorites" : "Add to Favorites", item.isFavorite ? "starSlash" : "star", async () => {
         if (actionWorking) return;

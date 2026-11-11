@@ -108,7 +108,7 @@ test("Continue Watching uses fresh title visibility and token without resetting 
 });
 test("state conflicts remain visible without replaying the mutation", async (t) => {
   let writes = 0; const f = fixture(t, { watchState: async () => state, setContinueWatching: async () => { writes++; throw new ApiError(409, "library_state_conflict", "Reload before saving."); } });
-  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie" })); button(menu, "Remove from Continue Watching").click(); await flush();
+  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie", watchState: "inProgress" })); button(menu, "Remove from Continue Watching").click(); await flush();
   assert.equal(writes, 1); assert.deepEqual(f.messages, ["Reload before saving."]); assert.equal(f.changed, 0);
 });
 test("viewer APIs preserve same-origin cookies, encoded routes and cancellation", async () => {
@@ -136,7 +136,7 @@ test("filtered search and collection routes round-trip", () => {
 test("a late watch-state read after a profile change cannot write with the next profile's cookies", async (t) => {
   const pending = deferred(); let writes = 0, signal;
   const f = fixture(t, { watchState: async (_id, _scope, _season, options) => { signal = options.signal; return pending.promise; }, setContinueWatching: async () => { writes++; } });
-  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie" })); button(menu, "Remove from Continue Watching").click(); await flush();
+  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie", watchState: "inProgress" })); button(menu, "Remove from Continue Watching").click(); await flush();
   f.view.close(); assert.equal(signal.aborted, true); pending.resolve(state); await flush(); assert.equal(writes, 0);
 });
 test("a season confirms only its affected episodes while a single film applies without a dialog", async (t) => {
@@ -145,13 +145,13 @@ test("a season confirms only its affected episodes while a single film applies w
   const season = h("div", {}, f.view.watchMenu({ id: "show", kind: "series" }, "season", 3));
   button(season, "Mark Season as Watched").click(); await flush(); button(f.dialog, "Mark as Watched").click(); await flush();
   assert.equal(writes[0].seasonNumber, 3); assert.equal(writes[0].scope, "season"); assert.deepEqual(reads[0], ["season", 3]);
-  const movie = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie" })); button(movie, "Mark as Watched").click(); await flush();
+  const movie = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie", watchState: "inProgress" })); button(movie, "Mark as Watched").click(); await flush();
   assert.equal(f.dialog, null); assert.equal(writes.length, 2);
 });
 test("repeated clicks cannot send concurrent visibility mutations", async (t) => {
   const pending = deferred(); let reads = 0, writes = 0;
   const f = fixture(t, { watchState: async () => { reads++; return pending.promise; }, setContinueWatching: async () => { writes++; } });
-  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie" })); const action = button(menu, "Remove from Continue Watching");
+  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie", watchState: "inProgress" })); const action = button(menu, "Remove from Continue Watching");
   action.click(); action.click(); await flush(); assert.equal(reads, 1); pending.resolve(state); await flush(); assert.equal(writes, 1);
 });
 test("invalid year input stays editable and canceled dialogs do not navigate", async (t) => {
@@ -169,7 +169,7 @@ test("a missing moved collection offers the complete index rather than reporting
 test("Continue Watching honors the displayed action if another device changed visibility before the read", async (t) => {
   const writes = [];
   const f = fixture(t, { watchState: async () => ({ ...state, continueWatchingHidden: true }), setContinueWatching: async (_id, body) => writes.push(body) });
-  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie", continueWatchingHidden: false }));
+  const menu = h("div", {}, f.view.watchMenu({ id: "film", kind: "movie", watchState: "inProgress", continueWatchingHidden: false }));
   button(menu, "Remove from Continue Watching").click(); await flush();
   assert.equal(writes[0].isHidden, true, "Remove must not become Show because the fresh snapshot is already hidden.");
   assert.equal(writes[0].stateToken, state.stateToken);

@@ -30,7 +30,8 @@ test("movie menus share ordered labels and send explicit Play versus Resume inte
 test("episodes navigate to their actual series and never offer unsupported episode favorites", (t) => {
   const f = fixture(t), item = { ...movie, id: "episode", kind: "episode", parentId: "series", progress: null };
   const menu = f.menu(item);
-  assert.deepEqual(labels(menu), ["Play", "Go to Series", "Mark as Watched", "Mark as Unwatched", "Remove from Continue Watching", "Edit Metadata…"]);
+  assert.deepEqual(labels(menu), ["Play", "Go to Series", "Mark as Watched", "Mark as Unwatched", "Edit Metadata…"]);
+  assert.ok(labels(f.menu({ ...item, watchState: "inProgress" })).includes("Remove from Continue Watching"));
   button(menu, "Go to Series").click(); assert.deepEqual(f.routes, [{ name: "title", id: "series" }]);
   assert.equal(labels(f.menu({ ...item, parentId: null })).includes("Go to Series"), false);
 });
@@ -102,4 +103,14 @@ test("watchlist actions toggle shared state for movies and series when provided"
   assert.equal(changed, 1);
   const secondMenu = h("div", {}, view.mediaMenu(movie));
   assert.equal(labels(secondMenu).includes("Remove from Watchlist"), true);
+});
+
+test("each menu marks only its own title: an episode the episode, a show the whole show", (t) => {
+  const f = fixture(t);
+  const episode = labels(f.menu({ ...movie, id: "episode", kind: "episode", parentId: "series", seasonNumber: 2 }));
+  assert.equal(episode.some((label) => /Season|Series/.test(label) && label.startsWith("Mark")), false);
+  const series = labels(f.menu({ id: "series", kind: "series", title: "Invented Show" }));
+  assert.ok(series.includes("Mark Series as Watched") && series.includes("Mark Series as Unwatched"));
+  assert.equal(series.some((label) => label.startsWith("Mark Season")), false);
+  assert.equal(series.includes("Remove from Continue Watching"), false);
 });

@@ -208,11 +208,44 @@ export const TOUR_SEEN_KEY = "aurelia.tourSeen";
 
 /** The short tour of the browser app on the first sign-in: the place to light up and one sentence. */
 export const TOUR_STOPS = Object.freeze([
-  { target: ".page .poster-card, .page .continue-card", title: "Open a Title", text: "Click a poster to see its details. Play starts it, and its menu has everything else." },
+  { target: ".page .continue-card, .page .poster-card", title: "Open a Title", text: "Click a poster to see its details. Play starts it, and its menu has everything else." },
   { target: ".top-bar .tabs", title: "Your Library", text: "Home, Movies, TV Shows, Collections and your Watchlist." },
   { target: ".top-actions a[href='/search']", title: "Search", text: "Find titles, people and genres. Press / anywhere to start." },
   { target: ".avatar-button", title: "Your Profile", text: "Settings, your name and picture, watch history and switching profiles." },
 ]);
+
+/**
+ * The first tour target that is on screen, else the first one at all. Rectangles are what
+ * getBoundingClientRect returns; a target hidden behind the top bar or below the window loses
+ * to one the person can see without scrolling.
+ */
+export function visibleTourTarget(rects, viewport, topInset = 0) {
+  const sized = rects.map((rect, index) => ({ rect, index })).filter(({ rect }) => rect && rect.width > 0 && rect.height > 0);
+  const onScreen = sized.find(({ rect }) => rect.top >= topInset && rect.bottom <= viewport.height && rect.left >= 0 && rect.right <= viewport.width);
+  return (onScreen ?? sized[0])?.index ?? -1;
+}
+
+/** The lit place of the tour, kept inside the window so its ring never runs off screen. */
+export function tourHole(rect, viewport, padding = 8, margin = 4) {
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+  const left = Math.max(margin, rect.left - padding);
+  const top = Math.max(margin, rect.top - padding);
+  const right = Math.min(viewport.width - margin, rect.right + padding);
+  const bottom = Math.min(viewport.height - margin, rect.bottom + padding);
+  return right - left > 0 && bottom - top > 0 ? { left, top, right, bottom } : null;
+}
+
+/**
+ * Which Continue Watching choice a title's menu offers: "remove" while it is started and shown
+ * there, "show" once it was hidden, nothing for a title that isn't in the row at all.
+ */
+export function continueWatchingChoice(item) {
+  if (!item || !["movie", "series", "episode"].includes(item.kind)) return null;
+  if (item.continueWatchingHidden) return "show";
+  const completed = item.watchState === "completed" || item.progress?.isCompleted;
+  const started = item.watchState === "inProgress" || (item.progress?.positionMilliseconds ?? 0) > 0;
+  return started && !completed ? "remove" : null;
+}
 
 /** Whether this browser still owes its person the tour. Storage may be missing or refuse access. */
 export function tourPending(storage) {

@@ -45,3 +45,30 @@ test("the tour note stays beside the lit place and inside the window", () => {
   const narrow = logic.tourBubblePosition({ left: 10, top: 10, right: 360, bottom: 60 }, { width: 375, height: 700 }, { width: 343, height: 170 });
   assert.ok(narrow.x >= 16 && narrow.x + 343 <= 375 - 16 + 0.001);
 });
+
+test("the tour lights the first target on screen and keeps its ring inside the window", () => {
+  const viewport = { width: 1200, height: 800 };
+  const below = { left: 20, top: 900, right: 220, bottom: 1200, width: 200, height: 300 };
+  const visible = { left: 240, top: 300, right: 440, bottom: 600, width: 200, height: 300 };
+  const hidden = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+  assert.equal(logic.visibleTourTarget([hidden, below, visible], viewport, 64), 2);
+  assert.equal(logic.visibleTourTarget([hidden, below], viewport, 64), 1);
+  assert.equal(logic.visibleTourTarget([hidden], viewport), -1);
+  const underBar = { left: 20, top: 30, right: 220, bottom: 330, width: 200, height: 300 };
+  assert.equal(logic.visibleTourTarget([underBar, visible], viewport, 64), 1);
+
+  assert.deepEqual(logic.tourHole(visible, viewport), { left: 232, top: 292, right: 448, bottom: 608 });
+  assert.deepEqual(logic.tourHole({ left: -10, top: 500, right: 300, bottom: 1000, width: 310, height: 500 }, viewport),
+    { left: 4, top: 492, right: 308, bottom: 796 });
+  assert.equal(logic.tourHole(hidden, viewport), null);
+});
+
+test("Continue Watching is offered only for titles that are in the row or were hidden from it", () => {
+  assert.equal(logic.continueWatchingChoice({ kind: "movie", watchState: "inProgress" }), "remove");
+  assert.equal(logic.continueWatchingChoice({ kind: "episode", progress: { positionMilliseconds: 5000 } }), "remove");
+  assert.equal(logic.continueWatchingChoice({ kind: "series", watchState: "unplayed" }), null);
+  assert.equal(logic.continueWatchingChoice({ kind: "movie", watchState: "completed", progress: { positionMilliseconds: 9, isCompleted: true } }), null);
+  assert.equal(logic.continueWatchingChoice({ kind: "movie", continueWatchingHidden: true }), "show");
+  assert.equal(logic.continueWatchingChoice({ kind: "collection", watchState: "inProgress" }), null);
+  assert.equal(logic.continueWatchingChoice(null), null);
+});
