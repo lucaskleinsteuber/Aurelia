@@ -31,7 +31,8 @@ public sealed record LiveStreamOptions(
     HdrToneMapping ToneMapping = HdrToneMapping.Unavailable,
     HardwareEncoder? Hardware = null,
     StreamingStep? Step = null,
-    int? SegmentSeconds = null);
+    int? SegmentSeconds = null,
+    string? X264Preset = null);
 
 /// <summary>
 /// Decides how a title reaches a player that cannot open the original: the picture is only
@@ -205,7 +206,7 @@ public static class LiveConversionPlanner
             case { } kind:
                 // A plain live stream keeps its former rates: x264 up to 8 Mbit/s, a chip at 6 Mbit/s.
                 var kilobits = options.Step?.VideoKilobits ?? (kind == LiveVideoEncoder.Libx264 ? 8000 : 6000);
-                arguments.AddRange(HardwareEncoding.EncoderArguments(kind, kilobits));
+                arguments.AddRange(HardwareEncoding.EncoderArguments(kind, kilobits, options.X264Preset));
                 if (kind == LiveVideoEncoder.Libx264) arguments.AddRange(["-level:v", options.Step?.LevelName ?? "4.1"]);
                 AddPicture(arguments, options, kind);
                 break;

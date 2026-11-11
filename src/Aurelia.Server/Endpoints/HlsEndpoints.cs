@@ -31,7 +31,8 @@ public static partial class HlsEndpoints
         if (opened is null) return problem!;
         await using (opened.Source.Stream)
         {
-            var steps = StreamingLadder.For(opened.Video, opened.Probe.BitRate);
+            // Qualities this server measured too slow to convert in time are left out.
+            var steps = live.Pace.Offered(live.ChooseEncoder(opened.Tools)?.Kind, StreamingLadder.For(opened.Video, opened.Probe.BitRate));
             return Playlist(context, HlsPlaylists.Master(steps, opened.Audio?.Index));
         }
     }

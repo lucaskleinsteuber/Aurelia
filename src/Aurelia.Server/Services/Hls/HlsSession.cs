@@ -235,7 +235,7 @@ public sealed partial class HlsSession : IAsyncDisposable
             encoder ??= live.ChooseEncoder(tools) ?? throw new InvalidOperationException("The server cannot encode pictures.");
             var stop = CancellationTokenSource.CreateLinkedTokenSource(ending.Token);
             var options = new LiveStreamOptions(index * HlsPlaylists.SegmentSeconds, Video, encoder.Value.Kind, Audio, CopyAudio: false,
-                ToneMapping, encoder.Value.Chip, Step, HlsPlaylists.SegmentSeconds);
+                ToneMapping, encoder.Value.Chip, Step, HlsPlaylists.SegmentSeconds, live.Pace.Preset(encoder.Value.Kind, Step.Id));
             store.BeginProducing(index);
             lock (store)
             {
@@ -271,10 +271,17 @@ public sealed partial class HlsSession : IAsyncDisposable
     {
         var finished = false;
         var fragments = 0;
+        // ffmpeg reports its average speed so far. The best one after a few segments shows what the
+        // computer manages; later ones drop while reading pauses for a player that is far behind.
+        var peak = 0.0;
         IHlsRun? run = null;
         try
         {
-            run = converter.Start(this, options, value => Volatile.Write(ref speed, value));
+            run = converter.Start(this, options, value =>
+            {
+                Volatile.Write(ref speed, value);
+                if (Volatile.Read(ref fragments) >= 2 && value > peak) peak = value;
+            });
             using var stopOnCancel = cancellationToken.Register(static state => ((IHlsRun)state!).Dispose(), run);
             byte[]? ftyp = null;
             byte[]? moof = null;
@@ -332,6 +339,8 @@ public sealed partial class HlsSession : IAsyncDisposable
                 }
                 else Interlocked.Increment(ref failures);
             }
+            if (fragments >= 3 && peak > 0 && options.Encoder is { } kind)
+                live.Pace.Record(kind, Step.Id, options.X264Preset, peak);
             run?.Dispose();
             slot.Dispose();
         }

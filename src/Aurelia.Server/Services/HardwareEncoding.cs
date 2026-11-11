@@ -172,15 +172,19 @@ public static partial class HardwareEncoding
         _ => pictureFilter,
     };
 
-    /// <summary>The encoder and its rate settings for a target video bitrate in kbit/s.</summary>
-    public static IReadOnlyList<string> EncoderArguments(LiveVideoEncoder kind, int kilobits)
+    /// <summary>
+    /// The encoder and its rate settings for a target video bitrate in kbit/s; x264 takes a preset
+    /// from <see cref="EncodingPace.Presets"/> (veryfast unless the server measured it too slow).
+    /// </summary>
+    public static IReadOnlyList<string> EncoderArguments(LiveVideoEncoder kind, int kilobits, string? x264Preset = null)
     {
+        var preset = x264Preset is not null && EncodingPace.Presets.Contains(x264Preset) ? x264Preset : EncodingPace.Presets[0];
         var rate = Kilobits(kilobits);
         var peak = Kilobits(kilobits * 3 / 2);
         var buffer = Kilobits(kilobits * 2);
         return kind switch
         {
-            LiveVideoEncoder.Libx264 => ["-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-maxrate", rate, "-bufsize", buffer, "-profile:v", "high"],
+            LiveVideoEncoder.Libx264 => ["-c:v", "libx264", "-preset", preset, "-crf", "22", "-maxrate", rate, "-bufsize", buffer, "-profile:v", "high"],
             LiveVideoEncoder.VideoToolbox => ["-c:v", "h264_videotoolbox", "-allow_sw", "1", "-b:v", rate, "-profile:v", "high"],
             LiveVideoEncoder.Nvenc => ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-b:v", rate, "-maxrate", peak, "-bufsize", buffer, "-profile:v", "high", "-forced-idr", "1"],
             LiveVideoEncoder.Qsv => ["-c:v", "h264_qsv", "-preset", "veryfast", "-b:v", rate, "-maxrate", peak, "-bufsize", buffer, "-profile:v", "high"],

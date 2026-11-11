@@ -20,9 +20,10 @@ public static class TranscodingStatus
         var running = sessions.Sessions.Select(session => new TranscodingSessionStatus(
             session.Title, session.Step.Id, session.Encoder is { } kind ? Name(kind) : null, session.IsProducing ? session.Speed : null,
             session.IsProducing)).ToList();
-        var hint = OperatingSystem.IsLinux()
+        var hint = (OperatingSystem.IsLinux()
             ? Hint(tools, setting, isLinux: true, GraphicsVendors(), HardwareEncoding.RenderDevices(), CanOpen)
-            : Hint(tools, setting, isLinux: false, [], [], _ => true);
+            : Hint(tools, setting, isLinux: false, [], [], _ => true))
+            ?? PaceHint(chosen?.Kind, live.Pace);
         return new TranscodingStatusResponse(
             chosen is not null,
             chosen is { } encoder ? Name(encoder.Kind) : null,
@@ -37,6 +38,20 @@ public static class TranscodingStatus
     }
 
     public static string Name(LiveVideoEncoder kind) => kind.ToString().ToLowerInvariant();
+
+    /// <summary>
+    /// When the processor converts and has fallen behind real time, says that Aurelia already
+    /// eases the picture and what would help; null while it keeps up.
+    /// </summary>
+    public static string? PaceHint(LiveVideoEncoder? kind, EncodingPace pace)
+    {
+        ArgumentNullException.ThrowIfNull(pace);
+        if (kind != LiveVideoEncoder.Libx264) return null;
+        var slow = pace.Measured(LiveVideoEncoder.Libx264)
+            .Where(step => pace.Last(LiveVideoEncoder.Libx264, step) is { } measure && measure.Speed < EncodingPace.Margin).ToList();
+        return slow.Count == 0 ? null
+            : $"The processor converts {string.Join(", ", slow)} slower than playback, so Aurelia uses a faster setting and leaves out qualities it can't keep up with. A video chip the server can use would help.";
+    }
 
     /// <summary>The next step when hardware encoding could work but doesn't, or null when nothing is to do.</summary>
     /// <param name="vendors">PCI vendor ids of the computer's graphics, such as "0x8086".</param>

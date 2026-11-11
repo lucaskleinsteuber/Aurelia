@@ -96,6 +96,9 @@ public sealed partial class LiveConversionService : IDisposable
     /// <summary>Remembers a chip that failed during a conversion, so the next ones use the processor for a while.</summary>
     public HardwareHealth Health { get; } = new();
 
+    /// <summary>How fast each quality converts here; see <see cref="EncodingPace"/>.</summary>
+    public EncodingPace Pace { get; } = new();
+
     /// <summary>How many pictures may be encoded at once: one on the processor, three on a chip, or the owner's number.</summary>
     public static int VideoConversionLimit(FfmpegTools? tools, int? configured = null) =>
         configured ?? (tools?.EncodesOnChip == true ? MaximumChipConversions : MaximumVideoConversions);
