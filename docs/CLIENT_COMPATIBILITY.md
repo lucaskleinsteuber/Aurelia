@@ -36,6 +36,12 @@ Servers 1.7.0 to 1.7.8 offered intro and credits times under `media-segments-v1`
 (`/api/v1/media/{id}/segments`). The feature was removed in 1.7.9, together with its stored
 times; those routes now return 404, and clients must treat that as "no times".
 
+Since 2.8.0, `media-segments-v2` means the server finds intro and credits times itself and
+sends them with the playback ticket as an optional `segments` object; administrators correct
+them under `/api/v1/media/{id}/segments` (docs/CLIENT_PROTOCOL.md, "Intro and credits"). It
+shares nothing with `media-segments-v1`: clients written for v1 ignore the new field, and a
+client must not show a skip button unless the server reports v2 and the ticket carries a time.
+
 `GET /api/v1/health/live` (also HEAD) indicates HTTP liveness without a database
 read. `GET /api/v1/health/ready` reports a coarse cached state. Component details
 and bounded recovery history require the Owner management endpoint

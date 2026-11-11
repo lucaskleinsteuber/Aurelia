@@ -144,6 +144,45 @@ public sealed class MigrationUpgradeTests
     }
 
     [Fact]
+    public async Task MediaSegmentTimesUpgradeAddsAnEmptyTableAndKeepsExistingData()
+    {
+        var root = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(root);
+        var options = new DbContextOptionsBuilder<AureliaDbContext>()
+            .UseSqlite($"Data Source={Path.Combine(root, "aurelia.db")};Pooling=False").Options;
+        try
+        {
+            await using var database = new AureliaDbContext(options);
+            await database.Database.GetService<IMigrator>().MigrateAsync("20261107173836_ProfilePersonalizationAndAgeLimits");
+            var userId = Guid.NewGuid();
+            await database.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO Users (Id, Username, NormalizedUsername, PasswordHash, Role, CreatedAt, IsEnabled, AccessMode, AccessRevision, PinProtectionEnabled, ProfileRevision)
+                VALUES ({userId}, 'Kept', 'KEPT', 'unchanged-password-hash', 'User', 1, 1, 'EntireLibrary', 3, 0, 0);
+                """);
+            // The table of the first attempt (1.7.0 to 1.7.8) was dropped in 1.7.9 and must not exist here.
+            Assert.Equal(0L, await ScalarAsync(database, "SELECT count(*) FROM sqlite_master WHERE name = 'MediaSegments'"));
+
+            await database.Database.MigrateAsync();
+
+            Assert.Equal(0, await database.MediaSegments.CountAsync());
+            Assert.Equal(1L, await ScalarAsync(database,
+                "SELECT count(*) FROM pragma_foreign_key_list('MediaSegments') WHERE \"table\" = 'MediaItems' AND on_delete = 'CASCADE'"));
+            var user = await database.Users.AsNoTracking().SingleAsync(candidate => candidate.Id == userId);
+            Assert.Equal(("unchanged-password-hash", 3), (user.PasswordHash, user.AccessRevision));
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root, true); }
+    }
+
+    private static async Task<long> ScalarAsync(AureliaDbContext database, string sql)
+    {
+        var connection = database.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (long)(await command.ExecuteScalarAsync())!;
+    }
+
+    [Fact]
     public async Task OptionalPinMigrationPreservesProtectedAndPendingProfilesWithoutChangingCredentials()
     {
         var root = TestPaths.CreateDataDirectory();

@@ -9,8 +9,15 @@ public static class ServerFeatures
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
-        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped,
+        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments,
     });
+
+    /// <summary>
+    /// Intro and credits times found by the server come with the playback ticket and can be
+    /// corrected ("media-segments-v2", docs/CLIENT_PROTOCOL.md). "media-segments-v1" was removed in
+    /// 1.7.9 and is never reported again.
+    /// </summary>
+    public const string MediaSegments = "media-segments-v2";
 
     /// <summary>Movie Night: the household swipes through one deck until everyone likes a title ("movie-night-v1").</summary>
     public const string MovieNight = "movie-night-v1";

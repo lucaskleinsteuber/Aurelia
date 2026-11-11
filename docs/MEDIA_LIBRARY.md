@@ -53,6 +53,29 @@ Aurelia understands these episode names: `S01E02`, `S1 E2`, `1x02`, `Season 1 Ep
 `Staffel 1 Folge 2`, and inside a season folder also `E02`, `Episode 2`, `Folge 2` or just `02`.
 Season folders may be called `Season 1`, `Staffel 1` or `S1`.
 
+## Intros and credits
+
+For series, the server finds where the intro and the credits are, so players can offer
+**Skip Intro** and the next episode when the credits begin. It works in the background after a
+scan, one short read at a time, and waits while anyone is watching.
+
+- If a file has chapters named like "Intro", "Opening", "OP", "Credits", "Ending" or "ED", those
+  are used as they are.
+- Otherwise the server compares the sound of each episode with up to four other episodes of the
+  same season: the first 12 minutes (at most 40 % of the episode) for the intro and the last 10
+  minutes (at most 25 %) for the credits. Music that at least two other episodes share at a
+  believable length is the intro (10 to 150 seconds) or the credits (at least 15 seconds); a
+  recap that only one other episode shares is not. Boundaries move to a quiet moment nearby.
+- When it is not sure, it stores nothing and no button appears. A season needs at least two
+  episodes; movies are not examined.
+- Someone who may edit the library can correct the times of an episode in Edit Metadata. A
+  correction is never replaced; "Reset to detected" removes it.
+
+The media file is only read. Sound and the fingerprints made from it exist only in the
+server's memory while a season is compared; only the timestamps are stored, in the server's
+database. No sound, picture, fingerprint or other file is written anywhere. The owner can turn
+detection off under the server settings; times set by hand keep working then.
+
 ## Extras and trailers
 
 Put them in a subfolder of the movie, the series or the season, and they appear on its page:

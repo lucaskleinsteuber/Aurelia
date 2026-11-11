@@ -904,6 +904,38 @@ namespace Aurelia.Server.Data.Migrations
                     b.ToTable("MediaItems");
                 });
 
+            modelBuilder.Entity("Aurelia.Server.Data.MediaItemPlacement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LibraryRootId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("TEXT");
+
+                    b.ToTable((string)null);
+
+                    b.ToView("MediaItems", (string)null);
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaItemRating", b =>
+                {
+                    b.Property<string>("ManualContentRating")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderContentRating")
+                        .HasColumnType("TEXT");
+
+                    b.ToTable((string)null);
+
+                    b.ToView("MediaMetadata", (string)null);
+                });
+
             modelBuilder.Entity("Aurelia.Server.Data.MediaMetadata", b =>
                 {
                     b.Property<Guid>("MediaItemId")
@@ -1040,6 +1072,53 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasIndex("Provider", "ProviderMediaId");
 
                     b.ToTable("MediaMetadata");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaSegment", b =>
+                {
+                    b.Property<Guid>("MediaItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AnalysisVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("AnalyzedFileModifiedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("AnalyzedFileSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("CreditsConfidence")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("CreditsSource")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("CreditsStartMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("IntroConfidence")
+                        .HasColumnType("REAL");
+
+                    b.Property<long?>("IntroEndMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("IntroSource")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("IntroStartMilliseconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MediaItemId");
+
+                    b.ToTable("MediaSegments");
                 });
 
             modelBuilder.Entity("Aurelia.Server.Data.MetadataJob", b =>
@@ -1853,6 +1932,17 @@ namespace Aurelia.Server.Data.Migrations
                     b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
                         .WithOne("Metadata")
                         .HasForeignKey("Aurelia.Server.Data.MediaMetadata", "MediaItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MediaItem");
+                });
+
+            modelBuilder.Entity("Aurelia.Server.Data.MediaSegment", b =>
+                {
+                    b.HasOne("Aurelia.Server.Data.MediaItem", "MediaItem")
+                        .WithOne()
+                        .HasForeignKey("Aurelia.Server.Data.MediaSegment", "MediaItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

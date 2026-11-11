@@ -59,6 +59,7 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
     public DbSet<ContinueWatchingState> ContinueWatchingStates => Set<ContinueWatchingState>();
     public DbSet<LibraryStateMutation> LibraryStateMutations => Set<LibraryStateMutation>();
     public DbSet<SceneNote> SceneNotes => Set<SceneNote>();
+    public DbSet<MediaSegment> MediaSegments => Set<MediaSegment>();
 
     public DbSet<MediaMetadata> MediaMetadata => Set<MediaMetadata>();
     // Read only by the access filters below, which must see titles without filtering them.
@@ -349,6 +350,16 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
             entity.HasOne(note => note.User).WithMany().HasForeignKey(note => note.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(note => note.MediaItem).WithMany().HasForeignKey(note => note.MediaItemId).OnDelete(DeleteBehavior.Cascade);
         });
+        modelBuilder.Entity<MediaSegment>().HasQueryFilter(segment => AccessUserId == null || AccessWholeCatalog
+            || MediaItems.Any(media => media.Id == segment.MediaItemId));
+        modelBuilder.Entity<MediaSegment>(entity =>
+        {
+            entity.HasKey(segment => segment.MediaItemId);
+            entity.Property(segment => segment.IntroSource).HasConversion<string>().HasMaxLength(16);
+            entity.Property(segment => segment.CreditsSource).HasConversion<string>().HasMaxLength(16);
+            entity.HasOne(segment => segment.MediaItem).WithOne().HasForeignKey<MediaSegment>(segment => segment.MediaItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         // History belongs to its profile and, like progress, only shows titles the profile may see,
         // so a page's total matches the entries it can list.
         modelBuilder.Entity<WatchEvent>().HasQueryFilter(watch => AccessUserId == null
@@ -364,6 +375,8 @@ public sealed class AureliaDbContext(DbContextOptions<AureliaDbContext> options)
         var nullableDateTimeOffsetConverter = new ValueConverter<DateTimeOffset?, long?>(
             value => value.HasValue ? value.Value.ToUnixTimeMilliseconds() : null,
             value => value.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(value.Value) : null);
+        modelBuilder.Entity<MediaSegment>().Property(segment => segment.UpdatedAt).HasConversion(dateTimeOffsetConverter);
+        modelBuilder.Entity<MediaSegment>().Property(segment => segment.AnalyzedFileModifiedAt).HasConversion(nullableDateTimeOffsetConverter);
 
         modelBuilder.Entity<ServerUser>(entity =>
         {

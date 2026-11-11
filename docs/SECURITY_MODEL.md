@@ -34,6 +34,10 @@ endpoint or a client can be checked against it.
   profile, and a session ends with its user, profile session or title. A video chip is opened
   only through `/dev/dri` render nodes (or Nvidia's driver) after a test encode of an invented
   picture.
+- **Intro detection keeps only timestamps.** To find intros and credits the server decodes
+  short stretches of an episode's sound the same way (ffmpeg without a shell, the checked and
+  opened file, standard output only). Sound and fingerprints stay in memory while a season is
+  compared; only the times are stored, in the database.
 - **Diagnostics are redacted.** Tokens, passwords, PINs and full paths do not appear in
   logs, Server Health or exported diagnostics.
 
@@ -65,7 +69,7 @@ titles manages only those and cannot browse or scan storage locations.
 
 Everything about the server and its people, also without the server password: server
 settings, network access, power saving, updates, backups, paired devices and pairing codes,
-profiles and their access, and the scrub-preview settings.
+profiles and their access, and the scrub-preview and intro detection settings.
 
 ### Changes that also need the server password
 

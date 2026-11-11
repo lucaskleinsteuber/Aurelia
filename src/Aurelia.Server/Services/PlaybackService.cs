@@ -17,7 +17,8 @@ public sealed class PlaybackService(
     TokenService tokenService,
     PlaybackProgressService progressService,
     PlaybackTicketPolicy? ticketPolicy = null,
-    ProfileSessionStore? profiles = null)
+    ProfileSessionStore? profiles = null,
+    MediaSegmentService? segments = null)
 {
     private const int CleanupBatchSize = 100;
 
@@ -97,7 +98,8 @@ public sealed class PlaybackService(
             await progressService.GetSnapshotAsync(
                 userId,
                 media.Id,
-                cancellationToken));
+                cancellationToken),
+            segments is null ? null : await segments.ForPlaybackAsync(media.Id, cancellationToken));
     }
 
     public async Task RevokeAsync(

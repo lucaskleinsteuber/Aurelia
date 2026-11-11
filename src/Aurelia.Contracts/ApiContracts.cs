@@ -330,7 +330,8 @@ public sealed record PlaybackSourceResponse(
     string ContentType,
     long ContentLength,
     DateTimeOffset ExpiresAt,
-    PlaybackProgressResponse Progress);
+    PlaybackProgressResponse Progress,
+    MediaSegmentsDto? Segments = null);
 
 public sealed record UpdatePlaybackProgressRequest(
     long PositionMilliseconds,

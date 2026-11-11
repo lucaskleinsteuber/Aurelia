@@ -37,6 +37,9 @@ public sealed record ProbedSubtitle(
     bool IsDefault,
     bool IsForced);
 
+/// <summary>A chapter mark from the file's header: where it begins and ends, and its name.</summary>
+public sealed record ProbedChapter(double StartSeconds, double EndSeconds, string? Title);
+
 /// <summary>
 /// A description of a media file from its header: container, length and streams. It holds no
 /// picture or sound, so it may stay in memory while the file is unchanged.
@@ -47,7 +50,8 @@ public sealed record MediaProbeResult(
     ProbedVideo? Video,
     IReadOnlyList<ProbedAudio> Audio,
     IReadOnlyList<ProbedSubtitle>? Subtitles = null,
-    long? BitRate = null);
+    long? BitRate = null,
+    IReadOnlyList<ProbedChapter>? Chapters = null);
 
 /// <summary>Reads a file's header with ffprobe; only the header is read, never the whole file.</summary>
 public static class MediaProbe
@@ -68,7 +72,8 @@ public static class MediaProbe
     [
         "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "file",
         "-show_entries", "stream=index,codec_name,codec_type,profile,level,width,height,pix_fmt,bits_per_raw_sample,channels,duration,color_transfer,color_primaries,color_space,color_range"
-            + ":stream_disposition=attached_pic,default,forced:stream_tags=language,title:format=format_name,duration,start_time,bit_rate",
+            + ":stream_disposition=attached_pic,default,forced:stream_tags=language,title:format=format_name,duration,start_time,bit_rate"
+            + ":chapter=start_time,end_time:chapter_tags=title",
         "-of", "json", "file:" + input,
     ];
 
@@ -120,6 +125,20 @@ public static class MediaProbe
             }
         }
 
+        var chapters = new List<ProbedChapter>();
+        if (root.TryGetProperty("chapters", out var chapterList) && chapterList.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var chapter in chapterList.EnumerateArray())
+            {
+                if (chapters.Count == 512) break;
+                if (Number(chapter, "start_time") is { } chapterStart && Number(chapter, "end_time") is { } chapterEnd
+                    && chapterStart >= 0 && chapterEnd > chapterStart)
+                {
+                    chapters.Add(new ProbedChapter(chapterStart, chapterEnd, Tag(chapter, "title")));
+                }
+            }
+        }
+
         var duration = Number(format, "duration") is > 0 and var total ? total : videoDuration;
         return new MediaProbeResult(
             container,
@@ -127,7 +146,8 @@ public static class MediaProbe
             video,
             audio,
             subtitles,
-            Number(format, "bit_rate") is > 0 and var rate ? (long)Math.Min(rate, long.MaxValue / 2) : null);
+            Number(format, "bit_rate") is > 0 and var rate ? (long)Math.Min(rate, long.MaxValue / 2) : null,
+            chapters);
     }
 
     private static int BitDepth(JsonElement stream, string? pixelFormat)

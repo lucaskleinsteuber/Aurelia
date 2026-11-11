@@ -322,6 +322,37 @@ does no recognition itself.
   original (embedded, beside the video or downloaded) as it is. The device reads the original
   as WebVTT through `GET {streamPath}/subtitles/{index}`.
 
+## Intro and credits
+
+A server from 2.8.0 reports `media-segments-v2`. It finds the intro and the credits of episodes
+itself, in the background, and every client gets the same times. The playback ticket
+(`POST /api/v1/media/{id}/playback`) carries them in an optional `segments` object:
+`{introStartMilliseconds, introEndMilliseconds, creditsStartMilliseconds}`, each from the start
+of the title and each possibly `null`. A missing `segments` means there is nothing to skip.
+Clients never analyze media themselves and show no button without a time; the server prefers no
+time to a wrong one.
+
+- A client shows **Skip Intro** from one second before `introStartMilliseconds` until two
+  seconds before `introEndMilliseconds` and jumps to `introEndMilliseconds`. Skipping
+  automatically is the person's own setting on that device, off by default.
+- From `creditsStartMilliseconds` a client offers the next episode with its countdown and a
+  **Watch Credits** choice that keeps playing to the end of the file.
+- `GET /api/v1/media/{id}/segments` returns the times with their origin
+  (`introSource`/`creditsSource`: `none`, `chapters`, `detected` or `manual`), a confidence from
+  0 to 1, `analyzed` and `canAnalyze` (episodes of a series).
+- Administrators with management unlocked correct them: `PUT` with the three times makes each
+  changed part `manual`, which no later analysis replaces; `DELETE` removes the corrections and
+  has the episode examined again; `POST .../segments/reanalyze` examines the episode's season
+  (or, for a series id, all its seasons) again.
+- The owner reads the state with `GET /api/v1/server/media-segments` (`available`, `enabled`,
+  `pendingCount`, `analyzedCount`, `noResultCount`, `running`, `pausedForPlayback`), turns
+  detection on or off with `PUT {enabled}` and starts over with
+  `POST /api/v1/server/media-segments/reanalyze` (`{seriesId?, seasonNumber?}`). While it is off,
+  tickets carry only times set by hand.
+
+How the server finds the times and what it stores is described in
+[Organizing your media](MEDIA_LIBRARY.md#intros-and-credits).
+
 ## Cinema mode
 
 With `cinema-trailers-v1` (server 2.3.0), a player can show trailers before a film, as at the
