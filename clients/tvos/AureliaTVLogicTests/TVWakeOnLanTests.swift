@@ -12,12 +12,13 @@ struct TVWakeOnLanTests {
     return defaults
   }
 
-  private func info(_ addresses: [String]?) throws -> TVServerInfo {
+  private func info(_ addresses: [String]?, hosting: String? = nil) throws -> TVServerInfo {
     var object: [String: Any] = [
       "serverId": serverID.uuidString, "name": "Synthetic", "version": "1.9.0",
       "isSetup": true, "lanAccessEnabled": true,
     ]
     if let addresses { object["wakeOnLanAddresses"] = addresses }
+    if let hosting { object["hosting"] = hosting }
     return try JSONDecoder().decode(
       TVServerInfo.self, from: JSONSerialization.data(withJSONObject: object))
   }
@@ -58,5 +59,21 @@ struct TVWakeOnLanTests {
 
   @Test func oldServerInfoWithoutCardsStillDecodes() throws {
     #expect(try info(nil).wakeOnLanAddresses == nil)
+  }
+
+  @Test func aServerInsideTheAureliaAppIsNeverWokenAndSaysWhereToStartIt() throws {
+    let defaults = isolatedDefaults()
+    TVWakeOnLan.remember(
+      serverID: serverID, info: try info(["02-00-5E-10-00-01"], hosting: "linuxServer"),
+      hosts: ["10.0.0.20"], defaults: defaults)
+    #expect(TVWakeOnLan.appHost(for: serverID, defaults: defaults) == nil)
+    TVWakeOnLan.remember(
+      serverID: serverID, info: try info(nil, hosting: "macApp"), hosts: ["10.0.0.20"], defaults: defaults)
+    let target = try #require(TVWakeOnLan.target(for: serverID, defaults: defaults))
+    #expect(target.hardwareAddresses.isEmpty, "A desktop or laptop is started by its owner.")
+    #expect(TVWakeOnLan.appHost(for: serverID, defaults: defaults) == "Mac")
+    // A server too old to say where it runs changes nothing.
+    TVWakeOnLan.remember(serverID: serverID, info: try info(nil), hosts: [], defaults: defaults)
+    #expect(TVWakeOnLan.appHost(for: serverID, defaults: defaults) == "Mac")
   }
 }

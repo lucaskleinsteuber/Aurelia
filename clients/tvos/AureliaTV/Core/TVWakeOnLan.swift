@@ -14,6 +14,17 @@ enum TVWakeOnLan {
   struct Target: Codable, Equatable {
     var hardwareAddresses: [String] = []
     var ipv4Hosts: [String] = []
+    /// Where the server last said it runs; "macApp" or "linuxApp" are never woken over the network.
+    var hosting: String? = nil
+  }
+
+  /// "Mac" or "Linux PC" when the server runs inside the Aurelia app there, as it last said.
+  static func appHost(for serverID: UUID, defaults: UserDefaults = .standard) -> String? {
+    switch target(for: serverID, defaults: defaults)?.hosting {
+    case "macApp": "Mac"
+    case "linuxApp": "Linux PC"
+    default: nil
+    }
   }
 
   /// Remembers what a server reported and where it answered, keyed by its identity.
@@ -24,6 +35,11 @@ enum TVWakeOnLan {
     var target = all[serverID.uuidString] ?? Target()
     let reported = (info?.wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
     if !reported.isEmpty { target.hardwareAddresses = reported }
+    if let hosting = info?.hosting {
+      target.hosting = hosting
+      // A desktop or laptop is started by its owner; old addresses must not wake it.
+      if hosting == "macApp" || hosting == "linuxApp" { target.hardwareAddresses = [] }
+    }
     let numeric = hosts.filter(isIPv4)
     if !numeric.isEmpty {
       // The newest addresses first, at most four.

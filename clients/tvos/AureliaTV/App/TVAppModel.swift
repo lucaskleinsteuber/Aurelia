@@ -15,6 +15,9 @@ final class TVAppModel: ObservableObject {
   @Published private(set) var error: String?
   /// The saved server did not answer at all, probably asleep: shown as a hint, not as an error.
   @Published private(set) var savedServerUnreachable = false
+  /// "Mac" or "Linux PC" when the saved server runs inside the Aurelia app there: its owner starts
+  /// it by opening Aurelia, and this device doesn't try to wake it.
+  var savedServerAppHost: String? { connection.flatMap { TVWakeOnLan.appHost(for: $0.serverID) } }
   @Published var selectedProfile: TVWatchingProfile?
   /// Counts rejected PINs, so the entry clears and shakes even when the message repeats.
   @Published private(set) var pinRejections = 0

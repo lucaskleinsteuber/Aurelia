@@ -171,9 +171,12 @@ struct TVSavedServerView: View {
         Image(systemName: "power").font(.system(size: 72, weight: .medium))
           .foregroundStyle(.secondary)
         VStack(spacing: 18) {
-          Text("The Server Is Off").font(.system(size: 56, weight: .bold))
+          Text(model.savedServerAppHost.map { "Start Aurelia on Your \($0)" } ?? "The Server Is Off").font(.system(size: 56, weight: .bold))
           Text(
-            "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
+            model.savedServerAppHost.map {
+              "“\(name)” runs inside the Aurelia app on a \($0). Open Aurelia there, or wake the \($0), and this Apple TV connects by itself."
+            }
+              ?? "“\(name)” isn’t answering. Turn on the computer the server runs on, or open Aurelia on your Mac to wake it."
           )
           .font(.title3).foregroundStyle(.secondary).multilineTextAlignment(.center)
           .frame(maxWidth: 1100)

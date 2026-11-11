@@ -149,6 +149,9 @@ struct IOSServerInfo: Codable, Equatable, Sendable {
   let capabilities: [String]?
   /// Hardware addresses of the server's network cards, reported for Wake-on-LAN.
   var wakeOnLanAddresses: [String]? = nil
+  /// From server 2.10.0: "macApp" or "linuxApp" when the Aurelia app hosts it on a desktop or
+  /// laptop, which its owner starts; "linuxServer" or "server" otherwise.
+  var hosting: String? = nil
 }
 
 struct IOSInspectedServer: Equatable, Sendable {
