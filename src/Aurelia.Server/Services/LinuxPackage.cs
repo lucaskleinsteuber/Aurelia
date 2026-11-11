@@ -34,3 +34,26 @@ public sealed class LinuxServiceRestart(IHostApplicationLifetime lifetime, Serve
         return new(Guid.NewGuid(), "restart", "restarting", null, configuration.Current.LanHttpsPort);
     }
 }
+
+/// <summary>
+/// Where this server runs. Aurelia for Mac and Aurelia for Linux start the server they host with
+/// <c>--host-parent-pid</c>; such a desktop or laptop is often off or elsewhere, so it gets no
+/// Wake-on-LAN and only "stop after unused minutes". The Linux package runs it as a system service
+/// on a computer meant to serve.
+/// </summary>
+public static class ServerHosting
+{
+    public const string MacApp = "macApp";
+    public const string LinuxApp = "linuxApp";
+    public const string LinuxServer = "linuxServer";
+    public const string Server = "server";
+
+    /// <summary>A server that stopped because nobody used it ends with this status, so its app doesn't start it again.</summary>
+    public const int IdleExitCode = 76;
+
+    public static string Kind(ServerRuntimeOptions runtime) =>
+        runtime.HostParentProcessId is not null ? (OperatingSystem.IsMacOS() ? MacApp : LinuxApp)
+        : LinuxPackage.IsInstalled ? LinuxServer : Server;
+
+    public static bool ByApp(string kind) => kind is MacApp or LinuxApp;
+}

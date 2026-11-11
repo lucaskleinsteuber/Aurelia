@@ -9,7 +9,8 @@ import {
   MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
   rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
-  TOP_BAR_SECTIONS, moveSection, POWER_MODES, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess
+  TOP_BAR_SECTIONS, moveSection, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess,
+  powerModesFor, appHostName
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
@@ -732,9 +733,11 @@ export function createSettings(app) {
     const power = sections?.power;
     if (!power?.available) return [];
     rememberWakeOnAccess(power);
-    const draft = { ...power, awakeHours: Boolean(power.awakeFrom) };
+    const draft = { ...power, awakeHours: Boolean(power.awakeFrom), afterSleepTimer: power.afterSleepTimer !== false };
+    const modes = powerModesFor(power);
+    const computer = appHostName(power.hosting);
     const explanation = h("p", { class: "muted small power-explanation" });
-    const mode = select(POWER_MODES.map((choice) => [choice.id, choice.label]), draft.mode, (chosen) => { draft.mode = chosen; update(); }, "When Unused");
+    const mode = select(modes.map((choice) => [choice.id, choice.label]), draft.mode, (chosen) => { draft.mode = chosen; update(); }, "When Unused");
     const minutes = select([...new Set([...POWER_IDLE_CHOICES, draft.idleMinutes])].sort((a, b) => a - b)
       .map((count) => [count, count < 60 || count % 60 ? `${count} minutes` : `${count / 60} hour${count === 60 ? "" : "s"}`]),
     draft.idleMinutes, (chosen) => { draft.idleMinutes = Number(chosen); }, "After");
@@ -745,8 +748,8 @@ export function createSettings(app) {
     };
     const from = time("awakeFrom", "Awake From");
     const until = time("awakeUntil", "Awake Until");
-    const hoursRow = row("Hours", h("div", { class: "inline-control" }, from, h("span", { class: "muted" }, "to"), until),
-      "It never powers down in these hours and wakes itself at their start, so every device finds it then.");
+    const hoursNote = h("span", {});
+    const hoursRow = row("Hours", h("div", { class: "inline-control" }, from, h("span", { class: "muted" }, "to"), until), hoursNote);
     const awakeToggle = toggle(draft.awakeHours, (on) => {
       draft.awakeHours = on;
       if (on && !draft.awakeFrom) { draft.awakeFrom = from.value = "17:00"; draft.awakeUntil = until.value = "23:30"; }
@@ -754,19 +757,26 @@ export function createSettings(app) {
     }, "Keep Running at Set Hours");
     const wakeRow = row("Wake When a Device Connects", toggle(Boolean(draft.wakeOnAccess), (on) => { draft.wakeOnAccess = on; }, "Wake When a Device Connects"),
       "Opening Aurelia in a browser wakes the server too, from a device that reached it within the last minutes. Other devices still use Wake-on-LAN. Stray network traffic can wake it now and then; it powers down again after five unused minutes.");
-    const unused = [row("After", minutes, "Without anyone watching or browsing. It also powers down five minutes after a sleep timer ends."),
+    const unused = [row("After", minutes, "Without anyone watching, browsing or changing settings on any device. An app that is only open doesn't count, and nothing happens while a title plays."),
+      row("Also After a Sleep Timer Ends", toggle(draft.afterSleepTimer, (on) => { draft.afterSleepTimer = on; }, "Also After a Sleep Timer Ends"),
+        "When a player's sleep timer ends and nothing plays for five more minutes, it happens right away, at any time of day."),
       row("Keep Running at Set Hours", awakeToggle), hoursRow];
     function update() {
-      explanation.textContent = POWER_MODES.find((choice) => choice.id === draft.mode)?.explanation ?? "";
+      explanation.textContent = modes.find((choice) => choice.id === draft.mode)?.explanation ?? "";
       for (const element of unused) element.hidden = draft.mode === "off";
       hoursRow.hidden = draft.mode === "off" || !draft.awakeHours;
+      hoursNote.textContent = draft.mode === "stop"
+        ? "Aurelia Server never stops during these hours."
+        : "It never powers down during these hours and wakes itself at their start, so every device finds it then.";
       wakeRow.hidden = !wakeOnAccessOffered(power, draft.mode);
     }
     update();
     const save = h("button", { class: "primary-button" }, "Save");
     save.addEventListener("click", () => act(save, () => api.saveServerPower(powerPayload(draft, power)), "Power settings saved.", refresh));
     return [
-      section("When Unused", "power", "What the server computer does when nobody uses Aurelia.",
+      section("When Nobody Uses Aurelia", "power", computer
+        ? `Aurelia Server runs inside the Aurelia app on a ${computer}. It can stop when nobody uses it, so the computer may sleep.`
+        : "What the server computer does while nobody watches, browses or changes anything.",
         row("When Unused", mode), explanation, ...unused, wakeRow,
         h("div", { class: "button-row" }, save)),
     ];

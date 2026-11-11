@@ -152,7 +152,8 @@ Aurelia Server
   sudo aurelia sleep shutdown [--idle MINUTES] [--awake ...]
                                               Computer turns off when unused; Wake-on-LAN starts it
                                               (on and shutdown: --wake-on-access on|off also wakes it
-                                              when a device such as a browser connects directly)
+                                              when a device such as a browser connects directly;
+                                              --after-sleep-timer off ignores players' sleep timers)
                                               Only Aurelia stops; a device starts it again
   sudo aurelia sleep off | status             Also in Aurelia's server settings on a Mac
   aurelia logs                                Follow the server log (Ctrl+C ends)
@@ -301,6 +302,9 @@ case "$command" in
             --idle) IDLE_MINUTES=${2:-}; shift 2 ;;
             --wake-on-access)
               case "${2:-}" in on|off) WAKE_ON_ACCESS=$2 ;; *) echo "--wake-on-access needs on or off." >&2; exit 2 ;; esac
+              shift 2 ;;
+            --after-sleep-timer)
+              case "${2:-}" in on|off) AFTER_SLEEP_TIMER=$2 ;; *) echo "--after-sleep-timer needs on or off." >&2; exit 2 ;; esac
               shift 2 ;;
             --awake)
               if [ "${2:-}" = off ]; then AWAKE_FROM="" AWAKE_UNTIL=""; else AWAKE_FROM=${2%%-*} AWAKE_UNTIL=${2##*-}; fi

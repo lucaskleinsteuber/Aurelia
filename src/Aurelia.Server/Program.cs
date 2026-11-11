@@ -160,6 +160,7 @@ builder.Services.AddSingleton(services => new ServerPowerSettingsStore(services.
 builder.Services.AddSingleton(services => new ServerUpdateStore(services.GetRequiredService<ServerRuntimeOptions>(), services.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<LinuxServiceRestart>();
 builder.Services.AddHostedService<ServerSleepWorker>();
+builder.Services.AddHostedService<AppHostedIdleStop>();
 builder.Services.AddSingleton<AdministrationApprovalStore>();
 builder.Services.AddSingleton<ServerRequestGuard>();
 builder.Services.AddSingleton<NativeHostOperations>();

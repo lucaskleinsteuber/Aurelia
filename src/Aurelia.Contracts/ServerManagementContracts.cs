@@ -16,12 +16,16 @@ public sealed record AdministrationApprovalResponse(string Token, DateTimeOffset
 /// both empty when there are no awake hours. WakeOnAccess: the network card also wakes the
 /// computer when a device sends it anything directly, such as a browser opening the address.
 /// WakeSupport holds the card's ethtool wake letters ("u" allows WakeOnAccess), empty when unknown.
+/// From 2.10.0: Hosting is where the server runs (see ServerInfoResponse.Hosting); a server hosted
+/// by the Mac or Linux app offers only "off" and "stop", where "stop" ends the server after the
+/// unused minutes until someone opens Aurelia on that computer. AfterSleepTimer: power down five
+/// minutes after a player's sleep timer ended (on by default).
 /// </summary>
 public sealed record ServerPowerSettings(bool Available, string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil,
-    bool WakeOnAccess = false, string WakeSupport = "");
-/// <summary>WakeOnAccess null keeps the stored choice, so clients that don't know it never change it.</summary>
+    bool WakeOnAccess = false, string WakeSupport = "", string Hosting = "server", bool AfterSleepTimer = true);
+/// <summary>WakeOnAccess and AfterSleepTimer null keep the stored choice, so clients that don't know them never change them.</summary>
 public sealed record UpdateServerPowerSettingsRequest(string Mode, int IdleMinutes, string? AwakeFrom, string? AwakeUntil,
-    bool? WakeOnAccess = null);
+    bool? WakeOnAccess = null, bool? AfterSleepTimer = null);
 
 /// <summary>
 /// Optional timeline scrub-preview settings and status. Small JPEG stills are kept in memory when

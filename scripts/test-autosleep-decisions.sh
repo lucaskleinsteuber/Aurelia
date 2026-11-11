@@ -43,6 +43,13 @@ decide "" | grep -F 'turn off until a Wake-on-LAN call: A sleep timer ended' >/d
   || fail "shut-down mode must turn the computer off after an ended sleep timer"
 rm -f "$work/data/sleep-ready"
 
+# With AFTER_SLEEP_TIMER=off an ended sleep timer changes nothing.
+printf 'MODE=sleep\nIDLE_MINUTES=60\nAFTER_SLEEP_TIMER=off\n' > "$work/data/sleep-settings"
+date +%s > "$work/data/sleep-ready"
+date +%s > "$work/state/last-active"
+decide "" | grep -F 'A sleep timer ended' >/dev/null && fail "a switched off sleep-timer rule must not power down"
+rm -f "$work/data/sleep-ready"
+
 # Woken (by a stray packet, perhaps) and nobody used Aurelia since: it sleeps again after five
 # minutes instead of a whole idle period; once someone used it, the idle period counts again.
 printf 'MODE=sleep\nIDLE_MINUTES=60\n' > "$work/data/sleep-settings"

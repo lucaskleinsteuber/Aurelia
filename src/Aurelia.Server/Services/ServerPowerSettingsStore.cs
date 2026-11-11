@@ -12,7 +12,7 @@ namespace Aurelia.Server.Services;
 /// are reported as unavailable and cannot be changed. The package's root-run wake script leaves the
 /// network card's wake abilities in <c>wake-on-lan-support</c>, so the server needs no network rights.
 /// </summary>
-public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtime, bool? available = null)
+public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtime, bool? available = null, string? hosting = null)
 {
     public const string FileName = "sleep-settings";
     public const string WakeSupportFileName = "wake-on-lan-support";
@@ -22,7 +22,10 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
     public static readonly IReadOnlyList<string> Modes = ["off", "stop", "sleep", "shutdown"];
     private readonly object gate = new();
 
-    private bool Available => available ?? LinuxPackage.IsInstalled;
+    /// <summary>Where the server runs; a server hosted by the Mac or Linux app only stops after unused minutes.</summary>
+    public string Hosting => hosting ?? ServerHosting.Kind(runtime);
+    private bool ByApp => ServerHosting.ByApp(Hosting);
+    private bool Available => available ?? (LinuxPackage.IsInstalled || ByApp);
     private string SettingsPath => Path.Combine(runtime.DataDirectory, FileName);
 
     public ServerPowerSettings Read()
@@ -37,16 +40,21 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
             var until = Time(values.GetValueOrDefault("AWAKE_UNTIL"));
             if (from is null || until is null) from = until = null;
             var mode = values.GetValueOrDefault("MODE") is { } stored && Modes.Contains(stored) ? stored : "off";
-            return new(Available, mode, idle, from, until, values.GetValueOrDefault("WAKE_ON_ACCESS") == "on", WakeSupport());
+            // A host app's server can't sleep or turn off its computer; anything else stored counts as stop.
+            if (ByApp && mode is "sleep" or "shutdown") mode = "stop";
+            return new(Available, mode, idle, from, until, !ByApp && values.GetValueOrDefault("WAKE_ON_ACCESS") == "on",
+                ByApp ? "" : WakeSupport(), Hosting, values.GetValueOrDefault("AFTER_SLEEP_TIMER") != "off");
         }
     }
 
     public ServerPowerSettings Update(UpdateServerPowerSettingsRequest request)
     {
         if (!Available)
-            throw new AccountException("power_settings_unavailable", "Power settings are available on Linux servers installed from the Aurelia package.", 409);
+            throw new AccountException("power_settings_unavailable", "Power settings are available on Linux servers installed from the Aurelia package and on servers hosted by Aurelia for Mac or Linux.", 409);
         if (!Modes.Contains(request.Mode))
             throw new AccountException("invalid_power_mode", "Choose off, stop, sleep or shutdown.", 400);
+        if (ByApp && request.Mode is "sleep" or "shutdown")
+            throw new AccountException("invalid_power_mode", "A server hosted by the Aurelia app can keep running or stop after unused minutes.", 400);
         if (request.IdleMinutes is < MinimumIdleMinutes or > MaximumIdleMinutes)
             throw new AccountException("invalid_idle_minutes", $"Choose between {MinimumIdleMinutes} and {MaximumIdleMinutes} minutes.", 400);
         var from = string.IsNullOrEmpty(request.AwakeFrom) ? null : Time(request.AwakeFrom);
@@ -54,8 +62,10 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
         if ((from is null) != string.IsNullOrEmpty(request.AwakeFrom) || (until is null) != string.IsNullOrEmpty(request.AwakeUntil)
             || (from is null) != (until is null) || (from is not null && from == until))
             throw new AccountException("invalid_awake_hours", "Awake hours need a start and a different end, as HH:MM.", 400);
-        var wakeOnAccess = request.WakeOnAccess ?? Read().WakeOnAccess;
-        if (request.WakeOnAccess == true && !WakeSupport().Contains('u', StringComparison.Ordinal))
+        var current = Read();
+        var wakeOnAccess = request.WakeOnAccess ?? current.WakeOnAccess;
+        var afterSleepTimer = request.AfterSleepTimer ?? current.AfterSleepTimer;
+        if (request.WakeOnAccess == true && (ByApp || !WakeSupport().Contains('u', StringComparison.Ordinal)))
             throw new AccountException("wake_on_access_unavailable", "This computer's network card can't wake it when a device connects.", 400);
 
         var content = new StringBuilder()
@@ -65,6 +75,7 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
             .Append(CultureInfo.InvariantCulture, $"AWAKE_FROM={from}\n")
             .Append(CultureInfo.InvariantCulture, $"AWAKE_UNTIL={until}\n")
             .Append(CultureInfo.InvariantCulture, $"WAKE_ON_ACCESS={(wakeOnAccess ? "on" : "off")}\n")
+            .Append(CultureInfo.InvariantCulture, $"AFTER_SLEEP_TIMER={(afterSleepTimer ? "on" : "off")}\n")
             .ToString();
         lock (gate)
         {
@@ -109,7 +120,7 @@ public sealed partial class ServerPowerSettingsStore(ServerRuntimeOptions runtim
 
     private static string? Time(string? value) => value is not null && TimeOfDay().IsMatch(value) ? value : null;
 
-    [GeneratedRegex(@"^(MODE|IDLE_MINUTES|AWAKE_FROM|AWAKE_UNTIL|WAKE_ON_ACCESS)=([a-z0-9:]*)\z")]
+    [GeneratedRegex(@"^(MODE|IDLE_MINUTES|AWAKE_FROM|AWAKE_UNTIL|WAKE_ON_ACCESS|AFTER_SLEEP_TIMER)=([a-z0-9:]*)\z")]
     private static partial Regex SettingLine();
 
     [GeneratedRegex(@"^([01][0-9]|2[0-3]):[0-5][0-9]\z")]

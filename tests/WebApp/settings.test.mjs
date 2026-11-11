@@ -4,7 +4,8 @@ import {
   GENERAL_DEFAULTS, PLAYBACK_DEFAULTS, SETTINGS_PAGES, libraryPayload, loadManagementSections,
   managementPermissions, metadataPayload, cropFrame, normalizeGeneralPreferences, normalizePreferences,
   profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation,
-  POWER_MODES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess, remembersWakeOnAccess, wakeRetryDelay
+  POWER_MODES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess, remembersWakeOnAccess, wakeRetryDelay,
+  powerModesFor, appHostName, rememberHosting, rememberedHosting
 } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
 test("management permissions keep owner settings and selected-title storage restrictions", () => {
@@ -375,10 +376,10 @@ test("Settings › Power sends what the server can act on and only asks a card t
   assert.deepEqual(POWER_MODES.map((mode) => mode.id), ["off", "stop", "sleep", "shutdown"]);
   const card = { wakeSupport: "pumbg" };
   assert.deepEqual(powerPayload({ mode: "shutdown", idleMinutes: "30", awakeHours: true, awakeFrom: "17:00", awakeUntil: "23:30:00", wakeOnAccess: true }, card),
-    { mode: "shutdown", idleMinutes: 30, awakeFrom: "17:00", awakeUntil: "23:30", wakeOnAccess: true });
+    { mode: "shutdown", idleMinutes: 30, awakeFrom: "17:00", awakeUntil: "23:30", afterSleepTimer: true, wakeOnAccess: true });
   // Hours turned off are sent as none; a card without "u" is never asked, so the server keeps its choice.
   assert.deepEqual(powerPayload({ mode: "sleep", idleMinutes: 15, awakeHours: false, awakeFrom: "17:00", wakeOnAccess: true }, { wakeSupport: "g" }),
-    { mode: "sleep", idleMinutes: 15, awakeFrom: null, awakeUntil: null });
+    { mode: "sleep", idleMinutes: 15, awakeFrom: null, awakeUntil: null, afterSleepTimer: true });
   assert.throws(() => powerPayload({ mode: "hibernate", idleMinutes: 15 }), /Choose what/);
   assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 4 }), /between 5 and 1440/);
   assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 15, awakeHours: true, awakeFrom: "17:00", awakeUntil: "" }), /both times/);
@@ -401,4 +402,23 @@ test("the asleep page knocks often for two minutes, then calmly, and knows wheth
   rememberWakeOnAccess({ available: false }, storage);
   assert.equal(remembersWakeOnAccess(storage), false, "a Mac or Linux app host changes nothing");
   assert.equal(remembersWakeOnAccess({ getItem: () => { throw new Error("blocked"); } }), false);
+});
+
+test("a server inside the Aurelia app only keeps running or stops, is never woken and says where to start it", () => {
+  const laptop = { available: true, hosting: "macApp", mode: "stop", idleMinutes: 30, wakeSupport: "pumbg" };
+  assert.deepEqual(powerModesFor(laptop).map((mode) => mode.id), ["off", "stop"]);
+  assert.match(powerModesFor(laptop)[1].explanation, /Start Aurelia on your Mac/);
+  assert.equal(powerModesFor({ hosting: "linuxServer" }), POWER_MODES);
+  assert.equal(wakeOnAccessOffered({ ...laptop, mode: "sleep" }), false);
+  assert.throws(() => powerPayload({ mode: "sleep", idleMinutes: 15 }, laptop), /Choose what/);
+  assert.deepEqual(powerPayload({ mode: "stop", idleMinutes: 30, afterSleepTimer: false, wakeOnAccess: true }, laptop),
+    { mode: "stop", idleMinutes: 30, awakeFrom: null, awakeUntil: null, afterSleepTimer: false });
+  assert.equal(appHostName("linuxApp"), "Linux PC");
+  assert.equal(appHostName("linuxServer"), null);
+  const values = new Map();
+  const storage = { setItem: (key, value) => values.set(key, value), getItem: (key) => values.get(key) ?? null };
+  rememberHosting("linuxApp", storage);
+  assert.equal(rememberedHosting(storage), "linuxApp");
+  rememberHosting(undefined, storage);
+  assert.equal(rememberedHosting(storage), "linuxApp", "an older server says nothing and changes nothing");
 });

@@ -161,6 +161,7 @@ Settings › Power, in Aurelia on a Mac or Linux under Settings › Server › P
 sudo aurelia sleep server --idle 15   # stop only Aurelia Server; the computer stays on
 sudo aurelia sleep on --idle 15       # put the whole computer to sleep
 sudo aurelia sleep shutdown --idle 30 # turn the computer off
+sudo aurelia sleep on --after-sleep-timer off  # ignore players' sleep timers
 sudo aurelia sleep off                # keep running (the default)
 sudo aurelia sleep status
 ```

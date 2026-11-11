@@ -73,6 +73,7 @@ async function start() {
   try {
     state.server = await api.serverInfo();
     state.offSince = null;
+    logic.rememberHosting(state.server?.hosting);
     document.title = state.server?.name && state.server.name !== "Aurelia" ? `Aurelia · ${state.server.name}` : "Aurelia";
   } catch (error) {
     return showServerOff(error);
@@ -96,14 +97,18 @@ function showServerOff() {
   settings.closeEditors();
   stopSync();
   const name = state.server?.name ? `“${state.server.name}”` : "The server";
-  const waking = logic.remembersWakeOnAccess();
+  // A server inside Aurelia on a desktop or laptop is started there, not woken over the network.
+  const computer = logic.appHostName(logic.rememberedHosting());
+  const waking = !computer && logic.remembersWakeOnAccess();
   render(screenFrame(h("div", { class: "center-stack narrow" },
     h("div", { class: `status-icon${waking ? " waking" : ""}` }, icon("power", { size: 34 })),
-    h("h1", {}, waking ? "Waking the Server…" : "The Server Is Asleep or Offline"),
-    h("p", {}, waking
+    h("h1", {}, computer ? `Start Aurelia on Your ${computer}` : waking ? "Waking the Server…" : "The Server Is Asleep or Offline"),
+    h("p", {}, computer
+      ? `${name} runs inside the Aurelia app on a ${computer}. Open Aurelia there, or wake the ${computer}, and this page connects by itself.`
+      : waking
       ? `${name} is waking because this page knocks. That takes a few seconds, or about a minute when it was turned off. If it doesn't wake, Aurelia on a Mac or your router can wake it with Wake-on-LAN.`
       : `${name} isn’t answering. The computer may be asleep or turned off. You can wake it with Aurelia on your Mac if Wake-on-LAN is set up, or check that the computer is turned on.`),
-    h("p", { class: "muted" }, "This page connects by itself as soon as the server is on."),
+    computer ? null : h("p", { class: "muted" }, "This page connects by itself as soon as the server is on."),
     h("div", { class: "button-row" }, h("button", { class: "primary-button", onclick: () => start() }, "Try Again")))));
   // Several requests can fail at once; only one retry may be waiting. Each quiet knock is a direct
   // packet to the server, which wakes it when its power settings allow; the page doesn't flicker.

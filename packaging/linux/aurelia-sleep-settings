@@ -5,10 +5,11 @@
 
 # Reads MODE (off, stop: only Aurelia stops, sleep: the computer sleeps, shutdown: the computer
 # turns off), IDLE_MINUTES, AWAKE_FROM, AWAKE_UNTIL and WAKE_ON_ACCESS (on: the network card also
-# wakes the computer when a device sends it anything directly) from a settings file. Missing or
-# invalid values keep the defaults: off, 15 minutes, no awake hours, magic packets only.
+# wakes the computer when a device sends it anything directly) and AFTER_SLEEP_TIMER (on: power
+# down five minutes after a player's sleep timer ended) from a settings file. Missing or invalid
+# values keep the defaults: off, 15 minutes, no awake hours, magic packets only, after sleep timers.
 read_sleep_settings() {
-  MODE=off IDLE_MINUTES=15 AWAKE_FROM="" AWAKE_UNTIL="" WAKE_ON_ACCESS=off
+  MODE=off IDLE_MINUTES=15 AWAKE_FROM="" AWAKE_UNTIL="" WAKE_ON_ACCESS=off AFTER_SLEEP_TIMER=on
   local file=$1 key value
   if [ -f "$file" ] && [ ! -L "$file" ]; then
     while IFS='=' read -r key value; do
@@ -23,6 +24,8 @@ read_sleep_settings() {
           if [[ "$value" =~ ^(([01][0-9]|2[0-3]):[0-5][0-9])?$ ]]; then AWAKE_UNTIL=$value; fi ;;
         WAKE_ON_ACCESS)
           if [[ "$value" =~ ^(on|off)$ ]]; then WAKE_ON_ACCESS=$value; fi ;;
+        AFTER_SLEEP_TIMER)
+          if [[ "$value" =~ ^(on|off)$ ]]; then AFTER_SLEEP_TIMER=$value; fi ;;
       esac
     done < <(head -c 4096 "$file")
   fi
@@ -34,7 +37,7 @@ read_sleep_settings() {
 # never creates, changes the owner of or moves a file in that user's folder: chown and chmod
 # would follow a link the user placed there in the meantime, onto any file of the computer.
 write_sleep_settings() {
-  printf '# What Aurelia Server does when unused, changed in the app or with `sudo aurelia sleep`.\nMODE=%s\nIDLE_MINUTES=%s\nAWAKE_FROM=%s\nAWAKE_UNTIL=%s\nWAKE_ON_ACCESS=%s\n' \
-    "$MODE" "$IDLE_MINUTES" "$AWAKE_FROM" "$AWAKE_UNTIL" "$WAKE_ON_ACCESS" \
+  printf '# What Aurelia Server does when unused, changed in the app or with `sudo aurelia sleep`.\nMODE=%s\nIDLE_MINUTES=%s\nAWAKE_FROM=%s\nAWAKE_UNTIL=%s\nWAKE_ON_ACCESS=%s\nAFTER_SLEEP_TIMER=%s\n' \
+    "$MODE" "$IDLE_MINUTES" "$AWAKE_FROM" "$AWAKE_UNTIL" "$WAKE_ON_ACCESS" "$AFTER_SLEEP_TIMER" \
     | runuser -u aurelia -- /bin/sh -c 'umask 077; t=$(mktemp "$1.XXXXXX") && cat > "$t" && mv -f "$t" "$1"' sh "$1"
 }

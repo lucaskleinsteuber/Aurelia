@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Net;
 using Aurelia.Contracts;
 using Aurelia.Server.Services;
@@ -17,7 +18,7 @@ public sealed class ServerPowerSettingsTests
         var saved = fixture.Store.Update(new("sleep", 20, "17:00", "23:30"));
         Assert.Equal(new ServerPowerSettings(true, "sleep", 20, "17:00", "23:30"), saved);
         Assert.Equal(
-            ["MODE=sleep", "IDLE_MINUTES=20", "AWAKE_FROM=17:00", "AWAKE_UNTIL=23:30", "WAKE_ON_ACCESS=off"],
+            ["MODE=sleep", "IDLE_MINUTES=20", "AWAKE_FROM=17:00", "AWAKE_UNTIL=23:30", "WAKE_ON_ACCESS=off", "AFTER_SLEEP_TIMER=on"],
             File.ReadAllLines(fixture.SettingsPath).Where(line => !line.StartsWith('#')));
 
         var withoutHours = fixture.Store.Update(new("stop", 15, null, null));
@@ -53,12 +54,48 @@ public sealed class ServerPowerSettingsTests
         File.WriteAllText(fixture.WakeSupportPath, "pumbg\n");
         var saved = fixture.Store.Update(new("shutdown", 30, "18:00", "23:00", WakeOnAccess: true));
         Assert.Equal(new ServerPowerSettings(true, "shutdown", 30, "18:00", "23:00", true, "pumbg"), saved);
+        Assert.True(saved.AfterSleepTimer);
         Assert.Contains("WAKE_ON_ACCESS=on", File.ReadAllLines(fixture.SettingsPath));
 
         // An app that doesn't know the choice sends none; it stays as it was.
         var older = fixture.Store.Update(new("sleep", 30, null, null));
         Assert.True(older.WakeOnAccess);
         Assert.False(fixture.Store.Update(new("sleep", 30, null, null, WakeOnAccess: false)).WakeOnAccess);
+    }
+
+    [Fact]
+    public void AServerHostedByTheAppOnlyStopsAfterUnusedMinutesAndIsNeverWokenOverTheNetwork()
+    {
+        using var fixture = new Fixture(available: null, hosting: ServerHosting.MacApp);
+        File.WriteAllText(fixture.WakeSupportPath, "pumbg");
+        var initial = fixture.Store.Read();
+        Assert.True(initial.Available);
+        Assert.Equal((ServerHosting.MacApp, ""), (initial.Hosting, initial.WakeSupport));
+        foreach (var mode in new[] { "sleep", "shutdown" })
+            Assert.Equal("invalid_power_mode", Assert.Throws<AccountException>(() => fixture.Store.Update(new(mode, 15, null, null))).Code);
+        Assert.Equal("wake_on_access_unavailable",
+            Assert.Throws<AccountException>(() => fixture.Store.Update(new("stop", 15, null, null, WakeOnAccess: true))).Code);
+        var saved = fixture.Store.Update(new("stop", 30, null, null, AfterSleepTimer: false));
+        Assert.Equal(("stop", 30, false), (saved.Mode, saved.IdleMinutes, saved.AfterSleepTimer));
+        // A file written for a Linux server keeps working, as stop.
+        File.WriteAllLines(fixture.SettingsPath, ["MODE=sleep", "IDLE_MINUTES=20"]);
+        Assert.Equal("stop", fixture.Store.Read().Mode);
+    }
+
+    [Fact]
+    public void AnAppHostedServerStopsWhenUnusedOutsideAwakeHoursAndNeverWhileSomethingPlays()
+    {
+        var settings = new ServerPowerSettings(true, "stop", 30, null, null, Hosting: ServerHosting.LinuxApp);
+        var now = new DateTimeOffset(2026, 11, 11, 20, 0, 0, TimeSpan.Zero);
+        var utc = TimeZoneInfo.Utc;
+        Assert.Null(AppHostedIdleStop.Decide(settings, now, now.AddMinutes(-29), 0, null, utc));
+        Assert.Equal("Unused for 30 minutes", AppHostedIdleStop.Decide(settings, now, now.AddMinutes(-30), 0, null, utc));
+        Assert.Null(AppHostedIdleStop.Decide(settings, now, now.AddHours(-2), 1, null, utc));
+        Assert.Null(AppHostedIdleStop.Decide(settings with { Mode = "off" }, now, now.AddHours(-2), 0, null, utc));
+        Assert.Null(AppHostedIdleStop.Decide(settings with { AwakeFrom = "19:00", AwakeUntil = "01:00" }, now, now.AddHours(-2), 0, null, utc));
+        Assert.Equal("A sleep timer ended", AppHostedIdleStop.Decide(settings, now, now.AddMinutes(-6), 0, now.AddMinutes(-1), utc));
+        Assert.Null(AppHostedIdleStop.Decide(settings with { AfterSleepTimer = false }, now, now.AddMinutes(-6), 0, now.AddMinutes(-1), utc));
+        Assert.Null(AppHostedIdleStop.Decide(settings, now, now.AddMinutes(-6), 0, now.AddMinutes(-10), utc)); // someone watched after the timer
     }
 
     [Fact]
@@ -105,6 +142,10 @@ public sealed class ServerPowerSettingsTests
 
         using var anonymous = await client.GetAsync("/api/v1/server/power");
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        // Every device learns where the server runs, so it knows whether to wake it or ask for Aurelia to be opened.
+        var info = await client.GetFromJsonAsync<ServerInfoResponse>("/api/v1/server/info", ApiTestClient.JsonOptions);
+        Assert.Contains(info!.Hosting, new[] { ServerHosting.Server, ServerHosting.LinuxServer, ServerHosting.MacApp, ServerHosting.LinuxApp });
     }
 
     private sealed class Fixture : IDisposable
@@ -114,11 +155,11 @@ public sealed class ServerPowerSettingsTests
         public string SettingsPath => Path.Combine(root.FullName, ServerPowerSettingsStore.FileName);
         public string WakeSupportPath => Path.Combine(root.FullName, ServerPowerSettingsStore.WakeSupportFileName);
 
-        public Fixture(bool available)
+        public Fixture(bool? available, string? hosting = null)
         {
             var runtime = new ServerRuntimeOptions(root.FullName, Path.Combine(root.FullName, "unused.db"),
                 "http://127.0.0.1:43110", "Synthetic", false, 43111, "", "", null);
-            Store = new ServerPowerSettingsStore(runtime, available);
+            Store = new ServerPowerSettingsStore(runtime, available, hosting);
         }
 
         public void Dispose() => root.Delete(recursive: true);

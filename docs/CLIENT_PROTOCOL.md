@@ -56,6 +56,18 @@ stale changes return `409 scene_note_conflict`. Preserve the draft on conflict.
 Notes belong only to the active profile and retain stable media identity when
 storage is offline. They are database records, never embedded video edits.
 
+## Where the server runs
+
+From 2.10.0, `GET /api/v1/server/info` reports `hosting`: `macApp` or `linuxApp` when Aurelia for
+Mac or Aurelia for Linux hosts the server on a desktop or laptop, `linuxServer` for the Linux
+package and `server` otherwise. An app-hosted server reports no `wakeOnLanAddresses`; a client
+remembers `hosting` per server, forgets wake addresses it stored for it and, when the server does
+not answer, asks to start Aurelia on that Mac or Linux PC instead of sending Wake-on-LAN.
+`GET /api/v1/server/power` (owner) reports the same `hosting`; such a server offers only the modes
+`off` and `stop`, and with `stop` it ends itself after the unused minutes (or five minutes after a
+player's sleep timer, `afterSleepTimer`) with exit status 76, which its app treats as "stopped
+until Aurelia is opened here", not as a crash.
+
 ## Web browser sign-in
 
 A server without an owner can be set up from a browser instead (2.7.0): `GET /api/v1/web/setup`

@@ -226,7 +226,9 @@ public static class ApiEndpointMappings
             runtime.LanAccessEnabled ? tlsIdentity.PublicKeyFingerprint : null,
             runtime.LanAccessEnabled ? tlsIdentity.DisplayFingerprint : null,
             ServerFeatures.Reported(await live.IsAvailableAsync(), await live.SpeechAudioAvailableAsync()),
-            runtime.LanAccessEnabled ? WakeOnLan.LocalAddresses() : null));
+            // A desktop or laptop that hosts Aurelia in its app is woken by its owner, not over the network.
+            runtime.LanAccessEnabled && !ServerHosting.ByApp(ServerHosting.Kind(runtime)) ? WakeOnLan.LocalAddresses() : null,
+            ServerHosting.Kind(runtime)));
     }
 
     private static async Task<IResult> SetupOwnerAsync(

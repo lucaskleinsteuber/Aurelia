@@ -51,25 +51,45 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
 }
 
 /**
- * What a Linux package server does when unused, as Settings › Power offers it. A server hosted by
- * the Mac or Linux app reports power as unavailable and never shows these.
+ * What a Linux package server does when unused, as Settings › Power offers it: all four choices.
+ * A server the Aurelia app hosts on a Mac or Linux PC (power.hosting "macApp" or "linuxApp") only
+ * keeps running or stops, because a desktop or laptop is woken by its owner, not the network.
  */
 export const POWER_MODES = Object.freeze([
   { id: "off", label: "Keep Running", explanation: "Aurelia and the computer keep running: ready at any moment, using the most power." },
-  { id: "stop", label: "Stop Aurelia Server", explanation: "Only Aurelia stops. The computer stays on, and Aurelia starts again within seconds when any device connects, a browser too." },
-  { id: "sleep", label: "Put the Computer to Sleep", explanation: "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it, and a router such as a FRITZ!Box can wake it too (Wake-on-LAN)." },
-  { id: "shutdown", label: "Shut Down the Computer", explanation: "The computer turns off and uses almost nothing. Wake-on-LAN starts it again, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off." },
+  { id: "stop", label: "Stop Only Aurelia Server", explanation: "Only Aurelia stops. The computer stays on for its other work, and Aurelia starts again within seconds when any device connects, a browser too." },
+  { id: "sleep", label: "Put the Computer to Sleep", explanation: "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it, and a router such as a FRITZ!Box can wake it too (Wake-on-LAN). Waking takes a few seconds." },
+  { id: "shutdown", label: "Shut Down the Computer", explanation: "The computer turns off and uses almost nothing. Wake-on-LAN starts it again, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off (often “Wake on LAN from S5”)." },
 ]);
+
+export function hostedByApp(hosting) {
+  return hosting === "macApp" || hosting === "linuxApp";
+}
+
+/** "Mac" or "Linux PC" for a server inside the Aurelia app, otherwise null. */
+export function appHostName(hosting) {
+  return hosting === "macApp" ? "Mac" : hosting === "linuxApp" ? "Linux PC" : null;
+}
+
+/** The choices Settings › Power offers for this server, with words that fit where it runs. */
+export function powerModesFor(power) {
+  const computer = appHostName(power?.hosting);
+  if (!computer) return POWER_MODES;
+  return [
+    { id: "off", label: "Keep Running", explanation: `Aurelia Server runs as long as the Aurelia app does. While the ${computer} sleeps or is turned off, other devices show “Start Aurelia on your ${computer}”.` },
+    { id: "stop", label: "Stop Aurelia Server", explanation: `Aurelia Server stops, and the ${computer} may sleep as usual. Other devices then show “Start Aurelia on your ${computer}”; opening Aurelia there starts it again. Nothing can wake it over the network.` },
+  ];
+}
 export const POWER_IDLE_CHOICES = Object.freeze([5, 10, 15, 30, 45, 60, 90, 120, 180]);
 
 /** Whether the network card can wake the computer when a device connects directly, in a mode where that matters. */
 export function wakeOnAccessOffered(power, mode = power?.mode) {
-  return (mode === "sleep" || mode === "shutdown") && String(power?.wakeSupport ?? "").includes("u");
+  return !hostedByApp(power?.hosting) && (mode === "sleep" || mode === "shutdown") && String(power?.wakeSupport ?? "").includes("u");
 }
 
 /** The request for Settings › Power, or an error naming what to fix. */
 export function powerPayload(draft, power = draft) {
-  if (!POWER_MODES.some((mode) => mode.id === draft.mode)) throw new Error("Choose what the server does when unused.");
+  if (!powerModesFor(power).some((mode) => mode.id === draft.mode)) throw new Error("Choose what the server does when unused.");
   const idleMinutes = Number(draft.idleMinutes);
   if (!Number.isInteger(idleMinutes) || idleMinutes < 5 || idleMinutes > 1440) throw new Error("Choose between 5 and 1440 minutes.");
   const time = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
@@ -81,13 +101,24 @@ export function powerPayload(draft, power = draft) {
     if (!time.test(awakeFrom) || !time.test(awakeUntil)) throw new Error("Enter both times of the awake hours.");
     if (awakeFrom === awakeUntil) throw new Error("The awake hours need a different start and end.");
   }
-  const payload = { mode: draft.mode, idleMinutes, awakeFrom, awakeUntil };
+  const payload = { mode: draft.mode, idleMinutes, awakeFrom, awakeUntil, afterSleepTimer: draft.afterSleepTimer !== false };
   // A card that can't do it never gets asked; null keeps the server's stored choice.
-  if (String(power?.wakeSupport ?? "").includes("u")) payload.wakeOnAccess = Boolean(draft.wakeOnAccess);
+  if (!hostedByApp(power?.hosting) && String(power?.wakeSupport ?? "").includes("u")) payload.wakeOnAccess = Boolean(draft.wakeOnAccess);
   return payload;
 }
 
 const WAKE_ON_ACCESS_KEY = "aurelia.wakeOnAccess";
+const HOSTING_KEY = "aurelia.serverHosting";
+
+/** Remembers where the server runs (from its info), so its asleep page knows what to say. */
+export function rememberHosting(hosting, storage = globalThis.localStorage) {
+  if (typeof hosting !== "string") return;
+  try { storage?.setItem(HOSTING_KEY, hosting); } catch {}
+}
+
+export function rememberedHosting(storage = globalThis.localStorage) {
+  try { return storage?.getItem(HOSTING_KEY) ?? null; } catch { return null; }
+}
 
 /** Remembers in this browser whether the server wakes on a direct connection, for its asleep page. */
 export function rememberWakeOnAccess(power, storage = globalThis.localStorage) {

@@ -4,7 +4,7 @@
 # aurelia-start.socket), puts the whole computer to sleep ("sleep", suspend to RAM) or turns it
 # off ("shutdown"). Wake-on-LAN, which Aurelia's apps send, wakes or starts it again. Either happens:
 # - five minutes after a player's sleep timer ended, if nothing played since (Aurelia Server
-#   leaves its sleep-ready file then), at any time of day;
+#   leaves its sleep-ready file then), at any time of day, unless AFTER_SLEEP_TIMER is off;
 # - otherwise after IDLE_MINUTES without a connected device, outside AWAKE_FROM-AWAKE_UNTIL when
 #   those hours are set. With awake hours a sleeping or turned off computer also wakes itself at
 #   AWAKE_FROM.
@@ -127,7 +127,7 @@ fi
 # A sleep timer ended five minutes ago and nothing played since. A signal older than a quarter of
 # an hour is stale (power saving was off then) and is ignored.
 if [ -f "$ready" ]; then
-  if (( now - $(stat -c %Y "$ready") < 900 )); then save_power "A sleep timer ended"; fi
+  if [ "$AFTER_SLEEP_TIMER" = on ] && (( now - $(stat -c %Y "$ready") < 900 )); then save_power "A sleep timer ended"; fi
   [ "$dry_run" = 1 ] || rm -f "$ready"
 fi
 

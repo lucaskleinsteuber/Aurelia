@@ -16,6 +16,9 @@ public sealed class ServerUseClock(ServerRuntimeOptions runtime, TimeProvider cl
 
     private string UsePath => Path.Combine(runtime.DataDirectory, FileName);
 
+    /// <summary>When someone last used the server since it started, or null.</summary>
+    public DateTimeOffset? LastUse { get { lock (gate) return written; } }
+
     /// <summary>Requests an open app sends by itself, with nobody using it.</summary>
     private static readonly PathString[] Background =
     [

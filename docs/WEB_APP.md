@@ -23,7 +23,9 @@ Web Browser*.
   connects again by itself once the server is back. A browser cannot send Wake-on-LAN. On a
   Linux server with **Wake When a Device Connects** on (Settings › Power), opening the address
   or keeping the asleep page open wakes it, from a device that reached it shortly before;
-  otherwise open Aurelia on the Mac to wake it.
+  otherwise open Aurelia on the Mac to wake it. A server that Aurelia hosts on a Mac or Linux PC
+  is never woken over the network: the page says "Start Aurelia on Your Mac" (or Linux PC) and
+  connects once Aurelia runs there again.
 
 ## Setting up a new server
 
@@ -205,9 +207,10 @@ administrator, shared collections; movie pages offer their TMDB franchise as a c
   They cover storage locations (picked in a browser of the server's folders), files a scan leaves
   out, Library Health (duplicates, missing titles and titles without details), the TMDB token,
   Review Matches, OpenSubtitles, codes for new devices (*Create Code*, *Enter Code from Device*),
-  profiles with their access, devices and passwords, Power (on a Linux package server only: keep
-  running, stop Aurelia, sleep or shut down after unused minutes, awake hours and waking when a
-  device connects), Video Conversion, backups
+  profiles with their access, devices and passwords, Power (on a Linux package server: keep
+  running, stop Aurelia, sleep or shut down after unused minutes or a sleep timer, awake hours and
+  waking when a device connects; on a server inside Aurelia on a Mac or Linux PC: keep running or
+  stop after unused minutes), Video Conversion, backups
   (checking them, encrypted backups to download, and restoring on a server hosted by the Mac app
   or installed from the Linux package, which restores at its restart), an Import Preview for a
   new storage location (*Review Before Importing*: what each folder and file becomes, corrected

@@ -24,7 +24,11 @@ public sealed record ServerInfoResponse(
     IReadOnlyList<string>? Capabilities = null,
     // Hardware addresses of the network cards that reach the home network, so a client can wake
     // a sleeping server with Wake-on-LAN. Only reported while network access is on.
-    IReadOnlyList<string>? WakeOnLanAddresses = null);
+    IReadOnlyList<string>? WakeOnLanAddresses = null,
+    // From 2.10.0: "macApp" or "linuxApp" when Aurelia for Mac or for Linux hosts the server on a
+    // desktop or laptop (no Wake-on-LAN then: when it is off, a device asks to start Aurelia there),
+    // "linuxServer" for the Linux package, "server" otherwise.
+    string? Hosting = null);
 
 public sealed record SetupOwnerRequest(
     string Username,
