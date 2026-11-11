@@ -1,5 +1,6 @@
 using Aurelia.Contracts;
 using Aurelia.Server.Authentication;
+using Aurelia.Server.Data;
 using Aurelia.Server.Services;
 using Microsoft.Net.Http.Headers;
 
@@ -52,6 +53,21 @@ public static class WebAppEndpoints
             var credential = await accounts.RedeemPairingCodeAsync(request, context.RequestAborted);
             WebCookies.Set(context, WebCookies.Device, credential.Token, credential.ExpiresAt);
             WebCookies.Delete(context, WebCookies.Pairing, WebCookies.PairingPath);
+            return Results.NoContent();
+        }).RequireRateLimiting("authentication");
+        // A new server set up from a browser: the code from the server computer creates the owner,
+        // and this browser becomes the first device. The owner chooses the viewing PIN next.
+        web.MapGet("/setup", async (AureliaDbContext database, CancellationToken token) =>
+            new WebSetupStatusResponse(await BrowserSetup.OpenAsync(database, token)));
+        web.MapPost("/setup", async (WebSetupRequest request, BrowserSetup setup, AccountService accounts, AureliaDbContext database, HttpContext context) =>
+        {
+            if (!await BrowserSetup.OpenAsync(database, context.RequestAborted))
+                throw new AccountException("server_already_setup", "This server already has an owner. Ask them for a code instead.", 409);
+            if (!setup.Matches(request.Code))
+                throw new AccountException("setup_code_invalid", "That setup code is not right. Check it on the server computer: sudo aurelia setup --browser", 403);
+            var credential = await accounts.SetupOwnerAsync(new SetupOwnerRequest(request.OwnerName, request.Password, request.DeviceName), context.RequestAborted);
+            setup.Finish();
+            WebCookies.Set(context, WebCookies.Device, credential.Token, credential.ExpiresAt);
             return Results.NoContent();
         }).RequireRateLimiting("authentication");
         web.MapPost("/pairing/cancel", async (DeviceAuthorizationService service, HttpContext context) =>

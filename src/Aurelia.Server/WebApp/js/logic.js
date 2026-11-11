@@ -562,6 +562,7 @@ export function parseRoute(pathname = "/", search = "") {
   if (parts.length === 1 && parts[0] === "history") return { name: "history" };
   if (parts.length === 1 && parts[0] === "statistics") return { name: "statistics" };
   if (parts.length === 1 && parts[0] === "movie-night") return { name: "movie-night" };
+  if (parts.length === 1 && parts[0] === "welcome") return { name: "welcome" };
   if (parts.length === 1 && parts[0] === "search") return { name: "search", query: query.get("q") ?? "" };
   if (parts[0] === "settings" && parts.length <= 2) {
     let page = parts[1] ?? "general";
@@ -595,6 +596,8 @@ export function routePath(route) {
       return "/watchlist";
     case "movie-night":
       return "/movie-night";
+    case "welcome":
+      return "/welcome";
     case "person": {
       const query = new URLSearchParams();
       if (route.personName) query.set("name", route.personName);
@@ -1400,3 +1403,20 @@ export function audioProfile(preferences = {}) {
 }
 
 export const decibels = (value) => 10 ** (value / 20);
+
+// MARK: Setting up a new server
+
+/** "abcde fghjk" → "ABCDE-FGHJK": the setup code as the server shows it, ignoring spaces and dashes. */
+export function setupCode(text) {
+  const letters = String(text ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  return letters.length > 5 ? `${letters.slice(0, 5)}-${letters.slice(5)}` : letters;
+}
+
+/** What still stops the setup form, or null when it can be sent. */
+export function setupProblem({ code, ownerName, password, repeat }) {
+  if (setupCode(code).replace("-", "").length !== 10) return "Enter the 10-character setup code from the server computer.";
+  if (!String(ownerName ?? "").trim()) return "Choose a name for the owner.";
+  if (String(password ?? "").length < 12) return "The Server Password needs at least 12 characters.";
+  if (password !== repeat) return "The passwords don’t match.";
+  return null;
+}

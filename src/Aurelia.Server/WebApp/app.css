@@ -1765,3 +1765,22 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
   .curtain-half { transition: opacity 0.4s; }
   .cinema-curtain.open .curtain-half { transform: none; opacity: 0; }
 }
+
+/* MARK: Setting up a new server, and the welcome steps after it */
+.setup-card { display: flex; flex-direction: column; gap: 14px; width: min(520px, 100%); padding: 32px; border-radius: 22px; background: rgba(40, 44, 49, 0.85); border: 1px solid var(--hairline); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); animation: sheet-in var(--motion-page) var(--ease-out); }
+.setup-card .brand-mark { width: 56px; height: 56px; }
+.setup-card h1 { font-size: 26px; }
+.setup-field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 14px; }
+.setup-field .text-field { width: 100%; }
+.setup-code { font: 700 22px/1.2 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.12em; text-transform: uppercase; text-align: center; }
+.welcome { max-width: 760px; margin: 0 auto; padding: clamp(28px, 6vw, 64px) var(--gutter) 64px; display: flex; flex-direction: column; gap: 18px; }
+.welcome-header h1 { font-size: clamp(32px, 5vw, 46px); font-weight: 850; letter-spacing: -0.02em; }
+.welcome-header p { margin-top: 8px; font-size: 16px; }
+.welcome-step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px; padding: 20px 22px; border-radius: 18px; background: var(--surface); border: 1px solid var(--hairline); animation: rise-in 0.5s var(--spring) both; }
+.welcome-step:nth-of-type(2) { animation-delay: 70ms; }
+.welcome-step:nth-of-type(3) { animation-delay: 140ms; }
+.welcome-number { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--raised); font-weight: 800; }
+.welcome-step.done .welcome-number { background: var(--accent); color: #fff; animation: mn-pop 0.5s var(--spring); }
+.welcome-body h2 { font-size: 18px; }
+.welcome-body p { margin: 4px 0 12px; }
+.welcome-finish { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 10px; }

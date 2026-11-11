@@ -16,6 +16,16 @@ command=${1:-run}
 case "$command" in
   run) exec "$server" run --data-dir /data "$@" ;;
   setup)
+    if [ "${1:-}" = --browser ]; then
+      arguments=(setup-browser --data-dir /data)
+      [ -n "${AURELIA_SERVER_NAME:-}" ] && arguments+=(--server-name "$AURELIA_SERVER_NAME")
+      "$server" "${arguments[@]}"
+      echo
+      echo "Start the server with: docker compose up -d"
+      echo "Then show the one-time setup code with: docker compose exec aurelia aurelia setup-code"
+      echo "and open https://<this computer>:43111 in a browser to finish setting up."
+      exit 0
+    fi
     owner=${AURELIA_OWNER:-}
     if [ -z "$owner" ]; then
       read -r -p "Owner name (used to sign in): " owner
@@ -36,12 +46,16 @@ case "$command" in
   pair) exec "$server" pairing create "$@" ;;
   library|pairing|metadata|server|database) exec "$server" "$command" "$@" ;;
   status) exec "$server" server identity ;;
+  setup-code)
+    if [ -r /data/browser-setup-code ]; then echo "Setup code: $(cat /data/browser-setup-code)"
+    else echo "No setup code: the server has an owner already, or it isn't running." >&2; exit 1; fi ;;
   version) cat /opt/aurelia/VERSION ;;
   *)
     cat <<'USAGE'
 Aurelia Server in a container
 
   setup                    Create the owner (run once with: docker compose run --rm aurelia setup)
+  setup --browser          Set up in a web browser instead; setup-code shows the one-time code
   pair                     Show a code to type on a new device (any Aurelia app or a browser)
   approve [CODE]           Allow an older app that shows a code itself
   library add --path /media/Movies [--kind automatic|movies|tv]

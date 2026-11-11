@@ -66,6 +66,79 @@ public sealed class WebAppTests
             Assert.Equal(HttpStatusCode.NotFound, index.StatusCode);
     }
 
+    [Fact]
+    public async Task ANewServerIsSetUpInABrowserWithTheCodeFromTheServerComputer()
+    {
+        using var factory = new AureliaServerFactory();
+        using var browser = factory.CreateClient();
+        var cookies = new CookieJar();
+        using (var status = await cookies.SendAsync(browser, Web(HttpMethod.Get, "/api/v1/web/setup", "device")))
+            Assert.True((await ApiTestClient.ReadAsync<WebSetupStatusResponse>(status)).Open);
+        // Only someone at the server computer can read the code: it sits in the private data folder.
+        var path = Path.Combine(factory.DataDirectory, BrowserSetup.FileName);
+        Assert.True(File.Exists(path));
+        if (!OperatingSystem.IsWindows()) Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        var code = (await File.ReadAllTextAsync(path)).Trim();
+        Assert.Matches("^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$", code);
+
+        using (var forged = await browser.PostAsJsonAsync("/api/v1/web/setup", new WebSetupRequest(code, "invented-owner", "a long invented server password", "Firefox on Mac"), ApiTestClient.JsonOptions))
+            Assert.Equal(HttpStatusCode.Forbidden, forged.StatusCode);
+        using (var wrong = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/setup", "device",
+                   new WebSetupRequest("AAAAA-AAAAA", "invented-owner", "a long invented server password", "Firefox on Mac"))))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, wrong.StatusCode);
+            Assert.Contains("setup_code_invalid", await wrong.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            Assert.False(cookies.Has("aurelia_device"));
+        }
+        using (var created = await cookies.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/setup", "device",
+                   new WebSetupRequest(code.ToLowerInvariant().Replace("-", " ", StringComparison.Ordinal), "invented-owner", "a long invented server password", "Firefox on Mac"))))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, created.StatusCode);
+            Assert.Contains("httponly", CookieJar.Header(created, "aurelia_device"), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("token", await created.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        }
+        Assert.False(File.Exists(path));
+        // The new owner's browser sees its profile, which asks for a viewing PIN next.
+        using (var profiles = await cookies.SendAsync(browser, Web(HttpMethod.Get, "/api/v1/profiles", "device")))
+            Assert.Equal(HttpStatusCode.OK, profiles.StatusCode);
+        using (var status = await cookies.SendAsync(browser, Web(HttpMethod.Get, "/api/v1/web/setup", "device")))
+            Assert.False((await ApiTestClient.ReadAsync<WebSetupStatusResponse>(status)).Open);
+        var other = new CookieJar();
+        using (var again = await other.SendAsync(browser, Web(HttpMethod.Post, "/api/v1/web/setup", "device",
+                   new WebSetupRequest(code, "someone-else", "another long invented password", "Chrome on Android"))))
+            Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    }
+
+    [Fact]
+    public void TenWrongSetupCodesMakeANewOne()
+    {
+        var directory = TestPaths.CreateDataDirectory();
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var runtime = new ServerRuntimeOptions(directory, Path.Combine(directory, "aurelia.db"), "http://127.0.0.1:0", "Invented", false,
+                ServerRuntimeOptions.DefaultLanHttpsPort, "", "", null);
+            var clock = new WebClock();
+            var setup = new BrowserSetup(runtime, clock, Microsoft.Extensions.Logging.Abstractions.NullLogger<BrowserSetup>.Instance);
+            var code = setup.Current();
+            Assert.Equal(code, setup.Current());
+            for (var attempt = 1; attempt < BrowserSetup.MaximumAttempts; attempt++) Assert.False(setup.Matches("WRONGWRONG"));
+            Assert.True(setup.Matches(code));
+            Assert.False(setup.Matches("WRONGWRONG"));
+            Assert.False(setup.Matches(code), "the tenth wrong code replaced it");
+            var renewed = setup.Current();
+            Assert.NotEqual(code, renewed);
+            Assert.Equal(BrowserSetup.Display(renewed) + "\n", File.ReadAllText(Path.Combine(directory, BrowserSetup.FileName)));
+            clock.Advance(BrowserSetup.Lifetime);
+            Assert.False(setup.Matches(renewed), "a day-old code expired");
+            Assert.NotEqual(renewed, setup.Current());
+            setup.Finish();
+            Assert.False(File.Exists(Path.Combine(directory, BrowserSetup.FileName)));
+            Assert.False(setup.Matches(renewed));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     [Theory]
     [InlineData("br, gzip", "br")]
     [InlineData("gzip", "gzip")]

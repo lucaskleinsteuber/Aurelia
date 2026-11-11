@@ -187,5 +187,5 @@ echo "Aurelia Server $(cat "$install_root/VERSION") is installed and runs as a s
 if $updating; then
   echo "It was updated; accounts, library and settings are unchanged."
 else
-  echo "Set it up next with: sudo aurelia setup"
+  echo "Set it up next with: sudo aurelia setup (in a web browser, or here in the terminal)"
 fi

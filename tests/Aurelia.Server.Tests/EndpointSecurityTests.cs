@@ -31,6 +31,8 @@ public sealed class EndpointSecurityTests
         "GET,HEAD /web/v/{version}/{**file}",
         "GET,HEAD {**path}",
         "POST /api/v1/web/pair",
+        "GET /api/v1/web/setup",
+        "POST /api/v1/web/setup",
         "POST /api/v1/web/pairing",
         "POST /api/v1/web/pairing/cancel",
         "POST /api/v1/web/pairing/status",

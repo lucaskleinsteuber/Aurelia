@@ -10,14 +10,19 @@ host=${1:?Provide the ssh host.}
 ssh_options=(-o BatchMode=yes)
 [ -z "${AURELIA_LINUX_PACKAGE_SSH_CONFIG:-}" ] || ssh_options+=(-F "$AURELIA_LINUX_PACKAGE_SSH_CONFIG")
 
-remote=$(ssh "${ssh_options[@]}" "$host" 'mktemp -d "${TMPDIR:-/tmp}/aurelia-hardware.XXXXXX"')
-cleanup() { ssh "${ssh_options[@]}" "$host" "rm -rf '$remote'" || true; }
+# The remote login shell may not be bash (fish, for example), so every command runs in bash.
+remote_bash() { ssh "${ssh_options[@]}" "$host" "bash -c $(printf '%q' "$1")"; }
+
+remote=$(remote_bash 'mktemp -d "${TMPDIR:-/tmp}/aurelia-hardware.XXXXXX"')
+cleanup() { remote_bash "rm -rf '$remote'" || true; }
 trap cleanup EXIT
 
-ssh "${ssh_options[@]}" "$host" 'command -v dotnet >/dev/null && command -v ffmpeg >/dev/null' \
+# A .NET SDK in ~/.cache/aurelia-dotnet (dotnet-install.sh --install-dir) is used when none is on the path.
+dotnet='$(command -v dotnet || echo "$HOME/.cache/aurelia-dotnet/dotnet")'
+remote_bash "[ -x \"$dotnet\" ] && command -v ffmpeg >/dev/null" \
   || { echo "$host needs the .NET SDK and ffmpeg for this test." >&2; exit 1; }
-ssh "${ssh_options[@]}" "$host" 'ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "h264_(nvenc|qsv|vaapi)" || true; ls /dev/dri 2>/dev/null || true'
+remote_bash 'ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "h264_(nvenc|qsv|vaapi)" || true; ls /dev/dri 2>/dev/null || true'
 
-git -C "$repository_root" archive --format=tar HEAD -- Aurelia.slnx Directory.Build.props Directory.Packages.props global.json NuGet.Config src tests \
-  | ssh "${ssh_options[@]}" "$host" "tar -x -C '$remote'"
-ssh "${ssh_options[@]}" "$host" "cd '$remote' && AURELIA_HARDWARE_TESTS=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 dotnet test tests/Aurelia.Server.Tests --filter Category=HardwareEncoding --logger 'console;verbosity=normal'"
+git -C "$repository_root" archive --format=tar HEAD -- Aurelia.slnx Directory.Build.props Directory.Packages.props global.json NuGet.Config src tests clients/macos/AureliaTests/Fixtures \
+  | remote_bash "tar -x -C '$remote'"
+remote_bash "cd '$remote' && AURELIA_HARDWARE_TESTS=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 \"$dotnet\" test tests/Aurelia.Server.Tests --filter Category=HardwareEncoding --logger 'console;verbosity=normal'"

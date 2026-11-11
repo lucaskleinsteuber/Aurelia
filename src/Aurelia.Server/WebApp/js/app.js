@@ -155,6 +155,11 @@ async function showPairing(note) {
   stopSync();
   document.title = "Aurelia";
   const token = ++state.renderToken;
+  // A server nobody owns yet is set up here instead, with the code from the server computer.
+  try {
+    if ((await api.webSetupStatus())?.open) return token === state.renderToken ? showServerSetup() : undefined;
+  } catch { /* Older servers have no browser setup; pairing works as before. */ }
+  if (token !== state.renderToken) return;
   let busy = false;
   // Every Aurelia app pairs the same way: the main device shows the code, this browser types it.
   const field = h("input", {
@@ -214,6 +219,67 @@ async function showPairing(note) {
   clear(root);
   root.append(screenFrame(form));
   field.focus();
+}
+
+/**
+ * Setting up a new server in this browser: the one-time code the server computer shows, then the
+ * owner's name and Server Password. This browser becomes the first device; the viewing PIN and
+ * the media folders come next.
+ */
+function showServerSetup() {
+  const token = ++state.renderToken;
+  const field = (label, control, note) => h("label", { class: "setup-field" }, h("span", {}, label), control, note ? h("span", { class: "muted small" }, note) : null);
+  const code = h("input", { class: "text-field setup-code", autocomplete: "off", spellcheck: "false", placeholder: "ABCDE-FGHJK", "aria-label": "Setup code" });
+  const owner = h("input", { class: "text-field", autocomplete: "username", maxlength: "64", "aria-label": "Owner name" });
+  const password = h("input", { class: "text-field", type: "password", autocomplete: "new-password", "aria-label": "Server Password" });
+  const repeat = h("input", { class: "text-field", type: "password", autocomplete: "new-password", "aria-label": "Repeat Server Password" });
+  const message = h("p", { class: "error-text", role: "alert" });
+  const submit = h("button", { class: "primary-button large", type: "submit", disabled: true }, "Set Up Aurelia");
+  const values = () => ({ code: code.value, ownerName: owner.value, password: password.value, repeat: repeat.value });
+  const check = () => { submit.disabled = Boolean(logic.setupProblem(values())); };
+  code.addEventListener("input", () => { code.value = logic.setupCode(code.value); check(); });
+  for (const input of [owner, password, repeat]) input.addEventListener("input", check);
+  let busy = false;
+  const form = h("form", { class: "setup-card", onsubmit: async (event) => {
+    event.preventDefault();
+    const problem = logic.setupProblem(values());
+    if (busy || problem) { message.textContent = problem ?? ""; return; }
+    busy = true;
+    submit.disabled = true;
+    message.textContent = "";
+    try {
+      await api.webSetup({ code: code.value, ownerName: owner.value.trim(), password: password.value,
+        deviceName: logic.deviceName(navigator.userAgent, navigator.maxTouchPoints) });
+      password.value = repeat.value = "";
+      try { sessionStorage.setItem("aurelia.welcome", "1"); } catch { /* The welcome page is optional. */ }
+      if (token === state.renderToken) return showProfiles("Choose your profile and give it a viewing PIN.");
+    } catch (error) {
+      if (token !== state.renderToken) return;
+      if (error instanceof ApiError && error.offline) return showServerOff();
+      message.textContent = error.code === "setup_code_invalid"
+        ? "That code is not right. On the server computer, run: sudo aurelia setup --browser"
+        : error.code === "server_already_setup" ? "This server already has an owner. Ask them for a code to sign in." : error.message;
+      if (error.code === "server_already_setup") return setTimeout(() => showPairing(), 2500);
+    } finally {
+      busy = false;
+      check();
+    }
+  } },
+    h("img", { class: "brand-mark", src: "/web/icon.svg", alt: "" }),
+    h("h1", {}, "Set Up Your Aurelia Server"),
+    h("p", {}, `“${state.server?.name ?? "Aurelia"}” has no owner yet. The server computer shows a one-time code; with it, this browser creates the owner.`),
+    h("ol", { class: "pairing-steps" },
+      h("li", {}, "On the server computer, run: sudo aurelia setup --browser"),
+      h("li", {}, "In Docker: docker compose exec aurelia aurelia setup-code"),
+      h("li", {}, "Type the code below and choose the owner’s name and Server Password.")),
+    field("Setup Code", code),
+    field("Owner Name", owner, "The owner manages the server. You choose a viewing PIN next."),
+    field("Server Password", password, "At least 12 characters. It protects server changes like removing titles or restoring backups."),
+    field("Repeat Server Password", repeat),
+    message, h("div", { class: "button-row" }, submit));
+  clear(root);
+  root.append(screenFrame(form));
+  code.focus();
 }
 
 // MARK: Profiles
@@ -404,6 +470,13 @@ function showPin(profile) {
 async function enterProfile(user) {
   reads.clear();
   prefetches.forget();
+  try {
+    if (sessionStorage.getItem("aurelia.welcome") === "1" && logic.managementPermissions(user).owner) {
+      sessionStorage.removeItem("aurelia.welcome");
+      history.replaceState(null, "", "/welcome");
+      state.route = { name: "welcome" };
+    }
+  } catch { /* Without storage there is no welcome page; Settings has everything. */ }
   state.profile = user;
   state.watchlistIds = new Set();
   api.watchlist().then((response) => {
@@ -824,6 +897,8 @@ function screenFor(route, token) {
       return statisticsScreen();
     case "movie-night":
       return movieNight.screen();
+    case "welcome":
+      return settings.welcomeScreen();
     default:
       return homeScreen();
   }

@@ -80,3 +80,17 @@ test("the top bar keeps every section once in the chosen order", () => {
   assert.deepEqual(logic.moveSection(null, "library", -1), ["library", "watchlist", "recent", "shows", "movies", "collections"]);
   assert.deepEqual(logic.normalizeGeneralPreferences({ sectionOrder: ["collections"] }).sectionOrder[0], "collections");
 });
+
+test("the setup form takes the server's code however it is typed and checks the password", () => {
+  assert.equal(logic.setupCode("abcde fghjk"), "ABCDE-FGHJK");
+  assert.equal(logic.setupCode("ab-c"), "ABC");
+  assert.equal(logic.setupCode("ABCDE-FGHJK-XYZ"), "ABCDE-FGHJK");
+  const ok = { code: "abcdefghjk", ownerName: "Owner", password: "a long password!", repeat: "a long password!" };
+  assert.equal(logic.setupProblem(ok), null);
+  assert.match(logic.setupProblem({ ...ok, code: "ABC" }), /10-character/);
+  assert.match(logic.setupProblem({ ...ok, ownerName: " " }), /name/);
+  assert.match(logic.setupProblem({ ...ok, password: "short", repeat: "short" }), /12/);
+  assert.match(logic.setupProblem({ ...ok, repeat: "different!!!!!" }), /match/);
+  assert.deepEqual(logic.parseRoute("/welcome", ""), { name: "welcome" });
+  assert.equal(logic.routePath({ name: "welcome" }), "/welcome");
+});

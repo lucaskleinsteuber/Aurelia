@@ -16,6 +16,7 @@ public sealed record ServerCommandLine(
         var commandIndex = Array.FindIndex(args, argument =>
             argument.Equals("run", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("setup-owner", StringComparison.OrdinalIgnoreCase)
+            || argument.Equals("setup-browser", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("library", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("metadata", StringComparison.OrdinalIgnoreCase)
             || argument.Equals("pairing", StringComparison.OrdinalIgnoreCase)

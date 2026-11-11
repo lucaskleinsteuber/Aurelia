@@ -1102,7 +1102,46 @@ export function createSettings(app) {
         form, message));
   }
 
-  return { settingsScreen, editMetadata: editors.editMetadata, closeEditors: () => { editors.close(); closeUpdates(); } };
+  /**
+   * The first steps on a server set up in this browser: media folders, movie info and power,
+   * then a scan. Everything here is also in Settings.
+   */
+  async function welcomeScreen() {
+    const refresh = () => app.navigate({ name: "welcome" }, { replace: true });
+    let libraries = [];
+    let provider = null;
+    let power = null;
+    try { libraries = (await api.libraries()) ?? []; } catch (error) { if (error?.code !== "management_locked") throw error; }
+    try { provider = await api.metadataProvider(); } catch { provider = null; }
+    try { power = await api.serverPower(); } catch { power = null; }
+    const step = (number, title, text, done, ...actions) => h("section", { class: `welcome-step ${done ? "done" : ""}` },
+      h("span", { class: "welcome-number", "aria-hidden": "true" }, done ? "✓" : String(number)),
+      h("div", { class: "welcome-body" }, h("h2", {}, title), h("p", { class: "muted" }, text), h("div", { class: "button-row" }, ...actions)));
+    return h("div", { class: "welcome page-enter" },
+      h("header", { class: "welcome-header" },
+        h("h1", {}, "Welcome to Aurelia"),
+        h("p", { class: "muted" }, "Three steps and your library is ready. You can change all of this later in Settings.")),
+      step(1, "Add your media", libraries.length
+        ? `${libraries.map((library) => library.name).join(", ")}. Add more folders any time.`
+        : "Choose the folders on the server that hold your films and shows. Aurelia only reads them.",
+        libraries.length > 0,
+        h("button", { class: libraries.length ? "secondary-button" : "primary-button", onclick: () => editors.addStorage() }, "Add a Folder…")),
+      step(2, "Get movie and TV info", provider?.hasToken
+        ? "Titles, artwork and episode details come from TMDB."
+        : "A free token from The Movie Database (TMDB) gives your titles posters, descriptions and cast. Optional.",
+        Boolean(provider?.hasToken),
+        h("button", { class: "secondary-button", onclick: () => admin.metadataService(refresh) }, provider?.hasToken ? "TMDB Settings…" : "Set Up TMDB…")),
+      power?.available ? step(3, "Choose how the server saves power", "Always on, sleeping when nobody watches, or stopping only Aurelia. Settings › Server › Power.", false,
+        h("a", { class: "secondary-button", href: "/settings/server", "data-route": true }, "Power Settings")) : null,
+      h("div", { class: "welcome-finish" },
+        button("Scan and Open Home", async () => {
+          if (libraries.length) await api.scanAllLibraries();
+          app.navigate({ name: "home" });
+        }, libraries.length ? "Scanning your media. Titles appear as they are found." : null, "primary-button large", () => {}),
+        h("p", { class: "muted small" }, "Add Aurelia to your phone’s home screen, or connect other devices with a code from Settings › Profiles and Devices.")));
+  }
+
+  return { settingsScreen, welcomeScreen, editMetadata: editors.editMetadata, closeEditors: () => { editors.close(); closeUpdates(); } };
 }
 
 function roleTitle(role) {

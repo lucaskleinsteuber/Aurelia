@@ -112,6 +112,8 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     serverInfo: () => request("/api/v1/server/info", { as: "device" }),
 
     /** Signs this browser in with the code from the main device; the credential stays in a cookie. */
+    webSetupStatus: () => request("/api/v1/web/setup", { as: "device" }),
+    webSetup: (body) => request("/api/v1/web/setup", { method: "POST", body, as: "device" }),
     redeemPairingCode: (code, deviceName) => request("/api/v1/web/pair", { method: "POST", body: { code, deviceName }, as: "device" }),
     profiles: () => request("/api/v1/profiles", { as: "device" }),
     unlockProfile: (profileId, pin) =>

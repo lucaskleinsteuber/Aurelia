@@ -137,7 +137,8 @@ usage() {
   cat <<'USAGE'
 Aurelia Server
 
-  sudo aurelia setup [--name "Server Name"] [--power always|save|stop-only]
+  sudo aurelia setup [--name "Server Name"] [--power always|save|stop-only] [--browser | --terminal]
+                                              --browser: set up in a web browser with a one-time code
                                               Create the owner, turn on network access, choose power use
   aurelia pair                                Show a code to type on a new device (Mac, Linux PC,
                                               Apple TV, iPhone, iPad or browser)
@@ -163,6 +164,30 @@ Commands that change the server ask for the owner's name, Server Password and PI
 USAGE
 }
 
+# The addresses and the one-time code for setting this server up in a browser.
+show_browser_setup() {
+  local code="" tries=0
+  while [ -z "$code" ] && [ $tries -lt 20 ]; do
+    code=$(cat "$data_dir/browser-setup-code" 2>/dev/null || true)
+    [ -n "$code" ] || { sleep 0.5; tries=$((tries + 1)); }
+  done
+  if [ -z "$code" ]; then
+    echo "No setup code: this server already has an owner, or it isn't running. Run: sudo aurelia status" >&2
+    return 1
+  fi
+  echo "Set up Aurelia in a web browser on any computer, phone or tablet at home:"
+  for address in $(hostname -I 2>/dev/null); do
+    case "$address" in *:*) continue ;; esac
+    echo "  https://$address:43111"
+  done
+  echo
+  echo "  Setup code: $code"
+  echo
+  echo "The browser warns about the certificate the first time; that is expected. The page shows"
+  echo "the same verification fingerprint as 'aurelia status' if you want to compare."
+  "$server" server identity 2>/dev/null | grep -i fingerprint || true
+}
+
 command=${1:-help}
 [ $# -gt 0 ] && shift
 
@@ -171,13 +196,36 @@ case "$command" in
     require_root setup
     name=""
     power=""
+    way=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --name) name=${2:-}; shift 2 ;;
         --power) power=${2:-}; shift 2 ;;
+        --browser) way=browser; shift ;;
+        --terminal) way=terminal; shift ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
       esac
     done
+    if [ -z "$way" ]; then
+      echo "How do you want to set up Aurelia?"
+      echo "  1) In a web browser on any computer, phone or tablet at home (recommended)"
+      echo "  2) Here in the terminal"
+      read -r -p "Choose 1 or 2 [1]: " way || way=""
+      case "${way:-1}" in 2|terminal) way=terminal ;; *) way=browser ;; esac
+    fi
+    if [ "$way" = browser ]; then
+      systemctl stop aurelia-start.socket aurelia 2>/dev/null || true
+      arguments=(setup-browser --data-dir "$data_dir")
+      [ -n "$name" ] && arguments+=(--server-name "$name")
+      if ! (cd "$data_dir" && runuser -u aurelia -- "$server" "${arguments[@]}"); then
+        systemctl start aurelia
+        exit 1
+      fi
+      systemctl start aurelia
+      wait_until_ready
+      show_browser_setup
+      exit 0
+    fi
     read -r -p "Owner name (used to sign in): " owner
     [ -n "$owner" ] || { echo "An owner name is required." >&2; exit 2; }
     systemctl stop aurelia-start.socket aurelia
@@ -188,6 +236,8 @@ case "$command" in
       systemctl start aurelia
       exit 1
     fi
+    # The owner exists now, so the browser setup code is no longer needed.
+    rm -f "$data_dir/browser-setup-code"
     systemctl start aurelia
     wait_until_ready
     "$server" server identity
@@ -320,6 +370,10 @@ case "$command" in
     systemctl --no-pager status aurelia | head -n 5 || true
     echo
     "$server" server identity || true
+    if [ -r "$data_dir/browser-setup-code" ]; then
+      echo
+      show_browser_setup
+    fi
     ;;
   logs)
     exec journalctl -u aurelia -f -n 50

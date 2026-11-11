@@ -92,7 +92,7 @@ builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
 // Every database command at the default level would fill a Linux journal with hundreds of
 // thousands of lines an hour; warnings and errors still appear.
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
-if (commandLine.Command == "setup-owner")
+if (commandLine.Command is "setup-owner" or "setup-browser")
 {
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     // A model design note, not a problem with this server; setup over SSH stays readable.
@@ -104,6 +104,7 @@ var connectionString = SqliteConnections.ConnectionString(runtime.DatabasePath);
 builder.Services.AddSingleton(runtime);
 builder.Services.AddSingleton(tlsIdentity);
 builder.Services.AddSingleton<BootstrapSetupAuthorizer>();
+builder.Services.AddSingleton<BrowserSetup>();
 builder.Services.AddDataProtection()
     .SetApplicationName("Aurelia.Server")
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionDirectory));
@@ -135,6 +136,7 @@ builder.Services.AddSingleton<EditorArtworkStore>();
 builder.Services.AddScoped<MediaEditorService>();
 builder.Services.AddScoped<LibraryMutationService>();
 builder.Services.AddHostedService<LibraryCleanupWorker>();
+builder.Services.AddHostedService<BrowserSetupStarter>();
 builder.Services.AddSingleton<ServerConfigurationStore>();
 builder.Services.AddSingleton<CredentialAttemptGuard>();
 builder.Services.AddSingleton<PairingCodeAttemptGuard>();
@@ -445,17 +447,37 @@ try
 {
     await DatabaseInitializer.InitializeAsync(app.Services, CancellationToken.None);
 
-    if (runtime.LanAccessEnabled)
+    if (runtime.LanAccessEnabled && commandLine.Command == "run")
     {
+        // Without an owner the network only reaches what anyone may see, and the browser setup,
+        // which needs the one-time code from this computer (BrowserSetup).
         await using var readinessScope = app.Services.CreateAsyncScope();
         var database = readinessScope.ServiceProvider.GetRequiredService<AureliaDbContext>();
         if (!await database.Users.AnyAsync())
+            Console.WriteLine("This server has no owner yet. Set it up in a browser with the setup code: sudo aurelia setup --browser");
+    }
+
+    if (commandLine.Command == "setup-browser")
+    {
+        // Turns on network access before there is an owner, so a browser on another computer can
+        // set the server up with the code only this computer shows.
+        await using var scope = app.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        if (await database.Users.AnyAsync())
         {
-            Console.Error.WriteLine(
-                "LAN access requires an owner. Run setup-owner locally before starting with --lan.");
-            Environment.ExitCode = 2;
+            Console.Error.WriteLine("This server already has an owner. Connect devices with: aurelia pair");
+            Environment.ExitCode = 1;
             return;
         }
+        var settings = scope.ServiceProvider.GetRequiredService<ServerConfigurationStore>();
+        var name = commandLine.Option("--server-name")?.Trim();
+        settings.Update(settings.Current with
+        {
+            LanAccessEnabled = true,
+            ServerName = string.IsNullOrEmpty(name) ? settings.Current.ServerName : name,
+        }, allowNetworkChange: true);
+        Console.WriteLine("Network access starts with the server, ready to be set up in a browser.");
+        return;
     }
 
     if (commandLine.Command == "setup-owner")
