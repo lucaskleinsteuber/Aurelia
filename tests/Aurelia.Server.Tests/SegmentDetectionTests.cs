@@ -143,12 +143,17 @@ public sealed class SegmentDetectionTests
                 var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
                 var changed = await database.MediaItems.SingleAsync(item => item.Id == episodes[1]);
                 changed.FileModifiedAt = changed.FileModifiedAt!.Value.AddSeconds(5);
+                // The synthetic file changes on disk too, as the scan would have found it; opening it
+                // to examine it reads the real time again.
+                File.SetLastWriteTimeUtc(changed.SourcePath, changed.FileModifiedAt.Value.UtcDateTime);
                 await database.SaveChangesAsync();
             }
             Assert.False((await SegmentsAsync(client, owner.Token, episodes[1])).Analyzed);
             Assert.Equal(1, await detection.QueuePendingSeasonsAsync(CancellationToken.None));
             Assert.Equal(1, await detection.ProcessPendingAsync(CancellationToken.None));
             Assert.True((await SegmentsAsync(client, owner.Token, episodes[1])).Analyzed);
+            // The test's own change is undone; the check below proves the examination changed no file.
+            File.SetLastWriteTimeUtc(paths[1], before[1].Item1);
 
             // With detection off only times set by hand are handed out, and nothing is examined.
             using (var disable = ApiTestClient.Authorized(HttpMethod.Put, "/api/v1/server/media-segments", owner.Token, new UpdateMediaSegmentSettingsRequest(false)))
