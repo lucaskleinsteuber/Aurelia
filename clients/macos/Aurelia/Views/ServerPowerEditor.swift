@@ -1,6 +1,9 @@
 import SwiftUI
 
-/// What a Linux server installed from the package does when unused; hidden for other servers.
+/// Settings › Power: what the server does when nobody uses Aurelia. A Linux package server can
+/// stop Aurelia, sleep or turn off its computer and wake on the network; a server Aurelia hosts on
+/// a Mac or Linux PC can only stop after the unused minutes, because a desktop or laptop is often
+/// off or elsewhere. Hidden where the server can't act on it.
 struct ServerPowerEditor: View {
   @EnvironmentObject private var model: AppModel
   let client: APIClient
@@ -9,29 +12,31 @@ struct ServerPowerEditor: View {
   @State private var working = false
   @State private var message: String?
 
-  static let idleChoices = [10, 15, 20, 30, 45, 60, 90, 120, 180]
+  static let idleChoices = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240]
 
   var body: some View {
     Group {
       if let stored, stored.available, let draft {
         AureliaSettingsSection(
-          "Power Saving",
+          "When Nobody Uses Aurelia",
           symbol: "leaf",
-          description: "What the server computer does while nobody watches."
+          description: draft.hostedByApp
+            ? "Aurelia Server runs inside the Aurelia app on \(draft.hostName). It can stop when nobody uses it, so the computer may sleep."
+            : "What the server computer does while nobody watches, browses or changes anything."
         ) {
           VStack(alignment: .leading, spacing: 12) {
             Picker("When Unused", selection: binding(\.mode)) {
-              Text("Keep Running").tag("off")
-              Text("Stop Aurelia Server").tag("stop")
-              Text("Put the Computer to Sleep").tag("sleep")
-              Text("Shut Down the Computer").tag("shutdown")
+              ForEach(Self.modes(hostedByApp: draft.hostedByApp), id: \.self) { mode in
+                Text(Self.label(mode: mode, hostedByApp: draft.hostedByApp)).tag(mode)
+              }
             }
             .pickerStyle(.radioGroup)
             .accessibilityIdentifier("server-power-mode")
-            Text(Self.explanation(draft.mode))
+            Text(Self.explanation(draft.mode, hostedByApp: draft.hostedByApp, hostName: draft.hostName))
               .font(.caption).foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
             if draft.mode != "off" {
+              Divider()
               Picker("After", selection: binding(\.idleMinutes)) {
                 ForEach(idleChoices(including: draft.idleMinutes), id: \.self) { minutes in
                   Text(Self.label(minutes)).tag(minutes)
@@ -39,7 +44,14 @@ struct ServerPowerEditor: View {
               }
               .frame(maxWidth: 320)
               Text(
-                "without a device using it. When a player's sleep timer ends, this happens after five minutes."
+                "Without anyone watching, browsing or changing settings on any device. An app that is only open doesn't count, and nothing happens while a title plays."
+              )
+              .font(.caption).foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+              Toggle("Also After a Sleep Timer Ends", isOn: afterSleepTimer)
+                .accessibilityIdentifier("server-power-sleep-timer")
+              Text(
+                "When a player's sleep timer ends and nothing plays for five more minutes, it happens right away, at any time of day."
               )
               .font(.caption).foregroundStyle(.secondary)
               Toggle("Keep Running at Set Hours", isOn: awakeHoursEnabled)
@@ -52,12 +64,8 @@ struct ServerPowerEditor: View {
                     "Until", selection: time(\.awakeUntil), displayedComponents: .hourAndMinute)
                 }
                 .fixedSize()
-                Text(
-                  draft.mode == "stop"
-                    ? "Aurelia Server never stops during these hours."
-                    : "It never powers down during these hours and wakes itself at their start, so an Apple TV finds it then."
-                )
-                .font(.caption).foregroundStyle(.secondary)
+                Text(Self.awakeHoursNote(draft))
+                  .font(.caption).foregroundStyle(.secondary)
               }
               if draft.offersWakeOnAccess {
                 Toggle("Wake When a Device Connects", isOn: wakeOnAccess)
@@ -70,7 +78,7 @@ struct ServerPowerEditor: View {
               }
             }
             HStack {
-              Button("Save Power Settings") { save() }
+              Button("Save") { save() }
                 .disabled(draft == stored || !isValid(draft))
               if working { ProgressView().controlSize(.small) }
             }
@@ -79,6 +87,11 @@ struct ServerPowerEditor: View {
           .frame(maxWidth: .infinity, alignment: .leading).disabled(working)
         }
         .accessibilityIdentifier("server-power")
+      } else if stored != nil {
+        Text(
+          "This server can't save power from Aurelia: it follows its computer's own energy settings."
+        )
+        .foregroundStyle(.secondary)
       }
     }
     .task(id: model.administrationGeneration) { await load() }
@@ -131,6 +144,10 @@ struct ServerPowerEditor: View {
     Binding(get: { draft?.wakeOnAccess ?? false }, set: { draft?.wakeOnAccess = $0 })
   }
 
+  private var afterSleepTimer: Binding<Bool> {
+    Binding(get: { draft?.afterSleepTimer ?? true }, set: { draft?.afterSleepTimer = $0 })
+  }
+
   private var awakeHoursEnabled: Binding<Bool> {
     Binding(
       get: { draft?.awakeFrom != nil },
@@ -167,16 +184,45 @@ struct ServerPowerEditor: View {
     Self.idleChoices.contains(current) ? Self.idleChoices : (Self.idleChoices + [current]).sorted()
   }
 
-  static func explanation(_ mode: String) -> String {
+  /// A server in the Aurelia app can only keep running or stop; a Linux server can do all four.
+  static func modes(hostedByApp: Bool) -> [String] {
+    hostedByApp ? ["off", "stop"] : ["off", "stop", "sleep", "shutdown"]
+  }
+
+  static func label(mode: String, hostedByApp: Bool) -> String {
     switch mode {
-    case "stop":
-      "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when a Mac or Apple TV connects."
-    case "sleep":
-      "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it; an Apple TV cannot, so open Aurelia on a Mac first."
-    case "shutdown":
-      "The computer turns off and uses almost nothing. Aurelia on a Mac starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off."
+    case "stop": hostedByApp ? "Stop Aurelia Server" : "Stop Only Aurelia Server"
+    case "sleep": "Put the Computer to Sleep"
+    case "shutdown": "Shut Down the Computer"
+    default: "Keep Running"
+    }
+  }
+
+  static func explanation(_ mode: String, hostedByApp: Bool = false, hostName: String = "the server computer")
+    -> String
+  {
+    switch (mode, hostedByApp) {
+    case ("stop", true):
+      "Aurelia Server stops, and \(hostName) may sleep as usual. Other devices then show “Start Aurelia on \(hostName)”; opening Aurelia there starts it again. Nothing can wake it over the network."
+    case ("stop", false):
+      "Only Aurelia Server stops; the computer stays on for its other work, such as a NAS. It starts again within seconds when any device connects, a browser too."
+    case ("sleep", _):
+      "The whole computer sleeps and uses only a few watts. Aurelia on a Mac wakes it when you open it, and so can a router such as a FRITZ!Box (Wake-on-LAN); an Apple TV can't, so open Aurelia on a Mac first. Waking takes a few seconds."
+    case ("shutdown", _):
+      "The computer turns off and uses almost nothing. Aurelia on a Mac starts it with Wake-on-LAN, which takes about a minute, and only if the computer's BIOS allows Wake-on-LAN while it is off (often called “Wake on LAN from S5”)."
     default:
-      "Aurelia Server keeps running all the time."
+      hostedByApp
+        ? "Aurelia Server runs as long as the Aurelia app does. While the computer sleeps or is turned off, other devices show “Start Aurelia on \(hostName)”."
+        : "Aurelia Server and the computer keep running: ready at any moment, using the most power."
+    }
+  }
+
+  static func awakeHoursNote(_ settings: ServerPowerSettings) -> String {
+    switch settings.mode {
+    case "stop" where settings.hostedByApp: "Aurelia Server never stops during these hours."
+    case "stop": "Aurelia Server never stops during these hours."
+    default:
+      "It never powers down during these hours and wakes itself at their start, so an Apple TV finds it then."
     }
   }
 

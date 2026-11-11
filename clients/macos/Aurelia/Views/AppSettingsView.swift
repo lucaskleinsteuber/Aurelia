@@ -10,6 +10,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
   case metadata = "Metadata"
   case profilesAndDevices = "Profiles and Devices"
   case server = "Server"
+  case power = "Power"
   case updates = "Updates"
   case advanced = "Advanced"
   case about = "About"
@@ -26,6 +27,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable, Sendable {
     case .metadata: "sparkles.rectangle.stack.fill"
     case .profilesAndDevices: "person.2.fill"
     case .server: "server.rack"
+    case .power: "bolt.fill"
     case .updates: "arrow.down.circle.fill"
     case .advanced: "slider.horizontal.3"
     case .about: "info.circle.fill"
@@ -268,12 +270,14 @@ struct AppSettingsView: View {
       return model.canManageStorage
     case .metadata, .server:
       return model.canManageMedia
+    case .power:
+      return model.profile?.user?.role == .owner
     }
   }
 
   private var needsServerAdministration: Bool {
     switch selectedCategory {
-    case .library, .metadata, .profilesAndDevices, .server: true
+    case .library, .metadata, .profilesAndDevices, .server, .power: true
     default: false
     }
   }
@@ -355,6 +359,8 @@ struct AppSettingsView: View {
           "Server Operations Unavailable",
           "The server's owner manages server health and operations.")
       }
+    case .power:
+      ServerManagementView(.power)
     case .updates:
       updatesSections
     case .advanced:
@@ -403,6 +409,12 @@ struct AppSettingsView: View {
       }
       if queryMatches(query, "quit window close rest energy sleep power mac") {
         windowSystemSection
+        let _ = { foundAny = true }()
+      }
+      if model.profile?.user?.role == .owner
+        && queryMatches(query, "power sleep shut down turn off wake lan unused idle energy awake hours server")
+      {
+        ServerManagementView(.power)
         let _ = { foundAny = true }()
       }
       if queryMatches(query, "resume next countdown threshold auto night mode sleep skip intro credits") {

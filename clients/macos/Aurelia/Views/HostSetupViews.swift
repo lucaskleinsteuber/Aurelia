@@ -141,6 +141,11 @@ struct NativeHostSetupView: View {
         Button("Try Again") { Task { await model.restartNativeHost() } }
           .buttonStyle(AureliaPrimaryActionButtonStyle())
           .accessibilityIdentifier("retry-server-start")
+      case .idle:
+        Text("Starting Your Server").font(.title.bold())
+        Text("It stopped because nobody used it.").foregroundStyle(.secondary)
+        ProgressView().controlSize(.large)
+          .task { await model.resumeIdleHost() }
       case .stopping, .stopped:
         Text("Server Stopped").font(.title.bold())
         Button("Start Server") { Task { await model.selectHostMode() } }

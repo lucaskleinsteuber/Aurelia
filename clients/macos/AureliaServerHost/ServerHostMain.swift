@@ -77,6 +77,9 @@ private enum HostState: String, Codable {
   case stopping
   case stopped
   case failed
+  /// Aurelia Server ended itself after the unused minutes of its power settings; it stays
+  /// stopped until Aurelia is opened on this Mac again.
+  case idle
 }
 
 private struct HostServerInfo: Codable {
@@ -365,6 +368,8 @@ private final class ServerHostRuntime: @unchecked Sendable {
   private func startServer(lan: Bool) {
     guard !shuttingDown else { return }
     stopWatchdog()
+    // Released while the server was stopped for being unused.
+    updateSleepAssertion()
     readinessGeneration &+= 1
     let generation = readinessGeneration
     serverReadyGeneration = nil
@@ -661,6 +666,9 @@ private final class ServerHostRuntime: @unchecked Sendable {
     }
   }
 
+  /// The status Aurelia Server ends with when its power settings stopped it for being unused.
+  private static let idleExitCode: Int32 = 76
+
   private func serverTerminated(status terminationStatus: Int32) {
     stopWatchdog()
     process = nil
@@ -714,6 +722,18 @@ private final class ServerHostRuntime: @unchecked Sendable {
     if let requestedLAN = pendingRestartLAN {
       pendingRestartLAN = nil
       startServer(lan: requestedLAN)
+      return
+    }
+    if terminationStatus == Self.idleExitCode {
+      // Nobody used it: the Mac may sleep, and nothing restarts it until Aurelia is opened.
+      if sleepAssertion != 0 {
+        IOPMAssertionRelease(sleepAssertion)
+        sleepAssertion = 0
+      }
+      updateStatus(
+        .idle,
+        message:
+          "Aurelia Server stopped because nobody used it. It starts again when you open Aurelia on this Mac.")
       return
     }
 

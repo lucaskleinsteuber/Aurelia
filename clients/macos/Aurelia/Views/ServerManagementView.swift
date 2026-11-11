@@ -3,7 +3,7 @@ import SwiftUI
 struct ServerManagementView: View {
   /// Settings shows the server under Server and the people who use it under Profiles and
   /// Devices; both pages share this view's loading, approval and deletion handling.
-  enum Part { case server, people }
+  enum Part { case server, people, power }
 
   @EnvironmentObject private var model: AppModel
   private let part: Part
@@ -38,6 +38,8 @@ struct ServerManagementView: View {
       if part == .people {
         profiles
         ServerDevicesSection()
+      } else if part == .power {
+        powerParts
       } else {
         serverParts
       }
@@ -87,6 +89,19 @@ struct ServerManagementView: View {
     }
   }
 
+  /// Settings › Power: when the server runs on a Mac, and what it does when nobody uses it. A
+  /// Linux server can sleep or turn off its computer; one the Aurelia app hosts only stops.
+  @ViewBuilder private var powerParts: some View {
+    if loading && capabilities == nil && !model.isLocalHost { ProgressView("Loading power settings…") }
+    if let client, capabilities != nil || model.isLocalHost {
+      if hosting.hostsOnMac {
+        ServerHostingEditor(
+          client: client, available: capabilities?.nativeHostOperations == true)
+      }
+      ServerPowerEditor(client: client)
+    }
+  }
+
   @ViewBuilder private var serverParts: some View {
     if loading && status == nil { ProgressView("Loading server settings…") }
     if let status {
@@ -99,16 +114,6 @@ struct ServerManagementView: View {
     }
     if let health {
       ServerHealthCard(health: health)
-    }
-    // Each kind of server shows only what it can do: hosting inside Aurelia on a Mac, or
-    // power saving of the Linux package.
-    if let client, capabilities != nil || model.isLocalHost {
-      if hosting.hostsOnMac {
-        ServerHostingEditor(
-          client: client, available: capabilities?.nativeHostOperations == true)
-      } else if hosting == .linuxPackage {
-        ServerPowerEditor(client: client)
-      }
     }
     if let configuration, let client {
       ServerEssentialsEditor(configuration: configuration, client: client) {

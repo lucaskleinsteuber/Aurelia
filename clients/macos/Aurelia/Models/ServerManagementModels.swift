@@ -213,6 +213,14 @@ struct ServerPowerSettings: Codable, Equatable, Sendable {
   var wakeOnAccess: Bool? = nil
   /// The card's ethtool wake letters; "u" allows `wakeOnAccess`. Empty or missing when unknown.
   var wakeSupport: String? = nil
+  /// From server 2.10.0: "macApp" or "linuxApp" when the Aurelia app hosts the server on a desktop
+  /// or laptop (then only "off" and "stop"), "linuxServer" or "server" otherwise.
+  var hosting: String? = nil
+  /// Power down five minutes after a player's sleep timer ended; nil from older servers (on).
+  var afterSleepTimer: Bool? = nil
+
+  var hostedByApp: Bool { hosting == "macApp" || hosting == "linuxApp" }
+  var hostName: String { hosting == "linuxApp" ? "the Linux PC" : hosting == "macApp" ? "the Mac" : "the server computer" }
 
   /// Wake When a Device Connects matters only while the computer sleeps or is off, and only on a
   /// card that can wake on a direct packet.

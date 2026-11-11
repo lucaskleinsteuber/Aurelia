@@ -89,6 +89,13 @@ final class AppModel: ObservableObject {
     !usesProfileSelection
       || (profile?.isViewingSession == true && (managementExpiresAt ?? .distantPast) > Date())
   }
+  /// "macApp" or "linuxApp" when the current server runs inside Aurelia on another computer.
+  var currentServerAppHost: String? {
+    guard operatingMode != .host, let serverId = deviceConnection?.serverId ?? profile?.serverId
+    else { return nil }
+    return WakeOnLan.appHost(for: serverId)
+  }
+
   var canWakeCurrentServer: Bool {
     guard operatingMode != .host, let serverId = deviceConnection?.serverId ?? profile?.serverId
     else { return false }
@@ -1059,6 +1066,17 @@ final class AppModel: ObservableObject {
     }
   }
 
+  /// Opening Aurelia starts a server that stopped itself for being unused (Power settings).
+  func resumeIdleHost() async {
+    guard operatingMode == .host, let live = try? await serverHost.status(), live.state == .idle else { return }
+    do {
+      try await serverHost.restart()
+      hostSnapshot = NativeHostSnapshot(
+        state: .restarting, message: nil, bootstrapToken: nil, serverInfo: nil)
+      startHostPolling()
+    } catch { errorMessage = failureMessage(error) }
+  }
+
   func restartNativeHost() async {
     errorMessage = nil
     hostHealth = HostHealthPolicy()
@@ -1084,7 +1102,7 @@ final class AppModel: ObservableObject {
         _ = await startNativeHost()
         return
       }
-      if live.state == .failed {
+      if live.state == .failed || live.state == .idle {
         // Only an explicit retry may reset the independent host's recovery budget.
         do {
           try await serverHost.restart()
@@ -3467,6 +3485,12 @@ final class AppModel: ObservableObject {
         do {
           let snapshot = try await self.serverHost.status()
           guard !Task.isCancelled else { return }
+          if snapshot.state == .idle {
+            // Stopped by its power settings, not broken: it starts again when Aurelia is opened.
+            self.hostSnapshot = snapshot
+            self.hostPollTask = nil
+            return
+          }
           if snapshot.state == .failed || snapshot.state == .stopped {
             // A replying helper owns its recovery budget and planned stops. Do not
             // bypass that decision by launching another host from the UI process.

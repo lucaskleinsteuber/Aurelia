@@ -11,6 +11,9 @@ struct ServerInfoResponse: Codable, Equatable, Sendable {
   let displayFingerprint: String?
   var capabilities: [String]? = nil
   var wakeOnLanAddresses: [String]? = nil
+  /// From server 2.10.0: "macApp" or "linuxApp" when the Aurelia app hosts it on a desktop or
+  /// laptop, "linuxServer" or "server" otherwise.
+  var hosting: String? = nil
 }
 
 struct RedeemPairingCodeRequest: Encodable, Sendable {

@@ -20,6 +20,29 @@ struct ServerUnreachableView: View {
           }
           WatchOfflineButton()
         }
+      } else if let host = model.currentServerAppHost {
+        // A server inside Aurelia on a desktop or laptop: its owner starts it there.
+        let computer = host == "linuxApp" ? "Linux PC" : "Mac"
+        Image(systemName: host == "linuxApp" ? "desktopcomputer" : "laptopcomputer")
+          .font(.system(size: 46, weight: .medium))
+          .symbolRenderingMode(.hierarchical)
+          .foregroundStyle(.white.opacity(0.86))
+        VStack(spacing: 8) {
+          Text("Start Aurelia on Your \(computer)")
+            .font(.title2.weight(.semibold))
+          Text(
+            "\(serverName ?? "Your server") runs inside the Aurelia app on a \(computer). Open Aurelia there, or wake the \(computer), and this Mac connects by itself."
+          )
+          .font(.callout)
+          .foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 440)
+        Button("Try Again") { Task { await model.retryConnection() } }
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
+          .keyboardShortcut(.defaultAction)
+          .accessibilityIdentifier("server-retry")
+        if model.canOfferOfflineMode { WatchOfflineButton().padding(.top, 12) }
       } else {
         Image(systemName: model.canWakeCurrentServer ? "moon.zzz.fill" : "wifi.slash")
           .font(.system(size: 46, weight: .medium))

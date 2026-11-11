@@ -67,9 +67,19 @@ devices and backups, scrub previews, Server Health and the server's own updates.
 | Library | Storage folders, scans, Library Health, import previews |
 | Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
 | Profiles and Devices | Profiles, PINs, age limits, devices, **Create Code** for a new device, the browser address |
-| Server | Network, power, backups, scrub previews, Video Conversion, Server Health (only on the host) |
+| Server | Network, backups, scrub previews, Video Conversion, Server Health (only on the host) |
+| Power | For the owner: when a server on a Mac runs (with the app open or in the background, keeping the Mac awake), and what the server does when nobody uses Aurelia (see below) |
 | Updates | App and server updates, Beta updates |
 | About | Version, what changed, source code, license texts, privacy policy |
+
+**Power** depends on where the server runs. A Linux server installed from the package can keep
+running, stop only Aurelia Server, put its computer to sleep or shut it down after the unused
+minutes, also right after a player's sleep timer, outside optional awake hours, and wake when a
+device connects to it. A server that Aurelia hosts on a Mac or Linux PC can only keep running or
+stop after the unused minutes: a desktop or laptop is woken by its owner, not over the network.
+It then stays stopped until Aurelia is opened on that computer again, and the Mac may sleep; Apple
+TV, iPhone, iPad, the browser and other computers show "Start Aurelia on Your Mac" instead of
+trying Wake-on-LAN.
 
 **Streaming Quality** (with a server that offers it) chooses between the original file and the
 server's live conversion: Automatic picks the best quality the connection carries, "Up to 720p"

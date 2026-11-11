@@ -20,8 +20,31 @@ enum WakeOnLan {
       < 120
   }
 
-  /// Remembers the wake addresses a server reported, keyed by its identity.
+  static let hostingKey = "AureliaServerHosting"
+
+  /// A server the Aurelia app hosts on a Mac ("macApp") or Linux PC ("linuxApp"), as it last said;
+  /// nil for a server that runs on its own. Such a server is started by opening Aurelia there,
+  /// never woken over the network.
+  static func appHost(for serverId: UUID, defaults: UserDefaults = .standard) -> String? {
+    let stored = defaults.dictionary(forKey: hostingKey) as? [String: String] ?? [:]
+    return stored[serverId.uuidString].flatMap { $0 == "macApp" || $0 == "linuxApp" ? $0 : nil }
+  }
+
+  /// Remembers the wake addresses a server reported, keyed by its identity, and where it runs.
   static func remember(_ info: ServerInfoResponse, defaults: UserDefaults = .standard) {
+    if let hosting = info.hosting {
+      var kinds = defaults.dictionary(forKey: hostingKey) as? [String: String] ?? [:]
+      if kinds[info.serverId.uuidString] != hosting {
+        kinds[info.serverId.uuidString] = hosting
+        defaults.set(kinds, forKey: hostingKey)
+      }
+      if hosting == "macApp" || hosting == "linuxApp" {
+        // A desktop or laptop is started by its owner; old addresses must not wake it.
+        var stored = defaults.dictionary(forKey: defaultsKey) as? [String: [String]] ?? [:]
+        if stored.removeValue(forKey: info.serverId.uuidString) != nil { defaults.set(stored, forKey: defaultsKey) }
+        return
+      }
+    }
     let addresses = (info.wakeOnLanAddresses ?? []).compactMap(hardwareAddress).map(format)
     guard !addresses.isEmpty else { return }
     var stored = defaults.dictionary(forKey: defaultsKey) as? [String: [String]] ?? [:]

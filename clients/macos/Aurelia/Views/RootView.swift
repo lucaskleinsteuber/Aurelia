@@ -167,6 +167,11 @@ struct RootView: View {
       model.isSettingsPresented = false
       introductionReplay = UUID()
     }
+    // A server this Mac hosts that stopped for being unused starts again when Aurelia is opened.
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      Task { await model.resumeIdleHost() }
+    }
+    .task { await model.resumeIdleHost() }
   }
 }
 

@@ -15,6 +15,8 @@ enum NativeHostState: String, Codable, Sendable {
   case stopping
   case stopped
   case failed
+  /// The server stopped itself after its unused minutes; opening Aurelia starts it again.
+  case idle
 }
 
 struct NativeHostSnapshot: Codable, Equatable, Sendable {
