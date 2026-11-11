@@ -35,6 +35,79 @@ public sealed class WebAppTests
     }
 
     [Fact]
+    public async Task PageLoadsItsFilesFromAVersionedFolderTheBrowserKeepsForGood()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        using var page = await client.GetAsync("/");
+        var html = await page.Content.ReadAsStringAsync();
+        var match = System.Text.RegularExpressions.Regex.Match(html, "src=\"/web/v/([0-9a-f]{16})/js/app\\.js\"");
+        Assert.True(match.Success, html);
+        var version = match.Groups[1].Value;
+        Assert.Contains($"href=\"/web/v/{version}/app.css\"", html, StringComparison.Ordinal);
+        // Every module is announced, so the browser fetches them side by side.
+        foreach (var module in new[] { "api.js", "logic.js", "player.js", "settings.js", "dom.js" })
+            Assert.Contains($"<link rel=\"modulepreload\" href=\"/web/v/{version}/js/{module}\">", html, StringComparison.Ordinal);
+        Assert.True(page.Headers.CacheControl?.NoCache);
+        Assert.DoesNotContain("unsafe", Assert.Single(page.Headers.GetValues("Content-Security-Policy")), StringComparison.Ordinal);
+
+        using (var script = await client.GetAsync($"/web/v/{version}/js/app.js"))
+        {
+            Assert.Equal(HttpStatusCode.OK, script.StatusCode);
+            Assert.True(script.Headers.CacheControl?.Public);
+            Assert.Equal(TimeSpan.FromDays(365), script.Headers.CacheControl?.MaxAge);
+            Assert.Contains("immutable", script.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
+            var plain = await (await client.GetAsync("/web/js/app.js")).Content.ReadAsByteArrayAsync();
+            Assert.Equal(plain, await script.Content.ReadAsByteArrayAsync());
+        }
+        using (var stale = await client.GetAsync("/web/v/0000000000000000/js/app.js"))
+            Assert.Equal(HttpStatusCode.NotFound, stale.StatusCode);
+        using (var index = await client.GetAsync($"/web/v/{version}/index.html"))
+            Assert.Equal(HttpStatusCode.NotFound, index.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("br, gzip", "br")]
+    [InlineData("gzip", "gzip")]
+    [InlineData("gzip, br;q=0", "gzip")]
+    [InlineData("identity", null)]
+    public async Task TextFilesComeCompressedWhenTheBrowserAcceptsIt(string accepted, string? expected)
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        using var plainResponse = await client.GetAsync("/web/js/app.js");
+        var plain = await plainResponse.Content.ReadAsByteArrayAsync();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/web/js/app.js");
+        request.Headers.TryAddWithoutValidation("Accept-Encoding", accepted);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("Accept-Encoding", response.Headers.Vary);
+        var body = await response.Content.ReadAsByteArrayAsync();
+        if (expected is null)
+        {
+            Assert.Empty(response.Content.Headers.ContentEncoding);
+            Assert.Equal(plain, body);
+            return;
+        }
+        Assert.Equal(expected, Assert.Single(response.Content.Headers.ContentEncoding));
+        Assert.True(body.Length < plain.Length / 2);
+        using var input = new MemoryStream(body);
+        using Stream decoder = expected == "br"
+            ? new System.IO.Compression.BrotliStream(input, System.IO.Compression.CompressionMode.Decompress)
+            : new System.IO.Compression.GZipStream(input, System.IO.Compression.CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        await decoder.CopyToAsync(output);
+        Assert.Equal(plain, output.ToArray());
+        // The compressed form has its own tag and answers "unchanged" to it.
+        using var again = new HttpRequestMessage(HttpMethod.Get, "/web/js/app.js");
+        again.Headers.TryAddWithoutValidation("Accept-Encoding", accepted);
+        again.Headers.IfNoneMatch.Add(response.Headers.ETag!);
+        using var unchanged = await client.SendAsync(again);
+        Assert.Equal(HttpStatusCode.NotModified, unchanged.StatusCode);
+        Assert.NotEqual(plainResponse.Headers.ETag!.Tag, response.Headers.ETag!.Tag);
+    }
+
+    [Fact]
     public async Task BrowserSignsInWithTheMainDevicesCodeOnceAndNeverReceivesAToken()
     {
         var clock = new WebClock();
@@ -299,7 +372,7 @@ public sealed class WebAppTests
             Assert.Contains("frame-ancestors 'none'", policy, StringComparison.Ordinal);
             Assert.DoesNotContain("unsafe", policy, StringComparison.Ordinal);
             Assert.True(page.Headers.CacheControl?.NoCache);
-            Assert.Contains("/web/js/app.js", await page.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+            Assert.Contains("/js/app.js", await page.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         }
 
         using var script = await client.GetAsync("/web/js/app.js");

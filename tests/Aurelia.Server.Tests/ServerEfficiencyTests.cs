@@ -37,6 +37,13 @@ public sealed class ServerEfficiencyTests
         using var homeResponse = await client.SendAsync(home);
         Assert.Equal(HttpStatusCode.OK, homeResponse.StatusCode);
         Assert.Contains("br", homeResponse.Content.Headers.ContentEncoding);
+        foreach (var path in new[] { "/api/v1/watchlist", "/api/v1/history" })
+        {
+            using var list = Request(path, owner.Token);
+            using var listResponse = await client.SendAsync(list);
+            Assert.True(listResponse.IsSuccessStatusCode, path);
+            Assert.Contains("br", listResponse.Content.Headers.ContentEncoding);
+        }
 
         // Responses that can carry credentials or personal state stay uncompressed.
         foreach (var path in new[] { "/api/v1/auth/me", "/api/v1/auth/sessions", "/api/v1/capabilities" })

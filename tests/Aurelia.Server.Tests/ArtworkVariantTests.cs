@@ -45,6 +45,31 @@ public sealed class ArtworkVariantTests
     }
 
     [Fact]
+    public async Task AnAddressWithTheCurrentRevisionMayBeKeptForGood()
+    {
+        using var factory = new AureliaServerFactory();
+        using var client = factory.CreateClient();
+        var owner = await ApiTestClient.SetupOwnerAsync(client);
+        var asset = await SeedAsync(factory, 640, 320, false);
+        foreach (var (query, kept) in new[]
+        {
+            ($"?width=320&rev={asset.Revision}", true),
+            ($"?rev={asset.Revision}", true),
+            ($"?width=320&rev={asset.Revision + 1}", false),
+            ("?width=320", false),
+        })
+        {
+            using var request = ApiTestClient.Authorized(HttpMethod.Get, $"/api/v1/artwork/{asset.Id}{query}", owner.Token);
+            using var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+            var cache = response.Headers.CacheControl!;
+            Assert.True(cache.Private, query);
+            Assert.True(kept == (cache.MaxAge == TimeSpan.FromDays(365)), query);
+            Assert.True(kept != cache.NoCache, query);
+        }
+    }
+
+    [Fact]
     public async Task CachedVariantsAndUnchangedRepliesDoNotOpenTheOriginal()
     {
         if (OperatingSystem.IsWindows()) return;

@@ -838,14 +838,16 @@ public static class ApiEndpointMappings
         throw new MetadataException(code, message, StatusCodes.Status400BadRequest);
     }
 
-    private static async Task<IResult> ArtworkAsync(HttpContext context, Guid artworkId, int? width, ArtworkStore artwork, ArtworkVariantStore variants, AureliaDbContext database, CancellationToken cancellationToken)
+    private static async Task<IResult> ArtworkAsync(HttpContext context, Guid artworkId, int? width, long? rev, ArtworkStore artwork, ArtworkVariantStore variants, AureliaDbContext database, CancellationToken cancellationToken)
     {
         if (width.HasValue && !ArtworkVariantStore.IsSupportedWidth(width.Value))
             throw new AccountException("invalid_artwork_width", "Choose an artwork width of 320, 640, 1280 or 1920.", 400);
         var described = await artwork.DescribeAsync(artworkId, database, cancellationToken);
         if (described is null) return Results.NotFound();
         var revision = described.Revision;
-        context.Response.Headers.CacheControl = "private, no-cache";
+        // An address naming the current revision always shows the same picture: a replaced picture
+        // gets a new revision and so a new address, and the browser may keep this one for good.
+        context.Response.Headers.CacheControl = rev == revision ? "private, max-age=31536000, immutable" : "private, no-cache";
         context.Response.Headers.XContentTypeOptions = "nosniff";
         // A cached variant answers without opening the original; an unchanged one needs no file at all.
         var cached = width.HasValue ? variants.OpenCached(artworkId, revision, width.Value, described.LastModified) : null;

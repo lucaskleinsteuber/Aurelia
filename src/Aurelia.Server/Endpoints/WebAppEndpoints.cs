@@ -89,32 +89,53 @@ public static class WebAppEndpoints
             return Results.NoContent();
         });
 
+        // The page's files under a name that changes with their content: kept for good by the browser.
+        app.MapMethods("/web/v/{version}/{**file}", [HttpMethods.Get, HttpMethods.Head], (string version, string? file, WebAppAssets assets, HttpContext context) =>
+            version == assets.Version && file != WebAppAssets.Index ? Serve(context, assets.Find(file ?? string.Empty), immutable: true) : Results.NotFound());
         app.MapMethods("/web/{**file}", [HttpMethods.Get, HttpMethods.Head], (string? file, WebAppAssets assets, HttpContext context) =>
-            Serve(context, assets, assets.Find(file ?? string.Empty)));
+            Serve(context, file == WebAppAssets.Index ? assets.Page : assets.Find(file ?? string.Empty)));
         // Every other page address belongs to the app, which finds its screen from the address.
         // API addresses keep their plain 404, and this route runs only when no other one matches.
         app.MapMethods("{**path}", [HttpMethods.Get, HttpMethods.Head], (string? path, WebAppAssets assets, HttpContext context) =>
-            context.Request.Path.StartsWithSegments("/api") ? Results.NotFound() : Serve(context, assets, assets.Find(WebAppAssets.Index)))
+            context.Request.Path.StartsWithSegments("/api") ? Results.NotFound() : Serve(context, assets.Page))
             .Add(endpoint => ((RouteEndpointBuilder)endpoint).Order = int.MaxValue);
     }
 
-    private static IResult Serve(HttpContext context, WebAppAssets assets, WebAppAssets.Asset? asset)
+    private static IResult Serve(HttpContext context, WebAppAssets.Asset? asset, bool immutable = false)
     {
         if (asset is null) return Results.NotFound();
         var headers = context.Response.Headers;
-        headers.CacheControl = "no-cache";
-        headers.ETag = asset.EntityTag;
+        headers.CacheControl = immutable ? "public, max-age=31536000, immutable" : "no-cache";
+        headers.XContentTypeOptions = "nosniff";
         if (asset.ContentType.StartsWith("text/html", StringComparison.Ordinal))
             headers.ContentSecurityPolicy = WebAppAssets.ContentSecurityPolicy;
-        if (context.Request.Headers.IfNoneMatch.ToString() == asset.EntityTag)
+        var encoding = asset.Compressible ? PreferredEncoding(context.Request) : null;
+        var body = encoding is null ? null : asset.Encoded(encoding);
+        if (body is null) encoding = null;
+        if (asset.Compressible) headers.Vary = HeaderNames.AcceptEncoding;
+        // Each encoding is its own representation, so it carries its own tag.
+        var entityTag = encoding is null ? asset.EntityTag : asset.EntityTag.Insert(asset.EntityTag.Length - 1, "-" + encoding);
+        headers.ETag = entityTag;
+        if (context.Request.Headers.IfNoneMatch.ToString() == entityTag)
             return Results.StatusCode(StatusCodes.Status304NotModified);
+        if (encoding is not null) headers.ContentEncoding = encoding;
+        var content = body ?? asset.Content;
         if (HttpMethods.IsHead(context.Request.Method))
         {
             headers.ContentType = asset.ContentType;
-            headers.ContentLength = asset.Content.Length;
+            headers.ContentLength = content.Length;
             return Results.Empty;
         }
-        return Results.Bytes(asset.Content, asset.ContentType);
+        return Results.Bytes(content, asset.ContentType);
+    }
+
+    /// <summary>Brotli when the browser accepts it, else gzip, else none; "q=0" refuses an encoding.</summary>
+    internal static string? PreferredEncoding(HttpRequest request)
+    {
+        if (!StringWithQualityHeaderValue.TryParseList(request.Headers.AcceptEncoding, out var values)) return null;
+        bool Accepts(string name) => values.Any(value =>
+            value.Value.Equals(name, StringComparison.OrdinalIgnoreCase) && (value.Quality ?? 1) > 0);
+        return Accepts("br") ? "br" : Accepts("gzip") ? "gzip" : null;
     }
 
     private static (Guid Id, string Secret) Pairing(HttpContext context)
