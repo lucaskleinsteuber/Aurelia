@@ -3,6 +3,7 @@
 import { h, clear } from "./dom.js";
 import { loadAllPages } from "./api.js";
 import { libraryPayload, managementPermissions, metadataPayload, profilePayload, waitForLibraryOperation, artworkUrl } from "./logic.js";
+import { createMetadataExtras } from "./metadata-extras.js";
 
 const input = (value = "", attributes = {}) => h("input", { class: "text-field", value: String(value ?? ""), ...attributes });
 const field = (title, control, note) => h("label", { class: "editor-field" }, h("span", { class: "editor-field-title" }, title), control,
@@ -13,6 +14,7 @@ const button = (title, action, kind = "secondary-button") => h("button", { type:
 export function createManagementEditors(app) {
   const { api, state } = app;
   const dialogs = new Set();
+  const metadataExtras = createMetadataExtras({ api, app, kit: { input, field, choice, button } });
 
   function editor(title, saveLabel, onSave) {
     const profileID = state.profile?.id;
@@ -268,8 +270,11 @@ export function createManagementEditors(app) {
     const changes = {};
     const automatic = new Set();
     const controls = new Map();
+    const extras = {};
     const context = editor("Edit Metadata", "Save", async ({ signal }) => {
-      await api.saveMediaEditor(item.id, metadataPayload(document, changes, [...automatic]), { signal });
+      const payload = metadataPayload(document, changes, [...automatic]);
+      if (extras.relativeSourcePath) payload.relativeSourcePath = extras.relativeSourcePath;
+      await api.saveMediaEditor(item.id, payload, { signal });
       app.toast("Metadata saved.");
     });
     context.dialog.setAttribute("class", "sheet settings-editor metadata-editor");
@@ -281,10 +286,6 @@ export function createManagementEditors(app) {
       h("div", {}, h("h2", {}, "Edit Metadata"), name,
         h("p", { class: "muted small" }, "Changes apply to this title. Your video files stay in place."))));
     const section = (title, ...content) => h("section", { class: "editor-section settings-section metadata-section" }, h("h3", {}, title), ...content);
-    const imagePreview = (selection, label) => selection?.assetId
-      ? h("img", { class: label === "Poster" ? "metadata-artwork-poster" : "metadata-artwork-backdrop",
-        src: `/api/v1/media/${encodeURIComponent(item.id)}/editor/artwork/${encodeURIComponent(selection.assetId)}`, alt: label, loading: "lazy", decoding: "async" })
-      : h("p", { class: "muted small" }, `No ${label.toLowerCase()} selected.`);
     const validate = () => {
       for (const [key, entry] of controls) {
         entry.error.textContent = "";
@@ -293,8 +294,8 @@ export function createManagementEditors(app) {
         try { metadataPayload(document, { [key]: changes[key] }, []); }
         catch (error) { entry.error.textContent = error.message; entry.control.setAttribute("aria-invalid", "true"); }
       }
-      try { metadataPayload(document, changes, [...automatic]); context.setValid(true); }
-      catch { context.setValid(false); }
+      try { metadataPayload(document, changes, [...automatic]); context.setValid(true); context.message(""); }
+      catch (error) { context.setValid(false); context.message(error.message); }
     };
     const load = async () => {
       const loaded = await api.mediaEditor(item.id, { signal: context.signal });
@@ -335,21 +336,15 @@ export function createManagementEditors(app) {
       const genres = section("Genres", makeField("Genres", "genres", "genres", { placeholder: "One genre per line" }));
       const production = section("Production and Release", makeField("Studios", "studios", "studios", { placeholder: "One studio per line" }),
         makeField("Country of Origin", "country", "country", { maxlength: 128 }), h("p", { class: "muted small" }, "Choose one country. Foreign content ratings are not automatically converted to FSK."));
-      const credits = section("Cast and Crew", h("p", { class: "muted small" }, "Cast and crew are preserved when you save."),
-        document.values.credits.length ? h("ul", { class: "metadata-credit-list" }, document.values.credits.map((person) => h("li", {}, h("strong", {}, person.name),
-          h("span", { class: "muted small" }, [person.department, person.job, person.character].filter(Boolean).join(" · "))))) : h("p", { class: "muted small" }, "No cast or crew listed."));
-      const artwork = section("Artwork", h("p", { class: "muted small" }, "Your existing artwork and crops are preserved when you save."),
-        h("div", { class: "metadata-artwork-grid" }, h("div", {}, h("h4", {}, "Poster"), imagePreview(document.values.poster, "Poster")),
-          h("div", {}, h("h4", {}, "Background"), imagePreview(document.values.backdrop, "Background"))));
-      const source = section("Source", h("p", { class: "muted small" }, "The source association is preserved. Video files are never uploaded, moved or changed."),
-        h("p", { class: "metadata-source" }, document.sourcePath || document.relativeSourcePath || "No source path available."));
+      delete extras.relativeSourcePath;
+      const { artwork, credits, source, subtitles, removal } = metadataExtras.sections({ item, document, context, changes, automatic, extras, changed: () => { validate(); } });
       const reload = button("Reload", () => {
         // Reload is explicit: keep a conflict draft until the user chooses to discard it.
         const confirm = button("Discard Draft and Reload", () => context.run(load), "danger-button");
         reload.replaceWith(confirm);
       });
-      context.body.append(h("p", { class: "muted small" }, "Manual changes survive scans and provider refreshes. Existing artwork, cast and file associations are preserved."),
-        titleAndYear, overview, genres, production, credits, artwork, matchingSection(item, context, load), source, reload);
+      context.body.append(h("p", { class: "muted small" }, "Manual changes survive scans and provider refreshes. Your video files are never changed."),
+        ...[titleAndYear, overview, genres, production, artwork, credits, matchingSection(item, context, load), source, subtitles, reload, removal].filter(Boolean));
       name.textContent = document.values.title;
       validate();
       context.clean(); context.ready();

@@ -216,11 +216,11 @@ test("metadata editor follows native settings sections and preserves read-only s
   const f = fixture(t, { mediaEditor: async () => document });
   f.editors.editMetadata({ id: "film", title: "Invented Film", poster: { path: "/api/v1/artwork/invented" } }); await flush();
   assert.deepEqual(f.dialog.querySelectorAll("h3").map((node) => node.textContent),
-    ["Title and Year", "Overview", "Genres", "Production and Release", "Cast and Crew", "Artwork", "Match with TMDB", "Source"]);
-  assert.match(f.dialog.textContent, /Morgan Vale/); assert.match(f.dialog.textContent, /\/invented\/Quiet Harbor/);
+    ["Title and Year", "Overview", "Genres", "Production and Release", "Artwork", "Cast and Crew", "Match with TMDB", "Video File", "Remove Title"]);
+  assert.ok(f.dialog.querySelectorAll("input").some((node) => node.value === "Morgan Vale"));
+  assert.match(f.dialog.textContent, /\/invented\/Quiet Harbor/);
   const images = f.dialog.querySelectorAll("img");
   assert.equal(images[0].getAttribute("src"), "/api/v1/artwork/invented?width=320");
-  assert.equal(images[1].getAttribute("src"), "/api/v1/media/film/editor/artwork/poster");
   assert.equal(f.dialog.querySelectorAll("h2")[0].textContent, "Edit Metadata");
   assert.ok(f.dialog.querySelectorAll("button").some((node) => node.textContent === "Cancel"));
 });

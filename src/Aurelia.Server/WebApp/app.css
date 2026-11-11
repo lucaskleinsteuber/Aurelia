@@ -1266,6 +1266,29 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .metadata-artwork-poster { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 10px; }
 .metadata-artwork-backdrop { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; }
 .metadata-source { overflow-wrap: anywhere; user-select: text; font-size: 13px; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Edit Metadata: pictures with their crop, Cast and Crew, the video file. */
+.artwork-choice { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.artwork-crop-preview { display: grid; place-items: center; width: 100%; border-radius: 12px; background-color: var(--surface); background-repeat: no-repeat; border: 1px solid var(--hairline); box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3); }
+.artwork-crop-preview.poster { aspect-ratio: 2 / 3; max-width: 180px; }
+.artwork-crop-preview.backdrop { aspect-ratio: 16 / 9; }
+.artwork-choice .button-row { gap: 8px; }
+.credit-editor { list-style: none; display: grid; gap: 8px; margin: 0; padding: 0; }
+.credit-row { display: grid; grid-template-columns: minmax(0, 1.2fr) 128px minmax(0, 1fr) auto; gap: 8px; align-items: center; animation: rise-in 0.3s var(--spring) both; }
+.credit-row .text-field, .credit-row .select { min-height: 38px; padding: 8px 10px; width: 100%; }
+.credit-actions { display: flex; gap: 2px; }
+.credit-actions .icon-button { width: 32px; height: 32px; font-size: 14px; }
+.credit-actions .icon-button.danger { color: var(--danger); }
+@media (max-width: 640px) { .credit-row { grid-template-columns: 1fr 1fr; } .credit-actions { grid-column: 1 / -1; justify-content: flex-end; } }
+.file-icon { width: 14px; height: 18px; flex: none; border-radius: 2px; background: linear-gradient(#d9dde3, #a9b0ba); }
+.crop-sheet { width: min(760px, calc(100vw - 32px)); }
+.crop-stage { position: relative; width: fit-content; max-width: 100%; margin: 14px auto; touch-action: none; user-select: none; }
+.crop-image { display: block; max-width: 100%; max-height: 56vh; border-radius: 8px; }
+.crop-frame { position: absolute; border: 2px solid #fff; border-radius: 6px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); cursor: grab; transition: left var(--motion-quick) var(--ease-out), top var(--motion-quick) var(--ease-out), width var(--motion-quick) var(--ease-out), height var(--motion-quick) var(--ease-out); }
+.crop-frame:active { cursor: grabbing; transition: none; }
+.crop-stage { overflow: hidden; border-radius: 8px; }
+.crop-sheet .editor-field, .crop-sheet input[type="range"] { width: 100%; }
 @media (max-width: 560px) {
   .metadata-editor-header { padding: 20px; gap: 16px; }
   .metadata-editor > .editor-form { padding: 16px; }

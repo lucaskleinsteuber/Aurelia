@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   GENERAL_DEFAULTS, PLAYBACK_DEFAULTS, SETTINGS_PAGES, libraryPayload, loadManagementSections,
-  managementPermissions, metadataPayload, normalizeGeneralPreferences, normalizePreferences,
+  managementPermissions, metadataPayload, cropFrame, normalizeGeneralPreferences, normalizePreferences,
   profilePayload, scrubPreviewBucketSeconds, scrubPreviewFrameUrl, scrubPreviewUsageText, transcodingSummary, waitForLibraryOperation
 } from "../../src/Aurelia.Server/WebApp/js/logic.js";
 
@@ -156,7 +156,35 @@ test("metadata validation rejects invalid years, runtimes, FSK, long lists and e
   for (const changes of [{ title: " " }, { releaseYear: "2025tail" }, { releaseYear: "1799" }, { releaseYear: "3001" }, { runtimeMinutes: "1.5" }, { runtimeMinutes: "0" }, { runtimeMinutes: "14401" }, { fsk: "7" }, { genres: Array.from({ length: 51 }, (_, index) => `Genre ${index}`) }, { overview: "a".repeat(8193) }])
     assert.throws(() => metadataPayload(document, changes));
   assert.throws(() => metadataPayload(document, { unknownField: "value" }), /Unknown/);
-  assert.throws(() => metadataPayload(document, {}, ["credits"]), /Unknown/);
+  assert.throws(() => metadataPayload(document, {}, ["sourcePath"]), /Unknown/);
+  // Cast and pictures are edited too, within bounds.
+  assert.throws(() => metadataPayload(document, { credits: [{ id: "p", name: " " }] }), /name/);
+  assert.throws(() => metadataPayload(document, { credits: Array.from({ length: 201 }, (_, index) => ({ id: String(index), name: "Invented" })) }), /200/);
+  assert.throws(() => metadataPayload(document, { poster: { assetId: "a", uploadId: "u" } }), /one picture/);
+  assert.throws(() => metadataPayload(document, { poster: { uploadId: "u", crop: { x: 0, y: 0, width: 0, height: 1 } } }), /crop/);
+});
+
+test("Cast and Crew and pictures become overrides with trimmed people and bounded crops", () => {
+  const payload = metadataPayload(document, {
+    credits: [{ id: "p1", name: "  Invented Actor ", department: "Acting", character: " Lead ", job: "" }],
+    poster: { uploadId: "u1", crop: { x: 0.2, y: -0.1, width: 0.9, height: 0.5, rotation: 45 } },
+  });
+  assert.deepEqual(payload.values.credits, [{ id: "p1", name: "Invented Actor", department: "Acting", job: null, character: "Lead", profile: null, personKey: null }]);
+  assert.deepEqual(payload.values.poster, { assetId: null, uploadId: "u1", crop: { x: 0.2, y: 0, width: 0.8, height: 0.5, rotation: 0 } });
+  assert.ok(payload.overrideFields.includes("credits") && payload.overrideFields.includes("poster"));
+});
+
+test("a crop frame keeps the poster or background shape inside the picture", () => {
+  // A 16:9 picture cropped to a 2:3 poster: full height, centred.
+  const poster = cropFrame({ imageWidth: 1600, imageHeight: 900, aspect: 2 / 3 });
+  assert.equal(poster.height, 1);
+  assert.ok(Math.abs(poster.width - (2 / 3) / (16 / 9)) < 1e-6);
+  assert.ok(Math.abs(poster.x - (1 - poster.width) / 2) < 1e-6);
+  // Zoomed in and pushed past the edge, it stays inside.
+  const corner = cropFrame({ imageWidth: 1600, imageHeight: 900, aspect: 16 / 9, zoom: 2, centerX: 0.99, centerY: 0.01 });
+  assert.deepEqual(corner, { x: 0.5, y: 0, width: 0.5, height: 0.5, rotation: 0 });
+  // Zoom stays between 1 and 4.
+  assert.equal(cropFrame({ imageWidth: 100, imageHeight: 100, aspect: 1, zoom: 9 }).width, 0.25);
 });
 
 test("scrub preview helpers bucketize timeline seconds, build cacheable URLs and format storage usage", async () => {

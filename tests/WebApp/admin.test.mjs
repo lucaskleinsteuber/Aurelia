@@ -141,3 +141,12 @@ test("administration helpers count down codes, split folders and clean language 
   assert.deepEqual(folderCrumbs(null), []);
   assert.deepEqual(subtitleLanguages("EN; de, en, deu, fr"), ["en", "de", "fr"]);
 });
+
+test("Edit Metadata shows a picture choice and its crop without decoding anything", async () => {
+  const { pictureAddress, cropStyle } = await import("../../src/Aurelia.Server/WebApp/js/metadata-extras.js");
+  assert.equal(pictureAddress("m 1", { uploadId: "u/1" }), "/api/v1/media/m%201/editor/uploads/u%2F1");
+  assert.equal(pictureAddress("m", { assetId: "a" }), "/api/v1/media/m/editor/artwork/a");
+  assert.equal(pictureAddress("m", null), "");
+  assert.deepEqual(cropStyle(null), { "background-size": "cover", "background-position": "center" });
+  assert.deepEqual(cropStyle({ x: 0.25, y: 0, width: 0.5, height: 1 }), { "background-size": "200.000% 100.000%", "background-position": "50.000% 0%" });
+});

@@ -109,7 +109,50 @@ export function profilePayload(snapshot, draft) {
   return { revision: snapshot.revision, ...body };
 }
 
-const EDITOR_PROPERTIES = { title: "title", releaseYear: "releaseYear", overview: "overview", runtimeMinutes: "runtimeMinutes", fsk: "fskAge", genres: "genres", studios: "studios", country: "country" };
+const EDITOR_PROPERTIES = { title: "title", releaseYear: "releaseYear", overview: "overview", runtimeMinutes: "runtimeMinutes", fsk: "fskAge", genres: "genres", studios: "studios", country: "country",
+  credits: "credits", poster: "poster", backdrop: "backdrop" };
+
+/** One person in Cast and Crew as the server takes it; names and roles are trimmed and bounded. */
+export function editorCredit(credit) {
+  const name = String(credit?.name ?? "").trim();
+  const department = String(credit?.department ?? "").trim() || "Acting";
+  if (!name || name.length > 256) throw new Error("Give every person a name of up to 256 characters.");
+  const optional = (text) => { const value = String(text ?? "").trim(); return value ? value.slice(0, 256) : null; };
+  return { id: credit.id, name, department: department.slice(0, 64), job: optional(credit.job), character: optional(credit.character),
+    profile: credit.profile ?? null, personKey: credit.personKey ?? null };
+}
+
+/** A picture choice: an existing picture or a new upload, with an optional crop inside 0…1. */
+export function editorArtwork(selection) {
+  if (!selection) return null;
+  const crop = selection.crop ? normalizedCrop(selection.crop) : null;
+  if (Boolean(selection.assetId) === Boolean(selection.uploadId)) throw new Error("Choose one picture.");
+  return { assetId: selection.assetId ?? null, uploadId: selection.uploadId ?? null, crop };
+}
+
+function normalizedCrop(crop) {
+  const round = (value) => Math.round(value * 1e6) / 1e6;
+  const x = round(Math.max(0, crop.x)), y = round(Math.max(0, crop.y));
+  const width = round(Math.min(1 - x, crop.width)), height = round(Math.min(1 - y, crop.height));
+  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) throw new Error("The crop is outside the picture.");
+  return { x, y, width, height, rotation: [0, 90, 180, 270].includes(crop.rotation) ? crop.rotation : 0 };
+}
+
+/**
+ * The part of a picture a crop frame of `aspect` (width / height) shows at `zoom` (1 = as large
+ * as fits), centred on `centerX`/`centerY` (0…1) and kept inside the picture. All in 0…1.
+ */
+export function cropFrame({ imageWidth, imageHeight, aspect, zoom = 1, centerX = 0.5, centerY = 0.5 }) {
+  const pictureAspect = imageWidth / imageHeight;
+  let width = aspect >= pictureAspect ? 1 : aspect / pictureAspect;
+  let height = aspect >= pictureAspect ? pictureAspect / aspect : 1;
+  const scale = 1 / Math.max(1, Math.min(4, zoom));
+  width *= scale;
+  height *= scale;
+  const x = Math.min(1 - width, Math.max(0, centerX - width / 2));
+  const y = Math.min(1 - height, Math.max(0, centerY - height / 2));
+  return normalizedCrop({ x, y, width, height, rotation: 0 });
+}
 
 function editorNumber(value, label, minimum, maximum) {
   const text = String(value ?? "").trim();
@@ -144,6 +187,10 @@ export function metadataPayload(document, changes = {}, automatic = []) {
       value = editorNumber(raw, "the FSK age", 0, 18);
       if (value !== null && ![0, 6, 12, 16, 18].includes(value)) throw new Error("Choose a valid FSK age.");
     } else if (field === "genres" || field === "studios") value = editorList(raw);
+    else if (field === "credits") {
+      if (!Array.isArray(raw) || raw.length > 200) throw new Error("Use up to 200 people in Cast and Crew.");
+      value = raw.map(editorCredit);
+    } else if (field === "poster" || field === "backdrop") value = editorArtwork(raw);
     else value = String(raw ?? "").trim();
     values[property] = value;
     overrides.add(field);
