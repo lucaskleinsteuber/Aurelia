@@ -1688,6 +1688,45 @@ struct APIClient: Sendable {
     let data = try await perform(path: "/api/v1/server/scrub-previews", method: "DELETE")
     return try Self.decode(ScrubPreviewSettings.self, from: data)
   }
+  /// Intro and credits times of one title with their origin ("media-segments-v2").
+  func mediaSegments(mediaId: UUID) async throws -> MediaSegmentTimes {
+    try await get("/api/v1/media/\(mediaId.uuidString.lowercased())/segments")
+  }
+  /// Corrects the times by hand; a changed part is never replaced by detection again.
+  func saveMediaSegments(mediaId: UUID, _ request: SetMediaSegmentsRequest) async throws
+    -> MediaSegmentTimes
+  {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/segments", method: "PUT",
+      body: try JSONEncoder().encode(request))
+    return try Self.decode(MediaSegmentTimes.self, from: data)
+  }
+  /// Removes the corrections; the server examines the title again.
+  func resetMediaSegments(mediaId: UUID) async throws -> MediaSegmentTimes {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/segments", method: "DELETE")
+    return try Self.decode(MediaSegmentTimes.self, from: data)
+  }
+  /// Has the server examine an episode's season (or all seasons of a series) again.
+  func reanalyzeMediaSegments(mediaId: UUID) async throws {
+    _ = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/segments/reanalyze", method: "POST")
+  }
+  func serverMediaSegments() async throws -> MediaSegmentSettings {
+    try await get("/api/v1/server/media-segments")
+  }
+  func saveServerMediaSegments(enabled: Bool) async throws -> MediaSegmentSettings {
+    let data = try await perform(
+      path: "/api/v1/server/media-segments", method: "PUT",
+      body: try JSONEncoder().encode(["enabled": enabled]))
+    return try Self.decode(MediaSegmentSettings.self, from: data)
+  }
+  func reanalyzeAllMediaSegments() async throws -> MediaSegmentSettings {
+    let data = try await perform(
+      path: "/api/v1/server/media-segments/reanalyze", method: "POST",
+      body: Data("{}".utf8))
+    return try Self.decode(MediaSegmentSettings.self, from: data)
+  }
   func scrubPreviewFrame(mediaId: UUID, seconds: Int) async throws -> Data {
     let (data, _, _) = try await Self.request(
       baseURL: profile.baseURL,

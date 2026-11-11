@@ -13,6 +13,7 @@ struct KeyboardShortcutsSheet: View {
             shortcutRow("Seek Back / Forward", keys: ["←", "→"])
             shortcutRow("Previous Episode", keys: ["P", "⇧⌘←"])
             shortcutRow("Next Episode", keys: ["N", "⇧⌘→"])
+            shortcutRow("Skip Intro", keys: ["S", "Return"])
             shortcutRow("Mute or Unmute", keys: ["M"])
             shortcutRow("Toggle Full Screen", keys: ["F"])
             shortcutRow("Fill Screen or Show Whole Picture", keys: ["Z"])

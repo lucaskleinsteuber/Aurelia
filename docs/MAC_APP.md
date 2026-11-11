@@ -63,7 +63,7 @@ devices and backups, scrub previews, Server Health and the server's own updates.
 | General | Start screen, poster size, watched titles in rows, Reduce Motion, window and rest behavior |
 | Sidebar | Which pages appear in the sidebar and in which order |
 | Activity | Your watch history and statistics, and Wrapped: the year, or last month from the 2nd, as slides over the whole window (← → Space Esc) |
-| Playback | Audio and subtitles, Automatic Resume, Streaming Quality, Cinema Mode, Dialogue Boost, Volume Leveling |
+| Playback | Audio and subtitles, Automatic Resume, Streaming Quality, Skip Intros Automatically, Cinema Mode, Dialogue Boost, Volume Leveling |
 | Library | Storage folders, scans, Library Health, import previews |
 | Metadata | TMDB token, Review Matches, OpenSubtitles key (subtitles from speech are in Edit Metadata) |
 | Profiles and Devices | Profiles, PINs, age limits, devices, **Create Code** for a new device, the browser address |
@@ -136,6 +136,16 @@ shows, a genre, an era and a length. Movie Night covers the whole window; ✕ or
 Motion follows one set of curves (`AureliaMotion` in `Views/AureliaDesign.swift`): `press` for
 buttons and cards, `quick` for hover, `standard` for content that changes in place, `page` for
 pages and full-window layers. Reduce Motion turns each into a short fade.
+
+## Skip Intro and credits
+
+With a server from 2.8.0, the player offers **Skip Intro** while an episode's intro plays
+(Return or S skips too). Settings › Playback › **Skip Intros Automatically** skips it without
+asking: once per episode, and not when you move into the intro yourself. When the credits
+begin, Up Next appears with its countdown; **Watch Credits** plays them to the end, and then
+the next episode starts as usual. The server finds the times
+([Organizing your media](MEDIA_LIBRARY.md#intros-and-credits)); without a time no button
+appears. Edit Metadata › Intro and Credits corrects an episode's times.
 
 ## Cinema mode
 

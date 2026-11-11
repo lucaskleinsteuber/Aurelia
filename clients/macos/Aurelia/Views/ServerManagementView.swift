@@ -116,6 +116,7 @@ struct ServerManagementView: View {
       }
       .id("essentials-\(configuration.stored.revision)")
       ServerScrubPreviewsEditor(client: client)
+      ServerMediaSegmentsEditor(client: client)
       ServerVideoConversionCard(client: client)
     }
     ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {

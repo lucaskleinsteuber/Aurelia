@@ -273,6 +273,13 @@ struct MetadataEditorSheet: View {
           SubtitleDownloadPanel(mediaId: metadata.mediaId)
         }
       }
+      if model.supportsMediaSegments,
+        draft.document?.kind == .episode || draft.document?.kind == .series
+      {
+        AureliaSettingsSection("Intro and Credits", symbol: "forward.end") {
+          MediaSegmentsPanel(mediaId: metadata.mediaId, isSeries: draft.document?.kind == .series)
+        }
+      }
       AureliaSettingsSection("Source", symbol: "doc") { source }
     }
   }

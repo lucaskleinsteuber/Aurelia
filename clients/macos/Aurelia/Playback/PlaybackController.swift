@@ -144,6 +144,8 @@ final class PlaybackController: ObservableObject {
   @Published private(set) var showsStartScreen = true
   /// The next episode's card in a title's last seconds.
   @Published private(set) var upNext: PlaybackUpNext?
+  /// Skip Intro is offered: the intro the server found is playing.
+  @Published private(set) var showsSkipIntro = false
   @Published private(set) var isPlaying = false
   @Published private(set) var isSeekable = false
   @Published private(set) var currentTimeMilliseconds: Int64 = 0
@@ -204,6 +206,12 @@ final class PlaybackController: ObservableObject {
   /// The engine was asked to open at the resume position, so it usually needs no seek.
   private var openedAtResume = false
   private var upNextDismissed = false
+  /// Where the Up Next card appeared with the credits; its countdown runs from there.
+  private var creditsAnchor: Int64?
+  /// The intro was already skipped for this episode, automatically or with the button.
+  private var introSkipped = false
+  /// The person moved into the intro on their own, so it plays.
+  private var movedIntoIntro = false
   /// Cancel on the Up Next card: this title stops at its end instead of continuing.
   private var autoplayCancelled = false
   private var resumePositionMilliseconds: Int64 = 0
@@ -626,6 +634,10 @@ final class PlaybackController: ObservableObject {
       replayCompletedPlayback(at: target, autoplay: false)
       return
     }
+    // Moving into the intro by hand means it should play; it is not skipped automatically then.
+    if let intro = currentSegments?.intro, target >= intro.start, target < intro.end {
+      movedIntoIntro = true
+    }
     currentTimeMilliseconds = target
     observedPosition = target
     stableMovementStartedAt = nil
@@ -975,6 +987,7 @@ final class PlaybackController: ObservableObject {
     assignIfChanged(&currentChapterIndex, engine.currentChapterIndex)
     assignIfChanged(&isPreparing, wantsPlayback && durationMilliseconds <= 0 && !isPlaying)
     updateUpNext()
+    updateSkipIntro()
 
     // Buffering or an external decoder pause breaks continuous stable playback,
     // even if the next position notification arrives within the normal tick gap.
@@ -1065,6 +1078,7 @@ final class PlaybackController: ObservableObject {
     record(.ended)
     enqueueProgressSave(isFinished: true)
     upNext = nil
+    showsSkipIntro = false
     if sleepTimer == .endOfEpisode {
       let client = client
       Task { await client.sleepTimerEnded() }
@@ -1103,7 +1117,8 @@ final class PlaybackController: ObservableObject {
     let finished =
       !backwards
       && UpNextPolicy.nextFinishesCurrent(
-        position: currentTimeMilliseconds, duration: durationMilliseconds, upNextShown: upNext != nil)
+        position: currentTimeMilliseconds, duration: durationMilliseconds, upNextShown: upNext != nil,
+        creditsStart: currentSegments?.creditsStartMilliseconds)
     naturalEndReached = false
     endHandled = true
     loadID = UUID()
@@ -1111,6 +1126,7 @@ final class PlaybackController: ObservableObject {
     watchdogTask = nil
     isPlaying = false
     upNext = nil
+    showsSkipIntro = false
     record(.ended)
     enqueueProgressSave(isFinished: finished)
     nextItemTask = Task { [weak self] in
@@ -1118,29 +1134,89 @@ final class PlaybackController: ObservableObject {
     }
   }
 
-  /// Hides the Up Next card; the player then stops at the end instead of continuing.
+  /// Hides the Up Next card. Cancel in the last seconds stops the player at the end instead of
+  /// continuing; Watch Credits (the card that appeared with the credits) plays them and then
+  /// continues with the next episode as usual.
   func dismissUpNext() {
     upNextDismissed = true
-    autoplayCancelled = true
+    if upNext?.duringCredits != true { autoplayCancelled = true }
+    creditsAnchor = nil
     upNext = nil
+  }
+
+  /// The intro and credits times of the title that is playing.
+  private var currentSegments: MediaSegments? {
+    guard let source = activePlayback, source.mediaId == presentation.mediaId else { return nil }
+    return source.segments
+  }
+
+  /// Jumps to the end of the intro; Watch Together follows like any other seek.
+  func skipIntro() {
+    guard showsSkipIntro, let intro = currentSegments?.intro else { return }
+    introSkipped = true
+    showsSkipIntro = false
+    seek(to: intro.end)
+  }
+
+  private func updateSkipIntro() {
+    guard let intro = currentSegments?.intro, appliedResumePosition, !endHandled,
+      durationMilliseconds <= 0 || intro.end <= durationMilliseconds
+    else {
+      assignIfChanged(&showsSkipIntro, false)
+      return
+    }
+    let shown = SkipIntroPolicy.showsButton(
+      position: currentTimeMilliseconds, introStart: intro.start, introEnd: intro.end)
+    if isPlaying,
+      SkipIntroPolicy.skipsAutomatically(
+        enabled: preferences.skipIntrosAutomatically, alreadySkipped: introSkipped,
+        movedIntoIntro: movedIntoIntro, buttonShown: shown)
+    {
+      introSkipped = true
+      assignIfChanged(&showsSkipIntro, false)
+      seek(to: intro.end)
+      return
+    }
+    assignIfChanged(&showsSkipIntro, shown)
   }
 
   private func updateUpNext() {
     let next = queuedItems.first
     let leadMs = Int64(preferences.upNextCountdownSeconds) * 1_000
+    let creditsStart = currentSegments?.creditsStartMilliseconds
     let shown = UpNextPolicy.shows(
       position: currentTimeMilliseconds, duration: durationMilliseconds, hasNext: next != nil,
       autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,
-      dismissed: upNextDismissed, lead: leadMs)
+      dismissed: upNextDismissed, lead: leadMs, creditsStart: creditsStart)
+    let duringCredits =
+      shown
+      && UpNextPolicy.showsForCredits(
+        position: currentTimeMilliseconds, duration: durationMilliseconds, creditsStart: creditsStart)
+    // The countdown starts where the card appeared: at the credits, or later when the person
+    // moved into them.
+    if duringCredits {
+      if creditsAnchor == nil { creditsAnchor = currentTimeMilliseconds }
+    } else {
+      creditsAnchor = nil
+    }
     let card = next.flatMap { next in
       shown
         ? PlaybackUpNext(
           title: next.title, subtitle: next.subtitle,
           seconds: UpNextPolicy.seconds(
-            position: currentTimeMilliseconds, duration: durationMilliseconds))
+            position: currentTimeMilliseconds, duration: durationMilliseconds,
+            creditsAnchor: creditsAnchor, lead: leadMs),
+          duringCredits: duringCredits)
         : nil
     }
     assignIfChanged(&upNext, card)
+    // The countdown ran out before the file ended: the next episode starts, and this one counts
+    // as watched like at its real end.
+    if let card, card.duringCredits, card.seconds == 0, isPlaying, !endHandled,
+      currentTimeMilliseconds < durationMilliseconds
+    {
+      playNextNow()
+    }
   }
 
   private func engineFailed(_ message: String) {
@@ -1212,6 +1288,10 @@ final class PlaybackController: ObservableObject {
     upNext = nil
     upNextDismissed = false
     autoplayCancelled = false
+    creditsAnchor = nil
+    showsSkipIntro = false
+    introSkipped = false
+    movedIntoIntro = false
     incidentStartedAt = recoveryClock()
     incidentPausedAt = nil
     opaqueTicketRetryUsed = false

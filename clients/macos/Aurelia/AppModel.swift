@@ -518,6 +518,9 @@ final class AppModel: ObservableObject {
   var supportsAdaptiveStreaming: Bool {
     libraryCapabilities.contains(ServerFeatureNames.adaptiveStreaming)
   }
+  var supportsMediaSegments: Bool {
+    libraryCapabilities.contains(ServerFeatureNames.mediaSegments)
+  }
 
   func start() async {
     guard !hasStarted else { return }

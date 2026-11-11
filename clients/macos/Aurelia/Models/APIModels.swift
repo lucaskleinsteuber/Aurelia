@@ -1060,6 +1060,68 @@ struct PlaybackSourceResponse: Codable, Equatable, Sendable {
   let contentLength: Int64
   let expiresAt: String
   let progress: PlaybackProgressResponse
+  /// Intro and credits times found by the server ("media-segments-v2"); older servers send none.
+  var segments: MediaSegments? = nil
+}
+
+/// Where the intro and the credits of the playing title are, in milliseconds from its start.
+struct MediaSegments: Codable, Equatable, Sendable {
+  var introStartMilliseconds: Int64?
+  var introEndMilliseconds: Int64?
+  var creditsStartMilliseconds: Int64?
+
+  /// The intro when both ends are known and in order.
+  var intro: (start: Int64, end: Int64)? {
+    guard let start = introStartMilliseconds, let end = introEndMilliseconds, start >= 0, end > start
+    else { return nil }
+    return (start, end)
+  }
+}
+
+enum MediaSegmentSource: String, Codable, Sendable {
+  case none, chapters, detected, manual
+
+  var title: String {
+    switch self {
+    case .none: "Not found"
+    case .chapters: "From chapters"
+    case .detected: "Detected"
+    case .manual: "Set by hand"
+    }
+  }
+}
+
+/// One title's intro and credits times with their origin, for correcting them.
+struct MediaSegmentTimes: Codable, Equatable, Sendable {
+  let mediaId: UUID
+  let analyzed: Bool
+  let canAnalyze: Bool
+  let introStartMilliseconds: Int64?
+  let introEndMilliseconds: Int64?
+  let introSource: MediaSegmentSource
+  let introConfidence: Double
+  let creditsStartMilliseconds: Int64?
+  let creditsSource: MediaSegmentSource
+  let creditsConfidence: Double
+
+  var hasManualPart: Bool { introSource == .manual || creditsSource == .manual }
+}
+
+struct SetMediaSegmentsRequest: Codable, Equatable, Sendable {
+  var introStartMilliseconds: Int64?
+  var introEndMilliseconds: Int64?
+  var creditsStartMilliseconds: Int64?
+}
+
+/// The server's intro and credits detection: whether it runs and how far it is.
+struct MediaSegmentSettings: Codable, Equatable, Sendable {
+  var available: Bool
+  var enabled: Bool
+  var pendingCount: Int
+  var analyzedCount: Int
+  var noResultCount: Int
+  var running: Bool
+  var pausedForPlayback: Bool
 }
 
 struct MetadataProviderStatus: Codable, Equatable, Sendable {

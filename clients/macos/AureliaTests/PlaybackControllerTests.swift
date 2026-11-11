@@ -829,6 +829,223 @@ final class PlaybackControllerTests: XCTestCase {
     await controller.shutdown()
   }
 
+  // MARK: Intro and credits times from the server
+
+  private func segmentsController(
+    engine: FakePlaybackEngine, client: FakePlaybackClient, nextID: UUID?,
+    skipsAutomatically: Bool = false
+  ) -> PlaybackController {
+    var preferences = PlaybackPreferences.defaultValue
+    preferences.preventSleepDuringPlayback = false
+    preferences.skipIntrosAutomatically = skipsAutomatically
+    let relay = FakePlaybackRelay()
+    engine.durationMilliseconds = 2_700_000
+    return PlaybackController(
+      client: client,
+      presentation: PlaybackPresentation(
+        mediaId: client.source.mediaId, title: "Episode 1", subtitle: "Series · S01 E01",
+        queue: nextID.map {
+          [PlaybackQueueItem(mediaId: $0, title: "Episode 2", subtitle: "Series · S01 E02")]
+        } ?? []),
+      engine: engine, preferences: preferences, relayFactory: { _, _ in relay })
+  }
+
+  private static let segments = MediaSegments(
+    introStartMilliseconds: 60_000, introEndMilliseconds: 150_000,
+    creditsStartMilliseconds: 2_400_000)
+
+  private func waitForEpisode(_ id: UUID, in controller: PlaybackController) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    while controller.presentation.mediaId != id && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    XCTAssertEqual(controller.presentation.mediaId, id)
+  }
+
+  func testSkipIntroIsOfferedOnlyWhileTheIntroPlaysAndJumpsToItsEnd() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.segments = Self.segments
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = segmentsController(engine: engine, client: client, nextID: UUID())
+    await controller.start()
+
+    // From one second before the intro until two seconds before its end.
+    for (position, offered) in [
+      (Int64(58_999), false), (59_000, true), (100_000, true), (147_999, true), (148_000, false),
+      (150_000, false),
+    ] {
+      engine.currentTimeMilliseconds = position
+      engine.onUpdate?()
+      XCTAssertEqual(controller.showsSkipIntro, offered, "at \(position) ms")
+    }
+    // Without the automatic setting nothing moves on its own.
+    XCTAssertFalse(engine.seekTargets.contains(150_000))
+
+    engine.currentTimeMilliseconds = 100_000
+    engine.onUpdate?()
+    controller.skipIntro()
+    XCTAssertEqual(engine.seekTargets.last, 150_000)
+    XCTAssertFalse(controller.showsSkipIntro)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testAutomaticSkipHappensExactlyOncePerEpisode() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.segments = Self.segments
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = segmentsController(
+      engine: engine, client: client, nextID: UUID(), skipsAutomatically: true)
+    await controller.start()
+
+    engine.currentTimeMilliseconds = 59_500
+    engine.onUpdate?()
+    XCTAssertEqual(engine.seekTargets.filter { $0 == 150_000 }.count, 1)
+    XCTAssertFalse(controller.showsSkipIntro)
+
+    // Going back into the intro afterwards plays it; Skip Intro is offered again instead.
+    controller.seek(to: 100_000)
+    engine.currentTimeMilliseconds = 101_000
+    engine.onUpdate?()
+    XCTAssertEqual(engine.seekTargets.filter { $0 == 150_000 }.count, 1)
+    XCTAssertTrue(controller.showsSkipIntro)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testNoAutomaticSkipAfterMovingIntoTheIntroByHand() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.segments = Self.segments
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = segmentsController(
+      engine: engine, client: client, nextID: UUID(), skipsAutomatically: true)
+    await controller.start()
+    engine.currentTimeMilliseconds = 10_000
+    engine.onUpdate?()
+
+    controller.seek(to: 80_000)
+    engine.currentTimeMilliseconds = 81_000
+    engine.onUpdate?()
+    XCTAssertFalse(engine.seekTargets.contains(150_000))
+    XCTAssertTrue(controller.showsSkipIntro)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testCreditsShowUpNextWithACountdownThatStartsTheNextEpisode() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.segments = Self.segments
+    let nextID = UUID()
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = segmentsController(engine: engine, client: client, nextID: nextID)
+    await controller.start()
+
+    engine.currentTimeMilliseconds = 2_399_000
+    engine.onUpdate?()
+    XCTAssertNil(controller.upNext)
+    engine.currentTimeMilliseconds = 2_400_000
+    engine.onUpdate?()
+    XCTAssertEqual(
+      controller.upNext,
+      PlaybackUpNext(
+        title: "Episode 2", subtitle: "Series · S01 E02", seconds: 20, duringCredits: true))
+    engine.currentTimeMilliseconds = 2_410_000
+    engine.onUpdate?()
+    XCTAssertEqual(controller.upNext?.seconds, 10)
+    XCTAssertEqual(controller.presentation.mediaId, source.mediaId)
+
+    // The countdown runs out long before the file ends: the next episode starts, and this one
+    // counts as watched.
+    engine.currentTimeMilliseconds = 2_420_000
+    engine.onUpdate?()
+    try await waitForEpisode(nextID, in: controller)
+    XCTAssertEqual(client.updates.last?.finished, true)
+    XCTAssertEqual(client.updates.last?.position, 2_420_000)
+    // The next episode came without times: nothing is offered there.
+    XCTAssertFalse(controller.showsSkipIntro)
+    await controller.shutdown()
+  }
+
+  func testWatchCreditsPlaysThemAndContinuesAtTheEnd() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.segments = Self.segments
+    let nextID = UUID()
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = segmentsController(engine: engine, client: client, nextID: nextID)
+    await controller.start()
+    engine.currentTimeMilliseconds = 2_405_000
+    engine.onUpdate?()
+    XCTAssertEqual(controller.upNext?.duringCredits, true)
+
+    controller.dismissUpNext()
+    for position in [Int64(2_430_000), 2_690_000] {
+      engine.currentTimeMilliseconds = position
+      engine.onUpdate?()
+      XCTAssertNil(controller.upNext)
+      XCTAssertEqual(controller.presentation.mediaId, source.mediaId)
+    }
+    engine.currentTimeMilliseconds = engine.durationMilliseconds
+    engine.isPlaying = false
+    engine.onEnded?()
+    try await waitForEpisode(nextID, in: controller)
+    await controller.shutdown()
+  }
+
+  func testMovingIntoTheCreditsStartsTheCountdownThere() async throws {
+    var source = Self.source(position: 0, completed: false)
+    source.segments = Self.segments
+    let client = FakePlaybackClient(source: source)
+    let engine = FakePlaybackEngine()
+    let controller = segmentsController(engine: engine, client: client, nextID: UUID())
+    await controller.start()
+    engine.currentTimeMilliseconds = 1_000_000
+    engine.onUpdate?()
+
+    controller.seek(to: 2_500_000)
+    engine.currentTimeMilliseconds = 2_500_000
+    engine.onUpdate?()
+    XCTAssertEqual(controller.upNext?.seconds, 20)
+    XCTAssertEqual(controller.presentation.mediaId, source.mediaId)
+    await controller.shutdown(saveProgress: false)
+  }
+
+  func testWithoutANextEpisodeOrWithoutTimesNothingChanges() async throws {
+    // The last episode gets no card in its credits.
+    var last = Self.source(position: 0, completed: false)
+    last.segments = Self.segments
+    let lastEngine = FakePlaybackEngine()
+    let lastController = segmentsController(
+      engine: lastEngine, client: FakePlaybackClient(source: last), nextID: nil)
+    await lastController.start()
+    lastEngine.currentTimeMilliseconds = 2_450_000
+    lastEngine.onUpdate?()
+    XCTAssertNil(lastController.upNext)
+    await lastController.shutdown(saveProgress: false)
+
+    // A server without times: no Skip Intro, and Up Next only in the last seconds, with Cancel.
+    let plain = Self.source(position: 0, completed: false)
+    let engine = FakePlaybackEngine()
+    let controller = segmentsController(
+      engine: engine, client: FakePlaybackClient(source: plain), nextID: UUID(),
+      skipsAutomatically: true)
+    await controller.start()
+    engine.currentTimeMilliseconds = 100_000
+    engine.onUpdate?()
+    XCTAssertFalse(controller.showsSkipIntro)
+    engine.currentTimeMilliseconds = 2_450_000
+    engine.onUpdate?()
+    XCTAssertNil(controller.upNext)
+    engine.currentTimeMilliseconds = 2_685_000
+    engine.onUpdate?()
+    XCTAssertEqual(
+      controller.upNext,
+      PlaybackUpNext(title: "Episode 2", subtitle: "Series · S01 E02", seconds: 15))
+    XCTAssertTrue(engine.seekTargets.isEmpty)
+    await controller.shutdown(saveProgress: false)
+  }
+
   func testEndOfEpisodeSleepTimerStopsQueueAdvance() async throws {
     let source = Self.source(position: 0, completed: false)
     let client = FakePlaybackClient(source: source)

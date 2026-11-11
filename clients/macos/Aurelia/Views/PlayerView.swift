@@ -133,6 +133,17 @@ struct PlayerView: View {
             .transition(.opacity)
         }
 
+        // Skip Intro stays in view while the intro plays, also after the controls have hidden.
+        if controller.showsSkipIntro, controller.upNext == nil, controller.errorMessage == nil,
+          preShow == nil
+        {
+          skipIntroButton
+            .padding(.trailing, 28)
+            .padding(.bottom, controlsVisible ? 150 : 40)
+            .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
+            .transition(.opacity)
+        }
+
         if let note = sceneNotes.cueText {
           VStack {
             HStack {
@@ -160,6 +171,7 @@ struct PlayerView: View {
       .frame(width: viewport.width, height: viewport.height)
       .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: startScreenVisible)
       .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: controller.upNext != nil)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: controller.showsSkipIntro)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .ignoresSafeArea()
@@ -833,7 +845,26 @@ struct PlayerView: View {
     .accessibilityLabel(title)
   }
 
-  /// The next episode with a countdown in this title's last seconds.
+  /// Jumps past the intro the server found; Return or S does the same.
+  private var skipIntroButton: some View {
+    Button {
+      controller.skipIntro()
+      revealControls()
+    } label: {
+      Label("Skip Intro", systemImage: "forward.end.fill")
+        .font(.headline)
+        .padding(.horizontal, 18)
+        .frame(minHeight: AureliaDesign.minimumControlSize)
+        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+    }
+    .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
+    .accessibilityLabel("Skip Intro")
+    .accessibilityHint("Jumps to the end of the intro")
+    .accessibilityIdentifier("player-skip-intro")
+    .onHover { interaction("skip-intro-hover", active: $0) }
+  }
+
+  /// The next episode with a countdown: when the credits begin, or in this title's last seconds.
   private func upNextCard(_ upNext: PlaybackUpNext) -> some View {
     VStack(alignment: .leading, spacing: 10) {
       Text("UP NEXT").font(.caption.weight(.bold)).tracking(1.2).foregroundStyle(.secondary)
@@ -853,7 +884,7 @@ struct PlayerView: View {
         .tint(.white)
         .foregroundStyle(.black)
         .accessibilityIdentifier("player-up-next-play")
-        Button("Cancel") { controller.dismissUpNext() }
+        Button(upNext.duringCredits ? "Watch Credits" : "Cancel") { controller.dismissUpNext() }
           .buttonStyle(.bordered)
           .accessibilityIdentifier("player-up-next-cancel")
       }
@@ -1030,6 +1061,14 @@ struct PlayerView: View {
     }
     if event.charactersIgnoringModifiers == "?" {
       model.isKeyboardShortcutsPresented = true
+      return true
+    }
+    // Return or S skips the intro while Skip Intro is offered.
+    if controller.showsSkipIntro, !event.isARepeat,
+      event.keyCode == 36 || event.keyCode == 76
+        || event.charactersIgnoringModifiers?.lowercased() == "s"
+    {
+      controller.skipIntro()
       return true
     }
     switch event.keyCode {

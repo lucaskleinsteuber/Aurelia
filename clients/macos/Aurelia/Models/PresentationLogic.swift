@@ -148,30 +148,71 @@ enum PlaybackEndTime {
   }
 }
 
-/// "Up Next" appears in the last seconds of an episode-length title when the next episode
-/// will start on its own; the countdown is simply the time left.
+/// "Skip Intro" is offered while the intro plays. Times come from the server; without them
+/// nothing is offered.
+enum SkipIntroPolicy {
+  /// The button appears a second before the intro and leaves two seconds before its end.
+  static func showsButton(position: Int64, introStart: Int64, introEnd: Int64) -> Bool {
+    guard introEnd > introStart else { return false }
+    return position >= introStart - 1_000 && position < introEnd - 2_000
+  }
+
+  /// With "Skip intros automatically" the intro is skipped once per episode, and never after the
+  /// person moved into it on their own (they want to see it).
+  static func skipsAutomatically(
+    enabled: Bool, alreadySkipped: Bool, movedIntoIntro: Bool, buttonShown: Bool
+  ) -> Bool {
+    enabled && buttonShown && !alreadySkipped && !movedIntoIntro
+  }
+}
+
+/// "Up Next" appears when the credits begin, or without a credits time in the last seconds of an
+/// episode-length title, when the next episode will start on its own.
 enum UpNextPolicy {
   static let lead: Int64 = 20_000
 
+  /// A credits time is only trusted in the second half of the title and before its end.
+  static func credits(_ creditsStart: Int64?, duration: Int64) -> Int64? {
+    guard let creditsStart, duration > 0, creditsStart >= duration / 2, creditsStart < duration - 1_000
+    else { return nil }
+    return creditsStart
+  }
+
   static func shows(
     position: Int64, duration: Int64, hasNext: Bool, autoplay: Bool, stopsAtEnd: Bool,
-    dismissed: Bool, lead: Int64 = lead
+    dismissed: Bool, lead: Int64 = lead, creditsStart: Int64? = nil
   ) -> Bool {
     guard hasNext, autoplay, !stopsAtEnd, !dismissed, duration >= 300_000, position > 0 else {
       return false
     }
+    if let credits = credits(creditsStart, duration: duration), position >= credits { return true }
     return duration - position <= lead
   }
 
-  /// Next Episode in the credits counts the episode as watched: while the Up Next card shows or
-  /// in its last tenth. Earlier, skipping on keeps the position, so the episode can be resumed.
-  static func nextFinishesCurrent(position: Int64, duration: Int64, upNextShown: Bool) -> Bool {
+  /// Whether the card shows because the credits began (rather than in the last seconds).
+  static func showsForCredits(position: Int64, duration: Int64, creditsStart: Int64?) -> Bool {
+    guard let credits = credits(creditsStart, duration: duration) else { return false }
+    return position >= credits
+  }
+
+  /// Next Episode in the credits counts the episode as watched: while the Up Next card shows, from
+  /// the credits on, or in its last tenth. Earlier, skipping on keeps the position, so the
+  /// episode can be resumed.
+  static func nextFinishesCurrent(
+    position: Int64, duration: Int64, upNextShown: Bool, creditsStart: Int64? = nil
+  ) -> Bool {
     guard duration > 0, position >= 0 else { return false }
+    if let credits = credits(creditsStart, duration: duration), position >= credits { return true }
     return upNextShown || position >= duration - duration / 10
   }
 
-  static func seconds(position: Int64, duration: Int64) -> Int {
-    Int((max(0, duration - position) + 999) / 1_000)
+  /// Seconds until the next episode starts: to the end of the title, or, when the card appeared
+  /// with the credits at `creditsAnchor`, the countdown from there.
+  static func seconds(
+    position: Int64, duration: Int64, creditsAnchor: Int64? = nil, lead: Int64 = lead
+  ) -> Int {
+    let deadline = creditsAnchor.map { min(duration, $0 + lead) } ?? duration
+    return Int((max(0, deadline - position) + 999) / 1_000)
   }
 }
 
@@ -179,4 +220,6 @@ struct PlaybackUpNext: Equatable {
   let title: String
   let subtitle: String?
   let seconds: Int
+  /// The card appeared with the credits: its second button keeps watching them.
+  var duringCredits = false
 }

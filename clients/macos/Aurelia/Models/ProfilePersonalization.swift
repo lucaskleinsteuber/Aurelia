@@ -143,4 +143,6 @@ enum ServerFeatureNames {
   static let monthlyWrapped = "monthly-wrapped-v1"
   /// HLS in several qualities, converted live by the server.
   static let adaptiveStreaming = StreamingQuality.feature
+  /// The server finds intros and credits and sends their times with the playback ticket.
+  static let mediaSegments = "media-segments-v2"
 }

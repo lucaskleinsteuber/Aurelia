@@ -405,7 +405,7 @@ struct AppSettingsView: View {
         windowSystemSection
         let _ = { foundAny = true }()
       }
-      if queryMatches(query, "resume next countdown threshold auto night mode sleep") {
+      if queryMatches(query, "resume next countdown threshold auto night mode sleep skip intro credits") {
         playbackBehaviorSection
         let _ = { foundAny = true }()
       }
@@ -732,6 +732,21 @@ struct AppSettingsView: View {
           .labelsHidden()
           .frame(width: 140)
           .accessibilityIdentifier("playback-upnext-countdown")
+        }
+
+        if model.supportsMediaSegments {
+          VStack(alignment: .leading, spacing: 2) {
+            Toggle(
+              "Skip Intros Automatically",
+              isOn: $playbackPreferences.preferences.skipIntrosAutomatically
+            )
+            .accessibilityIdentifier("playback-skip-intros")
+            Text(
+              "When the server knows where an episode's intro is, the player offers Skip Intro. Turn this on to skip it without asking. When the credits begin, the next episode is offered with the countdown above."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          }
         }
 
         LabeledContent("Start Over If Barely Started") {

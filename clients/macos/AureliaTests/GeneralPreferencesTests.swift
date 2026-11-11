@@ -31,6 +31,7 @@ struct GeneralPreferencesTests {
     #expect(value.defaultAudioLanguage == "original")
     #expect(!value.fillsScreen)
     #expect(value.defaultSubtitleLanguage == "off")
+    #expect(!value.skipIntrosAutomatically)
 
     var modified = value
     modified.upNextCountdownSeconds = 25
@@ -113,6 +114,90 @@ struct GeneralPreferencesTests {
       UpNextPolicy.shows(
         position: 595_000, duration: duration, hasNext: true, autoplay: true, stopsAtEnd: false,
         dismissed: false, lead: lead5s))
+  }
+
+  @Test func skipIntrosAutomaticallyIsSavedAndStartsOff() throws {
+    var value = PlaybackPreferences.defaultValue
+    #expect(!value.skipIntrosAutomatically)
+    value.skipIntrosAutomatically = true
+    let restored = try JSONDecoder().decode(
+      PlaybackPreferences.self, from: JSONEncoder().encode(value))
+    #expect(restored.skipIntrosAutomatically)
+  }
+
+  @Test func introAndCreditsPoliciesKeepTheirWindows() {
+    #expect(!SkipIntroPolicy.showsButton(position: 28_999, introStart: 30_000, introEnd: 90_000))
+    #expect(SkipIntroPolicy.showsButton(position: 29_000, introStart: 30_000, introEnd: 90_000))
+    #expect(!SkipIntroPolicy.showsButton(position: 88_000, introStart: 30_000, introEnd: 90_000))
+    #expect(!SkipIntroPolicy.showsButton(position: 50_000, introStart: 90_000, introEnd: 30_000))
+    #expect(
+      SkipIntroPolicy.skipsAutomatically(
+        enabled: true, alreadySkipped: false, movedIntoIntro: false, buttonShown: true))
+    for (enabled, skipped, moved, shown) in [
+      (false, false, false, true), (true, true, false, true), (true, false, true, true),
+      (true, false, false, false),
+    ] {
+      #expect(
+        !SkipIntroPolicy.skipsAutomatically(
+          enabled: enabled, alreadySkipped: skipped, movedIntoIntro: moved, buttonShown: shown))
+    }
+
+    let duration: Int64 = 1_500_000
+    // Credits are trusted only in the second half and before the end.
+    #expect(UpNextPolicy.credits(1_380_000, duration: duration) == 1_380_000)
+    #expect(UpNextPolicy.credits(600_000, duration: duration) == nil)
+    #expect(UpNextPolicy.credits(1_499_500, duration: duration) == nil)
+    #expect(
+      UpNextPolicy.shows(
+        position: 1_380_000, duration: duration, hasNext: true, autoplay: true, stopsAtEnd: false,
+        dismissed: false, creditsStart: 1_380_000))
+    #expect(
+      !UpNextPolicy.shows(
+        position: 1_379_000, duration: duration, hasNext: true, autoplay: true, stopsAtEnd: false,
+        dismissed: false, creditsStart: 1_380_000))
+    #expect(
+      !UpNextPolicy.shows(
+        position: 1_400_000, duration: duration, hasNext: true, autoplay: false, stopsAtEnd: false,
+        dismissed: false, creditsStart: 1_380_000))
+    // The countdown runs from where the card appeared, and never past the end of the title.
+    #expect(
+      UpNextPolicy.seconds(
+        position: 1_385_000, duration: duration, creditsAnchor: 1_380_000, lead: 20_000) == 15)
+    #expect(
+      UpNextPolicy.seconds(
+        position: 1_495_000, duration: duration, creditsAnchor: 1_490_000, lead: 20_000) == 5)
+    #expect(UpNextPolicy.seconds(position: 1_490_000, duration: duration) == 10)
+    // Next Episode from the credits on counts the episode as watched.
+    #expect(
+      UpNextPolicy.nextFinishesCurrent(
+        position: 1_340_000, duration: duration, upNextShown: false, creditsStart: 1_330_000))
+    #expect(
+      !UpNextPolicy.nextFinishesCurrent(
+        position: 1_340_000, duration: duration, upNextShown: false))
+  }
+
+  @Test func segmentTimeFieldsReadMinutesAndSeconds() {
+    #expect(MediaSegmentTimeText.text(84_600) == "1:24")
+    #expect(MediaSegmentTimeText.text(nil).isEmpty)
+    #expect(
+      MediaSegmentTimeText.request(introStart: "", introEnd: "1:30", creditsStart: "42:10")
+        == SetMediaSegmentsRequest(
+          introStartMilliseconds: 0, introEndMilliseconds: 90_000,
+          creditsStartMilliseconds: 2_530_000))
+    #expect(
+      MediaSegmentTimeText.request(introStart: "", introEnd: "", creditsStart: "")
+        == SetMediaSegmentsRequest(
+          introStartMilliseconds: nil, introEndMilliseconds: nil, creditsStartMilliseconds: nil))
+    #expect(MediaSegmentTimeText.request(introStart: "soon", introEnd: "1:30", creditsStart: "") == nil)
+    // Older servers send no times; the ticket still decodes.
+    let ticket = Data(
+      """
+      {"id":"00000000-0000-0000-0000-000000000001","mediaId":"00000000-0000-0000-0000-000000000002",
+      "streamPath":"/api/v1/streams/t","contentType":"video/mp4","contentLength":1,
+      "expiresAt":"2099-01-01T00:00:00Z","progress":{"mediaId":"00000000-0000-0000-0000-000000000002",
+      "positionMilliseconds":0,"durationMilliseconds":0,"isCompleted":false}}
+      """.utf8)
+    #expect((try? JSONDecoder().decode(PlaybackSourceResponse.self, from: ticket))?.segments == nil)
   }
 
   @Test func generalPreferenceEnumsRoundTrip() {

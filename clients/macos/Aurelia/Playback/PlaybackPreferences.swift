@@ -112,6 +112,8 @@ struct PlaybackPreferences: Codable, Equatable, Sendable {
   var cinemaTrailers = 2
   /// The original file, or the server's live conversion in a quality the connection carries.
   var streamingQuality: StreamingQuality = .original
+  /// Jumps past an intro the server found, instead of only offering Skip Intro.
+  var skipIntrosAutomatically = false
 
   init(
     automaticResume: Bool,
@@ -177,6 +179,7 @@ extension PlaybackPreferences {
     case upNextCountdownSeconds, resumeThresholdSeconds
     case defaultAudioLanguage, defaultSubtitleLanguage, dialogueBoost, volumeLeveling
     case fillsScreen, cinemaMode, cinemaAds, cinemaTrailers, streamingQuality
+    case skipIntrosAutomatically
   }
 
   /// Settings saved before a newer option existed keep their values; the new option starts off.
@@ -210,6 +213,8 @@ extension PlaybackPreferences {
       cinemaTrailers: try container.decodeIfPresent(Int.self, forKey: .cinemaTrailers) ?? 2)
     streamingQuality =
       (try? container.decodeIfPresent(StreamingQuality.self, forKey: .streamingQuality)) ?? .original
+    skipIntrosAutomatically =
+      try container.decodeIfPresent(Bool.self, forKey: .skipIntrosAutomatically) ?? false
   }
   func encode(to encoder: Encoder) throws {
     var values = encoder.container(keyedBy: CodingKeys.self)
@@ -232,6 +237,7 @@ extension PlaybackPreferences {
     try values.encode(cinemaAds, forKey: .cinemaAds)
     try values.encode(cinemaTrailers, forKey: .cinemaTrailers)
     try values.encode(streamingQuality, forKey: .streamingQuality)
+    try values.encode(skipIntrosAutomatically, forKey: .skipIntrosAutomatically)
   }
 
 }
