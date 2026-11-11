@@ -15,6 +15,9 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server (next), Mac, Linux, Apple TV, iPhone & iPad and browser: Aurelia knows where its server runs. A server that Aurelia for Mac or Linux hosts on a desktop or laptop offers only Keep Running or Stop Aurelia Server after unused minutes; it then stays stopped until Aurelia is opened on that computer, which may sleep meanwhile. It is never woken over the network: every other device shows "Start Aurelia on Your Mac" (or Linux PC) instead.
+- Mac and Linux: Power is its own category in Settings, with when a server on this computer runs, what any server does when nobody uses Aurelia and longer explanations of each choice.
+- Server (next), browser, Mac and Linux: Also After a Sleep Timer Ends can be turned off, so only the unused minutes count (`--after-sleep-timer off` over SSH).
 - Server 2.9.0 (158), browser, Mac 2.9.0 (166) and Linux 2.2.0 (27): power options get a fourth choice, Shut Down the Computer, and Wake When a Device Connects, which lets the network card wake a sleeping or turned off Linux server when a browser opens its address. After any wake it powers down again once five minutes pass unused. `sudo aurelia sleep shutdown` and `--wake-on-access on|off` do the same over SSH.
 - Browser (Server 2.9.0): Review Before Importing when adding a storage location opens the Import Preview, as on the Mac: what each folder and file becomes, searchable and filtered, with assignments corrected one by one or several at once before the recognized items are imported.
 - Server 2.9.0 (158) and browser: a Linux package server restores an encrypted backup chosen in a browser at its next start, before its database opens; a restore that fails rolls back and the server starts as before.
