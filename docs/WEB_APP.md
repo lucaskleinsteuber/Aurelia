@@ -1,8 +1,9 @@
 # Aurelia in a web browser
 
-Every Aurelia Server (in the Mac app or on Linux) also serves Aurelia for web browsers. It is
-meant for devices without an Aurelia app: another computer, a phone or a tablet at home.
-The Mac and Apple TV apps stay the full experience.
+Every Aurelia Server (in the Mac app or on Linux) also serves Aurelia for web browsers. It does
+everything the Mac app does, from setting up a new server to editing the library, on any
+computer, phone or tablet at home. The Mac app is development-signed and runs only on registered
+Macs, so on every other Mac the browser is the way to use Aurelia.
 
 ## Opening it
 
@@ -21,6 +22,24 @@ Web Browser*.
   the server serves it. If the server stops while the page is open, Aurelia says so and
   connects again by itself once the server is back. A browser cannot wake a sleeping server
   with Wake-on-LAN. Open Aurelia on the Mac or the Apple TV to wake it.
+
+## Setting up a new server
+
+A Linux server without an owner can be set up entirely in a browser:
+
+1. On the server computer, run `sudo aurelia setup` and choose the browser (or run
+   `sudo aurelia setup --browser`). In Docker: `docker compose run --rm aurelia setup --browser`,
+   start the server, then `docker compose exec aurelia aurelia setup-code`.
+2. It shows the server's addresses and a one-time **setup code** such as `ABCDE-FGHJK`.
+3. Open an address in a browser, type the code, the owner's name and the Server Password. This
+   browser becomes the first device and asks for the owner's viewing PIN.
+4. A welcome page offers the next steps: media folders (picked from the server's folders), a
+   TMDB token for posters and details, and power saving; then the first scan.
+
+The code exists only while the server has no owner. It lives in the server's private data folder
+(`/var/lib/aurelia/browser-setup-code`, readable by root and the server) and in its log, lasts a
+day, and ten wrong tries replace it, so someone else at home cannot claim the server first. Until
+the owner exists the network reaches only the browser app and the setup step.
 
 ## Signing in
 
@@ -171,25 +190,32 @@ administrator, shared collections; movie pages offer their TMDB franchise as a c
 *Settings* in the profile menu has the Mac's categories; viewers see only their own.
 
 - **General** and **Playback** are kept in this browser: start page, poster size, which sections
-  the top bar shows, whether watched or offline titles appear, reduced motion, automatic resume,
+  the top bar shows and in which order, whether watched or offline titles appear, reduced motion, automatic resume,
   starting over when a title was barely started, the next episode and its Up Next countdown,
   default audio and subtitle languages (used until you choose tracks for a series), subtitle
-  size and background, Night Mode, speed, volume, how long controls stay and the skip interval.
+  size and background, Dialogue Boost and Volume Leveling (the apps' presets, through Web Audio),
+  Cinema Mode, speed, volume, how long controls stay and the skip interval.
 - **Library**, **Metadata**, **Profiles and Devices**, **Server** and **Updates** are for owners
   and administrators, who are signed in with their PIN; they work without the server password.
-  They cover storage locations (added by their absolute path on the server), Library Health
-  (duplicates, missing titles and titles without details), the TMDB key, profiles and their
-  access, paired devices, power saving, backups, Server Health and server updates.
+  They cover storage locations (picked in a browser of the server's folders), files a scan leaves
+  out, Library Health (duplicates, missing titles and titles without details), the TMDB token,
+  Review Matches, OpenSubtitles, codes for new devices (*Create Code*, *Enter Code from Device*),
+  profiles with their access, devices and passwords, power saving, Video Conversion, backups
+  (checking them, encrypted backups to download, and restoring on a server hosted by the Mac app),
+  restart, a diagnostics report, Server Health and server updates.
+- Not in a browser: subtitles written from speech (macOS speech recognition), offline downloads
+  and waking a sleeping server with Wake-on-LAN.
 - A few changes that cannot be undone ask for the server password once more, exactly as on the
   Mac: resetting the library, removing a title, restoring a backup, changing the server
   password and changing or removing the owner or an administrator. See
   [Security model](SECURITY_MODEL.md).
 
 **Edit Metadata** (a title's More Actions menu) edits title, year, rating, runtime,
-description, genres, studios and country, matches the title with TMDB, and can reset a field to
-the automatic value. Manual changes survive later scans. A conflict with a change made
-elsewhere keeps your draft until you reload. Artwork, cast and the title's files are edited in
-the Mac app.
+description, genres, studios and country, Cast and Crew (add, remove, reorder, roles), the poster
+and background (upload a picture and crop it to shape, or crop the current one), matches the title
+with TMDB, chooses another video file for a film or episode, downloads subtitles from OpenSubtitles
+and removes a title. Every field can go back to the automatic value. Manual changes survive later
+scans. A conflict with a change made elsewhere keeps your draft until you reload.
 
 ## Add Aurelia to the home screen
 
@@ -206,6 +232,19 @@ src/Aurelia.Server/WebApp/icon.svg src/Aurelia.Server/WebApp/icons`. They contai
 artwork. The public manifest, icons and app shell reveal no account, library or management
 data. Those still require authentication through the same API. Aurelia uses no service worker
 and no offline cache: the server must be reachable.
+
+## Speed and motion
+
+- The page loads its scripts and styles from `/web/v/<version>/…`, a name that changes with their
+  content, so a browser keeps them for good and fetches them side by side (announced with
+  `modulepreload`); they come compressed (Brotli or gzip). Pictures carry their revision, so a
+  browser keeps them too until a new picture replaces them.
+- Pages seen before show at once from what the server said last time and refresh quietly; Back
+  returns to the same place. Pointing at a poster loads its page ahead. Slower pages show their
+  shape while they load.
+- Pages blend into each other, a clicked poster grows into the title's picture, menus and sheets
+  open from where they were asked for, and rails rise in as they come into view. Reduce Motion (the
+  system's or Settings › General) keeps everything still.
 
 ## How it is built
 
@@ -295,7 +334,9 @@ party. The rules live in `js/watch-together.js` and are tested in
 ## Movie Night and Wrapped
 
 **Movie Night** (`/movie-night`, from Home or the profile menu) lets anyone at home swipe on a
-phone, Android included: right for yes, left for nope, or the buttons and arrow keys. The match
+phone, Android included: right for yes, left for nope, or the buttons and arrow keys. The lobby's
+*Tonight's program* card lets the host choose movies or also shows, a genre, an era (2020s,
+2010s, 2000s, older) and a length (up to 1 h 40 m or 2 h 10 m) right there. The match
 shows as a ticket with **Play**. The page covers the whole window; ✕ returns to Home and keeps
 the browser in the night. A browser can also start a night as the lobby screen without
 swiping. The rules live in `js/movie-night.js`, the page in `js/movie-night-view.js`, tested in
@@ -306,3 +347,11 @@ wide screen the poster stands beside the words. From the 2nd of a month, **Your 
 is here** in Statistics (and on Home in that first week) plays last month the same way. Tapping
 the right or left side moves on or back, holding pauses, Escape closes, and with Reduce Motion
 the slides wait for a tap. `js/wrapped.js`, tested in `tests/WebApp/wrapped.test.mjs`.
+
+## Cinema mode
+
+Settings › Playback › **Cinema Mode** works as on the Mac: before a film that starts from the
+beginning comes one of Aurelia's made-up ads (ice cream, popcorn or phones; nothing is for sale),
+up to three trailers of films in the library nobody has watched, and the curtain, which opens once
+the film's picture moves (at most after ten seconds). **Skip** moves on, **Start Film** (Return)
+goes straight to the film, Esc ends everything. The rules live in `js/cinema.js`.

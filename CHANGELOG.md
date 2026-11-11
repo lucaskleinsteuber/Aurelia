@@ -15,6 +15,9 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server 2.7.0 (156): a new Linux server can be set up in a browser. `sudo aurelia setup` offers it (or `--browser`; in Docker `setup --browser` and `setup-code`), turns on network access and shows a one-time code; the browser that types it creates the owner, then a welcome page adds the media folders, the TMDB token and the first scan. Ten wrong codes replace it, and it exists only while the server has no owner.
+- Browser (Server 2.7.0): everything the Mac app does. Codes for new devices, approving a device's own code, a person's devices and password, the TMDB token, OpenSubtitles, Review Matches, a folder browser for storage locations, files a scan leaves out, restart, a diagnostics report, checking backups and encrypted backups to download (restoring on a server hosted by the Mac app); Edit Metadata uploads and crops artwork, edits Cast and Crew, chooses another video file, downloads subtitles and removes a title; Dialogue Boost, Volume Leveling and Cinema Mode with its made-up ads, trailers and curtain; the top bar's order.
+- Server 2.7.0 (156), Mac 2.7.0 (164), Linux 2.1.0 (26) and browser: Movie Night's lobby has a *Tonight's program* card where the host picks the kind, genre, era (2020s, 2010s, 2000s, older) and length (up to 1 h 40 m or 2 h 10 m) right there, beside who is swiping; the match ticket drops in with confetti.
 - Server 2.6.0 (155): live conversion on video chips. On Linux the server finds Nvidia (NVENC), Intel Quick Sync and VA-API (Intel, AMD) graphics with a short test encode, decodes on the chip where it can, converts up to three titles at once there, and hands a title to the processor when the chip fails. `Aurelia:HardwareEncoding` turns it off or picks a chip.
 - Server 2.6.0 (155): adaptive streaming over HLS in 1080p, 720p, 480p and 360p, converted live with a key frame every 4 seconds of title time; segments stay in memory only, a seek starts the conversion at that segment, and a session ends a minute after its last request.
 - Server 2.6.0 (155), Mac 2.6.0 (163) and Linux: Video Conversion for the owner in the browser app's, the Mac's and the Linux app's server settings, with the encoder, what converts now and, when a video chip can't be used, the one step that fixes it. The Linux installer adds the `render` group and the VA-API driver; the Docker image brings the drivers.
@@ -35,6 +38,11 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Browser (Server 2.7.0): pages open faster. The app's files carry their version in their address and come compressed, so the browser keeps them; pictures carry their revision; pages seen before show at once, a poster's page loads while pointing at it, and slower pages show their shape while loading.
+- Browser (Server 2.7.0): pages blend into each other, a clicked poster grows into the title's picture, menus, sheets and rails move with the Mac's curves, and Reduce Motion keeps everything still.
+- Browser (Server 2.7.0): each menu offers only what fits its own title. An episode marks the episode, a show the whole show, the season selector the season, and Continue Watching appears only for titles in that row.
+- Server 2.7.0 (156): a server converting on its processor learns how fast each quality goes, uses a faster x264 preset before a picture would stall, leaves out qualities it can't convert in time, and says so under Video Conversion.
+- Mac app: published as test versions only (arm64 and x64), since its development signature runs only on registered Macs; the README points everyone else to the browser.
 - Server 2.5.0 (154): Wrapped drops the pet slide, its lines are cheekier, and the genre slide says what share of the time it took.
 - Mac 2.5.0 (162), Linux 2.1.0 (26) and browser (Server 2.5.0): Movie Night and Wrapped cover the whole window instead of a sheet or a phone-sized frame; in a wide window Wrapped puts the poster beside the words.
 - Mac 2.5.0 (162): one set of motion curves everywhere. Settings pages, the activity tabs, Watchlist, Collections, History and Statistics glide in, buttons with their own look give way under the pointer, and the app fades between starting, profiles and the library. Sheets lose the line under their heading.
@@ -47,6 +55,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Browser (Server 2.7.0): the tour's ring sits on the first title it explains instead of beside it and off the window; Home's picture fills the whole width on wide windows; a person's page keeps its back button and heading off the edge; menu icons line up with their text.
 - Mac 2.4.0 (160): a sleeping server is woken only by Continue, Wake Server or opening something, not by any click on "Aurelia Is Resting" (such as closing the window) or by moving the mouse while Aurelia looks for the server.
 - Mac 2.4.0 (160): marking a title watched or unwatched no longer shows "Reload the library to see it" when the library is already reloading because of that change.
 - Mac 2.4.0 (160): Next Episode in the credits (the last tenth of an episode or while Up Next shows) marks the episode watched; earlier it keeps the position as before.

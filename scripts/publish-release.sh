@@ -20,7 +20,11 @@ if [ "${1:-}" = --linux-app ]; then
   exec bash "$repository_root/scripts/publish-linux-app-release.sh" "$@"
 fi
 case "$#:${1:-}" in
-  0:) product=Mac; latest=true ;;
+  0:)
+    product=Mac; latest=true
+    # The Mac app is development-signed and runs only on registered Macs, so it ships as betas
+    # only (owner's decision, 11.11.2026); everyone else uses Aurelia in a browser.
+    [ "$beta" = true ] || { echo "The Mac app is published as a beta only: use publish-release.sh --beta." >&2; exit 1; } ;;
   1:--server) product=Server; latest=false ;;
   *) echo "Usage: publish-release.sh [--beta] [--server | --linux-app] | --promote <tag>" >&2; exit 1 ;;
 esac

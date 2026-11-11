@@ -100,6 +100,14 @@ sudo aurelia update --set-token   # paste the token; it is not shown
 The token is kept in `/etc/aurelia/github-token`, which only root can read. When it expires,
 `aurelia update` says so; save a new one the same way. An empty entry removes the saved token.
 
+## Setting up in a browser
+
+`sudo aurelia setup` asks whether to finish in a web browser (recommended) or in the terminal.
+The browser way turns on network access, then shows the server's addresses and a one-time setup
+code; `sudo aurelia setup --browser` goes there directly and `aurelia status` shows the code
+again. Open an address on any computer, phone or tablet at home, type the code, and create the
+owner, the media folders and the TMDB token there. See [the browser app](WEB_APP.md#setting-up-a-new-server).
+
 ## Setting up over SSH
 
 ```sh

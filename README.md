@@ -103,8 +103,10 @@ or *Processor: Intel*). On Linux: run `uname -m` (`x86_64` means x64, `aarch64` 
 
 > [!NOTE]
 > Aurelia is free and does not use Apple's paid developer program. The Mac download is
-> development-signed and currently runs only on Macs registered to the developer's account;
-> on any other Mac, build it from source with a free Apple ID. The Apple TV, iPhone and iPad
+> development-signed, runs only on Macs registered to the developer's account and is published
+> as a test version. **On any other Mac, use Aurelia in your browser** (Safari, Chrome, Firefox):
+> it does everything the Mac app does, from setting up the server to editing your library. Or build
+> the Mac app from source with a free Apple ID. The Apple TV, iPhone and iPad
 > apps are not in the App Store and are installed from source the same way.
 > [Distribution and updates](docs/FREE_DISTRIBUTION.md) explains why.
 
@@ -116,8 +118,9 @@ or *Processor: Intel*). On Linux: run `uname -m` (`x86_64` means x64, `aarch64` 
    ```sh
    curl -fsSL https://raw.githubusercontent.com/lucaskleinsteuber/Aurelia/main/packaging/linux/get-aurelia.sh | sudo bash
    ```
-2. **Set it up.** Open Aurelia, choose *Set Up This Mac* (or *Set Up This PC* on Linux), create the owner profile, add your
-   media folders and confirm the import preview. Add your free TMDB key for posters and details.
+2. **Set it up.** On Linux, the installer offers to finish in a web browser: open the address it
+   shows, type its one-time code, and create the owner, your media folders and your free TMDB key
+   there. In the Mac or Linux app, choose *Set Up This Mac* (or *Set Up This PC*) instead.
 3. **Connect your other devices.** On the server computer choose *Settings › Profiles and Devices ›
    Create Code* (or run `aurelia pair` on a Linux server) and type the 8-digit code in the app on
    the new device, or in the browser at the server's address.

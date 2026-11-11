@@ -58,6 +58,15 @@ storage is offline. They are database records, never embedded video edits.
 
 ## Web browser sign-in
 
+A server without an owner can be set up from a browser instead (2.7.0): `GET /api/v1/web/setup`
+answers `{open}`; `POST /api/v1/web/setup` with `{code, ownerName, password, deviceName}` checks
+the one-time setup code from the server computer (`browser-setup-code` in the data folder, ten
+wrong codes replace it, a day at most), creates the owner and sets the device cookie like `/pair`.
+Both need the `X-Aurelia-Web` header and HTTPS; afterwards the request answers `409
+server_already_setup`. `setup-browser` (the server command behind `aurelia setup --browser`)
+turns on network access before an owner exists; until then the network reaches only anonymous
+endpoints.
+
 The browser app ([WEB_APP.md](WEB_APP.md)) is served by the server from `/` and `/web/`. It
 signs in with the main device's pairing code like every other client, but no script ever sees
 a credential:
@@ -369,6 +378,9 @@ profile (one with an age limit) gets the friendly lines.
   These polls do not keep a power-saving server awake.
 - `POST …/{id}/settings` with `{kinds: "movies"|"all", genre}`: the host only; `genre` is one of
   `genreOptions` or null.
+  Servers from 2.7.0 also take `era` (`any`, `2020s`, `2010s`, `2000s`, `older`) and `length`
+  (`any`, `short` = films up to 100 minutes, `standard` = up to 130) and report both in the state;
+  a request without them means `any`, so older apps leave every era and length in.
 - `POST …/{id}/deal` deals up to 40 titles in one order for everyone (films the dealer has
   finished are left out, and nothing dealt before comes again). It starts the night and deals
   again later; everyone's votes start over. `409 movie_night_empty` when nothing is left.

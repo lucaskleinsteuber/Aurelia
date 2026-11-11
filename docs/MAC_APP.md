@@ -130,7 +130,8 @@ accents and people talking over each other come out less well.
 Can't decide? **Movie Night** on Home lets everyone at home swipe through the same posters, on
 their phones, in a browser or here with the trackpad, the arrow keys or the buttons. The first
 title every voter likes shows as a ticket with **Play**. A Mac can also just show the lobby
-(**Just Watch on This Mac**). Movie Night covers the whole window; ✕ or Esc leaves the night.
+(**Just Watch on This Mac**). The host picks *Tonight's program* in the lobby: movies or also
+shows, a genre, an era and a length. Movie Night covers the whole window; ✕ or Esc leaves the night.
 
 Motion follows one set of curves (`AureliaMotion` in `Views/AureliaDesign.swift`): `press` for
 buttons and cards, `quick` for hover, `standard` for content that changes in place, `page` for

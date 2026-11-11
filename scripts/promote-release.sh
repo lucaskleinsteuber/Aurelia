@@ -13,6 +13,7 @@ cd "$repository_root"
   || { echo "$tag is still a draft; publish it as a beta first." >&2; exit 1; }
 case "$tag" in
   linux-app-*|server-*) latest=false ;;
+  [0-9]*) echo "Mac versions stay betas (owner's decision, 11.11.2026); only Server and Linux app tags are promoted." >&2; exit 1 ;;
   *) latest=true ;;
 esac
 title=$(gh release view "$tag" --json name --jq .name)

@@ -19,6 +19,9 @@ docker compose up -d
 ```
 
 `setup` asks for the owner's name and the Server Password (twice) and turns on network access.
+`setup --browser` instead turns on network access for setting up in a browser: start the server,
+show the one-time code with `docker compose exec aurelia aurelia setup-code`, and open
+`https://<host>:43111` ([details](WEB_APP.md#setting-up-a-new-server)).
 `AURELIA_SERVER_NAME` in the environment names the server.
 
 ## Connect devices and add media

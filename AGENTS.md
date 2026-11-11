@@ -273,7 +273,11 @@ These rules apply to every task in this repository.
 - Track verified product releases in `docs/RELEASE_VERSIONS.json`. End each GitHub
   release description with compact version and download links for every product,
   including unchanged products. Keep the version overview out of the README.
-  Mac remains Latest. Server and Linux Desktop have independent release tags.
+  Server and Linux Desktop have independent release tags. The Mac app is published as betas only,
+  never promoted to stable (owner's decision, 11.11.2026: its development signature runs only on
+  registered Macs); both architectures are still built and published, and GitHub's Latest stays at
+  the last stable Mac release. Everyone without a self-built Mac app uses Aurelia in a browser, so
+  the browser gets every Mac feature.
 - The main `lucaskleinsteuber/Aurelia` repository is public and stays public (owner's
   decision, 06.11.2026). Never change its visibility. Updates of the Mac app, the Linux app and
   the Linux server, the one-line Linux install and the Docker build read the public release feed
