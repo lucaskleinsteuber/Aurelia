@@ -7,7 +7,7 @@ import { ApiError } from "./api.js";
 import {
   MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
-  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary
+  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
@@ -348,8 +348,10 @@ export function createSettings(app) {
         ], preferences.resumeThresholdSeconds, (sec) => save({ resumeThresholdSeconds: Number(sec) }), "Start Over If Barely Started"),
           "Resume starts from the beginning when less than this was watched."),
         row("Keep Screen On During Playback", toggle(preferences.keepScreenOn, (on) => save({ keepScreenOn: on }), "Keep Screen On During Playback")),
-        row("Night Mode", toggle(preferences.nightMode, (on) => save({ nightMode: on }), "Night Mode"),
-          "Softens loud explosions and lifts quiet dialogue.")),
+        row("Dialogue Boost", select(DIALOGUE_BOOST_CHOICES, preferences.dialogueBoost, (choice) => save({ dialogueBoost: choice }), "Dialogue Boost"),
+          "Lifts voices and lowers rumbling bass, so speech is easier to follow."),
+        row("Volume Leveling", select(VOLUME_LEVELING_CHOICES, preferences.volumeLeveling, (choice) => save({ volumeLeveling: choice }), "Volume Leveling"),
+          "Softens loud explosions and lifts quiet scenes. Sleep evens them out the most.")),
 
       section("Audio & Subtitles", "captions", "Preferred spoken language, subtitles and appearance.",
         row("Default Audio Language", select([

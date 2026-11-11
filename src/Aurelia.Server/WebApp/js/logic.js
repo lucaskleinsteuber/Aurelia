@@ -855,6 +855,8 @@ export const PLAYBACK_DEFAULTS = Object.freeze({
   automaticallyPlayNextEpisode: true,
   keepScreenOn: true,
   nightMode: false,
+  dialogueBoost: "off",
+  volumeLeveling: "off",
   upNextCountdownSeconds: UP_NEXT_LEAD,
   resumeThresholdSeconds: 0,
   defaultAudioLanguage: "original",
@@ -876,6 +878,9 @@ export function normalizePreferences(value) {
     automaticallyPlayNextEpisode: merged.automaticallyPlayNextEpisode !== false,
     keepScreenOn: merged.keepScreenOn !== false,
     nightMode: merged.nightMode === true,
+    dialogueBoost: ["off", "standard", "strong"].includes(merged.dialogueBoost) ? merged.dialogueBoost : "off",
+    // An explicit choice wins; before it existed, Night Mode on meant Standard leveling.
+    volumeLeveling: ["off", "standard", "sleep"].includes(value?.volumeLeveling) ? value.volumeLeveling : merged.nightMode === true ? "standard" : "off",
     upNextCountdownSeconds: Math.round(number(merged.upNextCountdownSeconds, 5, 30, UP_NEXT_LEAD)),
     resumeThresholdSeconds: Math.round(number(merged.resumeThresholdSeconds, 0, 120, 0)),
     defaultAudioLanguage: typeof merged.defaultAudioLanguage === "string" && /^(original|[a-z]{2})$/.test(merged.defaultAudioLanguage) ? merged.defaultAudioLanguage : "original",
@@ -1341,3 +1346,29 @@ export function subtitleLanguages(text) {
   const codes = String(text ?? "").toLowerCase().split(/[\s,;]+/).filter((code) => /^[a-z]{2}$/.test(code));
   return [...new Set(codes)].slice(0, 10);
 }
+
+// MARK: Sound
+
+export const DIALOGUE_BOOST_CHOICES = Object.freeze([["off", "Off"], ["standard", "Standard"], ["strong", "Strong"]]);
+export const VOLUME_LEVELING_CHOICES = Object.freeze([["off", "Off"], ["standard", "Standard"], ["sleep", "Sleep"]]);
+const BOOST_FREQUENCIES = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
+const BOOST_GAINS = { standard: [-3, -2, -1, 0, 2, 3, 1, 0, -1, -2], strong: [-6, -4, -2, 0, 3, 5, 2, 0, -2, -3] };
+
+/**
+ * The same Dialogue Boost and Volume Leveling presets as the other apps (docs/AUDIO_PROCESSING.md),
+ * as numbers for the browser's Web Audio nodes: equalizer bands with a preamp, then a compressor
+ * with makeup gain. Web Audio's compressor has no RMS detection, so both levels use its peak.
+ */
+export function audioProfile(preferences = {}) {
+  const boost = BOOST_GAINS[preferences.dialogueBoost] ?? null;
+  const leveling = { standard: { threshold: -24, knee: 6, ratio: 4, attack: 0.015, release: 0.3, makeupDb: 12 },
+    sleep: { threshold: -30, knee: 6, ratio: 12, attack: 0.0015, release: 0.65, makeupDb: 16 } }[preferences.volumeLeveling] ?? null;
+  return {
+    equalizer: boost ? BOOST_FREQUENCIES.map((frequency, index) => ({ frequency, gain: boost[index] })) : null,
+    preampDb: boost ? (preferences.dialogueBoost === "strong" ? -5 : -3) : 0,
+    compressor: leveling,
+    active: Boolean(boost || leveling),
+  };
+}
+
+export const decibels = (value) => 10 ** (value / 20);

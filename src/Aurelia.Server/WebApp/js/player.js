@@ -11,7 +11,7 @@ import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
   playerSubtitle, rateLabel, playbackStartSeconds, sessionRefused, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
-  timelineValueText, trackForLanguage, volumeValueText,
+  timelineValueText, trackForLanguage, volumeValueText, audioProfile, decibels, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
 import { createTrackChoices, matchingTrack } from "./track-choices.js";
@@ -234,7 +234,7 @@ export class Player {
     this.video.volume = this.preferences.defaultVolume;
     this.updateVolume();
     // Opening the player is a click, so the browser allows sound processing to start now.
-    if (this.preferences.nightMode) this.applyNightMode();
+    if (audioProfile(this.preferences).active) this.applySound();
     try {
       this.source = await this.api.createPlayback(this.item.id);
     } catch (error) {
@@ -779,6 +779,7 @@ export class Player {
   menuItems(options) {
     return options.map((option) => {
       if (option === "divider") return h("div", { class: "menu-divider", role: "separator" });
+      if (option.heading) return h("div", { class: "menu-heading", role: "presentation" }, option.heading);
       return h("button", {
         class: "menu-item check-item",
         role: "menuitemradio",
@@ -850,7 +851,10 @@ export class Player {
     })) : native.length ? native.map((track, position) => ({
       title: trackLabel({ ...track, title: track.label, language: track.language }, position), selected: track.enabled, action: () => this.chooseNativeAudio(track),
     })) : [{ title: "Original sound", selected: true, enabled: false }];
-    options.push("divider", { title: "Night Mode", selected: this.preferences.nightMode, action: () => this.setNightMode(!this.preferences.nightMode) });
+    options.push("divider", { heading: "Dialogue Boost" },
+      ...DIALOGUE_BOOST_CHOICES.map(([value, title]) => ({ title, selected: this.preferences.dialogueBoost === value, action: () => this.setSound({ dialogueBoost: value }) })),
+      "divider", { heading: "Volume Leveling" },
+      ...VOLUME_LEVELING_CHOICES.map(([value, title]) => ({ title, selected: this.preferences.volumeLeveling === value, action: () => this.setSound({ volumeLeveling: value }) })));
     this.openPopover(this.audioButton, this.menuItems(options));
   }
 
@@ -901,42 +905,61 @@ export class Player {
     } finally { this.restoringTracks = false; }
   }
 
-  /** Night Mode softens loud scenes and lifts quiet dialogue with a compressor, as on the Mac. */
-  setNightMode(enabled) {
-    this.preferences = savePreferences({ ...this.preferences, nightMode: enabled });
-    this.applyNightMode();
+  /** Dialogue Boost and Volume Leveling, as in the other apps; the choice is kept in this browser. */
+  setSound(change) {
+    this.preferences = savePreferences({ ...this.preferences, ...change });
+    this.applySound();
   }
 
-  applyNightMode() {
-    if (!this.preferences.nightMode && !this.audioGraph) return;
+  /**
+   * Routes the picture's sound through an equalizer for speech and a compressor that evens out
+   * loud and quiet scenes. Nothing is built until one of them is on; Off plays the sound as it is.
+   */
+  applySound() {
+    const profile = audioProfile(this.preferences);
+    if (!profile.active && !this.audioGraph) return;
     try {
       if (!this.audioGraph) {
         const context = new AudioContext();
         const source = context.createMediaElementSource(this.video);
+        this.audioGraph = { context, source, nodes: [] };
+      }
+      const graph = this.audioGraph;
+      graph.source.disconnect();
+      for (const node of graph.nodes) node.disconnect();
+      const { context } = graph;
+      const nodes = [];
+      if (profile.equalizer) {
+        const preamp = context.createGain();
+        preamp.gain.value = decibels(profile.preampDb);
+        nodes.push(preamp);
+        profile.equalizer.forEach((band, index, all) => {
+          const filter = context.createBiquadFilter();
+          filter.type = index === 0 ? "lowshelf" : index === all.length - 1 ? "highshelf" : "peaking";
+          filter.frequency.value = band.frequency;
+          filter.Q.value = 1.1;
+          filter.gain.value = band.gain;
+          nodes.push(filter);
+        });
+      }
+      if (profile.compressor) {
         const compressor = context.createDynamicsCompressor();
-        compressor.threshold.value = -30;
-        compressor.knee.value = 24;
-        compressor.ratio.value = 6;
-        compressor.attack.value = 0.005;
-        compressor.release.value = 0.3;
-        const gain = context.createGain();
-        this.audioGraph = { context, source, compressor, gain };
+        compressor.threshold.value = profile.compressor.threshold;
+        compressor.knee.value = profile.compressor.knee;
+        compressor.ratio.value = profile.compressor.ratio;
+        compressor.attack.value = profile.compressor.attack;
+        compressor.release.value = profile.compressor.release;
+        const makeup = context.createGain();
+        makeup.gain.value = decibels(profile.compressor.makeupDb);
+        nodes.push(compressor, makeup);
       }
-      const { context, source, compressor, gain } = this.audioGraph;
-      source.disconnect();
-      compressor.disconnect();
-      gain.disconnect();
-      if (this.preferences.nightMode) {
-        gain.gain.value = 1.6;
-        source.connect(compressor).connect(gain).connect(context.destination);
-      } else {
-        source.connect(context.destination);
-      }
+      graph.nodes = nodes;
+      [graph.source, ...nodes].reduce((from, to) => from.connect(to)).connect(context.destination);
       context.resume().catch(() => {});
     } catch {
       // Web Audio is not available; the sound plays unchanged.
     }
-    this.audioButton.classList.toggle("active", this.preferences.nightMode);
+    this.audioButton.classList.toggle("active", profile.active);
   }
 
   subtitleMenu() {

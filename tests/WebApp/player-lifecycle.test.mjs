@@ -34,7 +34,11 @@ test("a native sound-track menu uses browser tracks without starting live conver
   let options, remembered;
   const p = player({ video: { audioTracks: { 0: english, 1: german, length: 2 } }, trackChoices: { rememberAudio: (track) => { remembered = track; } },
     menuItems: (entries) => entries, openPopover: (_anchor, entries) => { options = entries; }, preferences: { nightMode: false } });
-  p.audioMenu(); assert.equal(options.length, 4); options[1].action();
+  p.audioMenu();
+  // Two tracks, then Dialogue Boost and Volume Leveling with three choices each.
+  assert.deepEqual(options.filter((option) => option.heading).map((option) => option.heading), ["Dialogue Boost", "Volume Leveling"]);
+  assert.equal(options.length, 2 + 2 * (2 + 3));
+  options[1].action();
   assert.equal(german.enabled, true); assert.equal(english.enabled, false); assert.equal(remembered, german);
 });
 test("live sound changes remember semantic identity and reapply the chosen subtitle after the restart", async () => {

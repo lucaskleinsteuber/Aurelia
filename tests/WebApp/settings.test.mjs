@@ -353,3 +353,19 @@ test("video conversion reads the encoder, the hint and the running conversions f
     "Processor (x264) · the processor stands in after a chip error");
   assert.equal(transcodingSummary(null).running, "None");
 });
+
+test("Dialogue Boost and Volume Leveling follow the other apps' presets and keep old Night Mode", async () => {
+  const { audioProfile, normalizePreferences } = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  assert.equal(normalizePreferences({ nightMode: true }).volumeLeveling, "standard");
+  assert.equal(normalizePreferences({ nightMode: true, volumeLeveling: "off" }).volumeLeveling, "off");
+  assert.equal(normalizePreferences({ dialogueBoost: "loud" }).dialogueBoost, "off");
+  assert.deepEqual(audioProfile({ dialogueBoost: "off", volumeLeveling: "off" }), { equalizer: null, preampDb: 0, compressor: null, active: false });
+  const strong = audioProfile({ dialogueBoost: "strong", volumeLeveling: "sleep" });
+  assert.equal(strong.preampDb, -5);
+  assert.deepEqual(strong.equalizer.map((band) => band.gain), [-6, -4, -2, 0, 3, 5, 2, 0, -2, -3]);
+  assert.deepEqual(strong.compressor, { threshold: -30, knee: 6, ratio: 12, attack: 0.0015, release: 0.65, makeupDb: 16 });
+  const standard = audioProfile({ dialogueBoost: "standard", volumeLeveling: "standard" });
+  assert.equal(standard.preampDb, -3);
+  assert.equal(standard.equalizer.find((band) => band.frequency === 3000).gain, 3);
+  assert.equal(standard.compressor.ratio, 4);
+});
