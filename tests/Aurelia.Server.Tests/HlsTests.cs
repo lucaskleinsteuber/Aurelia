@@ -304,6 +304,50 @@ public sealed partial class LiveConversionTests
         finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
     }
 
+    [Fact]
+    public async Task ConvertingFromALaterSegmentPutsAKeyFrameAtTheStartOfEverySegment()
+    {
+        if (Installed() is not { } ffmpeg) return;
+        var root = Path.Combine(TestPaths.CreateDataDirectory(), "Segment Key Frames");
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "Invented Film.mkv");
+        try
+        {
+            await MakeMediaAsync(ffmpeg, path);
+            var video = new ProbedVideo(0, "h264", "High", 30, 640, 360, "yuv420p", 8);
+            var step = StreamingLadder.Find(video, null, "360p")!;
+            foreach (var encoder in new[] { LiveVideoEncoder.Libx264, LiveVideoEncoder.VideoToolbox })
+            {
+                if (encoder == LiveVideoEncoder.VideoToolbox && !OperatingSystem.IsMacOS()) continue;
+                // A seek to segment 2 (8 s): key frames must follow at 12 and 16 s of title time.
+                var options = new LiveStreamOptions(8, video, encoder, null, false, Step: step, SegmentSeconds: HlsPlaylists.SegmentSeconds);
+                var start = new ProcessStartInfo(ffmpeg) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+                foreach (var argument in LiveConversionPlanner.Arguments(path, options)) start.ArgumentList.Add(argument);
+                using var process = Process.Start(start)!;
+                using var output = new MemoryStream();
+                var errors = process.StandardError.ReadToEndAsync();
+                await process.StandardOutput.BaseStream.CopyToAsync(output);
+                await process.WaitForExitAsync();
+                Assert.True(process.ExitCode == 0, await errors);
+                using var stream = new MemoryStream(output.ToArray());
+                byte[]? ftyp = null;
+                Fmp4Init? init = null;
+                var keyFrameSegments = new SortedSet<int>();
+                while (await Fmp4.ReadBoxAsync(stream, default) is { } box)
+                {
+                    if (box.Type == "ftyp") ftyp = box.Data;
+                    else if (box.Type == "moov") init = Fmp4.ParseInit(ftyp ?? [], box.Data);
+                    // With frag_keyframe every fragment begins with a key frame.
+                    else if (box.Type == "moof" && init is not null && Fmp4.FragmentStart(box.Data, init) is { } at
+                             && Math.Abs(at - HlsPlaylists.SegmentFor(at) * HlsPlaylists.SegmentSeconds) < 0.1)
+                        keyFrameSegments.Add(HlsPlaylists.SegmentFor(at));
+                }
+                Assert.Equal([2, 3, 4], keyFrameSegments);
+            }
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); }
+    }
+
     private static async Task<string> ReadTextAsync(HttpClient client, string token, string address, string contentType)
     {
         using var request = ApiTestClient.Authorized(HttpMethod.Get, address, token);

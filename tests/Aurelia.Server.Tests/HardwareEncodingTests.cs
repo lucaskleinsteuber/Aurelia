@@ -136,7 +136,7 @@ public sealed class HardwareEncodingTests
         foreach (var arguments in new[] { nvenc, vaapi, qsv, x264 })
         {
             Assert.Equal("pipe:1", arguments[^1]);
-            Assert.Equal(["-force_key_frames", "expr:gte(t,40+n_forced*4)"], arguments.SkipWhile(argument => argument != "-force_key_frames").Take(2));
+            Assert.Equal(["-force_key_frames", "expr:gte(t,n_forced*4)"], arguments.SkipWhile(argument => argument != "-force_key_frames").Take(2));
             Assert.Equal(["-c:a", "aac", "-ac", "2", "-b:a", "160k"], arguments.SkipWhile(argument => argument != "-c:a").Take(6));
             Assert.DoesNotContain("hls", arguments);
             Assert.Single(arguments, argument => argument.StartsWith("file:", StringComparison.Ordinal));

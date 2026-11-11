@@ -239,11 +239,10 @@ public static class LiveConversionPlanner
         arguments.AddRange(["-vf", HardwareEncoding.UploadFilter(kind, LiveHdr.PictureFilter(options.Video, options.ToneMapping, width, height))]);
         if (options.SegmentSeconds is { } seconds and > 0)
         {
-            // A key frame exactly where each segment of title time begins; -copyts keeps t in title
-            // time, so a stream started at a segment's start counts on from there.
-            var start = Seconds(options.Start);
+            // A key frame where each segment begins. ffmpeg counts t from the first frame it
+            // encodes, which is a segment's start, so every further segment is n_forced × length on.
             arguments.AddRange([
-                "-force_key_frames", $"expr:gte(t,{start}+n_forced*{seconds.ToString(CultureInfo.InvariantCulture)})",
+                "-force_key_frames", $"expr:gte(t,n_forced*{seconds.ToString(CultureInfo.InvariantCulture)})",
                 "-g", "600",
             ]);
             if (kind == LiveVideoEncoder.Libx264) arguments.AddRange(["-sc_threshold", "0"]);
