@@ -78,10 +78,48 @@ struct MovieNightState: Codable, Identifiable, Equatable, Sendable {
   let result: MovieNightResult?
   let lastAction: String?
   let lastActionBy: String?
+  /// Missing from servers before 2.7; such a server deals every era and length.
+  var era: String? = nil
+  var length: String? = nil
 
   var me: MovieNightMember? { members.first { $0.isYou } }
   var host: MovieNightMember? { members.first { $0.isHost } }
   var voters: [MovieNightMember] { members.filter(\.isVoting) }
+}
+
+/// Tonight's program: what the host lets the server deal.
+struct MovieNightProgram: Encodable, Equatable, Sendable {
+  var kinds: String
+  var genre: String?
+  var era: String
+  var length: String
+
+  init(kinds: String = "movies", genre: String? = nil, era: String = "any", length: String = "any") {
+    self.kinds = kinds
+    self.genre = genre
+    self.era = era
+    self.length = length
+  }
+
+  init(_ state: MovieNightState) {
+    self.init(kinds: state.kinds, genre: state.genre, era: state.era ?? "any", length: state.length ?? "any")
+  }
+
+  static let kindChoices = [("movies", "Movies"), ("all", "Movies and Shows")]
+  static let eraChoices = [
+    ("any", "Any Time"), ("2020s", "2020s"), ("2010s", "2010s"), ("2000s", "2000s"), ("older", "Older"),
+  ]
+  static let lengthChoices = [("any", "Any Length"), ("short", "Short, up to 1h 40m"), ("standard", "Up to 2h 10m")]
+
+  /// "Movies · Comedy · 2010s · Short".
+  var summary: String {
+    [
+      kinds == "all" ? "Movies and Shows" : "Movies",
+      genre,
+      era == "any" ? nil : Self.eraChoices.first { $0.0 == era }?.1,
+      length == "short" ? "Short" : length == "standard" ? "Up to 2h 10m" : nil,
+    ].compactMap { $0 }.joined(separator: " · ")
+  }
 }
 
 /// What a screen shows for the night.
@@ -144,7 +182,7 @@ protocol MovieNightAPI: Sendable {
   func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> MovieNightState
   func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
     -> MovieNightState
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> MovieNightState
+  func movieNightSettings(id: UUID, program: MovieNightProgram) async throws -> MovieNightState
   func dealMovieNight(id: UUID) async throws -> MovieNightState
   func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> MovieNightState
   func keepSwiping(id: UUID) async throws -> MovieNightState
@@ -187,9 +225,14 @@ final class MovieNightSession: ObservableObject {
     await run { [api] in try await api.joinMovieNight(id: night.id, deviceName: name, voting: voting) }
   }
 
-  func settings(kinds: String, genre: String?) async {
-    guard let id = state?.id else { return }
-    await run { [api] in try await api.movieNightSettings(id: id, kinds: kinds, genre: genre) }
+  /// Changes one part of tonight's program; the other choices stay.
+  func settings(_ change: (inout MovieNightProgram) -> Void) async {
+    guard let state else { return }
+    var program = MovieNightProgram(state)
+    change(&program)
+    let id = state.id
+    let wanted = program
+    await run { [api] in try await api.movieNightSettings(id: id, program: wanted) }
   }
 
   func deal() async {

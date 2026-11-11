@@ -99,7 +99,7 @@ struct MovieNightView: View {
             .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.97)), removal: .opacity))
         }
         .aureliaAnimation(AureliaMotion.page, value: session.screen)
-        .frame(maxWidth: 760, alignment: .leading)
+        .frame(maxWidth: session.screen == .lobby ? 1040 : 760, alignment: .leading)
         .padding(.horizontal, 48)
         .padding(.top, 72)
         .padding(.bottom, 48)
@@ -193,46 +193,118 @@ struct MovieNightView: View {
     if let state = session.state {
       let voters = state.voters.count
       heading(
-        "Who's in?",
+        "Movie Night",
         voters == 0
           ? "Nobody is swiping yet. Open Aurelia on a phone and join this night."
-          : "\(voters == 1 ? "1 person is" : "\(voters) people are") ready to swipe. Anyone else at home can join from Aurelia on their phone, in a browser or on the Apple TV.")
-      people(state)
-      if state.me?.isHost == true {
-        Picker("Deal", selection: Binding(
-          get: { state.kinds },
-          set: { kinds in Task { await session.settings(kinds: kinds, genre: state.genre) } })
-        ) {
-          Text("Movies").tag("movies")
-          Text("Movies and Shows").tag("all")
+          : "Pick tonight's program, deal the cards, and let everyone swipe.")
+      ViewThatFits(in: .horizontal) {
+        HStack(alignment: .top, spacing: 20) {
+          program(state).frame(minWidth: 500)
+          crowd(state).frame(width: 270)
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 320)
-        if !state.genreOptions.isEmpty {
-          Picker("Genre", selection: Binding(
-            get: { state.genre ?? "" },
-            set: { genre in Task { await session.settings(kinds: state.kinds, genre: genre.isEmpty ? nil : genre) } })
-          ) {
-            Text("Any Genre").tag("")
-            ForEach(state.genreOptions, id: \.self) { Text($0).tag($0) }
-          }
-          .frame(maxWidth: 320)
+        VStack(alignment: .leading, spacing: 20) {
+          program(state)
+          crowd(state)
         }
       }
       HStack(spacing: 12) {
-        if state.me?.isHost == true {
-          Button("Deal the Cards") { Task { await session.deal() } }
-            .buttonStyle(AureliaPrimaryActionButtonStyle())
-            .keyboardShortcut(.defaultAction)
-            .disabled(voters == 0)
-        } else {
-          Text("Waiting for \(state.host?.name ?? "the host") to deal.").foregroundStyle(.secondary)
-        }
         Button(state.me?.isVoting == true ? "Just Watch on This Mac" : "Swipe Here Too") {
           Task { await session.setVoting(!(state.me?.isVoting ?? false)) }
         }
       }
     }
+  }
+
+  /// Tonight's program on a card: what, genre, era and length, then the deal. Only the host
+  /// can change it; everyone else sees the choices.
+  private func program(_ state: MovieNightState) -> some View {
+    let hosting = state.me?.isHost == true
+    let current = MovieNightProgram(state)
+    let genres = [("", "Any Genre")] + state.genreOptions.map { ($0, $0) }
+    return VStack(alignment: .leading, spacing: 16) {
+      HStack(alignment: .firstTextBaseline) {
+        Text("Tonight's Program").font(.title3.weight(.bold))
+        Spacer(minLength: 12)
+        Text(hosting ? "You choose what gets dealt." : "\(state.host?.name ?? "The host") chooses what gets dealt.")
+          .font(.callout).foregroundStyle(.secondary)
+      }
+      programRow("What", MovieNightProgram.kindChoices, selected: current.kinds, enabled: hosting) { value in
+        { $0.kinds = value }
+      }
+      if !state.genreOptions.isEmpty {
+        programRow("Genre", genres, selected: current.genre ?? "", enabled: hosting) { value in
+          { $0.genre = value.isEmpty ? nil : value }
+        }
+      }
+      // Servers before 2.7 don't know eras and lengths.
+      if state.era != nil {
+        programRow("When", MovieNightProgram.eraChoices, selected: current.era, enabled: hosting) { value in
+          { $0.era = value }
+        }
+        programRow("Length", MovieNightProgram.lengthChoices, selected: current.length, enabled: hosting) { value in
+          { $0.length = value }
+        }
+      }
+      DashedRule().stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 4])).foregroundStyle(.white.opacity(0.18))
+        .frame(height: 1)
+      HStack(spacing: 14) {
+        Text(current.summary).fontWeight(.semibold).foregroundStyle(MovieNightPalette.yes)
+        Spacer(minLength: 12)
+        if hosting {
+          Button {
+            Task { await session.deal() }
+          } label: {
+            Label("Deal the Cards", systemImage: "play.fill")
+          }
+          .buttonStyle(AureliaPrimaryActionButtonStyle())
+          .keyboardShortcut(.defaultAction)
+          .disabled(state.voters.isEmpty)
+        } else {
+          Text("Waiting for \(state.host?.name ?? "the host") to deal.").foregroundStyle(.secondary)
+        }
+      }
+    }
+    .padding(22)
+    .background(
+      LinearGradient(
+        colors: [Color(red: 0.17, green: 0.19, blue: 0.21), Color(red: 0.14, green: 0.15, blue: 0.17)],
+        startPoint: .topLeading, endPoint: .bottomTrailing),
+      in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+    )
+    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.08)))
+    .shadow(color: .black.opacity(0.35), radius: 24, y: 14)
+  }
+
+  private func programRow(
+    _ label: String, _ choices: [(String, String)], selected: String, enabled: Bool,
+    change: @escaping (String) -> (inout MovieNightProgram) -> Void
+  ) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 12) {
+      Text(label).font(.callout.weight(.semibold)).foregroundStyle(.secondary).frame(width: 60, alignment: .leading)
+      FlowLayout(spacing: 8) {
+        ForEach(choices, id: \.0) { value, title in
+          FilterChip(title: title, selected: selected == value) {
+            Task { await session.settings(change(value)) }
+          }
+          .opacity(enabled || selected == value ? 1 : 0.45)
+        }
+      }
+      .disabled(!enabled)
+      .aureliaAnimation(AureliaMotion.press, value: selected)
+    }
+  }
+
+  private func crowd(_ state: MovieNightState) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text(state.voters.count == 1 ? "1 swiping" : "\(state.voters.count) swiping").font(.title3.weight(.bold))
+      people(state)
+      Text("Anyone at home joins from Aurelia on a phone, tablet, computer or in a browser: Movie Night › Join.")
+        .font(.callout).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .padding(18)
+    .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.08)))
   }
 
   @ViewBuilder
@@ -256,6 +328,7 @@ struct MovieNightView: View {
   private var result: some View {
     if let state = session.state, let outcome = state.result {
       MovieNightTicket(outcome: outcome, voters: state.voters.map(\.name))
+        .overlay(alignment: .top) { if outcome.card != nil { MovieNightConfetti() } }
       ForEach(outcome.awards, id: \.title) { award in
         VStack(alignment: .leading, spacing: 4) {
           Text(award.title).fontWeight(.bold).foregroundStyle(MovieNightPalette.yes)
@@ -448,9 +521,54 @@ private struct MovieNightCardView: View {
 }
 
 /// The match as a cinema ticket: poster and lines on paper, and a stub that admits the voters.
+/// A short line, for the dashed tear line of tonight's program.
+private struct DashedRule: Shape {
+  func path(in rect: CGRect) -> Path {
+    Path { path in
+      path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+      path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+    }
+  }
+}
+
+/// A short burst of paper in the night's colors over the ticket; Reduce Motion leaves it out.
+private struct MovieNightConfetti: View {
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @State private var fallen = false
+  private let pieces: [(x: Double, drift: Double, spin: Double, delay: Double, color: Color)] = (0..<28).map { index in
+    (
+      Double.random(in: 0...1), Double.random(in: -80...80), Double.random(in: -360...360),
+      Double.random(in: 0...0.26),
+      [MovieNightPalette.yes, MovieNightPalette.nope, MovieNightPalette.paper, Color(red: 0.48, green: 0.64, blue: 1)][index % 4]
+    )
+  }
+
+  var body: some View {
+    if !reduceMotion {
+      GeometryReader { geometry in
+        ForEach(pieces.indices, id: \.self) { index in
+          let piece = pieces[index]
+          RoundedRectangle(cornerRadius: 2)
+            .fill(piece.color)
+            .frame(width: 8, height: 14)
+            .rotationEffect(.degrees(fallen ? piece.spin : 0))
+            .offset(x: geometry.size.width * piece.x + (fallen ? piece.drift : 0), y: fallen ? 420 : -30)
+            .opacity(fallen ? 0 : 1)
+            .animation(.timingCurve(0.2, 0.6, 0.4, 1, duration: 1.3).delay(piece.delay), value: fallen)
+        }
+      }
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
+      .onAppear { fallen = true }
+    }
+  }
+}
+
 private struct MovieNightTicket: View {
   let outcome: MovieNightResult
   let voters: [String]
+  @Environment(\.aureliaReduceMotion) private var reduceMotion
+  @State private var landed = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -487,6 +605,13 @@ private struct MovieNightTicket: View {
     .background(MovieNightPalette.paper)
     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     .shadow(color: .black.opacity(0.5), radius: 24, y: 16)
+    // The ticket drops in and tips forward, as if handed over the counter.
+    .rotation3DEffect(.degrees(landed || reduceMotion ? 0 : 55), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.6)
+    .offset(y: landed || reduceMotion ? 0 : -50)
+    .opacity(landed ? 1 : 0)
+    .onAppear {
+      withAnimation(reduceMotion ? AureliaMotion.reduced : AureliaMotion.emphasis) { landed = true }
+    }
     .accessibilityElement(children: .combine)
   }
 }

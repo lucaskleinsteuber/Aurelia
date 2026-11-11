@@ -704,11 +704,6 @@ struct APIClient: Sendable {
     let isVoting: Bool
   }
 
-  private struct MovieNightSettingsBody: Encodable {
-    let kinds: String
-    let genre: String?
-  }
-
   private struct MovieNightRoleBody: Encodable { let isVoting: Bool }
 
   private static func movieNightPath(_ id: UUID, _ tail: String = "") -> String {
@@ -745,9 +740,8 @@ struct APIClient: Sendable {
     return try Self.decode(MovieNightState.self, from: data)
   }
 
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> MovieNightState {
-    try await movieNightPost(
-      Self.movieNightPath(id, "/settings"), MovieNightSettingsBody(kinds: kinds, genre: genre))
+  func movieNightSettings(id: UUID, program: MovieNightProgram) async throws -> MovieNightState {
+    try await movieNightPost(Self.movieNightPath(id, "/settings"), program)
   }
 
   func dealMovieNight(id: UUID) async throws -> MovieNightState {

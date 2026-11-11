@@ -31,6 +31,23 @@ struct MovieNightTests {
       deck: deck, yourVotes: votes, result: nil, lastAction: nil, lastActionBy: nil)
   }
 
+  @Test func tonightsProgramChangesOneChoiceAndKeepsTheOthers() async throws {
+    var lobby = Self.night(phase: "lobby")
+    lobby.era = "2010s"
+    lobby.length = "short"
+    let api = FakeMovieNightAPI(answers: [lobby, lobby])
+    let session = MovieNightSession(api: api, deviceName: "Invented Mac")
+    await session.start()
+    await session.settings { $0.genre = "Comedy" }
+    let sent = await api.programs
+    #expect(sent == [MovieNightProgram(kinds: "movies", genre: "Comedy", era: "2010s", length: "short")])
+    #expect(MovieNightProgram(lobby).summary == "Movies · 2010s · Short")
+    #expect(MovieNightProgram(kinds: "all", genre: "Drama", era: "any", length: "standard").summary == "Movies and Shows · Drama · Up to 2h 10m")
+    // A server before eras and lengths sends neither; the app treats them as any.
+    #expect(MovieNightProgram(Self.night(phase: "lobby")) == MovieNightProgram())
+    await session.leave()
+  }
+
   @Test func aCardCountsOnceItTravelsFarEnoughOrIsFlicked() {
     #expect(MovieNightRules.choice(offset: 120) == .like)
     #expect(MovieNightRules.choice(offset: -120) == .nope)
@@ -131,6 +148,7 @@ struct MovieNightTests {
 private actor FakeMovieNightAPI: MovieNightAPI {
   private var answers: [MovieNightState]
   private(set) var votes: [MovieNightVote] = []
+  private(set) var programs: [MovieNightProgram] = []
 
   init(answers: [MovieNightState]) { self.answers = answers }
 
@@ -149,7 +167,10 @@ private actor FakeMovieNightAPI: MovieNightAPI {
     try await Task.sleep(for: .seconds(60))
     throw CancellationError()
   }
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> MovieNightState { try next() }
+  func movieNightSettings(id: UUID, program: MovieNightProgram) async throws -> MovieNightState {
+    programs.append(program)
+    return try next()
+  }
   func dealMovieNight(id: UUID) async throws -> MovieNightState { try next() }
   func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> MovieNightState {
     votes.append(.init(mediaId: mediaID, like: like))
