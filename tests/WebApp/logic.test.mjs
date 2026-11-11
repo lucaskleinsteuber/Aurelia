@@ -67,6 +67,10 @@ test("artwork uses the prepared widths and only the server's own addresses", () 
   assert.equal(logic.artworkUrl({ path: `${poster.path}?revision=3` }, 640), `${poster.path}?revision=3&width=640`);
   assert.equal(logic.artworkUrl({ path: "https://elsewhere.example/picture.jpg" }, 640), "");
   assert.equal(logic.artworkUrl(null, 640), "");
+  // The revision lets the browser keep a picture; nonsense revisions are left out.
+  assert.equal(logic.artworkUrl({ ...poster, revision: 7 }, 640), `${poster.path}?width=640&rev=7`);
+  assert.equal(logic.artworkUrl({ ...poster, revision: 7 }), `${poster.path}?rev=7`);
+  assert.equal(logic.artworkUrl({ ...poster, revision: "7; drop" }, 640), `${poster.path}?width=640`);
 });
 
 test("addresses map to screens and back", () => {

@@ -405,10 +405,13 @@ export function episodeLabel(item) {
 /** An artwork address in one of the widths the server prepares (320, 640, 1280, 1920). */
 export function artworkUrl(artwork, width) {
   if (!artwork?.path || !artwork.path.startsWith("/api/v1/artwork/")) return "";
-  if (!width) return artwork.path;
+  // Naming the revision lets the browser keep the picture; a replaced picture has a new one.
+  const revision = Number.isSafeInteger(artwork.revision) && artwork.revision > 0 ? `rev=${artwork.revision}` : "";
+  const join = (query) => query ? `${artwork.path}${artwork.path.includes("?") ? "&" : "?"}${query}` : artwork.path;
+  if (!width) return join(revision);
   const sizes = [320, 640, 1280, 1920];
   const chosen = sizes.find((size) => size >= width) ?? 1920;
-  return `${artwork.path}${artwork.path.includes("?") ? "&" : "?"}width=${chosen}`;
+  return join([`width=${chosen}`, revision].filter(Boolean).join("&"));
 }
 
 export function scrubPreviewBucketSeconds(seconds, durationSeconds = 0, intervalSeconds = 15) {
@@ -1180,5 +1183,74 @@ export function transcodingSummary(status) {
     encoder,
     running: converting === 0 ? "None" : `${converting} of ${status.videoLimit} at once`,
     sessions,
+  };
+}
+
+// MARK: Remembered pages
+
+/**
+ * Remembers what the server answered for a few pages, so Back and a second visit show at once.
+ * A remembered answer is returned right away and, once it is older than `freshMs`, asked again in
+ * the background; `onChanged` runs when the new answer differs. `clear()` forgets everything, and
+ * an answer still on its way when that happens is not kept. Every read gets its own copy.
+ */
+export function createReadCache({ max = 24, freshMs = 4000, now = () => Date.now() } = {}) {
+  const entries = new Map();
+  let generation = 0;
+  const keep = (key, text) => {
+    entries.delete(key);
+    entries.set(key, { text, at: now(), refreshing: false });
+    while (entries.size > max) entries.delete(entries.keys().next().value);
+  };
+  return {
+    get size() { return entries.size; },
+    has: (key) => entries.has(key),
+    clear() {
+      generation += 1;
+      entries.clear();
+    },
+    async read(key, load, onChanged) {
+      const entry = entries.get(key);
+      if (entry) {
+        entries.delete(key);
+        entries.set(key, entry);
+        if (now() - entry.at >= freshMs && !entry.refreshing) {
+          entry.refreshing = true;
+          const started = generation;
+          Promise.resolve().then(load).then((value) => {
+            if (started !== generation) return;
+            const text = JSON.stringify(value ?? null);
+            const changed = text !== entry.text;
+            keep(key, text);
+            if (changed) onChanged?.();
+          }, () => { entry.refreshing = false; });
+        }
+        return JSON.parse(entry.text);
+      }
+      const started = generation;
+      const value = await load();
+      if (started === generation) keep(key, JSON.stringify(value ?? null));
+      return value;
+    },
+  };
+}
+
+/**
+ * Starts at most `limit` warm-up loads at a time and each key only once until `forget`; a load
+ * that is not wanted any more is simply not started. Returns whether this call started one.
+ */
+export function createPrefetcher({ limit = 2 } = {}) {
+  const started = new Set();
+  let running = 0;
+  return {
+    get running() { return running; },
+    forget: () => started.clear(),
+    start(key, load) {
+      if (started.has(key) || running >= limit) return false;
+      started.add(key);
+      running += 1;
+      Promise.resolve().then(load).catch(() => started.delete(key)).finally(() => { running -= 1; });
+      return true;
+    },
   };
 }

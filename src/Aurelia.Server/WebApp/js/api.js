@@ -15,8 +15,15 @@ export class ApiError extends Error {
   }
 }
 
-export function createApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
+/**
+ * @param {Function} [fetchImpl]
+ * @param {object} [hooks]
+ * @param {(path: string, method: string) => void} [hooks.onChange]  called before each request that
+ *   may change something on the server (everything but GET and HEAD), so remembered pages can be dropped
+ */
+export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { onChange } = {}) {
   async function request(path, { method = "GET", body, as = "profile", signal, keepalive = false, approval } = {}) {
+    if (method !== "GET" && method !== "HEAD") onChange?.(path, method);
     const headers = { Accept: "application/json", "X-Aurelia-Web": as };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (approval) headers["X-Aurelia-Approval"] = approval;

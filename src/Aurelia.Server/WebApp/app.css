@@ -18,6 +18,13 @@
   --hero-radius: 24px;
   --gutter: clamp(16px, 4vw, 48px);
   --spring: cubic-bezier(0.2, 0.9, 0.25, 1);
+  /* One set of motions, as the Mac's AureliaMotion: press for buttons and cards, quick for hover,
+     standard for content that changes in place, page for pages and full-window layers. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-press: 0.12s;
+  --motion-quick: 0.18s;
+  --motion-standard: 0.32s;
+  --motion-page: 0.42s;
   --top-bar: 64px;
 }
 
@@ -376,6 +383,30 @@ img { display: block; }
 .spinner.visible { opacity: 1; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* While a page loads it shows its shape; a page that answers quickly never shows it at all. */
+.page-skeleton { animation: skeleton-in 0.24s ease-out 0.12s both; }
+@keyframes skeleton-in { from { opacity: 0; } }
+.skeleton {
+  background: linear-gradient(100deg, var(--surface) 30%, #31363b 50%, var(--surface) 70%);
+  background-size: 300% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border-radius: var(--card-radius);
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.skeleton-hero { height: clamp(420px, 56.25vw, calc(100svh - var(--top-bar))); border-radius: 0; margin-bottom: 34px; }
+.skeleton-detail { height: clamp(440px, 64vh, 620px); border-radius: 0; margin-bottom: 38px; }
+.skeleton-rail { padding: 0 var(--gutter); margin-bottom: 34px; }
+.skeleton-heading { width: 180px; height: 22px; border-radius: 8px; margin-bottom: 14px; }
+.skeleton-row { display: grid; grid-auto-flow: column; grid-auto-columns: clamp(110px, 14vw, 172px); gap: 18px; overflow: hidden; }
+.skeleton-poster { aspect-ratio: 2 / 3; }
+.skeleton-page-header { padding: 32px var(--gutter) 22px; }
+.skeleton-title { width: 220px; height: 34px; border-radius: 10px; }
+.skeleton-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(clamp(110px, 28vw, 168px), 1fr)); gap: 26px 18px; padding: 0 var(--gutter); }
+
+/* Pictures fade in once decoded; one that was already there shows at once. */
+.img-fade { opacity: 0; transition: opacity 0.4s ease-out; }
+.img-fade.loaded, .img-fade.artwork-missing { opacity: 1; }
+
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12vh var(--gutter); text-align: center; }
 .empty-state h2 { font-size: 22px; }
 
@@ -688,11 +719,51 @@ img.artwork-missing { opacity: 0; }
 .filter-divider { flex: none; width: 1px; height: 20px; background: var(--hairline); margin: 0 4px; }
 .filter-bar .spacer { flex: 1; min-width: 8px; }
 .text-button { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 4px 6px; white-space: nowrap; }
-.popup-menu { position: absolute; z-index: 60; max-height: 60vh; overflow-y: auto; animation: popover-in-top 0.14s ease-out; }
+.popup-menu { position: absolute; z-index: 60; max-height: 60vh; overflow-y: auto; transform-origin: top center; animation: menu-in var(--motion-quick) var(--ease-out); }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-6px) scale(0.96); } }
+.popup-menu .menu-item { animation: menu-item-in var(--motion-standard) var(--ease-out) both; }
+.popup-menu .menu-item:nth-child(2) { animation-delay: 15ms; }
+.popup-menu .menu-item:nth-child(3) { animation-delay: 30ms; }
+.popup-menu .menu-item:nth-child(n + 4) { animation-delay: 45ms; }
+@keyframes menu-item-in { from { opacity: 0; transform: translateY(-3px); } }
+.profile-menu:not([hidden]) { transform-origin: top right; animation: menu-in var(--motion-quick) var(--ease-out); }
 .menu-heading { padding: 8px 10px 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
 
 /* Motion: content rises in, as on the Mac; Reduce Motion keeps it still. */
 .page-enter { animation: page-in 0.32s ease-out; }
+
+/* Page changes: the old page settles back while the new one rises in; Back comes from above. The
+   top bar stays put, and a clicked poster grows into the title's picture. */
+.top-bar { view-transition-name: top-bar; }
+.page-transition .page-enter { animation: none; }
+::view-transition-old(root) { animation: vt-out 0.2s ease-in both; }
+::view-transition-new(root) { animation: vt-in var(--motion-page) var(--ease-out) both; }
+:root[data-navigation="back"]::view-transition-new(root) { animation-name: vt-in-back; }
+@keyframes vt-out { to { opacity: 0; transform: scale(0.985); } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(16px); } }
+@keyframes vt-in-back { from { opacity: 0; transform: translateY(-12px); } }
+::view-transition-group(title-art) { animation-duration: 0.5s; animation-timing-function: var(--ease-out); }
+::view-transition-old(title-art), ::view-transition-new(title-art) { width: 100%; height: 100%; object-fit: cover; overflow: clip; }
+::view-transition-group(top-bar) { animation: none; }
+
+/* Home's hero arrives as one moment: the picture settles, then its words rise in turn. */
+.hero-content > * { animation: rise-in 0.6s var(--spring) both; }
+.hero-content > :nth-child(2) { animation-delay: 70ms; }
+.hero-content > :nth-child(3) { animation-delay: 130ms; }
+.hero-content > :nth-child(4) { animation-delay: 180ms; }
+.hero-content > :nth-child(n + 5) { animation-delay: 230ms; }
+
+/* Progress grows to where it stands; sheets rise; rails rise once as they come into view. */
+.progress-fill { transform-origin: left center; animation: progress-in 0.9s var(--ease-out) 0.15s both; }
+@keyframes progress-in { from { transform: scaleX(0); } }
+dialog[open] { animation: sheet-in var(--motion-standard) var(--ease-out); }
+dialog[open]::backdrop { animation: backdrop-in var(--motion-standard) ease-out; }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(18px) scale(0.97); } }
+@keyframes backdrop-in { from { opacity: 0; } }
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.5s ease-out, transform 0.6s var(--ease-out); }
+.reveal.revealed { opacity: 1; transform: none; }
+.hrail.slide-in.back .hrail-track { animation-name: slide-in-back; }
+@keyframes slide-in-back { from { opacity: 0; transform: translateX(-28px); } }
 @keyframes page-in { from { opacity: 0; transform: translateY(10px); } }
 .rise { animation: rise-in 0.5s var(--spring) both; animation-delay: calc(var(--rise, 0) * 60ms); }
 @keyframes rise-in { from { opacity: 0; transform: translateY(14px); } }
@@ -703,7 +774,9 @@ img.artwork-missing { opacity: 0; }
 .poster-grid .poster-card:nth-child(n + 40) { content-visibility: auto; contain-intrinsic-size: auto 300px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
+  .reveal { opacity: 1; transform: none; }
 }
+body[data-hero-motion="reduced"] .reveal { opacity: 1; transform: none; }
 
 /* Settings › General and Playback in this browser */
 body[data-poster-size="compact"] .poster-grid { grid-template-columns: repeat(auto-fill, minmax(clamp(96px, 22vw, 132px), 1fr)); }

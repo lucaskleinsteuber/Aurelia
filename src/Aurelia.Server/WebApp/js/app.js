@@ -15,7 +15,23 @@ import { ADAPTIVE_FEATURE } from "./hls-logic.js";
 import { createSettings } from "./settings.js";
 import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
 
-const api = createApi();
+// Pages seen before show at once from what the server said last time; anything this browser
+// changes on the server, and every change the server reports, forgets them.
+const reads = logic.createReadCache();
+const prefetches = logic.createPrefetcher();
+const api = createApi(undefined, { onChange: (path) => {
+  if (path.endsWith("/player/heartbeat")) return;
+  reads.clear();
+  prefetches.forget();
+} });
+const remembered = (name, key, load) => reads.read(`${name}:${key}`, load, () => refreshSoon());
+const cached = {
+  home: () => remembered("home", "", () => api.home()),
+  detail: (id) => remembered("detail", id, () => api.detail(id)),
+  playbackPlan: (id) => remembered("plan", id, () => api.playbackPlan(id)),
+  watchlist: () => remembered("watchlist", "", () => api.watchlist()),
+  person: (who) => remembered("person", JSON.stringify(who), () => api.person(who)),
+};
 const root = document.getElementById("app");
 
 const state = {
@@ -384,6 +400,8 @@ function showPin(profile) {
 }
 
 async function enterProfile(user) {
+  reads.clear();
+  prefetches.forget();
   state.profile = user;
   state.watchlistIds = new Set();
   api.watchlist().then((response) => {
@@ -498,8 +516,7 @@ function navigate(route, { replace = false } = {}) {
   if (replace) history.replaceState(null, "", path);
   else if (path !== location.pathname + location.search) history.pushState(null, "", path);
   state.route = route;
-  renderRoute();
-  if (!replace) window.scrollTo(0, 0);
+  renderRoute({ resetScroll: !replace });
 }
 
 window.addEventListener("popstate", () => {
@@ -507,7 +524,7 @@ window.addEventListener("popstate", () => {
   if (!state.profile) return;
   closePlayer();
   state.route = logic.parseRoute(location.pathname, location.search);
-  renderRoute({ restoreScroll: true });
+  renderRoute({ restoreScroll: true, direction: "back" });
 });
 
 // Links inside the app change the screen without reloading the page.
@@ -515,8 +532,48 @@ document.addEventListener("click", (event) => {
   const link = event.target.closest?.("a[data-route]");
   if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
   event.preventDefault();
+  // The clicked poster grows into the title's picture on the next page.
+  const art = link.matches(".poster-card, .continue-card") ? link.querySelector("img.loaded") : null;
+  const titleId = link.getAttribute("href").startsWith("/title/") ? link.getAttribute("href").slice(7).split(/[?#/]/)[0] : null;
+  if (art && titleId) {
+    art.style.viewTransitionName = "title-art";
+    art.dataset.morph = "1";
+    state.morphFrom = titleId;
+  }
   navigate(logic.parseRoute(link.getAttribute("href").split("?")[0], link.getAttribute("href").split("?")[1] ?? ""));
 });
+
+// Pointing at a title loads its page already, so the click opens it at once.
+let prefetchTimer = 0;
+document.addEventListener("pointerover", (event) => {
+  const link = event.target.closest?.("a[href^='/title/']");
+  clearTimeout(prefetchTimer);
+  if (!link || !state.profile || state.player) return;
+  const id = link.getAttribute("href").slice("/title/".length).split(/[?#/]/)[0];
+  if (!id || reads.has(`detail:${id}`)) return;
+  prefetchTimer = setTimeout(() => {
+    prefetches.start(id, () => Promise.all([cached.detail(id), cached.playbackPlan(id).catch(() => null)]));
+  }, event.pointerType === "touch" ? 0 : 90);
+}, { passive: true });
+
+/** Rails rise in once as they come into view; a quiet refresh shows them as they were. */
+let revealObserver = null;
+let revealInstantly = false;
+function revealWhenSeen(element) {
+  if (revealInstantly || typeof IntersectionObserver !== "function" || !motionAllowed()) {
+    element.classList.add("revealed");
+    return element;
+  }
+  revealObserver ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      entry.target.classList.add("revealed");
+      revealObserver.unobserve(entry.target);
+    }
+  }, { rootMargin: "0px 0px -6% 0px" });
+  revealObserver.observe(element);
+  return element;
+}
 
 function shell(content) {
   // The Mac app's sidebar: Home, then the library's sections.
@@ -559,7 +616,34 @@ function shell(content) {
   return h("div", { class: "app-shell" }, header, h("main", { class: "page", id: "page" }, content));
 }
 
-async function renderRoute({ quiet = false, restoreScroll = false } = {}) {
+/** Whether pages may move: the system's and this browser's Reduce Motion both keep them still. */
+function motionAllowed() {
+  return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches && document.body.dataset.heroMotion !== "reduced";
+}
+
+/**
+ * Replaces the page. With motion, the browser blends the old page into the new one (a poster
+ * that was clicked grows into the title's picture); without, the page simply changes.
+ */
+function swapPage(update, { animate, direction }) {
+  if (!animate || typeof document.startViewTransition !== "function" || !motionAllowed()) {
+    update();
+    return;
+  }
+  document.documentElement.dataset.navigation = direction;
+  document.documentElement.classList.add("page-transition");
+  try {
+    const transition = document.startViewTransition(update);
+    transition.finished.catch(() => {}).finally(() => {
+      document.documentElement.classList.remove("page-transition");
+      document.querySelectorAll("[data-morph]").forEach((element) => { element.style.viewTransitionName = ""; delete element.dataset.morph; });
+    });
+  } catch {
+    update();
+  }
+}
+
+async function renderRoute({ quiet = false, restoreScroll = false, resetScroll = false, direction = "forward" } = {}) {
   catalog.close();
   if (!state.profile) return;
   isRenderingRoute = true;
@@ -568,32 +652,50 @@ async function renderRoute({ quiet = false, restoreScroll = false } = {}) {
   const path = logic.routePath(route) || (location.pathname + location.search);
   const targetScroll = restoreScroll ? scrollMemory.recall(path) : null;
   const scroll = quiet ? window.scrollY : (targetScroll ?? 0);
-  const page = h("div", { class: "page-loading" }, h("div", { class: "spinner visible" }));
-  if (!quiet) {
-    clear(root);
-    root.append(shell(page));
+  revealInstantly = quiet;
+  const loading = screenFor(route, token).then((content) => ({ content }), (error) => ({ error }));
+  // A page that answers quickly (remembered or near) replaces the old one directly; a slower one
+  // shows its shape first.
+  let outcome = quiet ? await loading : await Promise.race([loading, new Promise((resolve) => setTimeout(resolve, 140))]);
+  if (!outcome) {
+    if (token !== state.renderToken) return;
+    swapPage(() => {
+      clear(root);
+      root.append(shell(skeletonFor(route)));
+      if (resetScroll || restoreScroll) window.scrollTo(0, 0);
+    }, { animate: true, direction });
+    outcome = await loading;
   }
-  let content;
-  try {
-    content = await screenFor(route, token);
-  } catch (error) {
+  let content = outcome.content;
+  if (outcome.error) {
     if (token !== state.renderToken) return;
     isRenderingRoute = false;
-    if (handleError(error)) return;
-    content = emptyState("warning", "Couldn’t Load This Page", error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
+    if (handleError(outcome.error)) return;
+    content = emptyState("warning", "Couldn’t Load This Page", outcome.error.message, h("button", { class: "secondary-button", onclick: () => renderRoute() }, "Try Again"));
   }
   if (token !== state.renderToken || !content) {
     isRenderingRoute = false;
     return;
   }
-  clear(root);
-  root.append(shell(content));
-  if (quiet || restoreScroll) {
-    window.scrollTo(0, scroll);
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => window.scrollTo(0, scroll));
+  const morph = state.morphFrom;
+  state.morphFrom = null;
+  swapPage(() => {
+    clear(root);
+    root.append(shell(content));
+    if (morph && route.name === "title" && route.id === morph) {
+      const art = root.querySelector(".detail-hero .hero-art");
+      if (art) { art.style.viewTransitionName = "title-art"; art.dataset.morph = "1"; }
     }
-  }
+    if (quiet || restoreScroll) {
+      window.scrollTo(0, scroll);
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => window.scrollTo(0, scroll));
+      }
+    } else if (resetScroll) {
+      window.scrollTo(0, 0);
+    }
+  }, { animate: !quiet && !root.querySelector(".page-skeleton"), direction });
+  revealInstantly = false;
   isRenderingRoute = false;
   if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
   const label = { home: "Home", library: "Library", watchlist: "Watchlist", recent: "Recently Added", movies: "Movies", shows: "TV Shows", search: "Search", collections: "Collections", history: "Watch History", statistics: "Statistics", settings: "Settings", "movie-night": "Movie Night" }[route.name];
@@ -732,7 +834,7 @@ function screenFor(route, token) {
 // MARK: Home
 
 async function homeScreen() {
-  const home = await api.home();
+  const home = await cached.home();
   const general = loadGeneral();
   const continuing = visibleTitles(home.continueWatching, general, { keepWatched: true });
   const favorites = visibleTitles(home.favorites, general);
@@ -768,21 +870,40 @@ function rail(title, cards, kind = "poster", allHref) {
   const track = h("div", { class: `rail-track ${kind}` }, cards);
   const scrollBehavior = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
   const scroll = (direction) => track.scrollBy({ left: direction * track.clientWidth * 0.85, behavior: scrollBehavior() });
-  return h("section", { class: "rail" },
+  return revealWhenSeen(h("section", { class: "rail reveal" },
     h("div", { class: "section-header" }, h("h2", {}, title), h("span", { class: "count" }, String(cards.length)),
       allHref ? h("a", { class: "text-button", href: allHref, "data-route": true }, "See All") : null,
       h("div", { class: "rail-arrows" },
         h("button", { class: "icon-button", "aria-label": `Scroll ${title} back`, onclick: () => scroll(-1) }, icon("back")),
         h("button", { class: "icon-button", "aria-label": `Scroll ${title} forward`, onclick: () => scroll(1) }, icon("forward")))),
-    track);
+    track));
 }
 
 function artwork(image, width, className, alt) {
   const url = logic.artworkUrl(image, width);
   if (!url) return h("div", { class: `${className} artwork-missing` });
-  const element = h("img", { class: className, src: url, alt, loading: "lazy", decoding: "async" });
+  const element = h("img", { class: `${className} img-fade`, src: url, alt, loading: "lazy", decoding: "async" });
+  // A picture the browser already has shows at once; one still loading fades in when it's ready.
+  if (element.complete && element.naturalWidth) element.classList.add("loaded");
+  else element.addEventListener("load", () => element.classList.add("loaded"), { once: true });
   element.addEventListener("error", () => element.classList.add("artwork-missing"), { once: true });
   return element;
+}
+
+/** The page's shape while it loads: the hero and rails of Home, a title's header, or a poster grid. */
+function skeletonFor(route) {
+  const block = (name) => h("div", { class: `skeleton ${name}` });
+  const rail = (count = 8) => h("div", { class: "skeleton-rail" }, block("skeleton-heading"),
+    h("div", { class: "skeleton-row" }, Array.from({ length: count }, () => block("skeleton-poster"))));
+  const frame = (...children) => h("div", { class: "page-skeleton", role: "status", "aria-label": "Loading" }, ...children);
+  switch (route.name) {
+    case "home": return frame(block("skeleton-hero"), rail(), rail());
+    case "title": return frame(block("skeleton-detail"), rail(4));
+    case "library": case "recent": case "movies": case "shows": case "watchlist": case "collections": case "collection": case "person":
+      return frame(h("div", { class: "skeleton-page-header" }, block("skeleton-title")),
+        h("div", { class: "skeleton-grid" }, Array.from({ length: 18 }, () => block("skeleton-poster"))));
+    default: return h("div", { class: "page-loading" }, h("div", { class: "spinner visible" }));
+  }
 }
 
 function titleHref(item) {
@@ -891,9 +1012,9 @@ function openMenu(anchor, items) {
 
 async function titleScreen(id) {
   const [detail, plan, watchlistSnapshot] = await Promise.all([
-    api.detail(id),
-    api.playbackPlan(id).catch(() => null),
-    api.watchlist().catch(() => null),
+    cached.detail(id),
+    cached.playbackPlan(id).catch(() => null),
+    cached.watchlist().catch(() => null),
   ]);
   if (watchlistSnapshot?.mediaIds) state.watchlistIds = new Set(watchlistSnapshot.mediaIds);
   const item = detail.item;
@@ -1073,13 +1194,14 @@ function seasonsSection(item, seasons, target) {
   const watched = h("span", { class: "watched-label small" });
   const holder = h("div", { class: "season-body" });
   const show = (season, animate) => {
+    const backwards = seasons.indexOf(season) < seasons.indexOf(current);
     current = season;
     titleButton.replaceChildren(icon("chevronUpDown", { size: 15 }), h("span", {}, logic.seasonTitle(season.number)), icon("chevronDown", { size: 13 }));
     count.textContent = `${season.episodes.length} episode${season.episodes.length === 1 ? "" : "s"}`;
     const allWatched = season.episodes.length > 0 && season.episodes.every((entry) => entry.item.watchState === "completed");
     watched.replaceChildren(...(allWatched ? [icon("checkCircle", { size: 14 }), "Watched"] : []));
     const rail = hrail(season.episodes.map((entry) => episodeCard(entry, seasons, season.number)), { label: "Episodes", className: "episodes" });
-    if (animate) rail.classList.add("slide-in");
+    if (animate) rail.classList.add("slide-in", ...(backwards ? ["back"] : []));
     holder.replaceChildren(...[rail, supplementRails(season.supplements, "", `${item.title} · ${logic.seasonTitle(season.number)}`)].filter(Boolean));
   };
   titleButton.addEventListener("click", (event) => {
@@ -1151,7 +1273,7 @@ function castRail(credits) {
 }
 
 async function watchlistScreen() {
-  const response = await api.watchlist();
+  const response = await cached.watchlist();
   const items = response?.items ?? [];
   state.watchlistIds = new Set(response?.mediaIds ?? items.map((item) => item.id));
   if (!items.length) {
@@ -1163,7 +1285,7 @@ async function watchlistScreen() {
 }
 
 async function personScreen(route) {
-  const detail = await api.person({ name: route.personName, key: route.personKey });
+  const detail = await cached.person({ name: route.personName, key: route.personKey });
   const items = detail?.items ?? [];
   const name = detail?.name ?? route.personName ?? "Person";
   document.title = `${name} · Aurelia`;
@@ -1679,7 +1801,7 @@ function startSync() {
       try {
         const changes = await api.changes(after, generation, controller.signal);
         if (controller.signal.aborted) return;
-        if (!first && (changes.resetRequired || changes.changedAreas?.length)) refreshSoon();
+        if (!first && (changes.resetRequired || changes.changedAreas?.length)) refreshSoon({ forget: true });
         after = changes.cursor;
         generation = changes.generation ?? generation;
         first = false;
@@ -1705,7 +1827,11 @@ function stopSync() {
   state.sync = null;
 }
 
-function refreshSoon() {
+function refreshSoon({ forget = false } = {}) {
+  if (forget) {
+    reads.clear();
+    prefetches.forget();
+  }
   // While a title plays, the page refreshes when the player closes.
   if (state.player || document.querySelector("dialog[open]")) return;
   clearTimeout(state.refreshTimer);
