@@ -65,7 +65,8 @@ public static class ServerManagementEndpoints
             return Results.NoContent();
         });
         server.MapPost("/backups/restore/prepare", (BackupRestoreRequest request, FullServerBackupService backups, CancellationToken token) => backups.PrepareRestoreAsync(request, token));
-        server.MapPost("/backups/restore/{id:guid}/apply", (HttpContext context, Guid id, NativeHostOperations operations) => operations.ApplyRestoreAsync(context.User.RequireSessionId(), id, context.RequestAborted));
+        server.MapPost("/backups/restore/{id:guid}/apply", (HttpContext context, Guid id, NativeHostOperations operations, LinuxServiceRestart linux) =>
+            operations.ApplyRestoreAsync(context.User.RequireSessionId(), id, context.RequestAborted, linux));
         server.MapPut("/settings", (ServerHostSettings request, ServerConfigurationStore configuration) => configuration.Update(request));
         server.MapPost("/approval", (HttpContext context, AdministrationApprovalRequest request,
             AdministrationApprovalStore approvals) =>

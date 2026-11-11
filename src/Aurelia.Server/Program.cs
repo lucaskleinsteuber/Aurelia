@@ -61,6 +61,10 @@ using var instanceLock = runtime.HostParentProcessId is not null
     ? await ServerInstanceLock.AcquireForHostAsync(runtime.DataDirectory, CancellationToken.None)
     : appInstanceLock();
 await FullServerBackupService.RecoverInterruptedRestoreAsync(runtime, CancellationToken.None);
+// A restore asked for in a browser on a Linux package server, applied before anything opens the database.
+if (await FullServerBackupService.ApplyRequestedOnStartAsync(runtime, CancellationToken.None) is { } restored)
+    Console.WriteLine(restored == "completed" ? "Restored the server from a backup. Every device signs in again."
+        : "Restoring the server from a backup failed; the previous state stays.");
 runtime = ServerRuntimeOptions.Resolve(builder.Configuration, args);
 await new DatabaseBackupService(runtime).RecoverPendingRestoreAsync(CancellationToken.None);
 using var tlsIdentity = ServerTlsIdentity.LoadOrCreate(runtime);

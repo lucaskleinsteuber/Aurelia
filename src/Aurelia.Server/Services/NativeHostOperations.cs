@@ -15,7 +15,8 @@ public sealed class NativeHostOperations(ServerRuntimeOptions runtime, ServerCon
 {
     private readonly SemaphoreSlim gate = new(1, 1);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private string JournalPath => Path.Combine(runtime.DataDirectory, "host-operation.json");
+    public const string JournalFileName = "host-operation.json";
+    private string JournalPath => Path.Combine(runtime.DataDirectory, JournalFileName);
     private static Uri? ControlUrl
     {
         get
@@ -117,7 +118,8 @@ public sealed class NativeHostOperations(ServerRuntimeOptions runtime, ServerCon
         }
         finally { gate.Release(); }
     }
-    public async Task<HostOperationStatus> ApplyRestoreAsync(Guid sessionId, Guid restoreId, CancellationToken token)
+    /// <param name="linux">A Linux package server restores at its next start, which it asks systemd for.</param>
+    public async Task<HostOperationStatus> ApplyRestoreAsync(Guid sessionId, Guid restoreId, CancellationToken token, LinuxServiceRestart? linux = null)
     {
         await gate.WaitAsync(token);
         try
@@ -127,6 +129,12 @@ public sealed class NativeHostOperations(ServerRuntimeOptions runtime, ServerCon
             if (!File.Exists(receipt) || new FileInfo(receipt).LinkTarget is not null)
                 throw new AccountException("restore_not_prepared", "Validate the encrypted backup before applying it.", 409);
             var journal = new HostOperationJournal(1, restoreId, "restore", "restarting", sessionId, null, null);
+            if (!Available && linux is not null && LinuxPackage.IsInstalled)
+            {
+                await FullServerBackupService.RequestOnStartAsync(runtime, restoreId, token);
+                await WriteAsync(journal, token);
+                return linux.Request() with { Id = restoreId, Kind = "restore" };
+            }
             await WriteAsync(journal, token);
             try { await SendAsync("restore-prepared", new { id = restoreId }, token); }
             catch { await WriteAsync(journal with { State = "failed" }, CancellationToken.None); throw; }

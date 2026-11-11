@@ -157,6 +157,68 @@ public sealed class FullServerBackupService(ServerRuntimeOptions runtime, Databa
     public static Task ApplyPreparedAsync(ServerRuntimeOptions runtime, Guid id, CancellationToken token) =>
         ApplyPreparedCoreAsync(runtime, id, token);
 
+    /// <summary>
+    /// On a Linux package server the browser's restore names the prepared backup in this file and
+    /// restarts the service; the next start applies it before the database opens.
+    /// </summary>
+    public const string RestoreOnStartFile = "restore-on-start";
+
+    public static async Task RequestOnStartAsync(ServerRuntimeOptions runtime, Guid id, CancellationToken token)
+    {
+        var path = Path.Combine(runtime.DataDirectory, RestoreOnStartFile);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await using (var file = PrivateFilePermissions.OpenNewPrivateFile(temporary))
+            {
+                await file.WriteAsync(System.Text.Encoding.ASCII.GetBytes(id.ToString("D")), token);
+                file.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
+    /// <summary>
+    /// Applies a restore requested for this start, once: the request is removed first, so a restore
+    /// that fails (and rolls itself back) never stops the server from starting. Returns the outcome
+    /// for the host operation journal, or null when nothing was requested.
+    /// </summary>
+    public static async Task<string?> ApplyRequestedOnStartAsync(ServerRuntimeOptions runtime, CancellationToken token)
+    {
+        var request = new FileInfo(Path.Combine(runtime.DataDirectory, RestoreOnStartFile));
+        if (!request.Exists && request.LinkTarget is null) return null;
+        var text = request.LinkTarget is null && request.Length <= 64 ? await File.ReadAllTextAsync(request.FullName, token) : "";
+        File.Delete(request.FullName);
+        if (!Guid.TryParse(text.Trim(), out var id)) return "failed";
+        // Only a restore this server prepared and verified itself.
+        if (!File.Exists(Path.Combine(RestoreStage(runtime, id), "restore-receipt.json"))) return "failed";
+        string outcome;
+        try
+        {
+            await ApplyPreparedAsync(runtime, id, token);
+            outcome = "completed";
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException
+            or JsonException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            outcome = "failed";
+        }
+        var journal = Path.Combine(runtime.DataDirectory, NativeHostOperations.JournalFileName);
+        if (File.Exists(journal) && new FileInfo(journal).LinkTarget is null)
+        {
+            var current = JsonSerializer.Deserialize<HostOperationJournal>(await File.ReadAllTextAsync(journal, token), Json);
+            if (current?.Id == id)
+            {
+                var temporary = journal + "." + Guid.NewGuid().ToString("N");
+                await using (var file = PrivateFilePermissions.OpenNewPrivateFile(temporary))
+                    await JsonSerializer.SerializeAsync(file, current with { State = outcome }, Json, token);
+                File.Move(temporary, journal, true);
+            }
+        }
+        return outcome;
+    }
+
     internal static async Task ApplyPreparedCoreAsync(ServerRuntimeOptions runtime, Guid id, CancellationToken token,
         Action<RestoreActivationStep, int>? afterStep = null)
     {

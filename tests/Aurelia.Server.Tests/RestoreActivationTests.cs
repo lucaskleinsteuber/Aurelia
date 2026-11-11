@@ -11,6 +11,7 @@ namespace Aurelia.Server.Tests;
 
 public sealed class RestoreActivationTests : IClassFixture<RestoreActivationTests.PreparedRestoreTemplate>
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private readonly PreparedRestoreTemplate template;
 
     public RestoreActivationTests(PreparedRestoreTemplate template) => this.template = template;
@@ -41,6 +42,43 @@ public sealed class RestoreActivationTests : IClassFixture<RestoreActivationTest
         using var restarted = new AureliaServerFactory(fixture.Root);
         using var client = restarted.CreateClient();
         Assert.True((await client.GetAsync("/api/v1/server/info")).IsSuccessStatusCode);
+        await fixture.AssertCurrentStateAsync();
+    }
+
+    [Fact]
+    public async Task ALinuxServerAppliesARequestedRestoreOnceAtItsNextStart()
+    {
+        using var fixture = new RestoreFixture();
+        template.CopyTo(fixture.Root);
+        await fixture.ChangeCurrentStateAsync();
+        var journal = Path.Combine(fixture.Root, NativeHostOperations.JournalFileName);
+        await File.WriteAllTextAsync(journal, JsonSerializer.Serialize(
+            new HostOperationJournal(1, template.PreparedId, "restore", "restarting", Guid.NewGuid(), null, null), WebJson));
+        await FullServerBackupService.RequestOnStartAsync(fixture.Runtime, template.PreparedId, CancellationToken.None);
+
+        Assert.Equal("completed", await FullServerBackupService.ApplyRequestedOnStartAsync(fixture.Runtime, CancellationToken.None));
+        Assert.False(File.Exists(Path.Combine(fixture.Root, FullServerBackupService.RestoreOnStartFile)));
+        Assert.Contains("\"completed\"", await File.ReadAllTextAsync(journal), StringComparison.Ordinal);
+        await using (var database = new AureliaDbContext(fixture.Options))
+            Assert.Equal("Original library", (await database.LibraryRoots.SingleAsync()).Name);
+        Assert.Null(await FullServerBackupService.ApplyRequestedOnStartAsync(fixture.Runtime, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AFailedOrUnreadableStartRestoreKeepsTheCurrentStateAndNeverRepeats()
+    {
+        using var fixture = new RestoreFixture();
+        template.CopyTo(fixture.Root);
+        await fixture.ChangeCurrentStateAsync();
+        var request = Path.Combine(fixture.Root, FullServerBackupService.RestoreOnStartFile);
+        await FullServerBackupService.RequestOnStartAsync(fixture.Runtime, Guid.NewGuid(), CancellationToken.None);
+        Assert.Equal("failed", await FullServerBackupService.ApplyRequestedOnStartAsync(fixture.Runtime, CancellationToken.None));
+        Assert.False(File.Exists(request));
+        await fixture.AssertCurrentStateAsync();
+
+        await File.WriteAllTextAsync(request, "not an id");
+        Assert.Equal("failed", await FullServerBackupService.ApplyRequestedOnStartAsync(fixture.Runtime, CancellationToken.None));
+        Assert.False(File.Exists(request));
         await fixture.AssertCurrentStateAsync();
     }
 
