@@ -47,8 +47,6 @@ public static class CreditsPictures
     private const int ThumbnailHeight = 18;
     private const double SharedCorrelation = 0.92;
     private const double MaximumGapSeconds = 3;
-    private const double MaximumTailSeconds = 30;
-    private const double MinimumSeconds = 12;
     private const double MinimumPositiveShare = 0.6;
 
     /// <summary>Statistics of one 320 × 180 grey picture.</summary>
@@ -242,18 +240,24 @@ public static class CreditsPictures
     /// The credits of an episode of <paramref name="duration"/> seconds: the longest stretch of text
     /// on black and shared pictures (with black between them and gaps of at most three seconds)
     /// that lasts until at most 30 seconds before the end, such as studio logos after the names.
+    /// With <see cref="CreditsRules.Movie"/>, stretches that a scene interrupts (a mid-credits
+    /// scene) are joined so the earliest start wins, and a scene of up to five minutes may follow.
     /// </summary>
-    public static Result? Find(PictureWindow window, bool[] shared, double duration)
+    public static Result? Find(PictureWindow window, bool[] shared, double duration, CreditsRules? rules = null)
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(shared);
+        rules ??= CreditsRules.Episode;
         var count = window.Kinds.Length;
         if (count == 0) return null;
         bool Positive(int index) => window.Kinds[index] == PictureKind.Text || (index < shared.Length && shared[index]);
         bool CreditLike(int index) => Positive(index) || window.Kinds[index] == PictureKind.Black;
         var gapFrames = (int)Math.Round(MaximumGapSeconds / window.StepSeconds);
+        // Each stretch must be long enough on its own: the whole credits for an episode, one part
+        // of them for a movie whose parts are joined below.
+        var partSeconds = rules.JoinGapSeconds > 0 ? rules.PartMinimumSeconds : rules.MinimumSeconds;
 
-        Result? best = null;
+        var stretches = new List<(double Start, double End, int Positives, int Considered)>();
         var index = 0;
         while (index < count)
         {
@@ -284,7 +288,7 @@ public static class CreditsPictures
 
             var startTime = window.Time(start);
             var endTime = window.Time(last) + window.StepSeconds;
-            if (duration - endTime > MaximumTailSeconds || endTime - startTime < MinimumSeconds) continue;
+            if (endTime - startTime < partSeconds) continue;
             int positives = 0, considered = 0;
             for (var frame = start; frame <= last; frame++)
             {
@@ -293,12 +297,47 @@ public static class CreditsPictures
                 if (Positive(frame)) positives++;
             }
             var share = considered == 0 ? 0 : (double)positives / considered;
-            if (share < MinimumPositiveShare || positives * window.StepSeconds < MinimumSeconds * 0.6) continue;
+            if (share < MinimumPositiveShare || positives * window.StepSeconds < partSeconds * 0.6) continue;
+            stretches.Add((startTime, endTime, positives, considered));
+        }
+
+        Result? best = null;
+        for (var first = 0; first < stretches.Count; first++)
+        {
+            // Parts follow one another when a scene between them is short enough.
+            var end = first;
+            while (rules.JoinGapSeconds > 0 && end + 1 < stretches.Count && stretches[end + 1].Start - stretches[end].End <= rules.JoinGapSeconds) end++;
+            var (startTime, endTime) = (stretches[first].Start, stretches[end].End);
+            if (duration - endTime > rules.MaximumTailSeconds || endTime - startTime < rules.MinimumSeconds) continue;
+            var positives = 0;
+            var considered = 0;
+            for (var part = first; part <= end; part++)
+            {
+                positives += stretches[part].Positives;
+                considered += stretches[part].Considered;
+            }
             if (best is null || endTime - startTime > best.Value.End - best.Value.Start)
             {
-                best = new Result(startTime, endTime, Math.Round(share, 3));
+                best = new Result(startTime, endTime, Math.Round(considered == 0 ? 0 : (double)positives / considered, 3));
             }
         }
         return best;
     }
+}
+
+/// <summary>How end credits in pictures must look for an episode or for a movie.</summary>
+/// <param name="MaximumTailSeconds">How long the file may go on after the credits.</param>
+/// <param name="MinimumSeconds">How long the credits must last in all.</param>
+/// <param name="JoinGapSeconds">The longest scene between two parts of the credits that still joins them; 0 joins nothing.</param>
+/// <param name="PartMinimumSeconds">How long one part must last to be joined.</param>
+public sealed record CreditsRules(double MaximumTailSeconds, double MinimumSeconds, double JoinGapSeconds = 0, double PartMinimumSeconds = 0)
+{
+    /// <summary>Episodes: credits until at most 30 seconds before the end, at least 12 seconds long.</summary>
+    public static CreditsRules Episode { get; } = new(30, 12);
+
+    /// <summary>
+    /// Movies: at least 45 seconds, up to five minutes of a scene after them, and parts of at least
+    /// 20 seconds joined across a mid-credits scene of up to three minutes.
+    /// </summary>
+    public static CreditsRules Movie { get; } = new(300, 45, 180, 20);
 }

@@ -154,6 +154,25 @@ struct GeneralPreferencesTests {
     #expect(ServerMediaSegmentsEditor.remaining(50 * 3_600) == "2 days 2 hours")
   }
 
+  @Test func serverProgressCountsMoviesFrom2_11() throws {
+    let current = Data(
+      """
+      {"available":true,"enabled":true,"pendingCount":0,"analyzedCount":6,"noResultCount":2,
+      "running":true,"pausedForPlayback":false,"movieCount":40,"moviesWithCredits":12,
+      "moviesPendingCount":3}
+      """.utf8)
+    let settings = try JSONDecoder().decode(MediaSegmentSettings.self, from: current)
+    #expect(settings.hasPendingWork)
+    #expect(
+      ServerMediaSegmentsEditor.movieSummary(settings)
+        == "Movies: 12 of 40 with credits · 3 still to examine")
+    var older = settings
+    older.movieCount = nil
+    older.moviesPendingCount = nil
+    #expect(ServerMediaSegmentsEditor.movieSummary(older) == nil)
+    #expect(!older.hasPendingWork)
+  }
+
   @Test func introAndCreditsPoliciesKeepTheirWindows() {
     #expect(!SkipIntroPolicy.showsButton(position: 28_999, introStart: 30_000, introEnd: 90_000))
     #expect(SkipIntroPolicy.showsButton(position: 29_000, introStart: 30_000, introEnd: 90_000))

@@ -512,6 +512,9 @@ test("the trim editor's strip and handles follow the Mac's rules", () => {
 test("the detection's progress and time left read like the Mac", () => {
   assert.equal(logic.segmentProgress({ pendingCount: 25, analyzedCount: 70, noResultCount: 5, totalCount: 100 }), 0.75);
   assert.equal(logic.segmentProgress({ pendingCount: 0, analyzedCount: 0, noResultCount: 0 }), 1);
+  assert.equal(logic.segmentMovieSummary({ movieCount: 40, moviesWithCredits: 12, moviesPendingCount: 3 }), "Movies: 12 of 40 with credits · 3 to examine");
+  assert.equal(logic.segmentMovieSummary({ movieCount: 2, moviesWithCredits: 2, moviesPendingCount: 0 }), "Movies: 2 of 2 with credits");
+  assert.equal(logic.segmentMovieSummary({ pendingCount: 0 }), "");
   assert.equal(logic.segmentRemaining(12_000), "About 3 h 20 min left");
   assert.equal(logic.segmentRemaining(600), "About 10 min left");
   assert.equal(logic.segmentRemaining(null), "");

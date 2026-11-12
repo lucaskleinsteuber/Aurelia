@@ -34,12 +34,14 @@ enum MediaSegmentTimeText {
   }
 }
 
-/// Edit Metadata › Intro and Credits: the times the server found for an episode, corrections by
-/// hand, and a new analysis of the season. For a series it only offers the new analysis.
+/// Edit Metadata › Intro and Credits: the times the server found for an episode or a movie,
+/// corrections by hand, and a new analysis of the season or the movie. For a series it only
+/// offers the new analysis.
 struct MediaSegmentsPanel: View {
   @EnvironmentObject private var model: AppModel
   let mediaId: UUID
   let isSeries: Bool
+  var isMovie = false
   @State private var times: MediaSegmentTimes?
   @State private var introStart = ""
   @State private var introEnd = ""
@@ -54,10 +56,10 @@ struct MediaSegmentsPanel: View {
       if !isSeries, let times {
         HStack(spacing: 10) {
           Button("Edit Intro…") { editing = .intro }
-            .help("Opens the episode's beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save.")
+            .help("Opens the title's beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save.")
             .accessibilityIdentifier("segments-edit-intro")
           Button("Edit Credits…") { editing = .credits }
-            .help("Opens the episode's ending with a film strip: drag the handle to where the credits begin, play it to check, then save.")
+            .help("Opens the title's ending with a film strip: drag the handle to where the credits begin, play it to check, then save.")
             .accessibilityIdentifier("segments-edit-credits")
         }
         .disabled(working || model.profile == nil)
@@ -111,7 +113,7 @@ struct MediaSegmentsPanel: View {
           }
         }
         if let times, !times.analyzed, times.canAnalyze {
-          Text("The server has not examined this episode yet.")
+          Text("The server has not examined this \(isMovie ? "movie" : "episode") yet.")
             .font(.caption).foregroundStyle(.secondary)
         }
       }
@@ -127,10 +129,13 @@ struct MediaSegmentsPanel: View {
             .accessibilityIdentifier("segments-reset")
         }
         if isSeries || times?.canAnalyze == true {
-          Button(isSeries ? "Re-analyze All Seasons" : "Re-analyze Season") {
+          Button(isSeries ? "Re-analyze All Seasons" : isMovie ? "Re-analyze Movie" : "Re-analyze Season") {
             Task { await reanalyze() }
           }
-          .help("Has the server compare this season's episodes again in the background. Times set by hand stay.")
+          .help(
+            isMovie
+              ? "Has the server look for this movie's credits again in the background. Times set by hand stay."
+              : "Has the server compare this season's episodes again in the background. Times set by hand stay.")
           .accessibilityIdentifier("segments-reanalyze")
         }
         if working { ProgressView().controlSize(.small) }
@@ -282,8 +287,14 @@ struct ServerMediaSegmentsEditor: View {
             HStack(spacing: 10) {
               Button("Re-analyze Everything") { reanalyze(nil) }
                 .disabled(!stored.enabled || !stored.available)
-                .help("Examines every episode again; times set by hand stay")
+                .help("Examines every episode and movie again; times set by hand stay")
                 .accessibilityIdentifier("server-media-segments-reanalyze")
+              if stored.movieCount != nil {
+                Button("Re-analyze Movies") { run { try await client.reanalyzeMovieSegments() } }
+                  .disabled(!stored.enabled || !stored.available)
+                  .help("Looks for every movie's credits again; episodes and times set by hand stay")
+                  .accessibilityIdentifier("server-media-segments-reanalyze-movies")
+              }
               if working { ProgressView().controlSize(.small) }
             }
             if !series.isEmpty {
@@ -317,6 +328,11 @@ struct ServerMediaSegmentsEditor: View {
         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityIdentifier("server-media-segments-status")
+      if let movies = Self.movieSummary(settings) {
+        Text(movies)
+          .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+          .accessibilityIdentifier("server-media-segments-movies")
+      }
       if settings.running, let title = settings.currentTitle {
         Label(
           [title, settings.currentStep].compactMap { $0 }.joined(separator: " · "),
@@ -353,6 +369,14 @@ struct ServerMediaSegmentsEditor: View {
     return text
   }
 
+  /// "Movies: 12 of 40 with credits · 3 still to examine", or nil for a server without movies.
+  static func movieSummary(_ settings: MediaSegmentSettings) -> String? {
+    guard let count = settings.movieCount, count > 0 else { return nil }
+    var text = "Movies: \(settings.moviesWithCredits ?? 0) of \(count) with credits"
+    if let pending = settings.moviesPendingCount, pending > 0 { text += " · \(pending) still to examine" }
+    return text
+  }
+
   static func summary(_ settings: MediaSegmentSettings) -> String {
     var parts = [
       "\(settings.analyzedCount) episodes with times",
@@ -364,7 +388,7 @@ struct ServerMediaSegmentsEditor: View {
       text += ". Turned off: only times set by hand are used."
     } else if settings.pausedForPlayback {
       text += ". Waiting while someone is watching."
-    } else if settings.pendingCount > 0, let seconds = settings.estimatedSecondsRemaining {
+    } else if settings.hasPendingWork, let seconds = settings.estimatedSecondsRemaining {
       text += ". About \(remaining(seconds)) left."
     } else if settings.running {
       text += ". Working in the background."
@@ -387,7 +411,7 @@ struct ServerMediaSegmentsEditor: View {
   private func refreshWhileWorking() async {
     await load()
     while !Task.isCancelled, let current = stored, current.enabled,
-      current.pendingCount > 0 || current.running
+      current.hasPendingWork || current.running
     {
       try? await Task.sleep(for: .seconds(5))
       guard !Task.isCancelled else { return }

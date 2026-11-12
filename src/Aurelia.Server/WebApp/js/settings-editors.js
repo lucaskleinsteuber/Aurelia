@@ -349,7 +349,7 @@ export function createManagementEditors(app) {
       delete extras.relativeSourcePath;
       const { artwork, credits, source, subtitles, removal } = metadataExtras.sections({ item, document, context, changes, automatic, extras, changed: () => { validate(); } });
       const capabilities = state.server?.capabilities ?? [];
-      const segments = capabilities.includes(SEGMENTS_FEATURE) && (document.kind === "episode" || document.kind === "series")
+      const segments = capabilities.includes(SEGMENTS_FEATURE) && (document.kind === "episode" || document.kind === "series" || document.kind === "movie")
         ? segmentsSection({ api, item, kind: document.kind, canPreview: capabilities.includes("scrub-previews-v1") || capabilities.includes("live-conversion-v1") })
         : null;
       const reload = button("Reload", () => {

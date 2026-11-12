@@ -1131,6 +1131,13 @@ struct MediaSegmentSettings: Codable, Equatable, Sendable {
   var currentTitle: String? = nil
   var currentStep: String? = nil
   var estimatedSecondsRemaining: Int? = nil
+  // Servers before 2.11.0 examine no movies and send none of these.
+  var movieCount: Int? = nil
+  var moviesWithCredits: Int? = nil
+  var moviesPendingCount: Int? = nil
+
+  /// Whether episodes or movies are still waiting to be examined.
+  var hasPendingWork: Bool { pendingCount > 0 || (moviesPendingCount ?? 0) > 0 }
 
   /// Share of the episodes examined, 0 to 1.
   var progress: Double {

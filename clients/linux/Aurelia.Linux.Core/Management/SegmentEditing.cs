@@ -108,6 +108,15 @@ public static class SegmentEditing
         return minutes % 60 == 0 ? $"About {minutes / 60} h left" : $"About {minutes / 60} h {minutes % 60} min left";
     }
 
+    /// <summary>"Movies: 12 of 40 with credits · 3 to examine", or null for a server without movies.</summary>
+    public static string? MovieStatus(MediaSegmentSettingsResponse settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (settings.MovieCount <= 0) return null;
+        var text = $"Movies: {settings.MoviesWithCredits} of {settings.MovieCount} with credits";
+        return settings.MoviesPendingCount > 0 ? $"{text} · {settings.MoviesPendingCount} to examine" : text;
+    }
+
     /// <summary>The detection's state line for the server settings.</summary>
     public static string Status(MediaSegmentSettingsResponse settings)
     {

@@ -24,6 +24,6 @@ public static class MediaSegmentEndpoints
             detection.UpdateSettingsAsync(request, token));
         server.MapGet("/series", (SegmentDetectionService detection, CancellationToken token) => detection.SeriesStatusAsync(token));
         server.MapPost("/reanalyze", (ReanalyzeMediaSegmentsRequest request, SegmentDetectionService detection, CancellationToken token) =>
-            detection.ReanalyzeAsync(request.SeriesId, request.SeasonNumber, token));
+            detection.ReanalyzeAsync(request.SeriesId, request.SeasonNumber, token, request.Movies));
     }
 }

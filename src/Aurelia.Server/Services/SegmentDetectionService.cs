@@ -22,6 +22,13 @@ public sealed partial class SegmentDetectionService : BackgroundService
     /// <remarks>2: credits are also found in pictures (text on black, pictures episodes share).</remarks>
     public const int AnalysisVersion = 2;
 
+    /// <summary>Raised whenever the movie rules change; movies have their own so episodes are not examined again.</summary>
+    /// <remarks>1: credits from chapters and from text on black in the last pictures (since 2.11.0).</remarks>
+    public const int MovieAnalysisVersion = 1;
+
+    /// <summary>The queue's season number for a movie, whose id stands in the series' place.</summary>
+    private const int MovieEntry = int.MinValue;
+
     /// <summary>Shorter episodes have too little sound outside intro and credits to compare.</summary>
     public const double MinimumEpisodeSeconds = 180;
 
@@ -48,7 +55,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
     private int running;
     private int pausedForPlayback;
     private int rescanRequested;
-    private (DateTimeOffset At, int Pending, int Analyzed, int NoResult)? status;
+    private (DateTimeOffset At, Counts Counts)? status;
 
     private sealed record StoredSettings(bool Enabled, bool Pictures = true);
 
@@ -59,6 +66,12 @@ public sealed partial class SegmentDetectionService : BackgroundService
     private double? secondsPerEpisode;
 
     private sealed record EpisodeState(Guid Id, Guid Series, int Season, long? FileSize, DateTimeOffset? FileModifiedAt);
+
+    private sealed record MovieState(Guid Id, long? FileSize, DateTimeOffset? FileModifiedAt);
+
+    private sealed record LibraryState(List<EpisodeState> Episodes, List<MovieState> Movies, Dictionary<Guid, RowState> Rows);
+
+    private sealed record Counts(int Pending, int Analyzed, int NoResult, int Movies, int MoviesWithCredits, int MoviesPending);
 
     private sealed record RowState(Guid MediaItemId, MediaSegmentSource IntroSource, MediaSegmentSource CreditsSource, int AnalysisVersion,
         long? AnalyzedFileSize, DateTimeOffset? AnalyzedFileModifiedAt);
@@ -116,11 +129,14 @@ public sealed partial class SegmentDetectionService : BackgroundService
         get { lock (settingsGate) return settings.Pictures; }
     }
 
+    /// <summary>The rules' version a title of this kind is examined with.</summary>
+    public static int VersionFor(MediaKind kind) => kind == MediaKind.Movie ? MovieAnalysisVersion : AnalysisVersion;
+
     /// <summary>Whether a stored row still describes this file under the current rules.</summary>
-    public static bool IsCurrent(MediaSegment row, long? fileSize, DateTimeOffset? fileModifiedAt)
+    public static bool IsCurrent(MediaSegment row, MediaKind kind, long? fileSize, DateTimeOffset? fileModifiedAt)
     {
         ArgumentNullException.ThrowIfNull(row);
-        return row.AnalysisVersion == AnalysisVersion && row.AnalyzedFileSize == fileSize
+        return row.AnalysisVersion == VersionFor(kind) && row.AnalyzedFileSize == fileSize
             && row.AnalyzedFileModifiedAt?.ToUnixTimeMilliseconds() == fileModifiedAt?.ToUnixTimeMilliseconds();
     }
 
@@ -140,13 +156,22 @@ public sealed partial class SegmentDetectionService : BackgroundService
         Signal();
     }
 
+    /// <summary>Asks for one movie to be examined soon.</summary>
+    public void RequestMovie(Guid movieId)
+    {
+        if (!IsEnabled) return;
+        Enqueue(movieId, MovieEntry);
+        Signal();
+    }
+
     public async Task<MediaSegmentSettingsResponse> ReadSettingsAsync(CancellationToken cancellationToken)
     {
         var tools = await live.ToolsAsync();
         var counts = await CountsAsync(cancellationToken);
         var active = Volatile.Read(ref running) > 0;
         var current = activity;
-        var estimate = secondsPerEpisode is { } each && counts.Pending > 0 ? (int?)Math.Ceiling(each * counts.Pending) : null;
+        var waiting = counts.Pending + counts.MoviesPending;
+        var estimate = secondsPerEpisode is { } each && waiting > 0 ? (int?)Math.Ceiling(each * waiting) : null;
         return new MediaSegmentSettingsResponse(
             tools is { Speech: not SpeechAudioSupport.None },
             IsEnabled,
@@ -159,7 +184,10 @@ public sealed partial class SegmentDetectionService : BackgroundService
             counts.Pending + counts.Analyzed + counts.NoResult,
             active ? current?.Title : null,
             active ? current?.Step : null,
-            estimate);
+            estimate,
+            counts.Movies,
+            counts.MoviesWithCredits,
+            counts.MoviesPending);
     }
 
     public async Task<MediaSegmentSettingsResponse> UpdateSettingsAsync(UpdateMediaSegmentSettingsRequest request, CancellationToken cancellationToken)
@@ -204,9 +232,10 @@ public sealed partial class SegmentDetectionService : BackgroundService
 
     /// <summary>
     /// Marks the automatic times of a series, one season, or everything for a new analysis and
-    /// queues it. Times set by hand stay.
+    /// queues it. Without a series, <paramref name="movies"/> chooses only movies (true), only
+    /// episodes (false) or both (null). Times set by hand stay.
     /// </summary>
-    public async Task<MediaSegmentSettingsResponse> ReanalyzeAsync(Guid? seriesId, int? seasonNumber, CancellationToken cancellationToken)
+    public async Task<MediaSegmentSettingsResponse> ReanalyzeAsync(Guid? seriesId, int? seasonNumber, CancellationToken cancellationToken, bool? movies = null)
     {
         using (await mutations.EnterAsync(cancellationToken))
         {
@@ -214,15 +243,34 @@ public sealed partial class SegmentDetectionService : BackgroundService
             var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
             if (seriesId is { } series && !await database.MediaItems.IgnoreQueryFilters().AnyAsync(item => item.Id == series && item.Kind == MediaKind.Series, cancellationToken))
                 throw new AccountException("media_not_found", "The series was not found.", 404);
+            var episodes = seriesId is not null || movies != true;
+            var films = seriesId is null && seasonNumber is null && movies != false;
             await database.MediaSegments.IgnoreQueryFilters()
-                .Where(segment => segment.MediaItem.Kind == MediaKind.Episode
-                    && (seriesId == null || segment.MediaItem.ParentId == seriesId)
-                    && (seasonNumber == null || (segment.MediaItem.SeasonNumber ?? 0) == seasonNumber))
+                .Where(segment => (episodes && segment.MediaItem.Kind == MediaKind.Episode
+                        && (seriesId == null || segment.MediaItem.ParentId == seriesId)
+                        && (seasonNumber == null || (segment.MediaItem.SeasonNumber ?? 0) == seasonNumber))
+                    || (films && segment.MediaItem.Kind == MediaKind.Movie))
                 .ExecuteUpdateAsync(update => update.SetProperty(segment => segment.AnalysisVersion, 0), cancellationToken);
         }
         status = null;
         Interlocked.Exchange(ref rescanRequested, 1);
         Signal();
+        return await ReadSettingsAsync(cancellationToken);
+    }
+
+    /// <summary>Examines one movie again; times set by hand stay.</summary>
+    public async Task<MediaSegmentSettingsResponse> ReanalyzeMovieAsync(Guid movieId, CancellationToken cancellationToken)
+    {
+        using (await mutations.EnterAsync(cancellationToken))
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            await database.MediaSegments.IgnoreQueryFilters()
+                .Where(segment => segment.MediaItemId == movieId && segment.MediaItem.Kind == MediaKind.Movie)
+                .ExecuteUpdateAsync(update => update.SetProperty(segment => segment.AnalysisVersion, 0), cancellationToken);
+        }
+        status = null;
+        RequestMovie(movieId);
         return await ReadSettingsAsync(cancellationToken);
     }
 
@@ -241,7 +289,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
     /// <summary>For each series: its episodes, how many have an intro or credits, and how many are still to examine.</summary>
     public async Task<IReadOnlyList<MediaSegmentSeriesStatus>> SeriesStatusAsync(CancellationToken cancellationToken)
     {
-        var (episodes, rows) = await LoadStateAsync(cancellationToken);
+        var (episodes, _, rows) = await LoadStateAsync(cancellationToken);
         Dictionary<Guid, string> titles;
         await using (var scope = scopes.CreateAsyncScope())
         {
@@ -271,16 +319,23 @@ public sealed partial class SegmentDetectionService : BackgroundService
             })
             .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
 
-    /// <summary>Queues every season with an episode that was not examined in its current file version.</summary>
+    /// <summary>
+    /// Queues every season with an episode, and every movie, that was not examined in its current
+    /// file version. Seasons come first; movies follow.
+    /// </summary>
     public async Task<int> QueuePendingSeasonsAsync(CancellationToken cancellationToken)
     {
         if (!IsEnabled) return 0;
-        var (episodes, rows) = await LoadStateAsync(cancellationToken);
+        var (episodes, movies, rows) = await LoadStateAsync(cancellationToken);
         var added = 0;
         foreach (var season in episodes.GroupBy(episode => (episode.Series, episode.Season)))
         {
             if (season.Count() < 2 || !season.Any(episode => Needs(rows, episode))) continue;
             if (Enqueue(season.Key.Series, season.Key.Season)) added++;
+        }
+        foreach (var movie in movies)
+        {
+            if (Needs(rows, movie) && Enqueue(movie.Id, MovieEntry)) added++;
         }
         return added;
     }
@@ -299,11 +354,14 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 Interlocked.Increment(ref running);
                 try
                 {
-                    analyzed += await AnalyzeSeasonAsync(season.Series, season.Season, cancellationToken);
+                    analyzed += season.Season == MovieEntry
+                        ? await AnalyzeMovieAsync(season.Series, cancellationToken)
+                        : await AnalyzeSeasonAsync(season.Series, season.Season, cancellationToken);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    LogSeasonFailed(logger, season.Series, season.Season, exception);
+                    if (season.Season == MovieEntry) LogMovieFailed(logger, season.Series, exception);
+                    else LogSeasonFailed(logger, season.Series, season.Season, exception);
                 }
                 finally
                 {
@@ -343,7 +401,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
         if (episodes.Count < 2) return 0;
         episodes = [.. episodes.OrderBy(item => item.EpisodeNumber ?? int.MaxValue).ThenBy(item => item.SourcePath, StringComparer.Ordinal)];
 
-        bool NeedsAnalysis(MediaItem item) => !rows.TryGetValue(item.Id, out var row) || !IsCurrent(row, item.FileSize, item.FileModifiedAt);
+        bool NeedsAnalysis(MediaItem item) => !rows.TryGetValue(item.Id, out var row) || !IsCurrent(row, MediaKind.Episode, item.FileSize, item.FileModifiedAt);
         var needing = Enumerable.Range(0, episodes.Count).Where(index => NeedsAnalysis(episodes[index])).ToArray();
         if (needing.Length == 0) return 0;
 
@@ -385,7 +443,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
             var result = info.Duration >= MinimumEpisodeSeconds
                 ? await analyzer.AnalyzeAsync(index, cancellationToken)
                 : DetectedSegments.Nothing;
-            await SaveAsync(info.Media, result, cancellationToken);
+            await SaveAsync(info.Media, result, AnalysisVersion, cancellationToken);
             analyzed++;
             status = null;
             // A running average, so the estimate follows this server's speed and the library's mix.
@@ -394,6 +452,49 @@ public sealed partial class SegmentDetectionService : BackgroundService
         }
         activity = null;
         return analyzed;
+    }
+
+    /// <summary>
+    /// Examines one movie (see <see cref="MovieSegmentAnalyzer"/>): credits from a chapter or its
+    /// last pictures, an intro only from a chapter. Returns 1 when it was examined.
+    /// </summary>
+    public async Task<int> AnalyzeMovieAsync(Guid movieId, CancellationToken cancellationToken)
+    {
+        if (await live.ToolsAsync() is not { Speech: not SpeechAudioSupport.None } tools) return 0;
+        MediaItem? movie;
+        MediaSegment? row;
+        string title;
+        await using (var scope = scopes.CreateAsyncScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+            movie = await database.MediaItems.IgnoreQueryFilters().AsNoTracking().Include(item => item.LibraryRoot)
+                .SingleOrDefaultAsync(item => item.Id == movieId && item.Kind == MediaKind.Movie && item.Availability == MediaAvailability.Available, cancellationToken);
+            if (movie is null) return 0;
+            row = await database.MediaSegments.IgnoreQueryFilters().AsNoTracking().SingleOrDefaultAsync(segment => segment.MediaItemId == movieId, cancellationToken);
+            title = (await TitlesAsync(database, [movieId], cancellationToken)).GetValueOrDefault(movieId, string.Empty);
+        }
+        if (row is not null && IsCurrent(row, MediaKind.Movie, movie.FileSize, movie.FileModifiedAt)) return 0;
+        var started = clock.GetTimestamp();
+        var info = await DescribeAsync(tools, movie, cancellationToken);
+        if (info.Offline) return 0;
+        info.Label = title;
+        activity = new Activity(title, "Looking for the credits");
+        try
+        {
+            var analyzer = new MovieSegmentAnalyzer(new SegmentEpisode(info.Duration, info.Chapters),
+                UsesPictures ? (start, length, token) => LoadPicturesAsync(tools, info, start, length, token) : null);
+            var result = await analyzer.AnalyzeAsync(cancellationToken);
+            if (!IsEnabled) return 0;
+            await SaveAsync(movie, result, MovieAnalysisVersion, cancellationToken);
+        }
+        finally
+        {
+            activity = null;
+        }
+        status = null;
+        var seconds = clock.GetElapsedTime(started).TotalSeconds;
+        secondsPerEpisode = secondsPerEpisode is { } average ? average * 0.8 + seconds * 0.2 : seconds;
+        return 1;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -573,7 +674,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
         return SegmentWindow.FromPcm(samples, start);
     }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-    private async Task SaveAsync(MediaItem media, DetectedSegments result, CancellationToken cancellationToken)
+    private async Task SaveAsync(MediaItem media, DetectedSegments result, int version, CancellationToken cancellationToken)
     {
         using var lease = await mutations.EnterAsync(cancellationToken);
         await using var scope = scopes.CreateAsyncScope();
@@ -599,7 +700,7 @@ public sealed partial class SegmentDetectionService : BackgroundService
             row.CreditsSource = result.CreditsSource;
             row.CreditsConfidence = result.CreditsConfidence;
         }
-        row.AnalysisVersion = AnalysisVersion;
+        row.AnalysisVersion = version;
         row.AnalyzedFileSize = media.FileSize;
         row.AnalyzedFileModifiedAt = media.FileModifiedAt;
         row.UpdatedAt = clock.GetUtcNow();
@@ -615,10 +716,10 @@ public sealed partial class SegmentDetectionService : BackgroundService
 
     private static long? Milliseconds(double? seconds) => seconds is { } value ? (long)Math.Round(value * 1000) : null;
 
-    private async Task<(int Pending, int Analyzed, int NoResult)> CountsAsync(CancellationToken cancellationToken)
+    private async Task<Counts> CountsAsync(CancellationToken cancellationToken)
     {
-        if (status is { } cached && clock.GetUtcNow() - cached.At < StatusLifetime) return (cached.Pending, cached.Analyzed, cached.NoResult);
-        var (episodes, rows) = await LoadStateAsync(cancellationToken);
+        if (status is { } cached && clock.GetUtcNow() - cached.At < StatusLifetime) return cached.Counts;
+        var (episodes, movies, rows) = await LoadStateAsync(cancellationToken);
         int pending = 0, analyzed = 0, noResult = 0;
         foreach (var season in episodes.GroupBy(episode => (episode.Series, episode.Season)))
         {
@@ -639,11 +740,14 @@ public sealed partial class SegmentDetectionService : BackgroundService
                 }
             }
         }
-        status = (clock.GetUtcNow(), pending, analyzed, noResult);
-        return (pending, analyzed, noResult);
+        var moviesPending = movies.Count(movie => Needs(rows, movie));
+        var moviesWithCredits = movies.Count(movie => !Needs(rows, movie) && rows[movie.Id].CreditsSource != MediaSegmentSource.None);
+        var counts = new Counts(pending, analyzed, noResult, movies.Count, moviesWithCredits, moviesPending);
+        status = (clock.GetUtcNow(), counts);
+        return counts;
     }
 
-    private async Task<(List<EpisodeState> Episodes, Dictionary<Guid, RowState> Rows)> LoadStateAsync(CancellationToken cancellationToken)
+    private async Task<LibraryState> LoadStateAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopes.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
@@ -651,16 +755,26 @@ public sealed partial class SegmentDetectionService : BackgroundService
             .Where(item => item.Kind == MediaKind.Episode && item.ParentId != null && item.Availability == MediaAvailability.Available)
             .Select(item => new EpisodeState(item.Id, item.ParentId!.Value, item.SeasonNumber ?? 0, item.FileSize, item.FileModifiedAt))
             .ToListAsync(cancellationToken);
+        var movies = await database.MediaItems.IgnoreQueryFilters().AsNoTracking()
+            .Where(item => item.Kind == MediaKind.Movie && item.Availability == MediaAvailability.Available)
+            .Select(item => new MovieState(item.Id, item.FileSize, item.FileModifiedAt))
+            .ToListAsync(cancellationToken);
         var rows = await database.MediaSegments.IgnoreQueryFilters().AsNoTracking()
             .Select(segment => new RowState(segment.MediaItemId, segment.IntroSource, segment.CreditsSource, segment.AnalysisVersion,
                 segment.AnalyzedFileSize, segment.AnalyzedFileModifiedAt))
             .ToDictionaryAsync(segment => segment.MediaItemId, cancellationToken);
-        return (episodes, rows);
+        return new LibraryState(episodes, movies, rows);
     }
 
     private static bool Needs(Dictionary<Guid, RowState> rows, EpisodeState episode) =>
-        !rows.TryGetValue(episode.Id, out var row) || row.AnalysisVersion != AnalysisVersion || row.AnalyzedFileSize != episode.FileSize
-        || row.AnalyzedFileModifiedAt?.ToUnixTimeMilliseconds() != episode.FileModifiedAt?.ToUnixTimeMilliseconds();
+        Needs(rows, episode.Id, AnalysisVersion, episode.FileSize, episode.FileModifiedAt);
+
+    private static bool Needs(Dictionary<Guid, RowState> rows, MovieState movie) =>
+        Needs(rows, movie.Id, MovieAnalysisVersion, movie.FileSize, movie.FileModifiedAt);
+
+    private static bool Needs(Dictionary<Guid, RowState> rows, Guid id, int version, long? fileSize, DateTimeOffset? fileModifiedAt) =>
+        !rows.TryGetValue(id, out var row) || row.AnalysisVersion != version || row.AnalyzedFileSize != fileSize
+        || row.AnalyzedFileModifiedAt?.ToUnixTimeMilliseconds() != fileModifiedAt?.ToUnixTimeMilliseconds();
 
     private bool IsBusyWithPlayback() => streams.PlaybackCount > 0 || live.Running > 0;
 
@@ -713,6 +827,9 @@ public sealed partial class SegmentDetectionService : BackgroundService
 
     [LoggerMessage(LogLevel.Warning, "Intro and credits detection failed for season {Season} of series {Series}.")]
     private static partial void LogSeasonFailed(ILogger logger, Guid series, int season, Exception exception);
+
+    [LoggerMessage(LogLevel.Warning, "Credits detection failed for movie {Movie}.")]
+    private static partial void LogMovieFailed(ILogger logger, Guid movie, Exception exception);
 
     [LoggerMessage(LogLevel.Warning, "Intro and credits detection stopped and will retry.")]
     private static partial void LogLoopFailed(ILogger logger, Exception exception);

@@ -116,6 +116,17 @@ public static partial class SegmentRules
         return null;
     }
 
+    /// <summary>The first chapter named like credits, wherever it lies.</summary>
+    public static (double Start, double End)? NamedCreditsChapter(SegmentEpisode episode)
+    {
+        ArgumentNullException.ThrowIfNull(episode);
+        foreach (var chapter in episode.Chapters)
+        {
+            if (chapter.Title is { } title && CreditsName().IsMatch(title.Trim())) return (chapter.StartSeconds, chapter.EndSeconds);
+        }
+        return null;
+    }
+
     [GeneratedRegex(@"^(intro|introduction|opening|opening\s+credits|opening\s+theme|op|title\s+sequence|main\s+titles?)\s*\d{0,2}$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex IntroName();

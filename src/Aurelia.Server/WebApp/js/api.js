@@ -261,6 +261,7 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     saveServerMediaSegments: (body) => request("/api/v1/server/media-segments", { method: "PUT", body }),
     mediaSegmentSeries: (options = {}) => request("/api/v1/server/media-segments/series", options),
     reanalyzeSeriesSegments: (seriesId) => request("/api/v1/server/media-segments/reanalyze", { method: "POST", body: seriesId ? { seriesId } : {} }),
+    reanalyzeMovieSegments: () => request("/api/v1/server/media-segments/reanalyze", { method: "POST", body: { movies: true } }),
 
     serverScrubPreviews: (options = {}) => request("/api/v1/server/scrub-previews", options),
     saveServerScrubPreviews: (body) => request("/api/v1/server/scrub-previews", { method: "PUT", body }),

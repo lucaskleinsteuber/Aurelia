@@ -379,18 +379,21 @@ time to a wrong one.
   **Watch Credits** choice that keeps playing to the end of the file.
 - `GET /api/v1/media/{id}/segments` returns the times with their origin
   (`introSource`/`creditsSource`: `none`, `chapters`, `detected` or `manual`), a confidence from
-  0 to 1, `analyzed` and `canAnalyze` (episodes of a series).
+  0 to 1, `analyzed` and `canAnalyze` (episodes of a series; from 2.11.0 also movies, whose
+  credits come from a chapter or their last pictures and whose intro only from a chapter).
 - Administrators with management unlocked correct them: `PUT` with the three times makes each
   changed part `manual`, which no later analysis replaces; `DELETE` removes the corrections and
   has the episode examined again; `POST .../segments/reanalyze` examines the episode's season
-  (or, for a series id, all its seasons) again.
+  (or, for a series id, all its seasons, and from 2.11.0 for a movie id that movie) again.
 - The owner reads the state with `GET /api/v1/server/media-segments` (`available`, `enabled`,
   `pendingCount`, `analyzedCount`, `noResultCount`, `running`, `pausedForPlayback`; from 2.10.0
   also `usePictures`, `totalCount`, `currentTitle`, `currentStep` and
-  `estimatedSecondsRemaining`), turns detection or the pictures on or off with
+  `estimatedSecondsRemaining`; from 2.11.0 `movieCount`, `moviesWithCredits` and
+  `moviesPendingCount`, while the other counts stay episodes), turns detection or the pictures on or off with
   `PUT {enabled, usePictures?}`, lists each series with `GET /api/v1/server/media-segments/series`
   (`seriesId`, `title`, `episodeCount`, `withIntro`, `withCredits`, `pendingCount`) and starts over with
-  `POST /api/v1/server/media-segments/reanalyze` (`{seriesId?, seasonNumber?}`). While it is off,
+  `POST /api/v1/server/media-segments/reanalyze` (`{seriesId?, seasonNumber?, movies?}`; without a
+  series `movies: true` examines only movies, `false` only episodes, and no value both). While it is off,
   tickets carry only times set by hand.
 
 How the server finds the times and what it stores is described in

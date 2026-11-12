@@ -31,7 +31,9 @@ public sealed class SegmentsPanel : StackPanel
     private readonly TextBox creditsStart = new() { PlaceholderText = "42:10", Width = 110 };
     private readonly TextBlock introOrigin = Note("");
     private readonly TextBlock creditsOrigin = Note("");
-    private readonly TextBlock pending = Note("The server has not examined this episode yet.");
+    private readonly TextBlock pending = Note("");
+    private readonly bool movie;
+    private string Noun => movie ? "movie" : "episode";
     private readonly TextBlock problem = Message();
     private readonly TextBlock done = Note("");
     private MediaSegmentsResponse? times;
@@ -41,6 +43,8 @@ public sealed class SegmentsPanel : StackPanel
         this.scope = scope;
         this.mediaId = mediaId;
         this.engines = engines;
+        movie = kind == MediaKind.Movie;
+        pending.Text = $"The server has not examined this {Noun} yet.";
         Spacing = 10;
         if (kind == MediaKind.Series)
         {
@@ -78,8 +82,8 @@ public sealed class SegmentsPanel : StackPanel
         }
         Children.Clear();
         Children.Add(Buttons(
-            Tip(Button("Edit Intro…", () => TrimAsync(SegmentPart.Intro)), "Opens the episode's beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save."),
-            Tip(Button("Edit Credits…", () => TrimAsync(SegmentPart.Credits)), "Opens the episode's ending with a film strip: drag the handle to where the credits begin, play it to check, then save.")));
+            Tip(Button("Edit Intro…", () => TrimAsync(SegmentPart.Intro)), "Opens the title's beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save."),
+            Tip(Button("Edit Credits…", () => TrimAsync(SegmentPart.Credits)), "Opens the title's ending with a film strip: drag the handle to where the credits begin, play it to check, then save.")));
         Children.Add(Note("Or type the times as minutes:seconds, for example 1:24. Leave a field empty when there is nothing to skip."));
         Children.Add(Line("Intro Starts", introStart, introOrigin));
         Children.Add(Line("Intro Ends", introEnd, new TextBlock()));
@@ -90,18 +94,19 @@ public sealed class SegmentsPanel : StackPanel
             var request = SegmentEditing.Request(introStart.Text ?? "", introEnd.Text ?? "", creditsStart.Text ?? "")
                 ?? throw new FormatException("Enter times like 1:24 or 1:02:30.");
             Apply(await scope.Client.SaveMediaSegmentsAsync(mediaId, SegmentEditing.KeepUnchanged(request, times!)));
-            return "Saved. These times are used the next time the episode starts.";
+            return $"Saved. These times are used the next time the {Noun} starts.";
         }), "primary"), "Saves the typed times as corrections; detection never replaces them.");
         var reset = Tip(Button("Reset to Detected", () => Act(async () =>
         {
             Apply(await scope.Client.ResetMediaSegmentsAsync(mediaId));
-            return "The server examines the episode again; its times appear here shortly.";
-        })), "Removes the times set by hand; the server examines the episode again and fills in what it finds.");
-        var reanalyze = Tip(Button("Re-analyze Season", () => Act(async () =>
+            return $"The server examines the {Noun} again; its times appear here shortly.";
+        })), $"Removes the times set by hand; the server examines the {Noun} again and fills in what it finds.");
+        var reanalyze = Tip(Button(movie ? "Re-analyze Movie" : "Re-analyze Season", () => Act(async () =>
         {
             await scope.Client.ReanalyzeMediaSegmentsAsync(mediaId);
-            return "The server examines the episodes again in the background.";
-        })), "Has the server compare this season's episodes again in the background. Times set by hand stay.");
+            return movie ? "The server looks for the movie's credits again in the background." : "The server examines the episodes again in the background.";
+        })), movie ? "Has the server look for this movie's credits again in the background. Times set by hand stay."
+            : "Has the server compare this season's episodes again in the background. Times set by hand stay.");
         Children.Add(Buttons(save, reset, reanalyze));
         Children.Add(done);
         Children.Add(problem);
@@ -154,7 +159,7 @@ public sealed class SegmentsPanel : StackPanel
         if (await scope.Sheets.ShowAsync(sheet) && sheet.Saved is { } saved)
         {
             Apply(saved);
-            done.Text = "Saved. These times are used the next time the episode starts.";
+            done.Text = $"Saved. These times are used the next time the {Noun} starts.";
         }
         await sheet.DisposeAsync();
     }
@@ -500,6 +505,7 @@ public static class ServerSegmentsSection
         var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 6, MinWidth = 260 };
         var status = Note("");
         var current = Note("");
+        var movies = Note("");
         var series = new StackPanel { Spacing = 6 };
         var expander = new Expander { Header = "Series", Content = series, HorizontalAlignment = HorizontalAlignment.Stretch };
         var enabled = new CheckBox { Content = "Find Intros and Credits" };
@@ -507,6 +513,7 @@ public static class ServerSegmentsSection
         ToolTip.SetTip(enabled, "Compares the sound of a season's episodes in the background, only while nobody watches.");
         ToolTip.SetTip(pictures, "Also reads small grey pictures of the episodes, for credits with changing music and intros under narration. Slower, more accurate.");
         var updating = false;
+        Button? reanalyzeMovies = null;
         void Render(MediaSegmentSettingsResponse value)
         {
             settings = value;
@@ -519,6 +526,9 @@ public static class ServerSegmentsSection
             status.Text = SegmentEditing.Status(value);
             current.Text = value.Running && value.CurrentTitle is { } title ? $"Now: {title}{(value.CurrentStep is { } step ? $" · {step}" : "")}" : "";
             current.IsVisible = current.Text.Length > 0;
+            movies.Text = SegmentEditing.MovieStatus(value) ?? "";
+            movies.IsVisible = movies.Text.Length > 0;
+            if (reanalyzeMovies is not null) reanalyzeMovies.IsVisible = value.MovieCount > 0;
         }
         async Task Change(UpdateMediaSegmentSettingsRequest request)
         {
@@ -565,15 +575,22 @@ public static class ServerSegmentsSection
             MediaSegmentSettingsResponse? value = null;
             if (await scope.RunAsync(async () => value = await scope.Client.ReanalyzeAllSegmentsAsync(null), problem) && value is not null) Render(value);
         });
-        ToolTip.SetTip(everything, "Has the server examine every episode again. Times set by hand stay.");
+        ToolTip.SetTip(everything, "Has the server examine every episode and movie again. Times set by hand stay.");
+        reanalyzeMovies = Button("Re-analyze Movies", async () =>
+        {
+            MediaSegmentSettingsResponse? value = null;
+            if (await scope.RunAsync(async () => value = await scope.Client.ReanalyzeMovieSegmentsAsync(), problem) && value is not null) Render(value);
+        });
+        ToolTip.SetTip(reanalyzeMovies, "Has the server look for every movie's credits again. Episodes and times set by hand stay.");
         panel.Children.Add(Note("The server finds where episodes' intros and credits are, in the background and only while nobody watches. Only the times are stored."));
         panel.Children.Add(enabled);
         panel.Children.Add(pictures);
         panel.Children.Add(bar);
         panel.Children.Add(status);
+        panel.Children.Add(movies);
         panel.Children.Add(current);
         panel.Children.Add(expander);
-        panel.Children.Add(Buttons(everything));
+        panel.Children.Add(Buttons(everything, reanalyzeMovies));
         panel.Children.Add(problem);
         Render(settings);
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };

@@ -101,7 +101,7 @@ public sealed class MediaSegmentService(
         return Response(media, row);
     }
 
-    /// <summary>Examines the season of an episode, or every season of a series, again.</summary>
+    /// <summary>Examines the season of an episode, every season of a series, or a movie again.</summary>
     public async Task<MediaSegmentSettingsResponse> ReanalyzeAsync(Guid mediaId, CancellationToken cancellationToken)
     {
         var media = await database.MediaItems.AsNoTracking().SingleOrDefaultAsync(item => item.Id == mediaId, cancellationToken)
@@ -110,14 +110,16 @@ public sealed class MediaSegmentService(
         {
             { Kind: MediaKind.Series } => await detection.ReanalyzeAsync(media.Id, null, cancellationToken),
             { Kind: MediaKind.Episode, ParentId: { } series } => await detection.ReanalyzeAsync(series, media.SeasonNumber ?? 0, cancellationToken),
-            _ => throw new AccountException("media_segments_unavailable", "Intros and credits are only detected for episodes of a series.", 409),
+            { Kind: MediaKind.Movie } => await detection.ReanalyzeMovieAsync(media.Id, cancellationToken),
+            _ => throw new AccountException("media_segments_unavailable", "Intros and credits are only detected for episodes of a series and for movies.", 409),
         };
     }
 
     private void RequestAnalysisIfNeeded(MediaItem media, MediaSegment row)
     {
-        if (media is { Kind: MediaKind.Episode, ParentId: { } series } && !SegmentDetectionService.IsCurrent(row, media.FileSize, media.FileModifiedAt))
-            detection.RequestSeason(series, media.SeasonNumber ?? 0);
+        if (SegmentDetectionService.IsCurrent(row, media.Kind, media.FileSize, media.FileModifiedAt)) return;
+        if (media is { Kind: MediaKind.Episode, ParentId: { } series }) detection.RequestSeason(series, media.SeasonNumber ?? 0);
+        else if (media.Kind == MediaKind.Movie) detection.RequestMovie(media.Id);
     }
 
     private static void Validate(SetMediaSegmentsRequest request, long? duration)
@@ -158,10 +160,10 @@ public sealed class MediaSegmentService(
 
     private static MediaSegmentsResponse Response(MediaItem media, MediaSegment? row)
     {
-        var canAnalyze = media is { Kind: MediaKind.Episode, ParentId: not null };
+        var canAnalyze = media is { Kind: MediaKind.Episode, ParentId: not null } or { Kind: MediaKind.Movie };
         return row is null
             ? new(media.Id, false, canAnalyze, null, null, MediaSegmentSource.None, 0, null, MediaSegmentSource.None, 0)
-            : new(media.Id, SegmentDetectionService.IsCurrent(row, media.FileSize, media.FileModifiedAt), canAnalyze,
+            : new(media.Id, SegmentDetectionService.IsCurrent(row, media.Kind, media.FileSize, media.FileModifiedAt), canAnalyze,
                 row.IntroStartMilliseconds, row.IntroEndMilliseconds, row.IntroSource, row.IntroConfidence,
                 row.CreditsStartMilliseconds, row.CreditsSource, row.CreditsConfidence);
     }

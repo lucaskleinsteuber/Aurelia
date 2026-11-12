@@ -275,9 +275,12 @@ struct MetadataEditorSheet: View {
       }
       if model.supportsMediaSegments,
         draft.document?.kind == .episode || draft.document?.kind == .series
+          || draft.document?.kind == .movie
       {
         AureliaSettingsSection("Intro and Credits", symbol: "forward.end") {
-          MediaSegmentsPanel(mediaId: metadata.mediaId, isSeries: draft.document?.kind == .series)
+          MediaSegmentsPanel(
+            mediaId: metadata.mediaId, isSeries: draft.document?.kind == .series,
+            isMovie: draft.document?.kind == .movie)
         }
       }
       AureliaSettingsSection("Source", symbol: "doc") { source }

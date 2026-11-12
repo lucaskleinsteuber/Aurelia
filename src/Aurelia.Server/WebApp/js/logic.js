@@ -1741,6 +1741,14 @@ export function segmentProgress(settings) {
   return total === 0 ? 1 : (total - pending) / total;
 }
 
+/** "Movies: 12 of 40 with credits · 3 to examine", or "" for a server before 2.11.0 or without movies. */
+export function segmentMovieSummary(settings) {
+  const count = settings?.movieCount ?? 0;
+  if (count <= 0) return "";
+  const pending = settings.moviesPendingCount ?? 0;
+  return `Movies: ${settings.moviesWithCredits ?? 0} of ${count} with credits${pending > 0 ? ` · ${pending} to examine` : ""}`;
+}
+
 /** "About 3 h 20 min left" for the detection's estimate, or "" without one. */
 export function segmentRemaining(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) return "";

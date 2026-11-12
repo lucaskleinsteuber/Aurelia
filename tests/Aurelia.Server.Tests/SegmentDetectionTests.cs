@@ -286,6 +286,194 @@ public sealed class SegmentDetectionTests
         }
     }
 
+    [Fact]
+    public async Task AMoviesCreditsAreFoundInItsLastPicturesWithoutExaminingEpisodesAgain()
+    {
+        if (Installed() is not { } maker) return;
+        var ffmpeg = Tools() ?? maker;
+        var parent = TestPaths.CreateDataDirectory();
+        var root = Path.Combine(parent, "Invented Movies");
+        Directory.CreateDirectory(root);
+        try
+        {
+            // 21 minutes: the film until 18:20, 130 s of names on black, 30 s of a scene after them.
+            var path = Path.Combine(root, "Invented Movie (2026).mkv");
+            await EncodeFramesAsync(maker, path, seconds: 1_260, second => second < 1_100
+                ? SyntheticPictures.Scene(70_000 + second)
+                : second < 1_230 ? SyntheticPictures.Credits(71_000 + second / 4) : SyntheticPictures.Scene(72_000 + second));
+            var before = (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length);
+            using var factory = Factory(ffmpeg);
+            using var client = factory.CreateClient();
+            var owner = await ApiTestClient.SetupOwnerAsync(client);
+            var movie = await AddMovieAsync(factory, root, path);
+            // An episode already examined under the episode rules stays as it is.
+            var episode = await AddExaminedEpisodeAsync(factory, root);
+            var detection = factory.Services.GetRequiredService<SegmentDetectionService>();
+            var dataFiles = Files(factory.DataDirectory);
+
+            var waiting = await SettingsAsync(client, owner.Token);
+            Assert.True(waiting is { MovieCount: 1, MoviesPendingCount: 1, MoviesWithCredits: 0, PendingCount: 0 });
+            Assert.True((await SegmentsAsync(client, owner.Token, movie)) is { CanAnalyze: true, Analyzed: false });
+            Assert.Equal(1, await detection.QueuePendingSeasonsAsync(CancellationToken.None));
+            Assert.Equal(1, await detection.ProcessPendingAsync(CancellationToken.None));
+
+            var times = await SegmentsAsync(client, owner.Token, movie);
+            Assert.True(times is { Analyzed: true, CreditsSource: MediaSegmentSource.Detected, IntroSource: MediaSegmentSource.None }, times.ToString());
+            Assert.InRange(times.CreditsStartMilliseconds!.Value, 1_099_000, 1_101_000);
+            var done = await SettingsAsync(client, owner.Token);
+            Assert.True(done is { MovieCount: 1, MoviesPendingCount: 0, MoviesWithCredits: 1, AnalyzedCount: 1 });
+            using (var scope = factory.Services.CreateScope())
+            {
+                var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+                Assert.Equal(SegmentDetectionService.MovieAnalysisVersion, (await database.MediaSegments.SingleAsync(row => row.MediaItemId == movie)).AnalysisVersion);
+                Assert.Equal(SegmentDetectionService.AnalysisVersion, (await database.MediaSegments.SingleAsync(row => row.MediaItemId == episode)).AnalysisVersion);
+            }
+
+            // Examining only the movies again leaves the episode alone; the result is the same.
+            await detection.ReanalyzeAsync(null, null, CancellationToken.None, movies: true);
+            Assert.Equal(1, await detection.QueuePendingSeasonsAsync(CancellationToken.None));
+            Assert.Equal(1, await detection.ProcessPendingAsync(CancellationToken.None));
+            Assert.InRange((await SegmentsAsync(client, owner.Token, movie)).CreditsStartMilliseconds!.Value, 1_099_000, 1_101_000);
+            Assert.Equal(0, await detection.QueuePendingSeasonsAsync(CancellationToken.None));
+
+            // A movie can be examined again from its own page.
+            using (var request = ApiTestClient.Authorized(HttpMethod.Post, $"/api/v1/media/{movie}/segments/reanalyze", owner.Token))
+            using (var response = await client.SendAsync(request))
+            {
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+
+            var newDataFiles = Files(factory.DataDirectory).Except(dataFiles).Where(file => !ServerBookkeeping(factory.DataDirectory, file)).ToList();
+            Assert.True(newDataFiles.Count == 0, string.Join(", ", newDataFiles));
+            Assert.Equal(before, (File.GetLastWriteTimeUtc(path), new FileInfo(path).Length));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    /// <summary>Invented pictures at two a second with noise as sound.</summary>
+    private static async Task EncodeFramesAsync(string ffmpeg, string path, int seconds, Func<int, byte[]> picture)
+    {
+        var start = new ProcessStartInfo(ffmpeg) { RedirectStandardInput = true, RedirectStandardError = true, UseShellExecute = false };
+        foreach (var argument in new[]
+        {
+            "-hide_banner", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "gray", "-s", "320x180", "-r", "2", "-i", "pipe:0",
+            "-f", "lavfi", "-i", string.Create(System.Globalization.CultureInfo.InvariantCulture, $"anoisesrc=d={seconds}:c=pink:seed=3:a=0.1"),
+            "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "8", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-shortest", path,
+        }) start.ArgumentList.Add(argument);
+        using var process = Process.Start(start)!;
+        var errors = process.StandardError.ReadToEndAsync();
+        for (var second = 0; second < seconds; second++)
+        {
+            var frame = picture(second);
+            await process.StandardInput.BaseStream.WriteAsync(frame);
+            await process.StandardInput.BaseStream.WriteAsync(frame);
+        }
+        process.StandardInput.Close();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, await errors);
+    }
+
+    private static async Task<Guid> AddMovieAsync(AureliaServerFactory factory, string root, string path)
+    {
+        using var scope = factory.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var library = new LibraryRoot
+        {
+            Id = Guid.NewGuid(),
+            Name = "Invented Movie Library",
+            Path = root,
+            NormalizedPath = MediaPath.Normalize(root),
+            Kind = LibraryKind.Movies,
+            Availability = LibraryAvailability.Available,
+            CreatedAt = now,
+        };
+        var movie = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            LibraryRoot = library,
+            LibraryRootId = library.Id,
+            Kind = MediaKind.Movie,
+            SourcePath = path,
+            NormalizedSourcePath = MediaPath.Normalize(path),
+            DetectedTitle = "Invented Movie",
+            Category = string.Empty,
+            Extension = Path.GetExtension(path),
+            FileSize = new FileInfo(path).Length,
+            FileModifiedAt = new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero),
+            Availability = MediaAvailability.Available,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        database.MediaItems.Add(movie);
+        await database.SaveChangesAsync();
+        return movie.Id;
+    }
+
+    /// <summary>One episode whose times were stored under the current episode rules; it has no file.</summary>
+    private static async Task<Guid> AddExaminedEpisodeAsync(AureliaServerFactory factory, string root)
+    {
+        using var scope = factory.Services.CreateScope();
+        var database = scope.ServiceProvider.GetRequiredService<AureliaDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var library = await database.LibraryRoots.FirstAsync();
+        var seriesPath = Path.Combine(root, "Invented Show");
+        var series = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            LibraryRoot = library,
+            LibraryRootId = library.Id,
+            Kind = MediaKind.Series,
+            SourcePath = seriesPath,
+            NormalizedSourcePath = MediaPath.Normalize(seriesPath),
+            DetectedTitle = "Invented Show",
+            Category = string.Empty,
+            Availability = MediaAvailability.Available,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        var episodePath = Path.Combine(seriesPath, "Invented Show S01E01.mkv");
+        var episode = new MediaItem
+        {
+            Id = Guid.NewGuid(),
+            LibraryRoot = library,
+            LibraryRootId = library.Id,
+            Parent = series,
+            ParentId = series.Id,
+            Kind = MediaKind.Episode,
+            SeasonNumber = 1,
+            EpisodeNumber = 1,
+            SourcePath = episodePath,
+            NormalizedSourcePath = MediaPath.Normalize(episodePath),
+            DetectedTitle = "Invented Show 1",
+            Category = string.Empty,
+            Extension = ".mkv",
+            FileSize = 1,
+            FileModifiedAt = now,
+            Availability = MediaAvailability.Available,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        database.MediaItems.AddRange(series, episode);
+        database.MediaSegments.Add(new MediaSegment
+        {
+            MediaItemId = episode.Id,
+            CreditsStartMilliseconds = 100_000,
+            CreditsSource = MediaSegmentSource.Detected,
+            CreditsConfidence = 0.9,
+            AnalysisVersion = SegmentDetectionService.AnalysisVersion,
+            AnalyzedFileSize = 1,
+            AnalyzedFileModifiedAt = now,
+            UpdatedAt = now,
+        });
+        await database.SaveChangesAsync();
+        return episode.Id;
+    }
+
     /// <summary>200 s of invented picture at two pictures a second and noise as sound.</summary>
     private static async Task EncodePicturesAsync(string ffmpeg, string path, int seed)
     {

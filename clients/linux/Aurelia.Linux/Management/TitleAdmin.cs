@@ -365,7 +365,7 @@ public sealed class MetadataEditorSheet : UserControl
         {
             source.Add(Note("Edit an individual episode to change its video file."));
         }
-        if (document.Kind is MediaKind.Episode or MediaKind.Series && scope.Client.Library.Supports(ServerFeatures.MediaSegments))
+        if (document.Kind is MediaKind.Episode or MediaKind.Series or MediaKind.Movie && scope.Client.Library.Supports(ServerFeatures.MediaSegments))
             body.Children.Add(Card(Group("Intro and Credits", "IconPlay", new SegmentsPanel(scope, mediaId, document.Kind, engines))));
         if (document.Kind is MediaKind.Movie or MediaKind.Episode)
             body.Children.Add(Card(Group("Subtitles", "IconSubtitles", new SubtitlePanel(scope, mediaId))));

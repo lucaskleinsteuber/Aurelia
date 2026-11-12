@@ -56,6 +56,10 @@ public sealed class SegmentEditingTests
         Assert.Equal("All 100 episodes examined", SegmentEditing.Status(running with { PendingCount = 0, AnalyzedCount = 95 }));
         Assert.Equal("About 10 min left", SegmentEditing.Remaining(600));
         Assert.Null(SegmentEditing.Remaining(null));
+        Assert.Null(SegmentEditing.MovieStatus(running));
+        Assert.Equal("Movies: 12 of 40 with credits · 3 to examine",
+            SegmentEditing.MovieStatus(running with { MovieCount = 40, MoviesWithCredits = 12, MoviesPendingCount = 3 }));
+        Assert.Equal("Movies: 2 of 2 with credits", SegmentEditing.MovieStatus(running with { MovieCount = 2, MoviesWithCredits = 2 }));
     }
 }
 

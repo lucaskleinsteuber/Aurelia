@@ -5,7 +5,7 @@
 import { h, clear } from "./dom.js";
 import {
   segmentOrigin, segmentRequest, segmentTimeText, segmentTrimClamp, segmentTrimInitial, segmentTrimLabel,
-  segmentTrimSpan, segmentProgress, segmentRemaining, scrubPreviewFrameUrl,
+  segmentTrimSpan, segmentProgress, segmentRemaining, segmentMovieSummary, scrubPreviewFrameUrl,
 } from "./logic.js";
 import { triesDirectPlay } from "./live-logic.js";
 
@@ -17,7 +17,7 @@ function button(label, onclick, { kind = "secondary-button", title, disabled = f
   return h("button", { type: "button", class: kind, title, "aria-label": title ? `${label}. ${title}` : label, onclick, disabled }, label);
 }
 
-/** Edit Metadata › Intro and Credits for an episode, or Re-analyze for a series. */
+/** Edit Metadata › Intro and Credits for an episode or a movie, or Re-analyze for a series. */
 export function segmentsSection({ api, item, kind, canPreview }) {
   const message = h("p", { class: "muted small", role: "status", "aria-live": "polite" });
   const body = h("div", { class: "segments-panel" }, h("p", { class: "muted" }, "Loading…"));
@@ -34,6 +34,8 @@ export function segmentsSection({ api, item, kind, canPreview }) {
     return element;
   }
 
+  const movie = kind === "movie";
+  const noun = movie ? "movie" : "episode";
   let times = null;
   const introStart = h("input", { class: "text-field narrow", placeholder: "0:00", "aria-label": "Intro Starts" });
   const introEnd = h("input", { class: "text-field narrow", placeholder: "1:30", "aria-label": "Intro Ends" });
@@ -49,19 +51,20 @@ export function segmentsSection({ api, item, kind, canPreview }) {
     request.introEndMilliseconds = keep(request.introEndMilliseconds, times.introEndMilliseconds);
     request.creditsStartMilliseconds = keep(request.creditsStartMilliseconds, times.creditsStartMilliseconds);
     apply(await api.saveMediaSegments(item.id, request));
-    say("Saved. These times are used the next time the episode starts.");
+    say(`Saved. These times are used the next time the ${noun} starts.`);
   }), { kind: "primary-button", title: "Saves the typed times as corrections; detection never replaces them." });
   const reset = button("Reset to Detected", () => run(async () => {
     apply(await api.resetMediaSegments(item.id));
-    say("The server examines the episode again; its times appear here shortly.");
-  }), { title: "Removes the times set by hand; the server examines the episode again and fills in what it finds." });
-  const reanalyze = button("Re-analyze Season", () => run(async () => {
+    say(`The server examines the ${noun} again; its times appear here shortly.`);
+  }), { title: `Removes the times set by hand; the server examines the ${noun} again and fills in what it finds.` });
+  const reanalyze = button(movie ? "Re-analyze Movie" : "Re-analyze Season", () => run(async () => {
     await api.reanalyzeMediaSegments(item.id);
-    say("The server examines the episodes again in the background.");
-  }), { title: "Has the server compare this season’s episodes again in the background. Times set by hand stay." });
-  const editIntro = button("Edit Intro…", () => openTrim("intro"), { title: "Opens the episode’s beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save." });
-  const editCredits = button("Edit Credits…", () => openTrim("credits"), { title: "Opens the episode’s ending with a film strip: drag the handle to where the credits begin, play it to check, then save." });
-  const pending = h("p", { class: "muted small", hidden: true }, "The server has not examined this episode yet.");
+    say(movie ? "The server looks for the movie’s credits again in the background." : "The server examines the episodes again in the background.");
+  }), { title: movie ? "Has the server look for this movie’s credits again in the background. Times set by hand stay."
+    : "Has the server compare this season’s episodes again in the background. Times set by hand stay." });
+  const editIntro = button("Edit Intro…", () => openTrim("intro"), { title: "Opens the title’s beginning with a film strip: drag the yellow handles to where the intro begins and ends, play it to check, then save." });
+  const editCredits = button("Edit Credits…", () => openTrim("credits"), { title: "Opens the title’s ending with a film strip: drag the handle to where the credits begin, play it to check, then save." });
+  const pending = h("p", { class: "muted small", hidden: true }, `The server has not examined this ${noun} yet.`);
 
   async function run(action) {
     for (const control of [save, reset, reanalyze, editIntro, editCredits]) control.disabled = true;
@@ -87,7 +90,7 @@ export function segmentsSection({ api, item, kind, canPreview }) {
   }
   function openTrim(part) {
     if (!times) return;
-    openTrimEditor({ api, item, part, times, canPreview, onSaved: (saved) => { apply(saved); say("Saved. These times are used the next time the episode starts."); } });
+    openTrimEditor({ api, item, part, times, canPreview, onSaved: (saved) => { apply(saved); say(`Saved. These times are used the next time the ${noun} starts.`); } });
   }
 
   api.mediaSegments(item.id).then((value) => {
@@ -290,23 +293,33 @@ export function serverSegmentsSection({ api, section, row, toggle }) {
   const state = h("span", { class: "settings-value" }, "Loading…");
   const bar = h("progress", { class: "segments-progress", max: "1", value: "0" });
   const current = h("p", { class: "muted small" });
+  const movies = h("p", { class: "muted small", hidden: true });
   const series = h("div", { class: "settings-card-list" });
   const message = h("p", { class: "muted small", role: "status", "aria-live": "polite" });
   let settings = null;
   const enabled = toggle(false, (on) => change({ enabled: on }), "Find Intros and Credits");
   const pictures = toggle(true, (on) => change({ enabled: settings?.enabled ?? true, usePictures: on }), "Look at Pictures Too");
   const details = h("details", {}, h("summary", {}, "Series"), series);
+  const reanalyzeMovies = reanalyzeMoviesButton();
   const element = section("Intros and Credits", "play",
     "The server finds where episodes’ intros and credits are, in the background and only while nobody watches. Only the times are stored.",
     row("Find Intros and Credits", enabled, "Compares the sound of a season’s episodes."),
     row("Look at Pictures Too", pictures, "Also reads small grey pictures of the episodes, for credits with changing music and intros under narration. Slower, more accurate."),
     row("Progress", h("div", { class: "segments-status" }, bar, state)),
+    movies,
     current,
     details,
-    h("div", { class: "button-row" }, button("Re-analyze Everything", () => act(() => api.reanalyzeSeriesSegments(null), "Every episode is examined again in the background."),
-      { title: "Has the server examine every episode again. Times set by hand stay." })),
+    h("div", { class: "button-row" }, button("Re-analyze Everything", () => act(() => api.reanalyzeSeriesSegments(null), "Every episode and movie is examined again in the background."),
+      { title: "Has the server examine every episode and movie again. Times set by hand stay." }),
+    reanalyzeMovies),
     message);
 
+  function reanalyzeMoviesButton() {
+    const control = button("Re-analyze Movies", () => act(() => api.reanalyzeMovieSegments(), "Every movie’s credits are looked for again in the background."),
+      { title: "Has the server look for every movie’s credits again. Episodes and times set by hand stay." });
+    control.hidden = true;
+    return control;
+  }
   async function change(body) {
     try { render(await api.saveServerMediaSegments(body)); }
     catch (error) { message.textContent = error.message; }
@@ -328,6 +341,9 @@ export function serverSegmentsSection({ api, section, row, toggle }) {
       : !value.enabled ? "Off"
         : value.pendingCount === 0 ? `All ${total} episodes examined`
           : `${done} of ${total} episodes${value.pausedForPlayback ? " · paused while someone watches" : ""}${segmentRemaining(value.estimatedSecondsRemaining) ? ` · ${segmentRemaining(value.estimatedSecondsRemaining)}` : ""}`;
+    movies.textContent = segmentMovieSummary(value);
+    movies.hidden = !movies.textContent;
+    reanalyzeMovies.hidden = value.movieCount == null;
     current.textContent = value.running && value.currentTitle ? `Now: ${value.currentTitle}${value.currentStep ? ` · ${value.currentStep}` : ""}` : "";
   }
   async function refreshSeries() {

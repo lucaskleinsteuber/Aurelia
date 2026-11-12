@@ -70,6 +70,10 @@ public sealed partial class ManagementClient
     public Task<MediaSegmentSettingsResponse> ReanalyzeAllSegmentsAsync(Guid? seriesId) =>
         SendAsync<MediaSegmentSettingsResponse>(HttpMethod.Post, "/api/v1/server/media-segments/reanalyze", new ReanalyzeMediaSegmentsRequest(seriesId));
 
+    /// <summary>Looks for every movie's credits again (servers from 2.11.0).</summary>
+    public Task<MediaSegmentSettingsResponse> ReanalyzeMovieSegmentsAsync() =>
+        SendAsync<MediaSegmentSettingsResponse>(HttpMethod.Post, "/api/v1/server/media-segments/reanalyze", new ReanalyzeMediaSegmentsRequest(Movies: true));
+
     public Task<ScrubPreviewSettingsResponse> ScrubPreviewsAsync() => GetAsync<ScrubPreviewSettingsResponse>("/api/v1/server/scrub-previews");
 
     public Task<ScrubPreviewSettingsResponse> SaveScrubPreviewsAsync(UpdateScrubPreviewSettingsRequest request) =>

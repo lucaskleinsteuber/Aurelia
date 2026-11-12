@@ -1,3 +1,4 @@
+using Aurelia.Contracts;
 using Aurelia.Server.Services.Segments;
 using Xunit;
 
@@ -113,6 +114,78 @@ public sealed class CreditsPicturesTests
         Assert.Equal(expected, chosen!.Value.Start);
         Assert.Equal((3_500.0, 3_550.0, 0.7), SeasonSegmentAnalyzer.ChooseCredits((3_500, 3_550, 0.7), null));
         Assert.Null(SeasonSegmentAnalyzer.ChooseCredits(null, null));
+    }
+
+    [Fact]
+    public void AMovieKeepsItsCreditsAcrossAMidCreditsSceneAndAPostCreditsScene()
+    {
+        // 2 min of the film, 90 s of names, a one-minute mid-credits scene, 40 s more names and a
+        // two-minute scene after the credits.
+        var pictures = Seconds(120, second => SyntheticPictures.Scene(20_000 + second)).Concat(CreditCards(90))
+            .Concat(Seconds(60, second => SyntheticPictures.Scene(21_000 + second))).Concat(CreditCards(40))
+            .Concat(Seconds(120, second => SyntheticPictures.Scene(22_000 + second))).ToList();
+        var window = CreditsPictures.FromPictures(pictures, startSeconds: 6_770);
+        var duration = 6_770.0 + 430;
+        var result = CreditsPictures.Find(window, new bool[window.Kinds.Length], duration, CreditsRules.Movie);
+        Assert.NotNull(result);
+        Assert.InRange(result.Value.Start, 6_889.5, 6_890.5);
+        Assert.InRange(result.Value.End, 7_079, 7_081);
+        Assert.True(result.Value.Confidence >= 0.6);
+        // An episode's rules allow no two minutes after the credits.
+        Assert.Null(CreditsPictures.Find(window, new bool[window.Kinds.Length], duration));
+    }
+
+    [Fact]
+    public void AMovieNeedsLongCreditsAndATitleCardInTheFilmIsNotJoined()
+    {
+        // A 15 s card ("Ten years later") in the film, three minutes of film, 60 s of names to the end.
+        var pictures = Seconds(60, second => SyntheticPictures.Scene(30_000 + second)).Concat(CreditCards(15))
+            .Concat(Seconds(170, second => SyntheticPictures.Scene(31_000 + second))).Concat(CreditCards(60)).ToList();
+        var window = CreditsPictures.FromPictures(pictures, startSeconds: 5_000);
+        var result = CreditsPictures.Find(window, new bool[window.Kinds.Length], 5_305, CreditsRules.Movie);
+        Assert.InRange(result!.Value.Start, 5_244.5, 5_245.5);
+
+        // 30 s of names are too short for a movie's credits.
+        var brief = Seconds(200, second => SyntheticPictures.Scene(32_000 + second)).Concat(CreditCards(30)).ToList();
+        var briefWindow = CreditsPictures.FromPictures(brief, 5_000);
+        Assert.Null(CreditsPictures.Find(briefWindow, new bool[briefWindow.Kinds.Length], 5_230, CreditsRules.Movie));
+    }
+
+    [Fact]
+    public async Task AMoviesCreditsComeFromAChapterOrItsLastPicturesAndItsIntroOnlyFromAChapter()
+    {
+        Assert.Equal(1_200, MovieSegmentAnalyzer.CreditsWindowSeconds(9_000));
+        Assert.Equal(900, MovieSegmentAnalyzer.CreditsWindowSeconds(6_000));
+
+        // Chapters: used without looking at any picture.
+        var named = new SegmentEpisode(6_000, [new(0, 90, "Opening Credits"), new(90, 5_600, "Film"), new(5_600, 6_000, "End Credits")]);
+        var asked = 0;
+        var chapters = await new MovieSegmentAnalyzer(named, (_, _, _) => { asked++; return Task.FromResult<PictureWindow?>(null); })
+            .AnalyzeAsync(CancellationToken.None);
+        Assert.Equal((0.0, 90.0, MediaSegmentSource.Chapters), (chapters.IntroStart!.Value, chapters.IntroEnd!.Value, chapters.IntroSource));
+        Assert.Equal((5_600.0, MediaSegmentSource.Chapters), (chapters.CreditsStart!.Value, chapters.CreditsSource));
+        Assert.Equal(0, asked);
+
+        // Pictures: the last 15 % are asked for, and the intro stays empty.
+        (double Start, double Length)? requested = null;
+        var ending = Seconds(700, second => SyntheticPictures.Scene(40_000 + second)).Concat(CreditCards(200)).ToList();
+        var found = await new MovieSegmentAnalyzer(new SegmentEpisode(6_000, []), (start, length, _) =>
+        {
+            requested = (start, length);
+            return Task.FromResult<PictureWindow?>(CreditsPictures.FromPictures(ending, start));
+        }).AnalyzeAsync(CancellationToken.None);
+        Assert.Equal((5_100.0, 900.0), requested);
+        Assert.Equal(MediaSegmentSource.Detected, found.CreditsSource);
+        Assert.InRange(found.CreditsStart!.Value, 5_799.5, 5_800.5);
+        Assert.Equal(MediaSegmentSource.None, found.IntroSource);
+
+        // Nothing certain: nothing is kept. A short film is not examined.
+        var plain = Seconds(900, second => SyntheticPictures.Scene(41_000 + second)).ToList();
+        var nothing = await new MovieSegmentAnalyzer(new SegmentEpisode(6_000, []),
+            (start, _, _) => Task.FromResult<PictureWindow?>(CreditsPictures.FromPictures(plain, start))).AnalyzeAsync(CancellationToken.None);
+        Assert.Equal(DetectedSegments.Nothing, nothing);
+        Assert.Equal(DetectedSegments.Nothing, await new MovieSegmentAnalyzer(new SegmentEpisode(900, [new(800, 900, "Credits")]), null)
+            .AnalyzeAsync(CancellationToken.None));
     }
 
     private static PictureKind Kind(byte[] picture) => CreditsPictures.Classify(CreditsPictures.Measure(picture));

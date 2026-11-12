@@ -49,7 +49,9 @@ These rules apply to every task in this repository.
   publish a built image.
 - Intro and credits detection (owner, 11.11.2026): The server may decode and compare the audio
   track of episodes of a season in the background, and, for credits, small grey pictures of an
-  episode's last minutes (owner, 11.11.2026). Audio, pictures and fingerprints exist only in
+  episode's last minutes (owner, 11.11.2026), and of a movie's last 20 minutes for its credits
+  (owner, 12.11.2026; movies have their own `MovieAnalysisVersion`, so movie rules never
+  re-examine episodes). Audio, pictures and fingerprints exist only in
   memory. Only the timestamps are stored, in the database, never audio, images, fingerprints or
   files. The media file is only read.
 - Speech recognition (owner, 12.11.2026): the server may write subtitles from speech and sync

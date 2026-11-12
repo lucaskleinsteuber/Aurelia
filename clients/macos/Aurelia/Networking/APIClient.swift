@@ -1766,6 +1766,12 @@ struct APIClient: Sendable {
       body: try JSONEncoder().encode(["seriesId": seriesId.uuidString.lowercased()]))
     return try Self.decode(MediaSegmentSettings.self, from: data)
   }
+  func reanalyzeMovieSegments() async throws -> MediaSegmentSettings {
+    let data = try await perform(
+      path: "/api/v1/server/media-segments/reanalyze", method: "POST",
+      body: Data(#"{"movies":true}"#.utf8))
+    return try Self.decode(MediaSegmentSettings.self, from: data)
+  }
   func reanalyzeAllMediaSegments() async throws -> MediaSegmentSettings {
     let data = try await perform(
       path: "/api/v1/server/media-segments/reanalyze", method: "POST",

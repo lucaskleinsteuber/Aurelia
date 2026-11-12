@@ -76,8 +76,14 @@ scan, one short read at a time, and waits while anyone is watching.
   both find credits, the earlier start counts as long as both describe the same credits. This
   is the slow part: on an older server a few minutes per episode, once. The owner can turn it
   off and keep detection from sound only.
+- Movies (from Server 2.11.0) have no other episodes to compare with, so only their credits are
+  looked for: from a chapter named like credits, or in the pictures of their last 20 minutes (at
+  most 15 % of the movie). Names on black must last at least 45 seconds, a scene of up to five
+  minutes may follow them, and credits that a mid-credits scene interrupts count from their
+  first part. A movie's intro comes only from a chapter or from a correction by hand. Movies
+  have their own rules' version, so changing them never examines episodes again.
 - When it is not sure, it stores nothing and no button appears. A season needs at least two
-  episodes; movies are not examined.
+  episodes; movies shorter than 20 minutes are not examined.
 - Someone who may edit the library can correct the times of an episode in Edit Metadata. A
   correction is never replaced; "Reset to detected" removes it.
 
