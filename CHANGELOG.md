@@ -54,6 +54,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Mac: Skip Intro is larger, shows its key (Return; S works too) and moves above the bottom controls while they show, like Up Next, instead of sitting on them.
 - Browser (Server 2.9.0): Automatic quality plays a picture that can be copied without converting it and switches to adaptive streaming only after real stalls, so a weak server converts nothing while the connection keeps up.
 - Browser (Server 2.7.0): pages open faster. The app's files carry their version in their address and come compressed, so the browser keeps them; pictures carry their revision; pages seen before show at once, a poster's page loads while pointing at it, and slower pages show their shape while loading.
 - Browser (Server 2.7.0): pages blend into each other, a clicked poster grows into the title's picture, menus, sheets and rails move with the Mac's curves, and Reduce Motion keeps everything still.
@@ -72,6 +73,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Mac: Settings › Power no longer stays empty. It loads only where the server runs, shows a spinner while loading and says when the settings couldn't be loaded, with Try Again.
 - Browser: About in Settings opens again, a page change animates once instead of twice, and returning to the window no longer replays the page animation.
 - Browser (Server 2.7.0): the tour's ring sits on the first title it explains instead of beside it and off the window; Home's picture fills the whole width on wide windows; a person's page keeps its back button and heading off the edge; menu icons line up with their text.
 - Mac 2.4.0 (160): a sleeping server is woken only by Continue, Wake Server or opening something, not by any click on "Aurelia Is Resting" (such as closing the window) or by moving the mouse while Aurelia looks for the server.

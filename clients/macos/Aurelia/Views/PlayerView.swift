@@ -128,7 +128,7 @@ struct PlayerView: View {
         if let upNext = controller.upNext, controller.errorMessage == nil {
           upNextCard(upNext)
             .padding(.trailing, 28)
-            .padding(.bottom, controlsVisible ? 150 : 40)
+            .padding(.bottom, controlsVisible ? Self.overlayBottomWithControls : 40)
             .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
             .transition(.opacity)
         }
@@ -139,7 +139,7 @@ struct PlayerView: View {
         {
           skipIntroButton
             .padding(.trailing, 28)
-            .padding(.bottom, controlsVisible ? 150 : 40)
+            .padding(.bottom, controlsVisible ? Self.overlayBottomWithControls : 40)
             .frame(width: viewport.width, height: viewport.height, alignment: .bottomTrailing)
             .transition(.opacity)
         }
@@ -846,20 +846,35 @@ struct PlayerView: View {
   }
 
   /// Jumps past the intro the server found; Return or S does the same.
+  /// Skip Intro and Up Next sit above the bottom controls while they show, never on them.
+  static let overlayBottomWithControls: CGFloat = 200
+
   private var skipIntroButton: some View {
     Button {
       controller.skipIntro()
       revealControls()
     } label: {
-      Label("Skip Intro", systemImage: "forward.end.fill")
-        .font(.headline)
-        .padding(.horizontal, 18)
-        .frame(minHeight: AureliaDesign.minimumControlSize)
-        .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
+      HStack(spacing: 12) {
+        Image(systemName: "forward.end.fill")
+        Text("Skip Intro")
+        // The key that skips without the mouse (S works too).
+        Label("Return", systemImage: "return")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 7)
+          .padding(.vertical, 3)
+          .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.6)))
+          .accessibilityHidden(true)
+      }
+      .font(.title3.weight(.semibold))
+      .padding(.horizontal, 26)
+      .frame(minHeight: 58)
+      .playerMaterial(reduceTransparency: reduceTransparency, shape: Capsule())
     }
     .buttonStyle(PlayerPressButtonStyle(reduceMotion: reduceMotion))
+    .help("Jumps to the end of the intro. Return or S does the same.")
     .accessibilityLabel("Skip Intro")
-    .accessibilityHint("Jumps to the end of the intro")
+    .accessibilityHint("Jumps to the end of the intro. Return or S does the same.")
     .accessibilityIdentifier("player-skip-intro")
     .onHover { interaction("skip-intro-hover", active: $0) }
   }

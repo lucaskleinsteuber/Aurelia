@@ -11,6 +11,9 @@ struct ServerPowerEditor: View {
   @State private var draft: ServerPowerSettings?
   @State private var working = false
   @State private var message: String?
+  /// Set after a load that came back without settings (a server before 1.8.4) or failed.
+  @State private var loadFailed = false
+  @State private var unsupported = false
 
   static let idleChoices = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240]
 
@@ -92,6 +95,18 @@ struct ServerPowerEditor: View {
           "This server can't save power from Aurelia: it follows its computer's own energy settings."
         )
         .foregroundStyle(.secondary)
+      } else if unsupported {
+        Text("Power settings need Aurelia Server 1.8.4 or newer. Update the server to use them.")
+          .foregroundStyle(.secondary)
+      } else if loadFailed {
+        // A failed load used to leave the page empty; it now says so and can try again.
+        VStack(alignment: .leading, spacing: 8) {
+          Text(message ?? "The power settings couldn't be loaded.")
+            .foregroundStyle(.orange).textSelection(.enabled)
+          Button("Try Again") { Task { await load() } }
+        }
+      } else {
+        ProgressView("Loading power settings…")
       }
     }
     .task(id: model.administrationGeneration) { await load() }
@@ -99,6 +114,9 @@ struct ServerPowerEditor: View {
 
   private func load() async {
     let scope = ServerAdministrationScope(model: model, generation: model.administrationGeneration)
+    loadFailed = false
+    unsupported = false
+    message = nil
     do {
       let settings = try await model.currentAdministration {
         try await scope.request { try await client.serverPower() }
@@ -108,8 +126,13 @@ struct ServerPowerEditor: View {
     } catch let failure as APIClientError where failure.httpStatus == 404 {
       // Servers before 1.8.4 have no sleep mode settings.
       stored = nil
+      unsupported = true
+    } catch is CancellationError {
+      // A newer load of this page runs instead, unless the page itself went away.
+      if !Task.isCancelled { loadFailed = true }
     } catch {
-      message = scope.message(for: error)
+      message = scope.message(for: error) ?? error.localizedDescription
+      loadFailed = true
     }
   }
 

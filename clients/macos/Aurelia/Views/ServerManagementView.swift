@@ -92,7 +92,12 @@ struct ServerManagementView: View {
   /// Settings › Power: when the server runs on a Mac, and what it does when nobody uses it. A
   /// Linux server can sleep or turn off its computer; one the Aurelia app hosts only stops.
   @ViewBuilder private var powerParts: some View {
-    if loading && capabilities == nil && !model.isLocalHost { ProgressView("Loading power settings…") }
+    if capabilities == nil && !model.isLocalHost && error == nil {
+      ProgressView("Loading power settings…")
+    }
+    if error != nil, capabilities == nil, !model.isLocalHost {
+      Button("Try Again") { Task { await reload() } }
+    }
     if let client, capabilities != nil || model.isLocalHost {
       if hosting.hostsOnMac {
         ServerHostingEditor(
@@ -289,6 +294,14 @@ struct ServerManagementView: View {
         error = nil
         return
       }
+      // Power needs only to know where the server runs; the rest of the server page is not loaded.
+      if part == .power {
+        let abilities = try await model.currentAdministration { try await client.serverCapabilities() }
+        guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
+        capabilities = abilities
+        error = nil
+        return
+      }
       let loaded = try await model.currentAdministration {
         guard model.isCurrentAdministration(generation) else { throw CancellationError() }
         async let config = client.serverSettings()
@@ -302,6 +315,10 @@ struct ServerManagementView: View {
       (configuration, status, users, capabilities, health) = loaded
       error = nil
     } catch is CancellationError {
+      // Without a newer load on its way, Power says so instead of waiting forever.
+      if part == .power, !Task.isCancelled, capabilities == nil, !model.isLocalHost {
+        error = "The power settings couldn't be loaded."
+      }
     } catch {
       guard model.isCurrentAdministration(generation), !Task.isCancelled else { return }
       if let failure = error as? APIClientError,
