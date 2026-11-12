@@ -22,6 +22,16 @@ struct TVCoreTests {
     #expect(TVLiveSubtitleTrack.sidecarFiles(tracks).map(\.index) == [1000])
   }
 
+  @Test func pastMonthsOfWrappedAreListedByYear() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let today = calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 12))!
+    #expect(TVWrapped.readyMonths(year: 2026, today: today, calendar: calendar) == Array(1...10))
+    #expect(TVWrapped.readyMonths(year: 2025, today: today, calendar: calendar) == Array(1...12))
+    #expect(TVWrapped.readyMonths(year: 2027, today: today, calendar: calendar).isEmpty)
+    #expect(TVWrapped.wrappedYears(activityYears: [2024, 2026, 2027], today: today, calendar: calendar) == [2026, 2024])
+  }
+
   @Test func picturesUseTheirOwnConnectionsBesideTheData() {
     #expect(TVConnectionLane(path: "/api/v1/artwork/0f0e") == .artwork)
     #expect(TVConnectionLane(path: "/api/v1/media/0f0e/playback-plan") == .api)

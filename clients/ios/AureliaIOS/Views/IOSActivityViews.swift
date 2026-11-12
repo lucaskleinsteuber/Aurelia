@@ -183,6 +183,7 @@ struct IOSStatisticsView: View {
           .padding(.horizontal, IOSDesign.margin)
           if model.supportsMonthlyWrapped {
             IOSMonthlyWrappedButton { wrappedYear = $0 }.padding(.horizontal, IOSDesign.margin)
+            IOSMonthlyWrappedArchive(activityYears: stats.yearsAvailable ?? []) { wrappedYear = $0 }
           }
           weeks(stats.hoursByWeek ?? [])
           ranking("Top Titles", stats.topTitles ?? [])
@@ -514,5 +515,55 @@ struct IOSMonthlyWrappedButton: View {
     }
     .buttonStyle(.plain)
     .accessibilityIdentifier("monthly-wrapped")
+  }
+}
+
+/// Every month's Wrapped, not only the newest: a year to choose and its ready months to play.
+struct IOSMonthlyWrappedArchive: View {
+  let activityYears: [Int]
+  let open: (IOSWrappedLaunch) -> Void
+  @State private var year: Int?
+
+  var body: some View {
+    let years = IOSWrapped.wrappedYears(activityYears: activityYears)
+    let shown = year.flatMap { years.contains($0) ? $0 : nil } ?? years.first ?? 0
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Text("Monthly Wrapped").font(.title3.weight(.bold))
+        Spacer()
+        if years.count > 1 {
+          Picker("Year", selection: Binding(get: { shown }, set: { year = $0 })) {
+            ForEach(years, id: \.self) { Text(String($0)).tag($0) }
+          }
+          .pickerStyle(.menu)
+          .accessibilityIdentifier("wrapped-archive-year")
+        }
+      }
+      .padding(.horizontal, IOSDesign.margin)
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 10) {
+          ForEach(IOSWrapped.readyMonths(year: shown).reversed(), id: \.self) { month in
+            Button {
+              open(IOSWrappedLaunch(year: shown, month: month))
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(String(IOSWrapped.monthName(month).prefix(3)))
+                  .font(.system(size: 22, weight: .black)).tracking(-0.8)
+                Text(IOSWrapped.monthName(month)).font(.caption.weight(.semibold)).opacity(0.85)
+              }
+              .foregroundStyle(Color(wrappedHex: 0x22000F))
+              .frame(width: 96, alignment: .leading)
+              .padding(12)
+              .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play \(IOSWrapped.monthName(month)) \(String(shown)) Wrapped")
+          }
+        }
+        .padding(.horizontal, IOSDesign.margin)
+      }
+    }
+    .accessibilityIdentifier("monthly-wrapped-archive")
   }
 }

@@ -294,6 +294,24 @@ public static class WrappedStory
         return (first.Year, first.Month, CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(first.Month));
     }
 
+    /// <summary>The months of <paramref name="year"/> whose Wrapped is ready: all of a past year, up to the newest ready one.</summary>
+    public static IReadOnlyList<int> ReadyMonths(int year, DateTime today)
+    {
+        var ready = ReadyMonth(today);
+        if (year < ready.Year) return Enumerable.Range(1, 12).ToList();
+        return year == ready.Year ? Enumerable.Range(1, ready.Month).ToList() : [];
+    }
+
+    /// <summary>The years that can have a monthly Wrapped: those with activity and the newest ready month's, newest first.</summary>
+    public static IReadOnlyList<int> WrappedYears(IEnumerable<int> activityYears, DateTime today)
+    {
+        var ready = ReadyMonth(today).Year;
+        return activityYears.Where(year => year <= ready).Append(ready).Distinct().OrderDescending().ToList();
+    }
+
+    /// <summary>The English name of a month, 1 to 12.</summary>
+    public static string MonthName(int month) => CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(Math.Clamp(month, 1, 12));
+
     /// <summary>Home shows the new month in its first week, from the 2nd to the 8th.</summary>
     public static bool MonthIsNew(DateTime today) => today.Day is >= 2 and <= 8;
 

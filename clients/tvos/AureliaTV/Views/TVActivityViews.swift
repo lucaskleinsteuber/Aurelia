@@ -54,7 +54,7 @@ struct TVWatchHistoryView: View {
               } label: {
                 TVHistoryRow(item: item)
               }
-              .buttonStyle(TVButtonStyle())
+              .buttonStyle(TVButtonStyle(kind: .row))
               .contextMenu {
                 Button("Remove from History", role: .destructive) { Task { await remove(item) } }
               }
@@ -158,6 +158,8 @@ private struct TVHistoryRow: View {
       }
       Spacer()
     }
+    // Inside the row's rounded shape, so the poster never reaches past its corners.
+    .padding(14)
     .frame(maxWidth: .infinity, alignment: .leading)
     .accessibilityElement(children: .combine)
   }
@@ -177,6 +179,7 @@ struct TVStatisticsView: View {
   @State private var review: TVYearInReview?
   @State private var year = Calendar.current.component(.year, from: Date())
   @State private var wrappedYear: TVWrappedLaunch?
+  @State private var archiveYear: Int?
   @State private var error: String?
 
   var body: some View {
@@ -194,6 +197,7 @@ struct TVStatisticsView: View {
           }
           if model.capabilities?.supportsMonthlyWrapped == true {
             monthlyWrapped
+            monthlyArchive(stats.yearsAvailable ?? [])
           }
           weeks(stats.hoursByWeek ?? [])
           HStack(alignment: .top, spacing: 40) {
@@ -233,6 +237,50 @@ struct TVStatisticsView: View {
     .accessibilityElement(children: .combine)
   }
 
+  /// Every month's Wrapped, not only the newest: a year to choose and its ready months.
+  private func monthlyArchive(_ activityYears: [Int]) -> some View {
+    let years = TVWrapped.wrappedYears(activityYears: activityYears)
+    let shown = archiveYear.flatMap { years.contains($0) ? $0 : nil } ?? years.first ?? 0
+    return VStack(alignment: .leading, spacing: 18) {
+      Text("Monthly Wrapped").font(.system(size: 32, weight: .bold))
+      if years.count > 1 {
+        HStack(spacing: 16) {
+          ForEach(years, id: \.self) { candidate in
+            Button(String(candidate)) { archiveYear = candidate }
+              .buttonStyle(TVButtonStyle())
+              .accessibilityAddTraits(candidate == shown ? .isSelected : [])
+              .opacity(candidate == shown ? 1 : 0.65)
+          }
+        }
+        .focusSection()
+      }
+      ScrollView(.horizontal) {
+        HStack(spacing: 22) {
+          ForEach(TVWrapped.readyMonths(year: shown).reversed(), id: \.self) { month in
+            Button {
+              wrappedYear = TVWrappedLaunch(year: shown, month: month)
+            } label: {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(String(TVWrapped.monthName(month).prefix(3))).font(.system(size: 40, weight: .black))
+                Text("\(TVWrapped.monthName(month)) \(String(shown))").font(.system(size: 22, weight: .semibold))
+                  .opacity(0.85)
+              }
+              .foregroundStyle(Color(wrappedHex: 0x22000F))
+              .frame(width: 210, alignment: .leading)
+              .padding(22)
+              .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
+            .buttonStyle(TVCardButtonStyle())
+            .accessibilityLabel("Play \(TVWrapped.monthName(month)) \(String(shown)) Wrapped")
+          }
+        }
+        .padding(.vertical, 24)
+      }
+      .scrollClipDisabled()
+      .focusSection()
+    }
+  }
+
   private var monthlyWrapped: some View {
     let ready = TVWrapped.readyMonth()
     return Button {
@@ -251,7 +299,7 @@ struct TVStatisticsView: View {
       .padding(24)
       .background(Color(wrappedHex: 0xFF4D88), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
-    .buttonStyle(TVButtonStyle())
+    .buttonStyle(TVCardButtonStyle())
     .accessibilityIdentifier("monthly-wrapped")
   }
 
@@ -349,7 +397,7 @@ struct TVStatisticsView: View {
             .padding(24)
             .background(Color(wrappedHex: 0x6A4CFF), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
           }
-          .buttonStyle(TVButtonStyle())
+          .buttonStyle(TVCardButtonStyle())
           .accessibilityIdentifier("statistics-wrapped")
         }
         if let review {

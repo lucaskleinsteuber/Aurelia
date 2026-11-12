@@ -290,3 +290,70 @@ public static class MonthlyWrappedButton
         return button;
     }
 }
+
+/// <summary>Every month's Wrapped, not only the newest: a year to choose and its ready months to play.</summary>
+public static class MonthlyWrappedArchive
+{
+    public static Control Create(LibraryContext context, IEnumerable<int> activityYears, Thickness margin)
+    {
+        var years = WrappedStory.WrappedYears(activityYears, DateTime.Now);
+        var months = new WrapPanel { ItemSpacing = 10, LineSpacing = 10 };
+        var picker = new ComboBox { ItemsSource = years, SelectedItem = years.Count > 0 ? years[0] : null, MinWidth = 110, IsVisible = years.Count > 1 };
+        AutomationProperties.SetName(picker, "Monthly Wrapped Year");
+        var ink = new SolidColorBrush(Color.Parse("#22000F"));
+        void Show(int year)
+        {
+            months.Children.Clear();
+            foreach (var month in WrappedStory.ReadyMonths(year, DateTime.Now).Reverse())
+            {
+                var name = WrappedStory.MonthName(month);
+                var button = new Button
+                {
+                    Classes = { "card" },
+                    Padding = new Thickness(0),
+                    Content = new Border
+                    {
+                        Background = new SolidColorBrush(Color.Parse("#FF4D88")),
+                        CornerRadius = new CornerRadius(12),
+                        Padding = new Thickness(12, 10),
+                        Width = 120,
+                        Child = new StackPanel
+                        {
+                            Spacing = 2,
+                            Children =
+                            {
+                                new TextBlock { Text = name[..3], FontSize = 22, FontWeight = FontWeight.Black, Foreground = ink },
+                                new TextBlock { Text = name, FontSize = 12, FontWeight = FontWeight.SemiBold, Foreground = ink, Opacity = 0.85 },
+                            },
+                        },
+                    },
+                };
+                AutomationProperties.SetName(button, $"Play {name} {year} Wrapped");
+                button.Click += (_, _) => _ = context.Navigator.ShowWrappedAsync(year, month);
+                months.Children.Add(button);
+            }
+        }
+        picker.SelectionChanged += (_, _) => { if (picker.SelectedItem is int year) Show(year); };
+        if (years.Count > 0) Show(years[0]);
+        return new StackPanel
+        {
+            Margin = margin,
+            Spacing = 12,
+            Children =
+            {
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 14,
+                    Children =
+                    {
+                        new TextBlock { Text = "Monthly Wrapped", FontSize = 20, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center },
+                        picker,
+                    },
+                },
+                new TextBlock { Text = "Play any month again. A month is ready from the 2nd of the next month.", Opacity = 0.7, FontSize = 13 },
+                months,
+            },
+        };
+    }
+}

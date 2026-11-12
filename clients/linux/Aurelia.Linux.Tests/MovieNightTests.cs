@@ -124,6 +124,10 @@ public sealed class MovieNightTests
         Assert.Equal((2026, 9, "September"), WrappedStory.ReadyMonth(new DateTime(2026, 11, 1)));
         Assert.Equal((2026, 12, "December"), WrappedStory.ReadyMonth(new DateTime(2027, 1, 5)));
         Assert.Equal((2026, 11, "November"), WrappedStory.ReadyMonth(new DateTime(2027, 1, 1)));
+        Assert.Equal(Enumerable.Range(1, 10), WrappedStory.ReadyMonths(2026, new DateTime(2026, 11, 12)));
+        Assert.Equal(12, WrappedStory.ReadyMonths(2025, new DateTime(2026, 11, 12)).Count);
+        Assert.Empty(WrappedStory.ReadyMonths(2027, new DateTime(2026, 11, 12)));
+        Assert.Equal([2026, 2024], WrappedStory.WrappedYears([2024, 2026, 2027], new DateTime(2026, 11, 12)));
         Assert.False(WrappedStory.MonthIsNew(new DateTime(2026, 11, 1)));
         Assert.True(WrappedStory.MonthIsNew(new DateTime(2026, 11, 8)));
         Assert.False(WrappedStory.MonthIsNew(new DateTime(2026, 11, 9)));
