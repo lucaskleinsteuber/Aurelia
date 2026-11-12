@@ -1,32 +1,32 @@
 [
   {
     "product": "Mac",
-    "version": "2.0.0",
-    "build": 153,
-    "tag": "2.0.0-153"
+    "version": "2.12.1",
+    "build": 170,
+    "tag": "2.12.1-170"
   },
   {
     "product": "Server",
-    "version": "2.0.0",
-    "build": 148,
-    "tag": "server-2.0.0-148"
+    "version": "2.12.0",
+    "build": 161,
+    "tag": "server-2.12.0-161"
   },
   {
     "product": "Linux Desktop",
-    "version": "2.0.0",
-    "build": 25,
-    "tag": "linux-app-2.0.0-25"
+    "version": "2.3.0",
+    "build": 28,
+    "tag": "linux-app-2.3.0-28"
   },
   {
     "product": "Apple TV",
-    "version": "2.0.0",
-    "build": 35,
+    "version": "2.3.0",
+    "build": 38,
     "guide": "docs/APPLE_TV.md"
   },
   {
     "product": "iPhone & iPad",
-    "version": "2.1.0",
-    "build": 17,
+    "version": "2.6.0",
+    "build": 22,
     "guide": "docs/IOS_APP.md"
   }
 ]

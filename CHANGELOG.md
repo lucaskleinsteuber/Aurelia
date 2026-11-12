@@ -13,6 +13,10 @@ versioned commit, so their skipped numbers are preserved.
 
 ## [Unreleased]
 
+## [Server 2.12.0 (161), Mac 2.12.1 (170), Linux app 2.3.0 (28), Apple TV 2.3.0 (38) and iPhone & iPad 2.6.0 (22)](https://github.com/lucaskleinsteuber/Aurelia/releases/tag/2.12.1-170) - 12.11.2026
+
+The first stable releases since 2.0.0; they include every beta since then.
+
 ### Added
 
 - Browser: Settings › Server has the Mac app's server settings: how long new devices stay signed in, streams at the same time, noticing new files, the full check, maintenance hours and waiting tasks, automatic backups and how many are kept, and how long events are kept.
@@ -72,6 +76,10 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- iPhone & iPad and Apple TV: a title's details and its Play button no longer wait behind the posters that load right after the app starts; pictures use their own connections to the server.
+- iPhone & iPad: title menus no longer offer Add to Collection, and series no longer offer Start Over (movies keep it). Collections are still renamed, emptied and deleted on their page.
+- iPhone & iPad: Search shows nothing before something is typed and says "No Results" only once the server answered what was typed.
+- Apple TV: the profile page no longer changes the profile's name or picture; that is done on a Mac, iPhone, Linux PC or in the browser.
 - Browser: Settings has a sidebar of its categories, as in the Mac app, and another category fades in beside it instead of moving the whole page. A saved setting no longer replays the page's animation.
 - Browser: the page that is open, chosen again, only scrolls to the top; returning to the tab, pictures and the Home hero no longer fade or rise in again; Back shows the earlier page at once; a title's picture loads before its page opens.
 - Browser: Search is centered, shows nothing before something is typed, keeps the last results until new ones arrive and says "Loading…" only when it takes a moment.
@@ -97,6 +105,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Mac: Settings › Updates › Server Updates follows a check or an installation to its end, with a progress bar, "restarting" while the server is out of reach and a lasting answer such as "Done. Aurelia Server … is installed and running." The answer no longer vanishes after a moment.
 - Browser: Settings › Profiles and Devices opened with "SVG is not defined".
 - Browser: posters on Home and on a person's page lifted out of their row and showed a box around title and year.
 - Mac: a title's page stuttered when scrolled past its picture, and the information below flew in from above.
