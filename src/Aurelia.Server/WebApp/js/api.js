@@ -244,6 +244,14 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     serverPower: (options = {}) => request("/api/v1/server/power", options),
     serverTranscoding: (options = {}) => request("/api/v1/server/transcoding", options),
     saveServerPower: (body) => request("/api/v1/server/power", { method: "PUT", body }),
+    // Speech recognition on the server ("server-speech-v1")
+    mediaSpeech: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/speech`, options),
+    startSpeech: (mediaId, body) => request(`/api/v1/media/${id(mediaId)}/speech`, { method: "POST", body }),
+    cancelSpeech: (mediaId) => request(`/api/v1/media/${id(mediaId)}/speech`, { method: "DELETE" }),
+    serverSpeech: (options = {}) => request("/api/v1/server/speech", options),
+    downloadSpeechModel: (name) => request("/api/v1/server/speech/model", { method: "POST", body: { name } }),
+    removeSpeechModel: () => request("/api/v1/server/speech/model", { method: "DELETE" }),
+
     // Intro and credits ("media-segments-v2")
     mediaSegments: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/segments`, options),
     saveMediaSegments: (mediaId, body) => request(`/api/v1/media/${id(mediaId)}/segments`, { method: "PUT", body }),

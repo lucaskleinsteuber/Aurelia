@@ -145,4 +145,6 @@ enum ServerFeatureNames {
   static let adaptiveStreaming = StreamingQuality.feature
   /// The server finds intros and credits and sends their times with the playback ticket.
   static let mediaSegments = "media-segments-v2"
+  /// Subtitles from speech and Sync to Speech written by the server with whisper.cpp.
+  static let serverSpeech = "server-speech-v1"
 }

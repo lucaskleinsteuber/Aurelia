@@ -127,6 +127,9 @@ struct ServerManagementView: View {
       .id("essentials-\(configuration.stored.revision)")
       ServerScrubPreviewsEditor(client: client)
       ServerMediaSegmentsEditor(client: client)
+      if model.libraryCapabilities.contains(ServerFeatureNames.serverSpeech) {
+        ServerSpeechEditor(client: client)
+      }
       ServerVideoConversionCard(client: client)
     }
     ServerAdvancedDisclosure(isExpanded: $showsAdvanced) {

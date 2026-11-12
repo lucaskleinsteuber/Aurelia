@@ -263,6 +263,13 @@ done
 ffmpeg_root=$("$repository_root/scripts/build-ffmpeg-macos.sh" | tail -n 1)
 [[ -x "$ffmpeg_root/ffmpeg" && -x "$ffmpeg_root/ffprobe" ]] || { echo "The Mac ffmpeg build failed." >&2; exit 1; }
 /usr/bin/ditto "$ffmpeg_root" "$candidate/Contents/Resources/Server/ffmpeg"
+# Subtitles from speech use the app's own whisper.cpp (MIT) beside the server; its model is
+# downloaded only when the owner asks for it.
+whisper_root=$("$repository_root/scripts/build-whisper-macos.sh" | tail -n 1)
+[[ -x "$whisper_root/whisper-cli" ]] || { echo "The Mac whisper.cpp build failed." >&2; exit 1; }
+mkdir -p "$candidate/Contents/Resources/Server/whisper"
+/usr/bin/ditto "$whisper_root/whisper-cli" "$candidate/Contents/Resources/Server/whisper/whisper-cli"
+/usr/bin/ditto "$whisper_root/LICENSE" "$candidate/Contents/Resources/Server/whisper/LICENSE"
 # The audio filters are checked by loading VLCKit here, which needs this Mac's own slice and a
 # signature, so the check loads an ad-hoc signed copy of the universal framework before the app's
 # copy is thinned to the build's architecture.
@@ -274,6 +281,7 @@ python3 "$repository_root/scripts/verify-vlc-audio-filters.py" "$vlc_check/VLCKi
 rm -rf "$vlc_check"
 # ffmpeg and VLCKit come universal; only this build's architecture stays in the app.
 for binary in "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
+  "$candidate/Contents/Resources/Server/whisper/whisper-cli" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit"; do
   if [[ "$(/usr/bin/lipo -archs "$binary")" == *" "* ]]; then
     /usr/bin/lipo "$binary" -thin "$xcode_arch" -output "$binary.thin"
@@ -337,6 +345,7 @@ for binary in "$candidate/Contents/MacOS/Aurelia" \
   "$candidate/Contents/Helpers/Aurelia Server Host.app/Contents/MacOS/AureliaServerHost" \
   "$candidate/Contents/Frameworks/VLCKit.framework/Versions/A/VLCKit" \
   "$candidate/Contents/Resources/Server/ffmpeg/ffmpeg" "$candidate/Contents/Resources/Server/ffmpeg/ffprobe" \
+  "$candidate/Contents/Resources/Server/whisper/whisper-cli" \
   "$candidate/Contents/Resources/Server/$server_runtime/Aurelia.Server"; do
   [[ "$(/usr/bin/lipo -archs "$binary")" == "$xcode_arch" ]] \
     || { echo "${binary#$candidate/} is not built for $xcode_arch only." >&2; exit 1; }

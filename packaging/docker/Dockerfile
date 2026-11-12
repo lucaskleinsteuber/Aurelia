@@ -12,6 +12,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl jq openssl libicu76 ffmpeg mesa-va-drivers \
     && if [ "${TARGETARCH:-$(dpkg --print-architecture)}" = amd64 ]; then \
          apt-get install -y --no-install-recommends intel-media-va-driver i965-va-driver; fi \
+    && (apt-get install -y --no-install-recommends whisper.cpp || echo "whisper.cpp is not in this Debian; subtitles from speech stay off.") \
     && rm -rf /var/lib/apt/lists/*
 
 COPY fetch-server.sh /tmp/fetch-server.sh

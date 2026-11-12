@@ -85,6 +85,13 @@ if ! ldconfig -p 2>/dev/null | grep -F 'libicuuc.so' >/dev/null; then
   apt-get install -y "$icu" >/dev/null
 fi
 
+# Subtitles from speech use the distribution's whisper.cpp when it has one (Debian, Ubuntu). It
+# is optional; the model is downloaded later, only when the owner asks for it in Settings.
+if [ ! -x /usr/bin/whisper-cli ] && command -v apt-get >/dev/null 2>&1; then
+  apt-get install -y whisper.cpp >/dev/null 2>&1 \
+    || echo "whisper.cpp isn't available here; subtitles from speech stay off until it is installed." >&2
+fi
+
 # Web browsers play MKV and other files through live conversion with the system's ffmpeg. The
 # server works without it; browsers then play only files they open themselves.
 if [ ! -x /usr/bin/ffmpeg ] || [ ! -x /usr/bin/ffprobe ]; then

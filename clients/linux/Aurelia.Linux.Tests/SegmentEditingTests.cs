@@ -58,3 +58,19 @@ public sealed class SegmentEditingTests
         Assert.Null(SegmentEditing.Remaining(null));
     }
 }
+
+public sealed class SpeechTextTests
+{
+    [Fact]
+    public void ASpeechJobsLineSaysHowFarTheServerIs()
+    {
+        var job = new SpeechJobStatus(Guid.NewGuid(), "Invented Film", SpeechJobKind.Create, "en", null, SpeechJobState.Listening, 0.42, false, null, null);
+        Assert.True(SpeechText.Running(job));
+        Assert.Equal("Listening… 42 % heard", SpeechText.Line(job));
+        Assert.Equal("Paused while someone watches · 42 % heard", SpeechText.Line(job with { PausedForPlayback = true }));
+        Assert.False(SpeechText.Running(job with { State = SpeechJobState.Done }));
+        Assert.Equal("Moved 2.0 s later.", SpeechText.Line(job with { State = SpeechJobState.Done, Message = "Moved 2.0 s later." }));
+        Assert.Equal("488 MB", SpeechText.Bytes(487_601_967));
+        Assert.Equal("1.5 GB", SpeechText.Bytes(1_533_763_059));
+    }
+}

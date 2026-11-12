@@ -14,6 +14,10 @@ network. Media files are only read, never changed.
   to play MKV, AVI and other files the server converts live (see
   [Aurelia in a web browser](WEB_APP.md#watching)). Without it the server works as before and
   browsers play only files they open themselves.
+- Optional: `whisper.cpp`, which the installer adds through `apt` where the distribution has it
+  (Ubuntu 26.04, Debian). With it the server writes subtitles from speech and syncs subtitles to
+  speech; the owner downloads a speech model once in **Settings › Server › Speech Recognition**.
+  Without it nothing else changes.
 - Optional: a video chip. Converting for browsers and for apps set to a streaming quality is much
   faster on Nvidia (NVENC), Intel (Quick Sync or VA-API) or AMD (VA-API) graphics. The installer
   adds the server's user to the `render` and `video` groups and, with `apt`, the VA-API driver

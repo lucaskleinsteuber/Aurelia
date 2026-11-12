@@ -9,7 +9,7 @@ public static class ServerFeatures
     {
         "library-state-v1", "server-readiness-v1", "device-authorization-v1", "artwork-variants-v1",
         "catalog-pages-500-v1", PreviewStreams, WebApp, ProfilePersonalization, AgeLimits,
-        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments,
+        WebPairingCode, CinemaTrailers, MovieNight, YearWrapped, MonthlyWrapped, MediaSegments, ServerSpeech,
     });
 
     /// <summary>
@@ -42,6 +42,12 @@ public static class ServerFeatures
     /// ("cinema-trailers-v1", docs/CLIENT_PROTOCOL.md).
     /// </summary>
     public const string CinemaTrailers = "cinema-trailers-v1";
+
+    /// <summary>
+    /// Subtitles from speech and Sync to Speech on the server with whisper.cpp ("server-speech-v1"):
+    /// GET /api/v1/media/{id}/speech says whether it is installed and has a model.
+    /// </summary>
+    public const string ServerSpeech = "server-speech-v1";
 
     /// <summary>Display names and profile pictures ("profile-personalization-v1").</summary>
     public const string ProfilePersonalization = "profile-personalization-v1";

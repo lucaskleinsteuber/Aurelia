@@ -204,6 +204,7 @@ public sealed class SubtitlePanel : StackPanel
         Children.Add(downloaded);
         Children.Add(search);
         Children.Add(message);
+        if (scope.Client.Library.Supports(ServerFeatures.ServerSpeech)) Children.Add(new SpeechPanel(scope, mediaId, () => LoadAsync()));
         Loading = LoadAsync();
     }
 

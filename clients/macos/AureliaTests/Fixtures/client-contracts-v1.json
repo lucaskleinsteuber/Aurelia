@@ -77,7 +77,8 @@
       "movie-night-v1",
       "year-wrapped-v1",
       "monthly-wrapped-v1",
-      "media-segments-v2"
+      "media-segments-v2",
+      "server-speech-v1"
     ]
   },
   "problem": {

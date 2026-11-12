@@ -98,7 +98,12 @@ and the progress you make is sent to the server the next time it answers.
 
 ## Subtitles from speech
 
-For a title without fitting subtitles, the Mac can write them itself from what is said.
+For a title without fitting subtitles, Aurelia can write them from what is said. With a server
+from 2.11.0 that has whisper.cpp and a speech model (Settings › Server › **Speech Recognition**,
+where the owner downloads Base, Small or Medium once), the **server** listens in the background:
+Create Subtitles from Speech and Sync to Speech then start a job on the server, the editor shows
+its progress and Stop, and the Mac can be closed meanwhile. Without it, the Mac listens itself
+as described below.
 
 1. Open the movie or episode, choose **Edit Metadata** and scroll to **Subtitles**.
 2. Choose **Create Subtitles from Speech…**, pick the sound track and the language spoken in it

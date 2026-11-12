@@ -3,7 +3,7 @@
 // to the server's editor drafts; the crop is saved with the rest of the form.
 
 import { h, clear } from "./dom.js";
-import { cropFrame } from "./logic.js";
+import { cropFrame, speechJobRunning, speechJobText, SPEECH_FEATURE } from "./logic.js";
 
 const PICTURES = [
   { key: "poster", label: "Poster", aspect: 2 / 3 },
@@ -309,11 +309,86 @@ export function createMetadataExtras({ api, app, kit }) {
         }), "primary-button"))));
     });
     context.run(load);
+    const speech = app.state?.server?.capabilities?.includes(SPEECH_FEATURE) ? speechPart(item, context, load) : null;
     return block("Subtitles",
       saved,
       h("div", { class: "editor-path-row" }, field("Find on OpenSubtitles", language), button("Search", search)),
       found,
-      h("p", { class: "muted small" }, "Needs an OpenSubtitles key in Settings › Metadata. Subtitles from speech are made by Aurelia for Mac."));
+      h("p", { class: "muted small" }, speech ? "Needs an OpenSubtitles key in Settings › Metadata." : "Needs an OpenSubtitles key in Settings › Metadata. Subtitles from speech are made by Aurelia for Mac."),
+      speech);
+  }
+
+  /**
+   * Subtitles from Speech on the server: it listens to the title in the background with
+   * whisper.cpp and saves subtitles in the spoken language, or moves existing subtitles onto the
+   * speech as a synced copy. The page follows the job while it runs and can stop it.
+   */
+  function speechPart(item, context, reloadSubtitles) {
+    const area = h("div", { class: "speech-part" }, h("p", { class: "muted small" }, "Checking the server’s speech recognition…"));
+    const spoken = choice(LANGUAGES, (navigator.language ?? "en").slice(0, 2));
+    const tracks = h("select", { class: "select", "aria-label": "Subtitles to sync" });
+    let timer = null;
+    const show = (state) => {
+      clear(area);
+      area.append(h("h4", {}, "Subtitles from Speech"));
+      if (!state.available) {
+        area.append(h("p", { class: "muted small" }, "The server needs whisper.cpp to listen (on Debian or Ubuntu: sudo apt install whisper.cpp). Aurelia for Mac can still write subtitles itself."));
+        return;
+      }
+      if (!state.modelReady) {
+        area.append(h("p", { class: "muted small" }, "Download a speech model first: Settings › Server › Speech Recognition."));
+        return;
+      }
+      const job = state.job;
+      if (speechJobRunning(job)) {
+        area.append(h("progress", { class: "segments-progress", max: "1", value: String(job.progress ?? 0) }),
+          h("p", { class: "muted small", role: "status" }, speechJobText(job)),
+          button("Stop", () => context.run(async () => { await api.cancelSpeech(item.id); show(await api.mediaSpeech(item.id)); }), "secondary-button"));
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+          if (!context.alive()) return;
+          const next = await api.mediaSpeech(item.id).catch(() => null);
+          if (!next || !context.alive()) return;
+          if (!speechJobRunning(next.job)) await reloadSubtitles();
+          show(next);
+        }, 2000);
+        return;
+      }
+      if (job) area.append(h("p", { class: job.state === "failed" ? "error-text small" : "muted small", role: "status" }, speechJobText(job)));
+      area.append(
+        h("p", { class: "muted small" }, "The server listens to the title in the background and keeps only the finished subtitles. This window can be closed meanwhile."),
+        h("div", { class: "editor-path-row" }, field("Spoken Language", spoken),
+          button("Create Subtitles from Speech", () => context.run(async () => show(await api.startSpeech(item.id, { kind: "create", language: spoken.value }))), "primary-button")),
+        h("div", { class: "editor-path-row" }, field("Subtitles to Sync", tracks),
+          button("Sync to Speech", () => context.run(async () => {
+            const index = Number(tracks.value);
+            const track = [...tracks.options].find((option) => Number(option.value) === index);
+            show(await api.startSpeech(item.id, { kind: "sync", language: track?.dataset.language || spoken.value, subtitleIndex: index }));
+          }))),
+        h("p", { class: "muted small" }, "Syncing moves the chosen subtitles so they appear when the words are said, also when they were made for another frame rate or cut. The result is saved as a synced copy; the original stays."));
+    };
+    const loadTracks = async () => {
+      const ticket = await api.createPlayback(item.id);
+      try {
+        const list = (await api.streamSubtitles(ticket.id)) ?? [];
+        clear(tracks);
+        for (const track of list.filter((entry) => entry.supported)) {
+          const option = h("option", { value: String(track.index) }, [track.title || track.language || "Subtitles", track.language].filter(Boolean).join(" · "));
+          option.dataset.language = (track.language ?? "").slice(0, 2);
+          tracks.append(option);
+        }
+        if (!tracks.options.length) tracks.append(h("option", { value: "", disabled: true }, "No subtitles to sync"));
+      } finally {
+        api.revokePlayback(ticket.id).catch(() => {});
+      }
+    };
+    context.run(async () => {
+      const state = await api.mediaSpeech(item.id, { signal: context.signal });
+      if (!context.alive()) return;
+      show(state);
+      if (state.available && state.modelReady) await loadTracks().catch(() => {});
+    });
+    return area;
   }
 
   // MARK: Removing

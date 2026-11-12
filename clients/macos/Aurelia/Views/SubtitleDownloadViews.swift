@@ -215,11 +215,19 @@ struct SubtitleDownloadPanel: View {
   @State private var speechLanguages: [String] = []
   @State private var syncTracks: [LiveSubtitleTrack] = []
   @State private var syncTrack = -1
+  /// The server's own speech recognition for this title ("server-speech-v1"), when it has one.
+  @State private var serverSpeech: MediaSpeechInfo?
 
-  private var syncPossible: Bool { model.libraryCapabilities.contains("subtitle-sync-v1") }
+  /// The server listens when it has whisper.cpp and a model; this Mac's recognizer is the fallback.
+  private var serverListens: Bool { serverSpeech?.available == true && serverSpeech?.modelReady == true }
+
+  private var syncPossible: Bool {
+    serverListens || model.libraryCapabilities.contains("subtitle-sync-v1")
+  }
 
   private var speechPossible: Bool {
-    model.libraryCapabilities.contains("speech-subtitles-v1") && SpeechRecognizer.isAvailable
+    serverListens
+      || (model.libraryCapabilities.contains("speech-subtitles-v1") && SpeechRecognizer.isAvailable)
   }
 
   var body: some View {
@@ -294,6 +302,15 @@ struct SubtitleDownloadPanel: View {
     .onChange(of: speech.job(mediaId)?.phase) { _, phase in
       if case .saved = phase { Task { await load() } }
     }
+    .task(id: serverSpeech?.job?.isRunning == true) {
+      // Follows the server's job while it runs; its subtitles appear in the list when it is done.
+      while serverSpeech?.job?.isRunning == true, !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(2))
+        guard let client, !Task.isCancelled else { return }
+        serverSpeech = try? await client.mediaSpeech(mediaId: mediaId)
+        if serverSpeech?.job?.isRunning != true { await load() }
+      }
+    }
   }
 
   /// Subtitles written by this Mac from what is said in a sound track.
@@ -306,7 +323,26 @@ struct SubtitleDownloadPanel: View {
           : "This Mac listens to a sound track and writes subtitles from what is said. The sound is read from the server and never stored; the subtitles are kept on the server for every device."
       )
       .font(.caption).foregroundStyle(.secondary)
-      if let job = speech.job(mediaId) {
+      if serverListens {
+        Text("The server listens, in the background; this window can be closed meanwhile.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      if let job = serverSpeech?.job, job.isRunning {
+        ServerSpeechJobRow(job: job) { Task { await cancelServer() } }
+      } else if let job = serverSpeech?.job, speechTracks == nil, job.state != .cancelled {
+        HStack {
+          Label(
+            job.message ?? (job.state == .done ? "Saved." : "Stopped."),
+            systemImage: job.state == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle")
+            .foregroundStyle(job.state == .failed ? .orange : .primary)
+          Spacer()
+          Button("Done") { Task { await cancelServer() } }
+        }
+        Button(
+          syncPossible ? "Create or Sync Subtitles from Speech…" : "Create Subtitles from Speech…"
+        ) { Task { await loadSpeechTracks() } }
+          .disabled(working != nil)
+      } else if let job = speech.job(mediaId) {
         speechJob(job)
       } else if let tracks = speechTracks {
         if tracks.isEmpty {
@@ -445,7 +481,9 @@ struct SubtitleDownloadPanel: View {
           .filter(\.supported)
         syncTrack = syncTracks.first?.index ?? -1
       }
-      speechLanguages = SpeechLanguages.choices(await SpeechRecognizer.supportedLocales())
+      speechLanguages =
+        serverListens
+        ? SubtitleLanguages.choices : SpeechLanguages.choices(await SpeechRecognizer.supportedLocales())
       let chosen = tracks.first(where: \.isDefault) ?? tracks.first
       speechTrack = chosen?.index ?? 0
       let preferred = SpeechLanguages.code(forTrack: chosen?.language)
@@ -457,6 +495,10 @@ struct SubtitleDownloadPanel: View {
   }
 
   private func startSpeech() {
+    if serverListens {
+      startOnServer(StartServerSpeechRequest(kind: .create, language: speechLanguage, audioIndex: speechTrack))
+      return
+    }
     guard let profile = model.profile else { return }
     speech.start(
       mediaId: mediaId, track: speechTrack, language: speechLanguage, profile: profile,
@@ -465,14 +507,41 @@ struct SubtitleDownloadPanel: View {
   }
 
   private func startSync() {
-    guard let profile = model.profile, let track = syncTracks.first(where: { $0.index == syncTrack })
-    else { return }
+    guard let track = syncTracks.first(where: { $0.index == syncTrack }) else { return }
     // Saved in the subtitles' own language; when they don't say, in the spoken one.
     let language = SpeechLanguages.code(forTrack: track.language) ?? speechLanguage
+    if serverListens {
+      startOnServer(
+        StartServerSpeechRequest(
+          kind: .sync, language: language, audioIndex: speechTrack, subtitleIndex: track.index))
+      return
+    }
+    guard let profile = model.profile else { return }
     speech.sync(
       mediaId: mediaId, subtitles: track, language: language, track: speechTrack,
       spoken: speechLanguage, profile: profile, save: syncSaver(language: language))
     speechTracks = nil
+  }
+
+  private func startOnServer(_ request: StartServerSpeechRequest) {
+    guard let client else { return }
+    speechTracks = nil
+    Task {
+      await perform("speech") {
+        serverSpeech = try await model.currentAdministration {
+          try await client.startServerSpeech(mediaId: mediaId, request)
+        }
+      }
+    }
+  }
+
+  /// Stops a running server job, or clears a finished one's message.
+  private func cancelServer() async {
+    guard let client else { return }
+    await perform("speech") {
+      try await model.currentAdministration { try await client.cancelServerSpeech(mediaId: mediaId) }
+      serverSpeech = try await client.mediaSpeech(mediaId: mediaId)
+    }
   }
 
   private func syncSaver(language: String) -> @MainActor (String) async throws -> DownloadedSubtitle {
@@ -511,6 +580,9 @@ struct SubtitleDownloadPanel: View {
       downloaded = try await client.downloadedSubtitles(mediaId: mediaId)
     } catch {
       errorText = error.localizedDescription
+    }
+    if model.libraryCapabilities.contains(ServerFeatureNames.serverSpeech) {
+      serverSpeech = try? await client.mediaSpeech(mediaId: mediaId)
     }
   }
 

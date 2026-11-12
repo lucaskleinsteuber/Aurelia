@@ -52,6 +52,13 @@ These rules apply to every task in this repository.
   episode's last minutes (owner, 11.11.2026). Audio, pictures and fingerprints exist only in
   memory. Only the timestamps are stored, in the database, never audio, images, fingerprints or
   files. The media file is only read.
+- Speech recognition (owner, 12.11.2026): the server may write subtitles from speech and sync
+  subtitles to speech with whisper.cpp, run like ffmpeg (no shell, low priority, pausing while
+  anyone watches). Sound and recognized words exist only in memory and reach whisper.cpp through
+  its standard input; only the finished subtitles are stored, beside downloaded ones. The speech
+  model is downloaded once when the owner asks for it and kept in the server's data folder
+  (`SpeechModels`), with its size shown and removable. Linux and Docker use the distribution's
+  whisper.cpp; the Mac app ships its own MIT-licensed build.
 - Missing or offline media must retain identity, metadata, favorites, progress,
   and collection membership unless an administrator explicitly removes it.
 - Aurelia Classic, its app, database,

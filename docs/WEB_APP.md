@@ -206,6 +206,12 @@ none. Every button says what it does when pointed at. Settings › Server › **
 shows the detection's progress, the episode it is on, the time left and each series with
 Re-analyze, and turns detection and the pictures on or off.
 
+With a server that has whisper.cpp and a speech model (Settings › Server › **Speech
+Recognition**, where the owner downloads one), Edit Metadata › Subtitles offers **Create
+Subtitles from Speech** in the spoken language and **Sync to Speech** for one of the title's
+subtitle tracks. The server does the listening in the background; the page shows how far it is
+and can stop it.
+
 Name and Picture crops a chosen photo in the browser: drag the circle and zoom, then Use Photo
 draws a square JPEG that is uploaded on Save.
 

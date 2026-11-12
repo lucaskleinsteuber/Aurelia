@@ -33,6 +33,21 @@ public sealed partial class ManagementClient
 
     public Task<TranscodingStatusResponse> TranscodingAsync() => GetAsync<TranscodingStatusResponse>("/api/v1/server/transcoding");
 
+    // Speech recognition on the server ("server-speech-v1").
+    public Task<MediaSpeechResponse> MediaSpeechAsync(Guid mediaId) => GetAsync<MediaSpeechResponse>($"/api/v1/media/{mediaId}/speech");
+
+    public Task<MediaSpeechResponse> StartSpeechAsync(Guid mediaId, StartSpeechJobRequest request) =>
+        SendAsync<MediaSpeechResponse>(HttpMethod.Post, $"/api/v1/media/{mediaId}/speech", request);
+
+    public Task CancelSpeechAsync(Guid mediaId) => SendAsync<JsonNode>(HttpMethod.Delete, $"/api/v1/media/{mediaId}/speech", null);
+
+    public Task<ServerSpeechSettings> ServerSpeechAsync() => GetAsync<ServerSpeechSettings>("/api/v1/server/speech");
+
+    public Task<ServerSpeechSettings> DownloadSpeechModelAsync(string name) =>
+        SendAsync<ServerSpeechSettings>(HttpMethod.Post, "/api/v1/server/speech/model", new DownloadSpeechModelRequest(name));
+
+    public Task<ServerSpeechSettings> RemoveSpeechModelAsync() => SendAsync<ServerSpeechSettings>(HttpMethod.Delete, "/api/v1/server/speech/model", null);
+
     // Intro and credits ("media-segments-v2").
     public Task<MediaSegmentsResponse> MediaSegmentsAsync(Guid mediaId) => GetAsync<MediaSegmentsResponse>($"/api/v1/media/{mediaId}/segments");
 

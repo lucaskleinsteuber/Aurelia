@@ -516,3 +516,12 @@ test("the detection's progress and time left read like the Mac", () => {
   assert.equal(logic.segmentRemaining(600), "About 10 min left");
   assert.equal(logic.segmentRemaining(null), "");
 });
+
+test("a speech job's line says how far the server is", () => {
+  assert.equal(logic.speechJobRunning({ state: "listening" }), true);
+  assert.equal(logic.speechJobRunning({ state: "done" }), false);
+  assert.equal(logic.speechJobText({ state: "listening", progress: 0.42 }), "Listening… 42 % heard");
+  assert.equal(logic.speechJobText({ state: "listening", progress: 0.42, pausedForPlayback: true }), "Paused while someone watches · 42 % heard");
+  assert.equal(logic.speechJobText({ state: "done", message: "Moved 2.0 s later." }), "Moved 2.0 s later.");
+  assert.equal(logic.speechJobText(null), "");
+});

@@ -1737,3 +1737,62 @@ enum WrappedStory {
     forward ? (index + 1 < count ? index + 1 : nil) : max(0, index - 1)
   }
 }
+
+// MARK: Speech recognition on the server ("server-speech-v1")
+
+struct ServerSpeechJob: Codable, Equatable, Sendable {
+  enum Kind: String, Codable, Sendable { case create, sync }
+  enum State: String, Codable, Sendable {
+    case waiting, listening, saving, done, alreadyInSync, failed, cancelled
+  }
+
+  let mediaId: UUID
+  let title: String
+  let kind: Kind
+  let language: String
+  let subtitleIndex: Int?
+  let state: State
+  let progress: Double
+  let pausedForPlayback: Bool
+  let message: String?
+  let subtitleId: UUID?
+
+  var isRunning: Bool { state == .waiting || state == .listening || state == .saving }
+}
+
+struct MediaSpeechInfo: Codable, Equatable, Sendable {
+  let available: Bool
+  let modelReady: Bool
+  let job: ServerSpeechJob?
+}
+
+struct StartServerSpeechRequest: Codable, Equatable, Sendable {
+  let kind: ServerSpeechJob.Kind
+  let language: String
+  var audioIndex: Int? = nil
+  var subtitleIndex: Int? = nil
+}
+
+struct SpeechModelChoice: Codable, Equatable, Sendable, Identifiable {
+  let name: String
+  let label: String
+  let bytes: Int64
+  let description: String
+  var id: String { name }
+}
+
+struct SpeechModelDownload: Codable, Equatable, Sendable {
+  let name: String
+  let receivedBytes: Int64
+  let totalBytes: Int64
+}
+
+struct ServerSpeechSettings: Codable, Equatable, Sendable {
+  let available: Bool
+  let model: String?
+  let modelBytes: Int64
+  let downloading: SpeechModelDownload?
+  let downloadError: String?
+  let models: [SpeechModelChoice]
+  let jobs: [ServerSpeechJob]
+}

@@ -1644,6 +1644,30 @@ export function setupProblem({ code, ownerName, password, repeat }) {
   return null;
 }
 
+// MARK: Speech recognition on the server
+
+export const SPEECH_FEATURE = "server-speech-v1";
+
+/** Whether a speech job still runs. */
+export function speechJobRunning(job) {
+  return ["waiting", "listening", "saving"].includes(job?.state);
+}
+
+/** One line about a speech job for the person following it. */
+export function speechJobText(job) {
+  if (!job) return "";
+  const percent = `${Math.round((job.progress ?? 0) * 100)} %`;
+  switch (job.state) {
+    case "waiting": return "Waiting for the server…";
+    case "listening": return job.pausedForPlayback ? `Paused while someone watches · ${percent} heard` : `Listening… ${percent} heard`;
+    case "saving": return "Saving the subtitles…";
+    case "done": return job.message ?? "Saved.";
+    case "alreadyInSync": return job.message ?? "These subtitles already fit the speech.";
+    case "failed": return job.message ?? "The server couldn’t listen to this title.";
+    default: return "Stopped.";
+  }
+}
+
 // MARK: Intro and credits (as on the Mac)
 
 /** "1:24" for a segment time field (whole seconds), "" for none. */

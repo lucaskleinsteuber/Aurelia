@@ -6,7 +6,8 @@ updates from the app.
 
 The image is built on your own computer from the newest stable server release on GitHub; the
 download is checked against the release's `SHA256SUMS` and its minisign signature. ffmpeg, which lets browsers play MKV and
-other files, comes from Debian. Intel/AMD (amd64) and ARM (arm64) are supported.
+other files, comes from Debian, and so does whisper.cpp for subtitles from speech where Debian has it (its model is
+downloaded into `/data` only when the owner asks). Intel/AMD (amd64) and ARM (arm64) are supported.
 
 ## Start
 

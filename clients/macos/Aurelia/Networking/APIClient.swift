@@ -1420,6 +1420,38 @@ struct APIClient: Sendable {
     return SpeechAudioReader(request: request, fingerprint: profile.publicKeyFingerprint)
   }
 
+  /// Whether the server can listen to this title ("server-speech-v1") and its job, if any.
+  func mediaSpeech(mediaId: UUID) async throws -> MediaSpeechInfo {
+    try await get("/api/v1/media/\(mediaId.uuidString.lowercased())/speech")
+  }
+
+  /// Has the server write subtitles from speech, or sync a subtitle track to it, in the background.
+  func startServerSpeech(mediaId: UUID, _ request: StartServerSpeechRequest) async throws -> MediaSpeechInfo {
+    let data = try await perform(
+      path: "/api/v1/media/\(mediaId.uuidString.lowercased())/speech", method: "POST",
+      body: try JSONEncoder().encode(request))
+    return try Self.decode(MediaSpeechInfo.self, from: data)
+  }
+
+  func cancelServerSpeech(mediaId: UUID) async throws {
+    _ = try await perform(path: "/api/v1/media/\(mediaId.uuidString.lowercased())/speech", method: "DELETE")
+  }
+
+  /// The owner's Speech Recognition settings: whisper.cpp, the model and the jobs.
+  func serverSpeech() async throws -> ServerSpeechSettings { try await get("/api/v1/server/speech") }
+
+  func downloadSpeechModel(_ name: String) async throws -> ServerSpeechSettings {
+    let data = try await perform(
+      path: "/api/v1/server/speech/model", method: "POST",
+      body: try JSONEncoder().encode(["name": name]))
+    return try Self.decode(ServerSpeechSettings.self, from: data)
+  }
+
+  func removeSpeechModel() async throws -> ServerSpeechSettings {
+    let data = try await perform(path: "/api/v1/server/speech/model", method: "DELETE")
+    return try Self.decode(ServerSpeechSettings.self, from: data)
+  }
+
   /// Keeps subtitles written from speech on the server, in place of earlier ones in that language.
   func saveSpeechSubtitles(mediaId: UUID, language: String, subRip: String) async throws
     -> DownloadedSubtitle

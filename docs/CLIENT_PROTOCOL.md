@@ -334,6 +334,34 @@ does no recognition itself.
   original (embedded, beside the video or downloaded) as it is. The device reads the original
   as WebVTT through `GET {streamPath}/subtitles/{index}`.
 
+### Speech recognition on the server
+
+A server from 2.11.0 reports `server-speech-v1`: it writes subtitles from speech and syncs
+subtitles to speech itself, with whisper.cpp beside it (the Mac app's own build, or the
+distribution's `whisper.cpp` package on Linux and in Docker). Sound is decoded by ffmpeg and
+handed to whisper.cpp through its standard input in stretches of about ten minutes cut at a quiet
+moment; sound and words stay in memory, and only the finished subtitles are stored, as
+"From Speech" or "Synced" like those above. One title is examined at a time, at low priority,
+pausing while anyone watches.
+
+- `GET /api/v1/media/{id}/speech` (administrators) answers `{available, modelReady, job}`.
+  `available` says whether whisper.cpp is installed, `modelReady` whether the owner downloaded a
+  model. `job` is `{mediaId, title, kind: create|sync, language, subtitleIndex, state, progress,
+  pausedForPlayback, message, subtitleId}` with `state` one of `waiting`, `listening`, `saving`,
+  `done`, `alreadyInSync`, `failed` and `cancelled`.
+- `POST /api/v1/media/{id}/speech` starts a job: `{kind: "create", language, audioIndex?}` writes
+  subtitles in the spoken `language`; `{kind: "sync", language, subtitleIndex, audioIndex?}`
+  moves the subtitle track `subtitleIndex` (numbered as in `{streamPath}/subtitles`) onto the
+  speech, with offsets up to ten minutes, 23.976/24/25 frames per second and parts of another
+  cut, and saves it as a synced copy in `language`. Subtitles that already fit are left alone
+  (`alreadyInSync`); subtitles that fit nowhere are refused (`failed`, nothing saved). Without
+  whisper.cpp or a model the answer is `409`.
+- `DELETE /api/v1/media/{id}/speech` stops a running job, or clears a finished one.
+- The owner reads `GET /api/v1/server/speech` (`{available, model, modelBytes, downloading,
+  downloadError, models, jobs}`), downloads a model with `POST /api/v1/server/speech/model`
+  (`{name: "base" | "small" | "medium"}`; one model is kept, in the data folder's
+  `SpeechModels`) and removes it with `DELETE /api/v1/server/speech/model`.
+
 ## Intro and credits
 
 A server from 2.8.0 reports `media-segments-v2`. It finds the intro and the credits of episodes

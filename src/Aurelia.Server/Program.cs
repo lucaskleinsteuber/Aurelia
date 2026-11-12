@@ -151,6 +151,11 @@ builder.Services.AddHostedService<Aurelia.Server.Services.Hls.HlsSessionSweeper>
 builder.Services.AddSingleton<ScrubPreviewService>();
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<ScrubPreviewService>());
 builder.Services.AddSingleton<SegmentAudioReader>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Speech.SpeechModelStore>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Speech.ISpeechRecognizer, Aurelia.Server.Services.Speech.WhisperRecognizer>();
+builder.Services.AddSingleton<Aurelia.Server.Services.Speech.SpeechJobService>();
+if (!builder.Environment.IsEnvironment("Testing"))
+    builder.Services.AddHostedService(services => services.GetRequiredService<Aurelia.Server.Services.Speech.SpeechJobService>());
 builder.Services.AddSingleton<SegmentDetectionService>();
 // Compares episodes' sound for intros and credits in the background; tests drive it explicitly.
 if (!builder.Environment.IsEnvironment("Testing")) builder.Services.AddHostedService(services => services.GetRequiredService<SegmentDetectionService>());
@@ -451,6 +456,7 @@ app.MapMediaSegments();
 app.MapRemotePlayback();
 app.MapSubtitleDownloads();
 app.MapSpeechSubtitles();
+app.MapServerSpeech();
 app.MapWatchTogether();
 app.MapMovieNight();
 

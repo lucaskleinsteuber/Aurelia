@@ -15,6 +15,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Server: subtitles from speech and Sync to Speech on the server, with whisper.cpp (the Mac app's own build; on Linux and in Docker the distribution's `whisper.cpp`). The owner downloads a speech model once in Settings › Server › Speech Recognition (Base, Small or Medium, kept in the data folder with its size and removable). Titles are examined one at a time in the background, pausing while anyone watches; sound stays in memory and only the finished subtitles are kept.
+- Mac, browser and Linux: Edit Metadata › Subtitles has Create Subtitles from Speech and Sync to Speech through the server, with its progress and Stop; the Mac's own recognizer stays as the fallback for a server without it.
 - Browser and Linux: Edit Metadata › Intro and Credits with typed corrections, Reset to Detected, Re-analyze and the trim editor (picture, film strip, yellow handles, Play Selection, Mute, nudges, No Intro/No Credits, every button explained), and the server settings' Intros and Credits with progress, the current episode, the time left, each series with Re-analyze and the pictures switch.
 - Apple TV: Watch History, Statistics and Wrapped on the profile page, as on the iPhone: the history by day with removing and clearing, watch time, streaks, a chart of the last weeks, top titles and genres, a year in review and Wrapped as slides driven by the remote.
 - iPhone & iPad: chapters as a menu and marks on the timeline, scene notes in the player (add, edit, delete, shown at their moment), Movie Night's *Tonight's program* card with era and length, collections to create, rename, fill and delete, and a crop for an own profile photo.
