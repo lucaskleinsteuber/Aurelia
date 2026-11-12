@@ -10,7 +10,7 @@ import {
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
   rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES, INTRO_SKIPPING_CHOICES,
   TOP_BAR_SECTIONS, moveSection, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess,
-  powerModesFor, appHostName
+  powerModesFor, appHostName, SERVER_POLICY_FIELDS, serverPolicyDraft
 } from "./logic.js";
 import { loadPreferences, savePreferences } from "./player.js";
 import { applyAppearance, loadGeneral, saveGeneral } from "./preferences.js";
@@ -42,9 +42,9 @@ const CATEGORIES = [
 export function createSettings(app) {
   const { api, state } = app;
   const canManage = () => state.profile?.role === "owner" || state.profile?.role === "admin";
-  const editors = createManagementEditors({ ...app, onSaved: () => app.navigate(state.route, { replace: true }),
+  const editors = createManagementEditors({ ...app, onSaved: () => app.navigate(state.route, { replace: true, quiet: true }),
     chooseServerFolder: (onPick, start) => admin.chooseServerFolder(onPick, start),
-    reviewImport: (library) => importPreview.open(library, { onDone: () => app.navigate(state.route, { replace: true }) }) });
+    reviewImport: (library) => importPreview.open(library, { onDone: () => app.navigate(state.route, { replace: true, quiet: true }) }) });
   const admin = createAdminTools({ api, app, editors });
   const importPreview = createImportPreview({ api, app, kit: editors.kit });
   let updatesView;
@@ -103,7 +103,7 @@ export function createSettings(app) {
     const availableCategories = CATEGORIES.filter((c) => (!c.adminOnly || canManage()) && (!c.ownerOnly || owner)
       && (!c.needsPower || powerAvailable));
 
-    const refresh = () => app.navigate(state.route, { replace: true });
+    const refresh = () => app.navigate(state.route, { replace: true, quiet: true });
 
     if (sections?.updates?.available && !updatesView) {
       updatesView = createServerUpdates({
@@ -147,23 +147,30 @@ export function createSettings(app) {
         }, icon(symbol, { size: 18 }), label)));
 
     const contentContainer = h("div", { class: "settings-content" });
+    const heading = h("h1", { class: "settings-heading" });
+    const pageLabel = availableCategories.find((category) => category.id === page)?.label ?? "General";
 
     function renderContent() {
       clear(contentContainer);
+      nav.className = searchQuery ? "settings-tabs searching" : "settings-tabs";
       if (searchQuery) {
+        heading.textContent = "Search Results";
         contentContainer.append(searchResultsPage(sections, refresh));
       } else {
+        heading.textContent = pageLabel;
         contentContainer.append(categoryPage(page, sections, refresh));
       }
     }
 
     renderContent();
 
+    // As in the Mac app's Settings window: the categories in a sidebar, the chosen page beside it.
     return h("div", { class: "settings page-enter" },
-      h("div", { class: "page-header" }, h("h1", {}, "Settings")),
-      searchWrap,
-      nav,
-      contentContainer);
+      h("aside", { class: "settings-sidebar" },
+        h("div", { class: "settings-title" }, "Settings"),
+        searchWrap,
+        nav),
+      h("div", { class: "settings-main" }, heading, contentContainer));
   }
 
   function section(title, symbol, description, ...children) {
@@ -330,6 +337,8 @@ export function createSettings(app) {
         row("Version", value(server.version ? `${server.version}` : "—"), "The same as the server's version."),
         row("Server", value(server.name ?? "Aurelia")),
         row("Address", value(location.origin)),
+        row("Keep Profile Open", toggle(general.keepProfileOpen, (on) => saveG({ keepProfileOpen: on }), "Keep Profile Open"),
+          "Off: closing this tab or the browser locks the profile, and its PIN is asked again. On: the profile stays open in this browser until you switch or sign out."),
         row("Live Conversion", value(server.capabilities?.includes("live-conversion-v1") ? "Available" : "Not available"),
           "Lets this browser play MKV and other formats the server converts while playing.")),
 
@@ -693,11 +702,52 @@ export function createSettings(app) {
         sections?.capabilities && !sections.capabilities.nativeHostOperations && !sections.capabilities.linuxPackage
           ? h("p", { class: "muted small" }, "Restoring swaps the server’s data, which a server hosted by Aurelia for Mac or installed from the Linux package can do. Encrypted backups from here can be restored there.") : null) : null,
 
+      permissions.owner && sections?.policy?.stored ? serverPolicySection(sections.policy.stored, refresh) : null,
+
       permissions.owner ? section("Maintenance", "gear", "Restart the server or save a report of recent events for troubleshooting. The report holds no passwords, tokens or media paths.",
         h("div", { class: "button-row" },
           openButton("Restart Server…", () => admin.restart(refresh)),
           openButton("Download Diagnostics", () => admin.downloadDiagnostics()))) : null,
     ].filter(Boolean);
+  }
+
+  /**
+   * The Mac app's Sign-In & Streaming Limits, Library Maintenance, Backup and Diagnostics
+   * settings, in one place with one Save.
+   */
+  function serverPolicySection(stored, refresh) {
+    const changes = {};
+    const message = h("p", { class: "muted small", role: "status" });
+    const save = h("button", { class: "primary-button", disabled: true }, "Save Server Settings");
+    const check = () => {
+      const { draft, problem } = serverPolicyDraft(stored, changes);
+      const changed = Object.keys(draft).some((key) => draft[key] !== stored[key]);
+      message.textContent = problem ?? "";
+      message.className = problem ? "error-text" : "muted small";
+      save.disabled = Boolean(problem) || !changed;
+    };
+    const number = (field) => {
+      const control = h("input", { class: "text-field number-field", type: "number", inputmode: "numeric",
+        min: String(field.min), max: String(field.max), step: String(field.step ?? 1), value: String(stored[field.key]), "aria-label": field.label });
+      control.addEventListener("input", () => { changes[field.key] = control.value; check(); });
+      return row(field.label, h("div", { class: "inline-control" }, control, h("span", { class: "muted small" }, field.unit)));
+    };
+    const group = (name) => SERVER_POLICY_FIELDS.filter((field) => field.group === name).map(number);
+    const flag = (key, label, note) => row(label, toggle(stored[key] !== false, (on) => { changes[key] = on; check(); }, label), note);
+    save.addEventListener("click", () => act(save, async () => {
+      const { draft, problem } = serverPolicyDraft(stored, changes);
+      if (problem) throw new Error(problem);
+      await api.saveServerSettings(draft);
+    }, "Server settings saved.", refresh));
+    return section("Server Settings", "gear", "Sign-in, streaming, library maintenance, backups and diagnostics. Maintenance hours use the server's local time.",
+      h("h3", { class: "settings-subheading" }, "Sign-In & Streaming Limits"), ...group("limits"),
+      h("p", { class: "muted small" }, "Existing sessions keep their expiry. Removing a device stops its streams at once."),
+      h("h3", { class: "settings-subheading" }, "Library Maintenance"),
+      flag("monitoringEnabled", "Notice New and Removed Files Automatically"), ...group("maintenance"),
+      h("h3", { class: "settings-subheading" }, "Backups"),
+      flag("automaticBackupsEnabled", "Automatic Backups"), ...group("backups"),
+      h("h3", { class: "settings-subheading" }, "Diagnostics"), ...group("events"),
+      message, h("div", { class: "button-row" }, save));
   }
 
   function videoConversionSection(summary, hint) {

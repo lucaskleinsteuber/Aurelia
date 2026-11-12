@@ -543,3 +543,18 @@ test("a speech job's line says how far the server is", () => {
   assert.equal(logic.speechJobText({ state: "done", message: "Moved 2.0 s later." }), "Moved 2.0 s later.");
   assert.equal(logic.speechJobText(null), "");
 });
+
+test("the server policy keeps numbers in range and refuses impossible combinations", async () => {
+  const { serverPolicyDraft } = await import("../../src/Aurelia.Server/WebApp/js/logic.js");
+  const stored = { deviceSessionDays: 30, globalStreamLimit: 8, userStreamLimit: 4, reconciliationMinutes: 360, maintenanceStartHour: 0,
+    maintenanceEndHour: 24, jobQueueLimit: 1000, backupIntervalHours: 24, dailyBackupsRetained: 7, weeklyBackupsRetained: 4,
+    eventRetentionDays: 30, maximumEvents: 1000, revision: 5 };
+  const raised = serverPolicyDraft(stored, { deviceSessionDays: "900", reconciliationMinutes: "3" });
+  assert.equal(raised.draft.deviceSessionDays, 365);
+  assert.equal(raised.draft.reconciliationMinutes, 15);
+  assert.equal(raised.draft.revision, 5);
+  assert.equal(raised.problem, null);
+  assert.match(serverPolicyDraft(stored, { userStreamLimit: 10, globalStreamLimit: 6 }).problem, /per profile/);
+  assert.match(serverPolicyDraft(stored, { maintenanceStartHour: 5, maintenanceEndHour: 5 }).problem, /different hours/);
+  assert.equal(serverPolicyDraft(stored, { maximumEvents: "abc" }).draft.maximumEvents, 1000);
+});

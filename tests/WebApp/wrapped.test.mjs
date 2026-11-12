@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ACCENTS, accentFor, countTarget, countValue, stepFrom, readyMonth, monthIsNew } from "../../src/Aurelia.Server/WebApp/js/wrapped.js";
+import { ACCENTS, accentFor, countTarget, countValue, stepFrom, readyMonth, readyMonths, wrappedYears, monthIsNew } from "../../src/Aurelia.Server/WebApp/js/wrapped.js";
 
 // Wrapped's rules in the browser; the slides themselves come from the server.
 test("every color the server names has a field and readable ink", () => {
@@ -36,4 +36,13 @@ test("a month is ready from the 2nd of the next month, and new on Home for a wee
   assert.equal(monthIsNew(new Date(2026, 10, 2)), true);
   assert.equal(monthIsNew(new Date(2026, 10, 8)), true);
   assert.equal(monthIsNew(new Date(2026, 10, 9)), false);
+});
+
+test("past months of Wrapped are listed by year", () => {
+  const today = new Date(2026, 10, 12);
+  assert.deepEqual(readyMonths(2026, today), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(readyMonths(2025, today).length, 12);
+  assert.deepEqual(readyMonths(2027, today), []);
+  assert.deepEqual(wrappedYears([2024, 2026, 2027], today), [2026, 2024]);
+  assert.deepEqual(wrappedYears([], today), [2026]);
 });

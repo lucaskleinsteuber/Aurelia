@@ -50,7 +50,7 @@ test("a check polls only status every two seconds and keeps installed/newest ver
   await f.tick(); await f.tick();
   assert.deepEqual(f.calls.map((call) => call[0]), ["check", "status", "status"]);
   assert.deepEqual(f.delays, [2000, 2000]); assert.equal(f.timers.size, 0);
-  assert.match(f.component.element.textContent, /Update check complete\. The server is up to date/);
+  assert.match(f.component.element.textContent, /No new version found\. The server is up to date/);
   assert.equal(button(f.component.element, "Check for Updates").disabled, false);
 });
 
@@ -81,7 +81,7 @@ test("restart outages retain progress and success reports the installed version 
 
 test("idle without a changed installed version is not reported as an installed update", async (t) => {
   const f = fixture(t, { initialStatus: status("installing") });
-  await f.tick(); assert.match(f.component.element.textContent, /installed version has not changed/);
+  await f.tick(); assert.match(f.component.element.textContent, /The update was not installed/);
   assert.doesNotMatch(f.component.element.textContent, /now running/); assert.equal(f.timers.size, 0);
 });
 

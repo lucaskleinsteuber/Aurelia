@@ -44,7 +44,6 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
   let dialog;
   let operation;
   let installedBefore;
-  let checkedBefore;
   let remainingPolls = 0;
   const current = () => !lifetime.signal.aborted && isCurrent();
   const row = (label, value) => h("div", { class: "settings-row" }, h("div", { class: "settings-label" }, label), h("span", { class: "settings-value" }, value ?? "—"));
@@ -77,18 +76,16 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
       remainingPolls = 480;
     } else if (next.state === "checking" && !operation) {
       operation = "check";
-      checkedBefore = status?.checkedAt;
       remainingPolls = 90;
     }
     if (operation === "install" && next.state === "idle") {
       result = next.installed !== installedBefore
         ? `The server is now running ${next.installed}.`
-        : "The server is responding, but the installed version has not changed. Check for updates before trying again.";
+        : `The server is back, still on ${next.installed}. The update was not installed; check for updates and try again.`;
       operation = undefined;
     } else if (operation === "check" && next.state === "idle") {
-      result = next.checkedAt && next.checkedAt !== checkedBefore
-        ? next.updateAvailable ? "Update check complete. A new version is ready." : "Update check complete. The server is up to date."
-        : "The server is responding, but no new update-check result was reported. Check for updates again.";
+      // The answer is the status itself: a new version, or none.
+      result = next.updateAvailable ? `Aurelia Server ${next.newest ?? "update"} is ready to install.` : `No new version found. The server is up to date (${next.installed}).`;
       operation = undefined;
     }
     if (next.state === "failed") operation = undefined;
@@ -144,7 +141,6 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
     working = true;
     operation = kind;
     installedBefore = status?.installed;
-    checkedBefore = status?.checkedAt;
     remainingPolls = kind === "install" ? 480 : 90;
     message = result = "";
     render();
@@ -203,7 +199,6 @@ export function createServerUpdates({ api, initial, isCurrent = () => true, onLo
     if (busy(status)) {
       operation = status.state === "installing" ? "install" : "check";
       installedBefore = status.installed;
-      checkedBefore = status.checkedAt;
       remainingPolls = operation === "install" ? 480 : 90;
     }
   } catch (error) { message = error.message; }

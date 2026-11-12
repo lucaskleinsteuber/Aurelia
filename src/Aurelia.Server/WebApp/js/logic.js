@@ -39,6 +39,7 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
     if (typeof api.metadataProvider === "function") readers.metadataProvider = optional(() => api.metadataProvider({ signal }));
     if (typeof api.subtitleProvider === "function") readers.subtitleProvider = optional(() => api.subtitleProvider({ signal }));
     if (typeof api.serverCapabilities === "function") readers.capabilities = optional(() => api.serverCapabilities({ signal }));
+    if (typeof api.serverSettings === "function") readers.policy = optional(() => api.serverSettings({ signal }));
   }
   await Promise.all(Object.entries(readers).map(async ([name, read]) => {
     try { sections[name] = await read(); }
@@ -48,6 +49,37 @@ export async function loadManagementSections(api, profile, { signal } = {}) {
     }
   }));
   return sections;
+}
+
+/**
+ * The owner's server policy as Settings › Server edits it, with the server's own limits. Each
+ * value is a whole number kept inside its range, so a typed value never makes the save fail.
+ */
+export const SERVER_POLICY_FIELDS = Object.freeze([
+  { key: "deviceSessionDays", label: "Keep New Devices Signed In", unit: "days", min: 1, max: 365, group: "limits" },
+  { key: "globalStreamLimit", label: "Streams at the Same Time, in Total", unit: "streams", min: 1, max: 128, group: "limits" },
+  { key: "userStreamLimit", label: "Streams at the Same Time, per Profile", unit: "streams", min: 1, max: 16, group: "limits" },
+  { key: "reconciliationMinutes", label: "Full Check Every", unit: "minutes", min: 15, max: 10080, step: 15, group: "maintenance" },
+  { key: "maintenanceStartHour", label: "Maintenance From", unit: ":00", min: 0, max: 23, group: "maintenance" },
+  { key: "maintenanceEndHour", label: "Maintenance Until", unit: ":00", min: 1, max: 24, group: "maintenance" },
+  { key: "jobQueueLimit", label: "Maximum Waiting Tasks", unit: "tasks", min: 10, max: 10000, step: 10, group: "maintenance" },
+  { key: "backupIntervalHours", label: "Automatic Backup Every", unit: "hours", min: 1, max: 168, group: "backups" },
+  { key: "dailyBackupsRetained", label: "Daily Backups Kept", unit: "backups", min: 1, max: 30, group: "backups" },
+  { key: "weeklyBackupsRetained", label: "Weekly Backups Kept", unit: "backups", min: 1, max: 12, group: "backups" },
+  { key: "eventRetentionDays", label: "Keep Events For", unit: "days", min: 1, max: 90, group: "events" },
+  { key: "maximumEvents", label: "Maximum Events", unit: "events", min: 100, max: 10000, step: 100, group: "events" },
+]);
+
+/** The stored policy with `changes` applied and every number kept in range; null when a rule is broken. */
+export function serverPolicyDraft(stored, changes) {
+  const draft = { ...stored, ...changes };
+  for (const field of SERVER_POLICY_FIELDS) {
+    const number = Math.round(Number(draft[field.key]));
+    draft[field.key] = Number.isFinite(number) ? Math.min(field.max, Math.max(field.min, number)) : stored[field.key];
+  }
+  if (draft.userStreamLimit > draft.globalStreamLimit) return { draft, problem: "Streams per profile can't be more than streams in total." };
+  if (draft.maintenanceStartHour === draft.maintenanceEndHour) return { draft, problem: "Maintenance needs to start and end at different hours." };
+  return { draft, problem: null };
 }
 
 /**
@@ -1188,6 +1220,7 @@ export function normalizeGeneralPreferences(value) {
     showWatchlistInSidebar: merged.showWatchlistInSidebar !== false,
     showCollectionsInSidebar: merged.showCollectionsInSidebar !== false,
     hideOfflineTitles: merged.hideOfflineTitles === true,
+    keepProfileOpen: merged.keepProfileOpen === true,
     sectionOrder: sectionOrder(merged.sectionOrder),
   };
 }

@@ -116,6 +116,8 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     webSetup: (body) => request("/api/v1/web/setup", { method: "POST", body, as: "device" }),
     redeemPairingCode: (code, deviceName) => request("/api/v1/web/pair", { method: "POST", body: { code, deviceName }, as: "device" }),
     profiles: () => request("/api/v1/profiles", { as: "device" }),
+    /** The owner's first viewing PIN, confirmed with the Server Password, right after setting up. */
+    initializeProfiles: (password, pin) => request("/api/v1/profiles/initialize", { method: "POST", body: { password, pin }, as: "device" }),
     unlockProfile: (profileId, pin) =>
       request(`/api/v1/web/profiles/${id(profileId)}/unlock`, { method: "POST", body: pin ? { pin } : {}, as: "device" }),
     endProfile: () => request("/api/v1/web/profile/end", { method: "POST", as: "profile" }),
@@ -278,6 +280,12 @@ export function createApi(fetchImpl = (...args) => globalThis.fetch(...args), { 
     profileEditor: (userId, options = {}) => request(`/api/v1/users/${id(userId)}/profile`, options),
     createProfile: (body, options = {}) => approved("/api/v1/users", { ...options, body }),
     updateProfile: (userId, body, options = {}) => approved(`/api/v1/users/${id(userId)}/profile`, { ...options, method: "PUT", body }),
+    /** A children's profile: the highest FSK age it may watch, or null for a normal profile. */
+    profileAgeLimit: (userId, options = {}) => request(`/api/v1/users/${id(userId)}/age-limit`, options),
+    setProfileAgeLimit: (userId, body, options = {}) => request(`/api/v1/users/${id(userId)}/age-limit`, { ...options, method: "PUT", body }),
+    /** The owner's server policy: sign-in and streaming limits, library maintenance, backups, events. */
+    serverSettings: (options = {}) => request("/api/v1/server/settings", options),
+    saveServerSettings: (body, options = {}) => request("/api/v1/server/settings", { ...options, method: "PUT", body }),
     mediaEditor: (mediaId, options = {}) => request(`/api/v1/media/${id(mediaId)}/editor`, options),
     saveMediaEditor: (mediaId, body, options = {}) => request(`/api/v1/media/${id(mediaId)}/editor`, { ...options, method: "PUT", body }),
     metadataSearch: (mediaId, query, options = {}) => request(`/api/v1/media/${id(mediaId)}/metadata/search?${new URLSearchParams({ query })}`, options),

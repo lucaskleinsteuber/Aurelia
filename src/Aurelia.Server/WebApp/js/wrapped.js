@@ -48,6 +48,20 @@ export function readyMonth(today = new Date()) {
   return { year: first.getFullYear(), month: first.getMonth() + 1, name: MONTHS[first.getMonth()] };
 }
 
+/** The months of `year` whose Wrapped is ready: all of a past year, up to the newest ready one. */
+export function readyMonths(year, today = new Date()) {
+  const ready = readyMonth(today);
+  if (year < ready.year) return Array.from({ length: 12 }, (_, index) => index + 1);
+  if (year === ready.year) return Array.from({ length: ready.month }, (_, index) => index + 1);
+  return [];
+}
+
+/** The years that can have a monthly Wrapped: those with activity and the newest ready month's, newest first. */
+export function wrappedYears(activityYears, today = new Date()) {
+  const ready = readyMonth(today).year;
+  return [...new Set([...(activityYears ?? []).filter((year) => year <= ready), ready])].sort((left, right) => right - left);
+}
+
 /** Home shows the new month in its first week, from the 2nd to the 8th. */
 export function monthIsNew(today = new Date()) {
   return today.getDate() >= 2 && today.getDate() <= 8;

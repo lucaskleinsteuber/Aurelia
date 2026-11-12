@@ -174,17 +174,38 @@ export function createManagementEditors(app) {
   function editProfile(existing = null) {
     if (!managementPermissions(state.profile).owner) return;
     let snapshot = null;
+    let ageSnapshot = null;
     let collect;
+    let collectAge = () => null;
+    const agesOffered = Boolean(state.server?.capabilities?.includes("age-limits-v1"));
+    // A children's profile is set apart from the rest, as on the Mac: it ends before a role
+    // change, and starts once the profile exists.
+    const saveAge = async (userId, wanted, signal) => {
+      const current = await api.profileAgeLimit(userId, { signal });
+      if ((current?.ageLimit ?? null) === wanted) return;
+      await api.setProfileAgeLimit(userId, { ageLimit: wanted, allowedTitleIds: wanted == null ? [] : current?.allowedTitleIds ?? [],
+        hiddenTitleIds: wanted == null ? [] : current?.hiddenTitleIds ?? [], revision: current?.revision ?? 0 }, { signal });
+    };
     const context = editor(existing ? "Edit Profile" : "Create Profile", existing ? "Save" : "Create Profile", async ({ signal }) => {
       const body = profilePayload(snapshot, collect());
-      if (existing) await api.updateProfile(existing.user.id, body, { signal });
-      else await api.createProfile(body, { signal });
+      const age = agesOffered ? collectAge() : undefined;
+      if (existing) {
+        if (age === null && ageSnapshot?.ageLimit != null) await saveAge(existing.user.id, null, signal);
+        await api.updateProfile(existing.user.id, body, { signal });
+        if (age != null) await saveAge(existing.user.id, age, signal);
+      } else {
+        const created = await api.createProfile(body, { signal });
+        const createdId = created?.user?.id ?? created?.id;
+        if (age != null && createdId) await saveAge(createdId, age, signal);
+      }
       app.toast(existing ? "Profile saved." : "Profile created.");
     });
     const load = async () => {
-      const [loaded, titles] = await Promise.all([existing ? api.profileEditor(existing.user.id, { signal: context.signal }) : null, profileTitles(context.signal)]);
+      const [loaded, titles, age] = await Promise.all([existing ? api.profileEditor(existing.user.id, { signal: context.signal }) : null, profileTitles(context.signal),
+        existing && agesOffered ? api.profileAgeLimit(existing.user.id, { signal: context.signal }).catch(() => null) : null]);
       if (!context.alive()) return;
       snapshot = loaded;
+      ageSnapshot = age;
       clear(context.body);
       const user = snapshot?.user;
       const name = input(user?.username ?? "", { minlength: 3, maxlength: 64, required: true, disabled: Boolean(existing) });
@@ -205,6 +226,12 @@ export function createManagementEditors(app) {
         h("p", { class: "muted small" }, "A series includes all current and future seasons, episodes, extras and trailers."));
       const protectionFields = h("div", { class: "editor-grid" }, field(user?.pinProtectionEnabled && !user.needsPinSetup ? "New PIN (optional)" : "PIN (4–8 digits)", pin), field("Confirm PIN", confirm));
       const accessNote = h("p", { class: "muted small" });
+      const child = input("", { type: "checkbox", checked: ageSnapshot?.ageLimit != null });
+      const ageChoice = choice([[0, "Under 6 · FSK 0"], [6, "6 to 11 · up to FSK 6"], [12, "12 to 15 · up to FSK 12"], [16, "16 or 17 · up to FSK 16"]],
+        ageSnapshot?.ageLimit ?? 6);
+      const ageField = field("Age", ageChoice, "Only titles up to this FSK rating show. Titles without a rating stay hidden until you allow them on the Mac.");
+      const childSection = agesOffered ? h("div", {}, h("h3", {}, "Children's Profile"),
+        field("Children's Profile", child, "A profile for a child: it sees only titles for its age."), ageField) : null;
       const redraw = () => {
         clear(list);
         const matches = titles.filter((item) => item.title.toLocaleLowerCase().includes(query.value.toLocaleLowerCase()));
@@ -222,6 +249,10 @@ export function createManagementEditors(app) {
         protection.disabled = privileged;
         protectionFields.hidden = !protection.checked;
         if (!protection.checked) { pin.value = ""; confirm.value = ""; }
+        if (childSection) {
+          childSection.hidden = role.value !== "user";
+          ageField.hidden = !child.checked;
+        }
         access.disabled = role.value === "owner";
         if (role.value === "owner") access.value = "entireLibrary";
         picker.hidden = access.value !== "selectedTitles";
@@ -229,13 +260,14 @@ export function createManagementEditors(app) {
           : access.value === "entireLibrary" ? "Includes all existing titles and titles added later." : "Choose the films and series this profile can watch.";
       };
       query.addEventListener("input", redraw);
-      for (const control of [role, protection, access]) control.addEventListener("change", update);
+      for (const control of [role, protection, access, child]) control.addEventListener("change", update);
+      collectAge = () => role.value === "user" && child.checked ? Number(ageChoice.value) : null;
       context.body.append(field("Name", name), field("Role", role, "Administrators manage their allowed content. Owners manage the whole server."),
         field("Profile enabled", enabled), h("h3", {}, "PIN Protection"), field("Require a Profile PIN", protection, "Owner and administrator profiles always require a PIN."),
         protectionFields, h("p", { class: "muted small" }, user?.pinProtectionEnabled && !user.needsPinSetup
           ? "Leave both PIN fields empty to keep the current PIN. Changing it locks active sessions."
           : "Use 4–8 digits and enter the same PIN in both fields when protection is enabled."),
-        h("h3", {}, "Content Access"), field("Can watch", access), accessNote, picker);
+        childSection, h("h3", {}, "Content Access"), field("Can watch", access), accessNote, picker);
       collect = () => ({ username: name.value, role: role.value, isEnabled: enabled.checked, pinProtectionEnabled: protection.checked,
         pin: pin.value, pinConfirmation: confirm.value, accessMode: access.value, titleIds: [...selected] });
       redraw(); update(); context.clean(); context.ready();

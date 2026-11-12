@@ -475,7 +475,9 @@ img { display: block; }
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
   scroll-padding: 0 var(--gutter);
-  padding: 6px var(--gutter) 18px;
+  /* Room above and below for a card that lifts and its shadow; the margins keep the rail's place. */
+  padding: 16px var(--gutter) 30px;
+  margin: -10px 0 -12px;
   scrollbar-width: none;
 }
 .rail-track::-webkit-scrollbar { display: none; }
@@ -578,6 +580,9 @@ img.artwork-missing { opacity: 0; }
   color: var(--muted);
 }
 .search-bar:focus-within { border-color: rgba(255, 255, 255, 0.4); }
+/* The Search page centers its field and title, as the Mac and TV apps do. */
+.search > .page-header { justify-content: center; }
+.search > .search-bar { margin-inline: auto; width: min(720px, calc(100% - 2 * var(--gutter))); max-width: none; }
 .search-field { flex: 1; height: 100%; border: 0; background: none; font-size: 17px; color: var(--text); outline: none; }
 .search-field::-webkit-search-cancel-button { filter: invert(1); }
 
@@ -638,7 +643,8 @@ img.artwork-missing { opacity: 0; }
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
   scroll-padding: 0 var(--gutter);
-  padding: 6px var(--gutter) 18px;
+  padding: 16px var(--gutter) 30px;
+  margin: -10px 0 -12px;
   scrollbar-width: none;
 }
 .hrail-track::-webkit-scrollbar { display: none; }
@@ -741,10 +747,12 @@ img.artwork-missing { opacity: 0; }
 .page-transition .page-enter { animation: none; }
 ::view-transition-old(root) { animation: vt-out 0.2s ease-in both; }
 ::view-transition-new(root) { animation: vt-in var(--motion-page) var(--ease-out) both; }
-:root[data-navigation="back"]::view-transition-new(root) { animation-name: vt-in-back; }
+:root[data-navigation="back"]::view-transition-new(root) { animation: vt-in-back 0.24s var(--ease-out) both; }
+/* Back leaves the page at once, so the page left behind never shows again over the one returned to. */
+:root[data-navigation="back"]::view-transition-old(root) { animation: none; opacity: 0; }
 @keyframes vt-out { to { opacity: 0; transform: scale(0.985); } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(16px); } }
-@keyframes vt-in-back { from { opacity: 0; transform: translateY(-12px); } }
+@keyframes vt-in-back { from { opacity: 0; } }
 ::view-transition-group(title-art) { animation-duration: 0.5s; animation-timing-function: var(--ease-out); }
 ::view-transition-old(title-art), ::view-transition-new(title-art) { width: 100%; height: 100%; object-fit: cover; overflow: clip; }
 ::view-transition-group(top-bar) { animation: none; }
@@ -773,6 +781,10 @@ dialog[open]::backdrop { animation: backdrop-in var(--motion-standard) ease-out;
 .hero-art.settle { animation: settle 1.2s ease-out both; }
 @keyframes settle { from { opacity: 0; transform: scale(1.04); } }
 .poster-grid .poster-card { animation: rise-in 0.42s var(--spring) both; animation-delay: calc(var(--stagger, 0) * 18ms); }
+/* A page refreshed in place (returning to the tab, a saved setting) keeps still: nothing that
+   already showed rises or fades in a second time. */
+.app-shell.still .hero-content > *, .app-shell.still .hero-art.settle, .app-shell.still .rise,
+.app-shell.still .poster-grid .poster-card, .app-shell.still .progress-fill, .app-shell.still .settings-section { animation: none; }
 /* Long grids lay out only what comes into view. */
 .poster-grid .poster-card:nth-child(n + 40) { content-visibility: auto; contain-intrinsic-size: auto 300px; }
 @media (prefers-reduced-motion: reduce) {
@@ -797,19 +809,37 @@ body[data-subtitle-background="solid"] video::cue { background-color: #000; }
 
 /* MARK: Settings (the Mac app's pages) */
 
-.settings { max-width: 860px; padding-bottom: 48px; }
-.settings-tabs { display: flex; gap: 6px; padding: 0 var(--gutter) 22px; flex-wrap: wrap; }
-.settings-tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; color: var(--muted); font-weight: 600; transition: background 0.15s, color 0.15s; }
+/* As in the Mac app's Settings: a sidebar of categories and the chosen page beside it. */
+.settings { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: clamp(24px, 3vw, 44px); align-items: start; max-width: 1200px; padding: 28px var(--gutter) 48px; }
+.settings-sidebar { position: sticky; top: calc(var(--top-bar) + env(safe-area-inset-top) + 20px); display: flex; flex-direction: column; gap: 14px; }
+.settings-title { font-size: 26px; font-weight: 800; letter-spacing: -0.01em; padding: 0 4px; }
+.settings-main { min-width: 0; max-width: 860px; }
+.settings-heading { font-size: clamp(24px, 3vw, 30px); font-weight: 800; letter-spacing: -0.01em; margin: 2px 0 20px; }
+.settings-tabs { display: flex; flex-direction: column; gap: 2px; }
+.settings-tabs.searching .settings-tab.selected { background: none; color: var(--muted); }
+.settings-tab { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--muted); font-weight: 600; transition: background 0.15s, color 0.15s; }
+.settings-tab .icon { flex: none; }
 .settings-tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
-.settings-tab.selected { background: rgba(255, 255, 255, 0.14); color: var(--text); }
-.settings-search-bar { display: flex; padding: 0 var(--gutter) 18px; }
-.settings-search-wrap { position: relative; width: 100%; max-width: 440px; }
+.settings-tab.selected { background: rgba(255, 255, 255, 0.13); color: var(--text); }
+.settings-search-bar { display: flex; }
+.settings-search-wrap { position: relative; width: 100%; }
 .settings-search-input { width: 100%; height: 38px; padding: 0 14px 0 38px; border-radius: 10px; border: 1px solid var(--hairline); background: rgba(0, 0, 0, 0.22); color: var(--text); font: inherit; font-size: 14px; box-sizing: border-box; }
 .settings-search-input:focus { outline: none; border-color: var(--accent); }
 .settings-search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--muted); }
-.settings-content { padding: 0 var(--gutter); }
+.settings-subheading { font-size: 14px; font-weight: 700; color: var(--muted); margin-top: 10px; }
+.number-field { width: 96px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--hairline); background: rgba(0, 0, 0, 0.22); color: var(--text); font: inherit; text-align: right; }
+.number-field:focus { outline: none; border-color: var(--accent); }
+.settings-content.swap-in { animation: settings-swap 0.16s ease-out; }
+@keyframes settings-swap { from { opacity: 0; } }
+@media (max-width: 760px) {
+  .settings { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .settings-sidebar { position: static; }
+  .settings-tabs { flex-direction: row; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); }
+  .settings-tabs::-webkit-scrollbar { display: none; }
+  .settings-tab { flex: none; border-radius: 999px; padding: 7px 14px; }
+}
 .settings-stack { display: flex; flex-direction: column; gap: 22px; }
-.settings-section { padding: 20px 22px; border-radius: 18px; background: var(--surface); border: 1px solid var(--hairline); animation: rise-in 0.4s var(--spring) both; }
+.settings-section { padding: 20px 22px; border-radius: 18px; background: var(--surface); border: 1px solid var(--hairline); }
 .settings-section.danger-zone { border-color: rgba(255, 69, 58, 0.45); background: rgba(255, 69, 58, 0.05); }
 .settings-section.danger-zone .settings-symbol { background: rgba(255, 69, 58, 0.18); color: #ff453a; }
 .settings-section-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
@@ -936,7 +966,7 @@ body[data-subtitle-background="solid"] video::cue { background-color: #000; }
   color: #fff;
   transition: background 0.12s ease-out;
 }
-.menu-control:hover, .player-icon:hover, .menu-control.selected { background: rgba(255, 255, 255, 0.12); }
+.menu-control:hover, .player-icon:hover, .menu-control.selected, .player-icon.selected { background: rgba(255, 255, 255, 0.12); }
 .menu-control.active, .player-icon.active { color: var(--accent); }
 .player-icon { width: 42px; height: 42px; }
 .player-icon.small { width: 28px; height: 28px; min-width: 28px; }
@@ -1681,6 +1711,11 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .wrapped-launch.month { background: #ff4d88; color: #22000f; }
 .wrapped-launch.month .wrapped-launch-year { color: #fff; }
 .wrapped-launch.home { width: auto; margin: 0 var(--gutter) 16px; }
+.wrapped-months { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; margin-top: 12px; }
+.wrapped-month { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px; border: 0; border-radius: 12px; background: #ff4d88; color: #22000f; text-align: left; transition: transform 0.15s var(--spring); }
+.wrapped-month:hover { transform: scale(1.03); }
+.wrapped-month strong { font-size: 22px; font-weight: 900; letter-spacing: -0.04em; }
+.wrapped-month span { font-size: 12px; font-weight: 600; opacity: 0.85; }
 
 .wrapped { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(0, 0, 0, 0.82); }
 .wrapped-frame {

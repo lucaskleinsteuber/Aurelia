@@ -8,7 +8,7 @@ import * as logic from "./logic.js";
 import { PROFILE_SYMBOL_PATHS } from "./profile-symbols.js";
 import { createWatchTogether } from "./watch-together.js";
 import { createMovieNightView } from "./movie-night-view.js";
-import { openWrapped, readyMonth, monthIsNew } from "./wrapped.js";
+import { openWrapped, readyMonth, readyMonths, wrappedYears, monthIsNew, MONTHS } from "./wrapped.js";
 import { Player } from "./player.js";
 import { LIVE_FEATURE } from "./live-logic.js";
 import { ADAPTIVE_FEATURE } from "./hls-logic.js";
@@ -16,6 +16,8 @@ import { createSettings } from "./settings.js";
 import { adScene, cinemaActs, cinemaWanted, comingUp, curtain, nextAd, AD_SECONDS, CURTAIN_EARLIEST, CURTAIN_LONGEST_WAIT, CURTAIN_OPENING, LAST_AD_KEY, TRAILER_LONGEST_SECONDS, TRAILER_START_SECONDS } from "./cinema.js";
 import { loadPreferences } from "./player.js";
 import { applyAppearance, loadGeneral, sidebarShows, startPath, visibleTitles } from "./preferences.js";
+
+const SVG = "http://www.w3.org/2000/svg";
 
 // Pages seen before show at once from what the server said last time; anything this browser
 // changes on the server, and every change the server reports, forgets them.
@@ -57,6 +59,10 @@ if (location.pathname === "/" && startPath() !== "/") {
 applyAppearance();
 
 const scrollMemory = new logic.ScrollMemory();
+// The app puts each page where it was itself; the browser's own restoring would move the old page
+// to the new page's place for a moment on Back.
+try { history.scrollRestoration = "manual"; } catch { /* Older browsers restore by themselves. */ }
+const OPEN_MARK = "aurelia.profileOpen";
 let isRenderingRoute = false;
 
 window.addEventListener("scroll", () => {
@@ -78,14 +84,28 @@ async function start() {
   } catch (error) {
     return showServerOff(error);
   }
-  // A page reload keeps a profile that is still open in this browser session.
+  // A page reload keeps the open profile. A new tab, or the browser opened again, asks for the
+  // profile (and its PIN) again, unless Settings › General keeps it open.
   try {
     const user = await api.request("/api/v1/auth/me");
-    if (user?.id) return enterProfile(user);
+    if (user?.id && (tabKeepsProfile() || loadGeneral().keepProfileOpen)) return enterProfile(user);
+    if (user?.id) await api.endProfile().catch(() => {});
   } catch (error) {
     if (error instanceof ApiError && error.offline) return showServerOff(error);
   }
   await showProfiles();
+}
+
+/** Whether this tab already had a profile open: the mark lives only as long as the tab. */
+function tabKeepsProfile() {
+  try { return sessionStorage.getItem(OPEN_MARK) === "1"; } catch { return false; }
+}
+
+function markTabProfile(open) {
+  try {
+    if (open) sessionStorage.setItem(OPEN_MARK, "1");
+    else sessionStorage.removeItem(OPEN_MARK);
+  } catch { /* Without session storage the profile is asked for on every load. */ }
 }
 
 function showConnecting() {
@@ -312,6 +332,7 @@ async function showProfiles(note) {
   stopSync();
   closePlayer();
   state.profile = null;
+  markTabProfile(false);
   document.title = "Aurelia";
   const token = ++state.renderToken;
   let picker;
@@ -323,12 +344,15 @@ async function showProfiles(note) {
     return showPairing();
   }
   if (token !== state.renderToken) return;
+  const firstPin = picker.managementSetupRequired;
   const list = h("div", { class: "profile-grid" }, picker.profiles.map((profile) =>
-    h("button", { class: "profile-entry", onclick: () => chooseProfile(profile) },
+    h("button", { class: "profile-entry", onclick: () => firstPin && profile.role === "owner" ? showFirstPin(profile) : chooseProfile(profile) },
       profilePicture(profile, "large"),
       h("span", { class: "profile-name" }, profile.name, profile.pinProtectionEnabled ? icon("lock", { size: 14, label: "PIN protected" }) : null))));
   const message = h("p", { class: "error-text", role: "alert" }, note ?? "");
-  if (picker.managementSetupRequired) message.textContent = "Finish setting up profiles in Aurelia on your Mac first.";
+  if (firstPin && !note) message.textContent = picker.profiles.some((profile) => profile.role === "owner")
+    ? "Choose the owner’s profile to give it a viewing PIN."
+    : "Finish setting up profiles in Aurelia on your Mac first.";
   clear(root);
   root.append(screenFrame(h("div", { class: "center-stack wide" },
     h("h1", { class: "picker-title" }, "Who’s watching?"),
@@ -489,6 +513,64 @@ function showPin(profile) {
   field.focus();
 }
 
+/**
+ * The owner's first viewing PIN, right after setting up the server in this browser, as the Mac's
+ * setup assistant asks for it: the Server Password confirms it is the owner, then the PIN twice.
+ */
+function showFirstPin(profile) {
+  const token = ++state.renderToken;
+  const field = (label, control) => h("label", { class: "setup-field" }, h("span", {}, label), control);
+  const password = h("input", { class: "text-field", type: "password", autocomplete: "current-password", "aria-label": "Server Password" });
+  const digits = (label) => h("input", { class: "text-field", type: "password", inputmode: "numeric", pattern: "[0-9]*", maxlength: "8", autocomplete: "off", "aria-label": label });
+  const pin = digits("Viewing PIN");
+  const repeat = digits("Repeat Viewing PIN");
+  const message = h("p", { class: "error-text", role: "alert" });
+  const submit = h("button", { class: "primary-button large", type: "submit", disabled: true }, "Save PIN");
+  const check = () => { submit.disabled = !password.value || !logic.isPin(pin.value) || pin.value !== repeat.value; };
+  password.addEventListener("input", check);
+  for (const input of [pin, repeat]) input.addEventListener("input", () => { input.value = input.value.replace(/[^0-9]/g, "").slice(0, 8); check(); });
+  let busy = false;
+  const form = h("form", { class: "setup-card", onsubmit: async (event) => {
+    event.preventDefault();
+    if (busy || submit.disabled) return;
+    busy = true;
+    submit.disabled = true;
+    message.textContent = "";
+    try {
+      await api.initializeProfiles(password.value, pin.value);
+      const chosen = pin.value;
+      const secret = password.value;
+      password.value = pin.value = repeat.value = "";
+      if (token !== state.renderToken) return;
+      // The Server Password was just typed, so the welcome steps (adding folders) need no
+      // second unlock.
+      const session = await api.unlockProfile(profile.id, chosen);
+      await api.unlockManagement(secret).catch(() => {});
+      await enterProfile(session.user);
+    } catch (error) {
+      if (token !== state.renderToken) return;
+      if (error instanceof ApiError && error.offline) return showServerOff();
+      message.textContent = error instanceof ApiError && (error.code === "invalid_credentials" || error.status === 401)
+        ? "That Server Password is not right." : error.message;
+    } finally {
+      busy = false;
+      check();
+    }
+  } },
+    profilePicture(profile, "large"),
+    h("h1", {}, "Choose a Viewing PIN"),
+    h("p", {}, `${profile.name} opens with this PIN on every device. Enter the Server Password you just chose to confirm it is you.`),
+    field("Server Password", password),
+    field("Viewing PIN (4–8 digits)", pin),
+    field("Repeat Viewing PIN", repeat),
+    message,
+    h("div", { class: "button-row" },
+      h("button", { class: "secondary-button", type: "button", onclick: () => showProfiles() }, "Back"), submit));
+  clear(root);
+  root.append(screenFrame(form));
+  password.focus();
+}
+
 async function enterProfile(user) {
   reads.clear();
   prefetches.forget();
@@ -500,6 +582,7 @@ async function enterProfile(user) {
     }
   } catch { /* Without storage there is no welcome page; Settings has everything. */ }
   state.profile = user;
+  markTabProfile(true);
   state.watchlistIds = new Set();
   api.watchlist().then((response) => {
     if (state.profile?.id === user.id) state.watchlistIds = new Set(response?.mediaIds ?? []);
@@ -604,16 +687,22 @@ function handleError(error) {
 
 // MARK: Navigation
 
-function navigate(route, { replace = false } = {}) {
+function navigate(route, { replace = false, quiet = false } = {}) {
   settings.closeEditors();
   endTour();
   const currentPath = logic.routePath(state.route) || (location.pathname + location.search);
-  if (!replace) scrollMemory.remember(currentPath, window.scrollY);
   const path = logic.routePath(route);
+  // The page that is already open, chosen again: it only scrolls back to the top, as in the Mac app.
+  if (!replace && path === currentPath && route.name === state.route.name) {
+    window.scrollTo({ top: 0, behavior: motionAllowed() ? "smooth" : "auto" });
+    return;
+  }
+  if (!replace) scrollMemory.remember(currentPath, window.scrollY);
+  const inPlace = !replace && route.name === "settings" && state.route.name === "settings";
   if (replace) history.replaceState(null, "", path);
   else if (path !== location.pathname + location.search) history.pushState(null, "", path);
   state.route = route;
-  renderRoute({ resetScroll: !replace });
+  renderRoute({ quiet, resetScroll: !replace, inPlace });
 }
 
 window.addEventListener("popstate", () => {
@@ -649,9 +738,19 @@ document.addEventListener("pointerover", (event) => {
   const id = link.getAttribute("href").slice("/title/".length).split(/[?#/]/)[0];
   if (!id || reads.has(`detail:${id}`)) return;
   prefetchTimer = setTimeout(() => {
-    prefetches.start(id, () => Promise.all([cached.detail(id), cached.playbackPlan(id).catch(() => null)]));
+    prefetches.start(id, () => Promise.all([cached.detail(id).then((detail) => { warmBackdrop(detail); return detail; }), cached.playbackPlan(id).catch(() => null)]));
   }, event.pointerType === "touch" ? 0 : 90);
 }, { passive: true });
+
+/** Starts loading a title's big picture, so its page can open with it. */
+function warmBackdrop(detail) {
+  const item = detail?.item;
+  const url = logic.artworkUrl(item?.backdrop ?? detail?.metadata?.backdrop ?? item?.poster, 1920);
+  if (!url || shownArtwork.has(url)) return;
+  const image = new Image();
+  image.decoding = "async";
+  image.src = url;
+}
 
 /** Rails rise in once as they come into view; a quiet refresh shows them as they were. */
 let revealObserver = null;
@@ -708,6 +807,13 @@ function shell(content) {
   return h("div", { class: "app-shell" }, header, h("main", { class: "page", id: "page" }, content));
 }
 
+/** Waits up to a short moment for the page's big picture, so it can arrive with its page. */
+function heroReady(content) {
+  const art = content?.querySelector?.(".detail-hero img.hero-art, .hero img.hero-art");
+  if (!art || art.classList.contains("loaded") || typeof art.decode !== "function") return Promise.resolve();
+  return Promise.race([art.decode().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 450))]);
+}
+
 /** Whether pages may move: the system's and this browser's Reduce Motion both keep them still. */
 function motionAllowed() {
   return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches && document.body.dataset.heroMotion !== "reduced";
@@ -729,7 +835,9 @@ function swapPage(update, { animate, direction, still = false }) {
     for (const element of root.querySelectorAll(".page-enter")) element.classList.remove("page-enter");
   };
   if (still) {
+    // The same page again, for example on returning to the tab: nothing rises or fades in again.
     settled();
+    root.querySelector(".app-shell")?.classList.add("still");
     return;
   }
   if (!animate || typeof document.startViewTransition !== "function" || !motionAllowed()) {
@@ -740,6 +848,9 @@ function swapPage(update, { animate, direction, still = false }) {
   document.documentElement.classList.add("page-transition");
   try {
     const transition = document.startViewTransition(settled);
+    // A hidden tab skips the animation; the page still changes, so nothing is reported.
+    transition.ready?.catch(() => {});
+    transition.updateCallbackDone?.catch(() => {});
     transition.finished.catch(() => {}).finally(() => {
       document.documentElement.classList.remove("page-transition");
       document.querySelectorAll("[data-morph]").forEach((element) => { element.style.viewTransitionName = ""; delete element.dataset.morph; });
@@ -749,7 +860,7 @@ function swapPage(update, { animate, direction, still = false }) {
   }
 }
 
-async function renderRoute({ quiet = false, restoreScroll = false, resetScroll = false, direction = "forward" } = {}) {
+async function renderRoute({ quiet = false, restoreScroll = false, resetScroll = false, direction = "forward", inPlace = false } = {}) {
   catalog.close();
   if (!state.profile) return;
   isRenderingRoute = true;
@@ -763,7 +874,7 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
   const loading = Promise.resolve().then(() => screenFor(route, token)).then((content) => ({ content }), (error) => ({ error }));
   // A page that answers quickly (remembered or near) replaces the old one directly; a slower one
   // shows its shape first.
-  let outcome = quiet ? await loading : await Promise.race([loading, new Promise((resolve) => setTimeout(resolve, 140))]);
+  let outcome = quiet || inPlace ? await loading : await Promise.race([loading, new Promise((resolve) => setTimeout(resolve, 140))]);
   if (!outcome) {
     if (token !== state.renderToken) return;
     swapPage(() => {
@@ -784,6 +895,15 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
     isRenderingRoute = false;
     return;
   }
+  // A page with a big picture waits a moment for it, so it arrives with the page instead of
+  // popping in after the page has moved.
+  if (!quiet && !inPlace) {
+    await heroReady(content);
+    if (token !== state.renderToken) {
+      isRenderingRoute = false;
+      return;
+    }
+  }
   const morph = state.morphFrom;
   state.morphFrom = null;
   swapPage(() => {
@@ -791,7 +911,7 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
     root.append(shell(content));
     if (morph && route.name === "title" && route.id === morph) {
       const art = root.querySelector(".detail-hero .hero-art");
-      if (art) { art.style.viewTransitionName = "title-art"; art.dataset.morph = "1"; }
+      if (art) { art.style.viewTransitionName = "title-art"; art.dataset.morph = "1"; art.classList.remove("settle"); }
     }
     if (quiet || restoreScroll) {
       window.scrollTo(0, scroll);
@@ -801,7 +921,9 @@ async function renderRoute({ quiet = false, restoreScroll = false, resetScroll =
     } else if (resetScroll) {
       window.scrollTo(0, 0);
     }
-  }, { animate: !quiet && !root.querySelector(".page-skeleton"), direction, still: quiet });
+    // Another settings page fades in where the last one was; the sidebar stays still.
+    if (inPlace) root.querySelector(".settings-content")?.classList.add("swap-in");
+  }, { animate: !quiet && !inPlace && !root.querySelector(".page-skeleton"), direction, still: quiet || inPlace });
   revealInstantly = false;
   isRenderingRoute = false;
   if (route.name === "home" && !quiet && logic.tourPending(safeStorage())) setTimeout(() => startTour(), 600);
@@ -993,13 +1115,17 @@ function rail(title, cards, kind = "poster", allHref) {
     track));
 }
 
+const shownArtwork = new Set();
+
 function artwork(image, width, className, alt) {
   const url = logic.artworkUrl(image, width);
   if (!url) return h("div", { class: `${className} artwork-missing` });
-  const element = h("img", { class: `${className} img-fade`, src: url, alt, loading: "lazy", decoding: "async" });
-  // A picture the browser already has shows at once; one still loading fades in when it's ready.
-  if (element.complete && element.naturalWidth) element.classList.add("loaded");
-  else element.addEventListener("load", () => element.classList.add("loaded"), { once: true });
+  // A page's big picture loads first; posters further down load when they come near.
+  const hero = /\bhero-art\b/.test(className);
+  const element = h("img", { class: `${className} img-fade`, src: url, alt, loading: hero ? "eager" : "lazy", decoding: "async", fetchpriority: hero ? "high" : null });
+  // A picture already shown on this visit shows at once; a new one fades in when it's ready.
+  if (shownArtwork.has(url) || (element.complete && element.naturalWidth)) element.classList.add("loaded");
+  element.addEventListener("load", () => { shownArtwork.add(url); element.classList.add("loaded"); }, { once: true });
   element.addEventListener("error", () => element.classList.add("artwork-missing"), { once: true });
   return element;
 }
@@ -1048,7 +1174,7 @@ function withMediaContextMenu(element, item, seasons, seasonNumber) {
 }
 
 function posterCard(item, index = 0) {
-  return withMediaContextMenu(h("a", { class: "poster-card card-hover", href: titleHref(item), "data-route": true, style: { "--stagger": Math.min(index, 24) } },
+  return withMediaContextMenu(h("a", { class: "poster-card", href: titleHref(item), "data-route": true, style: { "--stagger": Math.min(index, 24) } },
     h("div", { class: "poster-frame" },
       artwork(item.poster, 320, "poster-art", ""),
       item.poster ? null : h("div", { class: "poster-fallback" }, item.title),
@@ -1620,12 +1746,31 @@ async function statisticsScreen() {
   container.append(
     summary,
     monthlyWrappedLaunch(),
+    monthlyWrappedArchive(years),
     highlights,
     weeklySection ?? "",
     ranking("Most Watched", "Series count with all their episodes.", stats.topTitles) ?? "",
     ranking("Favorite Genres", "By the time you spent with them.", stats.topGenres) ?? "",
     yearSection ?? "");
   return container;
+}
+
+/** Every month's Wrapped, not only the newest: a year to choose and its ready months to play. */
+function monthlyWrappedArchive(activityYears) {
+  const years = wrappedYears(activityYears);
+  const grid = h("div", { class: "wrapped-months" });
+  const select = h("select", { class: "select-input", "aria-label": "Monthly Wrapped Year" },
+    years.map((year) => h("option", { value: String(year) }, String(year))));
+  const show = (year) => grid.replaceChildren(...readyMonths(year).reverse().map((month) =>
+    h("button", { class: "wrapped-month", "aria-label": `Play ${MONTHS[month - 1]} ${year} Wrapped`,
+      onclick: () => openWrapped({ api, year, month, artworkUrl: logic.artworkUrl }) },
+    h("strong", {}, MONTHS[month - 1].slice(0, 3)), h("span", {}, MONTHS[month - 1]))));
+  select.addEventListener("change", () => show(Number(select.value)));
+  show(years[0]);
+  return h("section", { class: "stat-section" },
+    h("div", { class: "section-header" }, h("h2", {}, "Monthly Wrapped"), select),
+    h("p", { class: "muted small" }, "Play any month again. A month is ready from the 2nd of the next month."),
+    grid);
 }
 
 /** "Play your October Wrapped": the newest ready month, in Statistics and in its first week on Home. */

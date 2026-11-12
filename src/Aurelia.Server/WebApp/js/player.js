@@ -159,12 +159,14 @@ export class Player {
     this.subtitleButton = this.menuButton("Subtitles", icon("captions", { size: 18 }), () => this.subtitleMenu());
     this.sleepButton = this.menuButton("Sleep Timer", icon("moon", { size: 18 }), () => this.sleepMenu());
     this.notesButton = this.menuButton("Scene Notes", icon("bookmark", { size: 18 }), () => this.notesPanel());
+    // Watch Together sits with the window controls below, not among the menus used while watching.
     this.togetherButton = this.menuButton("Watch Together", icon("people", { size: 18 }), () => this.togetherMenu());
+    this.togetherButton.className = "player-icon";
     this.qualityLabel = h("span", { class: "rate-label" }, this.quality === "original" ? "Orig" : this.quality === "auto" ? "Auto" : this.quality);
     this.qualityButton = this.menuButton("Streaming Quality", this.qualityLabel, () => this.qualityMenu());
     this.top = h("div", { class: "player-top" }, this.backButton,
       h("div", { class: "player-menus glass" }, this.rateButton, this.canStreamAdaptive ? this.qualityButton : null, this.audioButton,
-        this.subtitleButton, this.sleepButton, this.notesButton, this.together ? this.togetherButton : null));
+        this.subtitleButton, this.sleepButton, this.notesButton));
 
     // Middle: back, play and forward in one capsule.
     this.playButton = h("button", { class: "transport-play", "aria-label": "Play", onclick: () => this.toggle() }, icon("play", { size: 22 }));
@@ -185,7 +187,7 @@ export class Player {
     this.pipButton = h("button", { class: "player-icon", "aria-label": "Enter Picture in Picture", hidden: !document.pictureInPictureEnabled, onclick: () => this.togglePictureInPicture() }, icon("pip", { size: 18 }));
     this.airplayButton = h("button", { class: "player-icon airplay-btn", "aria-label": "AirPlay", hidden: true, onclick: () => this.showAirPlayPicker() }, icon("airplay", { size: 18 }));
     this.fullscreenButton = h("button", { class: "player-icon", "aria-label": "Enter Full Screen", onclick: () => this.toggleFullscreen() }, icon("fullscreen", { size: 18 }));
-    this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.airplayButton, this.pipButton, this.fullscreenButton);
+    this.trailing = h("div", { class: "player-trailing glass" }, this.muteButton, this.volume, this.together ? this.togetherButton : null, this.airplayButton, this.pipButton, this.fullscreenButton);
     this.timeline = h("input", { class: "timeline", type: "range", min: "0", max: "1000", value: "0", step: "1", "aria-label": "Playback Position", "aria-valuetext": timelineValueText(0, 0) });
     this.noteMarks = h("div", { class: "note-marks", "aria-hidden": "true" });
     this.previewImg = h("img", { class: "scrub-preview-img", alt: "" });

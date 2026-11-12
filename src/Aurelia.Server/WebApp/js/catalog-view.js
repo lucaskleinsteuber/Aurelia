@@ -24,7 +24,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     if (!handleError(error)) toast(error.message);
   };
 
-  function pagedList(read, parameters, signal, { collection = false, count = () => {} } = {}) {
+  function pagedList(read, parameters, signal, { collection = false, count = () => {}, emptyText = () => "No title matches these filters." } = {}) {
     const grid = h("div", { class: "poster-grid" });
     const message = h("p", { class: "muted", role: "status", "aria-live": "polite" });
     const more = h("button", { class: "secondary-button", onclick: () => load() }, "Load More");
@@ -39,7 +39,10 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
     let generation = 0;
     let request;
     let query = parameters;
-    const reset = () => { offset = 0; revision = undefined; total = 0; seen = new Set(); hidden = 0; clear(grid); };
+    // A new search or filter keeps the old titles on screen until the new ones arrive, so the
+    // grid never flashes empty in between.
+    let stale = false;
+    const reset = () => { offset = 0; revision = undefined; total = 0; seen = new Set(); hidden = 0; stale = true; };
     // Titles hidden by this browser's settings can fill whole pages; a few such pages load on
     // their own so the grid does not look empty while matching titles follow.
     const AUTO_PAGES = 5;
@@ -54,8 +57,9 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
       const ownRequest = request;
       busy = true;
       more.disabled = true;
-      more.hidden = false;
-      message.textContent = "Loading…";
+      more.hidden = true;
+      // "Loading…" only when it takes a moment; a quick answer replaces the page without it.
+      const slow = setTimeout(() => { if (mine === generation) message.textContent = "Loading…"; }, 350);
       try {
         // A changed catalog invalidates the old offset/revision. Restart once, without mixing
         // pages from different snapshots or retrying indefinitely during a busy scan.
@@ -76,6 +80,7 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
         if (!collection && revision && page.revision !== revision) throw new Error("The library changed. Reload this page before loading more.");
         revision = collection ? undefined : page.revision;
         const batchOffset = offset;
+        if (stale) { clear(grid); stale = false; }
         const before = seen.size;
         for (const item of items) {
           if (!item?.id || seen.has(item.id)) continue;
@@ -91,17 +96,19 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
           : hidden ? `${seen.size} shown · ${hidden} hidden by this browser’s settings${complete ? "" : ` · ${offset} of ${total} checked`}`
             : `${seen.size} of ${total} titles`;
         if (!seen.size && complete) message.textContent = collection ? "No collections available."
-          : hidden ? `No title to show: ${hidden} hidden by this browser’s settings.` : "No title matches these filters.";
+          : hidden ? `No title to show: ${hidden} hidden by this browser’s settings.` : emptyText(query);
         again = !collection && !complete && seen.size === before && autoPages < AUTO_PAGES;
         more.textContent = "Load More";
         count(collection ? seen.size : total, items);
       } catch (error) {
         if (signal.aborted || ownRequest.signal.aborted || mine !== generation || error?.name === "AbortError") return;
         if (handleError(error)) return;
+        if (stale) { clear(grid); stale = false; }
         message.textContent = error.message;
         more.textContent = "Try Again";
         more.hidden = false;
       } finally {
+        clearTimeout(slow);
         if (mine === generation) { busy = false; more.disabled = false; }
       }
       if (again && mine === generation && !signal.aborted) await load(false, query, autoPages + 1);
@@ -204,7 +211,9 @@ export function createCatalogView({ api, navigate, replaceRoute, posterCard, col
   async function search(route) {
     const signal = current();
     const input = h("input", { class: "search-field", type: "search", value: route.query ?? "", placeholder: "Movies, shows and episodes", "aria-label": "Search", maxlength: "256", autocomplete: "off", enterkeyhint: "search" });
-    const list = pagedList((query, options) => query.query ? api.search(query, options) : Promise.resolve({ items: [], total: 0 }), { query: route.query?.trim() ?? "" }, signal);
+    // Nothing typed yet shows nothing, not an empty result.
+    const list = pagedList((query, options) => query.query ? api.search(query, options) : Promise.resolve({ items: [], total: 0 }), { query: route.query?.trim() ?? "" }, signal,
+      { emptyText: (query) => query.query ? `No movies, shows or episodes match “${query.query}”.` : "" });
     input.addEventListener("input", () => {
       if (signal.aborted) return;
       clearTimeout(debounce);

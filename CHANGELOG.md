@@ -15,6 +15,11 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Browser: Settings › Server has the Mac app's server settings: how long new devices stay signed in, streams at the same time, noticing new files, the full check, maintenance hours and waiting tasks, automatic backups and how many are kept, and how long events are kept.
+- Browser: Edit Profile has Children's Profile with the age (FSK 0, 6, 12 or 16), as on the Mac.
+- Browser: Statistics › Monthly Wrapped plays any past month, chosen by year, not only the newest.
+- Browser: Settings › General › Keep Profile Open. Off, closing the tab or the browser locks the profile, and its PIN is asked again.
+- Browser: setting up a server in the browser goes on to the owner's viewing PIN, and the folders can be added straight away without a second unlock.
 - Server: suggestions of what to watch next, each with its reason ("Next in the … Collection", "Also directed by …") instead of a percentage. The next film of a series of films comes first, then the same franchise, then shared TMDB keywords (rare ones weigh more), genres, people, studio and a similar title; very different age ratings count strongly against a title. Only titles the profile may open and has not finished are suggested. TMDB keywords are kept for this and fetched once for titles matched before.
 - Server: Home has "Because You Watched …" rails for the latest watched titles, and its hour's title comes from the profile's personal top ten.
 - Mac, browser, Linux, Apple TV and iPhone & iPad: when a movie or a series' last episode reaches its credits, Up Next shows the server's suggestion with its reason and Watch Now, Watch Credits and Done, without a countdown. At the end of the file an end screen shows it with two more. Settings › Playback › Play Suggestions Automatically (off unless turned on) starts it by itself instead. Home shows the "Because You Watched …" rails.
@@ -67,6 +72,10 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Changed
 
+- Browser: Settings has a sidebar of its categories, as in the Mac app, and another category fades in beside it instead of moving the whole page. A saved setting no longer replays the page's animation.
+- Browser: the page that is open, chosen again, only scrolls to the top; returning to the tab, pictures and the Home hero no longer fade or rise in again; Back shows the earlier page at once; a title's picture loads before its page opens.
+- Browser: Search is centered, shows nothing before something is typed, keeps the last results until new ones arrive and says "Loading…" only when it takes a moment.
+- Browser: Watch Together moved from the player's top menus to the controls at the bottom right. Check for Updates says "No new version found" plainly.
 - Mac: Skip Intro is larger, shows its key (Return; S works too) and moves above the bottom controls while they show, like Up Next, instead of sitting on them.
 - Browser (Server 2.9.0): Automatic quality plays a picture that can be copied without converting it and switches to adaptive streaming only after real stalls, so a weak server converts nothing while the connection keeps up.
 - Browser (Server 2.7.0): pages open faster. The app's files carry their version in their address and come compressed, so the browser keeps them; pictures carry their revision; pages seen before show at once, a poster's page loads while pointing at it, and slower pages show their shape while loading.
@@ -86,6 +95,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Fixed
 
+- Browser: Settings › Profiles and Devices opened with "SVG is not defined".
+- Browser: posters on Home and on a person's page lifted out of their row and showed a box around title and year.
 - Mac: Settings › Power no longer stays empty. It loads only where the server runs, shows a spinner while loading and says when the settings couldn't be loaded, with Try Again.
 - Browser: About in Settings opens again, a page change animates once instead of twice, and returning to the window no longer replays the page animation.
 - Browser (Server 2.7.0): the tour's ring sits on the first title it explains instead of beside it and off the window; Home's picture fills the whole width on wide windows; a person's page keeps its back button and heading off the edge; menu icons line up with their text.
