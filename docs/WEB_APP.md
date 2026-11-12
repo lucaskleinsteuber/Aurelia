@@ -197,6 +197,9 @@ administrator, shared collections; movie pages offer their TMDB franchise as a c
 
 ## Settings
 
+Name and Picture crops a chosen photo in the browser: drag the circle and zoom, then Use Photo
+draws a square JPEG that is uploaded on Save.
+
 *Settings* in the profile menu has the Mac's categories; viewers see only their own.
 
 - **General** and **Playback** are kept in this browser: start page, poster size, which sections

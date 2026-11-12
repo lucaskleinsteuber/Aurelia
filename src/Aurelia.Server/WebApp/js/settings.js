@@ -18,6 +18,7 @@ import { createManagementEditors } from "./settings-editors.js";
 import { createServerUpdates } from "./server-updates.js";
 import { createAdminTools } from "./settings-admin.js";
 import { createImportPreview } from "./import-preview.js";
+import { cropPhoto } from "./photo-crop.js";
 
 const CATEGORIES = [
   { id: "general", label: "General", symbol: "gear", adminOnly: false },
@@ -868,14 +869,22 @@ export function createSettings(app) {
       }
     };
     const file = h("input", { type: "file", accept: "image/jpeg,image/png,image/webp", hidden: true });
-    file.addEventListener("change", () => {
+    file.addEventListener("change", async () => {
       const chosen = file.files?.[0];
+      file.value = "";
       if (!chosen) return;
-      if (chosen.size > MAXIMUM_PHOTO_BYTES) {
+      if (chosen.size > MAXIMUM_PHOTO_BYTES * 4) {
+        message.textContent = "Choose a photo smaller than 32 MB.";
+        return;
+      }
+      // The photo is cropped to a square here, before anything is uploaded.
+      const cropped = await cropPhoto(chosen);
+      if (!cropped) return;
+      if (cropped.size > MAXIMUM_PHOTO_BYTES) {
         message.textContent = "Choose a photo smaller than 8 MB.";
         return;
       }
-      photo = chosen;
+      photo = cropped;
       key = PHOTO_PICTURE;
       message.textContent = "";
       paint();

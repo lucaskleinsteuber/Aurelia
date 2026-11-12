@@ -322,6 +322,15 @@ export function cropFrame({ imageWidth, imageHeight, aspect, zoom = 1, centerX =
   return normalizedCrop({ x, y, width, height, rotation: 0 });
 }
 
+/** A 0…1 crop in whole pixels of a picture `width` × `height`, at least one pixel and inside it. */
+export function cropPixels(crop, width, height) {
+  const x = Math.max(0, Math.min(width - 1, Math.round(crop.x * width)));
+  const y = Math.max(0, Math.min(height - 1, Math.round(crop.y * height)));
+  const w = Math.max(1, Math.min(width - x, Math.round(crop.width * width)));
+  const h = Math.max(1, Math.min(height - y, Math.round(crop.height * height)));
+  return { x, y, width: w, height: h };
+}
+
 function editorNumber(value, label, minimum, maximum) {
   const text = String(value ?? "").trim();
   if (!text) return null;

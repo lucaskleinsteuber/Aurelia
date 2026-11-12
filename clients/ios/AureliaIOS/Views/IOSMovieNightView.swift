@@ -139,24 +139,12 @@ struct IOSMovieNightView: View {
         voters == 0
           ? "Nobody is swiping yet. Open Aurelia on another phone and join this night."
           : "\(voters == 1 ? "1 person is" : "\(voters) people are") ready to swipe. Anyone else at home can join from Aurelia.")
-      people(state)
-      if state.me?.isHost == true {
-        IOSMovieNightChips(
-          options: [("Movies", "movies"), ("Movies and shows", "all")],
-          selected: state.kinds
-        ) { kinds in Task { await session.settings(kinds: kinds, genre: state.genre) } }
-        if !state.genreOptions.isEmpty {
-          IOSMovieNightChips(
-            options: [("Any genre", "")] + state.genreOptions.map { ($0, $0) },
-            selected: state.genre ?? ""
-          ) { genre in Task { await session.settings(kinds: state.kinds, genre: genre.isEmpty ? nil : genre) } }
-        }
-        Button("Deal the Cards") { Task { await session.deal() } }
-          .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
-          .disabled(voters == 0)
-      } else {
-        Text("Waiting for \(state.host?.name ?? "the host") to deal.").foregroundStyle(.secondary)
+      IOSMovieNightProgramCard(state: state, voters: voters) { program in
+        Task { await session.settings(program) }
+      } deal: {
+        Task { await session.deal() }
       }
+      people(state)
       Button(state.me?.isVoting == true ? "Just Watch on This Screen" : "Swipe Here Too") {
         Task { await session.setVoting(!(state.me?.isVoting ?? false)) }
       }
@@ -217,28 +205,6 @@ struct IOSMovieNightView: View {
   }
 }
 
-private struct IOSMovieNightChips: View {
-  let options: [(String, String)]
-  let selected: String
-  let choose: (String) -> Void
-
-  var body: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 8) {
-        ForEach(options, id: \.1) { option in
-          let isSelected = option.1 == selected
-          Button(option.0) { choose(option.1) }
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 14)
-            .frame(height: 34)
-            .foregroundStyle(isSelected ? Color.black : Color.white)
-            .background(isSelected ? Color.white : IOSDesign.raised, in: Capsule())
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
-        }
-      }
-    }
-  }
-}
 
 /// The stack of posters: the top one follows the finger, tilts, and gets stamped.
 private struct IOSMovieNightStack: View {
@@ -443,6 +409,95 @@ private struct IOSMovieNightTicket: View {
       .frame(height: 7)
       .clipped()
       .accessibilityHidden(true)
+    }
+  }
+}
+
+/// "Tonight's program": the host picks the kind, genre, era and length right here and deals;
+/// everyone else sees the choice and waits.
+private struct IOSMovieNightProgramCard: View {
+  let state: IOSMovieNightState
+  let voters: Int
+  let change: (IOSMovieNightProgram) -> Void
+  let deal: () -> Void
+
+  private var hosting: Bool { state.me?.isHost == true }
+  private var program: IOSMovieNightProgram { IOSMovieNightProgram(state) }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Tonight's program").font(.title3.weight(.bold))
+        Text(hosting ? "You choose what gets dealt." : "\(state.host?.name ?? "The host") chooses what gets dealt.")
+          .font(.footnote).foregroundStyle(.secondary)
+      }
+      row("What", IOSMovieNightProgram.kinds, selected: program.kinds) { value in
+        var next = program
+        next.kinds = value
+        change(next)
+      }
+      if !state.genreOptions.isEmpty {
+        row("Genre", [("", "Any genre")] + state.genreOptions.map { ($0, $0) }, selected: program.genre ?? "") { value in
+          var next = program
+          next.genre = value.isEmpty ? nil : value
+          change(next)
+        }
+      }
+      if state.era != nil {
+        row("When", IOSMovieNightProgram.eras, selected: program.era) { value in
+          var next = program
+          next.era = value
+          change(next)
+        }
+      }
+      if state.length != nil {
+        row("Length", IOSMovieNightProgram.lengths, selected: program.length) { value in
+          var next = program
+          next.length = value
+          change(next)
+        }
+      }
+      Divider()
+      Text(program.summary).font(.subheadline.weight(.semibold))
+      if hosting {
+        Button {
+          deal()
+        } label: {
+          Label("Deal the Cards", systemImage: "play.fill")
+        }
+        .buttonStyle(IOSButtonStyle(kind: .primary, fullWidth: true))
+        .disabled(voters == 0)
+        .accessibilityIdentifier("movie-night-deal")
+      } else {
+        Text("Waiting for \(state.host?.name ?? "the host") to deal.").foregroundStyle(.secondary)
+      }
+    }
+    .padding(16)
+    .background(IOSDesign.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Tonight's program")
+  }
+
+  private func row(
+    _ label: String, _ options: [(String, String)], selected: String,
+    choose: @escaping (String) -> Void
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(label.uppercased()).font(.caption2.weight(.bold)).tracking(1).foregroundStyle(.secondary)
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 8) {
+          ForEach(options, id: \.0) { option in
+            Button(option.1) { choose(option.0) }
+              .font(.subheadline.weight(.semibold))
+              .padding(.horizontal, 12).padding(.vertical, 7)
+              .background(
+                option.0 == selected ? Color.white : Color.white.opacity(0.1), in: Capsule())
+              .foregroundStyle(option.0 == selected ? Color.black : Color.white)
+              .disabled(!hosting)
+              .accessibilityAddTraits(option.0 == selected ? .isSelected : [])
+          }
+        }
+      }
     }
   }
 }

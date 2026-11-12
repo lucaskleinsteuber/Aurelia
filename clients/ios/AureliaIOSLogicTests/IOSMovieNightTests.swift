@@ -145,7 +145,9 @@ private actor FakeMovieNightAPI: IOSMovieNightAPI {
     try await Task.sleep(for: .seconds(60))
     throw CancellationError()
   }
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> IOSMovieNightState { try next() }
+  func movieNightSettings(id: UUID, program: IOSMovieNightProgram) async throws
+    -> IOSMovieNightState
+  { try next() }
   func dealMovieNight(id: UUID) async throws -> IOSMovieNightState { try next() }
   func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> IOSMovieNightState {
     votes.append(.init(mediaId: mediaID, like: like))

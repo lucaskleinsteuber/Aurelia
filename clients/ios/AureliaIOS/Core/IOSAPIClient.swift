@@ -294,6 +294,40 @@ struct IOSAPIClient: Sendable {
     }
     return values
   }
+  /// Shared collections and this profile's own ("collections-v2").
+  func editableCollections() async throws -> [IOSCollection] {
+    try Self.decode([IOSCollection].self, data: await send("/api/v1/collections"))
+  }
+
+  func createCollection(name: String, mediaIDs: [UUID]) async throws -> IOSCollection {
+    try Self.decode(
+      IOSCollection.self,
+      data: await send(
+        "/api/v1/collections", method: "POST",
+        body: JSONEncoder().encode(IOSSaveCollection(name: name, mediaIds: mediaIDs))))
+  }
+
+  func updateCollection(_ collection: IOSCollection, name: String, mediaIDs: [UUID]) async throws
+    -> IOSCollection
+  {
+    try Self.decode(
+      IOSCollection.self,
+      data: await send(
+        "/api/v1/collections/\(collection.id.uuidString.lowercased())", method: "PUT",
+        body: JSONEncoder().encode(
+          IOSSaveCollection(name: name, mediaIds: mediaIDs, isShared: collection.isShared))))
+  }
+
+  func deleteCollection(id: UUID) async throws {
+    _ = try await send("/api/v1/collections/\(id.uuidString.lowercased())", method: "DELETE")
+  }
+
+  func setCollectionItem(collectionID: UUID, mediaID: UUID, included: Bool) async throws {
+    _ = try await send(
+      "/api/v1/collections/\(collectionID.uuidString.lowercased())/items/\(mediaID.uuidString.lowercased())",
+      method: included ? "POST" : "DELETE")
+  }
+
   func summary(id: UUID) async throws -> IOSCatalogItem {
     let item: IOSCatalogItem = try await get("/api/v1/catalog/items/\(id.uuidString)/summary")
     guard item.id == id else { throw IOSCoreError.invalidResponse }
@@ -306,6 +340,28 @@ struct IOSAPIClient: Sendable {
       body: JSONEncoder().encode(Payload(isFavorite: isFavorite)))
     return try Self.decode(Bool.self, data: data)
   }
+  /// This profile's scene notes for a title.
+  func sceneNotes(mediaID: UUID) async throws -> [IOSSceneNote] {
+    try Self.decode(
+      [IOSSceneNote].self, data: await send("/api/v1/media/\(mediaID.uuidString)/notes"))
+  }
+
+  func saveSceneNote(mediaID: UUID, noteID: UUID, _ note: IOSSaveSceneNote) async throws
+    -> IOSSceneNote
+  {
+    try Self.decode(
+      IOSSceneNote.self,
+      data: await send(
+        "/api/v1/media/\(mediaID.uuidString)/notes/\(noteID.uuidString)", method: "PUT",
+        body: JSONEncoder().encode(note)))
+  }
+
+  func deleteSceneNote(mediaID: UUID, noteID: UUID, revision: Int64) async throws {
+    _ = try await send(
+      "/api/v1/media/\(mediaID.uuidString)/notes/\(noteID.uuidString)", method: "DELETE",
+      query: [URLQueryItem(name: "revision", value: String(revision))])
+  }
+
   func watchlist() async throws -> IOSWatchlistResponse {
     let data = try await send("/api/v1/watchlist")
     return try Self.decode(IOSWatchlistResponse.self, data: data)

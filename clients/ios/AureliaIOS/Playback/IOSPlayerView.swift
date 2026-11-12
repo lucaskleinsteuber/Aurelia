@@ -15,6 +15,8 @@ struct IOSPlayerView: View {
   @State private var skip: IOSSkipIndicator?
   /// Cinema mode's ad, trailers and curtain before a film.
   @State private var preShow: IOSCinemaPreShow?
+  /// The playing title's scene notes; nil for downloads played without the server.
+  @State private var notes: IOSSceneNotesModel?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   init(makeController: @escaping @MainActor () -> IOSPlaybackController) {
@@ -91,7 +93,26 @@ struct IOSPlayerView: View {
     // The iPad keeps the status bar in every orientation; time and date stay out of the picture.
     .statusBarHidden(true)
     .preferredColorScheme(.dark)
-    .sheet(item: $controller.trackMenu) { menu in menuSheet(menu) }
+    .sheet(item: $controller.trackMenu) { menu in
+      if menu == .notes, let notes {
+        IOSSceneNotesSheet(notes: notes, position: controller.position) { target in
+          controller.trackMenu = nil
+          controller.seek(to: target)
+        }
+      } else {
+        menuSheet(menu)
+      }
+    }
+    .overlay(alignment: .topTrailing) {
+      if let notes, preShow == nil, controller.errorMessage == nil {
+        IOSSceneNoteCue(notes: notes, position: controller.position)
+          .padding(.top, controller.controlsVisible ? 64 : 16).padding(.trailing, 16)
+      }
+    }
+    .task(id: controller.currentMediaID) {
+      if notes == nil { notes = controller.makeSceneNotes() }
+      await notes?.show(mediaID: controller.currentMediaID)
+    }
     .onAppear {
       keyboard = true
       // A party this device is in follows into the player before it starts.
@@ -169,6 +190,12 @@ struct IOSPlayerView: View {
             "Sleep Timer", symbol: controller.sleepTimer == .off ? "moon.zzz" : "moon.zzz.fill",
             id: "sleep"
           ) { open(.sleep) }
+          if !controller.chapters.isEmpty {
+            glassButton("Chapters", symbol: "list.bullet", id: "chapters") { open(.chapters) }
+          }
+          if notes != nil {
+            glassButton("Scene Notes", symbol: "bookmark", id: "notes") { open(.notes) }
+          }
           // Watch Together: start a party for this title, or leave the one this device is in.
           if !controller.isOffline {
             watchTogetherButton
@@ -296,6 +323,14 @@ struct IOSPlayerView: View {
         ZStack(alignment: .leading) {
           Capsule().fill(.white.opacity(0.25))
           Capsule().fill(.white).frame(width: geometry.size.width * fraction)
+          // Where each chapter begins.
+          ForEach(
+            IOSChapterPolicy.markers(controller.chapters, duration: controller.duration), id: \.self
+          ) { marker in
+            Rectangle().fill(.black.opacity(0.6)).frame(width: 2, height: 8)
+              .offset(x: geometry.size.width * marker - 1)
+              .accessibilityHidden(true)
+          }
           if controller.scrubPosition != nil {
             // Where playback is now, while the bar shows where lifting the finger would jump.
             Capsule().fill(.white.opacity(0.45))
@@ -521,6 +556,22 @@ struct IOSPlayerView: View {
 
   private func sections(_ menu: IOSPlaybackController.TrackMenu) -> [MenuSection] {
     switch menu {
+    case .chapters:
+      let current = IOSChapterPolicy.current(controller.chapters, position: controller.position)
+      return [
+        MenuSection(
+          title: nil,
+          rows: controller.chapters.map { chapter in
+            MenuRow(
+              id: "chapter-\(chapter.index)",
+              title:
+                "\(chapter.title)  ·  \(IOSPlayerPolicy.timeLabel(milliseconds: chapter.timeOffsetMilliseconds))",
+              selected: current == chapter
+            ) { controller.selectChapter(chapter) }
+          })
+      ]
+    case .notes:
+      return []
     case .audio:
       var result: [MenuSection] = []
       if !controller.audioTracks.isEmpty {
@@ -658,6 +709,8 @@ struct IOSPlayerView: View {
     case .audio: "Audio and Subtitles"
     case .rate: "Playback Speed"
     case .sleep: "Sleep Timer"
+    case .chapters: "Chapters"
+    case .notes: "Scene Notes"
     }
   }
 
@@ -770,5 +823,104 @@ private struct IOSWatchTogetherNotice: View {
     .padding(.top, 64)
     .animation(.easeInOut(duration: 0.3), value: text)
     .allowsHitTesting(false)
+  }
+}
+
+/// A note's text at its moment, top right, while the title plays on.
+private struct IOSSceneNoteCue: View {
+  @ObservedObject var notes: IOSSceneNotesModel
+  let position: Int64
+
+  var body: some View {
+    if let note = notes.cue(at: position) {
+      Text(note.text).font(.callout).lineLimit(6).padding(12)
+        .frame(maxWidth: 280, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("scene-note-cue")
+        .transition(.opacity)
+    }
+  }
+}
+
+/// Scene notes of this title: tap one to jump there, add one at the current moment or as a range
+/// from it, edit the text, swipe to delete.
+private struct IOSSceneNotesSheet: View {
+  @ObservedObject var notes: IOSSceneNotesModel
+  let position: Int64
+  let jump: (Int64) -> Void
+  @State private var draft = ""
+  @State private var range = false
+  @State private var rangeSeconds = 30
+  @State private var editing: IOSSceneNote?
+  @State private var editText = ""
+
+  var body: some View {
+    NavigationStack {
+      List {
+        Section {
+          TextField("Note at \(IOSPlayerPolicy.timeLabel(milliseconds: position))", text: $draft, axis: .vertical)
+            .lineLimit(1...4)
+            .accessibilityIdentifier("scene-note-text")
+          Toggle("Time Range", isOn: $range)
+          if range {
+            Stepper("Lasts \(rangeSeconds) seconds", value: $rangeSeconds, in: 5...600, step: 5)
+          }
+          Button("Add Note") {
+            let end = range ? position + Int64(rangeSeconds) * 1_000 : nil
+            Task { if await notes.add(text: draft, start: position, end: end) { draft = "" } }
+          }
+          .disabled(IOSSceneNotePolicy.cleaned(draft) == nil || notes.working)
+          .accessibilityIdentifier("scene-note-add")
+        } footer: {
+          Text("Notes are private to your profile. A moment shows for six seconds, a range for as long as it lasts.")
+        }
+        Section {
+          if notes.sorted.isEmpty {
+            Text("No notes yet.").foregroundStyle(.secondary)
+          }
+          ForEach(notes.sorted) { note in
+            Button {
+              jump(note.startMilliseconds)
+            } label: {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(IOSSceneNotePolicy.label(note)).font(.caption.monospacedDigit())
+                  .foregroundStyle(.secondary)
+                Text(note.text).foregroundStyle(.primary).lineLimit(4)
+              }
+            }
+            .swipeActions {
+              Button("Delete", role: .destructive) { Task { await notes.delete(note) } }
+              Button("Edit") {
+                editText = note.text
+                editing = note
+              }
+            }
+            .accessibilityHint("Jumps to this note. Swipe to edit or delete.")
+          }
+        } footer: {
+          if let message = notes.message { Text(message).foregroundStyle(.orange) }
+        }
+      }
+      .navigationTitle("Scene Notes")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarLeading) {
+          Button("Reload") { Task { await notes.reload() } }
+        }
+      }
+      .alert(
+        "Edit Note",
+        isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })
+      ) {
+        TextField("Note", text: $editText)
+        Button("Cancel", role: .cancel) { editing = nil }
+        Button("Save") {
+          if let note = editing { Task { _ = await notes.update(note, text: editText) } }
+          editing = nil
+        }
+      }
+    }
+    .presentationDetents([.medium, .large])
   }
 }

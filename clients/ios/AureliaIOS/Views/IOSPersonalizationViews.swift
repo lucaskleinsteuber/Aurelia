@@ -92,6 +92,7 @@ struct IOSNameAndPictureView: View {
   @State private var photo: Data?
   @State private var preview: UIImage?
   @State private var photoItem: PhotosPickerItem?
+  @State private var cropping: IOSCroppingPhoto?
   @State private var working = false
   @State private var message: String?
   @State private var failed = false
@@ -212,15 +213,23 @@ struct IOSNameAndPictureView: View {
     }
     .onChange(of: photoItem) { _, item in
       guard let item else { return }
+      photoItem = nil
       Task {
         guard let data = try? await item.loadTransferable(type: Data.self),
-          let prepared = IOSProfilePictures.preparedPhoto(data),
-          let image = UIImage(data: prepared)
+          let image = IOSPhotoCrop.uprightImage(data)
         else {
           failed = true
           message = "This photo could not be read."
           return
         }
+        // The photo is cropped to a square before anything is uploaded.
+        cropping = IOSCroppingPhoto(image: image)
+      }
+    }
+    .sheet(item: $cropping) { candidate in
+      IOSPhotoCropSheet(image: candidate.image) { prepared in
+        cropping = nil
+        guard let prepared, let image = UIImage(data: prepared) else { return }
         photo = prepared
         preview = image
         pictureKey = IOSProfilePictures.photoKey
@@ -660,6 +669,91 @@ struct IOSLibraryTour: View {
     } else {
       index += 1
       tab = Self.stops[index].tab
+    }
+  }
+}
+
+/// A chosen photo waiting to be cropped.
+struct IOSCroppingPhoto: Identifiable {
+  let id = UUID()
+  let image: CGImage
+}
+
+/// Moves and zooms a photo inside a circle; Use Photo returns the square JPEG, Cancel nil.
+struct IOSPhotoCropSheet: View {
+  let image: CGImage
+  let done: (Data?) -> Void
+  @State private var zoom: CGFloat = 1
+  @State private var offset: CGSize = .zero
+  @GestureState private var dragging: CGSize = .zero
+  @GestureState private var pinching: CGFloat = 1
+
+  private var imageSize: CGSize { CGSize(width: image.width, height: image.height) }
+
+  var body: some View {
+    NavigationStack {
+      GeometryReader { geometry in
+        let side = min(geometry.size.width, geometry.size.height) - 48
+        let liveZoom = min(max(zoom * pinching, 1), IOSPhotoCrop.maximumZoom)
+        let live = IOSPhotoCrop.clamped(
+          offset: CGSize(
+            width: offset.width + dragging.width, height: offset.height + dragging.height),
+          imageSize: imageSize, side: side, zoom: liveZoom)
+        let scale = side / min(imageSize.width, imageSize.height) * liveZoom
+        ZStack {
+          Color.black.ignoresSafeArea()
+          Image(decorative: image, scale: 1)
+            .resizable()
+            .frame(width: imageSize.width * scale, height: imageSize.height * scale)
+            .offset(live)
+          Rectangle().fill(.black.opacity(0.55))
+            .mask {
+              Rectangle().overlay { Circle().frame(width: side, height: side).blendMode(.destinationOut) }
+                .compositingGroup()
+            }
+            .allowsHitTesting(false)
+          Circle().strokeBorder(.white, lineWidth: 2).frame(width: side, height: side)
+            .allowsHitTesting(false)
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        .clipped()
+        .contentShape(Rectangle())
+        .gesture(
+          DragGesture()
+            .updating($dragging) { value, state, _ in state = value.translation }
+            .onEnded { value in
+              offset = IOSPhotoCrop.clamped(
+                offset: CGSize(
+                  width: offset.width + value.translation.width,
+                  height: offset.height + value.translation.height),
+                imageSize: imageSize, side: side, zoom: zoom)
+            }
+            .simultaneously(
+              with: MagnifyGesture()
+                .updating($pinching) { value, state, _ in state = value.magnification }
+                .onEnded { value in
+                  zoom = min(max(zoom * value.magnification, 1), IOSPhotoCrop.maximumZoom)
+                  offset = IOSPhotoCrop.clamped(
+                    offset: offset, imageSize: imageSize, side: side, zoom: zoom)
+                })
+        )
+        .toolbar {
+          ToolbarItem(placement: .cancellationAction) { Button("Cancel") { done(nil) } }
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Use Photo") {
+              let rect = IOSPhotoCrop.rect(
+                imageSize: imageSize, side: side, zoom: zoom, offset: offset)
+              done(IOSPhotoCrop.croppedJPEG(image, rect: rect))
+            }
+            .accessibilityIdentifier("photo-crop-use")
+          }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Photo to crop")
+        .accessibilityHint("Drag to move the photo, pinch to zoom.")
+      }
+      .navigationTitle("Move and Scale")
+      .navigationBarTitleDisplayMode(.inline)
     }
   }
 }

@@ -24,7 +24,15 @@ its screens are its own:
   the title (see below). Progress, sound
   tracks, subtitles (including subtitle files next to the video), scrub previews, Skip Intro,
   Up Next (also when the credits begin, with Watch Credits), Cinema Mode before a film and the
-  sleep timer behave as on the Apple TV.
+  sleep timer behave as on the Apple TV. A file's **chapters** appear as a menu and as marks on
+  the timeline, and **scene notes** are listed, added at the current moment or as a range,
+  edited, deleted with a swipe and shown at their moment, private to the profile.
+- **Movie Night** shows *Tonight's program*: the host picks kind, genre, era and length right in
+  the lobby card and deals; everyone else sees the choice.
+- **Collections**: Add to Collection… in a title's menu chooses your own collections or starts a
+  new one; a collection's page renames or deletes it and removes titles. Smart lists stay on the
+  Mac and in the browser.
+- **Name and Picture** crops a chosen photo to a circle (drag and pinch) before it is uploaded.
 - **Screens** are built for iPhone and iPad rather than taken from the TV: a tab bar with Home,
   Movies, TV Shows, Search and Settings, iOS text sizes and margins, the PIN entered on a keypad
   like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an

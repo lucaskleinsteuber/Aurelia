@@ -72,6 +72,9 @@ struct IOSMovieNightState: Codable, Identifiable, Equatable, Sendable {
   let kinds: String
   let genre: String?
   let genreOptions: [String]
+  /// From server 2.7.0: the era and length the host picked; older servers send none.
+  var era: String? = nil
+  var length: String? = nil
   let members: [IOSMovieNightMember]
   let deck: [IOSMovieNightCard]?
   let yourVotes: [IOSMovieNightVote]
@@ -144,7 +147,8 @@ protocol IOSMovieNightAPI: Sendable {
   func joinMovieNight(id: UUID, deviceName: String, voting: Bool) async throws -> IOSMovieNightState
   func movieNight(id: UUID, after: Int64?, deckVersion: Int?, waitMilliseconds: Int) async throws
     -> IOSMovieNightState
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> IOSMovieNightState
+  func movieNightSettings(id: UUID, program: IOSMovieNightProgram) async throws
+    -> IOSMovieNightState
   func dealMovieNight(id: UUID) async throws -> IOSMovieNightState
   func voteMovieNight(id: UUID, mediaID: UUID, like: Bool) async throws -> IOSMovieNightState
   func keepSwiping(id: UUID) async throws -> IOSMovieNightState
@@ -187,9 +191,9 @@ final class IOSMovieNightSession: ObservableObject {
     await run { [api] in try await api.joinMovieNight(id: night.id, deviceName: name, voting: voting) }
   }
 
-  func settings(kinds: String, genre: String?) async {
+  func settings(_ program: IOSMovieNightProgram) async {
     guard let id = state?.id else { return }
-    await run { [api] in try await api.movieNightSettings(id: id, kinds: kinds, genre: genre) }
+    await run { [api] in try await api.movieNightSettings(id: id, program: program) }
   }
 
   func deal() async {
@@ -332,12 +336,10 @@ extension IOSAPIClient: IOSMovieNightAPI {
     return try await getWatchTogether(Self.night(id), query: query)
   }
 
-  func movieNightSettings(id: UUID, kinds: String, genre: String?) async throws -> IOSMovieNightState {
-    struct Body: Encodable {
-      let kinds: String
-      let genre: String?
-    }
-    return try await postWatchTogether(Self.night(id, "/settings"), Body(kinds: kinds, genre: genre))
+  func movieNightSettings(id: UUID, program: IOSMovieNightProgram) async throws
+    -> IOSMovieNightState
+  {
+    try await postWatchTogether(Self.night(id, "/settings"), program)
   }
 
   func dealMovieNight(id: UUID) async throws -> IOSMovieNightState {
@@ -363,5 +365,46 @@ extension IOSAPIClient: IOSMovieNightAPI {
 
   func leaveMovieNight(id: UUID) async throws {
     try await deleteWatchTogether(Self.night(id, "/members/me"))
+  }
+}
+
+/// Tonight's program: what the host deals (as on the Mac and in the browser).
+struct IOSMovieNightProgram: Codable, Equatable, Sendable {
+  var kinds: String
+  var genre: String?
+  var era: String
+  var length: String
+
+  static let kinds = [("movies", "Movies"), ("all", "Movies and shows")]
+  static let eras = [
+    ("any", "Any time"), ("2020s", "2020s"), ("2010s", "2010s"), ("2000s", "2000s"),
+    ("older", "Older"),
+  ]
+  static let lengths = [
+    ("any", "Any length"), ("short", "Short, up to 1h 40m"), ("standard", "Up to 2h 10m"),
+  ]
+
+  /// The night's current program; a server without eras and lengths keeps "any".
+  init(_ state: IOSMovieNightState) {
+    kinds = state.kinds
+    genre = state.genre?.isEmpty == false ? state.genre : nil
+    era = state.era ?? "any"
+    length = state.length ?? "any"
+  }
+
+  init(kinds: String, genre: String?, era: String, length: String) {
+    self.kinds = kinds
+    self.genre = genre
+    self.era = era
+    self.length = length
+  }
+
+  /// "Movies · Comedy · 2010s · Short" for the program card's foot.
+  var summary: String {
+    [
+      kinds == "all" ? "Movies and shows" : "Movies", genre,
+      era == "any" ? nil : Self.eras.first { $0.0 == era }?.1,
+      length == "short" ? "Short" : length == "standard" ? "Up to 2h 10m" : nil,
+    ].compactMap { $0 }.joined(separator: " · ")
   }
 }

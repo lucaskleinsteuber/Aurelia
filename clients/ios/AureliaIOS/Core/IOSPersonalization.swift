@@ -79,6 +79,76 @@ enum IOSProfilePictures {
   }
 }
 
+/// Cropping an own photo to the square the profile shows: the photo fills a square frame `side`
+/// points wide at `zoom` (1 fills the shorter side) and is moved by `offset` points.
+enum IOSPhotoCrop {
+  static let maximumZoom: CGFloat = 4
+
+  /// How far the photo may move at `zoom` so it still covers the frame.
+  static func clamped(offset: CGSize, imageSize: CGSize, side: CGFloat, zoom: CGFloat) -> CGSize {
+    guard imageSize.width > 0, imageSize.height > 0, side > 0 else { return .zero }
+    let scale = side / min(imageSize.width, imageSize.height) * min(max(zoom, 1), maximumZoom)
+    let spareX = max(0, (imageSize.width * scale - side) / 2)
+    let spareY = max(0, (imageSize.height * scale - side) / 2)
+    return CGSize(
+      width: min(max(offset.width, -spareX), spareX),
+      height: min(max(offset.height, -spareY), spareY))
+  }
+
+  /// The square of the photo, in its pixels, that the frame shows.
+  static func rect(imageSize: CGSize, side: CGFloat, zoom: CGFloat, offset: CGSize) -> CGRect {
+    guard imageSize.width > 0, imageSize.height > 0, side > 0 else { return .zero }
+    let zoom = min(max(zoom, 1), maximumZoom)
+    let scale = side / min(imageSize.width, imageSize.height) * zoom
+    let offset = clamped(offset: offset, imageSize: imageSize, side: side, zoom: zoom)
+    let length = side / scale
+    let x = imageSize.width / 2 - offset.width / scale - length / 2
+    let y = imageSize.height / 2 - offset.height / scale - length / 2
+    return CGRect(
+      x: min(max(x, 0), imageSize.width - length), y: min(max(y, 0), imageSize.height - length),
+      width: length, height: length)
+  }
+
+  /// The photo upright, at most 3000 pixels on its longer side, for showing and cropping.
+  static func uprightImage(_ data: Data) -> CGImage? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+      CGImageSourceGetCount(source) > 0
+    else { return nil }
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: 3_000,
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+  }
+
+  /// The cropped square as a JPEG of at most `IOSProfilePictures.uploadEdge` pixels.
+  static func croppedJPEG(_ image: CGImage, rect: CGRect) -> Data? {
+    guard let cropped = image.cropping(to: rect.integral) else { return nil }
+    let edge = min(IOSProfilePictures.uploadEdge, cropped.width)
+    guard edge > 0,
+      let context = CGContext(
+        data: nil, width: edge, height: edge, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+    else { return nil }
+    context.interpolationQuality = .high
+    context.draw(cropped, in: CGRect(x: 0, y: 0, width: edge, height: edge))
+    guard let scaled = context.makeImage() else { return nil }
+    let output = NSMutableData()
+    guard
+      let destination = CGImageDestinationCreateWithData(
+        output, UTType.jpeg.identifier as CFString, 1, nil)
+    else { return nil }
+    CGImageDestinationAddImage(
+      destination, scaled, [kCGImageDestinationLossyCompressionQuality: 0.88] as CFDictionary)
+    guard CGImageDestinationFinalize(destination),
+      output.length <= IOSProfilePictures.maximumUploadBytes
+    else { return nil }
+    return output as Data
+  }
+}
+
 /// "Children's profile · up to FSK 6" for a profile with an age limit.
 enum IOSAgeLimit {
   static func summary(for limit: Int?) -> String? {

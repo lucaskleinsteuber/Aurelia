@@ -35,6 +35,7 @@ final class IOSAppModel: ObservableObject {
   @Published private(set) var home: IOSHome?
 
   var supportsWatchlist: Bool { capabilities?.supportsWatchlistAndPeople ?? false }
+  var supportsCollections: Bool { capabilities?.supportsCollections ?? false }
   var supportsScrubPreviews: Bool { capabilities?.supportsScrubPreviews ?? false }
   var supportsMovieNight: Bool { capabilities?.supportsMovieNight ?? false }
   var supportsWrapped: Bool { capabilities?.supportsWrapped ?? false }

@@ -475,3 +475,12 @@ test("the weekly chart shows twelve weeks with empty ones", () => {
   assert.equal(logic.isoWeek(new Date(2027, 0, 1)), "2026-W53");
   assert.equal(logic.isoWeek(new Date(2026, 0, 1)), "2026-W01");
 });
+
+test("a profile photo crop becomes whole pixels inside the picture", () => {
+  const crop = logic.cropFrame({ imageWidth: 4000, imageHeight: 3000, aspect: 1, zoom: 2, centerX: 0.9, centerY: 0.5 });
+  const pixels = logic.cropPixels(crop, 4000, 3000);
+  assert.equal(pixels.width, pixels.height);
+  assert.equal(pixels.width, 1500);
+  assert.equal(pixels.x + pixels.width, 4000);
+  assert.deepEqual(logic.cropPixels({ x: 0.999, y: 0, width: 0, height: 0 }, 10, 10), { x: 10 - 1, y: 0, width: 1, height: 1 });
+});

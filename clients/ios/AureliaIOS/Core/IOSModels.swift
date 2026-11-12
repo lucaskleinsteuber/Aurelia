@@ -193,6 +193,8 @@ struct IOSCapabilities: Codable, Equatable, Sendable {
     capabilities?.contains("profile-personalization-v1") == true
   }
   var supportsWatchlistAndPeople: Bool { capabilities?.contains("watchlist-people-v1") == true }
+  /// Own and shared collections that can be made and changed here.
+  var supportsCollections: Bool { capabilities?.contains("collections-v2") == true }
   var supportsScrubPreviews: Bool { capabilities?.contains("scrub-previews-v1") == true }
   /// Movie Night: the household swipes one deck until everyone likes a title.
   var supportsMovieNight: Bool { capabilities?.contains("movie-night-v1") == true }

@@ -154,6 +154,8 @@ struct IOSCollection: Codable, Identifiable, Equatable, Sendable {
   let isSmart: Bool
   let totalCount: Int
   let isShared: Bool
+  /// The profile a personal collection belongs to; nil for a shared one.
+  var userId: UUID? = nil
 
   init(
     id: UUID,
@@ -174,7 +176,7 @@ struct IOSCollection: Codable, Identifiable, Equatable, Sendable {
   }
 
   enum CodingKeys: String, CodingKey {
-    case id, name, poster, items, isSmart, totalCount, isShared
+    case id, name, poster, items, isSmart, totalCount, isShared, userId
   }
 
   init(from decoder: Decoder) throws {
@@ -187,6 +189,25 @@ struct IOSCollection: Codable, Identifiable, Equatable, Sendable {
     let count = try container.decodeIfPresent(Int.self, forKey: .totalCount) ?? 0
     totalCount = count == 0 ? items.count : count
     isShared = try container.decodeIfPresent(Bool.self, forKey: .isShared) ?? true
+    userId = try container.decodeIfPresent(UUID.self, forKey: .userId)
+  }
+}
+
+enum IOSCollectionRules {
+  static let maximumNameLength = 80
+
+  /// A smart list chooses its own titles; a personal collection is its profile's, a shared one
+  /// the administrators'.
+  static func canEdit(_ collection: IOSCollection, userID: UUID?, role: String?) -> Bool {
+    guard !collection.isSmart else { return false }
+    if collection.isShared { return role == "owner" || role == "admin" }
+    return collection.userId == nil || collection.userId == userID
+  }
+
+  /// The name trimmed and within its limit, or nil when nothing is left.
+  static func cleanedName(_ name: String) -> String? {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : String(trimmed.prefix(maximumNameLength))
   }
 }
 struct IOSHome: Codable, Equatable, Sendable {
@@ -267,4 +288,13 @@ extension IOSCatalogItem {
       libraryAvailability: libraryAvailability, continueWatchingHidden: continueWatchingHidden)
   }
   var detailID: UUID { kind == .episode ? parentId ?? id : id }
+}
+
+/// A new or changed collection; smart lists are made on the Mac or in the browser.
+struct IOSSaveCollection: Codable, Equatable, Sendable {
+  let name: String
+  let mediaIds: [UUID]
+  var isSmart = false
+  var isShared = false
+  var rulesJson: String? = nil
 }

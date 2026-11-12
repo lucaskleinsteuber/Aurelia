@@ -545,6 +545,16 @@ struct IOSCollectionView: View {
   @State private var unavailable = false
   @State private var error: String?
   @State private var requestID = UUID()
+  @State private var renaming = false
+  @State private var newName = ""
+  @State private var confirmDelete = false
+  @Environment(\.dismiss) private var dismiss
+
+  private var canEdit: Bool {
+    model.supportsCollections
+      && IOSCollectionRules.canEdit(
+        current ?? collection, userID: model.session?.user.id, role: model.session?.user.role)
+  }
 
   var body: some View {
     ScrollView {
@@ -560,7 +570,14 @@ struct IOSCollectionView: View {
               }
               .buttonStyle(IOSContentButtonStyle())
               .accessibilityIdentifier("collection-item-\(item.id)")
-              .contextMenu { IOSMediaContextActions(item: item, actions: actions) }
+              .contextMenu {
+                IOSMediaContextActions(item: item, actions: actions)
+                if canEdit {
+                  Button("Remove from Collection", role: .destructive) {
+                    Task { await remove(item) }
+                  }
+                }
+              }
             }
           }
 
@@ -580,8 +597,69 @@ struct IOSCollectionView: View {
       }.padding(.horizontal, IOSDesign.margin).padding(.vertical, 12)
     }.background(IOSDesign.canvas.ignoresSafeArea())
       .navigationTitle(current?.name ?? collection.name)
+      .toolbar {
+        if canEdit {
+          Menu {
+            Button("Rename…") {
+              newName = current?.name ?? collection.name
+              renaming = true
+            }
+            Button("Delete Collection", role: .destructive) { confirmDelete = true }
+          } label: {
+            Image(systemName: "ellipsis.circle")
+          }
+          .accessibilityLabel("Edit Collection")
+        }
+      }
+      .alert("Rename Collection", isPresented: $renaming) {
+        TextField("Name", text: $newName)
+        Button("Cancel", role: .cancel) {}
+        Button("Save") { Task { await rename() } }
+      }
+      .confirmationDialog(
+        "Delete \(current?.name ?? collection.name)?", isPresented: $confirmDelete,
+        titleVisibility: .visible
+      ) {
+        Button("Delete Collection", role: .destructive) { Task { await delete() } }
+      } message: {
+        Text("Only the collection goes away; its titles stay in the library.")
+      }
       .task(id: model.libraryRefresh) { await reload() }
       .modifier(IOSLibraryActionPresentation(actions: actions))
+  }
+
+  private func rename() async {
+    guard let api = model.client, let name = IOSCollectionRules.cleanedName(newName) else { return }
+    let value = current ?? collection
+    do {
+      current = try await api.updateCollection(value, name: name, mediaIDs: value.items.map(\.id))
+      model.scheduleLibraryRefresh()
+    } catch {
+      self.error = error.localizedDescription
+    }
+  }
+
+  private func remove(_ item: IOSCatalogItem) async {
+    guard let api = model.client else { return }
+    do {
+      try await api.setCollectionItem(
+        collectionID: collection.id, mediaID: item.id, included: false)
+      model.scheduleLibraryRefresh()
+      await reload()
+    } catch {
+      self.error = error.localizedDescription
+    }
+  }
+
+  private func delete() async {
+    guard let api = model.client else { return }
+    do {
+      try await api.deleteCollection(id: collection.id)
+      model.scheduleLibraryRefresh()
+      dismiss()
+    } catch {
+      self.error = error.localizedDescription
+    }
   }
 
   private func reload() async {

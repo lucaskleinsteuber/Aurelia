@@ -15,6 +15,8 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- iPhone & iPad: chapters as a menu and marks on the timeline, scene notes in the player (add, edit, delete, shown at their moment), Movie Night's *Tonight's program* card with era and length, collections to create, rename, fill and delete, and a crop for an own profile photo.
+- Browser: an own profile photo is cropped to a circle before it is uploaded.
 - Linux, Apple TV and iPhone & iPad: Cinema Mode, as on the Mac and in the browser. Before a film that starts from its beginning comes one of Aurelia's made-up ads, trailers of films nobody has watched yet and the curtain, which opens once the film plays behind it; Settings › Playback turns it on and chooses ads and up to three trailers. The Apple TV and iPhone & iPad show the Mac's own ads and curtain.
 - Browser, Linux, Apple TV and iPhone & iPad: Skip Intro while an episode's intro plays and, when its credits begin, Up Next with its countdown and Watch Credits, with the server's times (2.8.0 or newer). Settings › Playback has Intros (Don't Offer, Show Skip Intro, Skip Automatically) and Offer Next Episode When Credits Begin, as on the Mac. In the browser and on Linux Return/Enter or S skips; on the Apple TV the button takes the focus.
 - Server 2.10.0 (159): credits are also found in pictures. The server looks at each episode's last six minutes, two pictures a second: names on black, or a card the season's episodes share; they must last until shortly before the end. Series whose closing music differs per episode now get credits. On an older server this takes a few minutes per episode, once, and stops whenever someone watches.

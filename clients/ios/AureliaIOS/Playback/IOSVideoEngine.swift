@@ -32,6 +32,29 @@ final class IOSVideoEngine: IOSPlaybackEngine {
   private(set) var audioTrackID: Int32 = -1
   private(set) var subtitleTrackID: Int32 = -1
 
+  /// The chapters of the current title, as on the Mac (VLC's chapter descriptions).
+  var chapters: [IOSPlaybackChapter] {
+    guard isActive else { return [] }
+    let titleIndex = player.currentTitleIndex
+    guard titleIndex >= 0 else { return [] }
+    return player.chapterDescriptions(ofTitle: titleIndex).enumerated().compactMap { offset, raw in
+      guard let values = raw as? [AnyHashable: Any] else { return nil }
+      let time = Self.chapterTime(values[VLCChapterDescriptionTimeOffset])
+      let duration = Self.chapterTime(values[VLCChapterDescriptionDuration])
+      let supplied = (values[VLCChapterDescriptionName] as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return IOSPlaybackChapter(
+        index: Int32(offset), title: supplied.isEmpty ? "Chapter \(offset + 1)" : supplied,
+        timeOffsetMilliseconds: max(0, time), durationMilliseconds: max(0, duration))
+    }
+  }
+
+  private static func chapterTime(_ value: Any?) -> Int64 {
+    if let value = value as? NSNumber { return value.int64Value }
+    if let value = value as? VLCTime { return value.value?.int64Value ?? 0 }
+    return 0
+  }
+
   var isActive: Bool { acceptsEvents && player.media != nil }
   var isPlaying: Bool { machine.state.isPlaying }
   var isLoading: Bool { machine.state.isLoading }

@@ -5,7 +5,7 @@ import UIKit
 
 @MainActor
 final class IOSPlaybackController: ObservableObject {
-  enum TrackMenu: Equatable { case audio, rate, sleep }
+  enum TrackMenu: Equatable { case audio, rate, sleep, chapters, notes }
 
   let engine: any IOSPlaybackEngine
   /// Plays a download from this device with no server; Watch Together and Play On are off.
@@ -42,6 +42,9 @@ final class IOSPlaybackController: ObservableObject {
   /// While the timeline is scrubbed, the position the viewer is choosing; Select jumps there.
   @Published private(set) var scrubPosition: Int64?
   @Published private(set) var upNext: IOSUpNext?
+  /// The file's chapters, read once the picture moves; empty without any.
+  @Published private(set) var chapters: [IOSPlaybackChapter] = []
+  private var chaptersRead = false
   /// "Skip Intro" is offered while the episode's intro plays (times from the server).
   @Published private(set) var showsSkipIntro = false
   /// A separate local relay for timeline previews; its reads are marked as previews, which
@@ -238,6 +241,17 @@ final class IOSPlaybackController: ObservableObject {
 
   private var creditsStart: Int64? {
     preferences.upNextAtCredits ? currentSegments?.creditsStartMilliseconds : nil
+  }
+
+  /// Scene notes for the playing title; downloads played without the server have none.
+  func makeSceneNotes() -> IOSSceneNotesModel? {
+    isOffline ? nil : IOSSceneNotesModel(api: api, mediaID: currentMediaID)
+  }
+
+  /// Jumps to the start of a chapter from the Chapters menu.
+  func selectChapter(_ chapter: IOSPlaybackChapter) {
+    trackMenu = nil
+    seek(to: chapter.timeOffsetMilliseconds)
   }
 
   /// Jumps to the end of the intro; Watch Together follows like any other seek.
@@ -733,6 +747,10 @@ final class IOSPlaybackController: ObservableObject {
     }
     updateUpNext()
     updateSkipIntro()
+    if !chaptersRead, engine.hasObservedPlayback, duration > 0 {
+      chaptersRead = true
+      assignIfChanged(&chapters, engine.chapters)
+    }
     if wasPlaying != isPlaying || wasLoading != isLoading { userInteracted() }
     if !isPlaying { controlsVisible = true }
   }
@@ -985,6 +1003,8 @@ final class IOSPlaybackController: ObservableObject {
     movedIntoIntro = false
     introDeclined = false
     showsSkipIntro = false
+    chapters = []
+    chaptersRead = false
     title = next.parentTitle.map { "\($0) · \(next.episodeLabel ?? next.title)" } ?? next.title
     baselineRevision = nil
     position = 0
