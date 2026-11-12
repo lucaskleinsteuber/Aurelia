@@ -675,6 +675,18 @@
     <Setter Property="FontSize" Value="13" />
     <Setter Property="FontFeatures" Value="+tnum" />
   </Style>
+  <Style Selector="Button.skipIntro">
+    <Setter Property="MinHeight" Value="58" />
+    <Setter Property="Padding" Value="26,0" />
+    <Setter Property="CornerRadius" Value="29" />
+    <Setter Property="Background" Value="#CC202124" />
+    <Setter Property="BorderBrush" Value="#40FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.skipIntro:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#E63A3B40" />
+  </Style>
   <Style Selector="Border.upNext">
     <Setter Property="Background" Value="#E6202326" />
     <Setter Property="CornerRadius" Value="{StaticResource AureliaCardRadius}" />

@@ -15,7 +15,7 @@ struct TVPlayerView: View {
   private enum Control: Hashable {
     case surface, close, backward, play, forward, timeline, audio, subtitles, rate, sleep, together,
       retry,
-      closeMenu, upNextPlay, upNextCancel
+      closeMenu, upNextPlay, upNextCancel, skipIntro
     case dialogueBoost(DialogueBoost)
     case volumeLeveling(VolumeLeveling)
     case audioTrack(Int32)
@@ -65,6 +65,12 @@ struct TVPlayerView: View {
       if let upNext = controller.upNext, !controller.controlsVisible, controller.trackMenu == nil {
         upNextCard(upNext)
       }
+      // Skip Intro while the intro plays and the controls are hidden; Select skips, Back lets it play.
+      if controller.showsSkipIntro, controller.upNext == nil, !controller.controlsVisible,
+        controller.trackMenu == nil, controller.errorMessage == nil
+      {
+        skipIntroButton
+      }
       if let menu = controller.trackMenu { menuView(menu) }
       if let party = model.watchParty { TVWatchTogetherNotice(session: party) }
     }
@@ -91,6 +97,10 @@ struct TVPlayerView: View {
     }
     .onChange(of: controller.upNext != nil) { _, shown in
       if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .upNextPlay }
+    }
+    .onChange(of: controller.showsSkipIntro) { _, shown in
+      if shown, !controller.controlsVisible, controller.trackMenu == nil { focus = .skipIntro }
+      else if !shown, focus == .skipIntro { focus = .surface }
     }
     .onPlayPauseCommand { controller.togglePlayPause() }.onExitCommand { controller.back() }
     .onChange(of: focus) { _, value in
@@ -427,6 +437,21 @@ struct TVPlayerView: View {
     .accessibilityIdentifier("player-start-screen")
   }
 
+  private var skipIntroButton: some View {
+    Button {
+      controller.skipIntro()
+    } label: {
+      Label("Skip Intro", systemImage: "forward.end.fill")
+        .font(.system(size: 30, weight: .semibold))
+    }
+    .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .skipIntro)
+    .accessibilityHint("Jumps to the end of the intro")
+    .accessibilityIdentifier("player-skip-intro")
+    .padding(.trailing, 80).padding(.bottom, 70)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    .focusSection()
+  }
+
   private func upNextCard(_ upNext: TVUpNext) -> some View {
     VStack(alignment: .leading, spacing: 18) {
       Text("UP NEXT").font(.system(size: 20, weight: .bold)).tracking(1.2)
@@ -440,8 +465,13 @@ struct TVPlayerView: View {
         }
         .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .upNextPlay)
         .accessibilityIdentifier("player-up-next-play")
-        Button("Cancel") { controller.dismissUpNext() }
+        Button(upNext.duringCredits ? "Watch Credits" : "Cancel") { controller.dismissUpNext() }
           .buttonStyle(TVButtonStyle()).focusEffectDisabled().focused($focus, equals: .upNextCancel)
+          .accessibilityHint(
+            upNext.duringCredits
+              ? "Keeps playing the credits; the next episode follows at the end"
+              : "Stops at the end instead of playing the next episode"
+          )
           .accessibilityIdentifier("player-up-next-cancel")
       }
     }

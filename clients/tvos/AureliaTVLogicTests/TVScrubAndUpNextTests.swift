@@ -72,4 +72,66 @@ struct TVScrubAndUpNextTests {
     #expect(TVPlayerPolicy.upNextSeconds(position: 2_685_000, duration: 2_700_000) == 15)
     #expect(TVPlayerPolicy.upNextSeconds(position: 2_699_500, duration: 2_700_000) == 1)
   }
+
+  @Test func upNextAppearsWithTrustedCreditsAndCountsDownFromThere() {
+    let credits = TVPlayerPolicy.credits(2_400_000, duration: 2_700_000)
+    #expect(credits == 2_400_000)
+    #expect(TVPlayerPolicy.credits(600_000, duration: 2_700_000) == nil)
+    #expect(TVPlayerPolicy.credits(2_699_500, duration: 2_700_000) == nil)
+    #expect(
+      TVPlayerPolicy.showsUpNext(
+        position: 2_400_000, duration: 2_700_000, hasNext: true, autoplay: true,
+        stopsAtEnd: false, dismissed: false, creditsStart: 2_400_000))
+    #expect(
+      TVPlayerPolicy.showsForCredits(position: 2_400_500, duration: 2_700_000, creditsStart: 2_400_000))
+    #expect(
+      TVPlayerPolicy.upNextSeconds(position: 2_405_000, duration: 2_700_000, creditsAnchor: 2_400_000)
+        == 15)
+    #expect(
+      TVPlayerPolicy.nextFinishesCurrent(
+        position: 2_400_000, duration: 2_700_000, upNextShown: false, creditsStart: 2_400_000))
+    #expect(
+      !TVPlayerPolicy.nextFinishesCurrent(
+        position: 1_000_000, duration: 2_700_000, upNextShown: false, creditsStart: 2_400_000))
+  }
+
+  @Test func skipIntroShowsDuringTheIntroAndSkipsAutomaticallyOnlyOnce() {
+    #expect(!TVPlayerPolicy.showsSkipIntro(position: 58_999, introStart: 60_000, introEnd: 90_000))
+    #expect(TVPlayerPolicy.showsSkipIntro(position: 59_000, introStart: 60_000, introEnd: 90_000))
+    #expect(!TVPlayerPolicy.showsSkipIntro(position: 88_000, introStart: 60_000, introEnd: 90_000))
+    #expect(
+      TVPlayerPolicy.skipsIntroAutomatically(
+        setting: .automatic, alreadySkipped: false, movedIntoIntro: false, buttonShown: true))
+    #expect(
+      !TVPlayerPolicy.skipsIntroAutomatically(
+        setting: .button, alreadySkipped: false, movedIntoIntro: false, buttonShown: true))
+    #expect(
+      !TVPlayerPolicy.skipsIntroAutomatically(
+        setting: .automatic, alreadySkipped: false, movedIntoIntro: true, buttonShown: true))
+    #expect(TVMediaSegments(introStartMilliseconds: 90_000, introEndMilliseconds: 60_000).intro == nil)
+  }
+
+  @Test func introAndCreditsChoicesDecodeWithDefaultsFromOlderSettings() throws {
+    let old = try JSONDecoder().decode(TVPlaybackPreferences.self, from: Data("{}".utf8))
+    #expect(old.introSkipping == .button)
+    #expect(old.upNextAtCredits)
+    var changed = TVPlaybackPreferences()
+    changed.introSkipping = .automatic
+    changed.upNextAtCredits = false
+    let round = try JSONDecoder().decode(
+      TVPlaybackPreferences.self, from: JSONEncoder().encode(changed))
+    #expect(round.introSkipping == .automatic)
+    #expect(!round.upNextAtCredits)
+    let ticket = try JSONDecoder().decode(
+      TVPlaybackTicket.self,
+      from: Data(
+        """
+        {"id":"00000000-0000-0000-0000-000000000001","mediaId":"00000000-0000-0000-0000-000000000002",
+        "streamPath":"/s","contentType":"video/mp4","contentLength":1,"expiresAt":"x",
+        "progress":{"mediaId":"00000000-0000-0000-0000-000000000002","positionMilliseconds":0,
+        "durationMilliseconds":1,"isCompleted":false,"revision":1},
+        "segments":{"introStartMilliseconds":1000,"introEndMilliseconds":2000,"creditsStartMilliseconds":null}}
+        """.utf8))
+    #expect(ticket.segments?.intro?.end == 2_000)
+  }
 }

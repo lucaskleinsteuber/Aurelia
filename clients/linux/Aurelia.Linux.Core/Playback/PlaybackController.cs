@@ -96,6 +96,13 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     private SleepTimer sleepTimer = SleepTimer.Off;
     private DateTimeOffset? sleepAt;
     private bool upNextDismissed;
+    /// <summary>Cancel in the last seconds: the title plays to its end and the player closes.</summary>
+    private bool autoplayCancelled;
+    /// <summary>Where the card appeared in the credits; its countdown runs from there.</summary>
+    private long? creditsAnchor;
+    private bool introSkipped;
+    private bool movedIntoIntro;
+    private bool showsSkipIntro;
     private string? error;
     private bool hasConflict;
     private bool observedPlayback;
@@ -266,11 +273,57 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     /// <summary>The Up Next card's title while it shows, else null.</summary>
     public CatalogItemSummary? UpNext => NextItem is { } next
-        && PlayerPolicy.ShowsUpNext(Position, Duration, true, Preferences.AutoplayNextEpisode, SleepTimer.EndOfEpisode, upNextDismissed, Preferences.UpNextCountdownSeconds)
+        && PlayerPolicy.ShowsUpNext(Position, Duration, true, Preferences.AutoplayNextEpisode, SleepTimer.EndOfEpisode, upNextDismissed, Preferences.UpNextCountdownSeconds,
+            CreditsStart)
         ? next
         : null;
 
-    public int UpNextSeconds => PlayerPolicy.UpNextSeconds(Position, Duration);
+    public int UpNextSeconds => PlayerPolicy.UpNextSeconds(Position, Duration, UpNextDuringCredits ? creditsAnchor : null, Preferences.UpNextCountdownSeconds);
+
+    /// <summary>The card appeared with the credits: its second button keeps watching them ("Watch Credits").</summary>
+    public bool UpNextDuringCredits => UpNext is not null && PlayerPolicy.ShowsForCredits(Position, Duration, CreditsStart);
+
+    /// <summary>The intro and credits times of the playing title from the server ("media-segments-v2"); downloads have none.</summary>
+    public MediaSegmentsDto? Segments => offline is null && ticket is { } current && current.MediaId == Item?.Id ? current.Segments : null;
+
+    private long? CreditsStart => Preferences.UpNextAtCredits ? Segments?.CreditsStartMilliseconds : null;
+
+    private (long Start, long End)? CurrentIntro =>
+        PlayerPolicy.Intro(Segments) is { } intro && (Duration <= 0 || intro.End <= Duration) ? intro : null;
+
+    /// <summary>Whether "Skip Intro" is offered now.</summary>
+    public bool ShowsSkipIntro
+    {
+        get => showsSkipIntro;
+        private set => SetProperty(ref showsSkipIntro, value);
+    }
+
+    /// <summary>Jumps to the end of the intro; Watch Together follows like any other seek.</summary>
+    public void SkipIntro()
+    {
+        if (!ShowsSkipIntro || CurrentIntro is not { } intro) return;
+        introSkipped = true;
+        ShowsSkipIntro = false;
+        SeekTo(intro.End);
+    }
+
+    private void UpdateSkipIntro()
+    {
+        if (Preferences.IntroSkipping == IntroSkipping.Off || CurrentIntro is not { } intro || State is not (PlayerState.Playing or PlayerState.Paused))
+        {
+            ShowsSkipIntro = false;
+            return;
+        }
+        var shown = PlayerPolicy.ShowsSkipIntro(Position, intro.Start, intro.End);
+        if (State == PlayerState.Playing && PlayerPolicy.SkipsIntroAutomatically(Preferences.IntroSkipping, introSkipped, movedIntoIntro, shown))
+        {
+            introSkipped = true;
+            ShowsSkipIntro = false;
+            SeekTo(intro.End);
+            return;
+        }
+        ShowsSkipIntro = shown && UpNext is null;
+    }
 
     public string? Error
     {
@@ -368,11 +421,14 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
     {
         if (engine is null) return;
         var target = PlayerPolicy.Clamp(milliseconds, Duration);
+        // Moving into the intro by hand means it should play; it is not skipped automatically then.
+        if (!introSkipped && CurrentIntro is { } intro && target >= intro.Start && target < intro.End) movedIntoIntro = true;
         engine.Seek(target);
         Position = target;
         UserAction?.Invoke(new PlaybackUserAction(PlaybackUserActionKind.Seek, target));
         Record(PlaybackDiagnosticKind.Seeked);
         upNextDismissed = false;
+        autoplayCancelled = false;
         lastMovement = time.GetUtcNow();
         _ = SaveProgressAsync(finished: false);
         RaiseClockChanged();
@@ -456,17 +512,25 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(UpNext));
     }
 
-    /// <summary>"Cancel" on the Up Next card: this title plays to its end, then the player closes.</summary>
+    /// <summary>
+    /// "Cancel" on the Up Next card: this title plays to its end, then the player closes. "Watch Credits" (the card
+    /// that appeared with the credits) hides it; the next episode still follows at the end.
+    /// </summary>
     public void DismissUpNext()
     {
+        if (!UpNextDuringCredits) autoplayCancelled = true;
         upNextDismissed = true;
+        creditsAnchor = null;
         OnPropertyChanged(nameof(UpNext));
+        OnPropertyChanged(nameof(UpNextDuringCredits));
     }
 
+    /// <summary>Next Episode keeps this one's position, except from the credits on, where it counts as watched.</summary>
     public async Task NextAsync()
     {
         if (NextItem is not { } next || Item is not { } current) return;
-        await SaveProgressAsync(finished: false);
+        var finished = PlayerPolicy.NextFinishesCurrent(Position, Duration, UpNext is not null, CreditsStart);
+        await SaveProgressAsync(finished: finished);
         queue.RemoveAt(0);
         previous.Push(current);
         await LoadAsync(next, null);
@@ -528,6 +592,11 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
         HasConflict = false;
         tracksApplied = false;
         upNextDismissed = false;
+        autoplayCancelled = false;
+        creditsAnchor = null;
+        introSkipped = false;
+        movedIntoIntro = false;
+        ShowsSkipIntro = false;
         observedPlayback = false;
         AudioTracks = [];
         SubtitleTracks = [];
@@ -709,9 +778,28 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
 
     private void RaiseClockChanged()
     {
+        // The countdown starts where the card appeared: at the credits, or later when the person moved into them.
+        if (UpNextDuringCredits) creditsAnchor ??= Position;
+        else creditsAnchor = null;
+        UpdateSkipIntro();
         OnPropertyChanged(nameof(UpNext));
+        OnPropertyChanged(nameof(UpNextDuringCredits));
         OnPropertyChanged(nameof(UpNextSeconds));
         system.Update(this);
+        // The countdown ran out in the credits before the file ended: the next episode starts and this one counts as watched.
+        if (UpNextDuringCredits && UpNextSeconds == 0 && State == PlayerState.Playing && Position < Duration && !advancing)
+        {
+            advancing = true;
+            _ = AdvanceFromCreditsAsync();
+        }
+    }
+
+    private bool advancing;
+
+    private async Task AdvanceFromCreditsAsync()
+    {
+        try { await NextAsync(); }
+        finally { advancing = false; }
     }
 
     private async Task FinishTitleAsync()
@@ -723,7 +811,7 @@ public sealed class PlaybackController : ObservableObject, IAsyncDisposable
             await SleepAsync();
             return;
         }
-        if (NextItem is { } next && Preferences.AutoplayNextEpisode && !upNextDismissed && Item is { } current)
+        if (NextItem is { } next && Preferences.AutoplayNextEpisode && !autoplayCancelled && Item is { } current)
         {
             queue.RemoveAt(0);
             previous.Push(current);

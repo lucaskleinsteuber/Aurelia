@@ -253,6 +253,58 @@ test("Up Next shows in the last 20 seconds of an episode-length title only", () 
   assert.equal(logic.upNextSeconds(2385.2, 2400), 15);
 });
 
+test("Skip Intro shows a second before the intro and leaves two seconds before its end", () => {
+  const intro = logic.introRange({ introStartMilliseconds: 60_000, introEndMilliseconds: 90_000 });
+  assert.deepEqual(intro, { start: 60, end: 90 });
+  assert.equal(logic.showsSkipIntro(58.9, intro), false);
+  assert.equal(logic.showsSkipIntro(59, intro), true);
+  assert.equal(logic.showsSkipIntro(87.9, intro), true);
+  assert.equal(logic.showsSkipIntro(88, intro), false);
+  assert.equal(logic.introRange({ introStartMilliseconds: 90_000, introEndMilliseconds: 60_000 }), null);
+  assert.equal(logic.introRange(undefined), null);
+  assert.equal(logic.introRange({ introStartMilliseconds: null, introEndMilliseconds: 60_000 }), null);
+});
+
+test("intros are skipped automatically once, and never after the viewer moved into them", () => {
+  const base = { setting: "automatic", alreadySkipped: false, movedIntoIntro: false, buttonShown: true };
+  assert.equal(logic.skipsIntroAutomatically(base), true);
+  assert.equal(logic.skipsIntroAutomatically({ ...base, setting: "button" }), false);
+  assert.equal(logic.skipsIntroAutomatically({ ...base, alreadySkipped: true }), false);
+  assert.equal(logic.skipsIntroAutomatically({ ...base, movedIntoIntro: true }), false);
+  assert.equal(logic.skipsIntroAutomatically({ ...base, buttonShown: false }), false);
+});
+
+test("Up Next appears when trusted credits begin and counts down from there", () => {
+  const base = { duration: 2400, hasNext: true, autoplay: true, stopsAtEnd: false, dismissed: false };
+  const credits = logic.creditsStart({ creditsStartMilliseconds: 2280_000 }, 2400);
+  assert.equal(credits, 2280);
+  assert.equal(logic.creditsStart({ creditsStartMilliseconds: 600_000 }, 2400), null);
+  assert.equal(logic.creditsStart({ creditsStartMilliseconds: 2399_500 }, 2400), null);
+  assert.equal(logic.creditsStart({}, 2400), null);
+  assert.equal(logic.showsUpNext({ ...base, position: 2281, credits }), true);
+  assert.equal(logic.showsUpNext({ ...base, position: 2279, credits }), false);
+  assert.equal(logic.showsUpNext({ ...base, position: 2281, credits, dismissed: true }), false);
+  assert.equal(logic.upNextSeconds(2285, 2400, 2280, 20), 15);
+  assert.equal(logic.upNextSeconds(2310, 2400, 2280, 20), 0);
+  assert.equal(logic.upNextSeconds(2395, 2400, 2390, 20), 5);
+});
+
+test("Next Episode counts the episode watched from the credits or in its last tenth", () => {
+  assert.equal(logic.nextFinishesCurrent({ position: 2281, duration: 2400, upNextShown: false, credits: 2280 }), true);
+  assert.equal(logic.nextFinishesCurrent({ position: 1200, duration: 2400, upNextShown: false, credits: 2280 }), false);
+  assert.equal(logic.nextFinishesCurrent({ position: 2170, duration: 2400, upNextShown: false }), true);
+  assert.equal(logic.nextFinishesCurrent({ position: 1000, duration: 2400, upNextShown: true }), true);
+  assert.equal(logic.nextFinishesCurrent({ position: 10, duration: 0, upNextShown: true }), false);
+});
+
+test("intro and credits choices keep their defaults and only known values", () => {
+  assert.equal(logic.normalizePreferences({}).introSkipping, "button");
+  assert.equal(logic.normalizePreferences({}).upNextAtCredits, true);
+  assert.equal(logic.normalizePreferences({ introSkipping: "automatic" }).introSkipping, "automatic");
+  assert.equal(logic.normalizePreferences({ introSkipping: "always" }).introSkipping, "button");
+  assert.equal(logic.normalizePreferences({ upNextAtCredits: false }).upNextAtCredits, false);
+});
+
 test("the player's subtitle line names the show, season and episode like the Mac", () => {
   assert.equal(logic.playerSubtitle({ kind: "episode", parentTitle: "Mr. Robot", seasonNumber: 1, episodeNumber: 1 }), "Mr. Robot · Season 1 · Episode 1");
   assert.equal(logic.playerSubtitle({ kind: "episode", parentTitle: "Top Gear", seasonNumber: 0, episodeNumber: 3 }), "Top Gear · Specials · Episode 3");

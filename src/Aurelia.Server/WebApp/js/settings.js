@@ -8,7 +8,7 @@ import { ApiError } from "./api.js";
 import {
   MAXIMUM_PHOTO_BYTES, PHOTO_PICTURE, PICTURE_PALETTES, PICTURE_SYMBOLS, PLAYBACK_DEFAULTS, PLAYBACK_RATES,
   ageLimitSummary, loadManagementSections, managementPermissions, normalizeGeneralPreferences, parsePicture,
-  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
+  rateLabel, scrubPreviewUsageText, shownName, transcodingSummary, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES, INTRO_SKIPPING_CHOICES,
   TOP_BAR_SECTIONS, moveSection, POWER_IDLE_CHOICES, powerPayload, wakeOnAccessOffered, rememberWakeOnAccess,
   powerModesFor, appHostName
 } from "./logic.js";
@@ -379,6 +379,12 @@ export function createSettings(app) {
           [5, "5 seconds"], [10, "10 seconds"], [15, "15 seconds"], [20, "20 seconds"], [30, "30 seconds"],
         ], preferences.upNextCountdownSeconds, (sec) => save({ upNextCountdownSeconds: Number(sec) }), "Up Next Countdown"),
           "How long before the end the next episode is offered."),
+        state.server?.capabilities?.includes("media-segments-v2") ? row("Intros", select(INTRO_SKIPPING_CHOICES, preferences.introSkipping,
+          (choice) => save({ introSkipping: choice }), "Intros"),
+          "Your server finds where an episode’s intro is. Show Skip Intro offers a button while it plays (Return or S); Skip Automatically jumps past it once per episode, but never when you go back into it yourself.") : null,
+        state.server?.capabilities?.includes("media-segments-v2") ? row("Offer Next Episode When Credits Begin",
+          toggle(preferences.upNextAtCredits, (on) => save({ upNextAtCredits: on }), "Offer Next Episode When Credits Begin"),
+          "Up Next appears when the credits begin, with the countdown above and Watch Credits. Turned off, or for episodes without known credits, it appears in the last seconds.") : null,
         row("Start Over If Barely Started", select([
           [0, "Never"], [30, "Under 30 seconds"], [60, "Under 1 minute"], [120, "Under 2 minutes"],
         ], preferences.resumeThresholdSeconds, (sec) => save({ resumeThresholdSeconds: Number(sec) }), "Start Over If Barely Started"),

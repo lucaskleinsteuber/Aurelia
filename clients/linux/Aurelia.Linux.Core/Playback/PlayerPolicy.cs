@@ -1,3 +1,4 @@
+using Aurelia.Contracts;
 using System.Globalization;
 
 namespace Aurelia.Linux.Core.Playback;
@@ -34,11 +35,52 @@ public static class PlayerPolicy
         return position >= duration - Math.Min(3000, Math.Max(500, duration / 20));
     }
 
-    /// <summary>The Up Next card: for titles of at least five minutes, in the last seconds of the countdown (Mac: UpNextPolicy).</summary>
-    public static bool ShowsUpNext(long position, long duration, bool hasNext, bool autoplay, bool stopsAtEnd, bool dismissed, int countdownSeconds = 20) =>
-        hasNext && autoplay && !stopsAtEnd && !dismissed && duration >= 300_000 && position > 0 && duration - position <= countdownSeconds * 1000L;
+    /// <summary>
+    /// The Up Next card: for titles of at least five minutes, when the credits begin or in the last seconds of the
+    /// countdown (Mac: UpNextPolicy).
+    /// </summary>
+    public static bool ShowsUpNext(long position, long duration, bool hasNext, bool autoplay, bool stopsAtEnd, bool dismissed, int countdownSeconds = 20,
+        long? creditsStart = null)
+    {
+        if (!hasNext || !autoplay || stopsAtEnd || dismissed || duration < 300_000 || position <= 0) return false;
+        if (Credits(creditsStart, duration) is { } credits && position >= credits) return true;
+        return duration - position <= countdownSeconds * 1000L;
+    }
 
-    public static int UpNextSeconds(long position, long duration) => (int)((Math.Max(0, duration - position) + 999) / 1000);
+    /// <summary>Seconds until the next episode: to the end, or the countdown from where the card appeared in the credits.</summary>
+    public static int UpNextSeconds(long position, long duration, long? creditsAnchor = null, int countdownSeconds = 20)
+    {
+        var deadline = creditsAnchor is { } anchor ? Math.Min(duration, anchor + countdownSeconds * 1000L) : duration;
+        return (int)((Math.Max(0, deadline - position) + 999) / 1000);
+    }
+
+    /// <summary>A credits time is only trusted in the second half of the title and before its end.</summary>
+    public static long? Credits(long? creditsStart, long duration) =>
+        creditsStart is { } start && duration > 0 && start >= duration / 2 && start < duration - 1000 ? start : null;
+
+    /// <summary>Whether the card shows because the credits began (rather than in the last seconds).</summary>
+    public static bool ShowsForCredits(long position, long duration, long? creditsStart) =>
+        Credits(creditsStart, duration) is { } credits && position >= credits;
+
+    /// <summary>Next Episode counts this one as watched from the credits on, while Up Next shows, or in its last tenth.</summary>
+    public static bool NextFinishesCurrent(long position, long duration, bool upNextShown, long? creditsStart = null)
+    {
+        if (duration <= 0 || position < 0) return false;
+        if (Credits(creditsStart, duration) is { } credits && position >= credits) return true;
+        return upNextShown || position >= duration - duration / 10;
+    }
+
+    /// <summary>The intro when both ends are known and in order.</summary>
+    public static (long Start, long End)? Intro(MediaSegmentsDto? segments) =>
+        segments is { IntroStartMilliseconds: { } start, IntroEndMilliseconds: { } end } && start >= 0 && end > start ? (start, end) : null;
+
+    /// <summary>"Skip Intro" appears a second before the intro and leaves two seconds before its end (Mac: SkipIntroPolicy).</summary>
+    public static bool ShowsSkipIntro(long position, long introStart, long introEnd) =>
+        introEnd > introStart && position >= introStart - 1000 && position < introEnd - 2000;
+
+    /// <summary>The intro is skipped on its own once per episode, never after the person moved into it themselves.</summary>
+    public static bool SkipsIntroAutomatically(IntroSkipping setting, bool alreadySkipped, bool movedIntoIntro, bool buttonShown) =>
+        setting == IntroSkipping.Automatic && buttonShown && !alreadySkipped && !movedIntoIntro;
 
     /// <summary>The decoder opened at the resume position when its first clock lands near it.</summary>
     public static bool OpenedAtResume(long clock, long resume) => Math.Abs(clock - resume) <= 5_000;

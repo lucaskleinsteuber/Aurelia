@@ -59,10 +59,89 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
     private static CatalogItemSummary Item(Guid id, MediaKind kind = MediaKind.Movie) =>
         FakeLibrary.Item(id, kind, "Title", 2024, [], parent: kind == MediaKind.Episode ? FakeLibrary.SeriesId : null, season: kind == MediaKind.Episode ? 1 : null, episode: kind == MediaKind.Episode ? 1 : null);
 
-    private void AddTicket(Guid media, string ticket, long position, long revision) =>
+    private void AddTicket(Guid media, string ticket, long position, long revision, MediaSegmentsDto? segments = null) =>
         server.Replace("POST", $"/api/v1/media/{media}/playback", JsonSerializer.Serialize(new PlaybackSourceResponse(Guid.NewGuid(), media,
             $"/api/v1/streams/{ticket}", "video/x-matroska", 1000, DateTimeOffset.UtcNow.AddHours(4),
-            new PlaybackProgressResponse(media, position, 3_600_000, false, null, null, revision)), AureliaJson.Options));
+            new PlaybackProgressResponse(media, position, 3_600_000, false, null, null, revision), segments), AureliaJson.Options));
+
+    private async Task<PlaybackController> StartEpisodeWithSegments(PlaybackPreferences? preferences = null)
+    {
+        AddTicket(FakeLibrary.EpisodeOne, "ticket-episode-1", position: 0, revision: 1, new MediaSegmentsDto(60_000, 90_000, 3_300_000));
+        var player = Controller(preferences);
+        await player.StartAsync(FakeLibrary.Item(FakeLibrary.SeriesId, MediaKind.Series, "Cobalt Station", 2024, []), resume: false);
+        return player;
+    }
+
+    [Fact]
+    public async Task SkipIntroShowsWhileTheIntroPlaysAndJumpsToItsEnd()
+    {
+        var player = await StartEpisodeWithSegments();
+        engines.Last.Advance(58_000);
+        Assert.False(player.ShowsSkipIntro);
+        engines.Last.Advance(2_000);
+        Assert.True(player.ShowsSkipIntro);
+        player.SkipIntro();
+        Assert.Equal(90_000, engines.Last.Time);
+        Assert.False(player.ShowsSkipIntro);
+    }
+
+    [Fact]
+    public async Task IntrosAreSkippedAutomaticallyOnceButNotAfterMovingIntoThem()
+    {
+        var player = await StartEpisodeWithSegments(new PlaybackPreferences(IntroSkipping: IntroSkipping.Automatic));
+        engines.Last.Advance(60_000);
+        Assert.Equal(90_000, engines.Last.Time);
+        player.SeekTo(70_000);
+        engines.Last.Advance(1_000);
+        Assert.Equal(71_000, engines.Last.Time);
+        Assert.True(player.ShowsSkipIntro, "The button stays offered after going back into the intro.");
+    }
+
+    [Fact]
+    public async Task IntrosOffDoesNotOfferSkipIntro()
+    {
+        var player = await StartEpisodeWithSegments(new PlaybackPreferences(IntroSkipping: IntroSkipping.Off));
+        engines.Last.Advance(70_000);
+        Assert.False(player.ShowsSkipIntro);
+    }
+
+    [Fact]
+    public async Task UpNextAppearsWithTheCreditsAndWatchCreditsKeepsTheNextEpisode()
+    {
+        var player = await StartEpisodeWithSegments(new PlaybackPreferences(UpNextCountdownSeconds: 10));
+        engines.Last.Advance(3_299_000);
+        Assert.Null(player.UpNext);
+        engines.Last.Advance(1_000);
+        Assert.Equal(FakeLibrary.EpisodeTwo, player.UpNext?.Id);
+        Assert.True(player.UpNextDuringCredits);
+        Assert.Equal(10, player.UpNextSeconds);
+        player.DismissUpNext();
+        Assert.Null(player.UpNext);
+        engines.Last.Advance(300_000);
+        engines.Last.End();
+        await Settle();
+        Assert.Equal(FakeLibrary.EpisodeTwo, player.Item?.Id);
+        Assert.Equal(0, closed);
+    }
+
+    [Fact]
+    public async Task TheCreditsCountdownStartsTheNextEpisodeAndFinishesThisOne()
+    {
+        var player = await StartEpisodeWithSegments(new PlaybackPreferences(UpNextCountdownSeconds: 10));
+        engines.Last.Advance(3_300_000);
+        engines.Last.Advance(10_000);
+        await Settle();
+        Assert.Equal(FakeLibrary.EpisodeTwo, player.Item?.Id);
+        Assert.Contains("\"isFinished\":true", server.Bodies[$"PUT /api/v1/media/{FakeLibrary.EpisodeOne}/progress"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithoutUpNextAtCreditsTheCardWaitsForTheLastSeconds()
+    {
+        var player = await StartEpisodeWithSegments(new PlaybackPreferences(UpNextAtCredits: false));
+        engines.Last.Advance(3_400_000);
+        Assert.Null(player.UpNext);
+    }
 
     private static string Progress(Guid media, long revision) =>
         JsonSerializer.Serialize(new PlaybackProgressResponse(media, 1, 3_600_000, false, null, DateTimeOffset.UtcNow, revision), AureliaJson.Options);
@@ -354,6 +433,15 @@ public sealed class PlaybackControllerTests : IAsyncDisposable
         Assert.False(PlayerPolicy.ShowsUpNext(3_590_000, 200_000, true, true, false, false), "Titles under five minutes get no card.");
         Assert.True(PlayerPolicy.ShowsUpNext(3_590_000, 3_600_000, true, true, false, false, 20));
         Assert.False(PlayerPolicy.ShowsUpNext(3_590_000, 3_600_000, true, true, true, false, 20), "End of episode sleep timer wins.");
+        Assert.True(PlayerPolicy.ShowsUpNext(3_300_000, 3_600_000, true, true, false, false, 20, creditsStart: 3_300_000));
+        Assert.False(PlayerPolicy.ShowsUpNext(3_300_000, 3_600_000, true, true, false, false, 20, creditsStart: 600_000), "Credits in the first half are not trusted.");
+        Assert.Equal(15, PlayerPolicy.UpNextSeconds(3_305_000, 3_600_000, creditsAnchor: 3_300_000, countdownSeconds: 20));
+        Assert.True(PlayerPolicy.ShowsSkipIntro(59_000, 60_000, 90_000));
+        Assert.False(PlayerPolicy.ShowsSkipIntro(88_000, 60_000, 90_000));
+        Assert.False(PlayerPolicy.SkipsIntroAutomatically(IntroSkipping.Automatic, alreadySkipped: false, movedIntoIntro: true, buttonShown: true));
+        Assert.True(PlayerPolicy.NextFinishesCurrent(3_300_000, 3_600_000, upNextShown: false, creditsStart: 3_300_000));
+        Assert.False(PlayerPolicy.NextFinishesCurrent(1_000_000, 3_600_000, upNextShown: false, creditsStart: 3_300_000));
+        Assert.Null(PlayerPolicy.Intro(new MediaSegmentsDto(90_000, 60_000, null)));
         Assert.Equal("1:02:03", PlayerPolicy.TimeLabel(3_723_000));
         Assert.Equal("4:05", PlayerPolicy.TimeLabel(245_000));
     }

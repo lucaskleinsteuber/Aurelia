@@ -35,6 +35,26 @@ struct IOSPlaybackTrack: Identifiable, Equatable, Sendable {
   }
 }
 
+/// What the player does while an episode's intro plays (Mac: IntroSkipping).
+enum IOSIntroSkipping: String, Codable, CaseIterable, Identifiable, Sendable {
+  /// Nothing is offered; the intro plays.
+  case off
+  /// A Skip Intro button is offered while the intro plays.
+  case button
+  /// The intro is skipped without asking, once per episode.
+  case automatic
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .off: "Don't Offer"
+    case .button: "Show Skip Intro"
+    case .automatic: "Skip Automatically"
+    }
+  }
+}
+
 struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
   static let supportedRates: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
   static let defaultValue = Self()
@@ -52,6 +72,10 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
   var volumeLeveling: VolumeLeveling = .off
   /// The original file, or the server's live conversion in a quality the connection carries.
   var streamingQuality: IOSStreamingQuality = .original
+  /// What the player does while an episode's intro plays.
+  var introSkipping: IOSIntroSkipping = .button
+  /// Up Next appears when the credits begin, not only in the last seconds.
+  var upNextAtCredits = true
   /// Compatibility accessor for older code and the persisted Night Mode key.
   var nightMode: Bool {
     get { volumeLeveling != .off }
@@ -77,7 +101,7 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
   private enum CodingKeys: String, CodingKey {
     case automaticResume, automaticallyPlayNextEpisode, defaultPlaybackRate, controlsDelay
     case seekInterval, preferredAudioTrack, preferredSubtitleTrack, nightMode, dialogueBoost,
-      volumeLeveling, streamingQuality
+      volumeLeveling, streamingQuality, introSkipping, upNextAtCredits
   }
 
   init(from decoder: Decoder) throws {
@@ -99,6 +123,9 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
     dialogueBoost = try values.decodeIfPresent(DialogueBoost.self, forKey: .dialogueBoost) ?? .off
     streamingQuality =
       (try? values.decodeIfPresent(IOSStreamingQuality.self, forKey: .streamingQuality)) ?? .original
+    introSkipping =
+      (try? values.decodeIfPresent(IOSIntroSkipping.self, forKey: .introSkipping)) ?? .button
+    upNextAtCredits = try values.decodeIfPresent(Bool.self, forKey: .upNextAtCredits) ?? true
   }
 
   func encode(to encoder: Encoder) throws {
@@ -114,6 +141,8 @@ struct IOSPlaybackPreferences: Codable, Equatable, Sendable {
     try values.encode(dialogueBoost, forKey: .dialogueBoost)
     try values.encode(volumeLeveling, forKey: .volumeLeveling)
     try values.encode(streamingQuality, forKey: .streamingQuality)
+    try values.encode(introSkipping, forKey: .introSkipping)
+    try values.encode(upNextAtCredits, forKey: .upNextAtCredits)
   }
 
   /// These preferences with a series' own track choices, where it has them.

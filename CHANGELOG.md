@@ -15,6 +15,7 @@ versioned commit, so their skipped numbers are preserved.
 
 ### Added
 
+- Browser, Linux, Apple TV and iPhone & iPad: Skip Intro while an episode's intro plays and, when its credits begin, Up Next with its countdown and Watch Credits, with the server's times (2.8.0 or newer). Settings › Playback has Intros (Don't Offer, Show Skip Intro, Skip Automatically) and Offer Next Episode When Credits Begin, as on the Mac. In the browser and on Linux Return/Enter or S skips; on the Apple TV the button takes the focus.
 - Server 2.10.0 (159): credits are also found in pictures. The server looks at each episode's last six minutes, two pictures a second: names on black, or a card the season's episodes share; they must last until shortly before the end. Series whose closing music differs per episode now get credits. On an older server this takes a few minutes per episode, once, and stops whenever someone watches.
 - Server 2.10.0 (159): intros found later or in pictures. An episode without an intro in its first minutes is searched up to its middle (three other episodes must share the music), and an episode whose intro has other sound, such as narration over it, is matched by its pictures against the other episodes' intros.
 - Server 2.10.0 (159) and Mac 2.10.0 (167): the server settings show how far intro and credits detection is, with a progress bar, the episode it is on, the time left and each series' results with Re-analyze, and turn the pictures off.

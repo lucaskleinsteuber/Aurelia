@@ -1066,7 +1066,7 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .up-next {
   position: absolute;
   right: max(28px, env(safe-area-inset-right));
-  bottom: 150px;
+  bottom: 200px;
   width: 320px;
   max-width: calc(100vw - 32px);
   display: flex;
@@ -1081,6 +1081,31 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .up-next-subtitle { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .up-next .button-row { margin-top: 4px; }
 .up-next .primary-button span { font-variant-numeric: tabular-nums; }
+
+/* "Skip Intro" while an episode's intro plays; it stays when the controls hide. */
+.skip-intro {
+  position: absolute;
+  right: max(28px, env(safe-area-inset-right));
+  bottom: 200px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 0 26px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 29px;
+  color: #fff;
+  font: inherit;
+  font-size: 19px;
+  font-weight: 600;
+  cursor: pointer;
+  animation: popover-in 0.2s ease-out;
+}
+.skip-intro:hover { background: rgba(255, 255, 255, 0.22); }
+.skip-intro kbd { font: inherit; font-size: 12px; color: var(--muted); padding: 2px 7px; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 5px; }
+.skip-intro:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.player:not(.controls-visible):not(.paused) .skip-intro { bottom: 40px; transition: bottom 0.2s; }
+@media (prefers-reduced-motion: reduce) { .skip-intro { animation: none; } }
 
 .player-notice {
   position: absolute;

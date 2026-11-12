@@ -109,22 +109,63 @@ enum TVPlayerPolicy {
     }
   }
 
-  /// "Up Next" appears in the last seconds of an episode-length title when the next episode
-  /// will start on its own.
+  /// "Up Next" appears when the credits begin, or without a credits time in the last seconds of
+  /// an episode-length title, when the next episode will start on its own (Mac: UpNextPolicy).
   static let upNextLead: Int64 = 20_000
 
   static func showsUpNext(
     position: Int64, duration: Int64, hasNext: Bool, autoplay: Bool, stopsAtEnd: Bool,
-    dismissed: Bool
+    dismissed: Bool, creditsStart: Int64? = nil
   ) -> Bool {
     guard hasNext, autoplay, !stopsAtEnd, !dismissed, duration >= 300_000, position > 0 else {
       return false
     }
+    if let credits = credits(creditsStart, duration: duration), position >= credits { return true }
     return duration - position <= upNextLead
   }
 
-  static func upNextSeconds(position: Int64, duration: Int64) -> Int {
-    Int((max(0, duration - position) + 999) / 1_000)
+  /// Seconds until the next episode starts: to the end of the title, or, when the card appeared
+  /// with the credits at `creditsAnchor`, the countdown from there.
+  static func upNextSeconds(position: Int64, duration: Int64, creditsAnchor: Int64? = nil) -> Int {
+    let deadline = creditsAnchor.map { min(duration, $0 + upNextLead) } ?? duration
+    return Int((max(0, deadline - position) + 999) / 1_000)
+  }
+
+  /// A credits time is only trusted in the second half of the title and before its end.
+  static func credits(_ creditsStart: Int64?, duration: Int64) -> Int64? {
+    guard let creditsStart, duration > 0, creditsStart >= duration / 2,
+      creditsStart < duration - 1_000
+    else { return nil }
+    return creditsStart
+  }
+
+  /// Whether the card shows because the credits began (rather than in the last seconds).
+  static func showsForCredits(position: Int64, duration: Int64, creditsStart: Int64?) -> Bool {
+    guard let credits = credits(creditsStart, duration: duration) else { return false }
+    return position >= credits
+  }
+
+  /// Next Episode counts this one as watched from the credits on, while Up Next shows, or in its
+  /// last tenth; earlier, the position is kept so the episode can be resumed.
+  static func nextFinishesCurrent(
+    position: Int64, duration: Int64, upNextShown: Bool, creditsStart: Int64? = nil
+  ) -> Bool {
+    guard duration > 0, position >= 0 else { return false }
+    if let credits = credits(creditsStart, duration: duration), position >= credits { return true }
+    return upNextShown || position >= duration - duration / 10
+  }
+
+  /// "Skip Intro" appears a second before the intro and leaves two seconds before its end.
+  static func showsSkipIntro(position: Int64, introStart: Int64, introEnd: Int64) -> Bool {
+    guard introEnd > introStart else { return false }
+    return position >= introStart - 1_000 && position < introEnd - 2_000
+  }
+
+  /// The intro is skipped on its own once per episode, never after the person moved into it.
+  static func skipsIntroAutomatically(
+    setting: TVIntroSkipping, alreadySkipped: Bool, movedIntoIntro: Bool, buttonShown: Bool
+  ) -> Bool {
+    setting == .automatic && buttonShown && !alreadySkipped && !movedIntoIntro
   }
 
   static func timeLabel(milliseconds: Int64) -> String {

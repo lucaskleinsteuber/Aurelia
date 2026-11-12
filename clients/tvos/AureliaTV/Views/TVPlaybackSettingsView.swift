@@ -26,6 +26,13 @@ struct TVPlaybackSettingsView: View {
             value: value.automaticallyPlayNextEpisode ? "On" : "Off",
             id: "settings-next"
           ) { value.automaticallyPlayNextEpisode.toggle() }
+          row("Intros", value: value.introSkipping.title, id: "settings-intros") {
+            value.introSkipping = Self.next(after: value.introSkipping, in: TVIntroSkipping.allCases)
+          }
+          row(
+            "Offer Next Episode When Credits Begin", value: value.upNextAtCredits ? "On" : "Off",
+            id: "settings-up-next-credits"
+          ) { value.upNextAtCredits.toggle() }
           row("Dialogue Boost", value: value.dialogueBoost.title, id: "settings-dialogue-boost") {
             value.dialogueBoost = Self.next(after: value.dialogueBoost, in: DialogueBoost.allCases)
           }

@@ -59,6 +59,9 @@ public sealed class PlayerView : UserControl, IDisposable
     private readonly Border upNext = new() { Classes = { "upNext" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Width = 340 };
     private readonly TextBlock upNextTitle = new() { FontSize = 18, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock upNextCountdown = new() { Foreground = Secondary };
+    private readonly Button upNextSecond = new() { Content = "Cancel", Classes = { "chip" } };
+    /// <summary>"Skip Intro" while an episode's intro plays; it stays when the controls hide.</summary>
+    private readonly Button skipIntro = new() { Classes = { "skipIntro" }, IsVisible = false, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom };
     private readonly Border status = new() { Classes = { "playerMaterial", "playerPanel" }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly TextBlock statusText = new() { Foreground = Brushes.White, FontSize = 15, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 480 };
     private readonly StackPanel statusActions = new() { Orientation = Orientation.Horizontal, Spacing = 10, HorizontalAlignment = HorizontalAlignment.Center };
@@ -211,8 +214,30 @@ public sealed class PlayerView : UserControl, IDisposable
 
         var playNow = new Button { Content = "Play Now", Classes = { "primary" } };
         playNow.Click += (_, _) => _ = controller.NextAsync();
-        var cancel = new Button { Content = "Cancel", Classes = { "chip" } };
+        ToolTip.SetTip(playNow, "Starts the next episode now");
+        var cancel = upNextSecond;
         cancel.Click += (_, _) => controller.DismissUpNext();
+        skipIntro.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            Children =
+            {
+                new PathIcon { Data = Application.Current?.FindResource("IconNextTrack") as Geometry, Width = 16, Height = 16, Foreground = Brushes.White },
+                new TextBlock { Text = "Skip Intro", FontSize = 18, FontWeight = FontWeight.SemiBold, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center },
+                // The key that skips without the mouse (S works too).
+                new Border
+                {
+                    BorderBrush = Secondary, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(7, 2),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new TextBlock { Text = "↵ Enter", FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = Secondary },
+                },
+            },
+        };
+        AutomationProperties.SetName(skipIntro, "Skip Intro");
+        AutomationProperties.SetHelpText(skipIntro, "Jumps to the end of the intro. Enter or S does the same.");
+        ToolTip.SetTip(skipIntro, "Jumps to the end of the intro. Enter or S does the same.");
+        skipIntro.Click += (_, _) => controller.SkipIntro();
         upNext.Child = new StackPanel
         {
             Spacing = 10,
@@ -238,7 +263,7 @@ public sealed class PlayerView : UserControl, IDisposable
         chrome.Children.Add(transport);
         chrome.Children.Add(bottom);
         chrome.Children.Add(conflict);
-        Content = new Grid { Children = { surface, chrome, status, upNext, noteCues, togetherNotice } };
+        Content = new Grid { Children = { surface, chrome, status, skipIntro, upNext, noteCues, togetherNotice } };
         if (together is not null) together.WatchPartyChanged += ShowTogetherNotice;
 
         controller.PropertyChanged += OnControllerChanged;
@@ -309,7 +334,9 @@ public sealed class PlayerView : UserControl, IDisposable
     private void PlaceOverlays()
     {
         var visible = chrome.IsVisible;
-        upNext.Margin = new Thickness(0, 0, 48, visible ? 186 : 40);
+        // Skip Intro and Up Next sit above the bottom controls while they show, never on them.
+        upNext.Margin = new Thickness(0, 0, 48, visible ? 200 : 40);
+        skipIntro.Margin = new Thickness(0, 0, 48, visible ? 200 : 40);
         noteCues.Margin = new Thickness(0, visible ? 104 : 32, 26, 0);
     }
 
@@ -361,7 +388,13 @@ public sealed class PlayerView : UserControl, IDisposable
         {
             upNextTitle.Text = upcoming.Kind == MediaKind.Episode ? $"S{upcoming.SeasonNumber} E{upcoming.EpisodeNumber} · {upcoming.Title}" : upcoming.Title;
             upNextCountdown.Text = $"Playing in {controller.UpNextSeconds} s";
+            var credits = controller.UpNextDuringCredits;
+            upNextSecond.Content = credits ? "Watch Credits" : "Cancel";
+            ToolTip.SetTip(upNextSecond, credits
+                ? "Hides this card and keeps playing the credits; the next episode still follows at the end"
+                : "Stops at the end instead of playing the next episode");
         }
+        skipIntro.IsVisible = controller.ShowsSkipIntro && controller.UpNext is null;
         conflict.IsVisible = controller.HasConflict;
         var preparing = controller.State is PlayerState.Loading or PlayerState.Recovering;
         var failed = controller.State == PlayerState.Failed;
@@ -401,6 +434,13 @@ public sealed class PlayerView : UserControl, IDisposable
     {
         ShowControls();
         var handled = true;
+        // Enter or S skips the intro while Skip Intro is offered.
+        if (controller.ShowsSkipIntro && e.KeyModifiers == KeyModifiers.None && e.Key is Key.Enter or Key.Return or Key.S)
+        {
+            controller.SkipIntro();
+            e.Handled = true;
+            return;
+        }
         switch (e.Key)
         {
             case Key.Space:

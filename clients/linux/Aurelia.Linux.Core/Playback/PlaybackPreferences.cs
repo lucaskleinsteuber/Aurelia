@@ -21,7 +21,9 @@ public sealed record PlaybackPreferences(
     DialogueBoost DialogueBoost = DialogueBoost.Off,
     VolumeLeveling? VolumeLeveling = null,
     bool FillsScreen = false,
-    StreamingQuality StreamingQuality = StreamingQuality.Original)
+    StreamingQuality StreamingQuality = StreamingQuality.Original,
+    IntroSkipping IntroSkipping = IntroSkipping.Button,
+    bool UpNextAtCredits = true)
 {
     [JsonIgnore]
     public VolumeLeveling EffectiveLeveling => VolumeLeveling ?? (NightMode ? Playback.VolumeLeveling.Standard : Playback.VolumeLeveling.Off);
@@ -42,6 +44,7 @@ public sealed record PlaybackPreferences(
         {
             DialogueBoost = Enum.IsDefined(DialogueBoost) ? DialogueBoost : Playback.DialogueBoost.Off,
             StreamingQuality = Enum.IsDefined(StreamingQuality) ? StreamingQuality : Playback.StreamingQuality.Original,
+            IntroSkipping = Enum.IsDefined(IntroSkipping) ? IntroSkipping : Playback.IntroSkipping.Button,
             VolumeLeveling = Enum.IsDefined(EffectiveLeveling) ? EffectiveLeveling : Playback.VolumeLeveling.Off,
             NightMode = Enum.IsDefined(EffectiveLeveling) && EffectiveLeveling != Playback.VolumeLeveling.Off,
             UpNextCountdownSeconds = Countdowns.Contains(UpNextCountdownSeconds) ? UpNextCountdownSeconds : defaults.UpNextCountdownSeconds,
@@ -155,6 +158,17 @@ public sealed class TrackMemory(ISettingsStore store, Guid profileId)
         "jpn" or "ja" or "japanese" => "ja",
         var other => other,
     };
+}
+
+/// <summary>What the player does while an episode's intro plays (Mac: IntroSkipping).</summary>
+public enum IntroSkipping
+{
+    /// <summary>Nothing is offered; the intro plays.</summary>
+    Off,
+    /// <summary>A Skip Intro button is offered while the intro plays.</summary>
+    Button,
+    /// <summary>The intro is skipped without asking, once per episode.</summary>
+    Automatic,
 }
 
 public sealed record TrackChoice(string? Language, string? Name, bool Off);

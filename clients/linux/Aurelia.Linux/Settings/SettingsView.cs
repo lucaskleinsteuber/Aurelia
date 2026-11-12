@@ -534,6 +534,11 @@ public sealed class SettingsView : UserControl
             Toggle("Automatically Play Next Episode", null, current.AutoplayNextEpisode, value => Save(PlaybackPreferences.Load(Prefs.Store) with { AutoplayNextEpisode = value })),
             Choice("Up Next Countdown", null, [.. PlaybackPreferences.Countdowns.Select(s => (s, $"{s} Seconds"))],
                 current.UpNextCountdownSeconds, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextCountdownSeconds = value })),
+            Choice("Intros", "Your server finds where an episode's intro is. Show Skip Intro offers a button while it plays (Enter or S); Skip Automatically jumps past it once per episode, but never when you go back into it yourself.",
+                [(IntroSkipping.Off, "Don't Offer"), (IntroSkipping.Button, "Show Skip Intro"), (IntroSkipping.Automatic, "Skip Automatically")],
+                current.IntroSkipping, value => Save(PlaybackPreferences.Load(Prefs.Store) with { IntroSkipping = value })),
+            Toggle("Offer Next Episode When Credits Begin", "Up Next appears when the credits begin, with the countdown above and Watch Credits. Turned off, or for episodes without known credits, it appears in the last seconds.",
+                current.UpNextAtCredits, value => Save(PlaybackPreferences.Load(Prefs.Store) with { UpNextAtCredits = value })),
             Toggle("Prevent Sleep During Playback", "The screen stays on while a title plays.", current.PreventSleep, value => Save(PlaybackPreferences.Load(Prefs.Store) with { PreventSleep = value }))));
         if (shell?.Client?.SupportsAdaptiveStreaming == true)
         {

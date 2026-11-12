@@ -64,7 +64,10 @@ file, for a slow network. Original stays the default.
 | Press and hold on a title | Favorite, Watchlist, mark watched, Start Over |
 
 The player remembers audio and subtitle choices for each series and offers Up Next, a sleep
-timer, Dialogue Boost and Volume Leveling.
+timer, Dialogue Boost and Volume Leveling. While an episode's intro plays, **Skip Intro** takes
+the focus: Select skips, Back lets the intro play. When the credits begin, Up Next counts down
+with **Watch Credits**. Settings › Playback › Intros and Offer Next Episode When Credits Begin
+choose how.
 
 **Movie Night** on Home turns the Apple TV into the screen everyone looks at: it shows who
 joined from their phones, how far each has swiped, and the match as a ticket with Play already

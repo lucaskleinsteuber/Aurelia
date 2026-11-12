@@ -1,6 +1,7 @@
 // The browser player, laid out like the Mac app's: back and the menus (speed, sound, subtitles,
 // sleep timer, scene notes) at the top, the transport in the middle, title, volume and the
-// timeline at the bottom, and "Up Next" in the last seconds of an episode.
+// timeline at the bottom, "Skip Intro" while an episode's intro plays and "Up Next" when its credits
+// begin or in its last seconds.
 // It plays MP4/MOV with H.264 or HEVC and AAC straight from the server with byte ranges. Other
 // files (MKV, AVI) play live converted by the server (live.js), and so does an MP4 the browser
 // fails to show or to hear. Without live conversion, such a file gets a clear message.
@@ -11,6 +12,7 @@ import { ApiError } from "./api.js";
 import {
   ProgressSaver, SLEEP_MINUTES, PLAYBACK_RATES, clock, endsAt, normalizePreferences,
   playerSubtitle, rateLabel, playbackStartSeconds, sessionRefused, scrubPreviewFrameUrl, showsUpNext, upNextSeconds,
+  introRange, showsSkipIntro, skipsIntroAutomatically, creditsStart, nextFinishesCurrent,
   timelineValueText, trackForLanguage, volumeValueText, audioProfile, decibels, DIALOGUE_BOOST_CHOICES, VOLUME_LEVELING_CHOICES,
 } from "./logic.js";
 import { createSceneNotes } from "./player-notes.js";
@@ -126,6 +128,10 @@ export class Player {
     this.sleep = { mode: "off", until: 0 };
     this.upNextItem = undefined;
     this.upNextDismissed = false;
+    this.autoplayCancelled = false;
+    this.creditsAnchor = null;
+    this.introSkipped = false;
+    this.movedIntoIntro = false;
     this.build();
     this.sceneNotes = createSceneNotes({ api, mediaId: item.id, position: () => Math.round(this.video.currentTime * 1000),
       seek: (milliseconds) => { this.video.currentTime = milliseconds / 1000; this.closePopover(); },
@@ -199,12 +205,15 @@ export class Player {
       this.showControls();
       this.onMediaMenu(this.upNext, this.upNextItem);
     });
+    this.skipIntroButton = h("button", { class: "skip-intro glass", hidden: true, title: "Jumps to the end of the intro (Return or S)",
+      "aria-label": "Skip Intro", onclick: () => this.skipIntro() },
+      icon("next", { size: 18 }), h("span", {}, "Skip Intro"), h("kbd", { "aria-hidden": "true" }, "↩ Return"));
     this.cue = h("div", { class: "note-cue glass", hidden: true, "aria-live": "polite" });
     this.notice = h("div", { class: "player-notice glass", role: "status", hidden: true });
     this.togetherNotice = h("div", { class: "together-notice glass", role: "status", hidden: true });
 
     this.element = h("div", { class: "player controls-visible paused", role: "dialog", "aria-modal": "true", "aria-label": `Playing ${this.item.title}`, tabindex: "-1" },
-      this.video, this.startScreen, this.controls, this.cue, this.upNext, this.popover, this.notice, this.togetherNotice);
+      this.video, this.startScreen, this.controls, this.cue, this.skipIntroButton, this.upNext, this.popover, this.notice, this.togetherNotice);
     // What a Watch Together party sees of this player.
     this.partyPlayer = {
       mediaId: this.item.id,
@@ -488,6 +497,7 @@ export class Player {
     on(this.timeline, "input", () => {
       if (Number.isFinite(video.duration)) {
         const fraction = Math.min(1, Math.max(0, Number(this.timeline.value) / 1000));
+        this.movedTo(fraction * video.duration);
         video.currentTime = fraction * video.duration;
         this.showScrubPreview(fraction);
       }
@@ -543,6 +553,13 @@ export class Player {
     if (target?.isContentEditable || target?.tagName === "SELECT") return;
     if ((target instanceof HTMLInputElement && target.type !== "range") || target instanceof HTMLTextAreaElement) return;
     const seconds = this.preferences.seekInterval;
+    // Return or S skips the intro while Skip Intro is offered.
+    if (this.skipIntroButton?.hidden === false && !event.repeat && (event.key === "Enter" || event.key === "s" || event.key === "S")
+      && !(event.key === "Enter" && target instanceof HTMLButtonElement)) {
+      event.preventDefault();
+      this.skipIntro();
+      return;
+    }
     switch (event.key) {
       case " ":
       case "k":
@@ -612,7 +629,9 @@ export class Player {
   skip(seconds) {
     const video = this.video;
     if (!Number.isFinite(video.duration)) return;
-    video.currentTime = Math.min(Math.max(0, video.currentTime + seconds), video.duration);
+    const target = Math.min(Math.max(0, video.currentTime + seconds), video.duration);
+    this.movedTo(target);
+    video.currentTime = target;
     this.reportToParty("seek");
     this.showControls();
   }
@@ -708,6 +727,7 @@ export class Player {
 
   tick() {
     this.updateTime();
+    this.updateSkipIntro();
     this.updateUpNext();
     this.updateCue();
   }
@@ -1109,15 +1129,63 @@ export class Player {
 
   notesPanel() { this.sceneNotes.open(); }
 
-  // MARK: Up Next and the end
+  // MARK: Skip Intro, Up Next and the end
+
+  /** The intro of the playing title, from the server's `segments`; nothing without them. */
+  intro() {
+    const intro = introRange(this.source?.segments);
+    const duration = Number.isFinite(this.video.duration) ? this.video.duration : 0;
+    return intro && (duration <= 0 || intro.end <= duration) ? intro : null;
+  }
+
+  /** The credits start in seconds, when the viewer wants Up Next there and the server knows it. */
+  credits() {
+    const duration = Number.isFinite(this.video.duration) ? this.video.duration : 0;
+    return this.preferences.upNextAtCredits ? creditsStart(this.source?.segments, duration) : null;
+  }
+
+  /** Moving into the intro by hand means it should play; it is not skipped automatically then. */
+  movedTo(seconds) {
+    const intro = this.intro();
+    if (intro && seconds >= intro.start && seconds < intro.end) this.movedIntoIntro = true;
+  }
+
+  updateSkipIntro() {
+    const intro = this.intro();
+    const video = this.video;
+    if (this.preferences.introSkipping === "off" || !intro || this.resumeAt > 0 || !this.startScreen.hidden) {
+      this.skipIntroButton.hidden = true;
+      return;
+    }
+    const shown = showsSkipIntro(video.currentTime, intro);
+    if (!video.paused && skipsIntroAutomatically({ setting: this.preferences.introSkipping, alreadySkipped: this.introSkipped,
+      movedIntoIntro: this.movedIntoIntro, buttonShown: shown })) {
+      this.skipIntro(true);
+      return;
+    }
+    this.skipIntroButton.hidden = !shown || !this.upNext.hidden;
+  }
+
+  /** Jumps to the end of the intro; Watch Together follows like any other seek. */
+  skipIntro(automatic = false) {
+    const intro = this.intro();
+    if (!intro || (!automatic && this.skipIntroButton.hidden)) return;
+    this.introSkipped = true;
+    this.skipIntroButton.hidden = true;
+    this.video.currentTime = intro.end;
+    this.reportToParty("seek");
+  }
 
   async updateUpNext() {
     const video = this.video;
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    if (this.upNextItem === undefined && this.next && duration >= 300 && duration - video.currentTime < 60) {
+    const credits = this.credits();
+    const near = credits != null ? Math.min(credits, duration - 60) : duration - 60;
+    if (this.upNextItem === undefined && this.next && duration >= 300 && video.currentTime > near) {
       this.upNextItem = null;
       this.upNextItem = await this.next().catch(() => null);
     }
+    const lead = this.preferences.upNextCountdownSeconds;
     const visible = showsUpNext({
       position: video.currentTime,
       duration,
@@ -1125,31 +1193,59 @@ export class Player {
       autoplay: this.preferences.automaticallyPlayNextEpisode,
       stopsAtEnd: this.sleep.mode === "end",
       dismissed: this.upNextDismissed,
-      lead: this.preferences.upNextCountdownSeconds,
+      lead,
+      credits,
     });
+    const duringCredits = visible && credits != null && video.currentTime >= credits;
+    // The countdown starts where the card appeared: at the credits, or later when the viewer moved into them.
+    if (duringCredits) this.creditsAnchor ??= video.currentTime;
+    else this.creditsAnchor = null;
     if (!visible) {
       this.upNext.hidden = true;
       return;
     }
-    const seconds = upNextSeconds(video.currentTime, duration);
-    if (this.upNext.hidden || this.upNext.dataset.id !== this.upNextItem.id) {
+    this.skipIntroButton.hidden = true;
+    const seconds = upNextSeconds(video.currentTime, duration, this.creditsAnchor, lead);
+    const kind = duringCredits ? "credits" : "end";
+    if (this.upNext.hidden || this.upNext.dataset.id !== this.upNextItem.id || this.upNext.dataset.kind !== kind) {
       clear(this.upNext);
       this.upNextCount = h("span", {}, `Play Now · ${seconds}`);
       this.upNext.dataset.id = this.upNextItem.id;
+      this.upNext.dataset.kind = kind;
       this.upNext.append(
         h("div", { class: "eyebrow" }, "Up Next"),
         h("div", { class: "up-next-title" }, this.upNextItem.title),
         h("div", { class: "up-next-subtitle" }, playerSubtitle(this.upNextItem)),
         h("div", { class: "button-row" },
-          h("button", { class: "primary-button", onclick: () => this.playNext(this.upNextItem) }, icon("play", { size: 15 }), this.upNextCount),
-          h("button", { class: "secondary-button", onclick: () => this.dismissUpNext() }, "Cancel")));
+          h("button", { class: "primary-button", title: "Starts the next episode now", onclick: () => this.playNextNow() }, icon("play", { size: 15 }), this.upNextCount),
+          h("button", { class: "secondary-button", title: duringCredits ? "Hides this card and keeps playing the credits; the next episode still follows at the end" : "Stops at the end instead of playing the next episode",
+            onclick: () => this.dismissUpNext() }, duringCredits ? "Watch Credits" : "Cancel")));
       this.upNext.hidden = false;
     }
     this.upNextCount.textContent = `Play Now · ${seconds}`;
+    // The countdown ran out in the credits: the next episode starts, and this one counts as watched.
+    if (duringCredits && seconds === 0 && !video.paused && video.currentTime < duration) this.playNextNow();
   }
 
+  /** Next Episode from the card: in the credits this episode counts as watched, like at its real end. */
+  playNextNow() {
+    const next = this.upNextItem;
+    if (this.closed || !next) return;
+    const video = this.video;
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (this.saver && duration > 0 && this.resumeAt <= 0
+      && nextFinishesCurrent({ position: video.currentTime, duration, upNextShown: !this.upNext.hidden, credits: this.credits() })) {
+      this.saver.save(duration * 1000, duration * 1000, true, { keepalive: true });
+      this.saver = null;
+    }
+    this.playNext(next);
+  }
+
+  /** Cancel in the last seconds stops at the end; Watch Credits plays them and then continues as usual. */
   dismissUpNext() {
     this.upNextDismissed = true;
+    if (this.upNext.dataset.kind !== "credits") this.autoplayCancelled = true;
+    this.creditsAnchor = null;
     this.upNext.hidden = true;
   }
 
@@ -1167,7 +1263,7 @@ export class Player {
       finished();
       return;
     }
-    const next = this.sleep.mode === "end" || this.upNextDismissed || !this.preferences.automaticallyPlayNextEpisode
+    const next = this.sleep.mode === "end" || this.autoplayCancelled || !this.preferences.automaticallyPlayNextEpisode
       ? null
       : this.upNextItem ?? (this.next ? await this.next().catch(() => null) : null);
     if (next) this.playNext(next);

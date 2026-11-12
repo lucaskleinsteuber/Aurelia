@@ -26,6 +26,18 @@ struct IOSPlaybackSettingsView: View {
           "Emphasize speech and reduce differences between quiet and loud passages. Sleep applies stronger volume leveling."
         )
       }
+      Section {
+        Picker("Intros", selection: $value.introSkipping) {
+          ForEach(IOSIntroSkipping.allCases) { Text($0.title).tag($0) }
+        }.accessibilityIdentifier("settings-intros")
+        Toggle("Offer Next Episode When Credits Begin", isOn: $value.upNextAtCredits)
+          .disabled(!value.automaticallyPlayNextEpisode)
+          .accessibilityIdentifier("settings-up-next-credits")
+      } footer: {
+        Text(
+          "Your server finds where an episode's intro and credits are. Show Skip Intro offers a button while the intro plays; Skip Automatically jumps past it once per episode, but never when you go back into it yourself. Up Next appears when the credits begin, with Watch Credits."
+        )
+      }
       if model.supportsAdaptiveStreaming {
         Section {
           Picker("Streaming Quality", selection: $value.streamingQuality) {

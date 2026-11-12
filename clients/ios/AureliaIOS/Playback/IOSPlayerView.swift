@@ -58,6 +58,12 @@ struct IOSPlayerView: View {
       if let upNext = controller.upNext, !controller.controlsVisible, controller.trackMenu == nil {
         upNextCard(upNext)
       }
+      // Skip Intro while the intro plays; above the bottom controls while they show.
+      if controller.showsSkipIntro, controller.upNext == nil, controller.trackMenu == nil,
+        controller.errorMessage == nil, !controller.isStarting
+      {
+        skipIntroButton
+      }
       if !controller.isOffline, let party = model.watchParty {
         IOSWatchTogetherNotice(session: party)
       }
@@ -403,6 +409,23 @@ struct IOSPlayerView: View {
     .accessibilityIdentifier("player-start-screen")
   }
 
+  private var skipIntroButton: some View {
+    Button {
+      controller.skipIntro()
+    } label: {
+      Label("Skip Intro", systemImage: "forward.end.fill")
+        .font(.headline)
+        .padding(.horizontal, 8)
+        .frame(minHeight: 44)
+    }
+    .buttonStyle(.glass)
+    .accessibilityHint("Jumps to the end of the intro")
+    .accessibilityIdentifier("player-skip-intro")
+    .padding(.trailing, 16).padding(.bottom, controller.controlsVisible ? 120 : 16)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    .animation(.easeOut(duration: 0.2), value: controller.controlsVisible)
+  }
+
   private func upNextCard(_ upNext: IOSUpNext) -> some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("UP NEXT").font(.caption2.weight(.bold)).tracking(1)
@@ -416,8 +439,13 @@ struct IOSPlayerView: View {
         }
         .buttonStyle(.glassProminent).tint(.white).foregroundStyle(.black)
         .accessibilityIdentifier("player-up-next-play")
-        Button("Cancel") { controller.dismissUpNext() }
+        Button(upNext.duringCredits ? "Watch Credits" : "Cancel") { controller.dismissUpNext() }
           .buttonStyle(.glass)
+          .accessibilityHint(
+            upNext.duringCredits
+              ? "Keeps playing the credits; the next episode follows at the end"
+              : "Stops at the end instead of playing the next episode"
+          )
           .accessibilityIdentifier("player-up-next-cancel")
       }
       .font(.footnote.weight(.semibold))

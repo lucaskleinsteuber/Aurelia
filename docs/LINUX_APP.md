@@ -307,8 +307,13 @@ cap such as "Up to 720p" (shown when the server offers adaptive streaming), VLC 
 HLS stream through the same relay instead of the original file; the relay passes only the
 server's playlists and segments. Server management shows the server's **Video Conversion**. Other behavior:
 
-- Up Next appears for titles of at least five minutes in the last seconds of the countdown, and
-  the next episode starts at the natural end unless the card was cancelled.
+- Up Next appears for titles of at least five minutes when the credits begin (times from a
+  server with `media-segments-v2`) or in the last seconds of the countdown, and the next episode
+  starts at the natural end unless the card was cancelled. In the credits its second button is
+  **Watch Credits**, and the countdown starting the next episode counts this one as watched.
+- **Skip Intro** (also Enter or S) appears while an episode's intro plays, above the controls
+  while they show. Settings › Playback › Intros chooses Don't Offer, Show Skip Intro or Skip
+  Automatically; Offer Next Episode When Credits Begin can be turned off.
 - The sleep timer runs for a number of minutes or until the end of the episode and tells the
   server when it ends.
 - The ticket is renewed five minutes before it expires.

@@ -40,6 +40,8 @@ final class TVPlaybackController: ObservableObject {
   /// While the timeline is scrubbed, the position the viewer is choosing; Select jumps there.
   @Published private(set) var scrubPosition: Int64?
   @Published private(set) var upNext: TVUpNext?
+  /// "Skip Intro" is offered while the episode's intro plays (times from the server).
+  @Published private(set) var showsSkipIntro = false
   /// A separate local relay for timeline previews; its reads are marked as previews, which
   /// the server counts apart from playback, and its failures never touch playback.
   @Published private(set) var previewSourceURL: URL?
@@ -82,6 +84,12 @@ final class TVPlaybackController: ObservableObject {
   private var lastScrubAt: TimeInterval = 0
   private var upNextDismissed = false
   private var autoplayCancelled = false
+  /// Where the card appeared in the credits; its countdown runs from there.
+  private var creditsAnchor: Int64?
+  private var introSkipped = false
+  private var movedIntoIntro = false
+  /// Back over Skip Intro: the intro plays and the button stays away for this episode.
+  private var introDeclined = false
   private var ticket: TVPlaybackTicket?
   private var baselineRevision: Int64?
   private var openingTask: Task<Void, Never>?
@@ -189,15 +197,68 @@ final class TVPlaybackController: ObservableObject {
     // Set before seeking: the engine reports the seek synchronously.
     if !revealControls { quietSkipUntil = ProcessInfo.processInfo.systemUptime + 2.5 }
     let target = TVPlayerPolicy.seekPosition(current: position, offset: offset, duration: duration)
+    noteMove(to: target)
     engine.seek(to: target)
     userActionObserver?(.seek(target))
     if revealControls { userInteracted() }
+  }
+
+  /// Moving into the intro by hand means it should play; it is not skipped automatically then.
+  private func noteMove(to target: Int64) {
+    if let intro = currentSegments?.intro, target >= intro.start, target < intro.end {
+      movedIntoIntro = true
+    }
+  }
+
+  /// The intro and credits times of the title that is playing.
+  private var currentSegments: TVMediaSegments? {
+    guard let ticket, ticket.mediaId == currentMediaID else { return nil }
+    return ticket.segments
+  }
+
+  private var creditsStart: Int64? {
+    preferences.upNextAtCredits ? currentSegments?.creditsStartMilliseconds : nil
+  }
+
+  /// Jumps to the end of the intro; Watch Together follows like any other seek.
+  func skipIntro() {
+    guard showsSkipIntro, let intro = currentSegments?.intro, canSeek, !closed else { return }
+    introSkipped = true
+    showsSkipIntro = false
+    watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
+    engine.seek(to: intro.end)
+    userActionObserver?(.seek(intro.end))
+  }
+
+  private func updateSkipIntro() {
+    guard preferences.introSkipping != .off, let intro = currentSegments?.intro, !isStarting,
+      !finished, duration <= 0 || intro.end <= duration
+    else {
+      assignIfChanged(&showsSkipIntro, false)
+      return
+    }
+    let shown = TVPlayerPolicy.showsSkipIntro(
+      position: position, introStart: intro.start, introEnd: intro.end)
+    if isPlaying,
+      TVPlayerPolicy.skipsIntroAutomatically(
+        setting: preferences.introSkipping, alreadySkipped: introSkipped,
+        movedIntoIntro: movedIntoIntro, buttonShown: shown)
+    {
+      introSkipped = true
+      assignIfChanged(&showsSkipIntro, false)
+      watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
+      engine.seek(to: intro.end)
+      userActionObserver?(.seek(intro.end))
+      return
+    }
+    assignIfChanged(&showsSkipIntro, shown && upNext == nil && !introDeclined)
   }
 
   func seek(to milliseconds: Int64) {
     guard canSeek, !closed else { return }
     watchdog.noteSeek(at: ProcessInfo.processInfo.systemUptime)
     let target = TVPlayerPolicy.seekPosition(current: 0, offset: milliseconds, duration: duration)
+    noteMove(to: target)
     engine.seek(to: target)
     userActionObserver?(.seek(target))
     userInteracted()
@@ -416,18 +477,25 @@ final class TVPlaybackController: ObservableObject {
     return try? await api.scrubPreviewFrame(mediaID: mediaID, seconds: seconds)
   }
 
-  /// Starts the next episode now from the Up Next card.
+  /// Starts the next episode now from the Up Next card. From the credits on (or while the card
+  /// shows) this episode counts as watched; earlier its position is kept.
   func playNextNow() {
     guard !closed, !finished, let next = queue.first else { return }
+    let markFinished = TVPlayerPolicy.nextFinishesCurrent(
+      position: position, duration: duration, upNextShown: upNext != nil,
+      creditsStart: creditsStart)
     finished = true
     upNext = nil
-    advanceTask = Task { [weak self] in await self?.advance(to: next) }
+    showsSkipIntro = false
+    advanceTask = Task { [weak self] in await self?.advance(to: next, markFinished: markFinished) }
   }
 
-  /// Hides the Up Next card; the player then stops at the end instead of continuing.
+  /// Hides the Up Next card. Cancel in the last seconds stops the player at the end; Watch
+  /// Credits (the card that appeared with the credits) plays them, then the next episode follows.
   func dismissUpNext() {
     upNextDismissed = true
-    autoplayCancelled = true
+    if upNext?.duringCredits != true { autoplayCancelled = true }
+    creditsAnchor = nil
     upNext = nil
   }
 
@@ -436,6 +504,10 @@ final class TVPlaybackController: ObservableObject {
       cancelScrub()
     } else if upNext != nil, !controlsVisible {
       dismissUpNext()
+    } else if showsSkipIntro, !controlsVisible {
+      // Back over Skip Intro lets the intro play.
+      introDeclined = true
+      showsSkipIntro = false
     } else if trackMenu != nil {
       trackMenu = nil
       userInteracted()
@@ -625,24 +697,43 @@ final class TVPlaybackController: ObservableObject {
       userInteracted()
     }
     updateUpNext()
+    updateSkipIntro()
     if wasPlaying != isPlaying || wasLoading != isLoading { userInteracted() }
     if !isPlaying { controlsVisible = true }
   }
 
   private func updateUpNext() {
     let next = queue.first
+    let credits = creditsStart
     let shown = TVPlayerPolicy.showsUpNext(
       position: position, duration: duration, hasNext: next?.isPlayable == true,
       autoplay: preferences.automaticallyPlayNextEpisode, stopsAtEnd: sleepTimer == .endOfEpisode,
-      dismissed: upNextDismissed || finished)
+      dismissed: upNextDismissed || finished, creditsStart: credits)
+    let duringCredits =
+      shown
+      && TVPlayerPolicy.showsForCredits(position: position, duration: duration, creditsStart: credits)
+    // The countdown starts where the card appeared: at the credits, or later when the viewer
+    // moved into them.
+    if duringCredits {
+      if creditsAnchor == nil { creditsAnchor = position }
+    } else {
+      creditsAnchor = nil
+    }
     let card = next.flatMap { next in
       shown
         ? TVUpNext(
           title: next.episodeLabel.map { "\($0) · \(next.title)" } ?? next.title,
-          seconds: TVPlayerPolicy.upNextSeconds(position: position, duration: duration))
+          seconds: TVPlayerPolicy.upNextSeconds(
+            position: position, duration: duration, creditsAnchor: creditsAnchor),
+          duringCredits: duringCredits)
         : nil
     }
     assignIfChanged(&upNext, card)
+    // The countdown ran out in the credits before the file ended: the next episode starts, and
+    // this one counts as watched.
+    if let card, card.duringCredits, card.seconds == 0, isPlaying, position < duration {
+      playNextNow()
+    }
   }
 
   /// Starts the preview relay beside the playing one without delaying playback; previews
@@ -854,6 +945,11 @@ final class TVPlaybackController: ObservableObject {
     upNext = nil
     upNextDismissed = false
     autoplayCancelled = false
+    creditsAnchor = nil
+    introSkipped = false
+    movedIntoIntro = false
+    introDeclined = false
+    showsSkipIntro = false
     title = next.parentTitle.map { "\($0) · \(next.episodeLabel ?? next.title)" } ?? next.title
     baselineRevision = nil
     position = 0
@@ -969,6 +1065,8 @@ final class TVPlaybackController: ObservableObject {
 struct TVUpNext: Equatable {
   let title: String
   let seconds: Int
+  /// The card appeared with the credits: its second button keeps watching them.
+  var duringCredits = false
 }
 
 /// Watch Together drives the Apple TV player through these, without showing the controls.

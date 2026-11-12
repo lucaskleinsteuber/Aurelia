@@ -22,8 +22,9 @@ its screens are its own:
 - **Playback** runs through MobileVLCKit and a small relay on `127.0.0.1` that adds the
   sign-in to each request and streams the bytes through; nothing is stored unless you download
   the title (see below). Progress, sound
-  tracks, subtitles (including subtitle files next to the video), scrub previews, Up Next and
-  the sleep timer behave as on the Apple TV.
+  tracks, subtitles (including subtitle files next to the video), scrub previews, Skip Intro,
+  Up Next (also when the credits begin, with Watch Credits) and the sleep timer behave as on the
+  Apple TV.
 - **Screens** are built for iPhone and iPad rather than taken from the TV: a tab bar with Home,
   Movies, TV Shows, Search and Settings, iOS text sizes and margins, the PIN entered on a keypad
   like the iPhone passcode, seasons as a menu with the episodes listed below, and settings as an

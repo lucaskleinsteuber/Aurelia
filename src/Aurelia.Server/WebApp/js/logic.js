@@ -995,15 +995,56 @@ export function endsAt(position, duration, rate = 1, now = new Date(), locale = 
   return `Ends at ${end.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" })}`;
 }
 
-/** Whether the "Up Next" card shows: an episode-length title in its last seconds with a next one. */
-export function showsUpNext({ position, duration, hasNext, autoplay, stopsAtEnd, dismissed, lead = UP_NEXT_LEAD }) {
+/** The intro of a title's `segments` in seconds, when both ends are known and in order. */
+export function introRange(segments) {
+  const start = segments?.introStartMilliseconds;
+  const end = segments?.introEndMilliseconds;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) return null;
+  return { start: start / 1000, end: end / 1000 };
+}
+
+/** "Skip Intro" appears a second before the intro and leaves two seconds before its end (like the Mac). */
+export function showsSkipIntro(position, intro) {
+  if (!intro || !(intro.end > intro.start)) return false;
+  return position >= intro.start - 1 && position < intro.end - 2;
+}
+
+/** The intro is skipped on its own once per episode, never after the viewer moved into it themselves. */
+export function skipsIntroAutomatically({ setting, alreadySkipped, movedIntoIntro, buttonShown }) {
+  return setting === "automatic" && buttonShown && !alreadySkipped && !movedIntoIntro;
+}
+
+/** A credits time (seconds) is only trusted in the second half of the title and before its end. */
+export function creditsStart(segments, duration) {
+  const value = segments?.creditsStartMilliseconds;
+  if (!Number.isFinite(value) || !(duration > 0)) return null;
+  const seconds = value / 1000;
+  return seconds >= duration / 2 && seconds < duration - 1 ? seconds : null;
+}
+
+/** Whether the "Up Next" card shows: when the credits begin, or in an episode-length title's last seconds. */
+export function showsUpNext({ position, duration, hasNext, autoplay, stopsAtEnd, dismissed, lead = UP_NEXT_LEAD, credits = null }) {
   if (!hasNext || !autoplay || stopsAtEnd || dismissed || !(duration >= 300) || !(position > 0)) return false;
+  if (credits != null && position >= credits) return true;
   return duration - position <= lead;
 }
 
-export function upNextSeconds(position, duration) {
-  return Math.max(0, Math.ceil(duration - position));
+/** Seconds until the next episode starts: to the end, or `lead` seconds from where the card appeared in the credits. */
+export function upNextSeconds(position, duration, creditsAnchor = null, lead = UP_NEXT_LEAD) {
+  const deadline = creditsAnchor != null ? Math.min(duration, creditsAnchor + lead) : duration;
+  return Math.max(0, Math.ceil(deadline - position));
 }
+
+/** Next Episode counts this one as watched from the credits on, while Up Next shows, or in its last tenth. */
+export function nextFinishesCurrent({ position, duration, upNextShown, credits = null }) {
+  if (!(duration > 0) || !(position >= 0)) return false;
+  if (credits != null && position >= credits) return true;
+  return upNextShown || position >= duration - duration / 10;
+}
+
+export const INTRO_SKIPPING_CHOICES = Object.freeze([
+  ["off", "Don’t Offer"], ["button", "Show Skip Intro"], ["automatic", "Skip Automatically"],
+]);
 
 /** The small line above the title in the player: "Mr. Robot · Season 1 · Episode 1". */
 export function playerSubtitle(item) {
@@ -1032,6 +1073,8 @@ export const PLAYBACK_DEFAULTS = Object.freeze({
   cinemaAds: true,
   cinemaTrailers: 2,
   upNextCountdownSeconds: UP_NEXT_LEAD,
+  introSkipping: "button",
+  upNextAtCredits: true,
   resumeThresholdSeconds: 0,
   defaultAudioLanguage: "original",
   defaultSubtitleLanguage: "off",
@@ -1059,6 +1102,8 @@ export function normalizePreferences(value) {
     cinemaAds: merged.cinemaAds !== false,
     cinemaTrailers: Math.round(number(merged.cinemaTrailers, 0, 3, 2)),
     upNextCountdownSeconds: Math.round(number(merged.upNextCountdownSeconds, 5, 30, UP_NEXT_LEAD)),
+    introSkipping: ["off", "button", "automatic"].includes(merged.introSkipping) ? merged.introSkipping : "button",
+    upNextAtCredits: merged.upNextAtCredits !== false,
     resumeThresholdSeconds: Math.round(number(merged.resumeThresholdSeconds, 0, 120, 0)),
     defaultAudioLanguage: typeof merged.defaultAudioLanguage === "string" && /^(original|[a-z]{2})$/.test(merged.defaultAudioLanguage) ? merged.defaultAudioLanguage : "original",
     defaultSubtitleLanguage: typeof merged.defaultSubtitleLanguage === "string" && /^(off|[a-z]{2})$/.test(merged.defaultSubtitleLanguage) ? merged.defaultSubtitleLanguage : "off",
@@ -1290,6 +1335,7 @@ export const KEYBOARD_SHORTCUTS = [
       { keys: ["→", "L"], action: "Seek Forward" },
       { keys: ["N"], action: "Next Episode" },
       { keys: ["P"], action: "Previous Episode" },
+      { keys: ["Return", "S"], action: "Skip Intro (while offered)" },
       { keys: ["M"], action: "Mute or Unmute" },
       { keys: ["F"], action: "Toggle Full Screen" },
       { keys: ["Escape"], action: "Close Menu or Player" },

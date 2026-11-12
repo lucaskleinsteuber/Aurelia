@@ -635,6 +635,22 @@ struct IOSPlaybackTicket: Codable, Equatable, Sendable {
   let contentLength: Int64
   let expiresAt: String
   let progress: IOSPlaybackProgress
+  /// Intro and credits times found by the server ("media-segments-v2"); older servers send none.
+  var segments: IOSMediaSegments? = nil
+}
+
+/// Where the intro and the credits of the playing title are, in milliseconds from its start.
+struct IOSMediaSegments: Codable, Equatable, Sendable {
+  var introStartMilliseconds: Int64?
+  var introEndMilliseconds: Int64?
+  var creditsStartMilliseconds: Int64?
+
+  /// The intro when both ends are known and in order.
+  var intro: (start: Int64, end: Int64)? {
+    guard let start = introStartMilliseconds, let end = introEndMilliseconds, start >= 0, end > start
+    else { return nil }
+    return (start, end)
+  }
 }
 
 // MARK: Remote Playback Commands
